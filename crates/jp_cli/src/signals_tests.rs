@@ -218,3 +218,40 @@ fn escalation_counter_bumps_and_resets() {
     // A press past the cooldown starts over.
     assert_eq!(state.bump(now + Duration::from_secs(10)), 1);
 }
+
+/// Drives the full Ctrl-C escalation ladder through the real signal task —
+/// handler notification, shutdown, process exit — without ending the test
+/// process: the injected exit action records the code instead of exiting.
+#[tokio::test]
+async fn escalation_ladder_reaches_exit_through_signal_task() {
+    let (router, signals) = super::testing::test_router();
+    let (_guard, mut interrupt_rx) = router.push_handler();
+
+    // First press: notifies the topmost handler; no shutdown, no exit.
+    signals.interrupt().await;
+    interrupt_rx
+        .recv()
+        .await
+        .expect("handler should be notified");
+    assert!(!router.shutdown_token().is_cancelled());
+    assert!(signals.exit_codes().is_empty());
+
+    // Second press within the cooldown: bypasses the handler and requests a
+    // graceful shutdown.
+    signals.interrupt().await;
+    router.shutdown_token().cancelled().await;
+    assert!(signals.exit_codes().is_empty());
+
+    // Third press: the exit action fires with the SIGINT exit code. Delivery
+    // is asynchronous, so poll for the recording rather than asserting
+    // immediately.
+    signals.interrupt().await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while signals.exit_codes().is_empty() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the third press should reach the exit action");
+    assert_eq!(signals.exit_codes(), vec![130]);
+}

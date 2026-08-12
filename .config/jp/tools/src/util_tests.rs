@@ -1,6 +1,30 @@
 use super::*;
 
 #[test]
+fn truncate_leaves_fitting_string_untouched() {
+    assert_eq!(truncate("hello", 5), "hello");
+    assert_eq!(truncate("hello", 100), "hello");
+}
+
+#[test]
+fn truncate_appends_note_when_over_limit() {
+    assert_eq!(
+        truncate("0123456789", 4),
+        "0123\n\n[Truncated: showing 4 of 10 bytes]"
+    );
+}
+
+#[test]
+fn truncate_cuts_on_char_boundary() {
+    // A 3-byte character straddling the limit is dropped entirely rather than
+    // split, so the result stays valid UTF-8.
+    assert_eq!(
+        truncate("ab€cd", 3),
+        "ab\n\n[Truncated: showing 2 of 7 bytes]"
+    );
+}
+
+#[test]
 fn test_one_or_many_one() {
     let mut v = OneOrMany::One(1);
 

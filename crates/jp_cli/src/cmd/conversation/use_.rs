@@ -216,7 +216,8 @@ impl Use {
 
         // 3. Grep filter.
         let final_ids = match &self.grep {
-            Some(pattern) => search::filter_ids(ctx, &ranged, pattern),
+            Some(pattern) => search::filter_ids(ctx, &ranged, pattern)
+                .map_err(|e| format!("invalid pattern: {e}"))?,
             None => ranged,
         };
 
@@ -258,7 +259,7 @@ impl Use {
 
 /// Build the source candidate ID set for filter mode.
 ///
-/// When `target` resolves to a non-empty ID list (literal ID, `latest`,
+/// When `target` resolves to a non-empty ID list (literal ID, `recent`,
 /// `archived`, etc.), use it directly.
 /// When it resolves empty (i.e. a picker target like `?`, `?p`, `?a`), draw
 /// from the matching partition with the picker's sub-filter applied.

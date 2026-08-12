@@ -37,17 +37,51 @@ impl HrStyle {
 pub struct MarkdownConfig {
     /// Maximum line width for wrapping paragraph text.
     ///
+    /// Defaults to `80`.
     /// Set to `0` to disable wrapping entirely.
+    ///
+    /// This is a reading-comfort preference, so a wider output area does not
+    /// widen it.
+    /// A narrower one caps it: text is never wrapped past the columns
+    /// available, since the terminal would then wrap it a second time.
     #[setting(default = 80)]
     pub wrap_width: usize,
 
-    /// Maximum visual width for a single table column.
+    /// Upper bound on the visual width of a single table column.
     ///
-    /// Cells exceeding this width are wrapped over multiple lines.
+    /// Defaults to `40`.
+    /// Set to `0` to leave columns as wide as their content.
     ///
-    /// Set to `0` to disable wrapping.
+    /// Body cells exceeding their column's width are wrapped over multiple
+    /// lines.
+    /// A line continuing the row above opens with `┆` instead of `|`, so a
+    /// wrapped row reads as one row rather than several.
+    /// A header cell is cut short with `…` rather than wrapped, so the row of
+    /// dashes stays directly beneath the header and the table survives being
+    /// copied out of the terminal into a markdown document.
+    /// A column can end up narrower than this: a table wider than the terminal
+    /// has its widest columns narrowed until it fits, so the terminal does not
+    /// break the rows apart.
+    /// Columns never narrow below three characters, so `1` and `2` behave as
+    /// `3`, and a table with more columns than fit at that minimum is rendered
+    /// at the minimum and overflows the terminal.
+    /// Tables in piped or redirected output are not fitted, since there is no
+    /// width to fit them to — unless `--width` supplies one.
     #[setting(default = 40)]
     pub table_max_column_width: usize,
+
+    /// Whether the continuation lines of a wrapped table row open with `┆`.
+    ///
+    /// Defaults to `true`.
+    /// Set to `false` to open every line with `|`.
+    ///
+    /// A cell wrapped over several lines otherwise reads as several one-line
+    /// rows, since nothing distinguishes the start of a row from the middle of
+    /// one.
+    /// Only the line's opening delimiter changes, so a table copied out of the
+    /// terminal into a markdown document still splits into the right columns.
+    #[setting(default = true)]
+    pub table_continuation_edge: bool,
 
     /// Syntax highlighting theme for code blocks.
     ///
@@ -60,7 +94,7 @@ pub struct MarkdownConfig {
     ///
     /// - `markdown`: render the original CommonMark syntax (`---`).
     /// - `line`: render a continuous unicode horizontal line (`─`) spanning
-    ///   the [`Self::wrap_width`].
+    ///   `wrap_width`.
     #[setting(default)]
     pub hr_style: HrStyle,
 }
@@ -72,6 +106,9 @@ impl AssignKeyValue for PartialMarkdownConfig {
             "wrap_width" => self.wrap_width = kv.try_some_from_str()?,
             "table_max_column_width" => {
                 self.table_max_column_width = kv.try_some_from_str()?;
+            }
+            "table_continuation_edge" => {
+                self.table_continuation_edge = kv.try_some_from_str()?;
             }
             "theme" => self.theme = kv.try_some_from_str()?,
             "hr_style" => self.hr_style = kv.try_some_from_str()?,
@@ -90,6 +127,10 @@ impl PartialConfigDelta for PartialMarkdownConfig {
                 self.table_max_column_width.as_ref(),
                 next.table_max_column_width,
             ),
+            table_continuation_edge: delta_opt(
+                self.table_continuation_edge.as_ref(),
+                next.table_continuation_edge,
+            ),
             theme: delta_opt(self.theme.as_ref(), next.theme),
             hr_style: delta_opt(self.hr_style.as_ref(), next.hr_style),
         }
@@ -103,6 +144,9 @@ impl FillDefaults for PartialMarkdownConfig {
             table_max_column_width: self
                 .table_max_column_width
                 .or(defaults.table_max_column_width),
+            table_continuation_edge: self
+                .table_continuation_edge
+                .or(defaults.table_continuation_edge),
             theme: self.theme.or(defaults.theme),
             hr_style: self.hr_style.or(defaults.hr_style),
         }
@@ -118,6 +162,10 @@ impl ToPartial for MarkdownConfig {
             table_max_column_width: partial_opt(
                 &self.table_max_column_width,
                 defaults.table_max_column_width,
+            ),
+            table_continuation_edge: partial_opt(
+                &self.table_continuation_edge,
+                defaults.table_continuation_edge,
             ),
             theme: partial_opts(self.theme.as_ref(), defaults.theme),
             hr_style: partial_opt(&self.hr_style, defaults.hr_style),

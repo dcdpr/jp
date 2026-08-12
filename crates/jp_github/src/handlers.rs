@@ -482,15 +482,22 @@ impl PullsHandler {
     /// `id`).
     /// When `start_line` is set, the comment is multi-line; the range is
     /// `[start_line, line]` on the chosen `side`.
+    ///
+    /// Returns the created thread as GitHub resolved it.
+    /// Callers should check [`CreatedReviewThread::line`]: the mutation accepts
+    /// anchors that are not part of the PR's diff without raising an error, and
+    /// the resulting thread (`line: null`) is never rendered in the review UI.
+    ///
+    /// [`CreatedReviewThread::line`]: models::pulls::CreatedReviewThread::line
     pub async fn add_review_thread(
         &self,
         review_node_id: &str,
         comment: &models::pulls::DraftReviewComment,
-    ) -> Result<()> {
+    ) -> Result<models::pulls::CreatedReviewThread> {
         let query = indoc::indoc! {"
             mutation AddThread($input: AddPullRequestReviewThreadInput!) {
               addPullRequestReviewThread(input: $input) {
-                thread { id }
+                thread { id line isOutdated }
               }
             }
         "};
@@ -527,9 +534,38 @@ impl PullsHandler {
         // `client.graphql` raises any GraphQL `errors` as an `Err`, so a failed
         // mutation surfaces to the caller (and the LLM) rather than reporting
         // success.
-        self.client.graphql::<Value>(&body).await?;
+        let response: Value = self.client.graphql(&body).await?;
 
-        Ok(())
+        // A missing or null `thread` alongside an empty `errors` array would
+        // otherwise report success for a mutation that created nothing.
+        let thread = response
+            .pointer("/data/addPullRequestReviewThread/thread")
+            .filter(|t| !t.is_null());
+
+        let Some(id) = thread
+            .and_then(|t| t.get("id"))
+            .and_then(Value::as_str)
+            .filter(|id| !id.is_empty())
+        else {
+            return Err(Error::GitHub {
+                source: GitHubError {
+                    status_code: StatusCode::new(200),
+                    message: "addPullRequestReviewThread returned no thread; the comment was not \
+                              created"
+                        .to_owned(),
+                },
+                body: Some(response.to_string()),
+            });
+        };
+
+        Ok(models::pulls::CreatedReviewThread {
+            id: id.to_owned(),
+            line: thread.and_then(|t| t.get("line")).and_then(Value::as_u64),
+            is_outdated: thread
+                .and_then(|t| t.get("isOutdated"))
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        })
     }
 
     /// Find the GraphQL thread node ID of the thread containing the given REST

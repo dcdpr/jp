@@ -14,13 +14,16 @@ use jp_config::interrupt::{StreamingInterruptConfig, ToolInterruptConfig};
 use jp_conversation::ConversationStream;
 use jp_editor::EditorBackend;
 use jp_inquire::{ReplyEditMode, prompt::PromptBackend};
-use jp_llm::event::{Event, EventMatcher, EventPatch, FinishReason, PatchAction};
+use jp_llm::event::{Event, FinishReason, apply_patches};
 use jp_printer::Printer;
 use tokio_util::sync::CancellationToken;
 use tracing::{info, trace};
 
 use super::handler::{InterruptAction, InterruptHandler};
-use crate::cmd::query::turn::{Action, CommittedEvent, TurnCoordinator, TurnPhase};
+use crate::cmd::query::{
+    stream::{RebuildRefusal, StreamRetryState},
+    turn::{Action, CommittedEvent, TurnCoordinator, TurnPhase},
+};
 
 /// Action to take in a select loop.
 ///
@@ -32,6 +35,10 @@ pub enum LoopAction {
 
     /// Break the inner loop.
     Break,
+
+    /// The provider asked to rebuild the request and was refused.
+    /// The turn cannot make progress and must abort.
+    RebuildRefused(RebuildRefusal),
 }
 
 /// Result of handling an interrupt during LLM streaming.
@@ -126,12 +133,36 @@ pub fn handle_llm_event(
     event: Event,
     turn_coordinator: &mut TurnCoordinator,
     conversation_stream: &mut ConversationStream,
+    retry_state: &mut StreamRetryState,
 ) -> (LoopAction, CommittedEvent) {
     // `Patch` is a side-channel instruction from the provider to fix bad events
     // in the conversation stream. This can be handled directly instead of
     // passing through the turn coordinator.
     if let Event::Patch(patches) = event {
-        apply_history_patches(conversation_stream, &patches);
+        let count = apply_patches(conversation_stream, &patches);
+        let shrinks = patches.iter().all(|patch| patch.action.shrinks_stream());
+        retry_state.record_patch(count, shrinks);
+
+        if !shrinks {
+            // A patch set that can grow the stream gives no guarantee the repair
+            // loop ends, so the rebuild below is refused whatever it changed.
+            tracing::warn!(
+                patches = patches.len(),
+                "History patches include an action that may not shrink the conversation stream."
+            );
+        }
+
+        if count > 0 {
+            tracing::debug!(count, "Applied history patches to conversation stream.");
+        } else {
+            // The rebuilt request would be byte-identical, so the rebuild that
+            // follows is refused below rather than resent.
+            tracing::warn!(
+                patches = patches.len(),
+                "History patches matched no events in the conversation stream."
+            );
+        }
+
         return (LoopAction::Continue, CommittedEvent::None);
     }
 
@@ -139,7 +170,10 @@ pub fn handle_llm_event(
     // Break the inner streaming loop while keeping the phase as `Streaming` so
     // the outer turn loop re-enters with a fresh request.
     if matches!(event, Event::Finished(FinishReason::Retry)) {
-        return (LoopAction::Break, CommittedEvent::None);
+        return match retry_state.authorize_rebuild() {
+            Ok(()) => (LoopAction::Break, CommittedEvent::None),
+            Err(refusal) => (LoopAction::RebuildRefused(refusal), CommittedEvent::None),
+        };
     }
 
     let outcome = turn_coordinator.handle_event(conversation_stream, event);
@@ -149,48 +183,6 @@ pub fn handle_llm_event(
     };
 
     (loop_action, outcome.committed)
-}
-
-/// Apply provider-issued metadata patches to historical conversation events.
-///
-/// NOTE: This mutates the stream in-place, which deviates from the append-only
-/// principle established in RFD 064 (non-destructive compaction).
-/// This is acceptable for now because the targets are opaque provider metadata
-/// (cryptographic signatures), not user-visible content, and the overlay/
-/// projection infrastructure from RFD 064 does not exist yet.
-/// Once RFD 064 lands, this should migrate to an append-only patch event that
-/// the projection layer applies at request-build time.
-fn apply_history_patches(stream: &mut ConversationStream, patches: &[EventPatch]) {
-    let mut count = 0;
-
-    for event in stream.iter_mut() {
-        for patch in patches {
-            let matched = match &patch.matcher {
-                EventMatcher::MetadataValue { key, value } => event
-                    .event
-                    .metadata
-                    .get(key)
-                    .and_then(|v| v.as_str())
-                    .is_some_and(|v| v == value),
-                _ => false,
-            };
-
-            if !matched {
-                continue;
-            }
-
-            match &patch.action {
-                PatchAction::RemoveMetadata(key) => event.event.metadata.remove(key),
-                _ => continue,
-            };
-
-            count += 1;
-        }
-    }
-
-    if count > 0 {
-        tracing::debug!(count, "Applied history patches to conversation stream.");
-    }
 }
 
 /// Result of handling an interrupt during tool execution.
@@ -207,9 +199,17 @@ pub enum ToolInterruptResult {
     /// The caller should wait for cancellation to complete, then re-execute.
     Restart,
 
-    /// Cancel current execution and override cancelled tool responses with the
-    /// user-supplied message.
-    Cancelled { response: String },
+    /// Cancel current execution and override cancelled tool responses.
+    Cancelled {
+        /// The user-supplied message, or `None` to answer each cancelled tool
+        /// with its configured `cancellation_response`.
+        response: Option<String>,
+
+        /// Whether to end the turn after recording the cancelled responses,
+        /// instead of sending them back to the assistant in a follow-up
+        /// request.
+        exit: bool,
+    },
 
     /// Cancel current execution and begin a graceful shutdown: the user
     /// cancelled the interrupt menu itself with Ctrl-C.
@@ -259,9 +259,9 @@ pub fn handle_tool_interrupt(
             cancellation_token.cancel();
             ToolInterruptResult::Restart
         }
-        InterruptAction::ToolCancelled { response } => {
+        InterruptAction::ToolCancelled { response, exit } => {
             cancellation_token.cancel();
-            ToolInterruptResult::Cancelled { response }
+            ToolInterruptResult::Cancelled { response, exit }
         }
         InterruptAction::Escalate => {
             info!("Escalating past the tool interrupt menu");

@@ -49,6 +49,35 @@ fn rustfmt_changes_only_lists_those_files() {
 }
 
 #[test]
+fn formatted_file_listing_is_bounded() {
+    let (_dir, ctx) = ctx();
+    let rustfmt_stdout = (0..4_000)
+        .map(|i| format!("{root}/src/generated/file_{i}.rs", root = ctx.root))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success(rustfmt_stdout)
+        .expect("comfort")
+        .returns_success("");
+
+    let content = cargo_format_impl(&ctx, None, &runner)
+        .unwrap()
+        .unwrap_content();
+
+    assert!(
+        content.len() < MAX_DIAGNOSTIC_BYTES + 200,
+        "listing grew to {} bytes",
+        content.len()
+    );
+    assert!(
+        content.contains("[Truncated: showing"),
+        "got tail: {}",
+        &content[content.len() - 100..]
+    );
+}
+
+#[test]
 fn comfort_changes_only_lists_those_files() {
     let (_dir, ctx) = ctx();
     let comfort_stdout = format!("{}/crates/foo/src/lib.rs", ctx.root);

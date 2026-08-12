@@ -1,3 +1,5 @@
+use utils::suppress_matcher;
+
 use crate::{
     Context, Tool, to_xml,
     util::{OneOrMany, ToolResult},
@@ -21,12 +23,28 @@ use move_file::fs_move_file;
 use read_file::fs_read_file;
 
 pub async fn run(ctx: Context, t: Tool) -> ToolResult {
+    // Paths these tools may read but never return. Honored by the tools that exist
+    // to hand file contents or paths back; the write tools return confirmations
+    // rather than content, and what they may touch is the access policy's
+    // question.
+    //
+    // Parsed strictly rather than through `option_or`: a disclosure control that
+    // falls back to "suppress nothing" when its configuration is malformed hands
+    // over the very paths it was told to hold back, and does it silently.
+    let patterns: Vec<String> = match t.options.get("suppress") {
+        None => vec![],
+        Some(value) => serde_json::from_value(value.clone())
+            .map_err(|error| format!("Invalid `suppress` option for tool '{}': {error}", t.name))?,
+    };
+    let suppress = suppress_matcher(&ctx.root, &patterns)?;
+
     match t.name.trim_start_matches("fs_") {
         "list_files" => fs_list_files(
             &ctx.root,
             ctx.access.as_ref(),
             t.opt("prefixes")?,
             t.opt("extensions")?,
+            &suppress,
         )
         .await
         .and_then(to_xml)
@@ -35,6 +53,7 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
         "read_file" => {
             fs_read_file(
                 &ctx,
+                &suppress,
                 t.req("path")?,
                 t.opt("start_line")?,
                 t.opt("end_line")?,
@@ -49,6 +68,7 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
             t.opt("context")?,
             t.opt("paths")?,
             None,
+            &suppress,
         )
         .await
         .map(Into::into),
@@ -65,6 +85,7 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
             t.opt("context")?,
             Some(vec!["docs".to_owned()].into()),
             Some(vec!["md".to_owned()].into()),
+            &suppress,
         )
         .await
         .map(Into::into),
@@ -103,3 +124,7 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
         _ => Err(format!("Unknown tool '{}'", t.name).into()),
     }
 }
+
+#[cfg(test)]
+#[path = "fs_tests.rs"]
+mod tests;

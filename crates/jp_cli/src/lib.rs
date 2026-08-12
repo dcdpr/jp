@@ -16,7 +16,7 @@ mod signals;
 mod timer;
 
 use std::{
-    env, fmt,
+    env, fmt, fs,
     io::{self, IsTerminal as _, Write as _, stderr, stdout},
     num::{self, NonZeroUsize},
     process::ExitCode,
@@ -36,6 +36,7 @@ use clap::{
     builder::{BoolValueParser, TypedValueParser as _},
 };
 use cmd::{Commands, workspace::target::WorkspaceTarget};
+use crossterm::terminal;
 use ctx::{Ctx, IntoPartialAppConfig};
 use error::{Error, Result};
 use jp_config::{
@@ -47,7 +48,7 @@ use jp_config::{
         load_partials_with_inheritance,
     },
 };
-use jp_printer::{OutputFormat, Printer};
+use jp_printer::{OutputFormat, OutputWidth, Printer};
 use jp_storage::backend::{FsStorageBackend, NullLockBackend, NullPersistBackend};
 use jp_term::table::{DetailRow, details, details_markdown};
 use jp_workspace::{Workspace, roots, session_store::WorkspaceSessionStore, user_data_dir};
@@ -172,6 +173,16 @@ struct Globals {
     #[arg(short = 'w', long, global = true)]
     workspace: Option<WorkspaceTarget>,
 
+    /// Lay output out against this many columns.
+    ///
+    /// Detected automatically when stdout is a terminal.
+    /// Set it when stdout is a pipe that still renders for a human at a known
+    /// width, such as a preview pane laid out by another program.
+    /// `0` means unknown, which is the default when piped: content keeps its
+    /// natural width instead of being fitted to a guess.
+    #[arg(long, global = true, value_name = "COLUMNS")]
+    width: Option<u16>,
+
     /// The format of the log output written to stderr.
     ///
     /// Defaults to "text" when stderr is a terminal, and "json" when stderr is
@@ -181,10 +192,12 @@ struct Globals {
     #[arg(long, global = true, value_enum, default_value_t = LogFormat::Auto)]
     log_format: LogFormat,
 
-    /// Write tracing logs to an additional destination.
+    /// Write the full tracing log to the given file.
     ///
-    /// Use `-` to write to stderr.
-    /// Tracing is always written to a log file regardless of this flag.
+    /// Use `-` to stream logs to stderr instead.
+    /// When unset, the log is written to a temporary file, which is kept and
+    /// its path printed when a run fails, or when `JP_DEBUG=1` is set and
+    /// stdout is a terminal.
     #[arg(long, global = true, value_name = "PATH")]
     log_file: Option<String>,
 
@@ -337,11 +350,17 @@ pub fn run() -> ExitCode {
     );
 
     trace!(command = cli.command.name(), arguments = %cli, "Starting CLI run.");
-    let (code, output) = match run_inner(cli, format) {
-        Ok(()) => (0, None),
+    let (code, outcome, output) = match run_inner(cli, format) {
+        Ok(()) => (0, RunOutcome::AsExpected, None),
         Err(error) => {
-            let (code, msg) = parse_error(error.into(), format);
-            (code, Some(msg))
+            let error = cmd::Error::from(error);
+            let outcome = if error.expected {
+                RunOutcome::AsExpected
+            } else {
+                RunOutcome::Failed
+            };
+            let (code, msg) = parse_error(error, format);
+            (code, outcome, Some(msg))
         }
     };
 
@@ -355,10 +374,13 @@ pub fn run() -> ExitCode {
         }
     }
 
-    if (code != 0
-        || env::var("JP_DEBUG")
-            .as_deref()
-            .is_ok_and(|v| v == "1" || v == "true"))
+    // Read here rather than inside the policy, which stays a pure function of
+    // its inputs.
+    let debug_enabled = env::var("JP_DEBUG")
+        .as_deref()
+        .is_ok_and(|v| v == "1" || v == "true");
+
+    if should_report_trace_log(outcome, is_tty, debug_enabled)
         && let Some(path) = guard.and_then(TracingGuard::persist)
     {
         if format.is_json() {
@@ -375,8 +397,74 @@ pub fn run() -> ExitCode {
     ExitCode::from(code)
 }
 
+/// How a run ended, as far as reporting its trace log goes.
+#[derive(Debug, Clone, Copy)]
+enum RunOutcome {
+    /// The run did what was asked: it either succeeded, or exited non-zero to
+    /// report a result.
+    /// `jp conversation grep` exits 1 when it finds nothing.
+    AsExpected,
+
+    /// The run failed.
+    Failed,
+}
+
+/// Whether to tell the user where the run's trace log was written.
+///
+/// A failed run always reports it: diagnosing the failure matters more than
+/// keeping the output stream clean.
+/// The exit status alone doesn't answer this, since a command can exit non-zero
+/// to report a result rather than a failure.
+///
+/// Every other run makes the report opt-in via `JP_DEBUG`, and only when stdout
+/// is a terminal.
+/// A piped stdout means `jp` is a component in someone else's pipeline, and a
+/// program consuming it may own the screen: an `fzf` list or preview, for
+/// instance, where two uninvited lines corrupt the layout.
+/// Note that stderr's own tty-ness is the wrong test: in `jp … | fzf`, stderr
+/// *is* the terminal, which is exactly how the corruption happens.
+///
+/// Set `--log-file` to choose the path when a piped run needs to be traced;
+/// nothing has to be announced when the caller picked the destination.
+fn should_report_trace_log(outcome: RunOutcome, stdout_is_tty: bool, debug_enabled: bool) -> bool {
+    match outcome {
+        RunOutcome::Failed => true,
+        RunOutcome::AsExpected => stdout_is_tty && debug_enabled,
+    }
+}
+
+/// The width to lay output out against.
+///
+/// A `--width` given on the command line is [`OutputWidth::Declared`], with `0`
+/// meaning unknown.
+/// Otherwise the controlling terminal is measured when stdout is a TTY.
+///
+/// [`OutputWidth::Unknown`] when stdout is piped or redirected and no width was
+/// given, so output keeps its full width for machine consumption rather than
+/// being laid out against a guessed size.
+fn detect_output_width(declared: Option<u16>) -> OutputWidth {
+    if let Some(width) = declared {
+        return if width > 0 {
+            OutputWidth::Declared(width)
+        } else {
+            OutputWidth::Unknown
+        };
+    }
+
+    if !stdout().is_terminal() {
+        return OutputWidth::Unknown;
+    }
+
+    terminal::size()
+        .ok()
+        .map_or(OutputWidth::Unknown, |(cols, _)| {
+            OutputWidth::Terminal(cols)
+        })
+}
+
 fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
-    let printer = Printer::terminal(format);
+    let printer =
+        Printer::terminal(format).with_output_width(detect_output_width(cli.globals.width));
 
     // `jp workspace` runs on a dedicated pre-workspace path: selecting or
     // inspecting a workspace must work from outside every workspace —
@@ -499,6 +587,13 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
             "Error running command. Disabling workspace persistence."
         );
         ctx.workspace.disable_persistence();
+
+        // The state this run produced is being discarded, so background work
+        // derived from it (e.g. generating a title for a conversation that
+        // won't survive) is wasted. Fire the soft-cancellation token now:
+        // the drain below then skips its soft wait and goes straight to the
+        // 2s grace pass instead of waiting up to 10s for doomed tasks.
+        ctx.task_handler.cancel_token().cancel();
     }
 
     // Flush the printer to ensure all queued typewriter output is fully written
@@ -848,7 +943,7 @@ fn load_partial_configs_from_files(
         partials.push(cwd_config);
     }
 
-    // Load `$XDG_DATA_HOME/jp/<workspace_id>/config.{toml,json,yaml}`.
+    // Load `$XDG_DATA_HOME/jp/workspace/<name>-<id>/config.{toml,json,yaml}`.
     if let Some(user_workspace_config) = fs
         .and_then(|f| f.user_storage_with_path(config_path))
         .and_then(|p| load_partial_at_path(p).transpose())
@@ -950,14 +1045,25 @@ const JP_CRATES: &[&str] = &[
 ];
 
 pub struct TracingGuard {
-    file: Option<NamedUtf8TempFile>,
+    sink: Option<TraceSink>,
+}
+
+/// Where the full trace log is written.
+enum TraceSink {
+    /// A delete-on-drop temp file, kept only when [`TracingGuard::persist`] is
+    /// called (a failed run, or `JP_DEBUG=1` with stdout on a terminal).
+    Temp(NamedUtf8TempFile),
+    /// A caller-chosen path (`--log-file <path>`).
+    /// The file always persists.
+    Path(Utf8PathBuf),
 }
 
 impl TracingGuard {
     fn persist(mut self) -> Option<Utf8PathBuf> {
-        self.file
-            .take()
-            .and_then(|file| file.keep().ok().map(|(_file, path)| path))
+        match self.sink.take()? {
+            TraceSink::Temp(file) => file.keep().ok().map(|(_file, path)| path),
+            TraceSink::Path(path) => Some(path),
+        }
     }
 }
 
@@ -1006,8 +1112,21 @@ fn configure_logging(
     file_filter.push("plugin=trace".to_owned());
     let file_env_filter = tracing_subscriber::EnvFilter::new(file_filter.join(","));
 
-    let file = NamedUtf8TempFile::new().ok()?;
-    let file_writer = file.as_file().try_clone().ok()?;
+    // An explicit `--log-file <path>` pins the trace log to that path;
+    // otherwise it goes to a delete-on-drop temp file that is only kept when the
+    // run fails, or when `JP_DEBUG=1` is set and stdout is a terminal. (`-`
+    // selects the stderr layer below, not a file path.)
+    let (file_writer, sink) = match log_file {
+        Some(path) if path != "-" => {
+            let file = fs::File::create(path).ok()?;
+            (file, TraceSink::Path(Utf8PathBuf::from(path)))
+        }
+        _ => {
+            let file = NamedUtf8TempFile::new().ok()?;
+            let writer = file.as_file().try_clone().ok()?;
+            (writer, TraceSink::Temp(file))
+        }
+    };
 
     let file_layer = fmt::layer()
         .json()
@@ -1085,7 +1204,7 @@ fn configure_logging(
         registry.init();
     }
 
-    Some(TracingGuard { file: Some(file) })
+    Some(TracingGuard { sink: Some(sink) })
 }
 
 /// Get the number of worker threads to use.

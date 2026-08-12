@@ -41,6 +41,7 @@ expression: v
         "base_backoff_ms": 1000,
         "max_backoff_secs": 60,
         "stream_idle_timeout_secs": 60,
+        "max_response_bytes": 1048576,
         "cache": true
       }
     },
@@ -55,6 +56,7 @@ expression: v
         "*": {
           "run": "ask",
           "result": "unattended",
+          "cancellation_response": "This tool request was intentionally rejected by the user. Please evaluate and either ask the user why it was rejected, or infer the reason by looking at the historical messages in the conversation.",
           "style": {
             "hidden": false,
             "inline_results": {
@@ -98,12 +100,19 @@ expression: v
       "markdown": {
         "wrap_width": 80,
         "table_max_column_width": 40,
+        "table_continuation_edge": true,
         "theme": "gruvbox-dark",
         "hr_style": "line"
       },
+      "mcp_startup": {
+        "show": true,
+        "delay_secs": 4,
+        "interval_ms": 100
+      },
       "reasoning": {
         "display": "full",
-        "background": 236
+        "background": 236,
+        "extend_across_tool_calls": true
       },
       "streaming": {
         "progress": {

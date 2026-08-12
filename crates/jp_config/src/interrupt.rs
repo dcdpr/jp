@@ -94,6 +94,9 @@ pub struct ToolInterruptConfig {
     /// - `restart`: Cancel the running tools and run them again.
     /// - `respond`: Cancel the running tools and send a message back to the
     ///   assistant in their place.
+    /// - `stop`: Cancel the running tools, record each tool's configured
+    ///   `cancellation_response`, and end the turn without asking the assistant
+    ///   to continue.
     #[setting(default)]
     pub action: ToolInterruptAction,
 
@@ -156,8 +159,13 @@ pub enum ToolInterruptAction {
 
     /// Cancel the running tools and send a message back to the assistant in
     /// place of their results.
-    /// An empty message uses a canned rejection notice.
+    /// An empty message uses each tool's configured `cancellation_response`.
     Respond,
+
+    /// Cancel the running tools, record each tool's configured
+    /// `cancellation_response`, and end the turn without asking the assistant
+    /// to continue.
+    Stop,
 }
 
 /// Where a reply or response is composed.

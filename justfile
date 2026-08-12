@@ -1,3 +1,5 @@
+set fallback
+
 # see: <https://github.com/cargo-bins/cargo-quickinstall/releases>
 bacon_version        := "3.23.0"
 binstall_version     := "1.20.0"
@@ -11,6 +13,14 @@ shear_version        := "1.12.4"
 vet_version          := "0.10.2"
 
 quiet_flag := if env_var_or_default("CI", "") == "true" { "" } else { "--quiet" }
+
+# Workspace crates that no `jp_*` crate depends on: standalone tooling binaries,
+# docs infrastructure, and command plugins. Skipping them drops their
+# dependencies from the build entirely, rather than merely skipping their tests.
+#
+# `grizzly` is deliberately absent: `jp_attachment_bear_note` depends on it, so
+# it is compiled either way.
+non_jp_excludes := "--exclude bookworm --exclude build-registry --exclude comfort --exclude jp-path --exclude jp-serve-web --exclude json_edit --exclude tools"
 
 alias r := run
 alias i := install
@@ -60,7 +70,7 @@ run *ARGS:
     #!/usr/bin/env sh
     set -eu
 
-    cargo run --package jp_cli -- "$@"
+    cargo run {{quiet_flag}} --package jp_cli -- "$@"
 
 # Install the `jp` binary from your local checkout.
 [group('build')]
@@ -87,8 +97,9 @@ commit *ARGS: _install-jp
     msg="Give me a commit message"
 
     args=$(just _shape-args "$msg" "$@")
+    branch=$(git rev-parse --abbrev-ref HEAD)
 
-    jp query --new --local --tmp=1h --cfg=personas/committer $args || exit 1
+    jp query --new --local --tmp=1h --title="just commit ($branch)" --cfg=personas/committer $args || exit 1
     git commit --amend
 
 [group('jp')]
@@ -136,6 +147,19 @@ rfd-this *ARGS: _install-jp
     args=$(just _shape-args "$msg" "$@")
 
     jp query --cfg=skill/rfd $args
+
+# Open a commit message in the editor, using Jean-Pierre.
+[group('jp')]
+[positional-arguments]
+commit-this *ARGS: _install-jp
+    #!/usr/bin/env sh
+    set -eu
+
+    msg="I gave you the commit skill, use it to stage and commit all relevant changes part of our conversation."
+
+    args=$(just _shape-args "$msg" "$@")
+
+    jp query --cfg=skill/git-reading --cfg=skill/git-stage --cfg=skill/git-commit-writing $args
 
 # Review a GitHub pull request, queueing inline comments to a draft review.
 #
@@ -272,7 +296,7 @@ pr-triage NNN *ARGS: _install-jp _install-tools
                 ans=n
             fi
             case "$ans" in
-                p|P)
+                p|P|"")
                     jp conversation use '?session'
                     jp query --cfg=personas/pr-triager \
                         --attach "gh:pull/{{NNN}}/diff" \
@@ -280,7 +304,8 @@ pr-triage NNN *ARGS: _install-jp _install-tools
                         $args
                     exit 0 ;;
                 q|Q) exit 0 ;;
-                *) ;;
+                n|N) ;;
+                *)   echo "Unknown choice '$ans'; aborting." >&2; exit 1 ;;
             esac ;;
     esac
 
@@ -310,10 +335,15 @@ pr-triage NNN *ARGS: _install-jp _install-tools
             $args
     fi
 
-# Review the current diff with revdiff and send the annotations back to the
-# active jp conversation. ARGS before a `--` are forwarded to revdiff (see
-# `revdiff --help`); ARGS after a `--` are forwarded to the `jp query` that
-# receives the annotations:
+# Review the current diff with revdiff and send the annotations to jp for
+# triage. The assistant (personas/review-triager: dev/architect knowledge,
+# no edit tools) grounds each note against the code and responds note by
+# note with a verdict (accept / amend / dismiss / defer) and a concrete
+# recommendation — it does not edit files. To act on the verdicts, follow
+# up with a dev persona, e.g. `jp q --cfg=personas/dev "apply the accepted
+# items"`. ARGS before a `--` are forwarded to revdiff (see `revdiff
+# --help`); ARGS after a `--` are forwarded to the `jp query` that receives
+# the annotations:
 #
 #   just review                     # uncommitted changes (default)
 #   just review HEAD~3              # last 3 commits
@@ -324,8 +354,12 @@ pr-triage NNN *ARGS: _install-jp _install-tools
 # Exits silently if revdiff produces no annotations (e.g. you quit with `q`
 # without leaving notes, or `Q` to discard). The matching `git diff` is
 # attached so the assistant can resolve line-anchored notes against the same
-# context revdiff showed you. Sends to the active conversation; use
-# `jp conversation use <ID>` first to target a specific one.
+# context revdiff showed you.
+#
+# When the current session has an active conversation, prompts (before the
+# review starts) whether to send the annotations there, to a new
+# conversation, or to quit. Without a TTY, or without an active
+# conversation, sends to whatever conversation `jp query` resolves to.
 [group('jp')]
 [positional-arguments]
 review *ARGS: _install-jp
@@ -337,6 +371,25 @@ review *ARGS: _install-jp
         echo "Install via 'brew install umputun/apps/revdiff' or see" >&2
         echo "https://github.com/umputun/revdiff/releases for binaries." >&2
         exit 1
+    fi
+
+    # Decide where the annotations go before launching the review, mirroring
+    # the pr-triage/rfd-triage pre-run prompt. Asking up front avoids fighting
+    # over the terminal with revdiff's TUI, and avoids discarding a finished
+    # review because the target was wrong.
+    target=""
+    active_id=$(jp -F json conversation ls +s 2>/dev/null \
+        | jq -r '.[-1].ID // empty' 2>/dev/null || true)
+    if [ -n "$active_id" ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
+        printf "This session's active conversation is %s.\n" "$active_id" > /dev/tty
+        printf "  Review in the [a]ctive conversation / [n]ew conversation / [q]uit: " > /dev/tty
+        IFS= read -r ans < /dev/tty
+        case "$ans" in
+            ""|a|A) target="--id $active_id" ;;
+            n|N)    target="--new" ;;
+            q|Q)    exit 0 ;;
+            *)      echo "Unknown choice '$ans'; aborting." >&2; exit 1 ;;
+        esac
     fi
 
     # Split ARGS at the first `--`: everything before it is for revdiff,
@@ -396,14 +449,68 @@ review *ARGS: _install-jp
         esac
     done
 
-    preamble="Below are my review notes from \`revdiff\` on the diff you just produced. \
-    Each entry header is \`## path:line[-line] (+|-)\` (anchored to a specific position) \
-    or \`## path (file-level)\` (whole file). The matching \`git diff\` is attached so you \
-    can resolve those positions. Address each note with targeted edits only — no wholesale \
-    re-generation, no unrelated cleanup."
+    preamble="Below are my review notes from \`revdiff\`, in the fenced block. Each record \
+    header is \`## path:line[-line] (+|-| )\` (anchored to a position in the reviewed \
+    content) or \`## path (file-level)\` (whole file); the reviewed content is attached so \
+    you can resolve the anchors. Triage the notes per your instructions: one numbered item \
+    per note, verdict plus reasoning plus recommendation. Do NOT edit any files."
 
-    printf '%s\n\n%s\n' "$preamble" "$annotations" \
-        | jp query --attach "$diff_attach" $jp_args
+    printf '%s\n\n```markdown\n%s\n```\n' "$preamble" "$annotations" \
+        | jp query $target --cfg=personas/review-triager --attach "$diff_attach" $jp_args
+
+# Review file(s) with revdiff, even when they have no diff, and send the
+# annotations to jp for triage. Uses revdiff's context-only file review
+# mode (`--only`): files without VCS changes are read from disk and shown
+# in full, with annotation support. Delegates to `just review`, so it
+# shares its conversation prompt, triage persona, and annotation handling.
+# Each file is attached to the `jp query` so the assistant sees the full
+# content despite the empty diff. ARGS after a `--` are forwarded to
+# `jp query`:
+#
+#   just review-file docs/rfd/001-jp-rfd-process.md
+#   just review-file path/a.rs path/b.rs -- --edit
+[group('jp')]
+[positional-arguments]
+review-file *ARGS:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    files=()
+    jp_args=()
+    after_sep=false
+
+    for arg in "$@"; do
+        if [ "$after_sep" = true ]; then
+            jp_args+=("$arg")
+        elif [ "$arg" = "--" ]; then
+            after_sep=true
+        else
+            files+=("$arg")
+        fi
+    done
+
+    if [ "${#files[@]}" -eq 0 ]; then
+        echo "Usage: just review-file FILE [FILE ...] [-- JP_ARGS ...]" >&2
+        exit 1
+    fi
+
+    rev_args=()
+    attach_args=()
+
+    for file in "${files[@]}"; do
+        if [ ! -f "$file" ]; then
+            echo "No such file: $file" >&2
+            exit 1
+        fi
+
+        # `--only` shows files without VCS changes in context-only mode
+        # (full content, annotatable). Files that DO have uncommitted
+        # changes show their diff instead, which is also what you'd want.
+        rev_args+=(--only="$file")
+        attach_args+=(--attach "$file")
+    done
+
+    just review "${rev_args[@]}" -- "${attach_args[@]}" "${jp_args[@]:-}"
 
 # Review an RFD. Accepts a permanent number (41, 041) or a draft ID (D01).
 #
@@ -698,34 +805,14 @@ rfd-draft CATEGORY +TITLE:
         design)   template="design"  ;;
         decision) template="decision" ;;
         guide)    template="guide"   ;;
-        process)  template="guide"   ;;
+        process)  template="process" ;;
         *) echo "Unknown category '$category'. Use 'design', 'decision', 'guide', or 'process'." >&2; exit 1 ;;
     esac
 
     # Find the first available draft number (D01–D99).
-    next=1
-    while [ "$next" -le 99 ]; do
-        draft_id=$(printf "D%02d" "$next")
-        if ! ls docs/rfd/drafts/${draft_id}-*.md >/dev/null 2>&1; then
-            break
-        fi
-        next=$((next + 1))
-    done
-    if [ "$next" -gt 99 ]; then
-        echo "No draft slots available (D01–D99 all in use)." >&2; exit 1
-    fi
-    draft_id=$(printf "D%02d" "$next")
+    draft_id=$(just _rfd-next-draft-slot) || exit 1
 
-    # Resolve the author from git config, falling back to $USER.
-    git_name=$(git config user.name 2>/dev/null || true)
-    git_email=$(git config user.email 2>/dev/null || true)
-    if [ -n "$git_name" ] && [ -n "$git_email" ]; then
-        author="${git_name} <${git_email}>"
-    elif [ -n "$git_name" ]; then
-        author="$git_name"
-    else
-        author="${USER:-unknown}"
-    fi
+    author=$(just _git-author)
 
     # Capitalize the category for the metadata header.
     cap_category=$(echo "$category" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')
@@ -1056,13 +1143,13 @@ _rfd-link SOURCE TARGET FORWARD INVERSE:
 # Advance an RFD's status: Draft -> Discussion -> Accepted -> Implemented.
 #
 # For drafts (DNN-prefixed files), assigns the next available permanent number
-# and renames the file. When promoting to Accepted, offers to create a GitHub
-# tracking issue via `jp` (prompting on TTY, defaulting to yes in
-# non-interactive runs) and injects the link into the metadata.
+# and renames the file. When promoting to Accepted, offers to turn each phase of
+# the Implementation Plan into a ticket carrying `Implements: NNN` (prompting on
+# TTY, defaulting to yes in non-interactive runs).
 #
 # Accepts: a permanent number (41, 041) or a draft ID (D01).
 [group('rfd')]
-rfd-promote NNN: _install-jp _install-comfort
+rfd-promote NNN: _install-jp _install-comfort _install-ticket
     #!/usr/bin/env sh
     set -eu
 
@@ -1095,6 +1182,23 @@ rfd-promote NNN: _install-jp _install-comfort
                 exit 1
             fi
         done
+
+        # The docs build also rejects `DNN` tokens anywhere in a published
+        # RFD's body, so refuse while the document references other drafts.
+        # Exempt: this draft's own id (the cross-reference pass below
+        # rewrites it to the permanent number) and the `Required by` /
+        # `Extended by` metadata lines (draft back-links are stripped
+        # automatically further down).
+        stray=$(grep -v -e '^- \*\*Required by\*\*: ' -e '^- \*\*Extended by\*\*: ' "$file" \
+            | grep -oE '(^|[^A-Za-z0-9_])D[0-9][0-9]([^A-Za-z0-9_]|$)' \
+            | grep -oE 'D[0-9][0-9]' | sort -u | grep -v "^${rfd_id}\$" || true)
+        if [ -n "$stray" ]; then
+            echo "Cannot promote: $(basename "$file") references other drafts in its body:" >&2
+            echo "$stray" | sed 's/^/  RFD /' >&2
+            echo "Published RFDs must not reference drafts (the docs build rejects DNN tokens)." >&2
+            echo "Promote those drafts first, or reword the references." >&2
+            exit 1
+        fi
     fi
 
     # --- Promotion gate (Discussion -> Accepted, Accepted -> Implemented):
@@ -1157,19 +1261,7 @@ rfd-promote NNN: _install-jp _install-comfort
         slug=$(echo "$basename_f" | sed 's/^[A-Z]*[0-9]*-//; s/\.md$//')
 
         # Assign next available permanent number.
-        existing=$(ls docs/rfd/[0-9][0-9][0-9]-*.md 2>/dev/null \
-            | sed 's|.*/||; s|-.*||' \
-            | sort -n)
-
-        next_num=1
-        for num_iter in $existing; do
-            n=$(echo "$num_iter" | sed 's/^0*//')
-            n=${n:-0}
-            [ "$n" -lt "$next_num" ] && continue
-            [ "$n" -gt "$next_num" ] && break
-            next_num=$((next_num + 1))
-        done
-        num=$(printf "%03d" "$next_num")
+        num=$(just _rfd-next-number) || exit 1
         new_basename="${num}-${slug}.md"
         new_file="docs/rfd/${new_basename}"
         final_file="$new_file"
@@ -1187,27 +1279,18 @@ rfd-promote NNN: _install-jp _install-comfort
             "$file" > "$new_file"
         rm "$file"
 
-        # Carry the board position across renumbering: `priority.json` stores
-        # RFD ids, so rewrite the draft id to its new permanent number wherever
-        # it appears (the `planned` milestone groups, `backlog`, or
-        # `in_development`; the legacy flat `order` is handled too).
-        priority_file="docs/rfd/priority.json"
-        if [ -f "$priority_file" ]; then
-            jq --arg old "$old_draft_id" --arg new "$num" '
-                def sub_id: map(if . == $old then $new else . end);
-                (if .planned then .planned |= map(.ids |= sub_id) else . end)
-                | (if .order then .order |= sub_id else . end)
-                | .backlog = ((.backlog // []) | sub_id)
-                | .in_development = ((.in_development // []) | sub_id)
-            ' "$priority_file" > "${priority_file}.tmp" && mv "${priority_file}.tmp" "$priority_file"
-        fi
+        # Carry the board position across renumbering.
+        just _rfd-priority-rewrite "$old_draft_id" "$num"
 
-        # Update cross-references in other RFDs: replace `RFD DNN` with
-        # `RFD NNN` in prose, `DNN-slug.md` with the correct relative
-        # path to `NNN-slug.md` in link targets, and standalone short
-        # mentions like `DNN` (e.g. "D27 also widens the scope") with
-        # the bare number `NNN`. Drafts under `drafts/` need a `../`
-        # prefix because the promoted file moved up a directory.
+        # Update cross-references in every RFD, including the promoted file
+        # itself: its prose can self-reference by draft id ("once D24
+        # lands"), and the initial rewrite above only covers the heading,
+        # status, and link prefixes. Replace `RFD DNN` with `RFD NNN` in
+        # prose, `DNN-slug.md` with the correct relative path to
+        # `NNN-slug.md` in link targets, and standalone short mentions like
+        # `DNN` (e.g. "D27 also widens the scope") with the bare number
+        # `NNN`. Drafts under `drafts/` need a `../` prefix because the
+        # promoted file moved up a directory.
         #
         # The short-form pass runs last so the long-form and basename
         # rewrites get first crack at their specific shapes (the
@@ -1219,7 +1302,6 @@ rfd-promote NNN: _install-jp _install-comfort
         updated=0
         for other in docs/rfd/*.md docs/rfd/drafts/*.md; do
             [ -f "$other" ] || continue
-            [ "$other" = "$new_file" ] && continue
             if ! grep -qE \
                     -e "RFD ${old_draft_id}" \
                     -e "${basename_f}" \
@@ -1247,10 +1329,12 @@ rfd-promote NNN: _install-jp _install-comfort
         # promoted file. These are bookkeeping artefacts of the bidirectional
         # draft-draft policy; the file is now published and cannot carry
         # draft back-links.
+        promoted_head=$(grep -n '^## ' "$new_file" | head -1 | cut -d: -f1)
+        promoted_head="${promoted_head:-9999}"
         for field in "Required by" "Extended by"; do
-            awk -v field="$field" '
+            awk -v field="$field" -v header_end="$promoted_head" '
                 BEGIN { search = "^- \\*\\*" field "\\*\\*: " }
-                $0 ~ search {
+                NR <= header_end && $0 ~ search {
                     sub(search, "", $0)
                     n = split($0, entries, /, /)
                     new = ""
@@ -1286,7 +1370,17 @@ rfd-promote NNN: _install-jp _install-comfort
                 fi
                 [ -z "$dep_file" ] && continue
 
-                existing=$(sed -n "s/^- \\*\\*${inverse}\\*\\*: //p" "$dep_file" | head -1)
+                # Scoped to the metadata header, like `add_link` in `_rfd-link`.
+                # RFDs that document these fields carry metadata-shaped examples
+                # in fenced blocks — 001 and 041 both do, and they are the most
+                # likely extension targets. Reading unscoped finds the example and
+                # concludes a header line exists; writing unscoped appends to the
+                # example instead of the header.
+                dep_head=$(grep -n '^## ' "$dep_file" | head -1 | cut -d: -f1)
+                dep_head="${dep_head:-9999}"
+
+                existing=$(head -n "$dep_head" "$dep_file" \
+                    | sed -n "s/^- \\*\\*${inverse}\\*\\*: //p" | head -1)
                 if echo "$existing" | grep -qE "RFD ${num}([^0-9]|\$)"; then
                     continue
                 fi
@@ -1300,11 +1394,11 @@ rfd-promote NNN: _install-jp _install-comfort
                 link="[RFD ${num}](${rel})"
 
                 if [ -n "$existing" ]; then
-                    sed "s|^- \\*\\*${inverse}\\*\\*: .*|&, ${link}|" "$dep_file" > "${dep_file}.tmp"
+                    sed "1,${dep_head}s|^- \\*\\*${inverse}\\*\\*: .*|&, ${link}|" \
+                        "$dep_file" > "${dep_file}.tmp"
                     mv "${dep_file}.tmp" "$dep_file"
                 else
-                    first_heading=$(grep -n '^## ' "$dep_file" | head -1 | cut -d: -f1)
-                    last_meta=$(head -n "${first_heading:-9999}" "$dep_file" | grep -n '^- \*\*' | tail -1 | cut -d: -f1)
+                    last_meta=$(head -n "$dep_head" "$dep_file" | grep -n '^- \*\*' | tail -1 | cut -d: -f1)
                     awk -v ln="$last_meta" -v entry="- **${inverse}**: ${link}" '
                         NR == ln { print; print entry; next }
                         { print }
@@ -1317,64 +1411,62 @@ rfd-promote NNN: _install-jp _install-comfort
 
         echo "${new_file}: Draft -> Discussion (assigned ${num})"
         if [ "$updated" -gt 0 ]; then
-            echo "Updated ${updated} cross-reference(s) in other RFDs."
+            echo "Updated ${updated} cross-reference(s) in RFD files."
         fi
 
-    # --- Discussion -> Accepted: create tracking issue via jp ---
+    # --- Discussion -> Accepted: offer to seed phase tickets ---
     elif [ "$current" = "Discussion" ]; then
         sed "s/^- \*\*Status\*\*: Discussion/- **Status**: Accepted/" "$file" > "${file}.tmp"
         mv "${file}.tmp" "$file"
+        echo "${file}: Discussion -> Accepted"
 
-        # Decide whether to create a tracking issue. When a TTY is
-        # attached, ask the caller so they can skip issue creation. In
-        # non-interactive runs (e.g. CI), default to creating one to
-        # preserve prior behaviour.
-        create_issue=true
+        # Acceptance records an agreed direction, not a commitment to start
+        # building, so the tickets are offered rather than created. Whoever
+        # accepts reviews them before they land. Non-interactive runs default to
+        # creating them.
+        create_tickets=true
         if [ -r /dev/tty ] && [ -w /dev/tty ]; then
-            printf "Create GitHub tracking issue for %s? [Y/n] " "$(basename "$file")" > /dev/tty
+            printf "Create phase tickets for %s? [Y/n] " "$(basename "$file")" > /dev/tty
             if IFS= read -r answer < /dev/tty; then
                 case "$answer" in
-                    n|N|no|No|NO) create_issue=false ;;
+                    n|N|no|No|NO) create_tickets=false ;;
                 esac
             fi
         fi
 
-        if [ "$create_issue" = true ]; then
-            # Create tracking issue using jp + structured output.
-            SCHEMA='{"type":"object","properties":{"number":{"type":"integer","description":"GitHub issue number"},"url":{"type":"string","description":"GitHub issue URL"}},"required":["number","url"]}'
-            PROMPT="Read the attached RFD. Create a tracking issue for it by calling the github_create_issue_rfd_tracking tool. Return the issue number and url."
-            TOOL_CFG='conversation.tools.github_create_issue_rfd_tracking:={"enable":true,"run":"unattended"}'
+        if [ "$create_tickets" = true ]; then
+            # The phases differ per RFD, so they're read out of the document
+            # rather than templated. Structured output keeps the result parseable.
+            SCHEMA='{"type":"object","properties":{"phases":{"type":"array","description":"One entry per phase of the Implementation Plan, in order","items":{"type":"object","properties":{"title":{"type":"string","description":"Imperative title, at most 60 characters"},"summary":{"type":"string","description":"What the phase delivers, one to three sentences of markdown"}},"required":["title","summary"]}}},"required":["phases"]}'
+            PROMPT="Read the attached RFD and list the phases of its Implementation Plan, in order. Give each a short imperative title and a summary of what it delivers. Return an empty array if the RFD has no Implementation Plan."
 
             result=$(
-                jp query --new --local --tmp=5m --format=json --no-reasoning \
-                    -c "$TOOL_CFG" \
+                jp query --new --local --tmp=5m --format=json --no-reasoning --no-tools \
                     --schema "$SCHEMA" \
                     --attachment "$file" \
                     "$PROMPT" \
                 | jq -s '.[-1]' 2>/dev/null
             ) || true
 
-            issue_num=$(echo "$result" | jq -r '.number // empty' 2>/dev/null || true)
-            issue_url=$(echo "$result" | jq -r '.url // empty' 2>/dev/null || true)
+            count=$(echo "$result" | jq '.phases | length' 2>/dev/null || echo 0)
+            count=${count:-0}
 
-            if [ -n "$issue_num" ] && [ -n "$issue_url" ]; then
-                first_heading=$(grep -n '^## ' "$file" | head -1 | cut -d: -f1)
-                last_meta=$(head -n "${first_heading:-9999}" "$file" | grep -n '^- \*\*' | tail -1 | cut -d: -f1)
-                awk -v ln="$last_meta" -v ti="- **Tracking Issue**: [#${issue_num}](${issue_url})" '
-                    NR == ln { print; print ti; next }
-                    { print }
-                ' "$file" > "${file}.tmp"
-                mv "${file}.tmp" "$file"
-                echo "${file}: Discussion -> Accepted"
-                echo "Tracking issue: #${issue_num} (${issue_url})"
+            if [ "$count" -eq 0 ]; then
+                echo "No implementation phases found; no tickets created." >&2
             else
-                echo "${file}: Discussion -> Accepted"
-                echo "Warning: tracking issue creation failed or was skipped." >&2
-                echo "Create one manually and add '- **Tracking Issue**: #NNN' to the metadata." >&2
+                i=0
+                while [ "$i" -lt "$count" ]; do
+                    title=$(echo "$result" | jq -r ".phases[$i].title")
+                    summary=$(echo "$result" | jq -r ".phases[$i].summary")
+                    jp ticket add feature "$title" \
+                        --implements "$rfd_id" \
+                        --body "$summary"
+                    i=$((i + 1))
+                done
+                echo "Review the tickets before committing them; 'just ticket-list' shows the board."
             fi
         else
-            echo "${file}: Discussion -> Accepted"
-            echo "Skipped tracking issue creation. Add one manually if needed." >&2
+            echo "Skipped phase tickets. File them later with 'just ticket-add'." >&2
         fi
 
     # --- Accepted -> Implemented ---
@@ -1472,6 +1564,232 @@ rfd-promote NNN: _install-jp _install-comfort
     # consolidate reference-style link definitions at the bottom, matching the
     # markdown formatting CI enforces (`fmt-markdown-ci`).
     comfort --language markdown --format-markdown --reference-links "$final_file"
+
+# Renumber an RFD to a new id, updating every cross-reference.
+#
+# NNN is the RFD to renumber: a permanent number (95, 095) or a draft ID
+# (D24). MMM is the target id and must live in the same id-space as NNN
+# (drafts renumber to another draft slot, published RFDs to another permanent
+# number; moving between spaces is `rfd-promote`'s job). When MMM is omitted,
+# the next available id in that space is used. The scan only sees local
+# files, so a number taken on another branch must be avoided by passing MMM
+# explicitly.
+#
+# Rewrites the file name, the document heading, `RFD <old>` mentions and
+# `<old>-slug.md` link targets across all RFDs (including the renumbered file
+# itself), bare `DNN` tokens for draft-space renumbers, and the id in
+# `priority.json`. The file stays in its directory, so existing link prefixes
+# (`../`, `./`) remain correct and only the basename is substituted.
+# References outside `docs/rfd/` (code comments, other docs) are reported but
+# not rewritten.
+#
+# Renumbering a published RFD changes its site URL and invalidates its
+# summary-cache entry; run `just rfd-summaries` afterwards.
+[group('rfd')]
+rfd-renumber NNN MMM="":
+    #!/usr/bin/env sh
+    set -eu
+
+    out=$(just _rfd-resolve "{{NNN}}") || exit 1
+    old_id="${out%% *}"
+    file="${out#* }"
+
+    if [ "$old_id" = "000" ]; then
+        echo "Refusing to renumber a template." >&2; exit 1
+    fi
+
+    dir=$(dirname "$file")
+    old_basename=$(basename "$file")
+    slug=$(echo "$old_basename" | sed 's/^[A-Z]*[0-9]*-//; s/\.md$//')
+
+    case "$old_id" in
+        D*) is_draft=true ;;
+        *)  is_draft=false ;;
+    esac
+
+    # --- Determine and validate the target id ---
+    target="{{MMM}}"
+    if [ -n "$target" ]; then
+        if [ "$is_draft" = true ]; then
+            if ! echo "$target" | grep -qiE '^D[0-9]{1,2}$'; then
+                echo "Target for a draft must be a draft slot (D01-D99), got '${target}'." >&2
+                exit 1
+            fi
+            n=$(echo "$target" | sed 's/^[Dd]0*//')
+            new_id=$(printf "D%02d" "${n:-0}")
+        else
+            if ! echo "$target" | grep -qE '^[0-9]+$'; then
+                echo "Target for a published RFD must be a number, got '${target}'." >&2
+                exit 1
+            fi
+            n=$(echo "$target" | sed 's/^0*//')
+            new_id=$(printf "%03d" "${n:-0}")
+        fi
+        if [ "${n:-0}" -eq 0 ]; then
+            echo "Target id must be greater than zero." >&2; exit 1
+        fi
+    else
+        if [ "$is_draft" = true ]; then
+            new_id=$(just _rfd-next-draft-slot) || exit 1
+        else
+            new_id=$(just _rfd-next-number) || exit 1
+        fi
+    fi
+
+    if [ "$new_id" = "$old_id" ]; then
+        echo "RFD ${old_id} already has that id; nothing to do." >&2; exit 1
+    fi
+
+    if [ "$is_draft" = true ]; then
+        taken=$(ls "docs/rfd/drafts/${new_id}-"*.md 2>/dev/null | head -1)
+    else
+        taken=$(ls "docs/rfd/${new_id}-"*.md 2>/dev/null | head -1)
+    fi
+    if [ -n "$taken" ]; then
+        echo "Target id ${new_id} is taken by $(basename "$taken")." >&2; exit 1
+    fi
+
+    # --- Rename the file and rewrite its heading ---
+    new_basename="${new_id}-${slug}.md"
+    new_file="${dir}/${new_basename}"
+    sed "s/^# RFD [A-Z]*[0-9]*:/# RFD ${new_id}:/" "$file" > "$new_file"
+    rm "$file"
+
+    # --- Carry the board position across renumbering ---
+    just _rfd-priority-rewrite "$old_id" "$new_id"
+
+    # --- Cross-references in every RFD, including the renumbered file ---
+    # Bare-token rewriting is draft-space only: `D24` is a distinctive
+    # token, a bare `095` is not. The bare-token rule runs twice because
+    # sed's `g` flag consumes the leading boundary character of a match,
+    # hiding the second of two back-to-back mentions.
+    updated=0
+    for other in docs/rfd/*.md docs/rfd/drafts/*.md; do
+        [ -f "$other" ] || continue
+        if [ "$is_draft" = true ]; then
+            sed -E \
+                -e "s#RFD ${old_id}([^0-9]|\$)#RFD ${new_id}\1#g" \
+                -e "s|${old_basename}|${new_basename}|g" \
+                -e "s#(^|[^A-Za-z0-9_])${old_id}([^A-Za-z0-9_]|\$)#\1${new_id}\2#g" \
+                -e "s#(^|[^A-Za-z0-9_])${old_id}([^A-Za-z0-9_]|\$)#\1${new_id}\2#g" \
+                "$other" > "${other}.tmp"
+        else
+            sed -E \
+                -e "s#RFD ${old_id}([^0-9]|\$)#RFD ${new_id}\1#g" \
+                -e "s|${old_basename}|${new_basename}|g" \
+                "$other" > "${other}.tmp"
+        fi
+        if cmp -s "$other" "${other}.tmp"; then
+            rm "${other}.tmp"
+            continue
+        fi
+        mv "${other}.tmp" "$other"
+        echo "  updated ${old_id} -> ${new_id} references in ${other}"
+        updated=$((updated + 1))
+    done
+
+    echo "${old_basename} -> ${new_file} (${old_id} -> ${new_id})"
+    if [ "$updated" -gt 0 ]; then
+        echo "Updated ${updated} file(s) with cross-references."
+    fi
+
+    # --- Report references the rewrite does not touch ---
+    leftovers=$(rg -l -e "RFD ${old_id}\b" -e "${old_basename}" \
+        --glob '!docs/rfd/**' . 2>/dev/null || true)
+    if [ -n "$leftovers" ]; then
+        echo "" >&2
+        echo "Warning: references outside docs/rfd/ still mention ${old_id}:" >&2
+        echo "$leftovers" | sed 's/^/  /' >&2
+    fi
+
+    if [ "$is_draft" = false ]; then
+        echo "Run \`just rfd-summaries\` to refresh the summary cache." >&2
+    fi
+
+# Internal: print the commit author as `Name <email>`.
+#
+# Falls back to the bare name, then to $USER, so a checkout without git identity
+# still produces something to attribute a document to.
+[private]
+_git-author:
+    #!/usr/bin/env sh
+    set -eu
+
+    name=$(git config user.name 2>/dev/null || true)
+    email=$(git config user.email 2>/dev/null || true)
+
+    if [ -n "$name" ] && [ -n "$email" ]; then
+        echo "${name} <${email}>"
+    elif [ -n "$name" ]; then
+        echo "$name"
+    else
+        echo "${USER:-unknown}"
+    fi
+
+# Internal: print the first available draft slot id (D01–D99).
+#
+# Exits 1 when all 99 slots are in use. Callers should propagate the exit
+# status with `|| exit 1`.
+[no-exit-message]
+[private]
+_rfd-next-draft-slot:
+    #!/usr/bin/env sh
+    set -eu
+
+    next=1
+    while [ "$next" -le 99 ]; do
+        draft_id=$(printf "D%02d" "$next")
+        if ! ls docs/rfd/drafts/${draft_id}-*.md >/dev/null 2>&1; then
+            break
+        fi
+        next=$((next + 1))
+    done
+    if [ "$next" -gt 99 ]; then
+        echo "No draft slots available (D01–D99 all in use)." >&2; exit 1
+    fi
+    printf "D%02d\n" "$next"
+
+# Internal: print the next available permanent RFD number, zero-padded.
+#
+# Walks the sorted existing numbers under `docs/rfd/` and takes the first gap
+# (max + 1 when there are none). Only local files are visible: a number taken
+# on another branch is not detected.
+[private]
+_rfd-next-number:
+    #!/usr/bin/env sh
+    set -eu
+
+    existing=$(ls docs/rfd/[0-9][0-9][0-9]-*.md 2>/dev/null \
+        | sed 's|.*/||; s|-.*||' \
+        | sort -n)
+    next_num=1
+    for num_iter in $existing; do
+        n=$(echo "$num_iter" | sed 's/^0*//')
+        n=${n:-0}
+        [ "$n" -lt "$next_num" ] && continue
+        [ "$n" -gt "$next_num" ] && break
+        next_num=$((next_num + 1))
+    done
+    printf "%03d\n" "$next_num"
+
+# Internal: rewrite an RFD id in the priority board.
+#
+# `priority.json` stores RFD ids; substitute OLD for NEW wherever the id
+# appears (the `planned` milestone groups, `backlog`, and the legacy flat
+# `order`). A missing board file is a no-op.
+[private]
+_rfd-priority-rewrite OLD NEW:
+    #!/usr/bin/env sh
+    set -eu
+
+    priority_file="docs/rfd/.priority.json"
+    [ -f "$priority_file" ] || exit 0
+    jq --arg old "{{OLD}}" --arg new "{{NEW}}" '
+        def sub_id: map(if . == $old then $new else . end);
+        (if .planned then .planned |= map(.ids |= sub_id) else . end)
+        | (if .order then .order |= sub_id else . end)
+        | .backlog = ((.backlog // []) | sub_id)
+    ' "$priority_file" > "${priority_file}.tmp" && mv "${priority_file}.tmp" "$priority_file"
 
 # Mark an RFD as abandoned with the given reason.
 [group('rfd')]
@@ -1635,20 +1953,208 @@ rfd-grep +ARGS:
 rfd-list *ARGS:
     node docs/.vitepress/rfd-list.mjs {{ARGS}}
 
+# File a ticket. KIND is 'bug', 'feature', or 'chore'.
+#
+# Tickets are markdown files under `docs/ticket/`, numbered from a counter that
+# never reuses an id. Write a ticket when the work is clear enough to start, and
+# an RFD when it needs a design first.
+#
+# The author comes from your JP or git identity. Omit the title to compose the
+# ticket inline — first line the title, blank line, then the description, with
+# `Ctrl+X` to escape into your editor. Piped text seeds the buffer:
+#
+#   just ticket-add bug "Tool call header misaligned"
+#   just ticket-add bug
+#   pbpaste | just ticket-add chore "Bump the deny list"
+[group('ticket')]
+ticket-add KIND *TITLE: _install-ticket
+    #!/usr/bin/env sh
+    set -eu
+
+    # The plugin's stdin carries the host protocol, so a piped description is
+    # read here and handed over as an argument.
+    body=""
+    if [ ! -t 0 ]; then
+        body=$(cat)
+    fi
+
+    set -- add {{quote(KIND)}}
+    if [ -n "{{TITLE}}" ]; then
+        set -- "$@" {{quote(TITLE)}}
+    fi
+    if [ -n "$body" ]; then
+        set -- "$@" --body "$body"
+    fi
+
+    jp ticket "$@"
+
+# Append a comment to a ticket.
+#
+# NNN is 42, 042, or T0042; append `#N` to reply to the Nth comment. The body
+# comes from the arguments, from stdin when piped, or from the inline composer
+# when neither is given.
+#
+#   just ticket-comment 42 "Reproduced at 72 columns."
+#   just ticket-comment 42#1 "The wrap calculation is off."
+#   git log -1 | just ticket-comment 42
+#   just ticket-comment 42
+#
+# The author comes from your JP or git identity.
+[group('ticket')]
+[positional-arguments]
+ticket-comment NNN *BODY: _install-ticket
+    #!/usr/bin/env sh
+    set -eu
+
+    shift # remove NNN from positional params
+
+    # `T0042#1` addresses a comment; split the reply target off the id.
+    id="{{NNN}}"
+    re=""
+    case "$id" in
+        *'#'*) re="${id##*#}"; id="${id%%#*}" ;;
+    esac
+
+    # The plugin's stdin carries the host protocol, so a piped body is read
+    # here and handed over as an argument. With neither, the plugin asks the
+    # host to open the inline composer.
+    body=""
+    if [ "$#" -gt 0 ]; then
+        body="$*"
+    elif [ ! -t 0 ]; then
+        body=$(cat)
+    fi
+
+    set -- comment "$id"
+    if [ -n "$re" ]; then
+        set -- "$@" --re "$re"
+    fi
+    if [ -n "$body" ]; then
+        set -- "$@" --body "$body"
+    fi
+
+    jp ticket "$@"
+
+# Mark a ticket as Done. NNN is 42, 042, or T0042.
+[group('ticket')]
+ticket-close NNN: _install-ticket
+    @jp ticket close {{quote(NNN)}}
+
+# List tickets, ordered by id.
+#
+#   just ticket-list                        # every ticket
+#   just ticket-list --status "In Progress" # one column of the board
+#   just ticket-list --kind bug
+#   just ticket-list --json                 # for `jq`
+[group('ticket')]
+[positional-arguments]
+ticket-list *ARGS: _install-ticket
+    #!/usr/bin/env sh
+    set -eu
+
+    jp ticket list "$@"
+
+# Read one ticket, with its comments numbered for replies.
+#
+# Pass `--json` for the machine-readable form.
+[group('ticket')]
+[positional-arguments]
+ticket-show NNN *ARGS: _install-ticket
+    #!/usr/bin/env sh
+    set -eu
+
+    shift # remove NNN from positional params
+    jp ticket show {{quote(NNN)}} "$@"
+
+# Import a GitHub issue as a ticket, or refresh one already imported.
+#
+# One way only: the title, description, and comments come from GitHub, and the
+# metadata block stays local, so triage survives the next import. Replies belong
+# on GitHub and arrive when you import again.
+#
+#   just ticket-import 123
+#   just ticket-import 123 --kind feature
+[group('ticket')]
+[positional-arguments]
+ticket-import NNN *ARGS: _install-ticket
+    #!/usr/bin/env sh
+    set -eu
+
+    shift # remove NNN from positional params
+    jp ticket import {{quote(NNN)}} "$@"
+
+# Promote a ticket to an RFD draft. CATEGORY is 'design' (default), 'decision',
+# 'guide', or 'process'.
+#
+# A ticket whose discussion turned into a design question becomes an RFD: the
+# draft is seeded from the ticket's title and description, and the ticket closes
+# as Done with `Promoted to` naming the draft. The work item is finished; the
+# work moved.
+#
+# Idempotent: a ticket that already names an existing draft reports it and stops,
+# so a run that failed partway can simply be repeated.
+[group('ticket')]
+ticket-promote NNN CATEGORY="design": _install-ticket
+    #!/usr/bin/env sh
+    set -eu
+
+    detail=$(jp ticket show {{quote(NNN)}} --json)
+    id=$(echo "$detail" | jq -r '.id')
+    title=$(echo "$detail" | jq -r '.title')
+    description=$(echo "$detail" | jq -r '.description')
+    promoted=$(echo "$detail" | jq -r '.metadata.promoted_to // empty')
+
+    if [ -n "$promoted" ]; then
+        existing=$(ls docs/rfd/drafts/${promoted}-*.md docs/rfd/${promoted}-*.md 2>/dev/null | head -1)
+        if [ -n "$existing" ]; then
+            echo "${id} is already promoted to ${promoted} (${existing})." >&2
+            exit 0
+        fi
+        echo "${id} names ${promoted}, but no such RFD exists; seeding a new draft." >&2
+    fi
+
+    out=$(just rfd-draft {{quote(CATEGORY)}} "$title")
+    echo "$out"
+    file=${out#Created }
+    draft=$(basename "$file" | sed 's/^\(D[0-9]*\)-.*/\1/')
+
+    # Seed the Summary with the ticket's description, replacing the template's
+    # placeholder prose. The remaining sections are left for the author.
+    awk -v desc="$description" -v id="$id" '
+        /^## Summary$/ {
+            print; print ""
+            if (desc != "") { print desc; print "" }
+            print "Promoted from ticket " id "."
+            print ""
+            skip = 1
+            next
+        }
+        skip && /^## / { skip = 0 }
+        skip { next }
+        { print }
+    ' "$file" > "${file}.tmp" && mv "${file}.tmp" "$file"
+
+    jp ticket promote "$id" --to "$draft"
+
+# Search across all tickets.
+[group('ticket')]
+ticket-grep +ARGS:
+    @rg {{ARGS}} docs/ticket/
+
 # Locally develop the documentation, with hot-reloading.
 [group('docs')]
-develop-docs *FLAGS="--open": rfd-summaries
+develop-docs *FLAGS="--host --allowedHosts --open": rfd-summaries
     just _docs "dev" {{FLAGS}}
 
 # Open the RFD priority board for drag-and-drop reordering.
 #
 # Starts the docs dev server and opens the board at `/rfd/priority`. Dragging
-# rows and toggling "in development" writes `docs/rfd/priority.json`; commit that
+# rows and toggling "in development" writes `docs/rfd/.priority.json`; commit that
 # file to publish the new order. The board is read-only in the production build
 # — the write endpoint only exists on the dev server.
 [group('rfd')]
 rfd-manage: rfd-summaries
-    just _docs "dev" "--open" "/rfd/priority"
+    just _docs "dev" "--host" "--allowedHosts" "--open" "/rfd/priority"
 
 # Build the statically built documentation.
 [group('docs')]
@@ -1677,8 +2183,12 @@ check-and-fix *FLAGS:
 # Run tests, using nextest.
 [group('check')]
 [group('main')]
+[positional-arguments]
 test *FLAGS="--workspace": (_install "cargo-nextest@" + nextest_version + " cargo-expand@" + expand_version)
-    cargo nextest run --all-targets --cargo-profile=nextest {{FLAGS}}
+    #!/usr/bin/env sh
+    set -eu
+
+    cargo nextest run --all-targets --cargo-profile=nextest --status-level=slow --failure-output=final "$@"
 
 # Continuously run tests, using Bacon.
 [group('check')]
@@ -1715,8 +2225,11 @@ serve-tools CONTEXT TOOL:
 # recipe, so every `jp query` that uses bookworm tools picks up the latest
 # local source automatically.
 [group('tools')]
-serve-bookworm: _build-bookworm
-    @$(cargo metadata --format-version 1 | jq -r .build_directory)/release/bookworm mcp
+serve-bookworm: # _build-bookworm
+    # NOTE: had to patch this, because both `_build-bookworm` and `cargo metadata` require a working
+    # Cargo workspace, and the merge conflicts broke the build.
+    # @$(cargo metadata --format-version 1 | jq -r .build_directory)/release/bookworm mcp
+    /Users/jean/.cargo/bin/bookworm mcp
 
 [private]
 @_build-bookworm:
@@ -1803,9 +2316,13 @@ fmt-markdown-ci: _install-comfort _install_ci_matchers
     comfort --check --workspace --language markdown --format-markdown --reference-links --prune-reference-links
 
 # Test the code on CI.
+#
+# `SCOPE` selects the crates to test: `workspace` covers every member, `jp-only`
+# skips the crates listed in `non_jp_excludes`. An unrecognised scope tests the
+# full workspace.
 [group('ci')]
-test-ci: (_install "cargo-nextest@" + nextest_version) _install_ci_matchers
-    cargo nextest run --locked --lib --tests --cargo-profile=nextest --workspace --no-fail-fast
+test-ci SCOPE="workspace": (_install "cargo-nextest@" + nextest_version) _install_ci_matchers
+    cargo nextest run --locked --lib --tests --cargo-profile=nextest --status-level=slow --failure-output=immediate-final --workspace --no-fail-fast {{ if SCOPE == "jp-only" { non_jp_excludes } else { "" } }}
 
 # Generate documentation on CI.
 [group('ci')]
@@ -1856,7 +2373,7 @@ vet-ci: (_install "cargo-vet@" + vet_version)
     echo "::add-matcher::.github/matchers.json"
 
 [working-directory: 'docs']
-@_docs CMD="dev" *FLAGS: _docs-install
+@_docs CMD="dev --host --allowedHosts" *FLAGS: _docs-install
     yarn vitepress {{CMD}} {{FLAGS}}
 
 @_install +CRATES: _install-binstall
@@ -1882,6 +2399,19 @@ _install-tools *args:
         exit 0
     fi
     cargo install {{quiet_flag}} --locked --path .config/jp/tools --debug {{args}}
+
+# Build and install the `jp-ticket` command plugin that backs `jp ticket`.
+#
+# The plugin is not in the published registry, so `jp` picks it up from `$PATH`
+# (`plugins.command.ticket.run` in `.jp/config.toml` approves it).
+_install-ticket *args:
+    #!/usr/bin/env sh
+    set -eu
+    if [ -n "${JP_NO_INSTALL:-}" ]; then
+        echo "Skipping jp-ticket rebuild (JP_NO_INSTALL set); using the installed binary." >&2
+        exit 0
+    fi
+    cargo install {{quiet_flag}} --locked --path crates/plugins/command/ticket --debug {{args}}
 
 @_install-comfort *args:
     cargo install {{quiet_flag}} --locked --path crates/contrib/comfort {{args}}

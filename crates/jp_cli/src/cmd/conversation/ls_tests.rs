@@ -1,22 +1,6 @@
+use strip_ansi_escapes::strip_str;
+
 use super::*;
-
-#[test]
-fn truncate_to_width_keeps_strings_that_fit() {
-    assert_eq!(truncate_to_width("hello", 10), "hello");
-    assert_eq!(truncate_to_width("hello", 5), "hello");
-}
-
-#[test]
-fn truncate_to_width_appends_ellipsis_when_cut() {
-    // Four visible chars plus the ellipsis fill exactly five display columns.
-    assert_eq!(truncate_to_width("hello world", 5), "hell…");
-}
-
-#[test]
-fn truncate_to_width_minimal_budgets() {
-    assert_eq!(truncate_to_width("hello", 1), "…");
-    assert_eq!(truncate_to_width("hello", 0), "");
-}
 
 #[test]
 fn fit_title_is_full_within_width() {
@@ -40,11 +24,6 @@ fn fit_title_floor_is_the_header_width() {
 fn fit_title_drops_when_column_would_be_unusable() {
     // Shaving would push the column below the header width -> drop it.
     assert_eq!(fit_title(100, 80, 24), TitleFit::Drop);
-}
-
-#[test]
-fn display_width_ignores_color_codes() {
-    assert_eq!(display_width("\x1b[1;33mhi\x1b[0m"), 2);
 }
 
 #[test]
@@ -88,15 +67,6 @@ fn header_marks_only_the_sorted_column() {
     );
     assert!(rendered.contains("Activity ↑"), "got:\n{rendered}");
     assert!(!rendered.contains("ID ↑"), "got:\n{rendered}");
-}
-
-#[test]
-fn display_width_ignores_osc8_hyperlinks() {
-    // The hyperlinked ID column must measure as its visible text only.
-    // If the URL bytes were counted, the fit math would under-shave and the
-    // table would still overflow.
-    let linked = hyperlink("jp://show-metadata/abc", "abc");
-    assert_eq!(display_width(&linked), 3);
 }
 
 #[test]

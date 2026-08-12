@@ -6,10 +6,7 @@ use futures::{StreamExt as _, TryStreamExt as _, stream};
 use jp_attachment::AttachmentContent;
 use jp_config::{
     assistant::tool_choice::ToolChoice,
-    model::{
-        id::{ModelIdConfig, Name, ProviderId},
-        parameters::ReasoningConfig,
-    },
+    model::id::{ModelIdConfig, Name, ProviderId},
     providers::llm::ollama::OllamaConfig,
 };
 use jp_conversation::{
@@ -36,6 +33,7 @@ use super::{EventStream, ModelDetails, Provider, trace_to_tmpfile};
 use crate::{
     error::{Error, Result, StreamError},
     event::{Event, FinishReason},
+    model::ReasoningDetails,
     query::ChatQuery,
     tool::ToolDefinition,
 };
@@ -104,17 +102,38 @@ impl Provider for Ollama {
 }
 
 fn map_model(model: LocalModel) -> Result<ModelDetails> {
+    let context_window = model
+        .details
+        .context_length
+        .and_then(|tokens| u32::try_from(tokens).ok());
+
     Ok(ModelDetails {
         id: (PROVIDER, &model.name).try_into()?,
+        reasoning: derive_reasoning(&model.capabilities),
         display_name: Some(model.name),
-        context_window: None,
+        context_window,
+        // `/api/tags` reports no generation ceiling.
         max_output_tokens: None,
-        reasoning: None,
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: vec![],
     })
+}
+
+/// Derive reasoning support from the capabilities Ollama advertises.
+///
+/// Only a non-empty capability list can rule reasoning out: an empty list means
+/// this Ollama version does not report capabilities, which is not the same as
+/// the model having none.
+/// A model that does advertise `thinking` keeps `None`, since no effort ladder
+/// is reported to derive one from.
+fn derive_reasoning(capabilities: &[String]) -> Option<ReasoningDetails> {
+    let reported = !capabilities.is_empty();
+    let thinks = capabilities.iter().any(|c| c == "thinking");
+
+    (reported && !thinks).then(ReasoningDetails::unsupported)
 }
 
 /// Map an Ollama streaming chunk into provider-agnostic events.
@@ -357,13 +376,16 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(ChatMessage
 
     request = request.options(options);
 
-    // Ollama models may default to thinking-on, so we must explicitly set the
-    // flag in both directions. `None` is treated as off because we can't know
-    // whether an arbitrary local model supports reasoning.
-    request = request.think(!matches!(
-        parameters.reasoning,
-        None | Some(ReasoningConfig::Off)
-    ));
+    // Ollama models may default to thinking-on, so the flag is set explicitly in
+    // both directions. Resolving through the model's capabilities keeps a model
+    // that advertises no `thinking` support from being asked to think, which it
+    // rejects outright. A model whose support is unknown still honours an
+    // explicit request and lets the provider decide.
+    request = request.think(
+        model
+            .custom_reasoning_config(parameters.reasoning)
+            .is_some(),
+    );
 
     if let Some(schema) = structured_schema {
         request = request.format(schema);
@@ -514,3 +536,7 @@ impl From<OllamaError> for StreamError {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "ollama_tests.rs"]
+mod tests;

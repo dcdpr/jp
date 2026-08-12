@@ -29,19 +29,22 @@ audit-as-crates-io = false
 audit-as-crates-io = true
 
 [policy.gemini_client_rs]
-audit-as-crates-io = true
+audit-as-crates-io = false
 
 [policy.httpmock]
 audit-as-crates-io = true
 
 [policy.inquire]
-audit-as-crates-io = true
+audit-as-crates-io = false
+
+[policy.ollama-rs]
+audit-as-crates-io = false
 
 [policy.openai_responses]
 audit-as-crates-io = false
 
 [policy.reedline]
-audit-as-crates-io = true
+audit-as-crates-io = false
 
 [policy.saphyr]
 audit-as-crates-io = true
@@ -294,10 +297,6 @@ criteria = "safe-to-deploy"
 version = "0.3.31"
 criteria = "safe-to-deploy"
 
-[[exemptions.gemini_client_rs]]
-version = "0.6.2@git:3e5bcf51ecbfc67cc50231b573e05c8047576ebd"
-criteria = "safe-to-deploy"
-
 [[exemptions.generic-array]]
 version = "0.14.7"
 criteria = "safe-to-deploy"
@@ -324,10 +323,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.hyper-rustls]]
 version = "0.27.7"
-criteria = "safe-to-deploy"
-
-[[exemptions.inquire]]
-version = "0.9.1@git:941896e113e786d3c40345e1f70249930f4eadb0"
 criteria = "safe-to-deploy"
 
 [[exemptions.insta]]
@@ -406,10 +401,6 @@ criteria = "safe-to-deploy"
 version = "0.36.7"
 criteria = "safe-to-deploy"
 
-[[exemptions.ollama-rs]]
-version = "0.3.3"
-criteria = "safe-to-deploy"
-
 [[exemptions.os_pipe]]
 version = "1.2.2"
 criteria = "safe-to-deploy"
@@ -468,10 +459,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.redox_users]]
 version = "0.5.2"
-criteria = "safe-to-deploy"
-
-[[exemptions.reedline]]
-version = "0.48.0@git:d6a56e266758c5a28d7b635b20611dfb50c6acfb"
 criteria = "safe-to-deploy"
 
 [[exemptions.relative-path]]

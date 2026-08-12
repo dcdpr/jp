@@ -22,6 +22,12 @@ Run all tests across the workspace:
 ```
 """
 
+# Use content checksums instead of file mtimes for cargo's freshness checks,
+# so sibling checkouts (git worktrees) sharing a target dir cannot serve each
+# other's stale artifacts. Requires nightly cargo (rust-lang/cargo#14136);
+# defaults to off so the tool also works on stable Rust.
+options.checksum_freshness = true
+
 [conversation.tools.cargo_test.style]
 inline_results = "full"
 results_file_link = "off"

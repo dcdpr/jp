@@ -72,6 +72,12 @@ impl StreamError {
         Self::new(StreamErrorKind::Transient, message)
     }
 
+    /// Create an output-limit error.
+    #[must_use]
+    pub fn output_limit(message: impl Into<String>) -> Self {
+        Self::new(StreamErrorKind::OutputLimit, message)
+    }
+
     /// Returns the human-readable error message (without the source chain).
     #[must_use]
     pub fn message(&self) -> &str {
@@ -102,6 +108,13 @@ impl StreamError {
     }
 
     /// Returns whether this error is likely retryable.
+    ///
+    /// Uncategorized errors ([`StreamErrorKind::Other`]) are additionally
+    /// sniffed for transient network failure patterns (see
+    /// `looks_like_transient_network_error`).
+    /// Proxies and gateways sitting between us and the provider report upstream
+    /// failures in bodies that don't match any provider's error envelope, so
+    /// they end up classified as `Other` even though retrying usually succeeds.
     #[must_use]
     pub fn is_retryable(&self) -> bool {
         matches!(
@@ -111,6 +124,8 @@ impl StreamError {
                 | StreamErrorKind::RateLimit
                 | StreamErrorKind::Transient
         ) || self.retry_after.is_some()
+            || (self.kind == StreamErrorKind::Other
+                && looks_like_transient_network_error(&self.message))
     }
 }
 
@@ -279,6 +294,10 @@ pub enum StreamErrorKind {
     /// This is not retryable — the user needs to top up or change plans.
     InsufficientQuota,
 
+    /// The response exceeded the configured output byte ceiling.
+    /// This is not retryable because a retry regenerates the same runaway.
+    OutputLimit,
+
     /// Other errors that are not categorized.
     /// These may or may not be retryable depending on the specific error.
     Other,
@@ -294,6 +313,7 @@ impl StreamErrorKind {
             Self::RateLimit => "Rate limited",
             Self::Transient => "Server error",
             Self::InsufficientQuota => "Insufficient API quota",
+            Self::OutputLimit => "Output limit exceeded",
             Self::Other => "Stream Error",
         }
     }
@@ -502,6 +522,19 @@ pub(crate) fn looks_like_quota_error(text: &str) -> bool {
         || lower.contains("credit balance is too low")
         || lower.contains("quota exceeded")
         || lower.contains("resource_exhausted")
+}
+
+/// Heuristic check for transient network/proxy failures based on error text.
+///
+/// Catches upstream failures reported by proxies and gateways between us and
+/// the provider, which don't match any provider's error envelope:
+///
+/// - `"upstream unreachable"`, `"no healthy upstream"`, `"upstream connect
+///   error"` (envoy-style proxies)
+/// - `"network is unreachable"`, `"host unreachable"` (transport errors)
+pub(crate) fn looks_like_transient_network_error(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("unreachable") || lower.contains("upstream")
 }
 
 /// Extracts a retry-after duration from an error message body.

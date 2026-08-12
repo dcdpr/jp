@@ -72,6 +72,38 @@ pub(crate) async fn github_pr_review_add_comment(
         None
     };
 
+    // Validate the anchor against the PR's diff before creating anything.
+    //
+    // GitHub's `addPullRequestReviewThread` mutation accepts anchors outside
+    // the diff without an error, creating a thread the review UI never
+    // renders — the comment silently vanishes. Rejecting here (before
+    // `ensure_pending_review`, for the same reason as the range check above)
+    // turns that silent loss into an actionable error.
+    match fetch_file_diff(pull_number, &path).await? {
+        FileDiff::NotInDiff => {
+            return error(format!(
+                "`{path}` is not among the files changed by PR #{pull_number}; review comments \
+                 can only anchor to lines in the PR's diff. Call `github_pr_diff` to list the \
+                 changed files."
+            ));
+        }
+        // No textual patch (binary or oversized file): fail open and rely on
+        // the post-mutation anchor check below.
+        FileDiff::Unverifiable => {}
+        FileDiff::Ranges(ranges) => {
+            if let Err(msg) = check_anchor(
+                &ranges,
+                &path,
+                line,
+                start_line,
+                resolved_side,
+                resolved_start_side,
+            ) {
+                return error(msg);
+            }
+        }
+    }
+
     let comment = DraftReviewComment {
         path: path.clone(),
         body: body.clone(),
@@ -83,14 +115,32 @@ pub(crate) async fn github_pr_review_add_comment(
 
     let review_node_id = ensure_pending_review(pull_number).await?;
 
-    jp_github::instance()
+    let thread = jp_github::instance()
         .pulls(ORG, REPO)
         .add_review_thread(&review_node_id, &comment)
         .await
         .map_err(|e| handle_404(e, format!("Pull #{pull_number} not found in {ORG}/{REPO}")))?;
 
     let location = format_location(&path, line, start_line, resolved_side, resolved_start_side);
-    Ok(format!("Comment queued on PR #{pull_number} at {location}.").into())
+
+    // Safety net behind the pre-validation above (a patch-less file, or a
+    // head that moved between validation and posting): GitHub reports the
+    // anchor it actually resolved, and a `None` line means the thread exists
+    // but the review UI will never render it.
+    if thread.line.is_none() {
+        return error(format!(
+            "GitHub created review thread {id} on PR #{pull_number} at {location}, but could not \
+             anchor it to the current diff; the comment will NOT be visible in the review. \
+             Re-anchor it to a line that is part of the PR's diff.",
+            id = thread.id,
+        ));
+    }
+
+    Ok(format!(
+        "Comment queued on PR #{pull_number} at {location} (thread {id}).",
+        id = thread.id
+    )
+    .into())
 }
 
 /// Find the current user's pending review on the PR, or lazily create an empty
@@ -139,17 +189,11 @@ fn format_location(
     side: Side,
     start_side: Option<Side>,
 ) -> String {
-    let side_str = match side {
-        Side::Right => "RIGHT",
-        Side::Left => "LEFT",
-    };
+    let side_str = side_str(side);
 
     match (start_line, start_side) {
         (Some(start), Some(start_side_v)) if start_side_v != side => {
-            let start_side_str = match start_side_v {
-                Side::Right => "RIGHT",
-                Side::Left => "LEFT",
-            };
+            let start_side_str = self::side_str(start_side_v);
             format!("{path}:{start}({start_side_str})-{line}({side_str})")
         }
         (Some(start), _) => format!("{path}:{start}-{line} ({side_str})"),
@@ -181,6 +225,28 @@ async fn format_for_approval(
         Err(e) => format!("(snippet unavailable: {e})"),
     };
 
+    // Warn the approver when the anchor isn't commentable: the snippet is
+    // rendered from the full file, so an out-of-diff anchor otherwise looks
+    // perfectly plausible. Fails quiet — the preview must not break over the
+    // extra API call, and the execute path re-validates with a hard error.
+    let warning = match fetch_file_diff(pull_number, path).await {
+        Ok(FileDiff::NotInDiff) => Some(format!(
+            "\u{26a0} `{path}` is not part of this PR's diff; posting will be rejected."
+        )),
+        Ok(FileDiff::Ranges(ranges)) => check_anchor(
+            &ranges,
+            path,
+            line,
+            start_line,
+            resolved_side,
+            resolved_start_side,
+        )
+        .err()
+        .map(|msg| format!("\u{26a0} {msg}")),
+        Ok(FileDiff::Unverifiable) | Err(_) => None,
+    };
+    let warning = warning.map_or_else(String::new, |w| format!("\n{w}\n"));
+
     let lang = crate::util::lang_from_path(path);
     let block = format!("`````{lang}\n{snippet}\n`````");
     let highlighted = Formatter::new().format_terminal(&block).unwrap_or(block);
@@ -194,7 +260,7 @@ async fn format_for_approval(
     formatdoc!(
         "
         PR #{pull_number} \u{2014} {location}
-
+        {warning}
         {highlighted}
 
         {body_rendered}
@@ -308,6 +374,211 @@ fn extract_window(content: &str, line: u64, start_line: Option<u64>) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+/// Files per page when walking a PR's changed files (the GitHub API max for
+/// `/pulls/{N}/files`).
+const FILES_PER_PAGE: u8 = 100;
+
+/// Commentable line ranges for one file of a PR diff.
+///
+/// GitHub anchors review comments to diff hunks: a `RIGHT` anchor must be a
+/// new-file line covered by a hunk, a `LEFT` anchor an old-file line (context
+/// lines count on both sides).
+/// The `addPullRequestReviewThread` mutation accepts anchors outside those
+/// ranges without an error — it creates a thread the review UI never renders,
+/// silently losing the comment — so anchors are validated here before anything
+/// is posted.
+#[derive(Debug, Default, PartialEq, Eq)]
+struct DiffRanges {
+    /// Inclusive old-file line ranges (`LEFT` side).
+    left: Vec<(u64, u64)>,
+    /// Inclusive new-file line ranges (`RIGHT` side).
+    right: Vec<(u64, u64)>,
+}
+
+impl DiffRanges {
+    /// Parse the hunk headers (`@@ -old,count +new,count @@`) out of a REST
+    /// `patch` blob.
+    ///
+    /// Content lines always start with ` `, `+`, or `-`, so scanning for the `
+    /// @@  ` prefix cannot match inside hunk bodies.
+    fn from_patch(patch: &str) -> Self {
+        let mut ranges = Self::default();
+
+        for line in patch.lines() {
+            let Some(rest) = line.strip_prefix("@@ ") else {
+                continue;
+            };
+            let mut parts = rest.split_whitespace();
+            let old = parts
+                .next()
+                .and_then(|p| p.strip_prefix('-'))
+                .and_then(parse_start_count);
+            let new = parts
+                .next()
+                .and_then(|p| p.strip_prefix('+'))
+                .and_then(parse_start_count);
+            let (Some((old_start, old_count)), Some((new_start, new_count))) = (old, new) else {
+                continue;
+            };
+
+            // A zero count (pure addition/removal) contributes no
+            // commentable lines on that side.
+            if old_count > 0 {
+                ranges.left.push((old_start, old_start + old_count - 1));
+            }
+            if new_count > 0 {
+                ranges.right.push((new_start, new_start + new_count - 1));
+            }
+        }
+
+        ranges
+    }
+
+    fn side(&self, side: Side) -> &[(u64, u64)] {
+        match side {
+            Side::Left => &self.left,
+            Side::Right => &self.right,
+        }
+    }
+
+    fn contains(&self, side: Side, line: u64) -> bool {
+        self.side(side)
+            .iter()
+            .any(|&(s, e)| (s..=e).contains(&line))
+    }
+
+    /// The commentable line closest to `line` on `side`, if any.
+    fn nearest(&self, side: Side, line: u64) -> Option<u64> {
+        self.side(side)
+            .iter()
+            .map(|&(s, e)| line.clamp(s, e))
+            .min_by_key(|c| c.abs_diff(line))
+    }
+
+    /// Human-readable range list, e.g. `61-92, 361-401`.
+    fn describe(&self, side: Side) -> String {
+        let ranges = self.side(side);
+        if ranges.is_empty() {
+            return "(none)".to_owned();
+        }
+
+        ranges
+            .iter()
+            .map(|&(s, e)| {
+                if s == e {
+                    s.to_string()
+                } else {
+                    format!("{s}-{e}")
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+}
+
+/// Parse a hunk-header `start,count` section (bare `start` means count 1).
+fn parse_start_count(s: &str) -> Option<(u64, u64)> {
+    let mut it = s.split(',');
+    let start = it.next()?.parse().ok()?;
+    let count = it.next().map_or(Some(1), |c| c.parse().ok())?;
+    Some((start, count))
+}
+
+/// Validate each end of the comment range against the diff's commentable
+/// ranges.
+///
+/// The rejection message includes the valid ranges and the nearest commentable
+/// line, so the caller can re-anchor in a single follow-up call.
+fn check_anchor(
+    ranges: &DiffRanges,
+    path: &str,
+    line: u64,
+    start_line: Option<u64>,
+    side: Side,
+    start_side: Option<Side>,
+) -> std::result::Result<(), String> {
+    let mut anchors = vec![("line", line, side)];
+    if let Some(start) = start_line {
+        anchors.push(("start_line", start, start_side.unwrap_or(side)));
+    }
+
+    for (name, value, anchor_side) in anchors {
+        if ranges.contains(anchor_side, value) {
+            continue;
+        }
+
+        let side_name = side_str(anchor_side);
+        let nearest = ranges
+            .nearest(anchor_side, value)
+            .map_or_else(String::new, |n| format!(" Nearest commentable line: {n}."));
+        return Err(format!(
+            "`{name}` ({value}, {side_name}) is not part of the PR's diff for `{path}`. GitHub \
+             accepts such anchors but never displays the comment. Commentable {side_name} lines \
+             (diff hunks including context): {ranges_desc}.{nearest}",
+            ranges_desc = ranges.describe(anchor_side),
+        ));
+    }
+
+    Ok(())
+}
+
+/// Result of resolving a file path against a PR's changed files.
+enum FileDiff {
+    /// The file is not part of the PR diff at all.
+    NotInDiff,
+    /// The file is in the diff, but GitHub returned no textual patch for it
+    /// (binary or oversized); anchors cannot be verified up front.
+    Unverifiable,
+    /// Commentable ranges parsed from the file's patch.
+    Ranges(DiffRanges),
+}
+
+/// Locate `path` among the PR's changed files and parse its commentable ranges.
+///
+/// Walks the paginated file list to the end before concluding the file is not
+/// in the diff — PRs can exceed one page.
+///
+/// Authenticates defensively (like [`fetch_snippet`]): the approval-preview
+/// path calls this without a prior successful [`auth`], and an uninitialized
+/// client panics rather than erroring.
+async fn fetch_file_diff(pull_number: u64, path: &str) -> Result<FileDiff> {
+    auth().await?;
+
+    let mut page = 1;
+
+    loop {
+        let entries = jp_github::instance()
+            .pulls(ORG, REPO)
+            .list_files(pull_number)
+            .page(page)
+            .per_page(FILES_PER_PAGE)
+            .send()
+            .await
+            .map_err(|e| handle_404(e, format!("Pull #{pull_number} not found in {ORG}/{REPO}")))?;
+        let full_page = entries.len() == usize::from(FILES_PER_PAGE);
+
+        if let Some(entry) = entries.into_iter().find(|e| e.filename == path) {
+            return Ok(entry
+                .patch
+                .as_deref()
+                .map_or(FileDiff::Unverifiable, |patch| {
+                    FileDiff::Ranges(DiffRanges::from_patch(patch))
+                }));
+        }
+        if !full_page {
+            return Ok(FileDiff::NotInDiff);
+        }
+        page += 1;
+    }
+}
+
+const fn side_str(side: Side) -> &'static str {
+    match side {
+        Side::Right => "RIGHT",
+        Side::Left => "LEFT",
+    }
 }
 
 pub(crate) async fn github_pr_review_add_reply(

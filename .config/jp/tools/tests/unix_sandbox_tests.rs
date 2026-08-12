@@ -271,3 +271,110 @@ async fn sandbox_blocks_file_writes() {
         );
     }
 }
+
+// --- Write carve-out for touch ---
+
+#[tokio::test]
+async fn sandbox_allows_touch_creating_workspace_file() {
+    if !has_sandbox_exec() {
+        return;
+    }
+
+    let (dir, ctx) = setup();
+    let target = dir.path().join("created-by-touch.txt");
+
+    let outcome = run_tool(
+        ctx,
+        tool(
+            "unix_utils",
+            &json!({
+                "util": "touch",
+                "args": ["created-by-touch.txt"]
+            }),
+        ),
+    )
+    .await;
+
+    assert!(
+        matches!(&outcome, Outcome::Success { content } if !content.contains("Operation not permitted")),
+        "touch should succeed inside the workspace, got: {outcome:?}"
+    );
+    assert!(target.exists(), "touch should have created the file");
+}
+
+#[tokio::test]
+async fn sandbox_allows_touch_updating_workspace_mtime() {
+    if !has_sandbox_exec() {
+        return;
+    }
+
+    let (dir, ctx) = setup();
+    let target = dir.path().join("existing.rs");
+    fs::write(&target, "fn main() {}\n").unwrap();
+
+    let before = fs::metadata(&target).unwrap().modified().unwrap();
+    // mtime granularity on some filesystems is one second.
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+
+    let outcome = run_tool(
+        ctx,
+        tool(
+            "unix_utils",
+            &json!({
+                "util": "touch",
+                "args": ["existing.rs"]
+            }),
+        ),
+    )
+    .await;
+
+    assert!(
+        matches!(&outcome, Outcome::Success { content } if !content.contains("Operation not permitted")),
+        "touch should succeed inside the workspace, got: {outcome:?}"
+    );
+
+    let after = fs::metadata(&target).unwrap().modified().unwrap();
+    assert!(after > before, "touch should have updated the mtime");
+    assert_eq!(
+        fs::read_to_string(&target).unwrap(),
+        "fn main() {}\n",
+        "touch must not alter file contents"
+    );
+}
+
+#[tokio::test]
+async fn touch_outside_workspace_is_rejected() {
+    if !has_sandbox_exec() {
+        return;
+    }
+
+    let (_dir, ctx) = setup();
+
+    // Create a file in /tmp to ensure the target exists.
+    let tmp_file = "/tmp/jp-sandbox-test-touch.txt";
+    fs::write(tmp_file, "before\n").ok();
+    let before = fs::metadata(tmp_file).unwrap().modified().unwrap();
+
+    let outcome = run_tool(
+        ctx,
+        tool(
+            "unix_utils",
+            &json!({
+                "util": "touch",
+                "args": [tmp_file]
+            }),
+        ),
+    )
+    .await;
+
+    let after = fs::metadata(tmp_file).unwrap().modified().unwrap();
+    fs::remove_file(tmp_file).ok();
+
+    // Argument validation should reject the absolute path; even if it
+    // didn't, the sandbox write allowance is workspace-scoped.
+    assert!(
+        matches!(outcome, Outcome::Error { .. }),
+        "touch outside the workspace should be rejected, got: {outcome:?}"
+    );
+    assert_eq!(before, after, "mtime outside the workspace must not change");
+}

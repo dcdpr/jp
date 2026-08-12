@@ -10,20 +10,26 @@ use std::{
 };
 
 use async_trait::async_trait;
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use camino_tempfile::tempdir;
 use futures::{StreamExt as _, stream};
 use indexmap::IndexMap;
 use inquire::InquireError;
 use jp_config::{
-    AppConfig,
+    AppConfig, PartialAppConfig,
+    assistant::{
+        PartialAssistantConfig,
+        request::{CachePolicy, PartialRequestConfig, RequestConfig},
+    },
     conversation::tool::{
         CommandConfigOrString, QuestionConfig, QuestionTarget, RunMode, ToolConfig, ToolSource,
         style::{DisplayStyleConfig, ErrorStyleConfig, InlineResults, LinkStyle, ParametersStyle},
     },
+    interrupt::ToolInterruptAction,
     model::id::{self, ProviderId},
 };
 use jp_conversation::{
-    Conversation,
+    Conversation, ConversationEvent,
     event::{ChatRequest, ChatResponse, InquirySource, ToolCallRequest, TurnStart},
 };
 use jp_inquire::{
@@ -33,7 +39,7 @@ use jp_inquire::{
 use jp_llm::{
     Error as LlmError, EventStream, Provider,
     error::StreamError,
-    event::{Event, FinishReason},
+    event::{Event, EventMatcher, EventPatch, FinishReason, PatchAction},
     model::ModelDetails,
     provider::mock::MockProvider,
     query::ChatQuery,
@@ -51,13 +57,16 @@ use jp_storage::backend::FsStorageBackend;
 use jp_tool::Question;
 use jp_workspace::Workspace;
 use serde_json::{Map, Value, json};
-use tokio::time::timeout;
+use tokio::{sync::Notify, time::timeout};
 use tokio_util::sync::CancellationToken;
 
 use super::*;
 use crate::{
-    cmd::query::tool::{ToolCoordinator, executor::TerminalExecutorSource},
-    signals::SignalRouter,
+    cmd::query::{
+        stream::retry::MAX_CONSECUTIVE_REBUILDS,
+        tool::{ToolCoordinator, executor::TerminalExecutorSource},
+    },
+    signals::testing::{detached_router, test_router},
 };
 
 fn empty_executor_source() -> Box<dyn ExecutorSource> {
@@ -188,12 +197,59 @@ impl Provider for AlwaysPrematureProvider {
     }
 }
 
+/// A provider that streams content without end, counting calls so a test can
+/// assert the response was not re-requested.
+///
+/// After its parts the stream stays pending forever and it never sends a
+/// terminal `Finished`, so the output ceiling is the only thing that can end
+/// it.
+/// A test built on this fixture hangs if the ceiling never fires, rather than
+/// falling through to the retry path and passing for the wrong reason.
+#[derive(Debug, Default)]
+struct RunawayProvider {
+    calls: AtomicUsize,
+}
+
+#[async_trait]
+impl Provider for RunawayProvider {
+    async fn model_details(&self, name: &id::Name) -> Result<ModelDetails, LlmError> {
+        Ok(ModelDetails::empty(id::ModelIdConfig {
+            provider: ProviderId::Test,
+            name: name.clone(),
+        }))
+    }
+
+    async fn models(&self) -> Result<Vec<ModelDetails>, LlmError> {
+        Ok(vec![])
+    }
+
+    async fn chat_completion_stream(
+        &self,
+        _model: &ModelDetails,
+        _query: ChatQuery,
+    ) -> Result<EventStream, LlmError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+
+        // 7 bytes, then 40 bytes per part.
+        let mut events = vec![Event::message(0, "runaway")];
+        events.extend(std::iter::repeat_with(|| Event::message(0, "0123456789".repeat(4))).take(9));
+
+        Ok(Box::pin(
+            stream::iter(events.into_iter().map(Ok)).chain(stream::pending()),
+        ))
+    }
+}
+
 /// A provider whose stream yields the given events and then stays pending
 /// forever, simulating an in-flight response that only an interrupt can stop.
 #[derive(Debug)]
 struct StallingMockProvider {
     events: Vec<Event>,
     model: ModelDetails,
+
+    /// Notified on the first poll of the stream's pending tail; see
+    /// [`Self::notify_when_stalled`].
+    stalled: Option<Arc<Notify>>,
 }
 
 impl StallingMockProvider {
@@ -205,7 +261,19 @@ impl StallingMockProvider {
                 provider: ProviderId::Test,
                 name: "stalling-mock".parse().expect("valid name"),
             }),
+            stalled: None,
         }
+    }
+
+    /// Notify `stalled` when the stream's pending tail is first polled.
+    ///
+    /// That poll can only come from the streaming event loop after it has
+    /// consumed every scripted event, so it doubles as a synchronization point
+    /// at which the loop — and its registered interrupt handler — is known to
+    /// be live.
+    fn notify_when_stalled(mut self, stalled: &Arc<Notify>) -> Self {
+        self.stalled = Some(Arc::clone(stalled));
+        self
     }
 }
 
@@ -227,7 +295,22 @@ impl Provider for StallingMockProvider {
         _query: ChatQuery,
     ) -> Result<EventStream, LlmError> {
         let events: Vec<Result<Event, StreamError>> = self.events.iter().cloned().map(Ok).collect();
-        Ok(Box::pin(stream::iter(events).chain(stream::pending())))
+
+        // The tail is polled only after every scripted event above has been
+        // consumed, i.e. from inside the streaming event loop.
+        let stalled = self.stalled.clone();
+        let mut notified = false;
+        let tail = stream::poll_fn(move |_| {
+            if !notified {
+                notified = true;
+                if let Some(stalled) = &stalled {
+                    stalled.notify_one();
+                }
+            }
+            std::task::Poll::Pending
+        });
+
+        Ok(Box::pin(stream::iter(events).chain(tail)))
     }
 }
 
@@ -253,8 +336,12 @@ async fn test_interrupt_stop_during_streaming_persists_content() {
         let chat_request = ChatRequest::from("What is 2+2?");
 
         // The stream commits partial content, then stalls until interrupted.
-        let provider: Arc<dyn Provider> =
-            Arc::new(StallingMockProvider::with_message("The answer is 4."));
+        // `stalled` fires once the stream is parked inside the streaming
+        // event loop; see the Ctrl-C task below.
+        let stalled = Arc::new(Notify::new());
+        let provider: Arc<dyn Provider> = Arc::new(
+            StallingMockProvider::with_message("The answer is 4.").notify_when_stalled(&stalled),
+        );
         let model = provider
             .model_details(&"test-model".parse().unwrap())
             .await
@@ -263,16 +350,24 @@ async fn test_interrupt_stop_during_streaming_persists_content() {
         let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = Arc::new(SignalRouter::detached());
+        let (router, signals) = test_router();
+        let router = Arc::new(router);
 
         // Mock user selecting 's' (Stop) from the interrupt menu.
         let backend = MockPromptBackend::new().with_inline_responses(['s']);
 
-        // Press Ctrl-C once the streaming handler is registered and polling.
-        let signal_router = Arc::clone(&router);
-        let signal_handle = tokio::spawn(async move {
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            signal_router.simulate_interrupt();
+        // Press Ctrl-C once the stream has stalled: the notification fires on
+        // the first poll of the stream's pending tail, from inside the
+        // streaming event loop, so the loop's interrupt handler is registered
+        // by then. A fixed sleep raced handler registration on slow runners
+        // (seen on Windows CI): a press routed while the handler stack is
+        // empty skips the menu and cancels the shutdown token directly.
+        let signal_handle = tokio::spawn({
+            let stalled = Arc::clone(&stalled);
+            async move {
+                stalled.notified().await;
+                signals.interrupt().await;
+            }
         });
 
         let result = run_turn_loop(
@@ -292,6 +387,7 @@ async fn test_interrupt_stop_during_streaming_persists_content() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -341,8 +437,12 @@ async fn test_streaming_interrupt_menu_cancel_escalates() {
         let chat_request = ChatRequest::from("What is 2+2?");
 
         // The stream commits partial content, then stalls until interrupted.
-        let provider: Arc<dyn Provider> =
-            Arc::new(StallingMockProvider::with_message("The answer is 4."));
+        // `stalled` fires once the stream is parked inside the streaming
+        // event loop; see the Ctrl-C task below.
+        let stalled = Arc::new(Notify::new());
+        let provider: Arc<dyn Provider> = Arc::new(
+            StallingMockProvider::with_message("The answer is 4.").notify_when_stalled(&stalled),
+        );
         let model = provider
             .model_details(&"test-model".parse().unwrap())
             .await
@@ -351,17 +451,25 @@ async fn test_streaming_interrupt_menu_cancel_escalates() {
         let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = Arc::new(SignalRouter::detached());
+        let (router, signals) = test_router();
+        let router = Arc::new(router);
 
         // No pre-loaded prompt responses: opening the interrupt menu and
         // cancelling it (as a second Ctrl-C would) escalates.
         let backend = MockPromptBackend::new();
 
-        // Press Ctrl-C once the streaming handler is registered and polling.
-        let signal_router = Arc::clone(&router);
-        let signal_handle = tokio::spawn(async move {
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            signal_router.simulate_interrupt();
+        // Press Ctrl-C once the stream has stalled: the notification fires on
+        // the first poll of the stream's pending tail, from inside the
+        // streaming event loop, so the loop's interrupt handler is registered
+        // by then. A fixed sleep raced handler registration on slow runners
+        // (seen on Windows CI): a press routed while the handler stack is
+        // empty skips the menu and cancels the shutdown token directly.
+        let signal_handle = tokio::spawn({
+            let stalled = Arc::clone(&stalled);
+            async move {
+                stalled.notified().await;
+                signals.interrupt().await;
+            }
         });
 
         let result = run_turn_loop(
@@ -381,6 +489,7 @@ async fn test_streaming_interrupt_menu_cancel_escalates() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -444,7 +553,7 @@ async fn test_normal_completion_persists_content() {
     let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
     let mcp_client = jp_mcp::Client::default();
-    let router = SignalRouter::detached();
+    let router = detached_router();
 
     run_turn_loop(
         Arc::clone(&provider),
@@ -463,6 +572,7 @@ async fn test_normal_completion_persists_content() {
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
         InvocationContext::default(),
+        PendingStreamTrim::default(),
     )
     .await
     .unwrap();
@@ -525,7 +635,7 @@ async fn premature_stream_end_without_finished_returns_error() {
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
     let mcp_client = jp_mcp::Client::default();
-    let router = SignalRouter::detached();
+    let router = detached_router();
 
     // Without the backstop the loop pends forever, so cap the whole run.
     let result = timeout(
@@ -547,6 +657,7 @@ async fn premature_stream_end_without_finished_returns_error() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             ChatRequest::from("hi"),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         ),
     )
     .await
@@ -588,7 +699,7 @@ async fn premature_stream_end_exhausts_retry_budget() {
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
     let mcp_client = jp_mcp::Client::default();
-    let router = SignalRouter::detached();
+    let router = detached_router();
 
     let result = timeout(
         Duration::from_secs(5),
@@ -609,6 +720,7 @@ async fn premature_stream_end_exhausts_retry_budget() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             ChatRequest::from("hi"),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         ),
     )
     .await
@@ -624,6 +736,94 @@ async fn premature_stream_end_exhausts_retry_budget() {
         provider.calls.load(Ordering::SeqCst),
         3,
         "provider should be called once per attempt across the retry budget"
+    );
+}
+
+/// A response that runs past `assistant.request.max_response_bytes` ends the
+/// turn with an error, is not re-requested, and keeps the content streamed
+/// before the ceiling was reached.
+#[tokio::test]
+async fn output_ceiling_ends_turn_without_re_requesting() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    let storage = root.join(".jp");
+
+    let mut config = AppConfig::new_test();
+    config.assistant.request.max_response_bytes = 64;
+    // A retry budget is left in place so the call-count assertion below has
+    // something to catch: were the ceiling classified as retryable, the loop
+    // would re-request the response instead of ending the turn.
+    config.assistant.request.max_retries = 5;
+    config.assistant.request.base_backoff_ms = 0;
+    // The fixture never goes idle-silent before the ceiling fires, but an
+    // enabled idle timeout would give the loop a second way out; disable it so
+    // only the ceiling can end this turn.
+    config.assistant.request.stream_idle_timeout_secs = 0;
+
+    let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+    let mut workspace = Workspace::new(root).with_backend(fs.clone());
+
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+        .unwrap();
+    let conv_id = lock.id();
+
+    let provider = Arc::new(RunawayProvider::default());
+    let dyn_provider: Arc<dyn Provider> = provider.clone();
+    let model = dyn_provider
+        .model_details(&"test-model".parse().unwrap())
+        .await
+        .unwrap();
+
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let mcp_client = jp_mcp::Client::default();
+    let router = detached_router();
+
+    let result = timeout(
+        Duration::from_secs(5),
+        run_turn_loop(
+            dyn_provider,
+            &model,
+            &config,
+            &router,
+            &mcp_client,
+            root,
+            false,
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &[],
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
+            ChatRequest::from("hi"),
+            InvocationContext::default(),
+            PendingStreamTrim::default(),
+        ),
+    )
+    .await
+    .expect("the output ceiling should end the turn, not hang it");
+
+    let Err(Error::Llm(jp_llm::Error::Stream(error))) = result else {
+        panic!("expected a stream error from the output ceiling, got: {result:?}");
+    };
+    assert_eq!(error.kind, jp_llm::StreamErrorKind::OutputLimit);
+
+    assert_eq!(
+        provider.calls.load(Ordering::SeqCst),
+        1,
+        "a response that breached the ceiling must not be re-requested"
+    );
+
+    // Option 1 of the ceiling design: the turn ends, but content the user
+    // already saw stays in the conversation.
+    let content = fs
+        .read_test_events_raw(&conv_id)
+        .expect("events should be persisted");
+    assert!(
+        content.contains("runaway"),
+        "content streamed before the ceiling must be persisted.\nFile contents:\n{content}"
     );
 }
 
@@ -684,7 +884,7 @@ async fn orphan_tool_call_is_sanitized_before_provider_request() {
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
     let mcp_client = jp_mcp::Client::default();
-    let router = SignalRouter::detached();
+    let router = detached_router();
 
     run_turn_loop(
         Arc::clone(&provider),
@@ -703,6 +903,7 @@ async fn orphan_tool_call_is_sanitized_before_provider_request() {
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         ChatRequest::from("new query"),
         InvocationContext::default(),
+        PendingStreamTrim::default(),
     )
     .await
     .unwrap();
@@ -767,7 +968,7 @@ async fn test_tool_call_cycle_completes_with_followup() {
     let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
     let mcp_client = jp_mcp::Client::default();
-    let router = SignalRouter::detached();
+    let router = detached_router();
 
     let result = run_turn_loop(
         Arc::clone(&provider),
@@ -786,6 +987,7 @@ async fn test_tool_call_cycle_completes_with_followup() {
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
         InvocationContext::default(),
+        PendingStreamTrim::default(),
     )
     .await;
 
@@ -832,14 +1034,23 @@ struct SleepingExecutor {
     tool_id: String,
     tool_name: String,
     arguments: Map<String, Value>,
+    /// Notified when `execute` starts, so tests can fire an interrupt while the
+    /// tool is guaranteed to be running (and the tool interrupt handler
+    /// guaranteed to be registered, as the coordinator pushes it before
+    /// spawning executors).
+    /// A fixed sleep is not enough: on slow machines (e.g. Windows CI) the
+    /// press can land before the executing phase and be consumed by an earlier
+    /// handler.
+    started: Option<Arc<Notify>>,
 }
 
 impl SleepingExecutor {
-    fn new(tool_id: &str, tool_name: &str) -> Self {
+    fn notifying(tool_id: &str, tool_name: &str, started: Arc<Notify>) -> Self {
         Self {
             tool_id: tool_id.to_owned(),
             tool_name: tool_name.to_owned(),
             arguments: Map::new(),
+            started: Some(started),
         }
     }
 }
@@ -871,6 +1082,10 @@ impl Executor for SleepingExecutor {
         _root: &Utf8Path,
         cancellation_token: CancellationToken,
     ) -> ExecutorResult {
+        if let Some(started) = &self.started {
+            started.notify_one();
+        }
+
         tokio::select! {
             () = cancellation_token.cancelled() => {
                 ExecutorResult::Completed(ToolCallResponse {
@@ -893,6 +1108,9 @@ impl Executor for SleepingExecutor {
 struct DelayedPromptBackend {
     inner: MockPromptBackend,
     delay: Duration,
+    /// Notified when a prompt becomes active, so tests can fire an interrupt
+    /// inside the prompt window instead of guessing with a fixed sleep.
+    started: Arc<Notify>,
 }
 
 impl PromptBackend for DelayedPromptBackend {
@@ -903,6 +1121,7 @@ impl PromptBackend for DelayedPromptBackend {
         default: Option<char>,
         writer: &mut dyn Write,
     ) -> Result<char, InquireError> {
+        self.started.notify_one();
         std::thread::sleep(self.delay);
         self.inner.inline_select(message, options, default, writer)
     }
@@ -915,6 +1134,7 @@ impl PromptBackend for DelayedPromptBackend {
         editor_escape: bool,
         output: Box<dyn Write + Send>,
     ) -> Result<ReplyOutcome, InquireError> {
+        self.started.notify_one();
         std::thread::sleep(self.delay);
         self.inner
             .inline_reply(message, initial_text, edit_mode, editor_escape, output)
@@ -926,6 +1146,7 @@ impl PromptBackend for DelayedPromptBackend {
         default: Option<&str>,
         writer: &mut dyn Write,
     ) -> Result<String, InquireError> {
+        self.started.notify_one();
         std::thread::sleep(self.delay);
         self.inner.text(message, default, writer)
     }
@@ -937,6 +1158,7 @@ impl PromptBackend for DelayedPromptBackend {
         default: Option<usize>,
         writer: &mut dyn Write,
     ) -> Result<String, InquireError> {
+        self.started.notify_one();
         std::thread::sleep(self.delay);
         self.inner.select(message, options, default, writer)
     }
@@ -950,6 +1172,7 @@ impl PromptBackend for DelayedPromptBackend {
 /// 4. The tools are cancelled, a graceful shutdown begins, and the turn ends
 ///    with the interrupt error
 #[tokio::test(flavor = "multi_thread")]
+#[allow(clippy::too_many_lines)]
 async fn test_tool_interrupt_menu_cancel_escalates() {
     let test_result = Box::pin(timeout(Duration::from_secs(10), async {
         let tmp = tempdir().unwrap();
@@ -976,6 +1199,7 @@ async fn test_tool_interrupt_menu_cancel_escalates() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -1001,23 +1225,32 @@ async fn test_tool_interrupt_menu_cancel_escalates() {
         let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = Arc::new(SignalRouter::detached());
+        let (router, signals) = test_router();
+        let router = Arc::new(router);
 
         // No pre-loaded prompt responses: opening the interrupt menu and
         // cancelling it (as a second Ctrl-C would) escalates.
         let backend = MockPromptBackend::new();
 
-        // The tool runs until the escalation cancels it.
-        let executor_source = TestExecutorSource::new().with_executor("slow_tool", |req| {
-            Box::new(SleepingExecutor::new(&req.id, &req.name))
+        // The tool runs until the escalation cancels it, and signals
+        // `tool_started` once it is executing.
+        let tool_started = Arc::new(Notify::new());
+        let executor_source = TestExecutorSource::new().with_executor("slow_tool", {
+            let tool_started = Arc::clone(&tool_started);
+            move |req| {
+                Box::new(SleepingExecutor::notifying(
+                    &req.id,
+                    &req.name,
+                    Arc::clone(&tool_started),
+                ))
+            }
         });
 
-        // Press Ctrl-C after 100ms (the tool runs until cancelled, so plenty
-        // of margin).
-        let signal_router = Arc::clone(&router);
+        // Press Ctrl-C once the tool is executing, which guarantees the tool
+        // interrupt handler is topmost.
         let signal_handle = tokio::spawn(async move {
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            signal_router.simulate_interrupt();
+            tool_started.notified().await;
+            signals.interrupt().await;
         });
 
         let result = run_turn_loop(
@@ -1037,6 +1270,7 @@ async fn test_tool_interrupt_menu_cancel_escalates() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -1064,6 +1298,156 @@ async fn test_tool_interrupt_menu_cancel_escalates() {
         assert!(
             content.contains("Please use a tool"),
             "Should contain user query.\nFile contents:\n{content}"
+        );
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out after 10 seconds");
+}
+
+/// Tests the stop flow:
+///
+/// 1. LLM returns a tool call
+/// 2. During execution, Ctrl-C is routed to the tool interrupt handler
+/// 3. `interrupt.tool_call.action = "stop"` skips the menu: the tools are
+///    cancelled and each cancelled call records its configured
+///    `cancellation_response`
+/// 4. The responses are committed and the turn ends without a follow-up request
+#[tokio::test(flavor = "multi_thread")]
+#[allow(clippy::too_many_lines)]
+async fn test_tool_stop_on_interrupt_commits_responses_without_follow_up() {
+    const CUSTOM_CANCELLATION_RESPONSE: &str =
+        "slow_tool was cancelled by the user; do not retry it this turn.";
+
+    let test_result = Box::pin(timeout(Duration::from_secs(10), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let mut config = AppConfig::new_test();
+        config.conversation.tools.defaults.run = RunMode::Unattended;
+        // Skip the interrupt menu: Ctrl-C during tool execution cancels the
+        // tools, records their cancellation responses, and ends the turn.
+        config.interrupt.tool_call.action = ToolInterruptAction::Stop;
+        config
+            .conversation
+            .tools
+            .insert("slow_tool".to_string(), ToolConfig {
+                source: ToolSource::Local { tool: None },
+                command: None,
+                run: Some(RunMode::Unattended),
+                format: None,
+                enable: None,
+                summary: None,
+                description: None,
+                examples: None,
+                parameters: IndexMap::new(),
+                result: None,
+                style: None,
+                questions: IndexMap::new(),
+                options: IndexMap::default(),
+                access: None,
+                cancellation_response: Some(CUSTOM_CANCELLATION_RESPONSE.to_string()),
+            });
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+        let conv_id = lock.id();
+
+        let chat_request = ChatRequest::from("Please use a tool");
+
+        let provider = Arc::new(SequentialMockProvider::with_tool_then_message(
+            "call_stop",
+            "slow_tool",
+            "This follow-up should never be requested.",
+        ));
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let mcp_client = jp_mcp::Client::default();
+        let (router, signals) = test_router();
+        let router = Arc::new(router);
+
+        // No prompt responses: the configured `stop` action never shows the
+        // menu, so any prompt would fail the test.
+        let backend = MockPromptBackend::new();
+
+        // The tool runs until the stop cancels it, and signals `tool_started`
+        // once it is executing.
+        let tool_started = Arc::new(Notify::new());
+        let executor_source = TestExecutorSource::new().with_executor("slow_tool", {
+            let tool_started = Arc::clone(&tool_started);
+            move |req| {
+                Box::new(SleepingExecutor::notifying(
+                    &req.id,
+                    &req.name,
+                    Arc::clone(&tool_started),
+                ))
+            }
+        });
+
+        // Press Ctrl-C once the tool is executing, which guarantees the tool
+        // interrupt handler is topmost.
+        let signal_handle = tokio::spawn(async move {
+            tool_started.notified().await;
+            signals.interrupt().await;
+        });
+
+        let result = run_turn_loop(
+            Arc::clone(&provider) as Arc<dyn Provider>,
+            &model,
+            &config,
+            &router,
+            &mcp_client,
+            root,
+            false,
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &[],
+            printer.clone(),
+            Arc::new(backend),
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source))
+                .with_interrupt(config.interrupt.tool_call.clone()),
+            chat_request.clone(),
+            InvocationContext::default(),
+            PendingStreamTrim::default(),
+        )
+        .await;
+
+        signal_handle.await.unwrap();
+
+        // Unlike an escalation, a stop ends the turn cleanly: no interrupt
+        // error, no graceful shutdown.
+        assert!(result.is_ok(), "stop must end the turn cleanly: {result:?}");
+        assert!(
+            !router.shutdown_token().is_cancelled(),
+            "stop must not request a graceful shutdown"
+        );
+
+        // No follow-up request was sent after the stop.
+        let call_count = provider.call_index.load(Ordering::SeqCst);
+        assert_eq!(call_count, 1, "stop must not trigger a follow-up request");
+
+        // The cancelled call's configured cancellation response was
+        // persisted, keeping every tool call paired with a response.
+        // Tool response content is base64-encoded in the raw events file.
+        let content = fs
+            .read_test_events_raw(&conv_id)
+            .expect("events should be persisted");
+        let encoded_response = STANDARD.encode(CUSTOM_CANCELLATION_RESPONSE);
+        assert!(
+            content.contains(&encoded_response),
+            "Should contain the configured cancellation response (base64-encoded).\nFile \
+             contents:\n{content}"
         );
     }))
     .await;
@@ -1105,6 +1489,7 @@ async fn test_interrupt_during_tool_prompt_completes_turn_early() {
                 })]),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -1130,13 +1515,16 @@ async fn test_interrupt_during_tool_prompt_completes_turn_early() {
         let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = Arc::new(SignalRouter::detached());
+        let (router, signals) = test_router();
+        let router = Arc::new(router);
 
         // The question prompt stalls for 400ms before answering 'y'. While it
         // is pending, the execution event loop declines interrupts.
+        let prompt_started = Arc::new(Notify::new());
         let backend = DelayedPromptBackend {
             inner: MockPromptBackend::new().with_inline_responses(['y']),
             delay: Duration::from_millis(400),
+            started: Arc::clone(&prompt_started),
         };
 
         let executor_source = TestExecutorSource::new().with_executor("question_tool", |req| {
@@ -1148,13 +1536,12 @@ async fn test_interrupt_during_tool_prompt_completes_turn_early() {
             ))
         });
 
-        // Press Ctrl-C 100ms into the 400ms prompt. The tool handler declines
-        // it (a prompt is active); the turn-level handler picks it up after
-        // the tool completes.
-        let signal_router = Arc::clone(&router);
+        // Press Ctrl-C once the 400ms prompt is active. The tool handler
+        // declines it (a prompt is active); the turn-level handler picks it
+        // up after the tool completes.
         let signal_handle = tokio::spawn(async move {
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            signal_router.simulate_interrupt();
+            prompt_started.notified().await;
+            signals.interrupt().await;
         });
 
         let result = run_turn_loop(
@@ -1174,6 +1561,7 @@ async fn test_interrupt_during_tool_prompt_completes_turn_early() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -1265,7 +1653,7 @@ async fn test_multiple_tool_calls_in_sequence() {
     let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
     let mcp_client = jp_mcp::Client::default();
-    let router = SignalRouter::detached();
+    let router = detached_router();
 
     let result = run_turn_loop(
         Arc::clone(&provider),
@@ -1284,6 +1672,7 @@ async fn test_multiple_tool_calls_in_sequence() {
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
         InvocationContext::default(),
+        PendingStreamTrim::default(),
     )
     .await;
 
@@ -1354,7 +1743,7 @@ async fn test_empty_tool_response_continues_cycle() {
     let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
     let mcp_client = jp_mcp::Client::default();
-    let router = SignalRouter::detached();
+    let router = detached_router();
 
     let result = run_turn_loop(
         Arc::clone(&provider),
@@ -1373,6 +1762,7 @@ async fn test_empty_tool_response_continues_cycle() {
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
         InvocationContext::default(),
+        PendingStreamTrim::default(),
     )
     .await;
 
@@ -1435,6 +1825,7 @@ async fn test_tool_restart_on_interrupt() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -1461,7 +1852,8 @@ async fn test_tool_restart_on_interrupt() {
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = Arc::new(SignalRouter::detached());
+        let (router, signals) = test_router();
+        let router = Arc::new(router);
 
         // Mock user selecting 't' (Restart) when interrupted.
         // Provide extra 'c' (continue) responses in case of unexpected prompts.
@@ -1472,9 +1864,15 @@ async fn test_tool_restart_on_interrupt() {
         // re-created the executor.
         let exec_calls = Arc::new(AtomicUsize::new(0));
         let exec_calls_in_factory = Arc::clone(&exec_calls);
+        let tool_started = Arc::new(Notify::new());
+        let tool_started_in_factory = Arc::clone(&tool_started);
         let executor_source = TestExecutorSource::new().with_executor("slow_tool", move |req| {
             if exec_calls_in_factory.fetch_add(1, Ordering::SeqCst) == 0 {
-                Box::new(SleepingExecutor::new(&req.id, &req.name))
+                Box::new(SleepingExecutor::notifying(
+                    &req.id,
+                    &req.name,
+                    Arc::clone(&tool_started_in_factory),
+                ))
             } else {
                 Box::new(MockExecutor::completed(
                     &req.id,
@@ -1484,13 +1882,12 @@ async fn test_tool_restart_on_interrupt() {
             }
         });
 
-        // Press Ctrl-C after 100ms (the tool runs until cancelled, so plenty
-        // of margin). The tool handler registered by the executing phase
-        // receives the press and shows the restart menu.
-        let signal_router = Arc::clone(&router);
+        // Press Ctrl-C once the first execution is running. The tool handler
+        // registered by the executing phase receives the press and shows the
+        // restart menu.
         let signal_handle = tokio::spawn(async move {
-            tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            signal_router.simulate_interrupt();
+            tool_started.notified().await;
+            signals.interrupt().await;
         });
 
         let result = run_turn_loop(
@@ -1510,6 +1907,7 @@ async fn test_tool_restart_on_interrupt() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -1582,6 +1980,7 @@ async fn test_merged_stream_exits_after_tool_response() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -1608,7 +2007,7 @@ async fn test_merged_stream_exits_after_tool_response() {
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         // No signals sent - the turn loop should complete naturally after
         // the tool executes and the follow-up LLM response is received.
@@ -1629,6 +2028,7 @@ async fn test_merged_stream_exits_after_tool_response() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -1692,6 +2092,7 @@ async fn test_tool_call_with_run_mode_ask_approves() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -1716,7 +2117,7 @@ async fn test_tool_call_with_run_mode_ask_approves() {
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         // Mock: user presses 'y' to approve
         let backend = MockPromptBackend::new().with_inline_responses(['y']);
@@ -1754,6 +2155,7 @@ async fn test_tool_call_with_run_mode_ask_approves() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -1833,6 +2235,7 @@ async fn test_tool_call_with_run_mode_ask_skips() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -1857,7 +2260,7 @@ async fn test_tool_call_with_run_mode_ask_skips() {
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         // Mock: user presses 'n' to skip
         let backend = MockPromptBackend::new().with_inline_responses(['n']);
@@ -1894,6 +2297,7 @@ async fn test_tool_call_with_run_mode_ask_skips() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -1981,6 +2385,7 @@ async fn test_tool_call_with_run_mode_unattended() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -2005,7 +2410,7 @@ async fn test_tool_call_with_run_mode_unattended() {
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         // No prompt responses needed - tool runs without asking
         let backend = MockPromptBackend::new();
@@ -2038,6 +2443,7 @@ async fn test_tool_call_with_run_mode_unattended() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -2117,6 +2523,7 @@ async fn test_tool_call_with_run_mode_skip() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -2141,7 +2548,7 @@ async fn test_tool_call_with_run_mode_skip() {
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         // No prompt responses needed - tool is skipped automatically
         let backend = MockPromptBackend::new();
@@ -2183,6 +2590,7 @@ async fn test_tool_call_with_run_mode_skip() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -2269,6 +2677,7 @@ async fn test_multiple_tools_with_different_run_modes() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
         // tool_unattended runs automatically
         config
@@ -2289,6 +2698,7 @@ async fn test_multiple_tools_with_different_run_modes() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -2338,7 +2748,7 @@ async fn test_multiple_tools_with_different_run_modes() {
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         // User presses 'y' to approve the Ask tool
         let backend = MockPromptBackend::new().with_inline_responses(['y']);
@@ -2383,6 +2793,7 @@ async fn test_multiple_tools_with_different_run_modes() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -2474,6 +2885,7 @@ async fn test_tool_call_returns_error() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -2498,7 +2910,7 @@ async fn test_tool_call_returns_error() {
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         let backend = MockPromptBackend::new();
 
@@ -2529,6 +2941,7 @@ async fn test_tool_call_returns_error() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -2739,7 +3152,7 @@ async fn test_waiting_indicator_shows_during_delay() {
         let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         run_turn_loop(
             Arc::clone(&provider),
@@ -2758,6 +3171,7 @@ async fn test_waiting_indicator_shows_during_delay() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await
         .unwrap();
@@ -2838,7 +3252,7 @@ async fn test_waiting_indicator_survives_keep_alive_and_shows_status() {
         let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         run_turn_loop(
             Arc::clone(&provider),
@@ -2857,6 +3271,7 @@ async fn test_waiting_indicator_survives_keep_alive_and_shows_status() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await
         .unwrap();
@@ -2951,7 +3366,7 @@ async fn test_waiting_indicator_cleared_before_retry_notice() {
         let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         run_turn_loop(
             Arc::clone(&provider),
@@ -2970,6 +3385,7 @@ async fn test_waiting_indicator_cleared_before_retry_notice() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await
         .unwrap();
@@ -3035,7 +3451,7 @@ async fn test_waiting_indicator_not_shown_when_disabled() {
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         run_turn_loop(
             Arc::clone(&provider),
@@ -3054,6 +3470,7 @@ async fn test_waiting_indicator_not_shown_when_disabled() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await
         .unwrap();
@@ -3110,7 +3527,7 @@ async fn test_waiting_indicator_not_shown_for_non_tty() {
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         run_turn_loop(
             Arc::clone(&provider),
@@ -3129,6 +3546,7 @@ async fn test_waiting_indicator_not_shown_for_non_tty() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await
         .unwrap();
@@ -3288,7 +3706,7 @@ async fn test_multi_part_tool_call_shows_preparing_spinner() {
         let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         let result = run_turn_loop(
             Arc::clone(&provider),
@@ -3307,6 +3725,7 @@ async fn test_multi_part_tool_call_shows_preparing_spinner() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -3374,7 +3793,7 @@ async fn test_turn_start_event_is_emitted() {
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
     let mcp_client = jp_mcp::Client::default();
-    let router = SignalRouter::detached();
+    let router = detached_router();
 
     run_turn_loop(
         Arc::clone(&provider),
@@ -3393,6 +3812,7 @@ async fn test_turn_start_event_is_emitted() {
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
         InvocationContext::default(),
+        PendingStreamTrim::default(),
     )
     .await
     .unwrap();
@@ -3436,7 +3856,7 @@ async fn test_turn_start_index_increments_across_turns() {
 
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
-    let router = SignalRouter::detached();
+    let router = detached_router();
 
     run_turn_loop(
         Arc::clone(&provider),
@@ -3455,6 +3875,7 @@ async fn test_turn_start_index_increments_across_turns() {
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
         InvocationContext::default(),
+        PendingStreamTrim::default(),
     )
     .await
     .unwrap();
@@ -3470,7 +3891,7 @@ async fn test_turn_start_index_increments_across_turns() {
 
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
-    let router = SignalRouter::detached();
+    let router = detached_router();
 
     run_turn_loop(
         Arc::clone(&provider),
@@ -3489,6 +3910,7 @@ async fn test_turn_start_index_increments_across_turns() {
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
         InvocationContext::default(),
+        PendingStreamTrim::default(),
     )
     .await
     .unwrap();
@@ -3562,7 +3984,7 @@ async fn test_markdown_flushed_before_tool_header() {
         let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         run_turn_loop(
             Arc::clone(&provider),
@@ -3582,6 +4004,7 @@ async fn test_markdown_flushed_before_tool_header() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await
         .unwrap();
@@ -3658,6 +4081,7 @@ async fn test_parallel_tool_calls_rendered_atomically() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
         config
             .conversation
@@ -3677,6 +4101,7 @@ async fn test_parallel_tool_calls_rendered_atomically() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -3729,7 +4154,7 @@ async fn test_parallel_tool_calls_rendered_atomically() {
         let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         let executor_source = TestExecutorSource::new()
             .with_executor("tool_a", |req| {
@@ -3763,6 +4188,7 @@ async fn test_parallel_tool_calls_rendered_atomically() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await
         .unwrap();
@@ -3847,6 +4273,7 @@ async fn test_single_tool_call_rendered_with_args() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -3893,7 +4320,7 @@ async fn test_single_tool_call_rendered_with_args() {
         let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         let executor_source = TestExecutorSource::new().with_executor("fs_read_file", |req| {
             Box::new(
@@ -3920,6 +4347,7 @@ async fn test_single_tool_call_rendered_with_args() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await
         .unwrap();
@@ -4089,6 +4517,7 @@ fn inquiry_tool_config(questions: &[&str]) -> ToolConfig {
             .collect(),
         options: IndexMap::default(),
         access: None,
+        cancellation_response: None,
     }
 }
 
@@ -4097,6 +4526,135 @@ fn inquiry_mock_model() -> ModelDetails {
         provider: ProviderId::Test,
         name: "inquiry-mock".parse().expect("valid name"),
     })
+}
+
+/// The global inquiry override for the output ceiling wins over the parent
+/// assistant's value.
+///
+/// `conversation.inquiry.assistant.request.max_response_bytes` is a public key,
+/// so reading the parent value here would silently ignore it.
+#[tokio::test]
+async fn inquiry_ceiling_honors_the_global_inquiry_override() {
+    let mut config = AppConfig::new_test();
+    config.assistant.request.max_response_bytes = 999_999;
+    config.conversation.inquiry.assistant.request = Some(RequestConfig {
+        max_response_bytes: 4096,
+        ..config.assistant.request
+    });
+
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider::new(vec![]));
+    let model = inquiry_mock_model();
+
+    let backend = build_inquiry_backend(&config, vec![], model, provider, vec![])
+        .await
+        .expect("the inquiry backend builds");
+
+    assert_eq!(
+        backend
+            .config_for("any_tool", "any_question")
+            .max_response_bytes,
+        4096,
+        "the global inquiry override must win over the parent assistant"
+    );
+}
+
+/// A partially-set inquiry request block must not disable the ceiling.
+///
+/// Built through the real loading path rather than by hand: because
+/// `AssistantOverrideConfig::request` is a resolved struct, setting only a
+/// sibling field leaves `max_response_bytes` at `0`, which is the ceiling's
+/// disable sentinel.
+/// Reading it verbatim would silently drop the runaway guard for every inquiry.
+#[tokio::test]
+async fn inquiry_ceiling_survives_a_sibling_only_request_override() {
+    let mut partial = PartialAppConfig::new_test();
+    partial.assistant.request.max_response_bytes = Some(500_000);
+
+    partial.conversation.inquiry.assistant.request = Some(PartialRequestConfig {
+        cache: Some(CachePolicy::Off),
+        ..PartialRequestConfig::default()
+    });
+
+    let config = AppConfig::from_partial_with_defaults(partial).expect("valid config");
+
+    // The resolution the guard has to cope with: the block is present, and its
+    // ceiling field is a zero the user never asked for.
+    assert_eq!(
+        config
+            .conversation
+            .inquiry
+            .assistant
+            .request
+            .expect("the block is set")
+            .max_response_bytes,
+        0
+    );
+
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider::new(vec![]));
+    let model = inquiry_mock_model();
+
+    let backend = build_inquiry_backend(&config, vec![], model, provider, vec![])
+        .await
+        .expect("the inquiry backend builds");
+
+    assert_eq!(
+        backend
+            .config_for("any_tool", "any_question")
+            .max_response_bytes,
+        500_000,
+        "an unset inquiry ceiling must inherit the parent, not disable the guard"
+    );
+}
+
+/// A per-question ceiling wins over the global inquiry override, which in turn
+/// wins over the parent assistant (RFD 034's resolution order).
+#[tokio::test]
+async fn inquiry_ceiling_honors_the_per_question_override() {
+    let mut config = AppConfig::new_test();
+    config.assistant.request.max_response_bytes = 999_999;
+    config.conversation.inquiry.assistant.request = Some(RequestConfig {
+        max_response_bytes: 4096,
+        ..config.assistant.request
+    });
+
+    let mut per_question = PartialAssistantConfig::default();
+    per_question.request.max_response_bytes = Some(512);
+
+    let mut tool = inquiry_tool_config(&["confirm"]);
+    tool.questions
+        .insert("confirm".to_string(), QuestionConfig {
+            target: QuestionTarget::Assistant(Box::new(per_question)),
+            answer: None,
+        });
+    config
+        .conversation
+        .tools
+        .insert("inquiry_tool".to_string(), tool);
+
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider::new(vec![]));
+    let model = inquiry_mock_model();
+
+    let backend = build_inquiry_backend(&config, vec![], model, provider, vec![])
+        .await
+        .expect("the inquiry backend builds");
+
+    assert_eq!(
+        backend
+            .config_for("inquiry_tool", "confirm")
+            .max_response_bytes,
+        512,
+        "the per-question override must win over the global inquiry value"
+    );
+
+    // A question without its own ceiling still inherits the global inquiry
+    // value, not the parent assistant's.
+    assert_eq!(
+        backend
+            .config_for("inquiry_tool", "other")
+            .max_response_bytes,
+        4096,
+        "an unset per-question ceiling falls back to the global inquiry value"
+    );
 }
 
 /// Tool has one boolean question with `QuestionTarget::Assistant`.
@@ -4146,7 +4704,7 @@ async fn test_tool_with_single_inquiry() {
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         let executor_source = TestExecutorSource::new().with_executor("inquiry_tool", |req| {
             Box::new(InquiryMockExecutor::new(
@@ -4175,6 +4733,7 @@ async fn test_tool_with_single_inquiry() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -4280,7 +4839,7 @@ async fn test_tool_with_multiple_inquiries() {
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         let executor_source = TestExecutorSource::new().with_executor("multi_q_tool", |req| {
             Box::new(InquiryMockExecutor::new(
@@ -4312,6 +4871,7 @@ async fn test_tool_with_multiple_inquiries() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -4389,6 +4949,7 @@ async fn test_parallel_tools_one_with_inquiry() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -4429,7 +4990,7 @@ async fn test_parallel_tools_one_with_inquiry() {
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         let executor_source = TestExecutorSource::new()
             .with_executor("inquiry_tool", |req| {
@@ -4462,6 +5023,7 @@ async fn test_parallel_tools_one_with_inquiry() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -4561,7 +5123,7 @@ async fn test_parallel_tools_both_with_inquiries() {
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         let executor_source = TestExecutorSource::new()
             .with_executor("tool_a", |req| {
@@ -4599,6 +5161,7 @@ async fn test_parallel_tools_both_with_inquiries() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -4729,7 +5292,7 @@ async fn test_retry_counter_resets_on_successful_event() {
         let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         let result = run_turn_loop(
             Arc::clone(&provider),
@@ -4748,6 +5311,7 @@ async fn test_retry_counter_resets_on_successful_event() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request,
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -4817,6 +5381,7 @@ async fn test_unavailable_tool_before_approved_does_not_panic() {
                 questions: IndexMap::new(),
                 options: IndexMap::default(),
                 access: None,
+                cancellation_response: None,
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
@@ -4858,7 +5423,7 @@ async fn test_unavailable_tool_before_approved_does_not_panic() {
         let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         // Only `ok_tool` is registered with the executor source; the
         // `missing_tool` tool call has no executor and falls through to
@@ -4885,6 +5450,7 @@ async fn test_unavailable_tool_before_approved_does_not_panic() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -4965,7 +5531,7 @@ async fn test_inquiry_failure_marks_tool_as_error() {
         let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         let executor_source = TestExecutorSource::new().with_executor("inquiry_tool", |req| {
             Box::new(InquiryMockExecutor::new(
@@ -4994,6 +5560,7 @@ async fn test_inquiry_failure_marks_tool_as_error() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -5021,6 +5588,100 @@ async fn test_inquiry_failure_marks_tool_as_error() {
     .await;
 
     assert!(test_result.is_ok(), "Test timed out");
+}
+
+/// A misconfigured inquiry model override must be attributed to the override:
+/// the underlying cause (e.g. a missing API key environment variable) is
+/// otherwise indistinguishable from a main-model failure and points the user at
+/// the wrong config.
+#[test]
+fn inquiry_model_override_error_names_the_override() {
+    let error = Error::InquiryModelOverride {
+        model: "openrouter/foo/bar".to_owned(),
+        source: LlmError::MissingEnv("OPENROUTER_API_KEY".to_owned()),
+    };
+
+    // The variant names the override and keeps the cause chain intact.
+    assert_eq!(
+        error.to_string(),
+        "Inquiry model override 'openrouter/foo/bar' is unusable"
+    );
+    assert_eq!(
+        std::error::Error::source(&error)
+            .expect("source")
+            .to_string(),
+        "Missing environment variable: OPENROUTER_API_KEY"
+    );
+
+    // The user-facing rendering carries the override's model id, the
+    // underlying cause, and an actionable suggestion.
+    let rendered = cmd::Error::from(error).to_string();
+    assert!(
+        rendered.contains("Inquiry model override is unusable"),
+        "missing attribution: {rendered}"
+    );
+    assert!(
+        rendered.contains("openrouter/foo/bar"),
+        "missing model id: {rendered}"
+    );
+    assert!(
+        rendered.contains("OPENROUTER_API_KEY"),
+        "missing cause: {rendered}"
+    );
+    assert!(
+        rendered.contains("conversation.inquiry.assistant.model"),
+        "missing suggestion: {rendered}"
+    );
+}
+
+/// A misconfigured per-question inquiry model override must be attributed to
+/// the specific tool question: like the global override, the underlying cause
+/// (e.g. a missing API key environment variable) is otherwise indistinguishable
+/// from a main-model failure and points the user at the wrong config.
+#[test]
+fn inquiry_question_model_override_error_names_the_override() {
+    let error = Error::InquiryQuestionModelOverride {
+        tool: "my_tool".to_owned(),
+        question: "q1".to_owned(),
+        model: "openrouter/foo/bar".to_owned(),
+        source: Box::new(LlmError::MissingEnv("OPENROUTER_API_KEY".to_owned())),
+    };
+
+    // The variant names the tool and question, and keeps the cause chain
+    // intact.
+    assert_eq!(
+        error.to_string(),
+        "Inquiry model override for question 'q1' of tool 'my_tool' is unusable"
+    );
+    assert_eq!(
+        std::error::Error::source(&error)
+            .expect("source")
+            .to_string(),
+        "Missing environment variable: OPENROUTER_API_KEY"
+    );
+
+    // The user-facing rendering carries the tool, question, model id, the
+    // underlying cause, and an actionable suggestion naming the per-question
+    // config path.
+    let rendered = cmd::Error::from(error).to_string();
+    assert!(
+        rendered.contains("Inquiry model override for a tool question is unusable"),
+        "missing attribution: {rendered}"
+    );
+    assert!(rendered.contains("my_tool"), "missing tool: {rendered}");
+    assert!(rendered.contains("q1"), "missing question: {rendered}");
+    assert!(
+        rendered.contains("openrouter/foo/bar"),
+        "missing model id: {rendered}"
+    );
+    assert!(
+        rendered.contains("OPENROUTER_API_KEY"),
+        "missing cause: {rendered}"
+    );
+    assert!(
+        rendered.contains("conversation.tools.my_tool.questions.q1"),
+        "missing suggestion: {rendered}"
+    );
 }
 
 /// Regression for live/replay parity on the role-header model id.
@@ -5073,7 +5734,7 @@ async fn test_live_header_uses_configured_model_id_not_provider_returned() {
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
-        let router = SignalRouter::detached();
+        let router = detached_router();
 
         run_turn_loop(
             Arc::clone(&provider),
@@ -5092,6 +5753,7 @@ async fn test_live_header_uses_configured_model_id_not_provider_returned() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request,
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await
         .unwrap();
@@ -5112,4 +5774,416 @@ async fn test_live_header_uses_configured_model_id_not_provider_returned() {
     .await;
 
     assert!(test_result.is_ok(), "Test timed out");
+}
+
+/// End-to-end: a tool call that follows a reasoning block continues the
+/// reasoning region, so its chrome (on stderr) carries the reasoning
+/// background.
+/// `AppConfig::new_test()` defaults `style.reasoning.background` to ANSI 236
+/// and `display` to `full`, so the boundary returns a region for the tool and
+/// `ToolRenderer` shades the header.
+#[tokio::test]
+async fn reasoning_before_a_tool_call_shades_the_tool_chrome() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    let storage = root.join(".jp");
+
+    let mut config = AppConfig::new_test();
+    config.style.tool_call.show = true;
+    config.conversation.tools.defaults.run = RunMode::Unattended;
+    config
+        .conversation
+        .tools
+        .insert("mock_tool".to_string(), ToolConfig {
+            source: ToolSource::Local { tool: None },
+            command: None,
+            run: Some(RunMode::Unattended),
+            format: None,
+            enable: None,
+            summary: None,
+            description: None,
+            examples: None,
+            parameters: IndexMap::new(),
+            result: None,
+            style: None,
+            questions: IndexMap::new(),
+            options: IndexMap::default(),
+            access: None,
+            cancellation_response: None,
+        });
+
+    let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+    let mut workspace = Workspace::new(root).with_backend(fs.clone());
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+        .unwrap();
+
+    // First response: reasoning, then a tool call that continues the region.
+    let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+        responses: vec![
+            vec![
+                Event::reasoning(0, "Thinking about it.\n\n"),
+                Event::flush(0),
+                Event::tool_call_start(1, "call_mock".to_string(), "mock_tool".to_string()),
+                Event::flush(1),
+                Event::Finished(FinishReason::Completed),
+            ],
+            final_message_events("Done."),
+        ],
+        call_index: AtomicUsize::new(0),
+        model: ModelDetails::empty(id::ModelIdConfig {
+            provider: ProviderId::Test,
+            name: "reasoning-tool-mock".parse().expect("valid name"),
+        }),
+    });
+    let model = provider
+        .model_details(&"test-model".parse().unwrap())
+        .await
+        .unwrap();
+
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let mcp_client = jp_mcp::Client::default();
+    let router = detached_router();
+
+    let executor_source = TestExecutorSource::new().with_executor("mock_tool", |req| {
+        Box::new(MockExecutor::completed(&req.id, &req.name, "tool output"))
+    });
+    let tool_defs = executor_source.tool_definitions();
+
+    run_turn_loop(
+        Arc::clone(&provider),
+        &model,
+        &config,
+        &router,
+        &mcp_client,
+        root,
+        false,
+        &[],
+        &lock,
+        ToolChoice::Auto,
+        &tool_defs,
+        printer.clone(),
+        Arc::new(MockPromptBackend::new()),
+        ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
+        ChatRequest::from("use the tool"),
+        InvocationContext::default(),
+        PendingStreamTrim::default(),
+    )
+    .await
+    .unwrap();
+
+    printer.flush();
+    let chrome = err.lock().clone();
+    assert!(
+        chrome.contains("\x1b[48;5;236m"),
+        "the tool chrome should carry the reasoning-region background.\nChrome:\n{chrome:?}"
+    );
+    assert!(
+        strip_ansi_escapes::strip(&chrome)
+            .windows(b"Calling tool".len())
+            .any(|w| w == b"Calling tool"),
+        "the shaded header text should still be present.\nChrome:\n{chrome:?}"
+    );
+}
+
+/// Metadata key a provider repair patch targets in the rebuild tests.
+fn rebuild_patch_key(round: u32) -> String {
+    format!("stale_signature_{round}")
+}
+
+const REBUILD_PATCH_VALUE: &str = "stale";
+
+/// One repair cycle: strip the metadata for `round`, then ask for a rebuild.
+///
+/// This is the shape a provider repair actually takes.
+/// The rejection is a request-validation error, so nothing streams before it.
+///
+/// The leading flush has no buffered part behind it, so it commits nothing.
+/// It is here because a cycle that renders nothing must not count as progress:
+/// if it did, the rebuild budget would reset on every rebuilt request and the
+/// cap could never be reached.
+fn repair_cycle(round: u32) -> Vec<Event> {
+    vec![
+        Event::flush(0),
+        Event::Patch(vec![EventPatch {
+            matcher: EventMatcher::MetadataValue {
+                key: rebuild_patch_key(round),
+                value: REBUILD_PATCH_VALUE.to_owned(),
+            },
+            action: PatchAction::RemoveMetadata(rebuild_patch_key(round)),
+        }]),
+        Event::Finished(FinishReason::Retry),
+    ]
+}
+
+/// Seed one assistant event carrying a distinct patchable key per round, so
+/// every repair cycle has something of its own to remove and therefore makes
+/// real progress.
+fn seed_patchable_metadata(lock: &jp_workspace::ConversationLock, rounds: u32) {
+    lock.as_mut().update_events(|stream| {
+        // A complete prior turn: an incomplete trailing turn would be trimmed
+        // when the loop starts its own.
+        stream.start_turn(ChatRequest::from("earlier question"));
+
+        let mut event = ConversationEvent::now(ChatResponse::reasoning("thinking"));
+        for round in 0..rounds {
+            event
+                .metadata
+                .insert(rebuild_patch_key(round), REBUILD_PATCH_VALUE.into());
+        }
+
+        stream
+            .current_turn_mut()
+            .add_event(event)
+            .build()
+            .expect("valid stream");
+    });
+}
+
+/// A provider that keeps patching and asking for a rebuild is stopped by the
+/// consecutive-rebuild cap.
+///
+/// Every cycle here makes genuine progress, so the progress guard never fires
+/// and the cap is the only thing that can end the turn.
+/// The mock is scripted with exactly one cycle more than the cap allows: if the
+/// cap regresses, the loop asks for a further batch and the mock panics rather
+/// than looping silently.
+#[tokio::test]
+async fn test_rebuild_cap_stops_a_provider_that_keeps_requesting_rebuilds() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    let storage = root.join(".jp");
+
+    let config = AppConfig::new_test();
+    let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+    let mut workspace = Workspace::new(root).with_backend(fs.clone());
+
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+        .unwrap();
+
+    let rounds = MAX_CONSECUTIVE_REBUILDS + 1;
+    seed_patchable_metadata(&lock, rounds);
+
+    let batches = (0..rounds).map(repair_cycle).collect();
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider::with_batches(batches));
+    let model = provider
+        .model_details(&"test-model".parse().unwrap())
+        .await
+        .unwrap();
+
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let mcp_client = jp_mcp::Client::default();
+    let (router, _signals) = test_router();
+    let router = Arc::new(router);
+
+    let result = run_turn_loop(
+        Arc::clone(&provider),
+        &model,
+        &config,
+        &router,
+        &mcp_client,
+        root,
+        false,
+        &[],
+        &lock,
+        ToolChoice::Auto,
+        &[],
+        printer.clone(),
+        Arc::new(MockPromptBackend::new()),
+        ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
+        ChatRequest::from("repair this"),
+        InvocationContext::default(),
+        PendingStreamTrim::default(),
+    )
+    .await;
+
+    let error = result.expect_err("the turn must abort once the rebuild cap is reached");
+    // The outer error only renders "LLM error"; the refusal is in the source.
+    let message = format!("{error:?}");
+    assert!(
+        message.contains("times in a row"),
+        "the abort should name the rebuild cap.\nError:\n{message}"
+    );
+}
+
+/// A refused rebuild ends the turn, so a retry line left by an earlier cycle
+/// has to be retired first.
+///
+/// A repair cycle renders nothing, so no event reaches the clear on the success
+/// path, and the final error would otherwise be written onto the notification.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_refused_rebuild_clears_the_retry_line() {
+    let test_result = Box::pin(timeout(Duration::from_secs(10), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let mut config = AppConfig::new_test();
+        // The waiting indicator writes its own erase sequences, which would
+        // blur what this test asserts.
+        config.style.streaming.progress.show = false;
+        // Keep the retry backoff out of the test's runtime.
+        config.assistant.request.base_backoff_ms = 1;
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+
+        // First cycle: a retryable error, which writes the retry notification and
+        // leaves the cursor parked at the end of it.
+        // Second cycle: a patch matching no event, so the rebuild that follows is
+        // refused for lack of progress and the turn aborts.
+        let provider: Arc<dyn Provider> = Arc::new(PacedMockProvider::new(Duration::ZERO, vec![
+            vec![(
+                Duration::ZERO,
+                Err(StreamError::transient("simulated hiccup")),
+            )],
+            vec![
+                (
+                    Duration::ZERO,
+                    Ok(Event::Patch(vec![EventPatch {
+                        matcher: EventMatcher::MetadataValue {
+                            key: "absent_key".into(),
+                            value: "absent_value".into(),
+                        },
+                        action: PatchAction::RemoveMetadata("absent_key".into()),
+                    }])),
+                ),
+                (Duration::ZERO, Ok(Event::Finished(FinishReason::Retry))),
+            ],
+        ]));
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let mcp_client = jp_mcp::Client::default();
+        let router = detached_router();
+
+        let result = run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &router,
+            &mcp_client,
+            root,
+            true, // is_tty
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &[],
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
+            ChatRequest::from("answer this"),
+            InvocationContext::default(),
+            PendingStreamTrim::default(),
+        )
+        .await;
+
+        assert!(
+            result.is_err(),
+            "a rebuild without progress must abort the turn"
+        );
+
+        printer.flush();
+
+        let chrome = err.lock();
+        assert!(
+            chrome.contains("retrying (1/"),
+            "the first cycle should have written a retry notice.\nChrome:\n{chrome}"
+        );
+        // The notice writes its own `\r\x1b[K` prefix, so occurrences cannot be
+        // counted. What distinguishes a retired line is that the erase is the
+        // last thing written, leaving the terminal clean for the final error.
+        assert!(
+            chrome.ends_with("\r\x1b[K"),
+            "the retry line must be retired before the turn aborts.\nChrome:\n{chrome:?}"
+        );
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out");
+}
+
+/// Content streamed before a refused rebuild survives the abort.
+///
+/// A part sits in the coordinator's event builder until a flush or terminal
+/// event reaches it, and the rebuild request is intercepted before the
+/// coordinator sees it, so persisting the conversation alone would drop text
+/// the user already saw.
+#[tokio::test]
+async fn test_refused_rebuild_persists_streamed_content() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    let storage = root.join(".jp");
+
+    let config = AppConfig::new_test();
+    let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+    let mut workspace = Workspace::new(root).with_backend(fs.clone());
+
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+        .unwrap();
+    let conv_id = lock.id();
+
+    // No patch precedes the rebuild request, so it is refused for lack of
+    // progress while a streamed part is still unflushed.
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider::with_batches(vec![vec![
+        Event::message(0, "partial answer"),
+        Event::Finished(FinishReason::Retry),
+    ]]));
+    let model = provider
+        .model_details(&"test-model".parse().unwrap())
+        .await
+        .unwrap();
+
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let mcp_client = jp_mcp::Client::default();
+    let (router, _signals) = test_router();
+    let router = Arc::new(router);
+
+    let result = run_turn_loop(
+        Arc::clone(&provider),
+        &model,
+        &config,
+        &router,
+        &mcp_client,
+        root,
+        false,
+        &[],
+        &lock,
+        ToolChoice::Auto,
+        &[],
+        printer.clone(),
+        Arc::new(MockPromptBackend::new()),
+        ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
+        ChatRequest::from("answer this"),
+        InvocationContext::default(),
+        PendingStreamTrim::default(),
+    )
+    .await;
+
+    assert!(
+        result.is_err(),
+        "a rebuild without a preceding patch must abort the turn"
+    );
+
+    let content = fs
+        .read_test_events_raw(&conv_id)
+        .expect("events should be persisted");
+
+    assert!(
+        content.contains("partial answer"),
+        "streamed content must survive the abort.\nFile contents:\n{content}"
+    );
 }

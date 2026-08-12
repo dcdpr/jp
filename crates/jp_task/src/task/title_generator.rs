@@ -35,6 +35,9 @@ pub struct TitleGeneratorTask {
     pub providers: LlmProviderConfig,
     pub events: ConversationStream,
     pub title: Option<String>,
+    /// Output ceiling for the title request, from
+    /// `assistant.request.max_response_bytes`.
+    pub max_response_bytes: u32,
     /// Whether the invoking process is attached to a terminal.
     /// When `false`, the OSC-2 title-update side effect on task sync is
     /// suppressed — the bytes would otherwise leak into a captured pipe.
@@ -63,6 +66,12 @@ impl TitleGeneratorTask {
 
         let model_id = model.id.resolved().clone();
 
+        // Fail fast on a misconfigured title provider (e.g. a missing API
+        // key environment variable). Without this, the failure only surfaces
+        // inside the spawned task, after the query has already committed to
+        // waiting for it at teardown.
+        provider::preflight(model_id.provider, &config.providers.llm)?;
+
         // If reasoning is explicitly enabled for title generation, use it,
         // otherwise limit it to low effort.
         if model.parameters.reasoning.is_none() {
@@ -81,6 +90,7 @@ impl TitleGeneratorTask {
             providers: config.providers.llm.clone(),
             events,
             title: None,
+            max_response_bytes: config.assistant.request.max_response_bytes,
             is_tty,
         })
     }
@@ -111,7 +121,7 @@ impl TitleGeneratorTask {
             tool_choice: jp_config::assistant::tool_choice::ToolChoice::default(),
         };
 
-        let retry_config = RetryConfig::default();
+        let retry_config = RetryConfig::default().with_max_response_bytes(self.max_response_bytes);
         let llm_events =
             collect_with_retry(provider.as_ref(), &model, query, &retry_config).await?;
 

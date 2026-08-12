@@ -109,20 +109,31 @@ fn event_scope_mapping() {
     );
 }
 
-// --- contains_substr --------------------------------------------------------
+// --- matcher failure --------------------------------------------------------
 
 #[test]
-fn contains_substr_case_sensitive() {
-    assert!(contains_substr("Hello World", "World", false));
-    assert!(!contains_substr("Hello World", "world", false));
-}
+fn a_poisoned_matcher_stops_matching() {
+    // Once a failure is recorded, every result will be discarded, so further
+    // engine invocations are wasted work — each can burn the full backtrack
+    // limit again. The gate is observable: a line the pattern genuinely
+    // matches reports `false` after the poison.
+    let matcher = Matcher::new(r"(a+)+\1b", true, false).unwrap();
+    assert!(matcher.is_match("aab"), "sanity: pattern matches this line");
+    assert!(matcher.failure().is_none());
 
-#[test]
-fn contains_substr_case_insensitive() {
-    // Note: `contains_substr` expects the needle to be pre-lowercased when
-    // `ignore_case` is true. The caller is responsible for that step.
-    assert!(contains_substr("Hello World", "world", true));
-    assert!(contains_substr("Hello WORLD", "world", true));
+    // Nested quantifiers over a long same-character run blow the backtrack
+    // limit and poison the matcher.
+    assert!(!matcher.is_match(&"a".repeat(64)));
+    assert!(matcher.failure().is_some());
+
+    assert!(
+        !matcher.is_match("aab"),
+        "a poisoned matcher must not run the engine again"
+    );
+    assert!(
+        matcher.find_spans("aab").is_empty(),
+        "find_spans shares the gate"
+    );
 }
 
 // --- filter_ids -------------------------------------------------------------
@@ -130,6 +141,11 @@ fn contains_substr_case_insensitive() {
 // `filter_ids` uses fixed scopes (title + chat) and smart-case matching, and
 // returns matching IDs without building hit metadata. These tests pin the
 // scope set and the smart-case rule.
+
+/// The matching IDs, for a pattern expected to compile.
+fn matching(ctx: &Ctx, ids: &[ConversationId], pattern: &str) -> Vec<ConversationId> {
+    filter_ids(ctx, ids, pattern).unwrap()
+}
 
 #[test]
 fn filter_ids_matches_chat_request() {
@@ -147,7 +163,7 @@ fn filter_ids_matches_chat_request() {
         )]),
     ]);
 
-    let matched = filter_ids(&ctx, &[id_match, id_miss], "deployment");
+    let matched = matching(&ctx, &[id_match, id_miss], "deployment");
     assert_eq!(matched, vec![id_match]);
 }
 
@@ -159,7 +175,7 @@ fn filter_ids_matches_chat_response() {
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
     )])]);
 
-    assert_eq!(filter_ids(&ctx, &[id], "rollout"), vec![id]);
+    assert_eq!(matching(&ctx, &[id], "rollout"), vec![id]);
 }
 
 #[test]
@@ -170,7 +186,7 @@ fn filter_ids_matches_reasoning() {
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
     )])]);
 
-    assert_eq!(filter_ids(&ctx, &[id], "schema"), vec![id]);
+    assert_eq!(matching(&ctx, &[id], "schema"), vec![id]);
 }
 
 #[test]
@@ -182,7 +198,7 @@ fn filter_ids_matches_title() {
     };
     let ctx = setup_ctx_with_conversations(vec![(id, conv, vec![])]);
 
-    assert_eq!(filter_ids(&ctx, &[id], "storage"), vec![id]);
+    assert_eq!(matching(&ctx, &[id], "storage"), vec![id]);
 }
 
 #[test]
@@ -198,7 +214,7 @@ fn filter_ids_ignores_tool_call_response() {
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
     )])]);
 
-    assert!(filter_ids(&ctx, &[id], "secret-keyword").is_empty());
+    assert!(matching(&ctx, &[id], "secret-keyword").is_empty());
 }
 
 #[test]
@@ -210,7 +226,7 @@ fn filter_ids_smart_case_lowercase_is_insensitive() {
     )])]);
 
     // All-lowercase pattern → case-insensitive match.
-    assert_eq!(filter_ids(&ctx, &[id], "wasm"), vec![id]);
+    assert_eq!(matching(&ctx, &[id], "wasm"), vec![id]);
 }
 
 #[test]
@@ -231,8 +247,33 @@ fn filter_ids_smart_case_uppercase_is_sensitive() {
 
     // Pattern with an uppercase letter → case-sensitive: only the uppercase
     // conversation matches.
-    assert_eq!(filter_ids(&ctx, &[id_lower, id_upper], "WASM"), vec![
+    assert_eq!(matching(&ctx, &[id_lower, id_upper], "WASM"), vec![
         id_upper
+    ]);
+}
+
+#[test]
+fn filter_ids_treats_the_pattern_as_a_literal() {
+    // `filter_ids` shares `c grep`'s matcher, which compiles a pattern as an
+    // *escaped* regex. If that escaping were ever dropped, `.` would silently
+    // become a wildcard here and `c use --grep` would match conversations the
+    // user never asked for.
+    let id_literal = make_id(20_750);
+    let id_wildcard = make_id(20_751);
+    let ts = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
+    let ctx = setup_ctx_with_events(vec![
+        (id_literal, vec![ConversationEvent::new(
+            ChatRequest::from("contains a.c exactly"),
+            ts,
+        )]),
+        (id_wildcard, vec![ConversationEvent::new(
+            ChatRequest::from("contains abc instead"),
+            ts,
+        )]),
+    ]);
+
+    assert_eq!(matching(&ctx, &[id_literal, id_wildcard], "a.c"), vec![
+        id_literal
     ]);
 }
 
@@ -244,7 +285,7 @@ fn filter_ids_returns_empty_when_no_match() {
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
     )])]);
 
-    assert!(filter_ids(&ctx, &[id], "nonexistent").is_empty());
+    assert!(matching(&ctx, &[id], "nonexistent").is_empty());
 }
 
 #[test]
@@ -272,5 +313,5 @@ fn filter_ids_preserves_input_order() {
     ]);
 
     let input = vec![id_a, id_b, id_c];
-    assert_eq!(filter_ids(&ctx, &input, "shared-marker"), input);
+    assert_eq!(matching(&ctx, &input, "shared-marker"), input);
 }

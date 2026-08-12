@@ -2,6 +2,19 @@
 enable = false
 run = "unattended"
 
+# Paths this tool may read but never returns. Their contents would either flood
+# the response or expose something the model has no business seeing. Reading them
+# is a separate question, governed by `access.fs` — `.git` in particular stays
+# readable, since that is how the write tools check for uncommitted work.
+#
+# Patterns use `.ignore` syntax, so `**/target/` matches at any depth.
+#
+# Disclosure blocks like `.git/` belong on every tool that returns contents, so
+# keep those in step. `**/target/` is a flood block and lives only on the tools
+# that enumerate in bulk; `fs_read_file` omits it deliberately, so an exact build
+# log stays retrievable (issue #626).
+options.suppress = [".git/", "**/target/"]
+
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
 summary = "Grep files in the project's local filesystem."
@@ -53,5 +66,5 @@ type = "array"
 items.type = "string"
 summary = "Optional list of files or directories to search."
 description = """
-If unspecified, all files in the project will be returned.
+If unspecified, all files in the project are searched.
 """

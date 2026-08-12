@@ -1,0 +1,31 @@
+when:
+  path: /v1/chat/completions
+  method: POST
+  json_body_str: >-
+    {
+      "model": "gemma-4-31b",
+      "messages": [
+        {
+          "role": "user",
+          "content": "What is 2 + 2?"
+        }
+      ],
+      "stream": true,
+      "reasoning_format": "parsed"
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |+
+    data: {"id":"chatcmpl-d3f6f55a-fe2c-416d-8ef1-7d310f948d75","choices":[{"delta":{"role":"assistant"},"index":0}],"created":1785156344,"model":"gemma-4-31b","system_fingerprint":"fp_b2c59c382b338de84cfc","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-d3f6f55a-fe2c-416d-8ef1-7d310f948d75","choices":[{"delta":{"content":"2"},"index":0}],"created":1785156344,"model":"gemma-4-31b","system_fingerprint":"fp_b2c59c382b338de84cfc","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-d3f6f55a-fe2c-416d-8ef1-7d310f948d75","choices":[{"delta":{"content":" + 2 = 4"},"index":0}],"created":1785156344,"model":"gemma-4-31b","system_fingerprint":"fp_b2c59c382b338de84cfc","object":"chat.completion.chunk"}
+    
+    data: {"id":"chatcmpl-d3f6f55a-fe2c-416d-8ef1-7d310f948d75","choices":[{"delta":{},"finish_reason":"stop","index":0}],"created":1785156344,"model":"gemma-4-31b","system_fingerprint":"fp_b2c59c382b338de84cfc","object":"chat.completion.chunk","usage":{"image_tokens":0,"total_tokens":29,"completion_tokens":8,"completion_tokens_details":{"reasoning_tokens":0},"prompt_tokens":21,"prompt_tokens_details":{"cached_tokens":0}},"time_info":{"created":1785156344.7446668,"queue_time":0.191040312,"prompt_time":0.00240679,"completion_time":0.000709062,"total_time":0.19935202598571777}}
+    
+    data: [DONE]
+    

@@ -35,7 +35,7 @@ use std::{
 
 use futures::{Stream, StreamExt as _};
 use tokio::{
-    runtime::Runtime,
+    runtime::{Handle, Runtime},
     sync::mpsc::{self, error::TrySendError},
     task::JoinHandle,
 };
@@ -51,7 +51,7 @@ const SIGQUIT_EXIT_CODE: i32 = 131;
 
 /// A raw OS signal, as consumed by the router's signal task.
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum OsSignal {
+pub(crate) enum OsSignal {
     /// SIGINT (Ctrl-C): routed through escalation and the handler stack.
     Interrupt,
 
@@ -85,8 +85,8 @@ pub struct SignalRouter {
     inner: Arc<RouterInner>,
 
     /// Keeps the signal-consuming task attached to the router.
-    /// The task runs until the process exits; the handle is never awaited or
-    /// aborted.
+    /// The task runs until the signal source ends (never, for the OS-backed
+    /// source); the handle is never awaited or aborted.
     _signal_task: JoinHandle<()>,
 }
 
@@ -97,8 +97,6 @@ impl SignalRouter {
     /// without a new press; a press arriving after the window counts as a fresh
     /// first press.
     pub fn new(runtime: &Runtime, escalation_cooldown: Duration) -> Self {
-        let inner = RouterInner::new(escalation_cooldown);
-
         #[cfg(unix)]
         let signals = os_signals(runtime);
 
@@ -107,13 +105,38 @@ impl SignalRouter {
         #[cfg(windows)]
         let signals = os_signals();
 
+        Self::with_signal_source(runtime.handle(), signals, escalation_cooldown, |code| {
+            std::process::exit(code)
+        })
+    }
+
+    /// Create the router from an arbitrary signal source and exit action.
+    ///
+    /// This is the dependency-inversion seam behind [`Self::new`], which binds
+    /// `signals` to the OS and `on_exit` to [`std::process::exit`].
+    /// Tests bind an in-memory channel and an exit recorder instead, driving
+    /// the real routing logic end to end without ending the test process.
+    ///
+    /// `on_exit` runs on the signal task when routing escalates to a process
+    /// exit ([`Routed::Exit`]).
+    /// The task keeps consuming signals if `on_exit` returns (production's exit
+    /// action never does), so a recording action observes every exit decision,
+    /// not just the first.
+    pub(crate) fn with_signal_source(
+        handle: &Handle,
+        signals: impl Stream<Item = OsSignal> + Send + 'static,
+        escalation_cooldown: Duration,
+        on_exit: impl Fn(i32) + Send + 'static,
+    ) -> Self {
+        let inner = RouterInner::new(escalation_cooldown);
+
         let router = inner.clone();
-        let signal_task = runtime.spawn(async move {
+        let signal_task = handle.spawn(async move {
             tokio::pin!(signals);
 
             while let Some(signal) = signals.next().await {
                 match router.route(signal) {
-                    Routed::Exit(code) => std::process::exit(code),
+                    Routed::Exit(code) => on_exit(code),
                     routed => debug!(?signal, ?routed, "Routed OS signal."),
                 }
             }
@@ -155,25 +178,6 @@ impl SignalRouter {
     /// graceful shutdown when no other handler exists.
     pub fn decline(&self) {
         self.inner.notify_next_or_shutdown();
-    }
-}
-
-#[cfg(test)]
-impl SignalRouter {
-    /// Create a router that is not connected to OS signals, with the default
-    /// 2-second escalation cooldown.
-    ///
-    /// Must be called from within a tokio runtime context.
-    pub(crate) fn detached() -> Self {
-        Self {
-            inner: RouterInner::new(Duration::from_secs(2)),
-            _signal_task: tokio::spawn(async {}),
-        }
-    }
-
-    /// Route a Ctrl-C press exactly as the signal task would.
-    pub(crate) fn simulate_interrupt(&self) {
-        self.inner.route(OsSignal::Interrupt);
     }
 }
 
@@ -464,6 +468,10 @@ fn os_signals() -> impl Stream<Item = OsSignal> {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "signals_testing.rs"]
+pub(crate) mod testing;
 
 #[cfg(test)]
 #[path = "signals_tests.rs"]

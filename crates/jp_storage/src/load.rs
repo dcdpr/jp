@@ -1,7 +1,6 @@
 use std::{
     collections::{HashMap, HashSet, hash_map::Entry},
-    fs,
-    io::{self, BufReader},
+    fs, io,
     time::SystemTime,
 };
 
@@ -115,11 +114,11 @@ impl Storage {
         filter: ConversationFilter,
     ) -> Vec<ConversationIndexEntry> {
         let partition = |root: &Utf8Path| -> Utf8PathBuf {
-            let active = root.join(CONVERSATIONS_DIR);
+            let live = root.join(CONVERSATIONS_DIR);
             if filter.archived {
-                active.join(ARCHIVE_DIR)
+                live.join(ARCHIVE_DIR)
             } else {
-                active
+                live
             }
         };
 
@@ -406,14 +405,18 @@ fn presence_of(in_user: bool, in_workspace: bool) -> StoragePresence {
 }
 
 /// Read and deserialize a JSON file, mapping errors to [`LoadError`].
+///
+/// Reads the file whole and parses the slice rather than streaming it.
+/// `serde_json`'s reader-based path advances one byte at a time and so loses
+/// the `memchr` scans and zero-copy string borrows it gets over a contiguous
+/// buffer — measurably slower on the conversation streams this loads.
 pub(crate) fn load_json<T: DeserializeOwned>(path: &Utf8Path) -> Result<T> {
-    let file = fs::File::open(path).map_err(|error| LoadError {
+    let bytes = fs::read(path).map_err(|error| LoadError {
         path: path.to_path_buf(),
         error: error.into(),
     })?;
 
-    let reader = BufReader::new(file);
-    serde_json::from_reader(reader).map_err(|error| LoadError {
+    serde_json::from_slice(&bytes).map_err(|error| LoadError {
         path: path.to_path_buf(),
         error: error.into(),
     })
@@ -423,10 +426,9 @@ pub(crate) fn load_count_and_timestamp_events(
     root: &Utf8Path,
 ) -> Option<(usize, Option<DateTime<Utc>>)> {
     let path = root.join(EVENTS_FILE);
-    let file = fs::File::open(&path).ok()?;
-    let reader = BufReader::new(file);
+    let bytes = fs::read(&path).ok()?;
 
-    let mut deserializer = serde_json::Deserializer::from_reader(reader);
+    let mut deserializer = serde_json::Deserializer::from_slice(&bytes);
     let summary = match EventSummary::deserialize(&mut deserializer) {
         Ok(summary) => summary,
         Err(error) => {

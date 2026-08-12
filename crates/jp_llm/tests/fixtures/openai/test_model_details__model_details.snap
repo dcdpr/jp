@@ -20,18 +20,27 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
             2024-05-31,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.4-mini",
+                retire_at: Some(
+                    2026-12-11,
+                ),
+            },
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],

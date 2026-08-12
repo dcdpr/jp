@@ -1,6 +1,6 @@
 {
   "001-jp-rfd-process.md": {
-    "hash": "4cb1014d97197183fbc3d98533c6e0f81aecd1390ddf8bf122a29566fde09b89",
+    "hash": "530085202f0a497981e72bffbc56f6cbf4164bb29f1fd45b50335dd4fecfba34",
     "summary": "Establishes lightweight Request for Discussion process for proposing and tracking design decisions with clear lifecycle states."
   },
   "002-using-llms.md": {
@@ -156,7 +156,7 @@
     "summary": "Hide conversations from default listings and expose conversation_id to tools for sub-agent workflows."
   },
   "041-rfd-lifecycle-enhancements.md": {
-    "hash": "c640083e40b592c53f088a16eda1a5b30dd4c20e27433cc61c48f0f06c10cf0c",
+    "hash": "3d71aebd35512ed91f2dd0a566cddcbd3f36a9642fe9d47912ef520a9c7e013b",
     "summary": "Defer RFD numbering to Discussion, auto-create tracking issues, add Extends/Extended by metadata."
   },
   "042-tool-options.md": {
@@ -172,7 +172,7 @@
     "summary": "Redesign `jp init` to generate schema-driven config with interactive model/mode selection and curated commented fields."
   },
   "045-layered-interrupt-handler-stack.md": {
-    "hash": "2e447eb40d6423319858cf9b45c302fc52b5063a017370cd55b735582d4e8342",
+    "hash": "a097b20423e8776532d8821aafa40828f4a0fd0aea84bd32f1420e1926751c6a",
     "summary": "Replace JP's ad-hoc interrupt handling with a layered LIFO handler stack, routing OS signals through scoped notification channels."
   },
   "046-nested-workspace-projection.md": {
@@ -184,7 +184,7 @@
     "summary": "Add `jp conversation edit` (opens directory in $EDITOR) and `jp conversation path` (prints conversation filesystem path)."
   },
   "048-four-channel-output-model.md": {
-    "hash": "b670e160c468f18ee7f2da731165a66f614bc91cfa6c1cb8787662513b79ffc9",
+    "hash": "38f68ad549fbc9416b3014ddc5b67b17da4aea9d2b15a61e4d621d8faf647f3f",
     "summary": "Separate JP output into four channels: stdout for responses, stderr for chrome, /dev/tty for prompts, log file for tracing."
   },
   "049-non-interactive-mode-and-detached-prompt-policy.md": {
@@ -224,7 +224,7 @@
     "summary": "Adds group `overrides` section to enforce tool configuration that outlasts tool-level settings but yields to CLI flags."
   },
   "058-typed-content-blocks-for-tool-responses.md": {
-    "hash": "4c8b925d579414f5ffa5d8f45d6a3a9628651d690cc01e017c3e129f369398cc",
+    "hash": "5e603eb54c4ddd915729fc1e2e99a3b5e9bd955e0babe11883656198a5bcf2e2",
     "summary": "Replace opaque tool output strings with typed content blocks (text, resource, question) mirroring MCP's CallToolResult model."
   },
   "059-shell-completions-and-man-pages.md": {
@@ -232,7 +232,7 @@
     "summary": "Add `jp completions` and `jp manpage` subcommands using clap_complete and clap_mangen for shell integration."
   },
   "060-config-explain.md": {
-    "hash": "b944888f2eea5fb4e717826c184af99b5a5b2e0bb8b1a3822e8642510a3f4c42",
+    "hash": "af1475f128e5897ec6b895706f6ef04f91a75dbeb61753b4768503a9a8ae4e22",
     "summary": "Global `--explain` flag traces config resolution through 9 layers, showing where each field value originates."
   },
   "061-interactive-config.md": {
@@ -248,7 +248,7 @@
     "summary": "Extend config wizard with frecency-based field ordering using CLI usage tracking data."
   },
   "064-non-destructive-conversation-compaction.md": {
-    "hash": "e1407202e2c53a7168b2b92ca4f0528644848cb8ca40062fe9883557be713b9a",
+    "hash": "04546fb7f0e0b853c24867506721f7f9f6fa0a90903cde85729c80dc26d703bc",
     "summary": "Non-destructive conversation compaction through overlay events that project reduced views without mutating stored data."
   },
   "065-typed-resource-model-for-attachments.md": {
@@ -292,7 +292,7 @@
     "summary": "UPPERCASE keywords NONE and WORKSPACE reset config state; loader.reset entry setting provides local resets; ConfigDelta becomes enum to persist resets."
   },
   "079-config-sources-and-load-order.md": {
-    "hash": "5e5c78898d1ba2ac5de5ef86ebad0da886c8ca608beaa6fd202e75ba6db670fc",
+    "hash": "4f02ce9e5d97a0573d9f408509498177337b9ea0c959a9cb369b5cc77dad5c12",
     "summary": "JP loads config from four implicit sources plus environment variables, with extends directives and inherit flags controlling precedence."
   },
   "074-eager-loading-with-command-declared-data-requirements.md": {
@@ -340,11 +340,11 @@
     "summary": "Add --explain flag to jp query showing rendered system prompt, tools, attachments, and final request without calling the LLM provider."
   },
   "086-line-oriented-stdin-input-for-cli-arguments.md": {
-    "hash": "df319f2f8d8476bcfec18dc2315a29ddba75f0cc212d6ec7ec6fd1d695746d7b",
+    "hash": "9425e7b6fa3fedd4d77f6e9d4466c15368f9a35accb665a4153ac2acdfdfc0eb",
     "summary": "Convention for multi-value CLI arguments: `-` reads line-oriented values from stdin, starting with conversation targeting."
   },
   "087-session-scoped-active-workspace.md": {
-    "hash": "fc48244a5cdff093c7538e827f064a25551353609384a104d2b513af110e3514",
+    "hash": "68b82e6dc03b0b092930660b60c521e9167646728a15a9e96778a20a9c00fedd",
     "summary": "Session-scoped active workspace lets JP commands run from anywhere after selecting a workspace with `jp w use`."
   },
   "088-unified-editor-service-and-inline-reply-widget.md": {
@@ -370,5 +370,29 @@
   "093-inline-first-query-composition.md": {
     "hash": "a4fa8987e41f656a337952452629eafd5768c9c24ffdbe30556692f0ffb616cb",
     "summary": "Bare `jp query` composes inline by default; `Ctrl+X` escapes to external editor, with fallback modes configurable via `query.compose_in_editor`."
+  },
+  "094-built-in-tell_user-tool-for-mid-turn-user-addressed-messages.md": {
+    "hash": "ffca3c7ad1fdbeb597df5b4ac2e3ad2dd85f944b390194ade88040755af1d2da",
+    "summary": "Add a built-in tell_user tool letting assistants deliver mid-turn user messages without ending the agentic loop."
+  },
+  "095-reasoning-region-shading-across-tool-calls.md": {
+    "hash": "f6113fe44ee1710d8cff4b6064e35d4f57a6673df23a524c922c17330c8aec4c",
+    "summary": "Extend reasoning-region background shading across tool calls to visually represent continuous reasoning despite interleaved tool execution."
+  },
+  "096-terminal-output-sanitization-for-untrusted-content.md": {
+    "hash": "8abdc1050cab6c682042be4f5cdc621baed71c1ae407be68318fad667b9afa46",
+    "summary": "Sanitize terminal output by allowlisting safe ANSI sequences (colors) and dropping dangerous ones (cursor, erase, OSC) to prevent escape injection attacks from untrusted content."
+  },
+  "097-stable-event-identifiers.md": {
+    "hash": "2310623e9dc1f4d82e3c2ed79d48b2ba6a7ba6a8731b5a658bf17b17a3b6b82d",
+    "summary": "Assign stable, stream-unique identifiers to every conversation event for safe manual editing and future reference features."
+  },
+  "098-request-response-event-linking.md": {
+    "hash": "9e4099d9ae5835c978c66ac78fde41f8ce24313d59f33abde3e555fd3651f236",
+    "summary": "Request-response linking via persistent event IDs detects answer scope under structural edits."
+  },
+  "100-in-repo-ticket-tracking.md": {
+    "hash": "e302846bc2a87c51849d39807dfd39b29dfd8fde1f7899e2f196e7f4480d5332",
+    "summary": "Lightweight markdown-based work items tracked in-repo, displacing GitHub issues from assistant context with kanban board and RFD promotion mechanics."
   }
 }

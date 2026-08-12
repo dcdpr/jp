@@ -236,6 +236,40 @@ fn trace_to_tmpfile_writes_distinct_files() {
     std::fs::remove_file(&second).ok();
 }
 
+/// `preflight` must surface missing credentials locally, without any I/O, so
+/// callers can fail fast before starting side-effectful work (spawning title
+/// generation, loading attachments) that is wasted when the request can never
+/// be sent.
+#[test]
+fn preflight_reports_missing_credentials() {
+    // Point at an environment variable that is guaranteed unset, so the
+    // outcome doesn't depend on the developer's shell.
+    let mut config = LlmProviderConfig::default();
+    config.openrouter.api_key_env = "JP_TEST_PREFLIGHT_UNSET_VAR".to_owned();
+
+    let error = preflight(ProviderId::Openrouter, &config).unwrap_err();
+    assert!(
+        matches!(
+            &error,
+            crate::Error::MissingEnv(var) if var == "JP_TEST_PREFLIGHT_UNSET_VAR"
+        ),
+        "expected MissingEnv, got: {error:?}"
+    );
+}
+
+#[test]
+fn preflight_passes_when_credentials_present() {
+    // Mirrors the dummy-key handling in `compaction_request_tests`: `USER`
+    // (or `USERNAME` on Windows) is always set.
+    let env = if cfg!(windows) { "USERNAME" } else { "USER" }.to_owned();
+    let mut config = LlmProviderConfig::default();
+    config.openrouter.api_key_env = env;
+
+    preflight(ProviderId::Openrouter, &config).unwrap();
+    // Llamacpp requires no credentials at all.
+    preflight(ProviderId::Llamacpp, &config).unwrap();
+}
+
 test_all_providers![
     chat_completion_stream,
     image_attachment,

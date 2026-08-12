@@ -606,6 +606,14 @@ pub struct ToolDefinition {
 }
 
 impl ToolDefinition {
+    /// Coerce JSON-encoded argument strings to non-string schema types.
+    ///
+    /// Strings stay unchanged when the schema accepts strings or their contents
+    /// do not parse to a declared type.
+    pub fn coerce_arguments(&self, arguments: &mut Map<String, Value>) {
+        coerce_parameter_types(arguments, &self.parameters);
+    }
+
     /// Execute the tool without any interactive prompts.
     ///
     /// This is a pure execution method that runs the tool's underlying command
@@ -676,6 +684,10 @@ impl ToolDefinition {
         access: Option<&jp_tool::AccessPolicy>,
         invocation: &InvocationContext,
     ) -> Result<ExecutionOutcome, ToolError> {
+        let mut arguments = arguments;
+        if let Some(arguments) = arguments.as_object_mut() {
+            self.coerce_arguments(arguments);
+        }
         info!(tool = %self.name, arguments = ?arguments, "Executing tool.");
 
         match config.source() {
@@ -972,6 +984,58 @@ pub(crate) fn split_description(text: &str) -> (String, Option<String>) {
 
     // Single long line, no period — return as-is.
     (text.to_owned(), None)
+}
+
+fn coerce_parameter_types(
+    arguments: &mut Map<String, Value>,
+    parameters: &IndexMap<String, ToolParameterConfig>,
+) {
+    for (name, config) in parameters {
+        let Some(value) = arguments.get_mut(name) else {
+            continue;
+        };
+
+        coerce_parameter_value(value, config);
+    }
+}
+
+fn coerce_parameter_value(value: &mut Value, config: &ToolParameterConfig) {
+    if let Value::String(raw) = value
+        && !config.kind.has_type("string")
+        && let Ok(parsed) = serde_json::from_str(raw)
+        && parameter_accepts_value(&parsed, &config.kind)
+    {
+        *value = parsed;
+    }
+
+    match value {
+        Value::Object(arguments) if !config.properties.is_empty() => {
+            coerce_parameter_types(arguments, &config.properties);
+        }
+        Value::Array(values) => {
+            let Some(items) = config.items.as_deref() else {
+                return;
+            };
+            for value in values {
+                coerce_parameter_value(value, items);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn parameter_accepts_value(value: &Value, types: &OneOrManyTypes) -> bool {
+    match value {
+        Value::Null => types.has_type("null"),
+        Value::Bool(_) => types.has_type("boolean"),
+        Value::Number(number) => {
+            types.has_type("number")
+                || (types.has_type("integer") && (number.is_i64() || number.is_u64()))
+        }
+        Value::String(_) => types.has_type("string"),
+        Value::Array(_) => types.has_type("array"),
+        Value::Object(_) => types.has_type("object"),
+    }
 }
 
 /// Fill in configured default values for missing parameters.

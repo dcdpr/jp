@@ -9,11 +9,11 @@ use jp_conversation::{
     event::{ChatRequest, ChatResponse},
 };
 use jp_llm::{StreamError, event::Event};
-use jp_printer::{OutputFormat, Printer};
+use jp_printer::{OutputFormat, Printer, SharedBuffer};
 use jp_workspace::{ConversationLock, Workspace};
 
 use super::*;
-use crate::signals::SignalRouter;
+use crate::signals::testing::{detached_router, test_router};
 
 fn make_retry_state(max_retries: u32) -> StreamRetryState {
     let config = RequestConfig {
@@ -21,6 +21,7 @@ fn make_retry_state(max_retries: u32) -> StreamRetryState {
         base_backoff_ms: 1, // 1ms for fast tests
         max_backoff_secs: 1,
         stream_idle_timeout_secs: 120,
+        max_response_bytes: 1_048_576,
         cache: CachePolicy::default(),
     };
     StreamRetryState::new(config, false)
@@ -35,6 +36,22 @@ fn make_turn_coordinator() -> TurnCoordinator {
         None,
         None,
     )
+}
+
+/// Create a coordinator that shares its printer with the caller, so a test can
+/// read what the renderer wrote.
+fn make_turn_coordinator_with_output() -> (TurnCoordinator, Arc<Printer>, SharedBuffer) {
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let coordinator = TurnCoordinator::new(
+        Arc::clone(&printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
+
+    (coordinator, printer, out)
 }
 
 /// Create a workspace with a single conversation and return a test lock.
@@ -85,6 +102,7 @@ fn backoff_uses_retry_after_when_present() {
         base_backoff_ms: 1,
         max_backoff_secs: 120,
         stream_idle_timeout_secs: 120,
+        max_response_bytes: 1_048_576,
         cache: CachePolicy::default(),
     };
     let state = StreamRetryState::new(config, false);
@@ -121,7 +139,7 @@ async fn retryable_error_breaks_for_retry() {
         turn_coordinator.start_turn(stream, ChatRequest::from("test"));
     });
 
-    let router = SignalRouter::detached();
+    let router = detached_router();
     let error = StreamError::transient("server overloaded");
     let result = handle_stream_error(
         error,
@@ -154,7 +172,7 @@ async fn non_retryable_error_returns_error() {
     let (_ws, lock) = make_test_lock();
     let conv = lock.as_mut();
 
-    let router = SignalRouter::detached();
+    let router = detached_router();
     let error = StreamError::other("auth failure");
     let result = handle_stream_error(
         error,
@@ -182,7 +200,7 @@ async fn budget_exhausted_returns_error() {
     // First attempt exhausts budget
     retry_state.record_attempt();
 
-    let router = SignalRouter::detached();
+    let router = detached_router();
     let error = StreamError::transient("still broken");
     let result = handle_stream_error(
         error,
@@ -223,7 +241,7 @@ async fn partial_content_flushed_on_retry() {
         "got {partial:?}"
     );
 
-    let router = SignalRouter::detached();
+    let router = detached_router();
     let error = StreamError::connect("connection reset");
     let result = handle_stream_error(
         error,
@@ -271,7 +289,7 @@ async fn partial_content_flushed_on_abort() {
 
     // A non-retryable error aborts the turn, but partial content must still be
     // flushed so streamed work isn't lost.
-    let router = SignalRouter::detached();
+    let router = detached_router();
     let error = StreamError::other("auth failure");
     let result = handle_stream_error(
         error,
@@ -311,7 +329,7 @@ async fn retry_without_partial_content_still_works() {
     // No partial content — error happens before any events
     assert!(turn_coordinator.peek_partial_events().is_empty());
 
-    let router = SignalRouter::detached();
+    let router = detached_router();
     let error = StreamError::transient("503 Service Unavailable");
     let result = handle_stream_error(
         error,
@@ -330,7 +348,46 @@ async fn retry_without_partial_content_still_works() {
     );
 }
 
-#[tokio::test(flavor = "multi_thread")]
+/// A fatal error ends the response, so the gap the interrupted reasoning block
+/// owes closes its region: the reasoning background must stop before it, not
+/// leave a shaded strip under the error message.
+#[tokio::test]
+async fn fatal_error_after_reasoning_leaves_the_gap_unshaded() {
+    let (mut turn_coordinator, printer, out) = make_turn_coordinator_with_output();
+    let mut retry_state = make_retry_state(3);
+    let (_ws, lock) = make_test_lock();
+    let conv = lock.as_mut();
+    conv.update_events(|stream| {
+        turn_coordinator.start_turn(stream, ChatRequest::from("test"));
+    });
+
+    conv.update_events(|stream| {
+        turn_coordinator.handle_event(stream, Event::reasoning(0, "Thinking.\n\n"));
+    });
+
+    let router = detached_router();
+    let result = handle_stream_error(
+        StreamError::other("auth failure"),
+        &mut retry_state,
+        &mut turn_coordinator,
+        &conv,
+        &printer,
+        &router,
+    )
+    .await;
+
+    assert!(matches!(result, StreamErrorOutcome::Fatal(_)));
+
+    printer.flush();
+    assert_eq!(
+        out.lock().clone(),
+        "\n── \u{1b}[1mjp\u{1b}[0m \
+         ──────────────────────────────────────────────────────────────────────────\n\n\u{1b}[48;\
+         5;236mThinking.\u{1b}[48;5;236m\u{1b}[K\u{1b}[0m\n\n"
+    );
+}
+
+#[tokio::test]
 async fn interrupt_during_backoff_cuts_wait_short() {
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
@@ -341,6 +398,7 @@ async fn interrupt_during_backoff_cuts_wait_short() {
         base_backoff_ms: 1,
         max_backoff_secs: 120,
         stream_idle_timeout_secs: 120,
+        max_response_bytes: 1_048_576,
         cache: CachePolicy::default(),
     };
     let mut retry_state = StreamRetryState::new(config, false);
@@ -351,11 +409,15 @@ async fn interrupt_during_backoff_cuts_wait_short() {
         turn_coordinator.start_turn(stream, ChatRequest::from("test"));
     });
 
-    let router = std::sync::Arc::new(SignalRouter::detached());
-    let signal_router = std::sync::Arc::clone(&router);
+    let (router, signals) = test_router();
+    let router = std::sync::Arc::new(router);
+    // On the current-thread runtime this task first runs only after the test
+    // task yields, and `handle_stream_error` has no await points before its
+    // backoff select! — so the temporary backoff handler is registered before
+    // this send can happen. The ordering is a scheduler guarantee, not a
+    // wall-clock bet.
     let signal_handle = tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        signal_router.simulate_interrupt();
+        signals.interrupt().await;
     });
 
     let error = StreamError::rate_limit(Some(Duration::from_mins(1)));

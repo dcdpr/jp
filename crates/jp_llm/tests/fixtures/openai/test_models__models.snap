@@ -7,7 +7,7 @@ expression: v
         id: ModelIdConfig {
             provider: Openai,
             name: Name(
-                "gpt-4-0613",
+                "text-embedding-ada-002",
             ),
         },
         display_name: None,
@@ -17,13 +17,14 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
         id: ModelIdConfig {
             provider: Openai,
             name: Name(
-                "gpt-4",
+                "whisper-1",
             ),
         },
         display_name: None,
@@ -33,6 +34,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -49,50 +51,14 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
         id: ModelIdConfig {
             provider: Openai,
             name: Name(
-                "gpt-5.2-codex",
-            ),
-        },
-        display_name: Some(
-            "GPT-5.2 Codex",
-        ),
-        context_window: Some(
-            400000,
-        ),
-        max_output_tokens: Some(
-            128000,
-        ),
-        reasoning: Some(
-            Leveled {
-                none: false,
-                xlow: false,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: true,
-            },
-        ),
-        knowledge_cutoff: Some(
-            2025-08-31,
-        ),
-        deprecated: Some(
-            Active,
-        ),
-        structured_output: None,
-        features: [
-            "temp_requires_no_reasoning",
-        ],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Openai,
-            name: Name(
-                "gpt-4o-mini-tts-2025-12-15",
+                "tts-1",
             ),
         },
         display_name: None,
@@ -102,13 +68,14 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
         id: ModelIdConfig {
             provider: Openai,
             name: Name(
-                "gpt-realtime-mini-2025-12-15",
+                "gpt-3.5-turbo-16k",
             ),
         },
         display_name: None,
@@ -118,13 +85,14 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
         id: ModelIdConfig {
             provider: Openai,
             name: Name(
-                "gpt-audio-mini-2025-12-15",
+                "gpt-4-0613",
             ),
         },
         display_name: None,
@@ -134,13 +102,14 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
         id: ModelIdConfig {
             provider: Openai,
             name: Name(
-                "chatgpt-image-latest",
+                "gpt-4",
             ),
         },
         display_name: None,
@@ -150,6 +119,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -166,6 +136,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -182,6 +153,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -198,6 +170,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -214,54 +187,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Openai,
-            name: Name(
-                "dall-e-3",
-            ),
-        },
-        display_name: None,
-        context_window: None,
-        max_output_tokens: None,
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Openai,
-            name: Name(
-                "dall-e-2",
-            ),
-        },
-        display_name: None,
-        context_window: None,
-        max_output_tokens: None,
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Openai,
-            name: Name(
-                "gpt-4-1106-preview",
-            ),
-        },
-        display_name: None,
-        context_window: None,
-        max_output_tokens: None,
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -278,6 +204,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -294,6 +221,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -310,6 +238,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -326,6 +255,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -342,6 +272,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -358,38 +289,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Openai,
-            name: Name(
-                "gpt-4-0125-preview",
-            ),
-        },
-        display_name: None,
-        context_window: None,
-        max_output_tokens: None,
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Openai,
-            name: Name(
-                "gpt-4-turbo-preview",
-            ),
-        },
-        display_name: None,
-        context_window: None,
-        max_output_tokens: None,
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -406,6 +306,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -422,6 +323,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -438,6 +340,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -463,9 +366,13 @@ expression: v
             2023-10-01,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.5",
+                retire_at: None,
+            },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -482,6 +389,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -510,6 +418,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -538,6 +447,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -563,41 +473,13 @@ expression: v
             2023-10-01,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.5",
+                retire_at: None,
+            },
         ),
         structured_output: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Openai,
-            name: Name(
-                "gpt-4o-audio-preview",
-            ),
-        },
-        display_name: None,
-        context_window: None,
-        max_output_tokens: None,
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Openai,
-            name: Name(
-                "gpt-4o-realtime-preview",
-            ),
-        },
-        display_name: None,
-        context_window: None,
-        max_output_tokens: None,
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -614,6 +496,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -630,70 +513,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Openai,
-            name: Name(
-                "gpt-4o-realtime-preview-2024-12-17",
-            ),
-        },
-        display_name: None,
-        context_window: None,
-        max_output_tokens: None,
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Openai,
-            name: Name(
-                "gpt-4o-audio-preview-2024-12-17",
-            ),
-        },
-        display_name: None,
-        context_window: None,
-        max_output_tokens: None,
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Openai,
-            name: Name(
-                "gpt-4o-mini-realtime-preview-2024-12-17",
-            ),
-        },
-        display_name: None,
-        context_window: None,
-        max_output_tokens: None,
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Openai,
-            name: Name(
-                "gpt-4o-mini-audio-preview-2024-12-17",
-            ),
-        },
-        display_name: None,
-        context_window: None,
-        max_output_tokens: None,
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -713,18 +533,27 @@ expression: v
             100000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
             2023-10-01,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.5",
+                retire_at: Some(
+                    2026-10-23,
+                ),
+            },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -744,50 +573,27 @@ expression: v
             100000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
             2023-10-01,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.5",
+                retire_at: Some(
+                    2026-10-23,
+                ),
+            },
         ),
         structured_output: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Openai,
-            name: Name(
-                "gpt-4o-mini-realtime-preview",
-            ),
-        },
-        display_name: None,
-        context_window: None,
-        max_output_tokens: None,
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Openai,
-            name: Name(
-                "gpt-4o-mini-audio-preview",
-            ),
-        },
-        display_name: None,
-        context_window: None,
-        max_output_tokens: None,
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -804,6 +610,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -823,18 +630,27 @@ expression: v
             100000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
             2023-10-01,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.5",
+                retire_at: Some(
+                    2026-10-23,
+                ),
+            },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -854,18 +670,27 @@ expression: v
             100000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
             2023-10-01,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.5",
+                retire_at: Some(
+                    2026-10-23,
+                ),
+            },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -875,13 +700,29 @@ expression: v
                 "gpt-4o-2024-11-20",
             ),
         },
-        display_name: None,
-        context_window: None,
-        max_output_tokens: None,
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
+        display_name: Some(
+            "GPT-4o",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: Some(
+            16384,
+        ),
+        reasoning: Some(
+            Unsupported,
+        ),
+        knowledge_cutoff: Some(
+            2023-10-01,
+        ),
+        deprecated: Some(
+            Deprecated {
+                note: "recommended replacement: gpt-5.5",
+                retire_at: None,
+            },
+        ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -898,38 +739,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Openai,
-            name: Name(
-                "gpt-4o-search-preview-2025-03-11",
-            ),
-        },
-        display_name: None,
-        context_window: None,
-        max_output_tokens: None,
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Openai,
-            name: Name(
-                "gpt-4o-search-preview",
-            ),
-        },
-        display_name: None,
-        context_window: None,
-        max_output_tokens: None,
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -946,6 +756,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -962,6 +773,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -978,6 +790,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -994,6 +807,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1013,18 +827,27 @@ expression: v
             100000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
             2023-10-01,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.5-pro",
+                retire_at: Some(
+                    2026-10-23,
+                ),
+            },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1044,18 +867,27 @@ expression: v
             100000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
             2023-10-01,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.5-pro",
+                retire_at: Some(
+                    2026-10-23,
+                ),
+            },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1072,6 +904,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1091,18 +924,27 @@ expression: v
             100000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
             2024-06-01,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.5",
+                retire_at: Some(
+                    2026-12-11,
+                ),
+            },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1122,18 +964,27 @@ expression: v
             100000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
             2024-06-01,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.4-mini",
+                retire_at: Some(
+                    2026-10-23,
+                ),
+            },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1153,18 +1004,27 @@ expression: v
             100000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
             2024-06-01,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.5",
+                retire_at: Some(
+                    2026-12-11,
+                ),
+            },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1184,18 +1044,27 @@ expression: v
             100000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
             2024-06-01,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.4-mini",
+                retire_at: Some(
+                    2026-10-23,
+                ),
+            },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1224,6 +1093,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1252,6 +1122,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1280,6 +1151,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1308,6 +1180,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1333,9 +1206,15 @@ expression: v
             2024-06-01,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.4-nano",
+                retire_at: Some(
+                    2026-10-23,
+                ),
+            },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1361,9 +1240,15 @@ expression: v
             2024-06-01,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.4-nano",
+                retire_at: Some(
+                    2026-10-23,
+                ),
+            },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1380,6 +1265,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1399,50 +1285,27 @@ expression: v
             100000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
             2024-06-01,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.5-pro",
+                retire_at: Some(
+                    2026-12-11,
+                ),
+            },
         ),
         structured_output: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Openai,
-            name: Name(
-                "gpt-4o-realtime-preview-2025-06-03",
-            ),
-        },
-        display_name: None,
-        context_window: None,
-        max_output_tokens: None,
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Openai,
-            name: Name(
-                "gpt-4o-audio-preview-2025-06-03",
-            ),
-        },
-        display_name: None,
-        context_window: None,
-        max_output_tokens: None,
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1462,18 +1325,27 @@ expression: v
             100000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
             2024-06-01,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.5-pro",
+                retire_at: Some(
+                    2026-12-11,
+                ),
+            },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1493,18 +1365,27 @@ expression: v
             100000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
             2024-06-01,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.5-pro",
+                retire_at: Some(
+                    2026-07-23,
+                ),
+            },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1524,18 +1405,27 @@ expression: v
             100000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
             2024-06-01,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.5-pro",
+                retire_at: Some(
+                    2026-07-23,
+                ),
+            },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1552,6 +1442,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1571,18 +1462,27 @@ expression: v
             100000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
             2024-06-01,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.5-pro",
+                retire_at: Some(
+                    2026-07-23,
+                ),
+            },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1602,18 +1502,27 @@ expression: v
             100000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
             2024-06-01,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.5-pro",
+                retire_at: Some(
+                    2026-07-23,
+                ),
+            },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1633,22 +1542,31 @@ expression: v
             16384,
         ),
         reasoning: Some(
-            Leveled {
-                none: false,
-                xlow: true,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: false,
+            Supported {
+                mode: Leveled {
+                    xlow: true,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: false,
             },
         ),
         knowledge_cutoff: Some(
             2024-09-30,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.5",
+                retire_at: Some(
+                    2026-07-23,
+                ),
+            },
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -1670,22 +1588,31 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: false,
-                xlow: true,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: false,
+            Supported {
+                mode: Leveled {
+                    xlow: true,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: false,
             },
         ),
         knowledge_cutoff: Some(
             2024-09-30,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.5",
+                retire_at: Some(
+                    2026-12-11,
+                ),
+            },
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -1707,22 +1634,29 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: false,
-                xlow: true,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: false,
+            Supported {
+                mode: Leveled {
+                    xlow: true,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: false,
             },
         ),
         knowledge_cutoff: Some(
             2024-09-30,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.5",
+                retire_at: None,
+            },
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -1744,18 +1678,27 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
             2024-05-31,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.4-mini",
+                retire_at: Some(
+                    2026-12-11,
+                ),
+            },
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -1777,18 +1720,27 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
             2024-05-31,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.4-mini",
+                retire_at: Some(
+                    2026-12-11,
+                ),
+            },
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -1810,18 +1762,27 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
             2024-05-31,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.4-nano",
+                retire_at: Some(
+                    2026-12-11,
+                ),
+            },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1841,18 +1802,27 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
             2024-05-31,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.4-nano",
+                retire_at: Some(
+                    2026-12-11,
+                ),
+            },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1869,6 +1839,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1885,6 +1856,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1901,6 +1873,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1917,6 +1890,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1936,18 +1910,27 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
             2024-09-30,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.5",
+                retire_at: Some(
+                    2026-07-23,
+                ),
+            },
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -1966,6 +1949,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1975,14 +1959,44 @@ expression: v
                 "gpt-5-pro-2025-10-06",
             ),
         },
-        display_name: None,
-        context_window: None,
-        max_output_tokens: None,
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
+        display_name: Some(
+            "GPT-5 pro",
+        ),
+        context_window: Some(
+            400000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: false,
+                    medium: false,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: false,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2024-09-30,
+        ),
+        deprecated: Some(
+            Deprecated {
+                note: "recommended replacement: gpt-5.5-pro",
+                retire_at: Some(
+                    2026-12-11,
+                ),
+            },
+        ),
         structured_output: None,
-        features: [],
+        prefill: None,
+        features: [
+            "temp_requires_no_reasoning",
+        ],
     },
     ModelDetails {
         id: ModelIdConfig {
@@ -2001,22 +2015,31 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: false,
-                xlow: false,
-                low: false,
-                medium: false,
-                high: true,
-                xhigh: false,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: false,
+                    medium: false,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: false,
             },
         ),
         knowledge_cutoff: Some(
             2024-09-30,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.5-pro",
+                retire_at: Some(
+                    2026-12-11,
+                ),
+            },
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2035,6 +2058,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -2051,6 +2075,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -2067,6 +2092,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -2083,6 +2109,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -2099,6 +2126,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -2115,6 +2143,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -2131,6 +2160,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -2147,6 +2177,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -2166,22 +2197,31 @@ expression: v
             16384,
         ),
         reasoning: Some(
-            Leveled {
-                none: true,
-                xlow: false,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: false,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
             2024-09-30,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.5",
+                retire_at: Some(
+                    2026-07-23,
+                ),
+            },
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2203,13 +2243,16 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: true,
-                xlow: false,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: false,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -2219,6 +2262,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2240,13 +2284,16 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: true,
-                xlow: false,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: false,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -2256,6 +2303,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2277,18 +2325,27 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
             2024-09-30,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.5",
+                retire_at: Some(
+                    2026-07-23,
+                ),
+            },
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2310,18 +2367,27 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
             2024-09-30,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.4-mini",
+                retire_at: Some(
+                    2026-07-23,
+                ),
+            },
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2343,18 +2409,27 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
             2024-09-30,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.5",
+                retire_at: Some(
+                    2026-07-23,
+                ),
+            },
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2373,6 +2448,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -2392,13 +2468,16 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: true,
-                xlow: false,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: true,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -2408,6 +2487,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2429,13 +2509,16 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: true,
-                xlow: false,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: true,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -2445,6 +2528,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2466,13 +2550,16 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: false,
-                xlow: false,
-                low: false,
-                medium: true,
-                high: true,
-                xhigh: true,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: false,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: false,
             },
         ),
         knowledge_cutoff: Some(
@@ -2482,6 +2569,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2503,13 +2591,16 @@ expression: v
             128000,
         ),
         reasoning: Some(
-            Leveled {
-                none: false,
-                xlow: false,
-                low: false,
-                medium: true,
-                high: true,
-                xhigh: true,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: false,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: false,
             },
         ),
         knowledge_cutoff: Some(
@@ -2519,6 +2610,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2540,22 +2632,31 @@ expression: v
             16384,
         ),
         reasoning: Some(
-            Leveled {
-                none: true,
-                xlow: false,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: true,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
             2025-08-31,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gpt-5.5",
+                retire_at: Some(
+                    2026-08-10,
+                ),
+            },
         ),
         structured_output: None,
+        prefill: None,
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2574,6 +2675,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -2590,6 +2692,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -2606,13 +2709,14 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
         id: ModelIdConfig {
             provider: Openai,
             name: Name(
-                "gpt-3.5-turbo-16k",
+                "gpt-4o-mini-tts-2025-12-15",
             ),
         },
         display_name: None,
@@ -2622,13 +2726,14 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
         id: ModelIdConfig {
             provider: Openai,
             name: Name(
-                "tts-1",
+                "gpt-realtime-mini-2025-12-15",
             ),
         },
         display_name: None,
@@ -2638,13 +2743,14 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
         id: ModelIdConfig {
             provider: Openai,
             name: Name(
-                "whisper-1",
+                "gpt-audio-mini-2025-12-15",
             ),
         },
         display_name: None,
@@ -2654,13 +2760,14 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
         id: ModelIdConfig {
             provider: Openai,
             name: Name(
-                "text-embedding-ada-002",
+                "chatgpt-image-latest",
             ),
         },
         display_name: None,
@@ -2670,6 +2777,970 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5.2-codex",
+            ),
+        },
+        display_name: Some(
+            "GPT-5.2 Codex",
+        ),
+        context_window: Some(
+            400000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: false,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2025-08-31,
+        ),
+        deprecated: Some(
+            Deprecated {
+                note: "recommended replacement: gpt-5.5",
+                retire_at: Some(
+                    2026-07-23,
+                ),
+            },
+        ),
+        structured_output: None,
+        prefill: None,
+        features: [
+            "temp_requires_no_reasoning",
+        ],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5.3-codex",
+            ),
+        },
+        display_name: Some(
+            "GPT-5.3 Codex",
+        ),
+        context_window: Some(
+            400000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: false,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2025-08-31,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        structured_output: None,
+        prefill: None,
+        features: [
+            "temp_requires_no_reasoning",
+        ],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-realtime-1.5",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-audio-1.5",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4o-search-preview",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-4o-search-preview-2025-03-11",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5.3-chat-latest",
+            ),
+        },
+        display_name: Some(
+            "GPT-5.3 Chat",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: Some(
+            16384,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: false,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2025-08-31,
+        ),
+        deprecated: Some(
+            Deprecated {
+                note: "recommended replacement: gpt-5.5",
+                retire_at: Some(
+                    2026-08-10,
+                ),
+            },
+        ),
+        structured_output: None,
+        prefill: None,
+        features: [
+            "temp_requires_no_reasoning",
+        ],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5.4-2026-03-05",
+            ),
+        },
+        display_name: Some(
+            "GPT-5.4",
+        ),
+        context_window: Some(
+            1050000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2025-08-31,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        structured_output: None,
+        prefill: None,
+        features: [
+            "temp_requires_no_reasoning",
+        ],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5.4-pro",
+            ),
+        },
+        display_name: Some(
+            "GPT-5.4 pro",
+        ),
+        context_window: Some(
+            1050000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: false,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: false,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2025-08-31,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        structured_output: None,
+        prefill: None,
+        features: [
+            "temp_requires_no_reasoning",
+        ],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5.4-pro-2026-03-05",
+            ),
+        },
+        display_name: Some(
+            "GPT-5.4 pro",
+        ),
+        context_window: Some(
+            1050000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: false,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: false,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2025-08-31,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        structured_output: None,
+        prefill: None,
+        features: [
+            "temp_requires_no_reasoning",
+        ],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5.4",
+            ),
+        },
+        display_name: Some(
+            "GPT-5.4",
+        ),
+        context_window: Some(
+            1050000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2025-08-31,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        structured_output: None,
+        prefill: None,
+        features: [
+            "temp_requires_no_reasoning",
+        ],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5.4-nano-2026-03-17",
+            ),
+        },
+        display_name: Some(
+            "GPT-5.4 nano",
+        ),
+        context_window: Some(
+            400000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2025-08-31,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        structured_output: None,
+        prefill: None,
+        features: [
+            "temp_requires_no_reasoning",
+        ],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5.4-nano",
+            ),
+        },
+        display_name: Some(
+            "GPT-5.4 nano",
+        ),
+        context_window: Some(
+            400000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2025-08-31,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        structured_output: None,
+        prefill: None,
+        features: [
+            "temp_requires_no_reasoning",
+        ],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5.4-mini-2026-03-17",
+            ),
+        },
+        display_name: Some(
+            "GPT-5.4 mini",
+        ),
+        context_window: Some(
+            400000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2025-08-31,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        structured_output: None,
+        prefill: None,
+        features: [
+            "temp_requires_no_reasoning",
+        ],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5.4-mini",
+            ),
+        },
+        display_name: Some(
+            "GPT-5.4 mini",
+        ),
+        context_window: Some(
+            400000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2025-08-31,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        structured_output: None,
+        prefill: None,
+        features: [
+            "temp_requires_no_reasoning",
+        ],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-image-2",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-image-2-2026-04-21",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5.5",
+            ),
+        },
+        display_name: Some(
+            "GPT-5.5",
+        ),
+        context_window: Some(
+            1050000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2025-12-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        structured_output: None,
+        prefill: None,
+        features: [
+            "temp_requires_no_reasoning",
+        ],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5.5-2026-04-23",
+            ),
+        },
+        display_name: Some(
+            "GPT-5.5",
+        ),
+        context_window: Some(
+            1050000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2025-12-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        structured_output: None,
+        prefill: None,
+        features: [
+            "temp_requires_no_reasoning",
+        ],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5.5-pro",
+            ),
+        },
+        display_name: Some(
+            "GPT-5.5 pro",
+        ),
+        context_window: Some(
+            1050000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: false,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: false,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2025-12-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        structured_output: None,
+        prefill: None,
+        features: [
+            "temp_requires_no_reasoning",
+            "streaming_unsupported",
+        ],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5.5-pro-2026-04-23",
+            ),
+        },
+        display_name: Some(
+            "GPT-5.5 pro",
+        ),
+        context_window: Some(
+            1050000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: false,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: false,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2025-12-01,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        structured_output: None,
+        prefill: None,
+        features: [
+            "temp_requires_no_reasoning",
+            "streaming_unsupported",
+        ],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "chat-latest",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-realtime-translate",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-realtime-2",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-realtime-whisper",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5.6-sol",
+            ),
+        },
+        display_name: Some(
+            "GPT-5.6 Sol",
+        ),
+        context_window: Some(
+            1050000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: true,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2026-02-16,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        structured_output: None,
+        prefill: None,
+        features: [
+            "temp_requires_no_reasoning",
+            "reasoning_pro_mode",
+            "persisted_reasoning",
+            "explicit_prompt_caching",
+        ],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5.6-terra",
+            ),
+        },
+        display_name: Some(
+            "GPT-5.6 Terra",
+        ),
+        context_window: Some(
+            1050000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: true,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2026-02-16,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        structured_output: None,
+        prefill: None,
+        features: [
+            "temp_requires_no_reasoning",
+            "reasoning_pro_mode",
+            "persisted_reasoning",
+            "explicit_prompt_caching",
+        ],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-5.6-luna",
+            ),
+        },
+        display_name: Some(
+            "GPT-5.6 Luna",
+        ),
+        context_window: Some(
+            1050000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: true,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2026-02-16,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        structured_output: None,
+        prefill: None,
+        features: [
+            "temp_requires_no_reasoning",
+            "reasoning_pro_mode",
+            "persisted_reasoning",
+            "explicit_prompt_caching",
+        ],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-realtime-2.1",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-realtime-2.1-mini",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
         features: [],
     },
 ]

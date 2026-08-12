@@ -102,7 +102,19 @@ jobs:
             os: windows-latest
             name_suffix: " (windows)"
             cache_suffix: "-windows"
+            # Restoring a 3.9 GB `target/` cache costs Windows more than
+            # compiling from a warm sccache does, so this job caches only
+            # `~/.cargo` and lets sccache carry compilation.
+            cache_targets: "false"
+            # Windows pays a steep per-file cost to unpack, compile and link, so
+            # PR runs cover only the crates that make up `jp` itself. The Linux
+            # `test` job still builds and tests everything on every PR, and
+            # `main` covers the full workspace on Windows too.
+            scope: ${{ github.ref == 'refs/heads/main' && 'workspace' || 'jp-only' }}
     name: ${{ matrix.task }}${{ matrix.name_suffix }}
+    # A run without a target cache falls back to a full build. Cap it so a
+    # pathological run doesn't burn an hour of Windows minutes unnoticed.
+    timeout-minutes: 60
     steps:
       - name: Decide whether to run task
         id: task
@@ -150,7 +162,11 @@ jobs:
         with:
           path: |
             ~/.rustup
-          key: toolchain-${{ matrix.task }}${{ matrix.cache_suffix }}
+          key: toolchain-${{ matrix.task }}${{ matrix.cache_suffix }}-${{ hashFiles('rust-toolchain.toml') }}
+          # Prefix match, so a toolchain bump falls back to the previous entry
+          # instead of paying for a full rustup download.
+          restore-keys: |
+            toolchain-${{ matrix.task }}${{ matrix.cache_suffix }}
       - if: ${{ steps.task.outputs.run == 'true' }}
         uses: extractions/setup-just@f8a3cce218d9f83db3a2ecd90e41ac3de6cdfd9b # v3
       - if: ${{ steps.task.outputs.run == 'true' }}
@@ -159,6 +175,7 @@ jobs:
           key: ${{ matrix.task }}
           cache-bin: false
           cache-workspace-crates: true
+          cache-targets: ${{ matrix.cache_targets || 'true' }}
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - if: ${{ steps.task.outputs.run == 'true' && matrix.task != 'coverage' && matrix.task != 'shear' }}
         uses: mozilla-actions/sccache-action@9e7fa8a12102821edf02ca5dbea1acd0f89a2696 # V0.10
@@ -171,8 +188,17 @@ jobs:
         run: |
           echo "SCCACHE_GHA_ENABLED=true" >> "$GITHUB_ENV"
           echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+      # `rust-cache` strips `~/.cargo/registry/src` before saving, so the first
+      # cargo invocation of the job re-extracts every `.crate` archive. That is
+      # the single most expensive non-build phase on Windows. Doing it in a
+      # named step keeps the cost visible instead of burying it in the silent
+      # `cargo metadata` that `cargo nextest run` shells out to on startup.
+      - name: Warm the registry source tree
+        if: ${{ steps.task.outputs.run == 'true' && matrix.task == 'test' }}
+        shell: bash
+        run: cargo metadata --locked --format-version 1 > /dev/null
       - if: ${{ steps.task.outputs.run == 'true' }}
-        run: just ${{ matrix.task }}-ci
+        run: just ${{ matrix.task }}-ci ${{ matrix.scope }}
       - if: ${{ matrix.task == 'coverage' && steps.task.outputs.run == 'true' }}
         uses: coverallsapp/github-action@648a8eb78e6d50909eff900e4ec85cab4524a45b # v2
         with:

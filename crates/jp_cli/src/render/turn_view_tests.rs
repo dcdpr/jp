@@ -3,7 +3,11 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
 };
 
-use jp_config::{AppConfig, style::reasoning::ReasoningDisplayConfig};
+use jp_config::{
+    AppConfig,
+    style::reasoning::{ReasoningDisplayConfig, TruncateChars},
+    types::color::Color,
+};
 use jp_conversation::event::ChatResponse;
 use jp_printer::{OutputFormat, Printer};
 
@@ -72,11 +76,82 @@ fn visible_reasoning_clears_tool_separator_debt() {
 }
 
 #[test]
+fn whitespace_only_reasoning_preserves_tool_separator_debt() {
+    // Interleaved thinking emits whitespace-only chunks between tool calls.
+    // `Full` would render them, but there is nothing to render, so they supply
+    // no spacing and the debt owed by the preceding result must survive.
+    let (mut view, flag) = view_owing_separator(ReasoningDisplayConfig::Full);
+    view.render_chat_response(&ChatResponse::reasoning("\n\n"));
+    assert!(
+        flag.load(Ordering::Relaxed),
+        "a reasoning chunk that renders nothing must not clear the debt"
+    );
+}
+
+#[test]
+fn reasoning_past_the_truncation_budget_preserves_tool_separator_debt() {
+    // Once the budget is spent, `Truncate` renders nothing for every later
+    // chunk, so those chunks supply no spacing either.
+    let (mut view, flag) = view_owing_separator(ReasoningDisplayConfig::Truncate(TruncateChars {
+        characters: 5,
+    }));
+    view.render_chat_response(&ChatResponse::reasoning("12345"));
+    flag.store(true, Ordering::Relaxed);
+
+    view.render_chat_response(&ChatResponse::reasoning("67890"));
+    assert!(
+        flag.load(Ordering::Relaxed),
+        "reasoning past the truncation budget renders nothing and must not clear the debt"
+    );
+}
+
+#[test]
+fn whitespace_that_fills_the_truncation_budget_clears_tool_separator_debt() {
+    // `Truncate` appends its `...` elision marker whenever the taken text fills
+    // the remaining budget, whitespace included, so this chunk does put
+    // something on screen and does supply the spacing. Preserving the debt here
+    // would pay it out alongside the chat separator the ellipsis raises, and
+    // the next header would get two blank lines.
+    let (mut view, flag) = view_owing_separator(ReasoningDisplayConfig::Truncate(TruncateChars {
+        characters: 2,
+    }));
+    view.render_chat_response(&ChatResponse::reasoning("\n\n"));
+    assert!(
+        !flag.load(Ordering::Relaxed),
+        "the rendered ellipsis supplies spacing and must clear the debt"
+    );
+}
+
+#[test]
 fn message_clears_tool_separator_debt() {
     let (mut view, flag) = view_owing_separator(ReasoningDisplayConfig::Hidden);
     view.render_chat_response(&ChatResponse::message("hello"));
     assert!(
         !flag.load(Ordering::Relaxed),
         "a message supplies spacing and clears the debt"
+    );
+}
+
+#[test]
+fn invisible_tool_call_is_transparent_to_the_reasoning_region() {
+    // An invisible tool (hidden, or `show = false`, or JSON) shows no chrome,
+    // so its boundary is transparent: it returns no background and leaves the
+    // reasoning region intact for the next visible tool call to continue.
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let mut style = AppConfig::new_test().style;
+    style.reasoning.display = ReasoningDisplayConfig::Full;
+    style.reasoning.background = Some(Color::Ansi256(236));
+    let mut view = TurnView::new(Arc::new(printer), style, None, None);
+
+    view.render_chat_response(&ChatResponse::reasoning("Thinking\n\n"));
+
+    assert!(
+        view.enter_tool_call_region(false).is_none(),
+        "an invisible tool call yields no region background"
+    );
+    assert!(
+        view.enter_tool_call_region(true).is_some(),
+        "the region survives the invisible tool call, so the next visible tool call still \
+         continues it"
     );
 }

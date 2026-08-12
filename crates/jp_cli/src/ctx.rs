@@ -7,17 +7,13 @@ use std::{
 
 use camino::Utf8Path;
 use chrono::{DateTime, Utc};
-use crossterm::terminal;
 use jp_config::{AppConfig, PartialAppConfig, conversation::tool::ToolSource};
-use jp_mcp::id::McpServerId;
+use jp_mcp::{StartupSet, id::McpServerId};
 use jp_printer::Printer;
 use jp_storage::backend::FsStorageBackend;
 use jp_task::TaskHandler;
 use jp_workspace::{Workspace, session::Session};
-use tokio::{
-    runtime::{Handle, Runtime},
-    task::JoinSet,
-};
+use tokio::runtime::{Handle, Runtime};
 
 use crate::{Globals, Result, bootstrap::ExecutionContext, signals::SignalRouter};
 
@@ -76,10 +72,13 @@ pub(crate) struct Term {
     /// These are not managed by the TTY subsystem.
     pub(crate) is_tty: bool,
 
-    /// Width of the controlling terminal in columns, when stdout is a TTY.
+    /// Width in columns to lay output out against.
     ///
-    /// `None` when stdout is piped or redirected, so list output keeps its full
-    /// width for machine consumption rather than wrapping to a guessed size.
+    /// The controlling terminal's width when stdout is a TTY, or the width the
+    /// caller declared with `--width`.
+    /// `None` when stdout is piped or redirected without a declared width, so
+    /// list output keeps its full width for machine consumption rather than
+    /// wrapping to a guessed size.
     pub(crate) width: Option<u16>,
 }
 
@@ -102,11 +101,7 @@ impl Ctx {
             .with_child_cwd(exec.child_cwd().map(|cwd| cwd.as_std_path().to_path_buf()));
 
         let is_tty = io::stdout().is_terminal();
-        let width = if is_tty {
-            terminal::size().ok().map(|(cols, _)| cols)
-        } else {
-            None
-        };
+        let width = printer.output_width().columns();
 
         Self {
             exec,
@@ -181,9 +176,7 @@ impl Ctx {
 
     /// Activate and deactivate MCP servers based on the active conversation
     /// context.
-    pub(crate) async fn configure_active_mcp_servers(
-        &mut self,
-    ) -> Result<JoinSet<std::result::Result<(), jp_mcp::Error>>> {
+    pub(crate) async fn configure_active_mcp_servers(&mut self) -> Result<StartupSet> {
         let mut server_ids = HashSet::new();
 
         for (_name, cfg) in self.config.conversation.tools.iter() {
