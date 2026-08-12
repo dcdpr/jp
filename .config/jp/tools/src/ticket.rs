@@ -7,6 +7,8 @@
 //! rendered with their 1-based positions so a reply can name the comment it
 //! answers.
 
+use std::path::MAIN_SEPARATOR;
+
 // The leading `::` picks the crate over this module, which shares its name.
 use ::ticket::{Kind, ParseError, Status, Ticket, TicketId, store};
 use camino::{Utf8Path, Utf8PathBuf};
@@ -172,8 +174,15 @@ fn dir(root: &Utf8Path) -> Utf8PathBuf {
 }
 
 /// A path the model can hand straight to `fs_read_file`.
+///
+/// Separators are always `/`, on every platform: the path travels through tool
+/// results into the conversation, and `fs_read_file` takes forward slashes
+/// everywhere.
 fn relative(root: &Utf8Path, path: &Utf8Path) -> String {
-    path.strip_prefix(root).unwrap_or(path).to_string()
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .as_str()
+        .replace(MAIN_SEPARATOR, "/")
 }
 
 /// Render the board as one line per ticket.
