@@ -466,6 +466,7 @@ when:
             {
               "id": "call_9NiOxr9CbNNm4FD5cLEyiAkN",
               "index": 0,
+              "type": "function",
               "function": {
                 "name": "run_me",
                 "arguments": "{\"foo\":\"bar\",\"bar\":\"foo\"}"
@@ -652,6 +653,7 @@ when:
             {
               "id": "call_9NiOxr9CbNNm4FD5cLEyiAkN",
               "index": 0,
+              "type": "function",
               "function": {
                 "name": "run_me",
                 "arguments": "{\"foo\":\"bar\",\"bar\":\"foo\"}"

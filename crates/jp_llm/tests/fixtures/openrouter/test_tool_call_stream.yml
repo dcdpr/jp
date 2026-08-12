@@ -125,6 +125,7 @@ when:
             {
               "id": "call_Vvg5Dy9TkCdqYIkRawxATO3Z",
               "index": 0,
+              "type": "function",
               "function": {
                 "name": "run_me",
                 "arguments": "{\"foo\":\"hello\",\"bar\":\"foo\"}"

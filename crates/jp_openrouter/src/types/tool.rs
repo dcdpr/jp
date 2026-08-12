@@ -38,7 +38,20 @@ pub struct ToolCall {
     pub id: Option<String>,
     #[serde(default)]
     pub index: usize,
+    /// The tool call kind.
+    /// OpenRouter currently supports function calls.
+    #[serde(rename = "type", default)]
+    pub kind: ToolCallType,
     pub function: FunctionCall,
+}
+
+/// The kind of tool requested by the model.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ToolCallType {
+    /// Invoke a named function with JSON arguments.
+    #[default]
+    Function,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -100,3 +113,7 @@ pub enum ChoiceFunctionType {
 pub struct ChoiceFunction {
     pub name: String,
 }
+
+#[cfg(test)]
+#[path = "tool_tests.rs"]
+mod tests;

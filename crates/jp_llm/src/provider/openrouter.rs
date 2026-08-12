@@ -29,7 +29,7 @@ use jp_openrouter::{
             self, ChatCompletion as OpenRouterChunk, FinishReason, ReasoningDetails,
             ReasoningDetailsFormat, ReasoningDetailsKind,
         },
-        tool::{self, FunctionCall, Tool, ToolCall, ToolFunction},
+        tool::{self, FunctionCall, Tool, ToolCall, ToolCallType, ToolFunction},
     },
 };
 use serde::Serialize;
@@ -600,6 +600,7 @@ fn map_event(
             function,
             id,
             index,
+            kind: _,
         },
     ) in tool_calls.into_iter().enumerate()
     {
@@ -1171,6 +1172,7 @@ fn convert_event_kind(kind: EventKind) -> Vec<RequestMessage> {
                 tool_calls: vec![ToolCall {
                     id: Some(request.id.clone()),
                     index: 0,
+                    kind: ToolCallType::Function,
                     function: FunctionCall {
                         name: Some(request.name),
                         arguments: serde_json::to_string(&request.arguments).ok(),

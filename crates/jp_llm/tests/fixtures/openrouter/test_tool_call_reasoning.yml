@@ -133,6 +133,7 @@ when:
             {
               "id": "call_EagA9aUujCC0EpWynWh4tMdE",
               "index": 0,
+              "type": "function",
               "function": {
                 "name": "run_me",
                 "arguments": "{\"foo\":\"hello\",\"bar\":\"foo\"}"

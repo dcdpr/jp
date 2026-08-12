@@ -40,6 +40,69 @@ async fn sub_provider_event_metadata(model: &str, test_name: &str) -> Result {
     Ok(())
 }
 
+/// Records an Opus 5 round trip with parallel tool calls through OpenRouter.
+///
+/// The follow-up request must preserve `type: "function"` on both calls.
+/// Without it, OpenRouter drops the tool results while translating to
+/// Anthropic's API and Opus rejects the remaining assistant message as
+/// unsupported prefill.
+#[test_log::test(tokio::test)]
+async fn test_anthropic_opus_5_parallel_tool_round_trip() -> Result {
+    let model_id: ModelIdConfig = "openrouter/anthropic/claude-opus-5".parse()?;
+    let mut model = ModelDetails::empty(model_id.clone());
+    model.context_window = Some(1_000_000);
+    model.max_output_tokens = Some(128_000);
+    model.reasoning = Some(ReasoningDetails::leveled(
+        false, true, true, true, true, true,
+    ));
+    model.structured_output = Some(true);
+
+    let response_model_id = model_id.clone();
+    let response_model = model.clone();
+    let requests = vec![
+        TestRequest::chat(ProviderId::Openrouter)
+            .model(model_id)
+            .model_details(model)
+            .enable_reasoning()
+            .tool(
+                "list_items",
+                iter::empty::<(&'static str, ToolParameterConfig)>(),
+            )
+            .tool(
+                "search_items",
+                iter::empty::<(&'static str, ToolParameterConfig)>(),
+            )
+            .chat_request(
+                "Call both list_items and search_items in parallel. Do not answer with text \
+                 before calling both tools.",
+            ),
+        TestRequest::func(move |history| {
+            let calls: Vec<_> = history
+                .iter()
+                .filter_map(|event| event.event.as_tool_call_request())
+                .collect();
+            let mut names: Vec<_> = calls.iter().map(|call| call.name.as_str()).collect();
+            names.sort_unstable();
+            assert_eq!(names, ["list_items", "search_items"]);
+
+            let mut request = TestRequest::chat(ProviderId::Openrouter)
+                .model(response_model_id)
+                .model_details(response_model)
+                .enable_reasoning();
+            for call in calls {
+                request = request.event(ToolCallResponse {
+                    id: call.id.clone(),
+                    result: Ok(format!("{} completed", call.name)),
+                });
+            }
+
+            Some(request)
+        }),
+    ];
+
+    run_test(function_name!(), requests).await
+}
+
 #[test]
 fn request_preserves_integer_tool_parameter_type() -> Result {
     let request = TestRequest::chat(ProviderId::Openrouter)
@@ -287,6 +350,7 @@ fn parallel_tool_calls_share_one_assistant_message() -> Result {
                     {
                         "id": "call_1",
                         "index": 0,
+                        "type": "function",
                         "function": {
                             "name": "fs_list_files",
                             "arguments": "{\"prefixes\":[\"crates\"]}"
@@ -295,6 +359,7 @@ fn parallel_tool_calls_share_one_assistant_message() -> Result {
                     {
                         "id": "call_2",
                         "index": 1,
+                        "type": "function",
                         "function": {
                             "name": "fs_grep_files",
                             "arguments": "{\"pattern\":\"hook\"}"
