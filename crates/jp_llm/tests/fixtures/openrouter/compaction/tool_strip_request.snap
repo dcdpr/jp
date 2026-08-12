@@ -40,7 +40,7 @@ expression: request
           "index": 0,
           "function": {
             "name": "read_file",
-            "arguments": null
+            "arguments": "{}"
           }
         }
       ]

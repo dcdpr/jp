@@ -1,10 +1,11 @@
 use indexmap::IndexMap;
 use jp_config::{conversation::tool::ToolParameterConfig, providers::llm::LlmProviderConfig};
+use std::iter;
 use jp_conversation::event::{ToolCallRequest, ToolCallResponse};
 use jp_test::{Result, function_name};
 
 use super::*;
-use crate::test::TestRequest;
+use crate::{model::ReasoningDetails, test::TestRequest};
 
 macro_rules! test_all_models {
         ($($fn:ident),* $(,)?) => {
@@ -129,6 +130,116 @@ fn tool_call_finish_is_a_clean_completion() -> Result {
         Event::Finished(event::FinishReason::Completed),
     ]);
     Ok(())
+}
+
+fn forced_tool_request(
+    reasoning: ReasoningDetails,
+    enable_reasoning: bool,
+) -> (request::ChatCompletion, Option<ForcedToolFallback>) {
+    let request = TestRequest::chat(ProviderId::Openrouter)
+        .tool_choice_fn("edit_file")
+        .tool(
+            "edit_file",
+            iter::empty::<(&'static str, ToolParameterConfig)>(),
+        )
+        .chat_request("Edit the file");
+    let request = if enable_reasoning {
+        request.enable_reasoning()
+    } else {
+        request
+    };
+    let TestRequest::Chat {
+        mut model, query, ..
+    } = request
+    else {
+        unreachable!();
+    };
+    model.reasoning = Some(reasoning);
+
+    let (request, _, fallback) = create_request(&model, query).unwrap();
+    (request, fallback)
+}
+
+#[test]
+fn forced_tool_with_disableable_reasoning_uses_hard_fallback() {
+    let reasoning = ReasoningDetails::leveled(false, true, true, true, true, false);
+    let (request, fallback) = forced_tool_request(reasoning, true);
+    let fallback = fallback.expect("reasoning with forced tool use needs a fallback");
+
+    assert_eq!(request.tool_choice, Some(tool::ToolChoice::Auto));
+    assert_eq!(fallback.strategy, ForceStrategy::DisableThinking);
+    assert!(matches!(
+        fallback.tool_choice,
+        tool::ToolChoice::Function(_)
+    ));
+    assert!(
+        serde_json::to_string(&request.messages)
+            .unwrap()
+            .contains("MUST call the tool named 'edit_file'")
+    );
+}
+
+#[test]
+fn forced_tool_with_mandatory_reasoning_uses_soft_retries() {
+    let reasoning = ReasoningDetails::leveled(false, true, true, true, true, false).always_on();
+    let (request, fallback) = forced_tool_request(reasoning, true);
+    let fallback = fallback.expect("mandatory reasoning needs a soft fallback");
+
+    assert_eq!(request.tool_choice, Some(tool::ToolChoice::Auto));
+    assert_eq!(fallback.strategy, ForceStrategy::EscalatingNudge {
+        remaining: SOFT_FORCE_MAX_RETRIES,
+    });
+}
+
+#[test]
+fn forced_tool_without_reasoning_stays_forced() {
+    let reasoning = ReasoningDetails::leveled(false, true, true, true, true, false);
+    let (request, fallback) = forced_tool_request(reasoning, false);
+
+    assert!(fallback.is_none());
+    assert!(matches!(
+        request.tool_choice,
+        Some(tool::ToolChoice::Function(_))
+    ));
+}
+
+#[test]
+fn hard_fallback_disables_reasoning_and_restores_tool_choice() {
+    let reasoning = ReasoningDetails::leveled(false, true, true, true, true, false);
+    let (request, fallback) = forced_tool_request(reasoning, true);
+    let fallback = fallback.unwrap();
+    let request = prepare_force_tool_retry_request(request, vec![], &fallback);
+
+    assert_eq!(
+        request.reasoning,
+        Some(request::Reasoning {
+            exclude: true,
+            effort: request::ReasoningEffort::None,
+        })
+    );
+    assert_eq!(request.tool_choice, Some(fallback.tool_choice));
+    assert!(
+        serde_json::to_string(&request.messages)
+            .unwrap()
+            .contains("You did not call the required tool")
+    );
+}
+
+#[test]
+fn soft_fallback_decrements_and_stops() {
+    let reasoning = ReasoningDetails::leveled(false, true, true, true, true, false).always_on();
+    let (request, fallback) = forced_tool_request(reasoning, true);
+    let fallback = fallback.unwrap();
+    let (request, next) =
+        prepare_soft_force_retry_request(request, vec![], &fallback, SOFT_FORCE_MAX_RETRIES);
+
+    assert_eq!(request.tool_choice, Some(tool::ToolChoice::Auto));
+    assert_eq!(next.unwrap().strategy, ForceStrategy::EscalatingNudge {
+        remaining: SOFT_FORCE_MAX_RETRIES - 1,
+    });
+
+    let (_, next) = prepare_soft_force_retry_request(request, vec![], &fallback, 1);
+    assert!(next.is_none());
 }
 
 #[test]
