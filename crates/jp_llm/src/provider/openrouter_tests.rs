@@ -59,7 +59,7 @@ fn request_preserves_integer_tool_parameter_type() -> Result {
         unreachable!();
     };
 
-    let (request, _) = create_request(&model, query)?;
+    let (request, _, _) = create_request(&model, query)?;
     let request = serde_json::to_value(request)?;
 
     assert_eq!(
