@@ -1,11 +1,10 @@
 # RFD 082: Unified inquiry event recording
 
-- **Status**: Accepted
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-12
 - **Extends**: [RFD 005][RFD 005-2]
-- **Required by**: [RFD 083]
 
 ## Summary
 
