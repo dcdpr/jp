@@ -10,8 +10,8 @@
 LLM usage is encouraged in the JP project.
 Contributors are free to use LLMs for reading, research, editing, debugging,
 code review, and code generation.
-All work product, be it code, prose, reviews, or comments, is the responsibility of
-the person who submits it, regardless of how it was produced.
+All work product, be it code, prose, reviews, or comments, is the responsibility
+of the person who submits it, regardless of how it was produced.
 
 ## The Core Principle
 
@@ -58,8 +58,8 @@ Listed here in priority order:
   In some contexts LLM usage is expected, as when debugging a tricky issue.
   In others it erodes trust: submitting code for review without having read it
   yourself shifts the burden to your reviewer.
-  The distinction is not about disclosure. It is about whether you have taken
-  responsibility for the work.
+  The distinction is not about disclosure.
+  It is about whether you have taken responsibility for the work.
 
 - **Urgency**: LLMs afford an opportunity to do work more quickly, but pace must
   not come at the expense of responsibility, rigor, empathy, and teamwork.
@@ -92,8 +92,8 @@ attenuated and sourcing has improved.
 For more involved research, the quality of results can vary widely.
 One should be careful about drawing too much confidence from the lengthy,
 well-formatted nature of an LLM-powered report.
-Even if a report appears well-sourced, the sources themselves may be incorrect
-A seemingly authoritative source found by an LLM may itself be an LLM
+Even if a report appears well-sourced, the sources themselves may be incorrect A
+seemingly authoritative source found by an LLM may itself be an LLM
 hallucination.
 
 When engaging LLMs as researchers, follow citation links to learn from the
@@ -235,8 +235,8 @@ JP's output is the user's responsibility.
 Submitting large volumes of LLM-generated code or prose without review, then
 expecting others to debug, maintain, or untangle it, is a failure of
 responsibility.
-The problem is not that an LLM was used. It is that the submitter did not take
-ownership of the output.
+The problem is not that an LLM was used.
+It is that the submitter did not take ownership of the output.
 The result is the same as submitting any other unreviewed work: it creates a
 burden for the team.
 

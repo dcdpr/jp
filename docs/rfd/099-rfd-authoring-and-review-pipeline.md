@@ -196,8 +196,8 @@ terminal.
 
 An apply turn with accepted work requires `fs_modify_file` for its first tool
 call.
-JP resets tool choice after that call, so the applier can inspect the result and
-finish normally.
+The provider soft-forces that call when reasoning prevents a forced tool choice
+on the wire.
 
 State is derived from the data, never asserted alongside it.
 An empty `findings` array is how a review clears an RFD, so there is no verdict

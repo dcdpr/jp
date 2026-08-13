@@ -4,21 +4,21 @@
 - **Category**: Process
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-17
-- **Extended by**: [RFD 099](099-rfd-authoring-and-review-pipeline.md)
+- **Extended by**: [RFD 099]
 
 ## Summary
 
 This RFD sets the terms on which an assistant writes an RFD for this project.
 The contributor owns the problem, the decisions, and the approval; the assistant
 can own the prose.
-It also says why an assistant-authored RFD carries constraints a hand-written one
-does not.
+It also says why an assistant-authored RFD carries constraints a hand-written
+one does not.
 
 ## Motivation
 
-Writing an RFD means understanding the project's conventions ([RFD 001]), reading
-the code that informs the design, and structuring a proposal that argues for
-itself.
+Writing an RFD means understanding the project's conventions ([RFD 001]),
+reading the code that informs the design, and structuring a proposal that argues
+for itself.
 JP is good at all three, and almost every RFD in this repository is
 assistant-authored.
 
@@ -43,8 +43,8 @@ It shows up in four shapes:
 - **Length standing in for rigour.** A long document is not evidence that anyone
   resolved anything.
 
-The countermeasure to the first three is the contributor: settle the scope before
-asking for prose, then read what comes back against what was discussed.
+The countermeasure to the first three is the contributor: settle the scope
+before asking for prose, then read what comes back against what was discussed.
 The countermeasure to the fourth is mechanical, and it is the next section.
 
 ## Why Assistant-Authored RFDs Carry Extra Constraints
@@ -76,8 +76,8 @@ That is the whole rule, and it does not soften because a model produced the
 words.
 A reviewer's time is spent on the assumption that the author understands the
 proposal.
-An RFD whose author cannot defend a section did not have an authoring problem; it
-had a design problem, and the prose hid it.
+An RFD whose author cannot defend a section did not have an authoring problem;
+it had a design problem, and the prose hid it.
 
 Automated review does not transfer any of this.
 Two models clearing a document means they agree, which is not the same as the
@@ -103,16 +103,17 @@ contributor supplies the decisions and approves the result.
   one.
   A title is not a design.
 - **Model review as a CI check.** Rejected.
-  A nondeterministic check is a review even when it emits lint-shaped output, and
-  calling it a lint hides the distinction that matters.
+  A nondeterministic check is a review even when it emits lint-shaped output,
+  and calling it a lint hides the distinction that matters.
 - **Documenting the skill and pipeline configuration here.** Rejected.
   Which tools a skill enables and which files it attaches are properties of the
-  configuration, which documents itself and drifts the moment prose describes it.
+  configuration, which documents itself and drifts the moment prose describes
+  it.
 
 ## References
 
-- [RFD 001] for the RFD process itself, which applies to every RFD however it was
-  written.
+- [RFD 001] for the RFD process itself, which applies to every RFD however it
+  was written.
 - [RFD 002] for LLM use across the project.
 - [RFD 099] for the authoring and review pipeline.
 

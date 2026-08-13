@@ -182,7 +182,8 @@ Abandoned drafts cost nothing beyond the disk space they occupy.
 Published RFDs must not link to drafts; any such link fails the docs build.
 
 Drafts cannot be superseded.
-A draft replaced before it advances to Discussion is **deleted**, not superseded.
+A draft replaced before it advances to Discussion is **deleted**, not
+superseded.
 Supersedes only applies once an RFD reaches Accepted, because before that there
 is no design to preserve.
 A draft the author has dropped can be deleted, or abandoned via `just
@@ -310,17 +311,17 @@ docs/rfd/042-short-title.md
 Every RFD has a **Category** that describes its purpose.
 Each category has a corresponding template:
 
-| Category     | Template      | Use when                            |
-| ------------ | ------------- | ----------------------------------- |
-| **Design**   | [`000-design-template.md`] | Proposing a feature or              |
-|              |               | architectural change that needs a   |
-|              |               | design.                             |
-| **Decision** | [`000-decision-template.md`] | Recording a decision: a technology  |
-|              |               | choice, a convention, a policy.     |
-| **Guide**    | [`000-guide-template.md`] | How-tos, reference material, and    |
-|              |               | contributor-facing documentation.   |
-| **Process**  | [`000-process-template.md`] | How the project operates:           |
-|              |               | workflows, policies, values.        |
+| Category     | Template      | Use when                           |
+| ------------ | ------------- | ---------------------------------- |
+| **Design**   | [`000-design-template.md`] | Proposing a feature or             |
+|              |               | architectural change that needs a  |
+|              |               | design.                            |
+| **Decision** | [`000-decision-template.md`] | Recording a decision: a technology |
+|              |               | choice, a convention, a policy.    |
+| **Guide**    | [`000-guide-template.md`] | How-tos, reference material, and   |
+|              |               | contributor-facing documentation.  |
+| **Process**  | [`000-process-template.md`] | How the project operates:          |
+|              |               | workflows, policies, values.       |
 
 All categories share the same numbering scheme, directory, lifecycle, and review
 process.
@@ -373,7 +374,6 @@ All categories use the same metadata:
 - **Required by**: RFD NNN (if another RFD depends on this one)
 - **Supersedes**: RFD NNN (if applicable)
 - **Superseded by**: RFD NNN (if applicable)
-- **Over budget**: reason (if the RFD exceeds its prose budget)
 ```
 
 Implementation progress is tracked in [tickets], not in the metadata header.
@@ -415,8 +415,8 @@ Use `Extends` instead when the relationship is design lineage worth recording
 past implementation.
 
 **Both relationships participate in the same gate.** An extension is a kind of
-dependency (`Extends ⊆ Requires`): if A extends B, then A also depends on B.
-So `rfd-promote` and the docs build enforce both fields uniformly:
+dependency (`Extends ⊆ Requires`): if A extends B, then A also depends on B. So
+`rfd-promote` and the docs build enforce both fields uniformly:
 
 - Promoting an RFD from **Discussion to Accepted** requires every entry in
   `Requires` *or* `Extends` to be at status `Accepted`, `Implemented`, or
@@ -528,10 +528,9 @@ Run `just --list --group rfd` to see them.
 | Command                         | Description                              |
 | ------------------------------- | ---------------------------------------- |
 | `just rfd-draft CATEGORY TITLE` | Create a blank draft under `drafts/`.    |
-| `just rfd-promote NNN [REASON]` | Advance status. Draft → Discussion       |
+| `just rfd-promote NNN`          | Advance status. Draft → Discussion       |
 |                                 | assigns a number; Discussion → Accepted  |
-|                                 | offers phase tickets. REASON records an  |
-|                                 | over-budget exemption.                   |
+|                                 | offers phase tickets.                    |
 | `just rfd-extend NNN MMM`       | Record that RFD MMM extends RFD NNN,     |
 |                                 | updating both. Accepts draft IDs (DNN)   |
 |                                 | on either side.                          |
@@ -552,8 +551,8 @@ Run `just --list --group rfd` to see them.
 |                                 | category.                                |
 
 This table covers the lifecycle.
-The assistant-authoring pipeline adds more commands to the same group, and
-[RFD 099] documents them.
+The assistant-authoring pipeline adds more commands to the same group, and [RFD
+099] documents them.
 
 ## Relationship to Architecture Documents
 
