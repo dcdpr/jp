@@ -242,7 +242,9 @@ Useful when a round wants watching.
 `just rfd-draft CATEGORY TITLE` creates a blank draft from a template, for an
 RFD written without the pipeline.
 Its author can use the review and signoff stages without adopting the pipeline's
-budgets or treating its checks as gates.
+round budgets.
+The prose hard limit is the exception: `rfd-lint` errors gate CI for every RFD
+in Draft or Discussion, whatever wrote it.
 
 The `rfd` skill is the other assistant path.
 Loaded into any conversation, it makes JP a collaborator on a document you are
