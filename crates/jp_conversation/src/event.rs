@@ -15,8 +15,8 @@ use serde_json::{Map, Value};
 pub use self::{
     chat::{ChatRequest, ChatResponse},
     inquiry::{
-        InquiryAnswerType, InquiryId, InquiryQuestion, InquiryRequest, InquiryResponse,
-        InquirySource, SelectOption,
+        CancellationReason, InquiryAnswerType, InquiryId, InquiryQuestion, InquiryRequest,
+        InquiryResponse, InquirySource, SelectOption,
     },
     tool_call::{ToolCallRequest, ToolCallResponse},
     turn::TurnStart,

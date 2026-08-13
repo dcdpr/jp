@@ -14,7 +14,7 @@ use jp_config::{
 };
 use jp_conversation::{
     ConversationStream,
-    event::{ChatResponse, EventKind},
+    event::{ChatResponse, EventKind, InquiryResponse},
 };
 use jp_editor::{EditOutcome, EditRequest, EditorBackend, EditorError, TerminalEditorBackend};
 use jp_printer::Printer;
@@ -370,8 +370,7 @@ fn build_history_text(history: &ConversationStream) -> String {
             }
             EventKind::InquiryResponse(response) => {
                 buf.push_str(&format!("\n\n## Inquiry Response on {timestamp}\n\n"));
-                buf.push_str("Answer: ");
-                buf.push_str(&response.answer.to_string());
+                buf.push_str(&inquiry_answer_line(response));
             }
             EventKind::TurnStart(_) => {}
         }
@@ -382,6 +381,15 @@ fn build_history_text(history: &ConversationStream) -> String {
 
     text.extend(messages);
     text
+}
+
+/// Render the answer line for an inquiry response in the history export.
+fn inquiry_answer_line(response: &InquiryResponse) -> String {
+    match response {
+        InquiryResponse::Answered { answer, .. } => format!("Answer: {answer}"),
+        InquiryResponse::Redacted { .. } => "Answer: <redacted>".to_string(),
+        InquiryResponse::Cancelled { reason, .. } => format!("Cancelled ({})", reason.as_str()),
+    }
 }
 
 #[cfg(test)]
