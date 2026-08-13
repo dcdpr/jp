@@ -324,11 +324,11 @@
     "summary": "Split tool enable into state and allow_toggle to fix directive bugs and eliminate variant proliferation."
   },
   "082-unified-inquiry-event-recording.md": {
-    "hash": "c617de652451b00153898d130a243a2b4e46ba4f9eb99db355927ebc5073df20",
+    "hash": "b2d476597db461a7970e469876845c6709c532b2e24ab624015500eb9bd7175f",
     "summary": "Unify inquiry event recording across all routing paths; add cancellation/redaction variants; track attempts per turn."
   },
   "083-built-in-ask_user-tool-for-assistant-initiated-inquiries.md": {
-    "hash": "11b0999e4212efd2f5ecbed7549921df06764b620d2c53475066e926e8292e99",
+    "hash": "c98f03d892b251f8b2c47ea359945c6db61a5138677650ee6d150cbfa4e02701",
     "summary": "Built-in tool for assistant to ask typed questions mid-turn with human-only enforcement and optional answer persistence."
   },
   "084-configurable-markdown-element-coloring.md": {
