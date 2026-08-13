@@ -15,7 +15,7 @@ mod signals;
 mod timer;
 
 use std::{
-    env, fmt,
+    env, fmt, fs,
     io::{self, IsTerminal as _, Write as _, stderr, stdout},
     num::{self, NonZeroUsize},
     process::ExitCode,
@@ -35,7 +35,7 @@ use clap::{
     builder::{BoolValueParser, TypedValueParser as _},
 };
 use cmd::Commands;
-use crossterm::style::Stylize as _;
+use crossterm::{style::Stylize as _, terminal};
 use ctx::{Ctx, IntoPartialAppConfig};
 use error::{Error, Result};
 use jp_config::{
@@ -47,18 +47,13 @@ use jp_config::{
         load_partials_with_inheritance,
     },
 };
-use jp_printer::{OutputFormat, Printer};
+use jp_printer::{OutputFormat, OutputWidth, Printer};
 use jp_storage::backend::{FsStorageBackend, NullLockBackend, NullPersistBackend};
 use jp_term::table::{DetailRow, details, details_markdown};
 use jp_workspace::{Workspace, user_data_dir};
 use relative_path::RelativePath;
 use serde_json::Value;
-use tokio::{
-    runtime::{self, Runtime},
-    sync::broadcast,
-    task::JoinHandle,
-};
-use tokio_util::sync::CancellationToken;
+use tokio::runtime::{self, Runtime};
 use tracing::{debug, info, trace, warn};
 
 use crate::{
@@ -67,8 +62,7 @@ use crate::{
         target::resolve_request,
     },
     config_pipeline::ConfigPipeline,
-    signals::SignalTo,
-    timer::spawn_line_timer,
+    timer::{LineTimer, spawn_line_timer},
 };
 
 static WORKER_THREADS: AtomicUsize = AtomicUsize::new(0);
@@ -167,6 +161,16 @@ struct Globals {
     #[arg(short = 'w', long, global = true)]
     workspace: Option<WorkspaceIdOrPath>,
 
+    /// Lay output out against this many columns.
+    ///
+    /// Detected automatically when stdout is a terminal.
+    /// Set it when stdout is a pipe that still renders for a human at a known
+    /// width, such as a preview pane laid out by another program.
+    /// `0` means unknown, which is the default when piped: content keeps its
+    /// natural width instead of being fitted to a guess.
+    #[arg(long, global = true, value_name = "COLUMNS")]
+    width: Option<u16>,
+
     /// The format of the log output written to stderr.
     ///
     /// Defaults to "text" when stderr is a terminal, and "json" when stderr is
@@ -176,10 +180,12 @@ struct Globals {
     #[arg(long, global = true, value_enum, default_value_t = LogFormat::Auto)]
     log_format: LogFormat,
 
-    /// Write tracing logs to an additional destination.
+    /// Write the full tracing log to the given file.
     ///
-    /// Use `-` to write to stderr.
-    /// Tracing is always written to a log file regardless of this flag.
+    /// Use `-` to stream logs to stderr instead.
+    /// When unset, the log is written to a temporary file, which is kept and
+    /// its path printed when a run fails, or when `JP_DEBUG=1` is set and
+    /// stdout is a terminal.
     #[arg(long, global = true, value_name = "PATH")]
     log_file: Option<String>,
 
@@ -350,11 +356,17 @@ pub fn run() -> ExitCode {
     );
 
     trace!(command = cli.command.name(), arguments = %cli, "Starting CLI run.");
-    let (code, output) = match run_inner(cli, format) {
-        Ok(()) => (0, None),
+    let (code, outcome, output) = match run_inner(cli, format) {
+        Ok(()) => (0, RunOutcome::AsExpected, None),
         Err(error) => {
-            let (code, msg) = parse_error(error.into(), format);
-            (code, Some(msg))
+            let error = cmd::Error::from(error);
+            let outcome = if error.expected {
+                RunOutcome::AsExpected
+            } else {
+                RunOutcome::Failed
+            };
+            let (code, msg) = parse_error(error, format);
+            (code, outcome, Some(msg))
         }
     };
 
@@ -368,10 +380,13 @@ pub fn run() -> ExitCode {
         }
     }
 
-    if (code != 0
-        || env::var("JP_DEBUG")
-            .as_deref()
-            .is_ok_and(|v| v == "1" || v == "true"))
+    // Read here rather than inside the policy, which stays a pure function of
+    // its inputs.
+    let debug_enabled = env::var("JP_DEBUG")
+        .as_deref()
+        .is_ok_and(|v| v == "1" || v == "true");
+
+    if should_report_trace_log(outcome, is_tty, debug_enabled)
         && let Some(path) = guard.and_then(TracingGuard::persist)
     {
         if format.is_json() {
@@ -388,8 +403,74 @@ pub fn run() -> ExitCode {
     ExitCode::from(code)
 }
 
+/// How a run ended, as far as reporting its trace log goes.
+#[derive(Debug, Clone, Copy)]
+enum RunOutcome {
+    /// The run did what was asked: it either succeeded, or exited non-zero to
+    /// report a result.
+    /// `jp conversation grep` exits 1 when it finds nothing.
+    AsExpected,
+
+    /// The run failed.
+    Failed,
+}
+
+/// Whether to tell the user where the run's trace log was written.
+///
+/// A failed run always reports it: diagnosing the failure matters more than
+/// keeping the output stream clean.
+/// The exit status alone doesn't answer this, since a command can exit non-zero
+/// to report a result rather than a failure.
+///
+/// Every other run makes the report opt-in via `JP_DEBUG`, and only when stdout
+/// is a terminal.
+/// A piped stdout means `jp` is a component in someone else's pipeline, and a
+/// program consuming it may own the screen: an `fzf` list or preview, for
+/// instance, where two uninvited lines corrupt the layout.
+/// Note that stderr's own tty-ness is the wrong test: in `jp … | fzf`, stderr
+/// *is* the terminal, which is exactly how the corruption happens.
+///
+/// Set `--log-file` to choose the path when a piped run needs to be traced;
+/// nothing has to be announced when the caller picked the destination.
+fn should_report_trace_log(outcome: RunOutcome, stdout_is_tty: bool, debug_enabled: bool) -> bool {
+    match outcome {
+        RunOutcome::Failed => true,
+        RunOutcome::AsExpected => stdout_is_tty && debug_enabled,
+    }
+}
+
+/// The width to lay output out against.
+///
+/// A `--width` given on the command line is [`OutputWidth::Declared`], with `0`
+/// meaning unknown.
+/// Otherwise the controlling terminal is measured when stdout is a TTY.
+///
+/// [`OutputWidth::Unknown`] when stdout is piped or redirected and no width was
+/// given, so output keeps its full width for machine consumption rather than
+/// being laid out against a guessed size.
+fn detect_output_width(declared: Option<u16>) -> OutputWidth {
+    if let Some(width) = declared {
+        return if width > 0 {
+            OutputWidth::Declared(width)
+        } else {
+            OutputWidth::Unknown
+        };
+    }
+
+    if !stdout().is_terminal() {
+        return OutputWidth::Unknown;
+    }
+
+    terminal::size()
+        .ok()
+        .map_or(OutputWidth::Unknown, |(cols, _)| {
+            OutputWidth::Terminal(cols)
+        })
+}
+
 fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
-    let printer = Printer::terminal(format);
+    let printer =
+        Printer::terminal(format).with_output_width(detect_output_width(cli.globals.width));
 
     // `jp init` is a special case that doesn't need the full startup pipeline.
     if let Commands::Init(args) = &cli.command {
@@ -440,10 +521,24 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     );
     let rt = ctx.handle().clone();
 
-    // Run the requested command.
+    // Run the requested command, racing it against the shutdown token.
     // `start_new` carries the interactive picker's "start a new conversation"
     // choice through to the query command, which honors it at lock time.
-    let output = rt.block_on(cli.command.run(&mut ctx, handles, start_new));
+    //
+    // When a graceful shutdown is requested (an unhandled or escalated
+    // Ctrl-C, or SIGTERM), the command future is dropped and the run falls
+    // through to the normal teardown below. Dropping the future releases
+    // conversation locks and persists dirty conversations (guard-scoped
+    // persistence); the teardown then drains background tasks and cleans up
+    // stale files.
+    let shutdown = ctx.signals.shutdown_token();
+    let output = rt.block_on(async {
+        tokio::select! {
+            biased;
+            output = cli.command.run(&mut ctx, handles, start_new) => output,
+            () = shutdown.cancelled() => Err(cmd::Error::interrupted()),
+        }
+    });
 
     if let Err(error) = output.as_ref()
         && error.disable_persistence
@@ -453,17 +548,23 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
             "Error running command. Disabling workspace persistence."
         );
         ctx.workspace.disable_persistence();
+
+        // The state this run produced is being discarded, so background work
+        // derived from it (e.g. generating a title for a conversation that
+        // won't survive) is wasted. Fire the soft-cancellation token now:
+        // the drain below then skips its soft wait and goes straight to the
+        // 2s grace pass instead of waiting up to 10s for doomed tasks.
+        ctx.task_handler.cancel_token().cancel();
     }
 
     // Flush the printer to ensure all queued typewriter output is fully written
     // before background tasks log any errors.
     ctx.printer.flush();
 
-    // Drain background tasks. Shows a timer line while waiting and lets the
-    // user interrupt: first Ctrl+C signals graceful cancellation with a 2s
-    // countdown; a second Ctrl+C — or SIGQUIT — escalates to a force quit
-    // that aborts tasks immediately and drops their pending workspace
-    // mutations.
+    // Drain background tasks. Shows a timer line while waiting. A graceful
+    // shutdown request (Ctrl-C, an interrupt earlier in the run, or SIGTERM)
+    // switches to a 2s cancellation countdown; any further Ctrl-C exits the
+    // process immediately via the signal router's escalation ladder.
     rt.block_on(drain_background_tasks(&mut ctx))
         .map_err(Error::Task)?;
 
@@ -478,13 +579,15 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     output.map_err(Into::into)
 }
 
-/// Drain background tasks at end of run, with interactive cancellation.
+/// Drain background tasks at end of run, with interrupt-aware cancellation.
 ///
 /// While [`TaskHandler::sync`] runs, prints a `⏱ Finishing background tasks…
 /// Ns` line on stderr after a 1s delay.
-/// The first SIGINT/SIGTERM switches the line to a 2s countdown and signals
-/// graceful cancellation; a second SIGINT (or any SIGQUIT) escalates to a force
-/// quit that aborts the `JoinSet` and drops pending workspace mutations.
+/// A graceful shutdown request — a Ctrl-C during the drain, an interrupt
+/// earlier in the run, or SIGTERM — switches the line to a 2s countdown and
+/// signals cancellation.
+/// Any Ctrl-C after shutdown has begun exits the process immediately (the
+/// signal router's escalation ladder).
 ///
 /// [`TaskHandler::sync`]: jp_task::TaskHandler::sync
 async fn drain_background_tasks(
@@ -495,11 +598,12 @@ async fn drain_background_tasks(
     }
 
     let cancel = ctx.task_handler.cancel_token();
-    let force = ctx.task_handler.force_token();
     let printer = ctx.printer.clone();
-    let mut signals = ctx.signals.receiver.resubscribe();
+    let shutdown = ctx.signals.shutdown_token();
     let show_chrome = ctx.term.is_tty;
-    let mut signals_open = true;
+    // The shutdown token only cancels once; after acting on it, stop
+    // selecting on it so the loop doesn't spin on a completed future.
+    let mut shutdown_watched = true;
 
     let mut timer = if show_chrome {
         spawn_line_timer(
@@ -507,7 +611,7 @@ async fn drain_background_tasks(
             true,
             Duration::from_secs(1),
             Duration::from_millis(100),
-            |secs| format!("\r\x1b[K⏱ Finishing background tasks… {secs:.1}s"),
+            |secs, _status| format!("\r\x1b[K⏱ Finishing background tasks… {secs:.1}s"),
         )
     } else {
         None
@@ -521,43 +625,26 @@ async fn drain_background_tasks(
     let result = loop {
         tokio::select! {
             biased;
-            sig = signals.recv(), if signals_open => {
-                let escalate = match sig {
-                    Ok(SignalTo::Shutdown) => cancel.is_cancelled(),
-                    Ok(SignalTo::Quit) => true,
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(broadcast::error::RecvError::Closed) => {
-                        signals_open = false;
-                        continue;
-                    }
-                };
-
+            // A graceful shutdown request (pending from an interrupted
+            // command, or arriving mid-drain) cancels background tasks.
+            () = shutdown.cancelled(), if shutdown_watched => {
+                shutdown_watched = false;
                 stop_drain_timer(timer.take()).await;
 
-                if escalate {
-                    force.cancel();
-                    if show_chrome {
-                        drop(writeln!(
-                            printer.err_writer(),
-                            "\r\x1b[K⏱ Aborting background tasks…",
-                        ));
-                    }
-                    // No further escalation possible; stop watching signals.
-                    signals_open = false;
-                } else {
-                    cancel.cancel();
-                    if show_chrome {
-                        timer = spawn_line_timer(
-                            printer.clone(),
-                            true,
-                            Duration::ZERO,
-                            Duration::from_millis(100),
-                            |secs| format!(
+                cancel.cancel();
+                if show_chrome {
+                    timer = spawn_line_timer(
+                        printer.clone(),
+                        true,
+                        Duration::ZERO,
+                        Duration::from_millis(100),
+                        |secs, _status| {
+                            format!(
                                 "\r\x1b[K⏱ Cancelling background tasks… {:.1}s",
                                 (2.0 - secs).max(0.0),
-                            ),
-                        );
-                    }
+                            )
+                        },
+                    );
                 }
             }
             result = &mut sync_fut => break result,
@@ -568,10 +655,9 @@ async fn drain_background_tasks(
     result
 }
 
-async fn stop_drain_timer(timer: Option<(CancellationToken, JoinHandle<()>)>) {
-    if let Some((token, handle)) = timer {
-        token.cancel();
-        drop(handle.await);
+async fn stop_drain_timer(timer: Option<LineTimer>) {
+    if let Some(timer) = timer {
+        timer.finish().await;
     }
 }
 
@@ -790,7 +876,7 @@ fn load_partial_configs_from_files(
         partials.push(cwd_config);
     }
 
-    // Load `$XDG_DATA_HOME/jp/<workspace_id>/config.{toml,json,yaml}`.
+    // Load `$XDG_DATA_HOME/jp/workspace/<name>-<id>/config.{toml,json,yaml}`.
     if let Some(user_workspace_config) = fs
         .and_then(|f| f.user_storage_with_path(config_path))
         .and_then(|p| load_partial_at_path(p).transpose())
@@ -908,14 +994,25 @@ const JP_CRATES: &[&str] = &[
 ];
 
 pub struct TracingGuard {
-    file: Option<NamedUtf8TempFile>,
+    sink: Option<TraceSink>,
+}
+
+/// Where the full trace log is written.
+enum TraceSink {
+    /// A delete-on-drop temp file, kept only when [`TracingGuard::persist`] is
+    /// called (a failed run, or `JP_DEBUG=1` with stdout on a terminal).
+    Temp(NamedUtf8TempFile),
+    /// A caller-chosen path (`--log-file <path>`).
+    /// The file always persists.
+    Path(Utf8PathBuf),
 }
 
 impl TracingGuard {
     fn persist(mut self) -> Option<Utf8PathBuf> {
-        self.file
-            .take()
-            .and_then(|file| file.keep().ok().map(|(_file, path)| path))
+        match self.sink.take()? {
+            TraceSink::Temp(file) => file.keep().ok().map(|(_file, path)| path),
+            TraceSink::Path(path) => Some(path),
+        }
     }
 }
 
@@ -964,8 +1061,21 @@ fn configure_logging(
     file_filter.push("plugin=trace".to_owned());
     let file_env_filter = tracing_subscriber::EnvFilter::new(file_filter.join(","));
 
-    let file = NamedUtf8TempFile::new().ok()?;
-    let file_writer = file.as_file().try_clone().ok()?;
+    // An explicit `--log-file <path>` pins the trace log to that path;
+    // otherwise it goes to a delete-on-drop temp file that is only kept when the
+    // run fails, or when `JP_DEBUG=1` is set and stdout is a terminal. (`-`
+    // selects the stderr layer below, not a file path.)
+    let (file_writer, sink) = match log_file {
+        Some(path) if path != "-" => {
+            let file = fs::File::create(path).ok()?;
+            (file, TraceSink::Path(Utf8PathBuf::from(path)))
+        }
+        _ => {
+            let file = NamedUtf8TempFile::new().ok()?;
+            let writer = file.as_file().try_clone().ok()?;
+            (writer, TraceSink::Temp(file))
+        }
+    };
 
     let file_layer = fmt::layer()
         .json()
@@ -1043,7 +1153,7 @@ fn configure_logging(
         registry.init();
     }
 
-    Some(TracingGuard { file: Some(file) })
+    Some(TracingGuard { sink: Some(sink) })
 }
 
 /// Get the number of worker threads to use.

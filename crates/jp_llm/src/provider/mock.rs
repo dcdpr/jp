@@ -24,6 +24,11 @@
 //! ]);
 //! ```
 
+use std::{
+    collections::VecDeque,
+    sync::{Arc, Mutex},
+};
+
 use async_trait::async_trait;
 use futures::stream;
 use jp_config::model::id::{ModelIdConfig, Name, ProviderId};
@@ -49,6 +54,11 @@ pub struct MockProvider {
     /// Events to return from the stream.
     events: Vec<Event>,
 
+    /// One event batch per request, consumed front to back.
+    ///
+    /// `None` means every request replays `events`.
+    batches: Option<Arc<Mutex<VecDeque<Vec<Event>>>>>,
+
     /// Model details to return.
     model: ModelDetails,
 }
@@ -63,6 +73,28 @@ impl MockProvider {
     pub fn new(events: Vec<Event>) -> Self {
         Self {
             events,
+            batches: None,
+            model: Self::default_model(),
+        }
+    }
+
+    /// Create a mock provider that returns a different event batch per request.
+    ///
+    /// Use this to script multi-request flows, such as a provider that asks the
+    /// caller to rebuild and resend before finally answering.
+    ///
+    /// # Panics
+    ///
+    /// [`chat_completion_stream`] panics once the batches are exhausted, so a
+    /// caller looping more times than the test scripted fails loudly instead of
+    /// silently replaying the last response.
+    ///
+    /// [`chat_completion_stream`]: Provider::chat_completion_stream
+    #[must_use]
+    pub fn with_batches(batches: Vec<Vec<Event>>) -> Self {
+        Self {
+            events: vec![],
+            batches: Some(Arc::new(Mutex::new(batches.into()))),
             model: Self::default_model(),
         }
     }
@@ -172,7 +204,15 @@ impl Provider for MockProvider {
         _model: &ModelDetails,
         _query: ChatQuery,
     ) -> Result<EventStream> {
-        let events = self.events.clone();
+        let events = match &self.batches {
+            None => self.events.clone(),
+            Some(batches) => batches
+                .lock()
+                .expect("mock batches lock")
+                .pop_front()
+                .expect("MockProvider received more requests than it has scripted batches"),
+        };
+
         Ok(Box::pin(stream::iter(events.into_iter().map(Ok))))
     }
 }

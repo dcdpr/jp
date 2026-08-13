@@ -8,22 +8,22 @@ use std::{
     fmt::Write as _,
     fs::{self},
     ops::{Deref, DerefMut},
-    time::Duration,
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
-use crossterm::style::{ContentStyle, Stylize as _};
 use fancy_regex::RegexBuilder;
 use jp_tool::{Capability, Outcome, Question};
 use serde::Deserialize;
 use serde_json::{Map, Value};
-use similar::{ChangeTag, TextDiff, udiff::UnifiedDiff};
+use similar::ChangeTag;
 
 use super::utils::{authorize, is_file_dirty_impl, resolve_workspace_path};
 use crate::{
     Context, Error,
     util::{
-        OneOrMany, ToolResult, error, fail,
+        OneOrMany, ToolResult,
+        diff::{colored_diff, text_diff, unified_diff},
+        error, fail,
         runner::{DuctProcessRunner, ProcessRunner},
     },
 };
@@ -72,7 +72,7 @@ fn fs_modify_file_impl<R: ProcessRunner>(
     }
 
     // Reject known overly-broad regex patterns.
-    if replace_using_regex && let Some(blocked) = find_blocked_regex_patterns(patterns) {
+    if let Some(blocked) = find_blocked_regex_patterns(patterns, replace_using_regex) {
         let list = blocked
             .iter()
             .map(|p| format!("`{p}`"))
@@ -102,7 +102,10 @@ fn fs_modify_file_impl<R: ProcessRunner>(
             None => vec![path.expect("validated above")],
         };
 
+        let use_regex = pattern.regex.unwrap_or(replace_using_regex);
         let mut applied_any = false;
+        let mut all_matched: BTreeMap<String, usize> = BTreeMap::new();
+        let mut invalid = None;
 
         for target in &targets {
             let resolved = match resolve_workspace_path(&ctx.root, target, ctx.access.as_ref()) {
@@ -128,20 +131,36 @@ fn fs_modify_file_impl<R: ProcessRunner>(
 
             let (_, current) = files.get_mut(&resolved.relative).unwrap();
             let contents = Content(current.clone());
-            let result = if replace_using_regex {
+            let result = if use_regex {
                 contents.replace_regexp(&pattern.old, &pattern.new, replace_all, case_sensitive)
             } else {
-                contents.replace_literal(&pattern.old, &pattern.new, replace_all, case_sensitive)
+                contents
+                    .replace_literal(&pattern.old, &pattern.new, replace_all, case_sensitive)
+                    .map(|content| Replacement {
+                        content,
+                        matched: BTreeMap::new(),
+                    })
             };
 
-            if let Ok(after) = result {
-                *current = after;
-                applied_any = true;
+            match result {
+                Ok(Replacement { content, matched }) => {
+                    *current = content;
+                    applied_any = true;
+                    for (text, count) in matched {
+                        *all_matched.entry(text).or_default() += count;
+                    }
+                }
+                Err(ReplaceError::NotFound) => {}
+                Err(ReplaceError::Invalid(msg)) => invalid = Some(msg),
             }
         }
 
         outcomes.push(if applied_any {
-            PatternOutcome::Applied
+            PatternOutcome::Applied {
+                matches: tally_matches(all_matched),
+            }
+        } else if let Some(msg) = invalid {
+            PatternOutcome::Invalid(msg)
         } else {
             PatternOutcome::NotFound
         });
@@ -209,16 +228,95 @@ pub(crate) struct Pattern {
     /// Overrides the root-level `path`.
     #[serde(default)]
     pub paths: Option<OneOrMany<String>>,
+
+    /// Optional per-pattern regex mode.
+    /// Overrides the call-level `replace_using_regex`.
+    #[serde(default)]
+    pub regex: Option<bool>,
 }
 
 /// Result of applying a single pattern.
 #[derive(Debug, PartialEq)]
 enum PatternOutcome {
     /// The pattern was found and replaced.
-    Applied,
+    Applied {
+        /// Distinct text the pattern bound to, with occurrence counts, most
+        /// frequent first.
+        ///
+        /// Only populated for regex patterns: a literal pattern matches itself,
+        /// so there is nothing the caller doesn't already know.
+        /// For a regex, this is the one thing the author can't see — what the
+        /// engine *actually* captured, as opposed to what the pattern was meant
+        /// to capture.
+        /// A quantifier that ran past its intended boundary shows up here as an
+        /// unexpected entry, before the diff has to be read.
+        matches: Vec<MatchTally>,
+    },
 
     /// The pattern was not found in the content.
     NotFound,
+
+    /// The pattern is not a valid regex.
+    Invalid(String),
+}
+
+/// One distinct matched string and how many times it was replaced.
+#[derive(Debug, PartialEq)]
+struct MatchTally {
+    text: String,
+    count: usize,
+}
+
+impl PatternOutcome {
+    /// An applied outcome that captured nothing, as a literal pattern always
+    /// does.
+    #[cfg(test)]
+    fn applied() -> Self {
+        Self::Applied { matches: vec![] }
+    }
+}
+
+/// A successful replacement: the new content, plus what the pattern matched.
+#[derive(Debug)]
+struct Replacement {
+    content: String,
+
+    /// Distinct matched strings, each with the number of occurrences replaced.
+    /// Empty for literal patterns.
+    ///
+    /// Keyed by the matched text rather than listing every occurrence, so a
+    /// pattern that matches a million times over a large file costs one entry
+    /// per distinct binding.
+    matched: BTreeMap<String, usize>,
+}
+
+/// Order `counts` most frequent first.
+///
+/// Ties break on the text so the report is deterministic.
+fn tally_matches(counts: BTreeMap<String, usize>) -> Vec<MatchTally> {
+    let mut tallies: Vec<MatchTally> = counts
+        .into_iter()
+        .map(|(text, count)| MatchTally { text, count })
+        .collect();
+
+    tallies.sort_by(|a, b| b.count.cmp(&a.count).then_with(|| a.text.cmp(&b.text)));
+    tallies
+}
+
+/// Why a replacement could not be performed.
+#[derive(Debug, PartialEq)]
+enum ReplaceError {
+    /// The pattern did not match the content.
+    NotFound,
+
+    /// The pattern could not be compiled or executed as a regex.
+    Invalid(String),
+}
+
+impl From<fancy_regex::Error> for ReplaceError {
+    fn from(err: fancy_regex::Error) -> Self {
+        Self::Invalid(err.to_string())
+    }
 }
 
 /// Validates the patterns for common errors.
@@ -282,40 +380,161 @@ fn validate_paths(default_path: Option<&str>, patterns: &[Pattern]) -> Result<()
 
 /// Formats a report of pattern outcomes.
 ///
-/// Returns empty string when there is a single pattern that succeeded.
-/// Shows a summary when there are multiple patterns, and details which patterns
-/// were not found.
+/// Returns empty string when a single literal pattern succeeded and there is
+/// nothing to say.
+/// Shows a summary when there are multiple patterns, details which patterns
+/// were not found or invalid, and lists what each regex pattern matched.
 fn format_pattern_report(patterns: &[Pattern], outcomes: &[PatternOutcome]) -> String {
     let total = outcomes.len();
     let applied = outcomes
         .iter()
-        .filter(|o| matches!(o, PatternOutcome::Applied))
+        .filter(|o| matches!(o, PatternOutcome::Applied { .. }))
         .count();
-    let failed: Vec<_> = patterns
+    let not_found: Vec<_> = patterns
         .iter()
         .zip(outcomes.iter())
         .enumerate()
         .filter(|(_, (_, o))| matches!(o, PatternOutcome::NotFound))
         .collect();
+    let invalid: Vec<_> = patterns
+        .iter()
+        .zip(outcomes.iter())
+        .enumerate()
+        .filter_map(|(i, (p, o))| match o {
+            PatternOutcome::Invalid(msg) => Some((i, p, msg)),
+            _ => None,
+        })
+        .collect();
 
-    // Single pattern, succeeded: no report.
-    if failed.is_empty() && total <= 1 {
+    let matched = format_matched(patterns, outcomes);
+
+    // Single pattern, succeeded, nothing captured worth reporting: no report.
+    if applied == total && total <= 1 && matched.is_empty() {
         return String::new();
     }
 
-    // All succeeded, multiple patterns: brief summary.
-    if failed.is_empty() {
-        return format!("{applied}/{total} patterns applied.");
+    // All succeeded: summary, plus whatever the regexes captured.
+    if applied == total {
+        let mut report = if total <= 1 {
+            String::new()
+        } else {
+            format!("{applied}/{total} patterns applied.")
+        };
+        if !matched.is_empty() {
+            if !report.is_empty() {
+                report.push_str("\n\n");
+            }
+            report.push_str(&matched);
+        }
+        return report;
     }
 
     // Some or all failed: detailed report.
-    let mut report = format!("{applied}/{total} patterns applied.\n\nPatterns not found:");
-    for (i, (pattern, _)) in &failed {
-        let preview = pattern_preview(&pattern.old);
-        report.push_str(&format!("\n  #{}: `{preview}`", i + 1));
+    let mut report = format!("{applied}/{total} patterns applied.");
+
+    if !matched.is_empty() {
+        report.push_str("\n\n");
+        report.push_str(&matched);
+    }
+
+    if !not_found.is_empty() {
+        report.push_str("\n\nPatterns not found:");
+        for (i, (pattern, _)) in &not_found {
+            let preview = pattern_preview(&pattern.old);
+            report.push_str(&format!("\n  #{}: `{preview}`", i + 1));
+        }
+    }
+
+    if !invalid.is_empty() {
+        report.push_str("\n\nInvalid regex patterns:");
+        for (i, pattern, msg) in &invalid {
+            let preview = pattern_preview(&pattern.old);
+            report.push_str(&format!("\n  #{}: `{preview}`\n      {msg}", i + 1));
+        }
     }
 
     report
+}
+
+/// Maximum distinct matched strings listed per pattern.
+///
+/// A pattern that binds to more shapes than this has already told the reader
+/// what they need to know.
+const MAX_REPORTED_MATCHES: usize = 8;
+
+/// Lists what each regex pattern actually matched.
+///
+/// Empty when no pattern captured anything, which is every literal-only call.
+/// This is the part a regex author can't otherwise see: the pattern says what
+/// was intended and the diff says what resulted, but only this says what the
+/// engine bound — so a quantifier that ate past its boundary is visible here
+/// without reading a single diff hunk.
+fn format_matched(patterns: &[Pattern], outcomes: &[PatternOutcome]) -> String {
+    let mut sections = Vec::new();
+
+    for (i, (pattern, outcome)) in patterns.iter().zip(outcomes.iter()).enumerate() {
+        let PatternOutcome::Applied { matches } = outcome else {
+            continue;
+        };
+        if matches.is_empty() {
+            continue;
+        }
+
+        let preview = pattern_preview(&pattern.old);
+        let mut section = format!("Pattern #{} `{preview}` matched:", i + 1);
+        for tally in matches.iter().take(MAX_REPORTED_MATCHES) {
+            let text = match_preview(&tally.text);
+            let _ = write!(section, "\n  {text}");
+            if tally.count > 1 {
+                let _ = write!(section, " ×{}", tally.count);
+            }
+        }
+        if matches.len() > MAX_REPORTED_MATCHES {
+            let _ = write!(
+                section,
+                "\n  …and {} more distinct match(es)",
+                matches.len() - MAX_REPORTED_MATCHES
+            );
+        }
+
+        sections.push(section);
+    }
+
+    sections.join("\n\n")
+}
+
+/// Maximum characters of a matched string rendered in full.
+const MATCH_PREVIEW_CHARS: usize = 60;
+
+/// Characters kept from the start of an elided matched string.
+const MATCH_PREVIEW_HEAD_CHARS: usize = 40;
+
+/// Characters kept from the end of an elided matched string.
+const MATCH_PREVIEW_TAIL_CHARS: usize = 16;
+
+/// Renders a matched string as a single quoted line.
+///
+/// Line breaks and other control characters are escaped, so a match spanning
+/// several lines stays on one line and two matches differing only past their
+/// first line render differently.
+/// Longer matches keep both ends and carry their character count, which keeps
+/// the tail an over-running quantifier produced visible.
+fn match_preview(s: &str) -> String {
+    let count = s.chars().count();
+    if count <= MATCH_PREVIEW_CHARS {
+        return format!("\"{}\"", s.escape_debug());
+    }
+
+    // Split on source characters rather than escaped ones, so an escape
+    // sequence is never cut in half.
+    let head: String = s.chars().take(MATCH_PREVIEW_HEAD_CHARS).collect();
+    let tail: String = s.chars().skip(count - MATCH_PREVIEW_TAIL_CHARS).collect();
+
+    format!(
+        "\"{}\" … \"{}\" ({count} chars)",
+        head.escape_debug(),
+        tail.escape_debug()
+    )
 }
 
 /// Returns a short preview of a pattern string (first line, max 60 chars).
@@ -361,11 +580,15 @@ const BROAD_CHANGE_MIN_LINES: usize = 10;
 /// or replaced.
 const BROAD_CHANGE_MAX_PERCENT: usize = 50;
 
-/// Returns the subset of patterns whose `old` field is a known overly-broad
-/// regex.
-fn find_blocked_regex_patterns(patterns: &[Pattern]) -> Option<Vec<&str>> {
+/// Returns the subset of regex-mode patterns whose `old` field is a known
+/// overly-broad regex.
+///
+/// `default_regex` is the call-level regex mode, used for patterns that do not
+/// set their own `regex` flag.
+fn find_blocked_regex_patterns(patterns: &[Pattern], default_regex: bool) -> Option<Vec<&str>> {
     let matches = patterns
         .iter()
+        .filter(|p| p.regex.unwrap_or(default_regex))
         .map(|p| p.old.trim())
         .filter(|old| BLOCKED_REGEX_PATTERNS.contains(old))
         .collect::<Vec<_>>();
@@ -527,7 +750,7 @@ impl Content {
         replace: &str,
         replace_all: bool,
         case_sensitive: bool,
-    ) -> std::result::Result<String, Error> {
+    ) -> Result<String, ReplaceError> {
         if case_sensitive {
             self.replace_literal_sensitive(find, replace, replace_all)
         } else {
@@ -540,11 +763,11 @@ impl Content {
         find: &str,
         replace: &str,
         replace_all: bool,
-    ) -> std::result::Result<String, Error> {
+    ) -> Result<String, ReplaceError> {
         // Find the first occurrence to determine the effective match.
         let (first_start, first_end) = self
             .find_pattern_range(find)
-            .ok_or("Cannot find pattern to replace")?;
+            .ok_or(ReplaceError::NotFound)?;
 
         if !replace_all {
             let mut result = String::with_capacity(self.0.len());
@@ -577,7 +800,7 @@ impl Content {
         find: &str,
         replace: &str,
         replace_all: bool,
-    ) -> std::result::Result<String, Error> {
+    ) -> Result<String, ReplaceError> {
         // Case-insensitive literal search: use regex with escaped pattern.
         let escaped = fancy_regex::escape(find);
         let re = RegexBuilder::new(&escaped)
@@ -587,7 +810,7 @@ impl Content {
             .build()?;
 
         if !re.is_match(&self.0)? {
-            return Err("Cannot find pattern to replace".into());
+            return Err(ReplaceError::NotFound);
         }
 
         let replaced = if replace_all {
@@ -600,13 +823,17 @@ impl Content {
     }
 
     /// Replace occurrences of a regex pattern.
+    ///
+    /// The returned [`Replacement`] carries the text each match bound to, so a
+    /// caller can report what the pattern captured rather than only what it
+    /// produced.
     fn replace_regexp(
         &self,
         find: &str,
         replace: &str,
         replace_all: bool,
         case_sensitive: bool,
-    ) -> std::result::Result<String, Error> {
+    ) -> Result<Replacement, ReplaceError> {
         let re = RegexBuilder::new(find)
             .case_insensitive(!case_sensitive)
             .multi_line(true)
@@ -614,13 +841,38 @@ impl Content {
             .unicode_mode(true)
             .build()?;
 
-        let result = if replace_all {
+        if !re.is_match(&self.0)? {
+            return Err(ReplaceError::NotFound);
+        }
+
+        // Counted before replacing, and bounded the same way the replacement is:
+        // with `replace_all` off only the first match is rewritten, so only the
+        // first is counted. Tallying borrowed slices keeps the cost at one entry
+        // per distinct match, so a single-character pattern over a large file
+        // doesn't allocate per occurrence.
+        let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+        for found in re.find_iter(&self.0) {
+            *counts.entry(found?.as_str()).or_default() += 1;
+            if !replace_all {
+                break;
+            }
+        }
+
+        let matched: BTreeMap<String, usize> = counts
+            .into_iter()
+            .map(|(text, count)| (text.to_owned(), count))
+            .collect();
+
+        let content = if replace_all {
             re.replace_all(&self.0, replace)
         } else {
             re.replace(&self.0, replace)
         };
 
-        Ok(result.to_string())
+        Ok(Replacement {
+            content: content.to_string(),
+            matched,
+        })
     }
 }
 
@@ -822,134 +1074,6 @@ fn apply_changes<R: ProcessRunner>(
         patch
     )
     .into())
-}
-
-/// Formats a line number as a right-aligned string of the given width, or blank
-/// spaces if the index is `None`.
-fn fmt_line_num(index: Option<usize>, width: usize) -> String {
-    match index {
-        Some(idx) => format!("{:>width$}", idx + 1),
-        None => " ".repeat(width),
-    }
-}
-
-fn text_diff<'old, 'new, 'bufs>(
-    old: &'old str,
-    new: &'new str,
-) -> TextDiff<'old, 'new, 'bufs, str> {
-    similar::TextDiff::configure()
-        .algorithm(similar::Algorithm::Patience)
-        .timeout(Duration::from_secs(2))
-        .diff_lines(old, new)
-}
-
-fn unified_diff<'diff, 'old, 'new, 'bufs>(
-    diff: &'diff TextDiff<'old, 'new, 'bufs, str>,
-    file: &str,
-) -> UnifiedDiff<'diff, 'old, 'new, 'bufs, str> {
-    let mut unified = diff.unified_diff();
-    unified.context_radius(3).header(file, file);
-    unified
-}
-
-fn colored_diff<'old, 'new, 'diff: 'old + 'new, 'bufs>(
-    diff: &'diff TextDiff<'old, 'new, 'bufs, str>,
-    unified: &UnifiedDiff<'diff, 'old, 'new, 'bufs, str>,
-    path: &str,
-) -> String {
-    let mut buf = String::new();
-
-    let (additions, deletions) =
-        diff.iter_all_changes()
-            .fold((0, 0), |(mut add, mut del), change| {
-                if matches!(change.tag(), ChangeTag::Delete) {
-                    del += 1;
-                } else if matches!(change.tag(), ChangeTag::Insert) {
-                    add += 1;
-                }
-                (add, del)
-            });
-
-    // Dynamic number column width based on the largest line number.
-    let max_line = diff.old_slices().len().max(diff.new_slices().len()).max(1);
-    let nw = max_line.to_string().len();
-
-    // Build stats: deletions first (left column = red), additions second (right = green).
-    let mut stats_plain = String::new();
-    let mut stats_colored = String::new();
-    if deletions > 0 {
-        stats_plain.push_str(&format!("-{deletions}"));
-        stats_colored.push_str(format!("-{deletions}").red().to_string().as_str());
-    }
-    if additions > 0 {
-        if !stats_plain.is_empty() {
-            stats_plain.push(',');
-            stats_colored.push(',');
-        }
-        stats_plain.push_str(&format!("+{additions}"));
-        stats_colored.push_str(format!("+{additions}").green().to_string().as_str());
-    }
-    let stats_width = stats_plain.len();
-
-    // Unified column where │ sits. Enough room for two right-aligned number
-    // columns plus a separator space, or the stats text plus a leading space.
-    let line_nums_width = 2 * nw + 1;
-    let pipe_col = (line_nums_width + 1).max(stats_width + 1);
-
-    // Header: stats line + separator.
-    let stats_pad = " ".repeat(pipe_col - stats_width - 1);
-    let header_line = format!("{stats_pad}{stats_colored} │ {}\n", path.bold());
-    let separator = format!("{}┼{}\n", "─".repeat(pipe_col), "─".repeat(path.len() + 2));
-    buf.push_str(&header_line);
-    buf.push_str(&separator);
-
-    // Hunks, with an ellipsis separator between non-contiguous regions.
-    let num_pad = " ".repeat(pipe_col - line_nums_width);
-    let mut first_hunk = true;
-    for hunk in unified.iter_hunks() {
-        if !first_hunk {
-            let _ = writeln!(&mut buf, "{}│ …", " ".repeat(pipe_col));
-        }
-        first_hunk = false;
-
-        for op in hunk.ops() {
-            for change in diff.iter_inline_changes(op) {
-                let (sign, s) = match change.tag() {
-                    ChangeTag::Delete => ("-", ContentStyle::new().red()),
-                    ChangeTag::Insert => ("+", ContentStyle::new().green()),
-                    ChangeTag::Equal => (" ", ContentStyle::new().dim()),
-                };
-
-                let old = fmt_line_num(change.old_index(), nw);
-                let new = fmt_line_num(change.new_index(), nw);
-
-                let _ = write!(
-                    &mut buf,
-                    "{} {}{}│{}",
-                    s.apply(old),
-                    s.apply(new),
-                    num_pad,
-                    s.apply(sign).bold(),
-                );
-                for (emphasized, value) in change.iter_strings_lossy() {
-                    if emphasized {
-                        let _ = write!(&mut buf, "{}", s.apply(value).underlined().on_black());
-                    } else {
-                        let _ = write!(&mut buf, "{}", s.apply(value));
-                    }
-                }
-                if change.missing_newline() {
-                    buf.push('\n');
-                }
-            }
-        }
-    }
-
-    // Footer: separator + stats (mirrored header for long diffs).
-    buf.push_str(&separator);
-    buf.push_str(&header_line);
-
-    buf
 }
 
 #[cfg(test)]

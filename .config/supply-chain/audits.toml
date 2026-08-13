@@ -171,6 +171,11 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.38.4 -> 0.39.2"
 
+[[audits.quick-xml]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.39.2 -> 0.41.0"
+
 [[audits.ra-ap-rustc_lexer]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"

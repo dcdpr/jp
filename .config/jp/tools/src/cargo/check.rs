@@ -2,21 +2,43 @@ use std::collections::BTreeSet;
 
 use jp_tool::Context;
 
+use super::MAX_DIAGNOSTIC_BYTES;
 use crate::util::{
     ToolResult, error,
     runner::{DuctProcessRunner, ProcessOutput, ProcessRunner},
+    truncate,
 };
 
-pub(crate) async fn cargo_check(ctx: &Context, package: Option<String>) -> ToolResult {
-    cargo_check_impl(ctx, package.as_deref(), &DuctProcessRunner)
+pub(crate) async fn cargo_check(
+    ctx: &Context,
+    package: Option<String>,
+    checksum_freshness: bool,
+) -> ToolResult {
+    cargo_check_impl(
+        ctx,
+        package.as_deref(),
+        checksum_freshness,
+        &DuctProcessRunner,
+    )
 }
 
 fn cargo_check_impl<R: ProcessRunner>(
     ctx: &Context,
     package: Option<&str>,
+    checksum_freshness: bool,
     runner: &R,
 ) -> ToolResult {
     let clippy_scope = package.map_or("--workspace".to_owned(), |v| format!("--package={v}"));
+
+    // Prevent warnings from being treated as errors, e.g. on CI.
+    let mut env = vec![("RUSTFLAGS", "-W warnings")];
+    if checksum_freshness {
+        // Use content checksums instead of file mtimes for cargo's freshness
+        // checks, so that sibling checkouts (git worktrees) sharing a target
+        // dir cannot serve each other's stale artifacts. Matches CI. Requires
+        // nightly cargo. See rust-lang/cargo#14136.
+        env.push(("CARGO_UNSTABLE_CHECKSUM_FRESHNESS", "true"));
+    }
 
     let ProcessOutput { stderr, status, .. } = runner.run_with_env(
         "cargo",
@@ -26,36 +48,55 @@ fn cargo_check_impl<R: ProcessRunner>(
             &clippy_scope,
             "--quiet",
             "--all-targets",
+            // Matches `just lint-ci`. Code behind an optional feature is not
+            // compiled without this, so its lints surface only on CI.
+            "--all-features",
         ],
         &ctx.root,
-        // Prevent warnings from being treated as errors, e.g. on CI.
-        &[("RUSTFLAGS", "-W warnings")],
+        &env,
     )?;
 
     if !status.is_success() {
-        return error(format!("Cargo command failed: {stderr}"));
+        return error(format!(
+            "Cargo command failed: {}",
+            truncate(&stderr, MAX_DIAGNOSTIC_BYTES)
+        ));
     }
 
     // Strip ANSI escape codes
     let clippy = strip_ansi_escapes::strip_str(stderr);
-    let clippy = clippy.trim();
+    let clippy = truncate(clippy.trim(), MAX_DIAGNOSTIC_BYTES);
 
     let comfort_note = match comfort_check(ctx, package, runner)? {
         ComfortCheck::Clean => None,
         ComfortCheck::Drift(note) => Some(note),
-        ComfortCheck::Failed(stderr) => return error(format!("comfort failed: {stderr}")),
+        ComfortCheck::Failed(stderr) => {
+            return error(format!(
+                "comfort failed: {}",
+                truncate(&stderr, MAX_DIAGNOSTIC_BYTES)
+            ));
+        }
     };
 
-    let clippy_section = if clippy.is_empty() {
-        "Check succeeded. No warnings or errors found.".to_owned()
+    let Some(note) = comfort_note else {
+        return Ok(if clippy.is_empty() {
+            "Check succeeded. No warnings or errors found."
+                .to_owned()
+                .into()
+        } else {
+            format!("```\n{clippy}\n```\n").into()
+        });
+    };
+
+    // The header is scoped to what clippy alone found. A bare "Check succeeded"
+    // would contradict the drift note that follows.
+    let header = if clippy.is_empty() {
+        "`cargo clippy` found no warnings or errors.".to_owned()
     } else {
-        format!("```\n{clippy}\n```\n")
+        format!("```\n{clippy}\n```")
     };
 
-    match comfort_note {
-        Some(note) => Ok(format!("{}\n\n{note}", clippy_section.trim_end()).into()),
-        None => Ok(clippy_section.into()),
-    }
+    Ok(format!("{header}\n\n{note}").into())
 }
 
 enum ComfortCheck {
@@ -124,7 +165,8 @@ fn comfort_check<R: ProcessRunner>(
     let listing = files.into_iter().collect::<Vec<_>>().join("\n- ");
     Ok(ComfortCheck::Drift(format!(
         "Doc comments in the following files are badly formatted. Run `cargo_fmt` to auto-fix \
-         them:\n- {listing}"
+         them:\n- {}",
+        truncate(&listing, MAX_DIAGNOSTIC_BYTES)
     )))
 }
 

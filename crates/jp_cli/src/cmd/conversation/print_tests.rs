@@ -3,7 +3,8 @@ use std::time::Duration;
 use camino_tempfile::tempdir;
 use chrono::{DateTime, TimeZone as _, Utc};
 use jp_config::{
-    AppConfig,
+    AppConfig, PartialAppConfig,
+    conversation::tool::style::{InlineResults, LinkStyle, ParametersStyle},
     style::reasoning::{ReasoningDisplayConfig, TruncateChars},
 };
 use jp_conversation::{
@@ -96,6 +97,81 @@ fn prints_user_message() {
     result.unwrap();
     let output = out.lock().clone();
     assert!(output.contains("Hello world"), "got: {output}");
+}
+
+/// Replay joins consecutive stored reasoning events into one region, so text
+/// broken mid-word across two events renders as a single word.
+///
+/// This is Anthropic's redaction shape as it lands on disk: a thinking block,
+/// an opaque `redacted_thinking` block stored as a reasoning event with no
+/// text, and the thinking continuing in the event after it.
+#[test]
+fn prints_reasoning_events_split_by_a_redacted_event_as_one_region() {
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = None;
+
+    let (mut ctx, id, out, _err, _rt) = setup_ctx_with_config(config, vec![
+        ConversationEvent::new(
+            ChatResponse::reasoning("I can test this directly by ver"),
+            ts(0, 0, 0),
+        ),
+        ConversationEvent::new(ChatResponse::reasoning(""), ts(0, 0, 1)),
+        ConversationEvent::new(
+            ChatResponse::reasoning("ifying the return value."),
+            ts(0, 0, 2),
+        ),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        range: TurnRange::from_last_turn(None, None),
+        current_config: false,
+        style: None,
+        compacted: false,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let result = print.run(&mut ctx, &[h]);
+    ctx.printer.flush();
+
+    result.unwrap();
+    let output = strip_ansi(&out.lock());
+    assert!(
+        output.contains("I can test this directly by verifying the return value."),
+        "stored reasoning events must render as one region, got: {output:?}"
+    );
+}
+
+/// A blank line stored inside the reasoning text splits it into two blocks,
+/// whether it arrived as its own event or inside one.
+#[test]
+fn prints_reasoning_separator_as_a_block_break() {
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = None;
+
+    let (mut ctx, id, out, _err, _rt) = setup_ctx_with_config(config, vec![
+        ConversationEvent::new(ChatResponse::reasoning("First section."), ts(0, 0, 0)),
+        ConversationEvent::new(ChatResponse::reasoning("\n\nSecond section."), ts(0, 0, 1)),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        range: TurnRange::from_last_turn(None, None),
+        current_config: false,
+        style: None,
+        compacted: false,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let result = print.run(&mut ctx, &[h]);
+    ctx.printer.flush();
+
+    result.unwrap();
+    let output = strip_ansi(&out.lock());
+    assert!(
+        output.contains("First section.\n\nSecond section."),
+        "a stored separator must break the region into blocks, got: {output:?}"
+    );
 }
 
 #[test]
@@ -363,6 +439,47 @@ fn structured_response_followed_by_message_closes_fence_first() {
     assert!(
         welcome_idx > close_idx,
         "trailing message must render after the JSON fence is closed; output: {output:?}"
+    );
+}
+
+/// Each structured response is a self-contained block, so two consecutive
+/// structured events render as two complete `json` fences rather than both
+/// values being appended inside the first one as `}{`.
+#[test]
+fn prints_consecutive_structured_events_as_separate_fences() {
+    let (mut ctx, id, out, _err, _rt) = setup_ctx(vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("Extract"), ts(0, 0, 1)),
+        ConversationEvent::new(
+            ChatResponse::structured(json!({"name": "Alice"})),
+            ts(0, 0, 2),
+        ),
+        ConversationEvent::new(
+            ChatResponse::structured(json!({"name": "Bob"})),
+            ts(0, 0, 3),
+        ),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        range: TurnRange::from_last_turn(None, None),
+        current_config: false,
+        style: None,
+        compacted: false,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let output = strip_ansi(&out.lock());
+    assert_eq!(
+        output.matches("```json").count(),
+        2,
+        "each structured event opens its own fence, got: {output:?}"
+    );
+    assert!(
+        !output.contains("}{"),
+        "the second value must not be appended inside the first fence, got: {output:?}"
     );
 }
 
@@ -1329,6 +1446,99 @@ fn role_header_renders_assistant_label_with_model_suffix() {
     );
 }
 
+/// A two-turn conversation whose model changed between the turns: turn 1 ran on
+/// `anthropic/test` (the conversation's base config), turn 2 on
+/// `openai/gpt-4o`.
+fn two_turns_with_model_switch() -> (Ctx, ConversationId, SharedBuffer, SharedBuffer, Runtime) {
+    let (ctx, id, out, err, rt) = setup_ctx(vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("first"), ts(0, 0, 1)),
+        ConversationEvent::new(ChatResponse::message("one"), ts(0, 0, 2)),
+    ]);
+
+    let mut delta = PartialAppConfig::empty();
+    delta.assistant.model.id = "openai/gpt-4o".into();
+
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let lock = ctx.workspace.test_lock(h);
+    lock.as_mut().update_events(|e| {
+        e.add_config_delta(delta);
+        e.extend(vec![
+            ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+            ConversationEvent::new(ChatRequest::from("second"), ts(0, 1, 1)),
+            ConversationEvent::new(ChatResponse::message("two"), ts(0, 1, 2)),
+        ]);
+    });
+
+    (ctx, id, out, err, rt)
+}
+
+fn print_with_style(style: Option<PrintStyle>, id: ConversationId) -> Print {
+    Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        range: TurnRange::from_last_turn(None, None),
+        current_config: false,
+        style,
+        compacted: false,
+    }
+}
+
+#[test]
+fn assistant_header_names_the_model_each_turn_ran_on() {
+    let (mut ctx, id, out, _err, _rt) = two_turns_with_model_switch();
+
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print_with_style(None, id).run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let output = strip_ansi(&out.lock());
+    assert!(
+        output.contains("── jp (anthropic/test) ") && output.contains("── jp (openai/gpt-4o) "),
+        "each turn should name its own model, got: {output:?}"
+    );
+}
+
+/// A `--style` preset overrides presentation only.
+/// It must not swap the per-turn config out for the current workspace config,
+/// which would label every turn with the model configured right now.
+#[test]
+fn style_preset_keeps_the_per_turn_model_in_the_assistant_header() {
+    let (mut ctx, id, out, _err, _rt) = two_turns_with_model_switch();
+
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print_with_style(Some(PrintStyle::Full), id)
+        .run(&mut ctx, &[h])
+        .unwrap();
+    ctx.printer.flush();
+
+    let output = strip_ansi(&out.lock());
+    assert!(
+        output.contains("── jp (anthropic/test) ") && output.contains("── jp (openai/gpt-4o) "),
+        "each turn should name its own model, got: {output:?}"
+    );
+}
+
+/// `--current-config` is the documented opt-out: it renders every turn with the
+/// workspace config, so both turns carry that model.
+#[test]
+fn current_config_labels_every_turn_with_the_workspace_model() {
+    let (mut ctx, id, out, _err, _rt) = two_turns_with_model_switch();
+
+    let mut print = print_with_style(None, id);
+    print.current_config = true;
+
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let output = strip_ansi(&out.lock());
+    assert_eq!(
+        output.matches("── jp (anthropic/test) ").count(),
+        2,
+        "both turns should use the workspace model, got: {output:?}"
+    );
+}
+
 #[test]
 fn role_header_assistant_appears_once_per_turn() {
     let (mut ctx, id, out, _err, _rt) = setup_ctx(vec![
@@ -1609,5 +1819,275 @@ fn style_full_shows_reasoning_and_untruncated_results() {
     assert!(
         output.contains("Here are the contents."),
         "message should still show, got: {output}"
+    );
+}
+
+/// A tool call replayed after a reasoning block continues the reasoning region,
+/// so its chrome (stderr) carries the reasoning background.
+/// `AppConfig::new_test` defaults `style.reasoning.background` to ANSI 236 and
+/// `display` to `full`.
+#[test]
+fn replay_shades_tool_chrome_after_reasoning() {
+    let (mut ctx, id, _out, err, _rt) = setup_ctx(vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("read it"), ts(0, 0, 1)),
+        ConversationEvent::new(
+            ChatResponse::reasoning("Let me check the file.\n\n"),
+            ts(0, 0, 2),
+        ),
+        ConversationEvent::new(
+            ToolCallRequest {
+                id: "tc1".into(),
+                name: "read_file".into(),
+                arguments: Map::from_iter([("path".into(), json!("a.rs"))]),
+            },
+            ts(0, 0, 3),
+        ),
+        ConversationEvent::new(
+            ToolCallResponse {
+                id: "tc1".into(),
+                result: Ok("contents".into()),
+            },
+            ts(0, 0, 4),
+        ),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        range: TurnRange::from_last_turn(None, None),
+        current_config: false,
+        style: None,
+        compacted: false,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let chrome = err.lock().clone();
+    assert!(
+        chrome.contains("\x1b[48;5;236m"),
+        "replayed tool chrome should carry the reasoning background, got: {chrome:?}"
+    );
+}
+
+/// With `style.reasoning.extend_across_tool_calls` disabled, replay restores
+/// the per-block behaviour: the tool chrome is not shaded even when it follows
+/// reasoning.
+#[test]
+fn replay_does_not_shade_tool_chrome_when_extension_disabled() {
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.extend_across_tool_calls = false;
+    let (mut ctx, id, _out, err, _rt) = setup_ctx_with_config(config, vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("read it"), ts(0, 0, 1)),
+        ConversationEvent::new(
+            ChatResponse::reasoning("Let me check the file.\n\n"),
+            ts(0, 0, 2),
+        ),
+        ConversationEvent::new(
+            ToolCallRequest {
+                id: "tc1".into(),
+                name: "read_file".into(),
+                arguments: Map::from_iter([("path".into(), json!("a.rs"))]),
+            },
+            ts(0, 0, 3),
+        ),
+        ConversationEvent::new(
+            ToolCallResponse {
+                id: "tc1".into(),
+                result: Ok("contents".into()),
+            },
+            ts(0, 0, 4),
+        ),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        range: TurnRange::from_last_turn(None, None),
+        current_config: false,
+        style: None,
+        compacted: false,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let chrome = err.lock().clone();
+    assert!(
+        !chrome.contains("\x1b[48;5;236m"),
+        "tool chrome must stay unshaded with the extension disabled, got: {chrome:?}"
+    );
+}
+
+/// With `style.tool_call.show = false`, replay suppresses tool chrome entirely,
+/// matching the live path.
+/// Before the predicate was wired into `TurnRenderer`, `jp conversation print`
+/// ignored `show` and always rendered the chrome.
+#[test]
+fn replay_suppresses_tool_chrome_when_show_disabled() {
+    let mut config = AppConfig::new_test();
+    config.style.tool_call.show = false;
+    let (mut ctx, id, _out, err, _rt) = setup_ctx_with_config(config, vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("read it"), ts(0, 0, 1)),
+        ConversationEvent::new(
+            ChatResponse::reasoning("Let me check the file.\n\n"),
+            ts(0, 0, 2),
+        ),
+        ConversationEvent::new(
+            ToolCallRequest {
+                id: "tc1".into(),
+                name: "read_file".into(),
+                arguments: Map::from_iter([("path".into(), json!("a.rs"))]),
+            },
+            ts(0, 0, 3),
+        ),
+        ConversationEvent::new(
+            ToolCallResponse {
+                id: "tc1".into(),
+                result: Ok("contents".into()),
+            },
+            ts(0, 0, 4),
+        ),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        range: TurnRange::from_last_turn(None, None),
+        current_config: false,
+        style: None,
+        compacted: false,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let chrome = err.lock().clone();
+    assert!(
+        !chrome.contains("Calling tool"),
+        "tool chrome must be suppressed when style.tool_call.show is false, got: {chrome:?}"
+    );
+}
+
+/// A tool result that rendered visible output owes a blank line before the next
+/// tool header, and a reasoning chunk that renders nothing must not cancel that
+/// debt.
+///
+/// `reasoning -> tool call -> visible result -> Reasoning("\n\n") -> tool
+/// call`: the whitespace-only chunk is the interleaved-thinking filler the LLM
+/// emits between tool calls.
+/// It puts nothing on screen, so it supplies no spacing of its own and the
+/// result stays separated from the following header.
+#[test]
+fn replay_keeps_the_gap_after_a_result_when_reasoning_renders_nothing() {
+    // `parameters = off` and `results_file_link = off` keep the chrome free of
+    // the nondeterministic temp-file path, so the whole stream can be asserted.
+    let mut config = AppConfig::new_test();
+    config.conversation.tools.defaults.style.parameters = ParametersStyle::Off;
+    config.conversation.tools.defaults.style.inline_results = InlineResults::Full;
+    config.conversation.tools.defaults.style.results_file_link = LinkStyle::Off;
+
+    let (mut ctx, id, _out, err, _rt) = setup_ctx_with_config(config, vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("read it"), ts(0, 0, 1)),
+        ConversationEvent::new(
+            ChatResponse::reasoning("Let me check the file.\n\n"),
+            ts(0, 0, 2),
+        ),
+        ConversationEvent::new(
+            ToolCallRequest {
+                id: "tc1".into(),
+                name: "read_file".into(),
+                arguments: Map::from_iter([("path".into(), json!("a.rs"))]),
+            },
+            ts(0, 0, 3),
+        ),
+        ConversationEvent::new(
+            ToolCallResponse {
+                id: "tc1".into(),
+                result: Ok("contents".into()),
+            },
+            ts(0, 0, 4),
+        ),
+        ConversationEvent::new(ChatResponse::reasoning("\n\n"), ts(0, 0, 5)),
+        ConversationEvent::new(
+            ToolCallRequest {
+                id: "tc2".into(),
+                name: "read_file".into(),
+                arguments: Map::from_iter([("path".into(), json!("b.rs"))]),
+            },
+            ts(0, 0, 6),
+        ),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        range: TurnRange::from_last_turn(None, None),
+        current_config: false,
+        style: None,
+        compacted: false,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let chrome = err.lock().clone();
+    assert_eq!(
+        strip_ansi(&chrome),
+        "Calling tool read_file\n\ncontents\n\nCalling tool read_file\n",
+        "got: {chrome:?}"
+    );
+}
+
+/// A reasoning region must not leak across turns.
+/// `--current-config` (`ConfigSource::Fixed`) skips the per-turn renderer
+/// rebuild, so a single `ChatRenderer` persists across turns: a turn that ends
+/// with reasoning followed by a turn that opens with a tool call must still
+/// render that tool's chrome unshaded.
+#[test]
+fn replay_does_not_leak_reasoning_region_across_turns() {
+    let (mut ctx, id, _out, err, _rt) = setup_ctx(vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("think about it"), ts(0, 0, 1)),
+        ConversationEvent::new(ChatResponse::reasoning("Deep thought.\n\n"), ts(0, 0, 2)),
+        ConversationEvent::new(TurnStart, ts(0, 0, 3)),
+        ConversationEvent::new(ChatRequest::from("now act"), ts(0, 0, 4)),
+        ConversationEvent::new(
+            ToolCallRequest {
+                id: "tc1".into(),
+                name: "read_file".into(),
+                arguments: Map::from_iter([("path".into(), json!("a.rs"))]),
+            },
+            ts(0, 0, 5),
+        ),
+        ConversationEvent::new(
+            ToolCallResponse {
+                id: "tc1".into(),
+                result: Ok("contents".into()),
+            },
+            ts(0, 0, 6),
+        ),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        range: TurnRange::from_last_turn(Some(2), None),
+        current_config: true,
+        style: None,
+        compacted: false,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let chrome = err.lock().clone();
+    assert!(
+        chrome.contains("Calling tool"),
+        "the tool chrome itself should render, got: {chrome:?}"
+    );
+    assert!(
+        !chrome.contains("\x1b[48;5;236m"),
+        "a tool call opening a new turn must not carry the previous turn's reasoning background, \
+         got: {chrome:?}"
     );
 }

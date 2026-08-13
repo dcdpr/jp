@@ -146,8 +146,10 @@ impl IntoPartialAppConfig for Commands {
             Commands::AttachmentAdd(args) => {
                 args.apply_cli_config(workspace, partial, merged_config)
             }
+            Commands::Conversation(args) => {
+                args.apply_cli_config(workspace, partial, merged_config)
+            }
             Commands::Config(_)
-            | Commands::Conversation(_)
             | Commands::Init(_)
             | Commands::Plugin(_)
             | Commands::External(_) => Ok(partial),
@@ -197,14 +199,48 @@ pub(crate) struct Error {
 
     /// Whether to disable persistence when this error is encountered.
     pub(super) disable_persistence: bool,
+
+    /// Whether the non-zero status reports an expected outcome instead of a
+    /// failure.
+    ///
+    /// `jp conversation grep` exits 1 when it finds nothing: the status is
+    /// non-zero, but the run did what was asked.
+    /// Diagnostics that only make sense for a broken run stay quiet for these.
+    pub(super) expected: bool,
 }
 
 impl Error {
+    /// Error for a run stopped by a graceful shutdown request: an unhandled or
+    /// escalated Ctrl-C, or SIGTERM.
+    ///
+    /// Exits with code 130 (128 + SIGINT).
+    /// Persistence stays enabled so state mutated before the interrupt survives
+    /// the shutdown.
+    pub(crate) fn interrupted() -> Self {
+        Self {
+            code: NonZeroU8::new(130).expect("non-zero"),
+            message: Some("Interrupted".to_owned()),
+            metadata: vec![],
+            disable_persistence: false,
+            expected: false,
+        }
+    }
+
     pub(super) fn with_persistence(self, persist: bool) -> Self {
         Self {
             disable_persistence: !persist,
             ..self
         }
+    }
+
+    /// Mark this error as reporting an expected outcome instead of a failure.
+    ///
+    /// The exit status stays non-zero; what changes is that the run doesn't
+    /// count as broken, so failure-only diagnostics (the trace log location)
+    /// stay quiet.
+    pub(crate) fn expected(mut self) -> Self {
+        self.expected = true;
+        self
     }
 }
 
@@ -231,6 +267,7 @@ impl From<u8> for Error {
             message: None,
             metadata: vec![],
             disable_persistence: true,
+            expected: false,
         }
     }
 }
@@ -278,6 +315,7 @@ impl From<(u8, String, Vec<(String, Value)>)> for Error {
             message: Some(message),
             metadata: metadata.into_iter().collect(),
             disable_persistence: true,
+            expected: false,
         }
     }
 }
@@ -357,6 +395,12 @@ impl From<crate::error::Error> for Error {
                 ("id", id),
             ]
             .into(),
+            ArgFile { path, source } => [
+                ("message", "Cannot read argument file".into()),
+                ("path", path),
+                ("error", source.to_string()),
+            ]
+            .into(),
             Attachment(error) => [
                 ("message", "Attachment error".into()),
                 ("error", error.clone()),
@@ -373,6 +417,42 @@ impl From<crate::error::Error> for Error {
                 ("uri", uri.to_string()),
             ]
             .into(),
+            InquiryModelOverride { model, source } => {
+                let mut meta = with_cause(&source, "Inquiry model override is unusable");
+                meta.insert(1, ("model", model));
+                meta.push((
+                    "suggestion",
+                    "Fix the provider credentials, or remove \
+                     `conversation.inquiry.assistant.model` to run inquiries on the main \
+                     assistant model."
+                        .to_owned(),
+                ));
+                meta
+            }
+            InquiryQuestionModelOverride {
+                tool,
+                question,
+                model,
+                source,
+            } => {
+                let mut meta = with_cause(
+                    source.as_ref(),
+                    "Inquiry model override for a tool question is unusable",
+                );
+                meta.insert(1, ("model", model));
+                meta.insert(2, ("tool", tool.clone()));
+                meta.insert(3, ("question", question.clone()));
+                meta.push((
+                    "suggestion",
+                    format!(
+                        "Fix the provider credentials, or remove the model override for question \
+                         '{question}' of tool '{tool}' (under \
+                         `conversation.tools.{tool}.questions.{question}`) to run this inquiry on \
+                         the default inquiry model."
+                    ),
+                ));
+                meta
+            }
             Editor(error) => [("message", "Editor error".into()), ("error", error.clone())].into(),
             Task(error) => with_cause(error.as_ref(), "Task error"),
             TemplateUndefinedVariable(var) => [
@@ -404,6 +484,7 @@ impl From<crate::error::Error> for Error {
                     message: Some(format_target_help(session, multi, true)),
                     metadata: vec![],
                     disable_persistence: false,
+                    expected: false,
                 };
             }
             NoConversationTarget => {
@@ -416,6 +497,7 @@ impl From<crate::error::Error> for Error {
                     )),
                     metadata: vec![],
                     disable_persistence: false,
+                    expected: false,
                 };
             }
             NewConflictsWithTarget => [(
@@ -425,6 +507,18 @@ impl From<crate::error::Error> for Error {
             )]
             .into(),
             Compaction(error) => [("message", "Compaction error".into()), ("error", error)].into(),
+            Summarize { model, reason } => [
+                ("message", "Summarization failed".to_owned()),
+                ("model", model),
+                ("reason", reason),
+                (
+                    "suggestion",
+                    "Retry with a different summarizer model, e.g. `jp conversation compact \
+                     --model <model>`, or raise `max_tokens` for the current one."
+                        .to_owned(),
+                ),
+            ]
+            .into(),
             CliConfig(error) => {
                 [("message", "CLI Config error".to_owned()), ("error", error)].into()
             }

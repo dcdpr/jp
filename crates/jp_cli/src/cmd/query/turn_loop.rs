@@ -27,26 +27,32 @@ use jp_conversation::{
 };
 use jp_inquire::prompt::PromptBackend;
 use jp_llm::{
-    Provider,
+    Error as LlmError, Provider,
     error::StreamError,
-    event::{Event, EventPart, ToolCallPart},
+    event::{Event, EventPart, FinishReason, ToolCallPart},
     model::ModelDetails,
+    output_limit_bytes,
     provider::get_provider,
     query::ChatQuery,
     tool::{InvocationContext, ToolDefinition, executor::Executor},
-    with_idle_timeout,
+    with_idle_timeout, with_output_limit,
 };
 use jp_printer::{ErrChannel, Printer};
 use jp_workspace::{ConversationLock, ConversationMut};
-use tokio::{sync::mpsc, task::JoinHandle};
-use tokio_stream::wrappers::{BroadcastStream, ReceiverStream, errors::BroadcastStreamRecvError};
-use tokio_util::sync::CancellationToken;
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, info, warn};
 
 use super::{
-    build_sections, build_thread,
-    interrupt::{LoopAction, handle_llm_event, handle_streaming_signal, reply_edit_mode},
-    stream::{StreamRetryState, handle_stream_error},
+    PendingStreamTrim, build_sections, build_thread,
+    interrupt::{
+        LoopAction, StreamingInterruptResult, handle_llm_event, handle_streaming_interrupt,
+        reply_edit_mode,
+    },
+    stream::{
+        ResponseBoundary, StreamErrorOutcome, StreamRetryState, commit_partial_response,
+        handle_stream_error,
+    },
     tool::{
         PendingEntry, PendingTools, ToolCallDecision, ToolCallState, ToolCoordinator, ToolPrompter,
         ToolRenderer, build_execution_plan,
@@ -56,17 +62,21 @@ use super::{
     turn::{Action, CommittedEvent, TurnCoordinator, TurnPhase, TurnState},
 };
 use crate::{
-    cmd::query::tool::coordinator::ExecutionResult,
+    cmd::{
+        self,
+        query::tool::coordinator::{ExecutionOutcome, ExecutionResult},
+    },
     editor::build_editor_backend,
     error::Error,
     render::metadata::set_rendered_arguments,
-    signals::{SignalRx, SignalTo},
+    signals::SignalRouter,
+    timer::LineTimer,
 };
 
 /// Events produced by the merged streaming loop sources.
 enum StreamingLoopEvent {
-    /// A signal from the signal handler (e.g. Ctrl+C).
-    Signal(SignalTo),
+    /// A Ctrl-C interrupt notification from the signal router.
+    Interrupt,
     /// An event from the LLM provider stream.
     Llm(Box<Result<Event, StreamError>>),
     /// A tick from the preparing indicator timer, carrying the elapsed time
@@ -81,7 +91,7 @@ enum StreamingLoopEvent {
 /// This avoids boxing while allowing `select_all` to poll them as a single
 /// merged stream.
 enum StreamSource<S, L, T> {
-    Signal(S),
+    Interrupt(S),
     Llm(L),
     Tick(T),
 }
@@ -96,21 +106,22 @@ where
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match self.get_mut() {
-            Self::Signal(s) => Pin::new(s).poll_next(cx),
+            Self::Interrupt(s) => Pin::new(s).poll_next(cx),
             Self::Llm(s) => Pin::new(s).poll_next(cx),
             Self::Tick(s) => Pin::new(s).poll_next(cx),
         }
     }
 }
 
-/// Spawns a waiting indicator task that prints elapsed time to the terminal.
+/// Spawns a waiting indicator task that prints elapsed time and an optional
+/// status detail to the terminal.
 ///
 /// Returns `None` if the indicator is disabled (not a TTY or config says no).
 fn spawn_waiting_indicator(
     printer: Arc<Printer>,
     config: &StreamingConfig,
     is_tty: bool,
-) -> Option<(CancellationToken, JoinHandle<()>)> {
+) -> Option<LineTimer> {
     if !is_tty {
         return None;
     }
@@ -120,8 +131,32 @@ fn spawn_waiting_indicator(
         config.progress.show,
         Duration::from_secs(u64::from(config.progress.delay_secs)),
         Duration::from_millis(u64::from(config.progress.interval_ms)),
-        |secs| format!("\r\x1b[K⏱ Waiting… {secs:.1}s"),
+        |secs, status| match status {
+            Some(detail) => format!("\r\x1b[K⏱ Waiting… {secs:.1}s ({detail})"),
+            None => format!("\r\x1b[K⏱ Waiting… {secs:.1}s"),
+        },
     )
+}
+
+/// Whether a streaming-loop event leaves the waiting indicator running.
+///
+/// Keep-alive pings, history patches, and part-less flushes produce no terminal
+/// output, so the indicator stays up through them.
+/// Everything else (content parts, finish, stream errors, signals, preparing
+/// ticks) is about to write to the terminal and must finish the indicator
+/// first.
+///
+/// A `Flush` that commits content is always preceded by a `Part` for the same
+/// index, which already finished the indicator; only a part-less flush — which
+/// commits nothing — can reach a live indicator.
+fn event_keeps_waiting_indicator(event: &StreamingLoopEvent) -> bool {
+    match event {
+        StreamingLoopEvent::Llm(result) => matches!(
+            result.as_ref(),
+            Ok(Event::KeepAlive | Event::Patch(_) | Event::Flush { .. })
+        ),
+        StreamingLoopEvent::Interrupt | StreamingLoopEvent::PreparingTick(_) => false,
+    }
 }
 
 /// Runs the turn loop: streaming from LLM, handling signals, executing tools.
@@ -147,7 +182,7 @@ pub(super) async fn run_turn_loop(
     provider: Arc<dyn Provider>,
     model: &ModelDetails,
     cfg: &AppConfig,
-    signals: &SignalRx,
+    signals: &SignalRouter,
     mcp_client: &jp_mcp::Client,
     root: &Utf8Path,
     is_tty: bool,
@@ -160,13 +195,22 @@ pub(super) async fn run_turn_loop(
     mut tool_coordinator: ToolCoordinator,
     chat_request: ChatRequest,
     invocation: InvocationContext,
+    pending_trim: PendingStreamTrim,
 ) -> Result<(), Error> {
+    // The turn-level interrupt handler (RFD 045) is the outermost handler
+    // scope within the turn: it owns the gaps between phases (persistence,
+    // thread building, response processing) and receives interrupts the inner
+    // streaming/tool handlers decline. Its notifications are consumed at the
+    // top of each phase-loop iteration; the guard drops when the turn ends.
+    let (_turn_interrupt_guard, mut turn_interrupt_rx) = signals.push_handler();
+
     let mut turn_state = TurnState::default();
     let mut stream_retry = StreamRetryState::new(cfg.assistant.request, is_tty);
     let idle_timeout = match cfg.assistant.request.stream_idle_timeout_secs {
         0 => None,
         secs => Some(Duration::from_secs(u64::from(secs))),
     };
+    let output_limit = output_limit_bytes(cfg.assistant.request.max_response_bytes);
     let mut turn_coordinator = TurnCoordinator::new(
         printer.clone(),
         cfg.style.clone(),
@@ -222,9 +266,23 @@ pub(super) async fn run_turn_loop(
     ));
 
     loop {
+        // A Ctrl-C that landed between phases ends the turn gracefully:
+        // commit any partial assistant content and complete.
+        if turn_interrupt_rx.try_recv().is_ok() {
+            info!("Interrupt received between turn phases; completing the turn.");
+            lock.as_mut()
+                .update_events(|stream| turn_coordinator.complete_early(stream));
+        }
+
         match turn_coordinator.current_phase() {
             TurnPhase::Idle => {
+                // The turn-start commit point: any replay trim deferred while
+                // building the request (see [`PendingStreamTrim`]) is applied
+                // in the same `update_events` scope that appends the new
+                // request, so the durable stream never persists the removal
+                // without its replacement.
                 lock.as_mut().update_events(|stream| {
+                    pending_trim.apply(stream);
                     turn_coordinator.start_turn(stream, chat_request.clone());
                 });
             }
@@ -258,38 +316,43 @@ pub(super) async fn run_turn_loop(
                     tool_choice: tool_choice.clone(),
                 };
 
-                // Start waiting indicator BEFORE the HTTP request. The drop
-                // guard ensures the indicator is cancelled if we exit early
-                // (error from run_cycle, break, return).
-                let waiting =
+                // Start waiting indicator BEFORE the HTTP request. Dropping
+                // the handle cancels the indicator if we exit early (error
+                // from the provider call, break, return).
+                let mut waiting =
                     spawn_waiting_indicator(printer.clone(), &cfg.style.streaming, is_tty);
-                let (waiting_token, mut waiting_handle) = match waiting {
-                    Some((token, handle)) => (Some(token), Some(handle)),
-                    None => (None, None),
-                };
-                let _waiting_guard = waiting_token
-                    .as_ref()
-                    .map(CancellationToken::drop_guard_ref);
+                if let Some(timer) = &waiting {
+                    timer.set_status("sending request");
+                }
 
                 // Build the three event sources for the streaming loop.
-                let sig_stream = StreamSource::Signal(
-                    BroadcastStream::new(signals.resubscribe()).filter_map(|result| {
-                        future::ready(match result {
-                            Ok(signal) => Some(StreamingLoopEvent::Signal(signal)),
-                            Err(BroadcastStreamRecvError::Lagged(n)) => {
-                                warn!("Missed {n} signals due to receiver lag");
-                                None
-                            }
-                        })
-                    }),
+                //
+                // The interrupt handler registers before the provider request
+                // goes out, so a Ctrl-C pressed while the connection is being
+                // set up is delivered as soon as the loop starts polling. The
+                // guard deregisters the handler when the cycle ends.
+                let (interrupt_guard, interrupt_rx) = signals.push_handler();
+                let interrupt_stream = StreamSource::Interrupt(
+                    ReceiverStream::new(interrupt_rx).map(|()| StreamingLoopEvent::Interrupt),
                 );
 
                 let raw_stream = provider
                     .chat_completion_stream(model, query)
                     .await
                     .map_err(|e| map_llm_error(e, vec![]))?;
+                if let Some(timer) = &waiting {
+                    timer.set_status("waiting for first tokens");
+                }
                 let raw_stream = match idle_timeout {
                     Some(idle) => with_idle_timeout(raw_stream, idle),
+                    None => raw_stream,
+                };
+                // Wrapped outside the provider stream, so the bytes of every
+                // chained continuation accumulate against a single ceiling
+                // rather than resetting per link. Bytes the provider discards
+                // while merging those links are billed but never seen here.
+                let raw_stream = match output_limit {
+                    Some(max) => with_output_limit(raw_stream, max),
                     None => raw_stream,
                 };
                 let llm_stream = StreamSource::Llm(
@@ -330,23 +393,25 @@ pub(super) async fn run_turn_loop(
                 let mut received_provider_event = false;
 
                 let mut streams: SelectAll<_> =
-                    SelectAll::from_iter([sig_stream, llm_stream, tick_stream]);
+                    SelectAll::from_iter([interrupt_stream, llm_stream, tick_stream]);
 
                 let mut conv = lock.as_mut();
 
                 while let Some(event) = streams.next().await {
-                    // Cancel and await the waiting indicator on the first
-                    // event, ensuring its cleanup (line clear) completes before
-                    // we render any content.
-                    if let Some(handle) = waiting_handle.take() {
-                        if let Some(token) = &waiting_token {
-                            token.cancel();
+                    // The indicator survives events that render nothing and is
+                    // finished on the first event that can write to the
+                    // terminal. `finish` awaits the task so its line clear
+                    // completes before we render any content.
+                    if event_keeps_waiting_indicator(&event) {
+                        if let Some(timer) = &waiting {
+                            timer.set_status("receiving response data");
                         }
-                        drop(handle.await);
+                    } else if let Some(timer) = waiting.take() {
+                        timer.finish().await;
                     }
 
                     match event {
-                        StreamingLoopEvent::Signal(signal) => {
+                        StreamingLoopEvent::Interrupt => {
                             // Clear the preparing display before showing the
                             // interrupt menu to avoid visual conflicts.
                             tool_renderer.clear_temp_line();
@@ -355,8 +420,7 @@ pub(super) async fn run_turn_loop(
                                 streams.iter().any(|s| matches!(s, StreamSource::Llm(_)));
 
                             let action = conv.update_events(|stream| {
-                                handle_streaming_signal(
-                                    signal,
+                                handle_streaming_interrupt(
                                     &mut turn_coordinator,
                                     stream,
                                     &printer,
@@ -368,9 +432,17 @@ pub(super) async fn run_turn_loop(
                                 )
                             });
                             match action {
-                                LoopAction::Continue => {}
-                                LoopAction::Break => break,
-                                LoopAction::Return(()) => return Ok(()),
+                                StreamingInterruptResult::Continue => {}
+                                StreamingInterruptResult::Break => break,
+                                StreamingInterruptResult::Abort => return Ok(()),
+                                // The menu itself was cancelled with Ctrl-C:
+                                // partial content is committed and the turn is
+                                // complete; begin a graceful shutdown and end
+                                // the turn with the interrupt error.
+                                StreamingInterruptResult::Escalate => {
+                                    signals.shutdown_token().cancel();
+                                    return Err(cmd::Error::interrupted().into());
+                                }
                             }
                         }
 
@@ -390,11 +462,12 @@ pub(super) async fn run_turn_loop(
                                         &mut turn_coordinator,
                                         &conv,
                                         &printer,
+                                        signals,
                                     )
                                     .await
                                     {
-                                        LoopAction::Break => break,
-                                        LoopAction::Return(result) => {
+                                        StreamErrorOutcome::Retry => break,
+                                        StreamErrorOutcome::Fatal(error) => {
                                             // Persist any partial content
                                             // flushed before aborting, so a
                                             // fatal stream error doesn't
@@ -402,18 +475,69 @@ pub(super) async fn run_turn_loop(
                                             if let Err(err) = conv.flush() {
                                                 warn!("Failed to persist before abort: {err}");
                                             }
-                                            return result;
+                                            return Err(error);
                                         }
-                                        LoopAction::Continue => continue,
+                                        // A Ctrl-C cut the backoff wait short:
+                                        // run the streaming interrupt flow with
+                                        // the stream known dead.
+                                        StreamErrorOutcome::Interrupted => {
+                                            let action = conv.update_events(|stream| {
+                                                handle_streaming_interrupt(
+                                                    &mut turn_coordinator,
+                                                    stream,
+                                                    &printer,
+                                                    prompt_backend.as_ref(),
+                                                    build_editor_backend(&cfg.editor),
+                                                    reply_edit_mode(cfg.editor.inline.edit_mode),
+                                                    &cfg.interrupt.streaming,
+                                                    true,
+                                                )
+                                            });
+                                            match action {
+                                                // With a dead stream, "continue"
+                                                // commits partial output as
+                                                // continuation context and breaks
+                                                // for a fresh request; a
+                                                // keep-polling Continue cannot
+                                                // occur here.
+                                                StreamingInterruptResult::Continue
+                                                | StreamingInterruptResult::Break => break,
+                                                StreamingInterruptResult::Abort => {
+                                                    return Ok(());
+                                                }
+                                                StreamingInterruptResult::Escalate => {
+                                                    signals.shutdown_token().cancel();
+                                                    return Err(cmd::Error::interrupted().into());
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             };
 
-                            // Reset the retry counter on the first successful
+                            // Reset the retry counters on the first successful
                             // event in this cycle. This ensures that partially
                             // successful streams (rate-limited mid-response)
                             // don't permanently consume the retry budget.
-                            if !received_provider_event {
+                            //
+                            // Only a content part or a non-repair terminal event
+                            // counts. A repair cycle is made of patches,
+                            // keep-alives, part-less flushes and the rebuild
+                            // request itself; counting any of them clears the
+                            // rebuild budget on every rebuilt request, so its cap
+                            // could never be reached. `reset` also drops the
+                            // pending patch record, which a rebuild request needs
+                            // intact to be authorized at all.
+                            //
+                            // A content-bearing flush is always preceded by a
+                            // `Part` for the same index, which already reset, so
+                            // excluding `Flush` here loses nothing.
+                            let advances_cycle = match &event {
+                                Event::Part { .. } => true,
+                                Event::Finished(reason) => *reason != FinishReason::Retry,
+                                Event::Flush { .. } | Event::Patch(_) | Event::KeepAlive => false,
+                            };
+                            if !received_provider_event && advances_cycle {
                                 received_provider_event = true;
                                 stream_retry.clear_line(&printer);
                                 stream_retry.reset();
@@ -427,8 +551,16 @@ pub(super) async fn run_turn_loop(
                                 ..
                             } = &event
                             {
-                                turn_coordinator.flush_renderer();
-                                turn_coordinator.transition_to_tool_call();
+                                // The tool-call boundary is owned here: only the
+                                // turn loop holds the per-tool config and
+                                // renderer needed to decide whether this tool's
+                                // chrome is visible, which decides whether the
+                                // reasoning region extends across it.
+                                let tool_chrome_visible = cfg.style.tool_call.show
+                                    && !printer.format().is_json()
+                                    && !tool_coordinator.is_hidden(name);
+                                let region = turn_coordinator.enter_tool_call(tool_chrome_visible);
+                                tool_renderer.set_region(id, region);
 
                                 tool_renderer.register(id, name, &tick_tx);
                                 tool_coordinator
@@ -446,12 +578,41 @@ pub(super) async fn run_turn_loop(
                             // from a misbehaving provider commits nothing and
                             // so cannot drive a double dispatch.
                             let (action, committed) = conv.update_events(|stream| {
-                                handle_llm_event(event, &mut turn_coordinator, stream)
+                                handle_llm_event(
+                                    event,
+                                    &mut turn_coordinator,
+                                    stream,
+                                    &mut stream_retry,
+                                )
                             });
                             match action {
                                 LoopAction::Continue => {}
                                 LoopAction::Break => break,
-                                LoopAction::Return(()) => return Ok(()),
+                                // The repair cannot or should not continue.
+                                // Persist what was streamed and surface the dead
+                                // end, which the refusal describes.
+                                LoopAction::RebuildRefused(refusal) => {
+                                    // A repair cycle renders nothing, so no event
+                                    // reached the clear above. Retire any retry
+                                    // line before the commit below flushes
+                                    // buffered output, which would otherwise land
+                                    // after the parked cursor.
+                                    stream_retry.clear_line(&printer);
+                                    commit_partial_response(
+                                        &mut turn_coordinator,
+                                        &conv,
+                                        &printer,
+                                        ResponseBoundary::Final,
+                                    );
+                                    if let Err(err) = conv.flush() {
+                                        warn!("Failed to persist before abort: {err}");
+                                    }
+
+                                    return Err(LlmError::Stream(StreamError::other(
+                                        refusal.to_string(),
+                                    ))
+                                    .into());
+                                }
                             }
 
                             // On a flushed tool-call request: clear the temp
@@ -518,6 +679,10 @@ pub(super) async fn run_turn_loop(
                         }
                     }
                 }
+
+                // Deregister the streaming interrupt handler; from here the
+                // router treats Ctrl-C as unhandled again.
+                drop(interrupt_guard);
 
                 // Clean up any preparing state on early loop exit.
                 tool_renderer.cancel_all();
@@ -634,7 +799,7 @@ pub(super) async fn run_turn_loop(
                     .execute_with_prompting(
                         approved,
                         Arc::clone(&prompter),
-                        signals.resubscribe(),
+                        signals,
                         &mut turn_coordinator,
                         &mut turn_state,
                         &printer,
@@ -650,19 +815,57 @@ pub(super) async fn run_turn_loop(
                     )
                     .await;
 
-                if execution_result.restart_requested {
-                    restart_requested = true;
-                    continue;
-                }
+                match execution_result.outcome {
+                    // The user cancelled the tool interrupt menu itself: an
+                    // escalation (RFD 045). The tools were already cancelled,
+                    // so persist their responses, begin a graceful shutdown,
+                    // and end the turn with the interrupt error.
+                    ExecutionOutcome::Escalated => {
+                        signals.shutdown_token().cancel();
+                        commit_tool_responses(
+                            execution_result,
+                            pre_resolved,
+                            &mut tool_coordinator,
+                            &mut turn_coordinator,
+                            &mut conv,
+                        )?;
+                        return Err(cmd::Error::interrupted().into());
+                    }
 
-                if commit_tool_responses(
-                    execution_result,
-                    pre_resolved,
-                    &mut tool_coordinator,
-                    &mut turn_coordinator,
-                    &mut conv,
-                )? {
-                    tool_choice = ToolChoice::Auto;
+                    // The user chose "Stop (cancel & exit)" (or configured
+                    // `interrupt.tool_call.action = "stop"`): the tools were
+                    // cancelled and their cancellation responses filled in.
+                    // Persist the responses so every tool call keeps a
+                    // matching response, then end the turn without a
+                    // follow-up request.
+                    ExecutionOutcome::Stopped => {
+                        commit_tool_responses(
+                            execution_result,
+                            pre_resolved,
+                            &mut tool_coordinator,
+                            &mut turn_coordinator,
+                            &mut conv,
+                        )?;
+                        break;
+                    }
+
+                    // The next loop iteration re-executes the cancelled
+                    // batch.
+                    ExecutionOutcome::Restart => {
+                        restart_requested = true;
+                    }
+
+                    ExecutionOutcome::Completed => {
+                        if commit_tool_responses(
+                            execution_result,
+                            pre_resolved,
+                            &mut tool_coordinator,
+                            &mut turn_coordinator,
+                            &mut conv,
+                        )? {
+                            tool_choice = ToolChoice::Auto;
+                        }
+                    }
                 }
             }
         }
@@ -688,6 +891,26 @@ async fn build_inquiry_backend(
         .clone()
         .or_else(|| cfg.assistant.system_prompt.clone());
 
+    // Same fallback for the output ceiling: an inquiry can be held to a tighter
+    // (or looser) ceiling than the parent assistant.
+    //
+    // `AssistantOverrideConfig::request` is a resolved `RequestConfig`, so a
+    // block where the user set only a sibling field (say `cache`) arrives here
+    // with every other field at Rust's `Default` rather than its schematic
+    // default. A `0` therefore cannot be distinguished from "unset", and reading
+    // it as the ceiling's disable sentinel would silently drop the runaway guard
+    // for every inquiry. Treat it as "inherit" instead, matching the block's
+    // documented unset-means-inherit rule. A per-question override carries real
+    // `Option`s, so `0` still disables the ceiling there.
+    let default_max_response_bytes = inquiry_override
+        .request
+        .as_ref()
+        .map_or(0, |request| request.max_response_bytes);
+    let default_max_response_bytes = match default_max_response_bytes {
+        0 => cfg.assistant.request.max_response_bytes,
+        bytes => bytes,
+    };
+
     // Track providers we've already constructed to avoid duplicates.
     let mut providers: IndexMap<ProviderId, Arc<dyn Provider>> = IndexMap::new();
 
@@ -695,12 +918,25 @@ async fn build_inquiry_backend(
     // merged with the parent assistant config.
     let default_config = if let Some(inquiry_model_cfg) = inquiry_override.model.as_ref() {
         let inquiry_model_id = inquiry_model_cfg.id.resolved();
-        let inquiry_provider: Arc<dyn Provider> =
-            Arc::from(get_provider(inquiry_model_id.provider, &cfg.providers.llm)?);
+        // Attribute failures to the override: without this, e.g. a missing
+        // API key environment variable renders identically to a main-model
+        // failure and points the user at the wrong config.
+        let inquiry_provider: Arc<dyn Provider> = Arc::from(
+            get_provider(inquiry_model_id.provider, &cfg.providers.llm).map_err(|source| {
+                Error::InquiryModelOverride {
+                    model: inquiry_model_id.to_string(),
+                    source,
+                }
+            })?,
+        );
         debug!(model = %inquiry_model_id, "Fetching inquiry model details.");
         let inquiry_model = inquiry_provider
             .model_details(&inquiry_model_id.name)
-            .await?;
+            .await
+            .map_err(|source| Error::InquiryModelOverride {
+                model: inquiry_model_id.to_string(),
+                source,
+            })?;
 
         if inquiry_model.structured_output == Some(false) {
             warn!(
@@ -722,6 +958,7 @@ async fn build_inquiry_backend(
             model: inquiry_model,
             system_prompt: default_system_prompt,
             sections: sections.clone(),
+            max_response_bytes: default_max_response_bytes,
         }
     } else {
         providers.insert(model.id.provider, Arc::clone(&provider));
@@ -731,6 +968,7 @@ async fn build_inquiry_backend(
             model: model.clone(),
             system_prompt: default_system_prompt,
             sections: sections.clone(),
+            max_response_bytes: default_max_response_bytes,
         }
     };
 
@@ -772,16 +1010,28 @@ async fn build_inquiry_overrides(
                     .resolve(&cfg.providers.llm.aliases)
                     .map_err(|e| Error::CliConfig(e.to_string()))?;
 
+                // Attribute failures to the per-question override: without
+                // this, e.g. a missing API key environment variable renders
+                // identically to a main-model failure and points the user at
+                // the wrong config.
+                let wrap_err = |source| Error::InquiryQuestionModelOverride {
+                    tool: tool_name.to_owned(),
+                    question: question_id.clone(),
+                    model: model_id.to_string(),
+                    source: Box::new(source),
+                };
+
                 let prov = if let Some(p) = providers.get(&model_id.provider) {
                     Arc::clone(p)
                 } else {
-                    let p: Arc<dyn Provider> =
-                        Arc::from(get_provider(model_id.provider, &cfg.providers.llm)?);
+                    let p: Arc<dyn Provider> = Arc::from(
+                        get_provider(model_id.provider, &cfg.providers.llm).map_err(wrap_err)?,
+                    );
                     providers.insert(model_id.provider, Arc::clone(&p));
                     p
                 };
 
-                let details = prov.model_details(&model_id.name).await?;
+                let details = prov.model_details(&model_id.name).await.map_err(wrap_err)?;
 
                 if details.structured_output == Some(false) {
                     warn!(
@@ -808,11 +1058,20 @@ async fn build_inquiry_overrides(
                 .map(|s| s.to_string())
                 .or_else(|| default_config.system_prompt.clone());
 
+            // Output ceiling follows the same order. `default_config` already
+            // carries the global-inquiry-or-parent value, so an unset
+            // per-question ceiling inherits it.
+            let max_response_bytes = per_q
+                .request
+                .max_response_bytes
+                .unwrap_or(default_config.max_response_bytes);
+
             overrides.insert((tool_name.to_owned(), question_id.clone()), InquiryConfig {
                 provider: inq_provider,
                 model: inq_model,
                 system_prompt,
                 sections: default_config.sections.clone(),
+                max_response_bytes,
             });
         }
     }

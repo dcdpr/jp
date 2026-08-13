@@ -38,6 +38,7 @@ PartialAppConfig {
             base_backoff_ms: None,
             max_backoff_secs: None,
             stream_idle_timeout_secs: None,
+            max_response_bytes: None,
             cache: None,
         },
     },
@@ -55,6 +56,7 @@ PartialAppConfig {
                 run: None,
                 format: None,
                 result: None,
+                cancellation_response: None,
                 style: PartialDisplayStyleConfig {
                     hidden: None,
                     inline_results: None,
@@ -101,13 +103,20 @@ PartialAppConfig {
         markdown: PartialMarkdownConfig {
             wrap_width: None,
             table_max_column_width: None,
+            table_continuation_edge: None,
             theme: None,
             hr_style: None,
+        },
+        mcp_startup: PartialMcpStartupConfig {
+            show: None,
+            delay_secs: None,
+            interval_ms: None,
         },
         reasoning: PartialReasoningConfig {
             display: None,
             summary_model: None,
             background: None,
+            extend_across_tool_calls: None,
         },
         streaming: PartialStreamingConfig {
             progress: PartialProgressConfig {
@@ -142,6 +151,7 @@ PartialAppConfig {
         },
     },
     interrupt: PartialInterruptConfig {
+        escalation_cooldown_secs: None,
         streaming: PartialStreamingInterruptConfig {
             action: None,
             compose_in_editor: None,

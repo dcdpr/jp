@@ -46,6 +46,9 @@ pub struct DetailsFmt {
     /// Attachments associated with the conversation.
     pub attachments: Vec<DetailItem>,
 
+    /// Compactions applied to the conversation.
+    pub compactions: Vec<DetailItem>,
+
     /// Pretty-print the output.
     pub pretty: bool,
 }
@@ -66,6 +69,7 @@ impl DetailsFmt {
             last_activated_at: None,
             expires_at: None,
             attachments: vec![],
+            compactions: vec![],
             pretty: true,
         }
     }
@@ -103,6 +107,12 @@ impl DetailsFmt {
     #[must_use]
     pub fn with_attachments(mut self, attachments: Vec<DetailItem>) -> Self {
         self.attachments = attachments;
+        self
+    }
+
+    #[must_use]
+    pub fn with_compactions(mut self, compactions: Vec<DetailItem>) -> Self {
+        self.compactions = compactions;
         self
     }
 
@@ -218,6 +228,13 @@ impl DetailsFmt {
             rows.push(DetailRow::list(
                 self.styled_label("Attachments"),
                 self.attachments.clone(),
+            ));
+        }
+
+        if !self.compactions.is_empty() {
+            rows.push(DetailRow::list(
+                self.styled_label("Compactions"),
+                self.compactions.clone(),
             ));
         }
 

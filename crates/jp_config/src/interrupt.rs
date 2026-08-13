@@ -29,6 +29,17 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct InterruptConfig {
+    /// Seconds the Ctrl-C escalation counter survives without a new press.
+    ///
+    /// Defaults to `2`.
+    /// Presses within the window escalate: the first opens an interrupt menu
+    /// (or begins a graceful shutdown when nothing can show one), the second
+    /// begins a graceful shutdown, and any press after shutdown has begun exits
+    /// immediately.
+    /// A press arriving after the window counts as a fresh first press.
+    #[setting(default = 2)]
+    pub escalation_cooldown_secs: u32,
+
     /// Ctrl-C behavior while the assistant is generating content.
     #[setting(nested)]
     pub streaming: StreamingInterruptConfig,
@@ -83,6 +94,9 @@ pub struct ToolInterruptConfig {
     /// - `restart`: Cancel the running tools and run them again.
     /// - `respond`: Cancel the running tools and send a message back to the
     ///   assistant in their place.
+    /// - `stop`: Cancel the running tools, record each tool's configured
+    ///   `cancellation_response`, and end the turn without asking the assistant
+    ///   to continue.
     #[setting(default)]
     pub action: ToolInterruptAction,
 
@@ -145,8 +159,13 @@ pub enum ToolInterruptAction {
 
     /// Cancel the running tools and send a message back to the assistant in
     /// place of their results.
-    /// An empty message uses a canned rejection notice.
+    /// An empty message uses each tool's configured `cancellation_response`.
     Respond,
+
+    /// Cancel the running tools, record each tool's configured
+    /// `cancellation_response`, and end the turn without asking the assistant
+    /// to continue.
+    Stop,
 }
 
 /// Where a reply or response is composed.
@@ -300,6 +319,9 @@ impl AssignKeyValue for PartialInterruptConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
+            "escalation_cooldown_secs" => {
+                self.escalation_cooldown_secs = kv.try_some_u32()?;
+            }
             _ if kv.p("streaming") => self.streaming.assign(kv)?,
             _ if kv.p("tool_call") => self.tool_call.assign(kv)?,
             _ => return missing_key(&kv),
@@ -338,6 +360,10 @@ impl AssignKeyValue for PartialToolInterruptConfig {
 impl PartialConfigDelta for PartialInterruptConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
+            escalation_cooldown_secs: delta_opt(
+                self.escalation_cooldown_secs.as_ref(),
+                next.escalation_cooldown_secs,
+            ),
             streaming: self.streaming.delta(next.streaming),
             tool_call: self.tool_call.delta(next.tool_call),
         }
@@ -365,6 +391,9 @@ impl PartialConfigDelta for PartialToolInterruptConfig {
 impl FillDefaults for PartialInterruptConfig {
     fn fill_from(self, defaults: Self) -> Self {
         Self {
+            escalation_cooldown_secs: self
+                .escalation_cooldown_secs
+                .or(defaults.escalation_cooldown_secs),
             streaming: self.streaming.fill_from(defaults.streaming),
             tool_call: self.tool_call.fill_from(defaults.tool_call),
         }
@@ -391,7 +420,13 @@ impl FillDefaults for PartialToolInterruptConfig {
 
 impl ToPartial for InterruptConfig {
     fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
+
         Self::Partial {
+            escalation_cooldown_secs: partial_opt(
+                &self.escalation_cooldown_secs,
+                defaults.escalation_cooldown_secs,
+            ),
             streaming: self.streaming.to_partial(),
             tool_call: self.tool_call.to_partial(),
         }

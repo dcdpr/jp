@@ -1,8 +1,8 @@
-use jp_config::AppConfig;
+use jp_config::{AppConfig, style::reasoning::ReasoningDisplayConfig};
 use jp_conversation::event::{ChatResponse, ToolCallRequest};
 use jp_llm::event::FinishReason;
 use jp_printer::{OutputFormat, Printer};
-use serde_json::{Map, json};
+use serde_json::{Map, Value, json};
 
 use super::{super::state::TurnState, *};
 use crate::cmd::query::interrupt::InterruptAction;
@@ -60,6 +60,103 @@ fn test_transitions_to_executing_on_tool_call() {
         .collect();
     assert_eq!(tool_calls.len(), 1);
     assert_eq!(tool_calls[0].id, "call_1");
+}
+
+/// Reasoning items split across several provider items form one region, so text
+/// broken mid-word across the split renders as a single word.
+///
+/// Reproduces Anthropic's redaction shape: a thinking block is interrupted by
+/// an opaque `redacted_thinking` block, which arrives as its own item holding
+/// no text, and the thinking continues in the item after it.
+/// Each item carries its own signature, so the three cannot be merged upstream
+/// — the renderer has to treat them as one region.
+#[test]
+fn reasoning_items_split_by_a_redacted_item_render_as_one_region() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, out, _) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let mut style = AppConfig::new_test().style;
+    style.reasoning.display = ReasoningDisplayConfig::Full;
+    style.reasoning.background = None;
+    let mut coordinator = TurnCoordinator::new(
+        Arc::clone(&printer),
+        style,
+        None,
+        None,
+        Some("anthropic/test".into()),
+    );
+
+    coordinator.start_turn(&mut stream, ChatRequest::from("hello"));
+
+    coordinator.handle_event(
+        &mut stream,
+        Event::reasoning(0, "I can test this directly by ver"),
+    );
+    coordinator.handle_event(&mut stream, Event::flush(0));
+    coordinator.handle_event(
+        &mut stream,
+        Event::reasoning(1, "").with_metadata_field("anthropic_redacted_thinking", "AAAA"),
+    );
+    coordinator.handle_event(&mut stream, Event::flush(1));
+    coordinator.handle_event(&mut stream, Event::reasoning(2, "ifying the return value."));
+    coordinator.handle_event(&mut stream, Event::flush(2));
+    coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
+
+    // Carrying the redacted payload is the only reason the content-less event
+    // is kept, so pin the payload rather than the event count: the next request
+    // has to replay it as a `redacted_thinking` block.
+    let redacted: Vec<_> = stream
+        .iter()
+        .filter_map(|e| e.event.metadata.get("anthropic_redacted_thinking"))
+        .filter_map(Value::as_str)
+        .collect();
+    assert_eq!(
+        redacted,
+        ["AAAA"],
+        "the redacted payload must survive into the stream"
+    );
+
+    printer.flush();
+    let output = strip_ansi(&out.lock());
+    assert!(
+        output.ends_with("I can test this directly by verifying the return value.\n\n"),
+        "reasoning items must form one region, got: {output:?}"
+    );
+}
+
+/// A provider response carrying two structured items produces two structured
+/// events, and the second must not be appended inside the first's `json` fence.
+///
+/// Pins the live path: the chunks of item 0 carry no terminator, so the only
+/// signal that its fence can close is its `Event::Flush`.
+#[test]
+fn consecutive_structured_events_render_as_separate_fences() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, out, _) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::clone(&printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        Some("openai/test".into()),
+    );
+
+    coordinator.start_turn(&mut stream, ChatRequest::from("extract"));
+
+    coordinator.handle_event(&mut stream, Event::structured(0, r#"{"name":"Alice"}"#));
+    coordinator.handle_event(&mut stream, Event::flush(0));
+    coordinator.handle_event(&mut stream, Event::structured(1, r#"{"name":"Bob"}"#));
+    coordinator.handle_event(&mut stream, Event::flush(1));
+    coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
+
+    printer.flush();
+    let output = strip_ansi(&out.lock());
+    assert_eq!(
+        output.matches("```json").count(),
+        2,
+        "each structured item opens its own fence, got: {output:?}"
+    );
 }
 
 #[test]
@@ -363,6 +460,52 @@ fn test_peek_partial_events() {
 }
 
 #[test]
+fn test_complete_early_commits_partials() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, _, _) = Printer::memory(OutputFormat::Text);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::new(printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
+
+    coordinator.start_turn(&mut stream, ChatRequest::from("test"));
+
+    // Unflushed partial content sits in the event builder.
+    coordinator.handle_event(&mut stream, Event::message(0, "partial answer"));
+    let len_before = stream.len();
+
+    coordinator.complete_early(&mut stream);
+
+    assert_eq!(coordinator.current_phase(), TurnPhase::Complete);
+    // The partial message was committed to the stream.
+    assert_eq!(stream.len(), len_before + 1);
+}
+
+#[test]
+fn test_complete_early_without_partials() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, _, _) = Printer::memory(OutputFormat::Text);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::new(printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
+
+    coordinator.start_turn(&mut stream, ChatRequest::from("test"));
+    let len_before = stream.len();
+
+    coordinator.complete_early(&mut stream);
+
+    assert_eq!(coordinator.current_phase(), TurnPhase::Complete);
+    assert_eq!(stream.len(), len_before);
+}
+
+#[test]
 fn test_buffered_markdown_flushed_before_tool_call() {
     let mut stream = ConversationStream::new_test();
     let (printer, out, _) = Printer::memory(OutputFormat::Text);
@@ -393,22 +536,16 @@ fn test_buffered_markdown_flushed_before_tool_call() {
         *out.lock()
     );
 
-    // LLM immediately follows with a tool call (no newline in between)
-    let tool_call = ToolCallRequest {
-        id: "call_1".into(),
-        name: "fs_read_file".into(),
-        arguments: serde_json::Map::new(),
-    };
-    coordinator.handle_event(
-        &mut stream,
-        Event::tool_call_start(1, tool_call.id.clone(), tool_call.name.clone()),
-    );
+    // The turn loop resolves the tool-call boundary before dispatching a tool
+    // start; the boundary drains the buffered markdown so it lands before the
+    // tool header.
+    coordinator.enter_tool_call(true);
 
     // The buffered markdown should now be flushed
     printer.flush();
     assert!(
         out.lock().contains("Now wire the config"),
-        "Expected buffered markdown to be flushed before tool call, got: {:?}",
+        "Expected buffered markdown to be flushed at the tool-call boundary, got: {:?}",
         *out.lock()
     );
 }
@@ -660,12 +797,12 @@ fn interrupt_continue_before_first_chunk_emits_assistant_header_on_resume() {
     );
 }
 
-/// Regression: a Reply interrupt inserts a new `ChatRequest` boundary, which in
-/// replay would render a labeled user header AND a fresh assistant header for
-/// the following content.
-/// Live mode must match.
+/// Regression: an editor-composed Reply interrupt inserts a new `ChatRequest`
+/// boundary whose text never appeared on the terminal, so live mode must echo
+/// it: a labeled user header AND a fresh assistant header for the following
+/// content, matching what replay renders for this `ChatRequest`.
 #[test]
-fn interrupt_reply_renders_user_header_for_new_request() {
+fn interrupt_reply_from_editor_renders_user_header_for_new_request() {
     let mut stream = ConversationStream::new_test();
     let (printer, out, _) = Printer::memory(OutputFormat::Text);
     let printer = Arc::new(printer);
@@ -682,9 +819,12 @@ fn interrupt_reply_renders_user_header_for_new_request() {
     // Some assistant content arrives so the assistant header is emitted.
     coordinator.handle_event(&mut stream, Event::message(0, "partial answer"));
 
-    // User interrupts with a follow-up reply.
+    // User interrupts with a follow-up reply composed in the external editor.
     coordinator.handle_streaming_interrupt(
-        InterruptAction::Reply("actually, ignore that".into()),
+        InterruptAction::Reply {
+            content: "actually, ignore that".into(),
+            from_editor: true,
+        },
         &mut stream,
     );
 
@@ -707,6 +847,68 @@ fn interrupt_reply_renders_user_header_for_new_request() {
     assert!(
         after_alice.contains("\u{2500}\u{2500} jp "),
         "expected a fresh `── jp` header after the Reply, got: {output:?}"
+    );
+}
+
+/// An inline-composed Reply is already visible in scrollback on the widget's
+/// own line, so live mode must NOT echo a labeled user header for it — but the
+/// next assistant chunk must still open with a fresh assistant header.
+#[test]
+fn interrupt_reply_inline_skips_user_header_but_resets_assistant_header() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, out, _) = Printer::memory(OutputFormat::Text);
+    let printer = Arc::new(printer);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::clone(&printer),
+        AppConfig::new_test().style,
+        Some("alice".into()),
+        None,
+        Some("anthropic/test".into()),
+    );
+
+    coordinator.start_turn(&mut stream, ChatRequest::from("first question"));
+
+    // Some assistant content arrives so the assistant header is emitted.
+    coordinator.handle_event(&mut stream, Event::message(0, "partial answer"));
+
+    // User interrupts with a follow-up reply submitted from the inline widget.
+    coordinator.handle_streaming_interrupt(
+        InterruptAction::Reply {
+            content: "actually, ignore that".into(),
+            from_editor: false,
+        },
+        &mut stream,
+    );
+
+    // Resumed cycle delivers the new assistant content.
+    coordinator.handle_event(&mut stream, Event::message(1, "new answer"));
+    coordinator.handle_event(&mut stream, Event::flush(1));
+    coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
+
+    printer.flush();
+    let output = strip_ansi(&out.lock());
+
+    // No echoed user header: the widget's own line is the live rendering.
+    assert!(
+        !output.contains("\u{2500}\u{2500} alice "),
+        "expected no `── alice` header for an inline reply, got: {output:?}"
+    );
+
+    // The reply still lands in the stream as a `ChatRequest`.
+    assert!(
+        stream
+            .iter()
+            .filter_map(|e| e.event.as_chat_request())
+            .any(|r| r.content == "actually, ignore that"),
+        "expected the inline reply recorded as a ChatRequest"
+    );
+
+    // And the resumed assistant content opens with a fresh `── jp` header:
+    // one for the partial answer, a second after the inline reply.
+    assert_eq!(
+        output.matches("\u{2500}\u{2500} jp ").count(),
+        2,
+        "expected two `── jp` headers (partial answer + resumed content), got: {output:?}"
     );
 }
 
@@ -735,7 +937,10 @@ fn interrupt_reply_during_reasoning_preserves_partial_reasoning() {
     coordinator.handle_event(&mut stream, Event::reasoning(0, "the trade-offs"));
 
     coordinator.handle_streaming_interrupt(
-        InterruptAction::Reply("actually, do X instead".into()),
+        InterruptAction::Reply {
+            content: "actually, do X instead".into(),
+            from_editor: false,
+        },
         &mut stream,
     );
 

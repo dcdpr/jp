@@ -1,10 +1,10 @@
 # RFD 045: Layered Interrupt Handler Stack
 
-- **Status**: Accepted
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2025-07-24
-- **Required by**: [RFD 088]
+- **Extended by**: [RFD 092]
 
 ## Summary
 
@@ -288,6 +288,38 @@ Any code awaiting the token (or checking `is_cancelled()`) can clean up.
 The existing cleanup in `Ctx::drop` (printer shutdown, workspace persistence)
 runs as part of normal process teardown.
 
+### Tool Interrupt Actions
+
+The tool interrupt menu offers four choices:
+
+| Key | Action               | Effect                                     |
+| --- | -------------------- | ------------------------------------------ |
+| `c` | Continue             | Resume waiting for the running tools.      |
+| `r` | Stop & respond       | Cancel the running tools and compose a     |
+|     |                      | message sent to the assistant in place of  |
+|     |                      | their results.                             |
+| `s` | Stop (cancel & exit) | Cancel the running tools, record their     |
+|     |                      | cancellation responses, and end the turn   |
+|     |                      | without a follow-up request.               |
+| `t` | Restart              | Cancel the running tools and run the batch |
+|     |                      | again.                                     |
+
+Every cancelled tool call still records a response, so the conversation stream
+stays consistent (each tool call has a matching result).
+When the user supplies a message via "Stop & respond", that message is recorded
+for each cancelled call.
+When no message is supplied — an empty "Stop & respond" reply, a menu-less
+`Ctrl+C` during reply composition, or "Stop (cancel & exit)" — each tool
+answers with its configured cancellation response instead:
+`conversation.tools.defaults.cancellation_response` sets the global default (a
+canned rejection notice asking the assistant to reflect on why the call was
+cancelled), and `conversation.tools.<name>.cancellation_response` overrides it
+per tool.
+
+The menu can be skipped entirely by setting `interrupt.tool_call.action` to
+`continue`, `restart`, `respond`, or `stop`; the configured action then runs as
+if the corresponding menu entry had been chosen.
+
 ### Handler Nesting During a Turn
 
 ```txt
@@ -308,7 +340,7 @@ CLI starts:
     ├── Tool execution:
     │     push ToolInterruptHandler        ← topmost
     │     ... tools run ...
-    │     Ctrl-C → tool menu (Continue/Stop & respond/Restart)
+    │     Ctrl-C → tool menu (Continue/Stop & respond/Stop (cancel & exit)/Restart)
     │     drop ToolInterruptHandler
     ├── (gap: response processing)
     │     TurnInterruptHandler is topmost
@@ -397,16 +429,16 @@ The full escalation sequence when a handler is showing a prompt:
    → SIGINT → router (escalation=2) → std::process::exit(130)
 ```
 
-Note: `jp_inquire` currently wraps `inquire::InquireError::OperationCanceled`,
-which conflates ESC and Ctrl-C.
-Both produce the same error.
+Note: `inquire` already distinguishes the two keys — ESC produces
+`InquireError::OperationCanceled` and Ctrl-C produces
+`InquireError::OperationInterrupted` (with the `crossterm` backend, which JP
+uses).
+The conflation is in JP's call sites, which treat every prompt error alike.
 For interrupt menus this is fine — cancelling an interrupt menu by any means
 should escalate.
 For non-interrupt prompts (tool permissions, tool questions), distinguishing ESC
-("skip this prompt") from Ctrl-C ("I want the interrupt menu") would be
-valuable.
-An upstream change request to `inquire` to distinguish the two keys is worth
-pursuing but is not a dependency for this RFD.
+("skip this prompt") from Ctrl-C ("I want the interrupt menu") remains valuable
+and requires no upstream change.
 
 ### Handler Decline and Propagation
 
@@ -677,4 +709,4 @@ Depends on Phases 2–4.
 
 [RFD 026]: 026-agent-loop-extraction.md
 [RFD 027]: 027-client-server-query-architecture.md
-[RFD 088]: 088-unified-editor-service-and-inline-reply-widget.md
+[RFD 092]: 092-predictable-and-responsive-interrupt-escalation.md

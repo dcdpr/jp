@@ -8,7 +8,8 @@ next: false
 
 The active RFD backlog in priority order — highest first, including **draft**
 RFDs you want to prioritise finishing.
-RFDs marked **in development** are currently being implemented.
+RFDs marked **in development** have a [ticket] in progress against them.
+Every RFD above a **milestone** line targets that release.
 Implemented, superseded, and abandoned RFDs are not shown here; see the [full
 RFD index] for those.
 
@@ -19,7 +20,8 @@ import { data } from '../.vitepress/loaders/rfd-board.data.js'
 import RfdBoard from '../.vitepress/theme/RfdBoard.vue'
 </script>
 
-<RfdBoard :entries="data" />
+<RfdBoard :entries="data.entries" :priority="data.priority" />
 
 [RFD 001]: ./001-jp-rfd-process
 [full RFD index]: ./
+[ticket]: ../ticket/board

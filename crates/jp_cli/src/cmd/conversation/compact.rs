@@ -1,16 +1,19 @@
 use std::{env, fs, path::PathBuf};
 
 use chrono::Utc;
-use jp_config::conversation::compaction::{
-    CompactionConfig, CompactionRuleConfig, PartialCompactionRuleConfig, PartialSummaryConfig,
-    ReasoningMode, RuleBound, ToolCallsMode,
+use jp_config::{
+    PartialAppConfig,
+    conversation::compaction::{
+        CompactionConfig, CompactionRuleConfig, PartialCompactionRuleConfig, PartialSummaryConfig,
+        ReasoningMode, RuleBound, ToolCallsMode,
+    },
 };
 use jp_conversation::{
     Compaction, CompactionRange, ConversationStream, RangeBound, ReasoningPolicy, SummaryPolicy,
     ToolCallPolicy,
     compaction::{extend_summary_range, resolve_range},
 };
-use jp_workspace::{ConversationHandle, ConversationMut};
+use jp_workspace::{ConversationHandle, ConversationMut, Workspace};
 use tracing::warn;
 
 use crate::{
@@ -18,9 +21,11 @@ use crate::{
         ConversationLoadRequest, Output,
         conversation_id::PositionalIds,
         lock::{LockOutcome, LockRequest, acquire_lock},
+        query::apply_model,
         turn_range::{Bound, TurnRange},
     },
-    ctx::Ctx,
+    ctx::{Ctx, IntoPartialAppConfig},
+    format::compaction_policy_label,
 };
 
 #[derive(Debug, clap::Args)]
@@ -31,13 +36,19 @@ pub(crate) struct Compact {
     /// Preserve the first N turns (or turns within a duration).
     ///
     /// Accepts a turn count (e.g. `2`) or a duration (e.g. `5h`).
-    #[arg(long, conflicts_with_all = ["from", "first", "last", "turn"])]
+    /// Composes with `--first M`: the pair compacts the first M turns minus the
+    /// preserved prefix, e.g. `--keep-first 1 --first 16` compacts turns 2
+    /// through 16.
+    #[arg(long, conflicts_with_all = ["from", "last", "turn"])]
     keep_first: Option<RuleBound>,
 
     /// Preserve the last N turns (or turns within a duration).
     ///
     /// Accepts a turn count (e.g. `3`) or a duration (e.g. `2h`).
-    #[arg(long, conflicts_with_all = ["to", "first", "last", "turn"])]
+    /// Composes with `--last M`: the pair compacts the last M turns minus the
+    /// preserved suffix, e.g. `--keep-last 2 --last 16` compacts the 14 turns
+    /// before the final 2.
+    #[arg(long, conflicts_with_all = ["to", "first", "turn"])]
     keep_last: Option<RuleBound>,
 
     /// Which turns to compact.
@@ -81,24 +92,42 @@ pub(crate) struct Compact {
     #[arg(short, long, conflicts_with = "compact")]
     summarize: Option<Option<String>>,
 
+    /// The model to summarize with.
+    ///
+    /// Accepts a model alias or a full `provider/name` ID, the same values as
+    /// `jp query --model`.
+    /// Overrides the summarizer model for every rule in this invocation,
+    /// including rules that set their own
+    /// `conversation.compaction.rules[].summary.model`.
+    /// Only affects rules that generate a summary; without one, nothing calls
+    /// an LLM.
+    #[arg(short = 'm', long)]
+    model: Option<String>,
+
     /// Preview what would change without applying.
     #[arg(long)]
     dry_run: bool,
 
-    /// Remove all compaction events from the stream.
+    /// Remove compaction events from the stream.
     ///
-    /// Restores the raw event history so the LLM sees all original events.
+    /// Without a value, removes every compaction event, restoring the raw event
+    /// history so the LLM sees all original events.
+    /// With a value (`--reset=2`), removes only that compaction event, numbered
+    /// as `jp conversation show` lists them.
     /// Mutually exclusive with the policy, range, and DSL flags: `--reset`
     /// undoes compaction, it does not re-compact in the same invocation.
     /// Composes with `--dry-run` to preview the removal.
     #[arg(
         long,
+        value_name = "INDEX",
+        require_equals = true,
+        value_parser = parse_compaction_index,
         conflicts_with_all = [
             "keep_first", "keep_last", "from", "to", "first", "last", "turn",
-            "reasoning", "tools", "summarize", "compact",
+            "reasoning", "tools", "summarize", "compact", "model",
         ],
     )]
-    reset: bool,
+    reset: Option<Option<usize>>,
 
     /// Compact using an inline DSL rule.
     ///
@@ -110,6 +139,34 @@ pub(crate) struct Compact {
 }
 
 impl Compact {
+    /// Reject flag combinations clap cannot express.
+    ///
+    /// `--keep-first N --first M` means "compact the first M turns, minus the
+    /// first N" (and `--keep-last`/`--last` the mirror image at the end): with
+    /// N greater than M the preserved turns swallow the whole selection, so the
+    /// pair is rejected rather than silently selecting nothing.
+    /// Only count-based bounds are comparable up front; durations and the other
+    /// bound forms resolve against the stream and may legitimately come up
+    /// empty.
+    fn validate(&self) -> Result<(), String> {
+        if let (Some(RuleBound::Turns(keep)), Some(first)) = (&self.keep_first, self.range.first())
+            && *keep > first
+        {
+            return Err(format!(
+                "--keep-first {keep} is greater than --first {first}: nothing would remain to \
+                 compact"
+            ));
+        }
+        if let (Some(RuleBound::Turns(keep)), Some(last)) = (&self.keep_last, self.range.last())
+            && *keep > last
+        {
+            return Err(format!(
+                "--keep-last {keep} is greater than --last {last}: nothing would remain to compact"
+            ));
+        }
+        Ok(())
+    }
+
     /// Returns `true` if any dedicated policy flag is set.
     ///
     /// Policy flags (`--reasoning`/`--tools`/`--summarize`) build a single
@@ -162,11 +219,49 @@ impl Compact {
         explicit.extend(self.compact_flag.dsl_rules());
 
         let explicit = CompactionConfig::finalize_rules(explicit)?;
-        Ok(crate::cmd::compact_flag::combine_rules(
+        let mut rules = crate::cmd::compact_flag::combine_rules(
             &cfg.conversation.compaction.rules,
             self.compact_flag.use_config_rules,
             explicit,
-        ))
+        );
+
+        if self.model.is_some() {
+            redirect_summaries_to_assistant_model(&mut rules, cfg);
+        }
+
+        Ok(rules)
+    }
+}
+
+/// Point every rule that names its own summary model at `assistant.model.id`.
+///
+/// A rule with no `summary.model` already summarizes on the assistant model, so
+/// it needs nothing here.
+/// A rule that names one would otherwise outrank `--model`, which is applied to
+/// `assistant.model`.
+/// Only the ID moves: the rule keeps its own summary parameters (max tokens,
+/// temperature, ...).
+fn redirect_summaries_to_assistant_model(
+    rules: &mut [CompactionRuleConfig],
+    cfg: &jp_config::AppConfig,
+) {
+    for summary in rules.iter_mut().filter_map(|rule| rule.summary.as_mut()) {
+        if let Some(model) = summary.model.as_mut() {
+            model.id = cfg.assistant.model.id.clone();
+        }
+    }
+}
+
+impl IntoPartialAppConfig for Compact {
+    fn apply_cli_config(
+        &self,
+        _: Option<&Workspace>,
+        mut partial: PartialAppConfig,
+        merged_config: Option<&PartialAppConfig>,
+    ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
+        apply_model(&mut partial, self.model.as_deref(), merged_config);
+
+        Ok(partial)
     }
 }
 
@@ -175,6 +270,48 @@ fn parse_tool_calls_mode(s: &str) -> Result<ToolCallsMode, String> {
         "expected one of: strip (s), strip-requests (sreq), strip-responses (sres), omit (o)"
             .to_string()
     })
+}
+
+/// Parse the `--reset=INDEX` value: a 1-based position among the conversation's
+/// compaction events.
+fn parse_compaction_index(s: &str) -> Result<usize, String> {
+    match s.parse() {
+        Ok(0) => Err("compaction indices are 1-based; `0` is not a valid index".to_owned()),
+        Ok(n) => Ok(n),
+        Err(_) => Err(format!("invalid compaction index '{s}'")),
+    }
+}
+
+/// Look up the compaction event a 1-based `--reset=INDEX` addresses.
+///
+/// Returns its 0-based position among the stream's compaction events, plus a
+/// `turns X..Y` label for the removal message (turn numbers 1-based, as the
+/// user sees them elsewhere).
+/// An index naming no event is an error rather than a silent no-op, matching
+/// how `--turn` treats an out-of-range turn.
+fn resolve_reset_index(
+    events: &ConversationStream,
+    index: usize,
+) -> Result<(usize, String), String> {
+    let Some(position) = index.checked_sub(1) else {
+        return Err("compaction indices are 1-based; `0` is not a valid index".to_owned());
+    };
+
+    let Some(compaction) = events.compactions().nth(position) else {
+        let count = events.compactions().count();
+        return Err(format!(
+            "compaction {index} out of range (conversation has {count} compaction event(s))"
+        ));
+    };
+
+    Ok((
+        position,
+        format!(
+            "turns {}..{}",
+            compaction.from_turn + 1,
+            compaction.to_turn + 1
+        ),
+    ))
 }
 
 /// Resolve the turn range a single rule would compact.
@@ -352,7 +489,7 @@ fn segments_for_compactions(compactions: &[Compaction], conv_id: &str) -> Vec<Ti
                         None => "summary".to_owned(),
                     },
                 ),
-                None => mechanical_label(c),
+                None => compaction_policy_label(c),
             };
             TimelineSegment {
                 from: c.from_turn,
@@ -379,46 +516,6 @@ fn existing_segments(snapshot: &ConversationStream) -> Vec<TimelineSegment> {
             existing: true,
         })
         .collect()
-}
-
-/// Describe a compaction's mechanical policies (reasoning / tool calls) for the
-/// timeline, e.g. `reasoning + tools`.
-///
-/// Summaries are labeled by the caller (which owns the temp-file path), so this
-/// covers only the non-summary policies.
-/// Returns `None` when the compaction carries no mechanical policy.
-fn mechanical_label(compaction: &Compaction) -> Option<String> {
-    let mut parts = Vec::new();
-    if compaction.reasoning.is_some() {
-        parts.push("reasoning");
-    }
-    if let Some(policy) = &compaction.tool_calls {
-        match policy {
-            ToolCallPolicy::Strip {
-                request: true,
-                response: true,
-            } => parts.push("tools"),
-            ToolCallPolicy::Strip {
-                request: true,
-                response: false,
-            } => parts.push("tool requests"),
-            ToolCallPolicy::Strip {
-                request: false,
-                response: true,
-            } => parts.push("tool responses"),
-            ToolCallPolicy::Strip {
-                request: false,
-                response: false,
-            } => {}
-            ToolCallPolicy::Omit => parts.push("tools omitted"),
-        }
-    }
-
-    if parts.is_empty() {
-        None
-    } else {
-        Some(parts.join(" + "))
-    }
 }
 
 /// Write a generated summary to a temp file so the timeline can link to it.
@@ -591,6 +688,7 @@ impl Compact {
     }
 
     pub(crate) async fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
+        self.validate()?;
         for handle in handles {
             self.compact_one(ctx, handle).await?;
         }
@@ -609,26 +707,8 @@ impl Compact {
         let conv = lock.into_mut();
         let events_snapshot = conv.events().clone();
 
-        if self.reset {
-            if self.dry_run {
-                // Preview only — `--dry-run` must not mutate the conversation.
-                let count = events_snapshot.compactions().count();
-                if count > 0 {
-                    ctx.printer
-                        .println(format!("Would remove {count} compaction event(s)."));
-                } else {
-                    ctx.printer.println("No compaction events to remove.");
-                }
-            } else {
-                let removed = conv.update_events(ConversationStream::remove_compactions);
-                if removed > 0 {
-                    ctx.printer
-                        .println(format!("Removed {removed} compaction event(s)."));
-                } else {
-                    ctx.printer.println("No compaction events to remove.");
-                }
-            }
-            return Ok(());
+        if let Some(index) = self.reset {
+            return self.run_reset(ctx, &conv, &events_snapshot, index);
         }
 
         // `--last 0` explicitly selects no turns.
@@ -692,6 +772,50 @@ impl Compact {
         Ok(())
     }
 
+    /// Handle `--reset[=INDEX]`: remove every compaction event, or just the one
+    /// at `index` (1-based, in stream order).
+    ///
+    /// Under `--dry-run` nothing is mutated and the message describes what
+    /// would be removed.
+    /// An `index` past the last compaction event is an error rather than a
+    /// silent no-op (matching `--turn`).
+    fn run_reset(
+        &self,
+        ctx: &Ctx,
+        conv: &ConversationMut,
+        events: &ConversationStream,
+        index: Option<usize>,
+    ) -> Output {
+        let Some(index) = index else {
+            let count = if self.dry_run {
+                events.compactions().count()
+            } else {
+                conv.update_events(ConversationStream::remove_compactions)
+            };
+
+            ctx.printer.println(match (count, self.dry_run) {
+                (0, _) => "No compaction events to remove.".to_owned(),
+                (count, true) => format!("Would remove {count} compaction event(s)."),
+                (count, false) => format!("Removed {count} compaction event(s)."),
+            });
+            return Ok(());
+        };
+
+        let (position, range) = resolve_reset_index(events, index)?;
+
+        if self.dry_run {
+            ctx.printer
+                .println(format!("Would remove compaction {index} ({range})."));
+            return Ok(());
+        }
+
+        conv.update_events(|stream| stream.remove_compaction(position));
+        ctx.printer
+            .println(format!("Removed compaction {index} ({range})."));
+
+        Ok(())
+    }
+
     /// Preview the compaction timeline without mutating the conversation.
     ///
     /// Resolves the same per-rule ranges as the real run (minus the summarizer
@@ -723,7 +847,7 @@ impl Compact {
             let label = if rule.summary.is_some() {
                 Some("summary".to_owned())
             } else {
-                mechanical_label(&build_mechanical_compaction(
+                compaction_policy_label(&build_mechanical_compaction(
                     range.from_turn,
                     range.to_turn,
                     rule,
@@ -765,7 +889,17 @@ impl Compact {
     /// The shared selector (`--from`/`--last`/`--turn`) takes precedence; when
     /// none is set it falls back to `--keep-first`, and to [`Bound::Default`]
     /// when that is also unset.
+    /// `--first` is the exception: it composes with `--keep-first`, which then
+    /// supplies the start of the range while `--first` caps its end (via
+    /// [`resolve_to`]).
+    ///
+    /// [`resolve_to`]: Self::resolve_to
     fn resolve_from(&self, events: &ConversationStream) -> Bound {
+        if let Some(bound) = &self.keep_first
+            && self.range.first().is_some()
+        {
+            return keep_first_to_bound(bound, events);
+        }
         match self.range.resolve_from(events) {
             Bound::Default => match &self.keep_first {
                 Some(bound) => keep_first_to_bound(bound, events),
@@ -780,7 +914,17 @@ impl Compact {
     /// The shared selector (`--to`/`--turn`) takes precedence; when none is set
     /// it falls back to `--keep-last`, and to [`Bound::Default`] when that is
     /// also unset.
+    /// `--last` is the exception: it composes with `--keep-last`, which then
+    /// supplies the end of the range while `--last` sets its start (via
+    /// [`resolve_from`]).
+    ///
+    /// [`resolve_from`]: Self::resolve_from
     fn resolve_to(&self, events: &ConversationStream) -> Bound {
+        if let Some(bound) = &self.keep_last
+            && self.range.last().is_some()
+        {
+            return keep_last_to_bound(bound, events);
+        }
         match self.range.resolve_to(events) {
             Bound::Default => match &self.keep_last {
                 Some(bound) => keep_last_to_bound(bound, events),

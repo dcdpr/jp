@@ -9,8 +9,15 @@ pub enum Error {
     #[error("Service error: {0}")]
     Service(#[from] rmcp::ServiceError),
 
-    #[error("Timeout error: {0}")]
-    Timeout(#[from] tokio::time::error::Elapsed),
+    #[error("Server initialization timed out after {timeout_secs}s: {cmd}{stderr}")]
+    InitializeTimeout {
+        cmd: String,
+        timeout_secs: u32,
+        /// Pre-rendered tail of the server's stderr, including a leading
+        /// newline and `stderr:` header when non-empty.
+        /// Empty when the server produced no stderr output before the deadline.
+        stderr: String,
+    },
 
     #[error("Unknown tool: {0}")]
     UnknownTool(String),

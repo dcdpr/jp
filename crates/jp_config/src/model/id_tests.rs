@@ -254,3 +254,36 @@ fn resolve_alias_chain_unknown_non_id_errors() {
     let aliases = IndexMap::new();
     assert!(resolve_alias_chain("nonexistent", &aliases).is_err());
 }
+
+#[test]
+fn name_charset() {
+    let valid = [
+        "a",
+        "glm-5.2",
+        "z-ai/glm-5.2",
+        "model_1:free",
+        // Openrouter prefixes its latest-alias catalog entries with `~`.
+        "~anthropic/claude-fable-latest",
+    ];
+    for id in valid {
+        assert!(id.parse::<Name>().is_ok(), "expected valid name: {id}");
+    }
+
+    // `\u{0663}` is ARABIC-INDIC DIGIT THREE: `char::is_numeric` accepts it, but
+    // the documented charset only allows ASCII digits.
+    let invalid = [
+        "",
+        "has space",
+        "back\\slash",
+        "star*",
+        "emoji-\u{1F980}",
+        "model-\u{0663}",
+    ];
+    for id in invalid {
+        let err = id.parse::<Name>().unwrap_err();
+        assert!(
+            err.to_string().contains("Model ID must be"),
+            "expected invalid name: {id}"
+        );
+    }
+}

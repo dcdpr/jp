@@ -693,7 +693,7 @@ fn test_archive_removes_from_index() {
     let lock = ws.test_lock(h);
     ws.archive_conversation(lock.into_mut());
 
-    // No longer in the active index.
+    // No longer in the live index.
     assert!(ws.acquire_conversation(&id).is_err());
     assert_eq!(ws.conversations().count(), 0);
 }
@@ -761,7 +761,7 @@ fn test_unarchive_restores_to_index() {
     let handle = ws.unarchive_conversation(&id).unwrap();
     assert_eq!(handle.id(), id);
 
-    // Back in the active index.
+    // Back in the live index.
     assert!(ws.acquire_conversation(&id).is_ok());
     assert_eq!(ws.conversations().count(), 1);
 }
@@ -846,7 +846,7 @@ fn test_unarchive_clears_archived_at() {
     // Unarchive.
     ws.unarchive_conversation(&id).unwrap();
 
-    // archived_at should be cleared in the active index.
+    // archived_at should be cleared in the live index.
     let h = ws.acquire_conversation(&id).unwrap();
     let meta = ws.metadata(&h).unwrap();
     assert!(

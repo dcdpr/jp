@@ -1,0 +1,86 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            part: Message(
+                "",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                "The",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " fox",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                ".",
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {
+                "openai_item_id": String("msg_041a23d55da6b2b6016a549a224678819481b59b178bbb436a"),
+                "openai_phase": String("final_answer"),
+            },
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Part {
+            index: 0,
+            part: Message(
+                "",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                "The",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " dog",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                ".",
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {
+                "openai_item_id": String("msg_041a23d55da6b2b6016a549a23ffe48194b937f20d09be7ffd"),
+                "openai_phase": String("final_answer"),
+            },
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

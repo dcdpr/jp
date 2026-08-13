@@ -1,4 +1,22 @@
+use async_trait::async_trait;
+use jp_config::{
+    AppConfig, Config as _,
+    conversation::tool::{PartialToolConfig, ToolConfig},
+};
+use jp_tool::Outcome;
+
 use super::*;
+
+struct EchoArguments;
+
+#[async_trait]
+impl BuiltinTool for EchoArguments {
+    async fn execute(&self, arguments: &Value, _answers: &IndexMap<String, Value>) -> Outcome {
+        Outcome::Success {
+            content: arguments.to_string(),
+        }
+    }
+}
 
 #[test]
 fn test_execution_outcome_completed_success_into_response() {
@@ -163,6 +181,98 @@ fn param(kind: &str, required: bool) -> ToolParameterConfig {
         items: None,
         properties: IndexMap::default(),
     }
+}
+
+#[test]
+fn coerces_json_strings_to_declared_parameter_types() {
+    let parameters = IndexMap::from_iter([
+        ("path".to_owned(), param("string", true)),
+        ("start_line".to_owned(), param("integer", false)),
+        ("enabled".to_owned(), param("boolean", false)),
+        ("string_or_integer".to_owned(), ToolParameterConfig {
+            kind: vec!["string".to_owned(), "integer".to_owned()].into(),
+            ..param("string", false)
+        }),
+        ("patterns".to_owned(), ToolParameterConfig {
+            kind: "array".to_owned().into(),
+            items: Some(Box::new(ToolParameterConfig {
+                kind: "object".to_owned().into(),
+                properties: IndexMap::from_iter([("count".to_owned(), param("integer", true))]),
+                ..param("object", false)
+            })),
+            ..param("array", false)
+        }),
+    ]);
+    let mut arguments = json!({
+        "path": "README.md",
+        "start_line": "1",
+        "enabled": "true",
+        "string_or_integer": "3",
+        "patterns": "[{\"count\":\"2\"}]"
+    })
+    .as_object()
+    .cloned()
+    .unwrap();
+
+    ToolDefinition {
+        name: "test".to_owned(),
+        docs: ToolDocs::default(),
+        parameters,
+    }
+    .coerce_arguments(&mut arguments);
+
+    assert_eq!(
+        Value::Object(arguments),
+        json!({
+            "path": "README.md",
+            "start_line": 1,
+            "enabled": true,
+            "string_or_integer": "3",
+            "patterns": [{"count": 2}]
+        })
+    );
+}
+
+#[tokio::test]
+async fn execute_coerces_json_strings_before_calling_tool() {
+    let partial: PartialToolConfig = serde_json::from_value(json!({
+        "source": "builtin",
+    }))
+    .unwrap();
+    let tool = ToolConfig::from_partial(partial, vec![]).unwrap();
+    let mut app = AppConfig::new_test();
+    app.conversation
+        .tools
+        .insert("echo_arguments".to_owned(), tool);
+    let config = app.conversation.tools.get("echo_arguments").unwrap();
+    let definition = ToolDefinition {
+        name: "echo_arguments".to_owned(),
+        docs: ToolDocs::default(),
+        parameters: IndexMap::from_iter([("start_line".to_owned(), param("integer", false))]),
+    };
+    let builtins = builtin::BuiltinExecutors::new().register("echo_arguments", EchoArguments);
+
+    let outcome = definition
+        .execute(
+            "call_1".to_owned(),
+            json!({"start_line": "1"}),
+            &IndexMap::new(),
+            &config,
+            &jp_mcp::Client::new(IndexMap::new()),
+            Utf8Path::new("/tmp"),
+            CancellationToken::new(),
+            &builtins,
+            None,
+            &InvocationContext::default(),
+        )
+        .await
+        .unwrap();
+
+    let ExecutionOutcome::Completed { id, result } = outcome else {
+        panic!("expected completed tool call");
+    };
+    assert_eq!(id, "call_1");
+    assert_eq!(result, Ok(r#"{"start_line":1}"#.to_owned()));
 }
 
 #[test]

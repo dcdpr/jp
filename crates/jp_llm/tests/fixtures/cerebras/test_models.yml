@@ -11,28 +11,196 @@ then:
       "object": "list",
       "data": [
         {
-          "id": "zai-glm-4.7",
-          "object": "model",
-          "created": 0,
-          "owned_by": "Cerebras"
-        },
-        {
           "id": "gpt-oss-120b",
           "object": "model",
           "created": 0,
           "owned_by": "Cerebras"
         },
         {
-          "id": "llama3.1-8b",
+          "id": "gemma-4-31b",
           "object": "model",
           "created": 0,
           "owned_by": "Cerebras"
         },
         {
-          "id": "qwen-3-235b-a22b-instruct-2507",
+          "id": "zai-glm-4.7",
           "object": "model",
           "created": 0,
           "owned_by": "Cerebras"
+        }
+      ]
+    }
+---
+when:
+  path: /public/v1/models
+  method: GET
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: application/json
+  json_body_str: >-
+    {
+      "object": "list",
+      "data": [
+        {
+          "id": "zai-glm-4.7",
+          "object": "model",
+          "created": 1767744000,
+          "owned_by": "Z.ai",
+          "name": "Z.ai GLM 4.7",
+          "description": "This model delivers strong coding performance with advanced reasoning capabilities, superior tool use, and enhanced real-world performance in agentic coding applications.",
+          "hugging_face_id": "zai-org/GLM-4.7",
+          "pricing": {
+            "prompt": "0.00000225",
+            "completion": "0.00000275"
+          },
+          "capabilities": {
+            "streaming": true,
+            "function_calling": true,
+            "structured_outputs": true,
+            "vision": false,
+            "json_mode": true,
+            "tools": true,
+            "tool_choice": true,
+            "parallel_tool_calls": true,
+            "response_format": true,
+            "reasoning": true
+          },
+          "supported_parameters": {
+            "temperature": true,
+            "top_p": true,
+            "seed": true,
+            "stop": true,
+            "max_completion_tokens": true,
+            "logprobs": false,
+            "top_logprobs": false,
+            "frequency_penalty": true,
+            "presence_penalty": true,
+            "logit_bias": true,
+            "repetition_penalty": false
+          },
+          "architecture": {
+            "modality": "text",
+            "tokenizer": "GLM",
+            "instruct_type": "glm"
+          },
+          "limits": {
+            "max_context_length": 131072,
+            "max_completion_tokens": 40960,
+            "requests_per_minute": null,
+            "tokens_per_minute": null
+          },
+          "datacenter_locations": [],
+          "deprecated": false,
+          "preview": true,
+          "quantization": "FP16/8 (weights only)"
+        },
+        {
+          "id": "gemma-4-31b",
+          "object": "model",
+          "created": 0,
+          "owned_by": "Google",
+          "name": "Gemma 4 31B",
+          "description": "This model excels at multimodal reasoning across screenshots, documents, diagrams, and design assets. Ideal for visual agentic workflows, image-aware copilots, and teams migrating from closed multimodal APIs to an open model.",
+          "hugging_face_id": "google/gemma-4-31B",
+          "pricing": {
+            "prompt": "0.00000099",
+            "completion": "0.00000149"
+          },
+          "capabilities": {
+            "streaming": true,
+            "function_calling": true,
+            "structured_outputs": true,
+            "vision": true,
+            "json_mode": true,
+            "tools": true,
+            "tool_choice": true,
+            "parallel_tool_calls": true,
+            "response_format": true,
+            "reasoning": true
+          },
+          "supported_parameters": {
+            "temperature": true,
+            "top_p": true,
+            "seed": true,
+            "stop": true,
+            "max_completion_tokens": true,
+            "logprobs": false,
+            "top_logprobs": false,
+            "frequency_penalty": true,
+            "presence_penalty": true,
+            "logit_bias": true,
+            "repetition_penalty": false
+          },
+          "architecture": {
+            "modality": "text+vision",
+            "tokenizer": "Gemini",
+            "instruct_type": "gemma"
+          },
+          "limits": {
+            "max_context_length": 131072,
+            "max_completion_tokens": 40960,
+            "requests_per_minute": null,
+            "tokens_per_minute": null
+          },
+          "datacenter_locations": [],
+          "deprecated": false,
+          "preview": false,
+          "quantization": null
+        },
+        {
+          "id": "gpt-oss-120b",
+          "object": "model",
+          "created": 1754438400,
+          "owned_by": "OpenAI",
+          "name": "OpenAI GPT OSS",
+          "description": "This model excels at efficient reasoning across science, math, and coding applications. It's ideal for real-time coding assistance, processing large documents for Q&A and summarization, agentic research workflows, and regulated on-premises workloads.",
+          "hugging_face_id": "openai/gpt-oss-120b",
+          "pricing": {
+            "prompt": "0.00000035",
+            "completion": "0.00000075"
+          },
+          "capabilities": {
+            "streaming": true,
+            "function_calling": true,
+            "structured_outputs": true,
+            "vision": false,
+            "json_mode": true,
+            "tools": true,
+            "tool_choice": true,
+            "parallel_tool_calls": false,
+            "response_format": true,
+            "reasoning": true
+          },
+          "supported_parameters": {
+            "temperature": true,
+            "top_p": true,
+            "seed": true,
+            "stop": true,
+            "max_completion_tokens": true,
+            "logprobs": false,
+            "top_logprobs": false,
+            "frequency_penalty": true,
+            "presence_penalty": true,
+            "logit_bias": true,
+            "repetition_penalty": false
+          },
+          "architecture": {
+            "modality": "text",
+            "tokenizer": "GPT",
+            "instruct_type": "harmony"
+          },
+          "limits": {
+            "max_context_length": 131072,
+            "max_completion_tokens": 40960,
+            "requests_per_minute": null,
+            "tokens_per_minute": null
+          },
+          "datacenter_locations": [],
+          "deprecated": false,
+          "preview": false,
+          "quantization": "FP16/8 (weights only)"
         }
       ]
     }

@@ -2,6 +2,27 @@ use comfy_table::Cell;
 
 use super::*;
 
+/// The pretty details view of a two-item list, exactly as it reaches the
+/// terminal: the label on the first line, items numbered and indented into the
+/// value column.
+const PRETTY_LIST_TWO_ITEMS: &str = " Attachments
+              1. a://x
+              2. b://y";
+
+/// The same view for ten items, where the single-digit numbers are padded to
+/// line up with `10.`.
+const PRETTY_LIST_TEN_ITEMS: &str = " Items
+         1. item-1
+         2. item-2
+         3. item-3
+         4. item-4
+         5. item-5
+         6. item-6
+         7. item-7
+         8. item-8
+         9. item-9
+        10. item-10";
+
 fn header() -> Row {
     let mut row = Row::new();
     row.add_cell(Cell::new("Name"));
@@ -66,21 +87,25 @@ fn markdown_details_no_title() {
 }
 
 #[test]
-fn pretty_details_list_puts_label_above_bulleted_items() {
+fn pretty_details_list_puts_label_above_numbered_items() {
     let output = details(None, vec![DetailRow::list("Attachments", vec![
         DetailItem::plain("a://x"),
         DetailItem::plain("b://y"),
     ])]);
 
-    let lines: Vec<&str> = output.lines().collect();
-    // Label sits on its own line; items are bulleted beneath it.
-    assert!(
-        lines[0].trim_end().ends_with("Attachments"),
-        "got: {output}"
-    );
-    assert!(!lines[0].contains("a://x"), "got: {output}");
-    assert!(output.contains("- a://x"), "got: {output}");
-    assert!(output.contains("- b://y"), "got: {output}");
+    assert_eq!(output, PRETTY_LIST_TWO_ITEMS);
+}
+
+#[test]
+fn pretty_details_list_right_aligns_numbers_past_the_tenth_item() {
+    // Single-digit numbers are padded so every item's text starts in the same
+    // column.
+    let items = (1..=10)
+        .map(|n| DetailItem::plain(format!("item-{n}")))
+        .collect();
+    let output = details(None, vec![DetailRow::list("Items", items)]);
+
+    assert_eq!(output, PRETTY_LIST_TEN_ITEMS);
 }
 
 #[test]
@@ -122,7 +147,7 @@ fn list_item_text_and_json_forms_can_differ() {
 
     // Pretty uses the text form.
     assert!(
-        details(None, rows.clone()).contains("- cmd (Desc): cmd://x"),
+        details(None, rows.clone()).contains("1. cmd (Desc): cmd://x"),
         "text form should drive the pretty view"
     );
 

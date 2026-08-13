@@ -25,14 +25,12 @@ use jp_conversation::ConversationId;
 use jp_printer::Printer;
 use jp_storage::lock::LockInfo;
 use jp_workspace::{ConversationHandle, ConversationLock, LockResult, Workspace, session::Session};
-use tokio::task::JoinHandle;
-use tokio_util::sync::CancellationToken;
 
 use crate::{
     ctx::Ctx,
     error::{Error, Result},
-    signals::SignalRx,
-    timer::spawn_line_timer,
+    signals::SignalRouter,
+    timer::{LineTimer, spawn_line_timer},
 };
 
 /// Result of attempting to acquire a conversation lock.
@@ -54,7 +52,7 @@ pub(crate) struct LockRequest<'a> {
     pub is_tty: bool,
     pub session: Option<&'a Session>,
     pub printer: &'a Printer,
-    pub signals: SignalRx,
+    pub signals: &'a SignalRouter,
 
     /// Lock-wait progress indicator configuration.
     pub lock_wait: LockWaitConfig,
@@ -74,7 +72,7 @@ impl<'a> LockRequest<'a> {
             is_tty: ctx.term.is_tty,
             session: ctx.session.as_ref(),
             printer: &ctx.printer,
-            signals: ctx.signals.receiver.resubscribe(),
+            signals: &ctx.signals,
             lock_wait: ctx.config().style.lock_wait.clone(),
             allow_new: false,
             allow_fork: false,
@@ -117,13 +115,18 @@ pub(crate) async fn acquire_lock(mut r: LockRequest<'_>) -> Result<LockOutcome> 
     let holder = lock_holder_description(r.workspace, id);
     let timer = spawn_lock_timer(r.printer, &r.lock_wait, &holder, timeout);
 
+    // While waiting, a Ctrl-C press skips straight to the contention prompt.
+    // The guard drops before the prompt shows, so a press while the prompt is
+    // up escalates through the router instead of being swallowed here.
+    let (interrupt_guard, mut interrupt_rx) = r.signals.push_handler();
+
     loop {
-        // Wait for the next poll tick, but also listen for OS signals.
-        // On ctrl-c (Shutdown), skip straight to the interactive prompt.
+        // Wait for the next poll tick, but also listen for interrupts.
         tokio::select! {
             biased;
-            Ok(_) = r.signals.recv() => {
+            Some(()) = interrupt_rx.recv() => {
                 cancel_timer(timer).await;
+                drop(interrupt_guard);
                 return prompt_contention(r).await;
             }
             () = tokio::time::sleep(Duration::from_millis(500)) => {}
@@ -139,6 +142,7 @@ pub(crate) async fn acquire_lock(mut r: LockRequest<'_>) -> Result<LockOutcome> 
 
         if start.elapsed() >= timeout {
             cancel_timer(timer).await;
+            drop(interrupt_guard);
             return prompt_contention(r).await;
         }
     }
@@ -198,7 +202,7 @@ fn lock_holder_description(workspace: &Workspace, id: ConversationId) -> String 
 // Lock-wait timer (delegates to the shared spawn_line_timer infrastructure)
 // ---------------------------------------------------------------------------
 
-type Timer = Option<(CancellationToken, JoinHandle<()>)>;
+type Timer = Option<LineTimer>;
 
 fn spawn_lock_timer(
     printer: &Printer,
@@ -213,7 +217,7 @@ fn spawn_lock_timer(
         config.show,
         Duration::from_secs(u64::from(config.delay_secs)),
         Duration::from_millis(u64::from(config.interval_ms)),
-        move |elapsed| {
+        move |elapsed, _status| {
             let remaining = (total - elapsed).max(0.0);
             format!("\r\x1b[K⏱ Pending conversation lock {holder} ({remaining:.1}s)")
         },
@@ -221,8 +225,7 @@ fn spawn_lock_timer(
 }
 
 async fn cancel_timer(timer: Timer) {
-    if let Some((token, handle)) = timer {
-        token.cancel();
-        drop(handle.await);
+    if let Some(timer) = timer {
+        timer.finish().await;
     }
 }

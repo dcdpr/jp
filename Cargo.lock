@@ -155,7 +155,7 @@ checksum = "9b34d609dfbaf33d6889b2b7106d3ca345eacad44200913df5ba02bfd31d2ba9"
 [[package]]
 name = "async-anthropic"
 version = "0.6.0"
-source = "git+https://github.com/JeanMertz/async-anthropic#140c11637550c86273136f7eee076fb94cd1798b"
+source = "git+https://github.com/JeanMertz/async-anthropic#669cc30e75b0dd0f2069cff5bfd9b61c6aa3b7f9"
 dependencies = [
  "backon",
  "derive_builder",
@@ -759,9 +759,9 @@ dependencies = [
 
 [[package]]
 name = "crossbeam-epoch"
-version = "0.9.18"
+version = "0.9.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b82ac4a3c2ca9c3460964f020e1402edd5753411d7737aa39c3714ad1b5420e"
+checksum = "2d6914041f254d6e9176c01941b21115dcfb7089e55135a35411081bd106ef3f"
 dependencies = [
  "crossbeam-utils",
 ]
@@ -1013,7 +1013,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users",
- "windows-sys 0.60.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1147,7 +1147,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1391,7 +1391,7 @@ dependencies = [
 [[package]]
 name = "gemini_client_rs"
 version = "0.6.2"
-source = "git+https://github.com/JeanMertz/gemini-client#3e5bcf51ecbfc67cc50231b573e05c8047576ebd"
+source = "git+https://github.com/JeanMertz/gemini-client#579474f09b39ea1031420f14538c92be6c14dcc8"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -1455,9 +1455,9 @@ checksum = "0cc23270f6e1808e30a928bdc84dea0b9b4136a8bc82338574f23baf47bbd280"
 
 [[package]]
 name = "globset"
-version = "0.4.16"
+version = "0.4.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "54a1028dfc5f5df5da8a56a73e6c153c9a9708ec57232470703592a3f18e49f5"
+checksum = "e47d37d2ae4464254884b60ab7071be2b876a9c35b696bd018ddcc76847309cd"
 dependencies = [
  "aho-corasick",
  "bstr",
@@ -1905,9 +1905,9 @@ dependencies = [
 
 [[package]]
 name = "ignore"
-version = "0.4.23"
+version = "0.4.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d89fd380afde86567dfba715db065673989d6253f42b88179abd3eae47bda4b"
+checksum = "7f8a7b8211e695a1d0cd91cace480d4d0bd57667ab10277cc412c5f7f4884f83"
 dependencies = [
  "crossbeam-deque",
  "globset",
@@ -1949,7 +1949,7 @@ dependencies = [
 [[package]]
 name = "inquire"
 version = "0.9.1"
-source = "git+https://github.com/JeanMertz/inquire?branch=merged#941896e113e786d3c40345e1f70249930f4eadb0"
+source = "git+https://github.com/JeanMertz/inquire?branch=merged#93ecb2750bc244b2af69b4294d6809957ec7adf0"
 dependencies = [
  "bitflags",
  "crossterm",
@@ -2056,6 +2056,22 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "jp-ticket"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "camino-tempfile",
+ "chrono",
+ "clap",
+ "jp_github",
+ "jp_plugin",
+ "serde",
+ "serde_json",
+ "ticket",
+ "tokio",
 ]
 
 [[package]]
@@ -2267,6 +2283,7 @@ dependencies = [
  "pretty_assertions",
  "quick-xml",
  "rayon",
+ "regex",
  "relative-path",
  "reqwest",
  "schemars",
@@ -2286,7 +2303,6 @@ dependencies = [
  "toml",
  "tracing",
  "tracing-subscriber",
- "unicode-width",
  "url",
  "which",
  "windows-sys 0.61.0",
@@ -2467,6 +2483,7 @@ dependencies = [
  "proptest",
  "syntect",
  "two-face",
+ "unicode-segmentation",
  "unicode-width",
 ]
 
@@ -2557,6 +2574,8 @@ dependencies = [
  "comfy-table",
  "serde_json",
  "strip-ansi-escapes",
+ "unicode-segmentation",
+ "unicode-width",
 ]
 
 [[package]]
@@ -2972,8 +2991,7 @@ dependencies = [
 [[package]]
 name = "ollama-rs"
 version = "0.3.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f647d8676b95a6b6205e11453c9fac338d73c9cdcc011c94d1ba9c9bfea582cd"
+source = "git+https://github.com/JeanMertz/ollama-rs?rev=6270148236d2d8e199580ee8f5a529868134c0a5#6270148236d2d8e199580ee8f5a529868134c0a5"
 dependencies = [
  "async-stream",
  "log",
@@ -3003,7 +3021,7 @@ checksum = "a4895175b425cb1f87721b59f0f286c2092bd4af812243672510e1ac53e2e0ad"
 [[package]]
 name = "openai_responses"
 version = "0.1.6"
-source = "git+https://github.com/JeanMertz/openai-responses-rs#2d462d32680e5fc0c52fdbc48e8ac5fb9d63029d"
+source = "git+https://github.com/JeanMertz/openai-responses-rs#dac7d6992a213ca4ec13d41527ddd7f5c54e9885"
 dependencies = [
  "async-fn-stream",
  "chrono",
@@ -3304,9 +3322,9 @@ dependencies = [
 
 [[package]]
 name = "quick-xml"
-version = "0.39.2"
+version = "0.41.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "958f21e8e7ceb5a1aa7fa87fab28e7c75976e0bfe7e23ff069e0a260f894067d"
+checksum = "e660451e55124f798a69a5af3f49ccfbefbd41910eefd25caf2393e1f3473ec1"
 dependencies = [
  "encoding_rs",
  "memchr",
@@ -3475,7 +3493,7 @@ dependencies = [
 [[package]]
 name = "reedline"
 version = "0.48.0"
-source = "git+https://github.com/JeanMertz/reedline?branch=changes#d6a56e266758c5a28d7b635b20611dfb50c6acfb"
+source = "git+https://github.com/JeanMertz/reedline?branch=changes#afcd57f3f20a7c43b1fc5853ba610cdecf2e2684"
 dependencies = [
  "chrono",
  "crossterm",
@@ -3735,7 +3753,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4464,7 +4482,7 @@ dependencies = [
  "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4583,6 +4601,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f60246a4944f24f6e018aa17cdeffb7818b76356965d03b07d6a9886e8962185"
 dependencies = [
  "cfg-if",
+]
+
+[[package]]
+name = "ticket"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "camino-tempfile",
+ "indoc",
+ "serde",
 ]
 
 [[package]]
@@ -4772,7 +4800,9 @@ dependencies = [
  "similar",
  "strip-ansi-escapes",
  "test-log",
+ "ticket",
  "tokio",
+ "toml",
  "url",
  "which",
  "windows-sys 0.61.0",
@@ -5289,7 +5319,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

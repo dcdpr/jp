@@ -1,0 +1,44 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "The fox.",
+                    },
+                ),
+                metadata: {
+                    "openai_item_id": String("msg_041a23d55da6b2b6016a549a224678819481b59b178bbb436a"),
+                    "openai_phase": String("final_answer"),
+                },
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "The dog.",
+                    },
+                ),
+                metadata: {
+                    "openai_item_id": String("msg_041a23d55da6b2b6016a549a23ffe48194b937f20d09be7ffd"),
+                    "openai_phase": String("final_answer"),
+                },
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+]

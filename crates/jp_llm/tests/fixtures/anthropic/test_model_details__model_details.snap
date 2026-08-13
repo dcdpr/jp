@@ -20,9 +20,12 @@ expression: v
             64000,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 1024,
-                max_tokens: None,
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 1024,
+                    max_tokens: None,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -34,10 +37,12 @@ expression: v
         structured_output: Some(
             true,
         ),
+        prefill: Some(
+            true,
+        ),
         features: [
             "interleaved-thinking",
             "context-editing",
-            "prefill",
         ],
     },
 ]

@@ -6,9 +6,10 @@ use jp_conversation::{
     event::{ChatRequest, ChatResponse, ToolCallRequest, ToolCallResponse},
 };
 use jp_llm::{
-    event::{Event, EventPart, FinishReason, ToolCallPart},
+    event::{Event, EventPart, FinishReason},
     event_builder::EventBuilder,
 };
+use jp_md::format::DefaultBackground;
 use jp_printer::Printer;
 
 use crate::cmd::query::{interrupt::InterruptAction, stream::TurnView};
@@ -220,6 +221,15 @@ impl TurnCoordinator {
         self.state = TurnPhase::Streaming;
     }
 
+    /// Process one event from a Provider stream.
+    ///
+    /// [`Event::Flush`] commits an indexed response to the Conversation but
+    /// does not flush terminal rendering.
+    /// Neither a provider aggregation boundary nor the boundary between two
+    /// adjacent same-kind [`ChatResponse`] events is a Markdown boundary:
+    /// consecutive responses of the same kind stay in one renderer content
+    /// region until a semantic boundary such as a tool call, content-kind
+    /// transition, or end of stream.
     pub fn handle_event(
         &mut self,
         stream: &mut ConversationStream,
@@ -243,28 +253,31 @@ impl TurnCoordinator {
                 metadata,
             } => {
                 match &part {
-                    EventPart::ToolCall(ToolCallPart::Start { .. }) => {
-                        // Streaming tool calls are always visible (the
-                        // hidden style only suppresses replay rendering).
-                        self.view.enter_tool_call(false);
-                    }
                     EventPart::Message(text) => {
-                        self.view.render_chat_response(&ChatResponse::Message {
-                            message: text.clone(),
-                        });
+                        self.view
+                            .render_chat_response_chunk(&ChatResponse::Message {
+                                message: text.clone(),
+                            });
                     }
                     EventPart::Reasoning(text) => {
-                        self.view.render_chat_response(&ChatResponse::Reasoning {
-                            reasoning: text.clone(),
-                        });
+                        self.view
+                            .render_chat_response_chunk(&ChatResponse::Reasoning {
+                                reasoning: text.clone(),
+                            });
                     }
                     EventPart::Structured(chunk) => {
-                        self.view.render_chat_response(&ChatResponse::Structured {
-                            data: serde_json::Value::String(chunk.clone()),
-                        });
+                        self.view
+                            .render_chat_response_chunk(&ChatResponse::Structured {
+                                data: serde_json::Value::String(chunk.clone()),
+                            });
                     }
-                    EventPart::ToolCall(ToolCallPart::ArgumentChunk(_)) => {
-                        // Forwarded to EventBuilder only; no rendering.
+                    EventPart::ToolCall(_) => {
+                        // Tool-call parts are forwarded to the EventBuilder
+                        // below. The live tool-call boundary (the chat flush,
+                        // separator shading, and tool-call transition) is owned
+                        // by the turn loop, which holds the per-tool config and
+                        // renderer needed to decide whether the chrome is
+                        // visible.
                     }
                 }
 
@@ -285,6 +298,14 @@ impl TurnCoordinator {
                     .as_tool_call_request()
                     .cloned()
                     .map_or(CommittedEvent::None, CommittedEvent::ToolCallRequest);
+
+                // The provider closed this item. A structured response's `json`
+                // fence is terminated here; a text-bearing one stays open, so
+                // consecutive reasoning or message items form a single region.
+                if event.is_chat_response() {
+                    self.view.end_chat_response();
+                }
+
                 self.push_event(stream, event);
                 HandleEventOutcome::committed(Action::Continue, committed)
             }
@@ -394,15 +415,34 @@ impl TurnCoordinator {
         self.event_builder.peek_partial_events()
     }
 
-    /// Resets the coordinator state back to Streaming for a new cycle.
+    /// Reset per-request state before continuing from committed partial output.
     ///
-    /// Used after handling a Continue action with prefill - the partial content
-    /// has been injected into the thread, and we're ready to receive the
-    /// continuation from the LLM.
+    /// The next request rebuilds the Thread with that output as continuation
+    /// context.
+    /// The Provider decides whether the target model accepts native assistant
+    /// prefill or needs another supported wire representation.
     pub fn prepare_continuation(&mut self) {
-        // Clear any partial buffers since we're starting fresh with prefill
-        self.event_builder = EventBuilder::new();
+        self.prepare_next_cycle();
         self.view.reset_for_continuation();
+    }
+
+    /// Reset per-request state before resending a request a stream error cut
+    /// short.
+    ///
+    /// Like [`prepare_continuation`], but keeps the renderer's content region
+    /// open: a retry puts nothing persistent on the terminal, so the reasoning
+    /// region and the separator it owes span the boundary.
+    ///
+    /// [`prepare_continuation`]: Self::prepare_continuation
+    pub fn prepare_retry_continuation(&mut self) {
+        self.prepare_next_cycle();
+        self.view.reset_for_stream_retry();
+    }
+
+    /// Drop the per-request event buffer and re-enter the streaming phase.
+    fn prepare_next_cycle(&mut self) {
+        // The committed partial response replaces these per-request buffers.
+        self.event_builder = EventBuilder::new();
         self.state = TurnPhase::Streaming;
     }
 
@@ -415,10 +455,33 @@ impl TurnCoordinator {
         self.view.flush();
     }
 
-    /// Mark that tool calls are about to be rendered, so the next content chunk
-    /// gets a blank line separator.
-    pub fn transition_to_tool_call(&mut self) {
-        self.view.enter_tool_call(false);
+    /// Flush the renderer at a streaming-cycle boundary the same response
+    /// continues across.
+    ///
+    /// Commits buffered content like [`flush_renderer`], but leaves a separator
+    /// owed by reasoning pending: the continuation resends the request with no
+    /// persistent content rendered in between, so its first content decides the
+    /// gap's shading.
+    ///
+    /// [`flush_renderer`]: Self::flush_renderer
+    pub fn flush_renderer_for_continuation(&mut self) {
+        self.view.flush_for_continuation();
+    }
+
+    /// Resolve the live tool-call boundary, returning the background the tool's
+    /// chrome should be filled with to keep a reasoning region continuous.
+    ///
+    /// `chrome_visible` is whether the tool's chrome will be rendered (the live
+    /// predicate `show && !json && !hidden`).
+    /// When visible, the deferred reasoning separator is drained with the
+    /// shading the region dictates and the chat renderer transitions into
+    /// tool-call mode; the returned background extends the reasoning region
+    /// across the tool chrome (`None` when the tool call doesn't continue a
+    /// shaded reasoning region).
+    /// When not visible the boundary is transparent and leaves the region
+    /// intact for the next visible content.
+    pub fn enter_tool_call(&mut self, chrome_visible: bool) -> Option<DefaultBackground> {
+        self.view.enter_tool_call_region(chrome_visible)
     }
 
     /// Wire the view's tool-separator flag to the turn's `ToolRenderer` so
@@ -427,39 +490,35 @@ impl TurnCoordinator {
         self.view.set_tool_separator(flag);
     }
 
-    /// Force transition to Complete phase.
+    /// End the turn early: commit any partial assistant content to the stream
+    /// and transition to `Complete` so the turn loop persists and exits.
     ///
-    /// Used when handling hard quit signals (SIGQUIT) where we want to save
-    /// progress and exit gracefully without showing an interrupt menu.
-    pub fn force_complete(&mut self) {
-        self.state = TurnPhase::Complete;
-    }
-
-    /// Handle a hard quit signal during streaming.
-    ///
-    /// Injects any partial content into the stream and transitions to Complete
-    /// so that the turn loop persists and exits.
-    pub fn handle_quit(&mut self, stream: &mut ConversationStream) {
+    /// Used by the turn-level interrupt handler when a Ctrl-C lands between
+    /// turn phases.
+    pub fn complete_early(&mut self, stream: &mut ConversationStream) {
         for response in self.peek_partial_events() {
             self.push_event(stream, response);
         }
 
-        self.force_complete();
+        self.state = TurnPhase::Complete;
     }
 
     /// Handle an interrupt action during LLM streaming.
     ///
     /// Transitions the state machine based on the user's choice from the
     /// interrupt menu.
-    /// Content injection (partial content, prefill, replies) is handled here to
-    /// keep the state machine self-contained.
+    /// Partial responses and replies are committed here to keep the state
+    /// machine self-contained.
     pub fn handle_streaming_interrupt(
         &mut self,
         action: InterruptAction,
         conversation_stream: &mut ConversationStream,
     ) -> TurnPhase {
         match action {
-            InterruptAction::Stop => {
+            // Stop and Escalate both end the turn with the partial content
+            // committed; escalation additionally makes the shell begin a
+            // graceful shutdown.
+            InterruptAction::Stop | InterruptAction::Escalate => {
                 // Inject partial content before completing
                 for response in self.peek_partial_events() {
                     self.push_event(conversation_stream, response);
@@ -478,7 +537,10 @@ impl TurnCoordinator {
                 self.prepare_continuation();
             }
 
-            InterruptAction::Reply(content) => {
+            InterruptAction::Reply {
+                content,
+                from_editor,
+            } => {
                 // Inject partial reasoning + message as assistant events first,
                 // before the user's reply, so the resumed model sees its own
                 // interrupted reasoning as context.
@@ -486,18 +548,24 @@ impl TurnCoordinator {
                     self.push_event(conversation_stream, response);
                 }
 
-                // Add user's reply as a new request, then render it through
-                // the view so the live terminal gets the same labeled
-                // user header replay would emit for this `ChatRequest`.
-                // `render_user_request` also resets the assistant-header
-                // gate, so the next assistant chunk will print a fresh
-                // `── jp …` header.
                 let request = ChatRequest {
                     content,
                     schema: None,
                     author: self.author.clone(),
                 };
-                self.view.render_user_request(&request);
+
+                // An editor-composed reply never appeared on the terminal, so
+                // echo it through the view (labeled user header + body), same
+                // as replay would emit for this `ChatRequest`. An
+                // inline-composed reply is already visible in scrollback on
+                // the widget's own line, so skip the echo — but still reset
+                // the assistant-header gate so the next assistant chunk
+                // prints a fresh `── jp …` header.
+                if from_editor {
+                    self.view.render_user_request(&request);
+                } else {
+                    self.view.begin_turn();
+                }
                 self.push_event(conversation_stream, request);
                 self.prepare_continuation();
             }
@@ -524,10 +592,10 @@ impl TurnCoordinator {
     /// This method only handles state transitions.
     /// Currently a no-op reserved for future state transitions.
     /// The shell handles cancellation via [`CancellationToken`] and restart via
-    /// [`ToolSignalResult`].
+    /// [`ToolInterruptResult`].
     ///
     /// [`CancellationToken`]: tokio_util::sync::CancellationToken
-    /// [`ToolSignalResult`]: crate::cmd::query::interrupt::signals::ToolSignalResult
+    /// [`ToolInterruptResult`]: crate::cmd::query::interrupt::signals::ToolInterruptResult
     #[allow(clippy::unused_self, clippy::match_same_arms)]
     pub fn handle_tool_interrupt(&mut self, action: &InterruptAction) {
         match action {

@@ -36,7 +36,7 @@ use serde_json::Value;
 use tracing::{debug, error, trace, warn};
 
 use super::registry;
-use crate::{Ctx, cmd, signals::SignalPair};
+use crate::{Ctx, cmd, signals::SignalRouter};
 
 /// Run a plugin binary, handling the full protocol lifecycle.
 ///
@@ -50,7 +50,7 @@ pub(crate) fn run_plugin(
     storage_path: Option<&Utf8Path>,
     user_storage_path: Option<&Utf8Path>,
     config: &Arc<AppConfig>,
-    signals: &SignalPair,
+    signals: &SignalRouter,
     log_level: u8,
 ) -> Result<(), cmd::Error> {
     let config_json = serde_json::to_value(config.as_ref().to_partial())
@@ -128,16 +128,28 @@ pub(crate) fn run_plugin(
         }
     });
 
-    // Shutdown thread: sends `Shutdown` directly to the plugin's stdin
-    // when a signal arrives. If the plugin doesn't exit within the grace
-    // period, sends SIGKILL.
+    // Shutdown thread: sends `Shutdown` directly to the plugin's stdin when
+    // an interrupt or a graceful shutdown request arrives. If the plugin
+    // doesn't exit within the grace period, sends SIGKILL.
+    //
+    // The guard drops when this function returns; the thread then sees the
+    // notification channel close and exits.
+    let (_interrupt_guard, mut interrupt_rx) = signals.push_handler();
+    let shutdown_token = signals.shutdown_token();
     let shutdown_sent = Arc::new(AtomicBool::new(false));
     let shutdown_writer = stdin.clone();
     let shutdown_flag = shutdown_sent.clone();
     let child_id = child.id();
-    let mut shutdown_rx = signals.receiver.resubscribe();
     let shutdown_handle = thread::spawn(move || {
-        if futures::executor::block_on(shutdown_rx.recv()).is_err() {
+        let interrupted = futures::executor::block_on(async {
+            tokio::select! {
+                notified = interrupt_rx.recv() => notified.is_some(),
+                () = shutdown_token.cancelled() => true,
+            }
+        });
+
+        // The plugin run completed and deregistered its handler.
+        if !interrupted {
             return;
         }
 

@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+
+import { field, unescapeTitle } from './metadata.mjs'
+import { checkMilestones, normalizePriority } from './rfd-priority.mjs'
+import { inDevelopmentRfds, loadTickets } from './ticket-shared.mjs'
 
 // Shared parsing and validation for the RFD data loaders.
 //
@@ -9,6 +13,11 @@ import { resolve } from 'node:path'
 // return a formatted error message, or `null` when the check passes. The
 // caller decides severity — published RFDs throw, drafts warn (except
 // duplicate ids, which abort either way).
+//
+// `assembleBoard` (bottom of this file) composes the building blocks into the
+// full priority board. Both the web board (`rfd-board.data.js`) and the
+// `just rfd-list` CLI (`../rfd-list.mjs`) go through it, so the two never
+// drift.
 
 // Parse the inline metadata from an RFD markdown file.
 //
@@ -16,18 +25,20 @@ import { resolve } from 'node:path'
 // small custom parser. Handles both permanent (`NNN`) and draft (`DNN`) ids.
 export function parseMeta(content, filename) {
     const num = filename.match(/^(\d{3}|D\d{2})/)?.[1] ?? '000'
-    const title = content.match(/^# RFD (?:\d+|D\d+):\s*(.+)/m)?.[1]?.trim() ?? filename
-
-    const field = (key) =>
-        content.match(new RegExp(`^- \\*\\*${key}\\*\\*:\\s*(.+)`, 'm'))?.[1]?.trim() ?? null
+    const rawTitle = content.match(/^# RFD (?:\d+|D\d+):\s*(.+)/m)?.[1]?.trim() ?? filename
+    const title = unescapeTitle(rawTitle)
 
     return {
         num,
         title,
-        status: field('Status'),
-        category: field('Category'),
-        authors: field('Authors'),
-        date: field('Date'),
+        status: field(content, 'Status'),
+        category: field(content, 'Category'),
+        // The RFD number that superseded this one, if any (e.g. `033` -> `034`).
+        supersededBy:
+            content.match(/^- \*\*Superseded by\*\*:.*?\bRFD\s+(\d{3}|D\d{2})\b/m)?.[1]
+            ?? null,
+        authors: field(content, 'Authors'),
+        date: field(content, 'Date'),
         slug: filename.replace(/\.md$/, ''),
     }
 }
@@ -40,13 +51,29 @@ export function parseMeta(content, filename) {
 // here), while drafts legitimately link both.
 export function parseReferences(content, ownNum) {
     const refs = new Set()
-    const pattern = /\b(\d{3}|D\d{2})-[a-z0-9-]+(?:\.md)?/g
-    let match
-    while ((match = pattern.exec(content)) !== null) {
-        const num = match[1]
-        if (num !== '000' && num !== ownNum) refs.add(num)
+    for (const label of referencedLabels(content)) {
+        // RFD ids only; ticket references belong to the cross-kind set the site
+        // builds in `theme/documents.mjs`.
+        if (label.startsWith('T')) continue
+        if (label !== '000' && label !== ownNum) refs.add(label)
     }
     return [...refs].sort()
+}
+
+// Every document a body links to, as the labels `documents.mjs` keys on:
+// `042` and `D12` for RFDs, `T0001` for tickets.
+//
+// The slug must carry a letter, so a date like `2026-08-05` isn't read as a
+// link to ticket 2026.
+export function referencedLabels(content) {
+    const labels = new Set()
+    const pattern = /\b(\d{3,4}|D\d{2})-[a-z0-9-]*[a-z][a-z0-9-]*(?:\.md)?/g
+    let match
+    while ((match = pattern.exec(content)) !== null) {
+        const id = match[1]
+        labels.add(id.length === 4 && !id.startsWith('D') ? `T${id}` : id)
+    }
+    return [...labels]
 }
 
 // Build the RFD entries consumed by the index pages and cross-reference
@@ -65,6 +92,8 @@ export function buildEntries(dir, files, summaries, basePath) {
             path: `${basePath}/${meta.slug}`,
             summary: summaries[f]?.summary ?? null,
             references: parseReferences(content, meta.num),
+            // Cross-kind links, resolved in the browser against both sets.
+            links: referencedLabels(content).filter(label => label !== meta.num),
         }
     })
 
@@ -78,8 +107,9 @@ export function buildEntries(dir, files, summaries, basePath) {
 }
 
 // Read the priority board state. This is human-curated source of truth: the
-// prioritised `order`, the unsorted `backlog` below the cutoff, and the dev's
-// in-development flags. Kept deliberately separate from the regenerable
+// prioritised `planned` milestone groups (see `normalizePriority` for the
+// exact shape) and the unsorted `backlog` below the cutoff. Kept deliberately
+// separate from the regenerable
 // `rfd-summaries.json` cache, so clearing the cache never loses the board. A
 // missing file is an empty board.
 export function loadPriority(path) {
@@ -87,15 +117,9 @@ export function loadPriority(path) {
     try {
         raw = JSON.parse(readFileSync(path, 'utf-8'))
     } catch {
-        return { order: [], backlog: [], inDevelopment: [] }
+        raw = {}
     }
-    return {
-        order: Array.isArray(raw.order) ? raw.order.map(String) : [],
-        backlog: Array.isArray(raw.backlog) ? raw.backlog.map(String) : [],
-        inDevelopment: Array.isArray(raw.in_development)
-            ? raw.in_development.map(String)
-            : [],
-    }
+    return normalizePriority(raw)
 }
 
 // Statuses that take an RFD off the priority board. The board is the active
@@ -107,16 +131,32 @@ export const TERMINAL_STATUSES = new Set([
     'Abandoned',
 ])
 
-// Annotate each entry with its board position and in-development flag.
-// `priority` is the index in the combined `order` + `backlog` list (lower =
-// higher priority) or `null` when the RFD hasn't been placed yet. Status is left
-// untouched so the view can drop terminal RFDs itself.
+// Annotate each entry with its board position and milestone. `priority` is the
+// index in the combined `order` + `backlog` list (lower = higher priority) or
+// `null` when the RFD hasn't been placed yet. `milestone` is the name of the
+// planned group the RFD sits in, or `null` (unassigned, backlogged, or
+// unplaced). Status is left untouched so the view can drop terminal RFDs itself.
 export function mergePriority(entries, priority) {
     const combined = [...priority.order, ...(priority.backlog ?? [])]
     const rank = new Map(combined.map((num, i) => [num, i]))
-    const inDev = new Set(priority.inDevelopment)
+    const milestoneOf = new Map()
+    for (const group of priority.planned) {
+        for (const num of group.ids) milestoneOf.set(num, group.milestone)
+    }
     for (const entry of entries) {
         entry.priority = rank.has(entry.num) ? rank.get(entry.num) : null
+        entry.milestone = milestoneOf.get(entry.num) ?? null
+    }
+}
+
+// Mark the RFDs someone is currently implementing.
+//
+// Derived from the tickets: an RFD is in development when a ticket claiming to
+// implement it sits in the In Progress column. The board doesn't record this and
+// can't set it — closing the ticket clears the flag on its own.
+export function mergeInDevelopment(entries, tickets) {
+    const inDev = new Set(inDevelopmentRfds(tickets))
+    for (const entry of entries) {
         entry.inDevelopment = inDev.has(entry.num)
     }
 }
@@ -143,14 +183,13 @@ export function checkPriority(entries, priority) {
     const unknown = [
         ...priority.order,
         ...(priority.backlog ?? []),
-        ...priority.inDevelopment,
     ].filter(num => !known.has(num))
 
     if (unknown.length === 0) return null
 
     const ids = [...new Set(unknown)].sort().join(', ')
     return `Unknown RFD ids in priority board: ${ids}.\n\n` +
-        `\`docs/rfd/priority.json\` references RFDs that don't exist. Fix the ` +
+        `\`docs/rfd/.priority.json\` references RFDs that don't exist. Fix the ` +
         `ids or remove them (the board UI rewrites this file on save).`
 }
 
@@ -439,4 +478,60 @@ export function checkRequiresOnImplemented(graph) {
         `is Implemented the link is redundant. Remove the \`Requires\` entry ` +
         `(and the matching \`Required by\` back-link), or use \`Extends\` if the ` +
         `relationship is design lineage worth keeping.`
+}
+
+// Assemble the full priority board: every published RFD and prioritisable
+// draft, annotated with board position (`priority`), in-development flag (from
+// ticket state), and hard dependencies (`dependsOn`). Entries not placed on the
+// board — including terminal RFDs — carry `priority: null`.
+//
+// Returns the entries alongside the normalized `priority` record so callers
+// can tell the prioritised `order` — and its milestone groups, `planned` —
+// from the unsorted `backlog` (the cutoff sits at `priority.order.length`).
+// Throws when the board references an unknown id (see `checkPriority`) or
+// when the milestone groups are malformed (see `checkMilestones`).
+//
+// Paths are resolved from this file's location, so the result is independent
+// of the caller's working directory.
+export function assembleBoard() {
+    const rfdDir = resolve(import.meta.dirname, '../../rfd')
+    const draftsDir = resolve(import.meta.dirname, '../../rfd/drafts')
+    const cachePath = resolve(import.meta.dirname, '../rfd-summaries.json')
+    const priorityPath = resolve(import.meta.dirname, '../../rfd/.priority.json')
+
+    const publishedFiles = readdirSync(rfdDir)
+        .filter(f => /^\d{3}-.+\.md$/.test(f) && !f.startsWith('000-'))
+        .sort()
+    const draftFiles = readdirSync(draftsDir)
+        .filter(f => /^D\d{2}-.+\.md$/.test(f))
+        .sort()
+
+    let summaries
+    try {
+        summaries = JSON.parse(readFileSync(cachePath, 'utf-8'))
+    } catch {
+        summaries = {}
+    }
+
+    const entries = [
+        ...buildEntries(rfdDir, publishedFiles, summaries, '/rfd'),
+        ...buildEntries(draftsDir, draftFiles, {}, '/rfd/drafts'),
+    ]
+
+    // Combined graph so the ordering constraint spans both id spaces (a draft
+    // may require a published RFD).
+    const graph = new Map([
+        ...buildGraph(rfdDir, publishedFiles),
+        ...buildGraph(draftsDir, draftFiles),
+    ])
+
+    const priority = loadPriority(priorityPath)
+    mergePriority(entries, priority)
+    mergeInDevelopment(entries, loadTickets())
+    mergeDependencies(entries, graph)
+
+    const error = checkPriority(entries, priority) ?? checkMilestones(priority.planned)
+    if (error) throw new Error(error)
+
+    return { entries, priority }
 }

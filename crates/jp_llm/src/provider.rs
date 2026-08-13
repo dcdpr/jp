@@ -65,6 +65,26 @@ pub fn get_provider(id: ProviderId, config: &LlmProviderConfig) -> Result<Box<dy
     Ok(provider)
 }
 
+/// Validate that a provider is able to accept requests: credentials present,
+/// configuration well-formed.
+///
+/// Local and synchronous — performs no I/O.
+/// Constructing a provider implies this check passes: this *is*
+/// [`get_provider`] with the client thrown away, packaged as an explicit seam
+/// so callers can fail fast before starting side-effectful work (spawning
+/// background tasks, loading attachments) that is wasted when the request can
+/// never be sent.
+///
+/// # Errors
+///
+/// Returns the same errors as [`get_provider`], e.g. [`Error::MissingEnv`] when
+/// the provider's API key environment variable is unset.
+///
+/// [`Error::MissingEnv`]: crate::Error::MissingEnv
+pub fn preflight(id: ProviderId, config: &LlmProviderConfig) -> Result<()> {
+    get_provider(id, config).map(drop)
+}
+
 /// Build the provider-native chat request for `query` and serialize it to JSON,
 /// without sending it.
 ///

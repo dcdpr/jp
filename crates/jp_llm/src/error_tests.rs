@@ -248,3 +248,41 @@ fn text_no_pattern_returns_none() {
     assert_eq!(extract_retry_from_text("Something went wrong"), None);
     assert_eq!(extract_retry_from_text(""), None);
 }
+
+#[test]
+fn transient_network_error_matches_proxy_upstream_failures() {
+    // Proxy error bodies that don't match any provider's error envelope, so
+    // they surface as `Other` via the generic fallback classification.
+    assert!(looks_like_transient_network_error(
+        r#"{"error":"the upstream unreachable"}"#
+    ));
+    assert!(looks_like_transient_network_error("no healthy upstream"));
+    assert!(looks_like_transient_network_error(
+        "upstream connect error or disconnect/reset before headers"
+    ));
+    assert!(looks_like_transient_network_error("Network is unreachable"));
+    assert!(looks_like_transient_network_error("host unreachable"));
+}
+
+#[test]
+fn transient_network_error_ignores_unrelated_errors() {
+    assert!(!looks_like_transient_network_error("invalid request"));
+    assert!(!looks_like_transient_network_error(
+        "model not found: claude-nonexistent"
+    ));
+    assert!(!looks_like_transient_network_error(""));
+}
+
+#[test]
+fn other_error_with_upstream_failure_message_is_retryable() {
+    // The exact shape of the reported failure: a proxy body wrapped by
+    // `AnthropicError::Unknown`, classified as `Other` by the catch-all arm.
+    let error = StreamError::other(r#"unknown error: {"error":"the upstream unreachable"}"#);
+    assert!(error.is_retryable());
+}
+
+#[test]
+fn other_error_without_transient_pattern_is_not_retryable() {
+    let error = StreamError::other("unknown error: something exploded");
+    assert!(!error.is_retryable());
+}

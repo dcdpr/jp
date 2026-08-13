@@ -16,13 +16,30 @@ expression: v
         context_window: Some(
             400000,
         ),
-        max_output_tokens: None,
-        reasoning: None,
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: true,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: false,
+            },
+        ),
         knowledge_cutoff: Some(
-            2025-08-07,
+            2024-05-31,
         ),
         deprecated: None,
-        structured_output: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
         features: [],
     },
 ]

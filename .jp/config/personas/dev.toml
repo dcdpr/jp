@@ -3,8 +3,10 @@ extends = [
     "../knowledge/software-engineering.toml",
     "../knowledge/software-laws.toml",
     "../knowledge/code-comments.toml",
+    "../knowledge/testing.toml",
     "../knowledge/ubiquitous-language.toml",
     "../knowledge/jp-config.toml",
+    "../knowledge/rfd-priority.toml",
     "../skill/web.toml",
     "../skill/read-files.toml",
     "../skill/edit-files.toml",
@@ -22,7 +24,7 @@ reasoning.display = "full"
 name = "Software Developer"
 
 [assistant.model]
-id = "fable"
+id = "opus"
 parameters.reasoning.effort = "high"
 
 [[assistant.instructions]]

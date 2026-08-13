@@ -5,7 +5,7 @@ use jp_workspace::ConversationHandle;
 use crate::{
     cmd::{ConversationLoadRequest, Output, conversation_id::PositionalIds},
     ctx::Ctx,
-    format::{attachment_detail_item, conversation::DetailsFmt},
+    format::{attachment_detail_item, compaction_detail_item, conversation::DetailsFmt},
     output::print_details,
 };
 
@@ -40,6 +40,8 @@ impl Show {
                 attachments.push(attachment_detail_item(&attachment.to_url()?));
             }
 
+            let compactions = events.compactions().map(compaction_detail_item).collect();
+
             let details = DetailsFmt::new(id)
                 .with_last_message_at(events.last().map(|v| v.event.timestamp))
                 .with_event_count(events.len())
@@ -51,6 +53,7 @@ impl Show {
                 .with_active_conversation(active_id.unwrap_or(id))
                 .with_expires_at(conversation.expires_at)
                 .with_attachments(attachments)
+                .with_compactions(compactions)
                 .with_pretty_printing(ctx.printer.pretty_printing_enabled());
 
             print_details(&ctx.printer, details.title.as_deref(), details.rows());

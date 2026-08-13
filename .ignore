@@ -20,9 +20,25 @@
 !.github/**
 !justfile
 
-# Then the exclusions (applied within the un-ignored trees)
+# `.gitignore` is deliberately not consulted by the `fs_*` tools: with a
+# whitelist, honouring it would only narrow results inside trees already
+# un-ignored above, and everything it would newly hide is listed below anyway.
+
+# Then the exclusions (applied within the un-ignored trees).
+#
+# These govern what the `fs_*` tools *surface*, not what they may open: an
+# excluded path stays out of unscoped listings and searches, but a tool call
+# naming it outright still reaches it — which is the point, since a path the
+# user hands over is one they want read.
+#
+# Two neighbouring lists cover the rest, in .jp/mcp/tools/fs/*.toml:
+#
+#   options.suppress  — read by the tool, never returned to the model
+#   access.fs         — what the tool process may touch at all
 .jp/conversations/
 .jp/local-conversations/
+.jp/mcp/state/
+.jp/**/QUERY_MESSAGE.md
 docs/.yarn/
 docs/.vitepress/cache/
 docs/.vitepress/dist/
@@ -34,3 +50,5 @@ docs/yarn.lock
 **/fixtures/
 docs2/
 lcov.info
+*.log
+/rustc-ice-*

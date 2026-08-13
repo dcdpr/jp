@@ -2,9 +2,11 @@ use std::collections::BTreeSet;
 
 use jp_tool::Context;
 
+use super::MAX_DIAGNOSTIC_BYTES;
 use crate::util::{
     ToolResult, error,
     runner::{DuctProcessRunner, ProcessOutput, ProcessRunner},
+    truncate,
 };
 
 pub(crate) async fn cargo_format(ctx: &Context, package: Option<String>) -> ToolResult {
@@ -38,7 +40,10 @@ fn cargo_format_impl<R: ProcessRunner>(
     )?;
 
     if !cargo_status.is_success() {
-        return error(format!("cargo fmt failed: {cargo_stderr}"));
+        return error(format!(
+            "cargo fmt failed: {}",
+            truncate(&cargo_stderr, MAX_DIAGNOSTIC_BYTES)
+        ));
     }
 
     // 2. Run comfort to reflow doc-comment paragraphs. The doc-comment
@@ -71,7 +76,10 @@ fn cargo_format_impl<R: ProcessRunner>(
     } = runner.run_with_env("comfort", &comfort_args, &ctx.root, &[])?;
 
     if !comfort_status.is_success() {
-        return error(format!("comfort failed: {comfort_stderr}"));
+        return error(format!(
+            "comfort failed: {}",
+            truncate(&comfort_stderr, MAX_DIAGNOSTIC_BYTES)
+        ));
     }
 
     // 3. Merge the two file lists into a deduplicated, sorted set, then
@@ -94,7 +102,11 @@ fn cargo_format_impl<R: ProcessRunner>(
         Ok("No files to format.".into())
     } else {
         let listing = files.into_iter().collect::<Vec<_>>().join("\n- ");
-        Ok(format!("Formatted files:\n- {listing}").into())
+        Ok(format!(
+            "Formatted files:\n- {}",
+            truncate(&listing, MAX_DIAGNOSTIC_BYTES)
+        )
+        .into())
     }
 }
 

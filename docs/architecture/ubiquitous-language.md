@@ -27,10 +27,13 @@ In disagreements between code and docs, the code is authoritative.
     - [EditorBackend](#editorbackend)
     - [InlineReply](#inlinereply)
     - [Inquiry](#inquiry)
+    - [Match](#match)
     - [Persona](#persona)
     - [Pinned Conversation](#pinned-conversation)
     - [Provider](#provider)
     - [RFD](#rfd)
+    - [Search Hit](#search-hit)
+    - [Signal Router](#signal-router)
     - [Thread](#thread)
     - [Tool Call](#tool-call)
     - [Turn](#turn)
@@ -112,8 +115,8 @@ through `build_editor_backend` in `jp_cli`.
 
 ### InlineReply
 
-The `jp_inquire` widget for short replies: the interrupt-menu reply (`r` while
-streaming, `s` while tools run) and the tool argument / result / skip-reason
+The `jp_inquire` widget for short replies: the interrupt-menu reply (`r` in both
+the streaming and tool menus) and the tool argument / result / skip-reason
 edits.
 It renders on the `/dev/tty` prompt writer and accepts inline typing, with a
 `Ctrl+X` escape to the configured editor (the `EditorBackend`) for longer edits.
@@ -129,6 +132,18 @@ user — distinct from a regular chat message.
 Carried as `InquiryRequest` and `InquiryResponse` events within a conversation.
 Used for mid-turn clarification that should not appear in the main chat stream
 or be sent to the LLM provider as context.
+
+### Match
+
+A [Search Hit](#search-hit) whose line actually contains the pattern, as opposed
+to one included only for surrounding context.
+Recorded as `is_match` on the hit, along with the byte ranges of the matched
+substrings.
+
+Matches are the unit every count in `jp conversation grep` uses: the figure in a
+heading, the `--output count` value, and the `--max-matches` cap.
+
+**Not the same as.** A Search Hit, which also covers context lines.
 
 ### Pinned Conversation
 
@@ -159,6 +174,39 @@ Each RFD captures design rationale for a significant change.
 Numeric-prefixed RFDs (`001-`, `002-`, …) are the accepted series; `D`-prefixed
 RFDs (`D01-`, `D02-`, …) are drafts or abandoned proposals.
 The process itself is defined in [RFD-001].
+
+### Search Hit
+
+One line of conversation content emitted by a search, together with the
+coordinate that locates it: the conversation, the turn it came from, and which
+part of the conversation it was found in (its scope — title, user, assistant,
+reasoning, tool call, and so on).
+Implemented as `Hit` in `jp_cli::cmd::conversation::grep`.
+
+A hit is either a [Match](#match) or a context line pulled in by `--context`;
+both are hits.
+
+**Not the same as.** A Match (a hit whose line contains the pattern), a
+Conversation Event (one hit is a single line from within an event, and one event
+can yield many hits).
+
+### Signal Router
+
+The process-wide owner of OS signal handling: `SignalRouter` in
+`jp_cli::signals` (RFD 045).
+It consumes SIGINT/SIGTERM/SIGQUIT once, tracks Ctrl+C **escalation** (first
+press → topmost interrupt handler, second press within the cooldown → graceful
+shutdown, any press after shutdown began → immediate exit), and owns the root
+**shutdown token** — a `CancellationToken` cancelled when a graceful shutdown
+is requested, observed cooperatively by teardown and long-running work.
+
+Scopes that can act on a Ctrl+C register an **interrupt handler** on the
+router's LIFO stack via `push_handler`, receiving an RAII guard and a
+notification channel polled from their own event loop.
+Only the topmost handler is notified; a handler may `decline` to pass the
+interrupt down the stack.
+The registered scopes are the streaming loop, the tool execution loop, and the
+turn-level handler covering gaps between turn phases.
 
 ### Thread
 

@@ -13,6 +13,7 @@ current project. The following tools help you with this:
 - cargo_test: Run the project's tests.
 - cargo_expand: Expand macros in the project's code.
 - cargo_format: Format the project's code.
+- cargo_update: Update named dependencies in `Cargo.lock`, optionally to a pinned version.
 """
 
 [conversation.tools]
@@ -20,6 +21,7 @@ cargo_check = { enable = true, run = "unattended", result = "unattended", style.
 cargo_test = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
 cargo_expand = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
 cargo_format = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
+cargo_update = { enable = true, result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
 
 [[assistant.instructions]]
 title = "Rust Project Conventions"

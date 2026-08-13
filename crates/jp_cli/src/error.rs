@@ -45,6 +45,43 @@ pub(crate) enum Error {
     #[error("LLM error")]
     Llm(#[from] jp_llm::Error),
 
+    /// The inquiry model override (`conversation.inquiry.assistant.model`)
+    /// could not be used.
+    ///
+    /// A dedicated variant so the failure is attributed to the override: the
+    /// underlying LLM error (e.g. a missing API key environment variable) would
+    /// otherwise be indistinguishable from a main-model failure and point the
+    /// user at the wrong config.
+    #[error("Inquiry model override '{model}' is unusable")]
+    InquiryModelOverride {
+        model: String,
+        source: jp_llm::Error,
+    },
+
+    /// A per-question inquiry model override (a `QuestionTarget::Assistant`
+    /// model under `conversation.tools.<tool>.questions.<id>`) could not be
+    /// used.
+    ///
+    /// A dedicated variant so the failure is attributed to the specific tool
+    /// question: the underlying LLM error (e.g. a missing API key environment
+    /// variable) would otherwise be indistinguishable from a main-model failure
+    /// and point the user at the wrong config.
+    #[error("Inquiry model override for question '{question}' of tool '{tool}' is unusable")]
+    InquiryQuestionModelOverride {
+        tool: String,
+        question: String,
+        model: String,
+        source: Box<jp_llm::Error>,
+    },
+
+    /// Reading an `@path` argument value from disk failed.
+    ///
+    /// The path and the underlying cause are both in the message because clap
+    /// renders a value-parser failure through `Display` alone and never walks
+    /// the cause chain.
+    #[error("cannot read '{path}': {source}")]
+    ArgFile { path: String, source: io::Error },
+
     #[error("{0} not found: {1}")]
     NotFound(&'static str, String),
 
@@ -141,4 +178,13 @@ pub(crate) enum Error {
 
     #[error("Compaction error: {0}")]
     Compaction(String),
+
+    /// The summarizer produced no usable summary.
+    ///
+    /// A dedicated variant so the failure names the model that produced
+    /// nothing: a refusal or a token-limited stream is a property of the model,
+    /// not of the compaction range, and the fix is to point the summarizer at a
+    /// different model.
+    #[error("Summarization failed for {model}: {reason}")]
+    Summarize { model: String, reason: String },
 }

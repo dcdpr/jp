@@ -12,6 +12,7 @@ fn request_config(stream_idle_timeout_secs: u32) -> RequestConfig {
         base_backoff_ms: 1000,
         max_backoff_secs: 60,
         stream_idle_timeout_secs,
+        max_response_bytes: 1_048_576,
         cache: CachePolicy::default(),
     }
 }
@@ -51,6 +52,16 @@ fn test_request_config_assign() {
     let kv = KvAssignment::try_from_cli("stream_idle_timeout_secs", "20").unwrap();
     p.assign(kv).unwrap();
     assert_eq!(p.stream_idle_timeout_secs, Some(20));
+
+    let kv = KvAssignment::try_from_cli("max_response_bytes", "4096").unwrap();
+    p.assign(kv).unwrap();
+    assert_eq!(p.max_response_bytes, Some(4096));
+
+    // `0` is the documented way to disable the ceiling, so it must survive
+    // assignment rather than being treated as "unset".
+    let kv = KvAssignment::try_from_cli("max_response_bytes", "0").unwrap();
+    p.assign(kv).unwrap();
+    assert_eq!(p.max_response_bytes, Some(0));
 }
 
 #[test]

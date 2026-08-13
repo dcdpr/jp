@@ -1,22 +1,32 @@
 use jp_tool::Context;
 
+use super::MAX_DIAGNOSTIC_BYTES;
 use crate::util::{
     ToolResult,
     runner::{DuctProcessRunner, ProcessOutput, ProcessRunner},
+    truncate,
 };
+
+/// Cap for expanded source.
+///
+/// Larger than [`MAX_DIAGNOSTIC_BYTES`]: expanded macro output is the payload
+/// the caller asked for, not incidental noise.
+const MAX_EXPANDED_BYTES: usize = 100_000;
 
 pub(crate) async fn cargo_expand(
     ctx: &Context,
     item: String,
     package: Option<String>,
+    checksum_freshness: bool,
 ) -> ToolResult {
-    cargo_expand_impl(ctx, &item, package, &DuctProcessRunner)
+    cargo_expand_impl(ctx, &item, package, checksum_freshness, &DuctProcessRunner)
 }
 
 fn cargo_expand_impl<R: ProcessRunner>(
     ctx: &Context,
     item: &str,
     package: Option<String>,
+    checksum_freshness: bool,
     runner: &R,
 ) -> ToolResult {
     let package = package.map(|v| format!("--package={v}"));
@@ -26,17 +36,34 @@ fn cargo_expand_impl<R: ProcessRunner>(
     }
     args.push(item);
 
+    let mut env = vec![("RUST_BACKTRACE", "1")];
+    if checksum_freshness {
+        // Use content checksums instead of file mtimes for cargo's freshness
+        // checks, so that sibling checkouts (git worktrees) sharing a target
+        // dir cannot serve each other's stale artifacts. Matches CI. Requires
+        // nightly cargo. See rust-lang/cargo#14136.
+        env.push(("CARGO_UNSTABLE_CHECKSUM_FRESHNESS", "true"));
+    }
+
     let ProcessOutput {
         stdout,
         stderr,
         status,
-    } = runner.run_with_env("cargo", &args, &ctx.root, &[("RUST_BACKTRACE", "1")])?;
+    } = runner.run_with_env("cargo", &args, &ctx.root, &env)?;
 
     if !status.is_success() {
-        return Err(format!("Cargo command failed: {stderr}").into());
+        return Err(format!(
+            "Cargo command failed: {}",
+            truncate(&stderr, MAX_DIAGNOSTIC_BYTES)
+        )
+        .into());
     }
 
-    Ok(format!("```rust\n{}\n```\n", stdout.trim()).into())
+    Ok(format!(
+        "```rust\n{}\n```\n",
+        truncate(stdout.trim(), MAX_EXPANDED_BYTES)
+    )
+    .into())
 }
 
 #[cfg(test)]

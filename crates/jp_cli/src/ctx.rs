@@ -2,23 +2,20 @@ use std::{
     collections::HashSet,
     io::{self, IsTerminal as _},
     sync::Arc,
+    time::Duration,
 };
 
 use camino::Utf8Path;
 use chrono::{DateTime, Utc};
-use crossterm::terminal;
 use jp_config::{AppConfig, PartialAppConfig, conversation::tool::ToolSource};
-use jp_mcp::id::McpServerId;
+use jp_mcp::{StartupSet, id::McpServerId};
 use jp_printer::Printer;
 use jp_storage::backend::FsStorageBackend;
 use jp_task::TaskHandler;
 use jp_workspace::{Workspace, session::Session};
-use tokio::{
-    runtime::{Handle, Runtime},
-    task::JoinSet,
-};
+use tokio::runtime::{Handle, Runtime};
 
-use crate::{Globals, Result, signals::SignalPair};
+use crate::{Globals, Result, signals::SignalRouter};
 
 /// Context for the CLI application
 pub(crate) struct Ctx {
@@ -50,7 +47,9 @@ pub(crate) struct Ctx {
 
     pub(crate) task_handler: jp_task::TaskHandler,
 
-    pub(crate) signals: SignalPair,
+    /// Routes OS signals: Ctrl-C escalation, scoped interrupt handlers, and the
+    /// root shutdown token.
+    pub(crate) signals: SignalRouter,
 
     runtime: Runtime,
 
@@ -69,10 +68,13 @@ pub(crate) struct Term {
     /// These are not managed by the TTY subsystem.
     pub(crate) is_tty: bool,
 
-    /// Width of the controlling terminal in columns, when stdout is a TTY.
+    /// Width in columns to lay output out against.
     ///
-    /// `None` when stdout is piped or redirected, so list output keeps its full
-    /// width for machine consumption rather than wrapping to a guessed size.
+    /// The controlling terminal's width when stdout is a TTY, or the width the
+    /// caller declared with `--width`.
+    /// `None` when stdout is piped or redirected without a declared width, so
+    /// list output keeps its full width for machine consumption rather than
+    /// wrapping to a guessed size.
     pub(crate) width: Option<u16>,
 }
 
@@ -88,14 +90,12 @@ impl Ctx {
         printer: Printer,
     ) -> Self {
         let config = config.into();
+        let escalation_cooldown =
+            Duration::from_secs(config.interrupt.escalation_cooldown_secs.into());
         let mcp_client = jp_mcp::Client::new(config.providers.mcp.clone());
 
         let is_tty = io::stdout().is_terminal();
-        let width = if is_tty {
-            terminal::size().ok().map(|(cols, _)| cols)
-        } else {
-            None
-        };
+        let width = printer.output_width().columns();
 
         Self {
             workspace,
@@ -110,7 +110,7 @@ impl Ctx {
             printer: Arc::new(printer),
             mcp_client,
             task_handler: TaskHandler::default(),
-            signals: SignalPair::new(&runtime),
+            signals: SignalRouter::new(&runtime, escalation_cooldown),
             runtime,
 
             #[cfg(test)]
@@ -169,9 +169,7 @@ impl Ctx {
 
     /// Activate and deactivate MCP servers based on the active conversation
     /// context.
-    pub(crate) async fn configure_active_mcp_servers(
-        &mut self,
-    ) -> Result<JoinSet<std::result::Result<(), jp_mcp::Error>>> {
+    pub(crate) async fn configure_active_mcp_servers(&mut self) -> Result<StartupSet> {
         let mut server_ids = HashSet::new();
 
         for (_name, cfg) in self.config.conversation.tools.iter() {

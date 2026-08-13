@@ -16,6 +16,8 @@ version.workspace = true
 comfy-table = { workspace = true }
 serde_json = { workspace = true, features = ["preserve_order"] }
 strip-ansi-escapes = { workspace = true }
+unicode-segmentation = { workspace = true }
+unicode-width = { workspace = true }
 
 [lints]
 workspace = true

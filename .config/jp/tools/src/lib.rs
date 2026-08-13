@@ -6,6 +6,7 @@ mod fs;
 mod git;
 mod github;
 mod plan;
+mod ticket;
 mod unix;
 mod util;
 mod web;
@@ -26,6 +27,7 @@ pub async fn run(ctx: Context, t: Tool) -> util::ToolResult {
         s if s.starts_with("web_") => web::run(ctx, t).await,
         s if s.starts_with("git_") => git::run(ctx, t).await,
         s if s.starts_with("unix_") => unix::run(ctx, t),
+        s if s.starts_with("ticket_") => ticket::run(ctx, t),
         "plan" => plan::run(ctx, t),
         _ => util::unknown_tool(t),
     }
@@ -77,7 +79,6 @@ impl Tool {
 
     /// Read a typed value from the options map, returning a default if the key
     /// is missing or the value can't be deserialized to `T`.
-    #[expect(dead_code, reason = "no tool reads options yet")]
     fn option_or<T: serde::de::DeserializeOwned>(&self, key: &str, default: T) -> T {
         self.options
             .get(key)

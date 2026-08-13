@@ -11,7 +11,7 @@ import {
     findCycles,
     findDuplicateIds,
     findStrayDraftRefs,
-} from './rfd-shared.js'
+} from './rfd-shared.mjs'
 
 const rfdDir = resolve(import.meta.dirname, '../../rfd')
 const cachePath = resolve(import.meta.dirname, '../rfd-summaries.json')

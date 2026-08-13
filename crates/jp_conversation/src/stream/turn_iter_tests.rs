@@ -1,4 +1,5 @@
 use chrono::{TimeZone as _, Utc};
+use jp_config::PartialAppConfig;
 
 use crate::{
     ConversationEvent, ConversationStream, EventKind,
@@ -13,6 +14,66 @@ fn ts(h: u32, m: u32, s: u32) -> chrono::DateTime<Utc> {
 fn empty_stream_yields_no_turns() {
     let stream = ConversationStream::new_test();
     assert_eq!(stream.iter_turns().len(), 0);
+}
+
+/// Every event's turn index according to `iter_turns`, which resolves per-event
+/// configuration, paired with the same according to the allocation-free
+/// `iter_events_by_turn`.
+///
+/// The two must agree exactly: callers pick between them on cost alone.
+fn turn_indices(stream: &ConversationStream) -> (Vec<usize>, Vec<usize>) {
+    let via_turns = stream
+        .iter_turns()
+        .flat_map(|turn| turn.iter().map(|_| turn.index()).collect::<Vec<_>>())
+        .collect();
+    let direct = stream.iter_events_by_turn().map(|(turn, _)| turn).collect();
+
+    (via_turns, direct)
+}
+
+#[test]
+fn events_by_turn_agrees_with_iter_turns() {
+    // Leading `TurnStart`, an interleaved config delta, and a trailing turn:
+    // the delta must not shift any turn number, since `iter_turns` never sees it.
+    let mut stream = ConversationStream::new_test();
+    stream.extend(vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("Q1"), ts(0, 0, 1)),
+    ]);
+    stream.add_config_delta(PartialAppConfig::default());
+    stream.extend(vec![
+        ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+        ConversationEvent::new(ChatRequest::from("Q2"), ts(0, 1, 1)),
+    ]);
+
+    let (via_turns, direct) = turn_indices(&stream);
+    assert_eq!(via_turns, direct);
+    assert_eq!(direct, vec![0, 0, 1, 1]);
+    assert_eq!(stream.turn_count(), 2);
+}
+
+#[test]
+fn events_by_turn_agrees_on_an_implicit_leading_turn() {
+    // No leading `TurnStart`: the orphan events form turn 0 and the explicit
+    // marker opens turn 1.
+    let mut stream = ConversationStream::new_test();
+    stream.extend(vec![
+        ConversationEvent::new(ChatRequest::from("orphan"), ts(0, 0, 1)),
+        ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+        ConversationEvent::new(ChatRequest::from("Q1"), ts(0, 1, 1)),
+    ]);
+
+    let (via_turns, direct) = turn_indices(&stream);
+    assert_eq!(via_turns, direct);
+    assert_eq!(direct, vec![0, 1, 1]);
+    assert_eq!(stream.turn_count(), 2);
+}
+
+#[test]
+fn events_by_turn_is_empty_for_an_empty_stream() {
+    let stream = ConversationStream::new_test();
+    assert_eq!(stream.iter_events_by_turn().count(), 0);
+    assert_eq!(stream.turn_count(), 0);
 }
 
 #[test]

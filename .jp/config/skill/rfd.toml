@@ -11,6 +11,7 @@ attachments = [
 [conversation.tools]
 rfd_draft = { enable = true, run = "unattended" }
 rfd_promote = { enable = true, run = "unattended" }
+rfd_renumber = { enable = true, run = "unattended" }
 rfd_supersede = { enable = true, run = "unattended" }
 rfd_abandon = { enable = true, run = "unattended" }
 rfd_extend = { enable = true, run = "unattended" }
@@ -55,6 +56,11 @@ status, which also moves the file up to `docs/rfd/`.
 `rfd_promote` handles deferred numbering: for DNN-prefixed drafts, it \
 assigns the next available permanent number and renames the file. When \
 promoting to Accepted, it creates a GitHub tracking issue.
+
+`rfd_renumber` moves an RFD (draft or published) to a new id and rewrites its \
+file name, heading, cross-references, and priority-board entry. The target id \
+stays in the same id-space; when omitted, the next available id is used (pass \
+it explicitly when a number is taken on another branch).
 
 `rfd_extend` records design-lineage relationships between RFDs \
 (adds Extends/Extended by metadata to both documents). Use this when \

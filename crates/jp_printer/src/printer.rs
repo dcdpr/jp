@@ -20,6 +20,37 @@ use crate::{ansi::AnsiStripper, typewriter::VisibleCharsIterator};
 /// A shared buffer that can be written to.
 pub type SharedBuffer = Arc<Mutex<String>>;
 
+/// The width, in columns, that output is laid out against.
+///
+/// Where the width came from matters to a renderer choosing between an escape
+/// sequence and real characters: a terminal implements the full escape
+/// repertoire, while a host that lays out its own output area usually renders
+/// plain text only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum OutputWidth {
+    /// No width is known, so content keeps its natural width.
+    #[default]
+    Unknown,
+
+    /// Measured from the controlling terminal.
+    Terminal(u16),
+
+    /// Supplied by the caller, for output rendered inside an area the host lays
+    /// out itself.
+    Declared(u16),
+}
+
+impl OutputWidth {
+    /// The width in columns, or `None` when it is unknown.
+    #[must_use]
+    pub const fn columns(self) -> Option<u16> {
+        match self {
+            Self::Unknown => None,
+            Self::Terminal(columns) | Self::Declared(columns) => Some(columns),
+        }
+    }
+}
+
 /// A centralized printer that handles output to out/err/tty via a background
 /// thread.
 #[derive(Debug)]
@@ -32,6 +63,12 @@ pub struct Printer {
 
     /// Whether a TTY writer is available for interactive prompts.
     has_tty: bool,
+
+    /// The width output is laid out against, when it is known.
+    ///
+    /// [`OutputWidth::Unknown`] for buffers, sinks, and redirected output,
+    /// where there is no width to lay content out against.
+    output_width: OutputWidth,
 
     /// The worker thread handle.
     worker_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
@@ -50,6 +87,7 @@ impl Clone for Printer {
             tx: self.tx.clone(),
             format: self.format,
             has_tty: self.has_tty,
+            output_width: self.output_width,
             worker_handle: self.worker_handle.clone(),
             delay_control: self.delay_control.clone(),
         }
@@ -96,9 +134,30 @@ impl Printer {
             tx,
             format,
             has_tty,
+            output_width: OutputWidth::Unknown,
             worker_handle: Arc::new(Mutex::new(Some(handle))),
             delay_control,
         }
+    }
+
+    /// Set the width output is laid out against.
+    ///
+    /// Consumers use it to lay out content that can't be soft-wrapped, such as
+    /// markdown tables, and to pick a line fill the output device renders.
+    /// Pass [`OutputWidth::Unknown`] when the output is consumed by a machine
+    /// rather than read by a human, so that content keeps its natural width.
+    ///
+    /// Call before the printer is shared; clones inherit the value.
+    #[must_use]
+    pub const fn with_output_width(mut self, width: OutputWidth) -> Self {
+        self.output_width = width;
+        self
+    }
+
+    /// The width output is laid out against.
+    #[must_use]
+    pub const fn output_width(&self) -> OutputWidth {
+        self.output_width
     }
 
     /// Create a new printer that writes to the terminal (stdout/stderr).

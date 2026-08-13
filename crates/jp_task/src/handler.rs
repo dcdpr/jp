@@ -16,13 +16,6 @@ pub struct TaskHandler {
     /// Tasks that don't observe the token are force-aborted after the grace
     /// window.
     cancel_token: CancellationToken,
-    /// Hard-cancellation signal.
-    /// Firing it short-circuits both the soft wait and the grace window in
-    /// [`TaskHandler::sync`], force-aborts the `JoinSet`, and skips the
-    /// workspace-sync iteration entirely.
-    /// Tasks that had completed their `run()` cleanly lose their pending
-    /// workspace mutation.
-    force_token: CancellationToken,
 }
 
 impl TaskHandler {
@@ -39,16 +32,6 @@ impl TaskHandler {
     #[must_use]
     pub fn cancel_token(&self) -> CancellationToken {
         self.cancel_token.clone()
-    }
-
-    /// Returns a clone of the hard-cancellation token.
-    ///
-    /// Cancelling the token force-aborts the `JoinSet` and skips the
-    /// workspace-sync iteration.
-    /// Pending workspace mutations are dropped.
-    #[must_use]
-    pub fn force_token(&self) -> CancellationToken {
-        self.force_token.clone()
     }
 
     pub fn spawn(&mut self, task: impl Task) {
@@ -92,15 +75,6 @@ impl TaskHandler {
         self.wait_for_tasks(Duration::from_secs(2), &mut tasks, true)
             .await;
 
-        // Force quit: drop accumulated results without applying them.
-        if self.force_token.is_cancelled() {
-            warn!(
-                count = tasks.len(),
-                "Force-quit requested; skipping workspace sync for collected tasks."
-            );
-            return Ok(());
-        }
-
         for task in tasks {
             if let Err(error) = task.sync(workspace).await {
                 tracing::error!(%error, "Error syncing background task.");
@@ -122,15 +96,6 @@ impl TaskHandler {
         loop {
             jp_macro::select!(
                 biased,
-                self.force_token.cancelled(),
-                |_force| {
-                    // Force quit: abort everything immediately. The
-                    // grace pass observes the same signal and exits via
-                    // the empty-JoinSet branch.
-                    warn!("Force-quit requested. Aborting background tasks.");
-                    self.tasks.shutdown().await;
-                    break;
-                },
                 self.cancel_token.cancelled(),
                 |_cancel| if (!shutdown) {
                     // Soft cancellation fired externally during the soft

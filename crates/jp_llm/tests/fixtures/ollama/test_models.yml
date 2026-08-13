@@ -10,6 +10,31 @@ then:
     {
       "models": [
         {
+          "name": "qwen3.5:9b",
+          "model": "qwen3.5:9b",
+          "modified_at": "2026-03-06T03:05:33.981620282+01:00",
+          "size": 6594474711,
+          "digest": "6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7",
+          "details": {
+            "parent_model": "",
+            "format": "gguf",
+            "family": "qwen35",
+            "families": [
+              "qwen35"
+            ],
+            "parameter_size": "9.7B",
+            "quantization_level": "Q4_K_M",
+            "context_length": 262144,
+            "embedding_length": 4096
+          },
+          "capabilities": [
+            "vision",
+            "completion",
+            "tools",
+            "thinking"
+          ]
+        },
+        {
           "name": "qwen3:8b",
           "model": "qwen3:8b",
           "modified_at": "2025-11-25T22:09:41.033215053+01:00",
@@ -23,8 +48,15 @@ then:
               "qwen3"
             ],
             "parameter_size": "8.2B",
-            "quantization_level": "Q4_K_M"
-          }
+            "quantization_level": "Q4_K_M",
+            "context_length": 40960,
+            "embedding_length": 4096
+          },
+          "capabilities": [
+            "completion",
+            "tools",
+            "thinking"
+          ]
         },
         {
           "name": "llama3:latest",
@@ -40,8 +72,13 @@ then:
               "llama"
             ],
             "parameter_size": "8.0B",
-            "quantization_level": "Q4_0"
-          }
+            "quantization_level": "Q4_0",
+            "context_length": 8192,
+            "embedding_length": 4096
+          },
+          "capabilities": [
+            "completion"
+          ]
         }
       ]
     }

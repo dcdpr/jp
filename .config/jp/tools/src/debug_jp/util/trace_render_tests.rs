@@ -307,6 +307,21 @@ fn render_strips_trace_path_marker_from_stderr() {
 }
 
 #[test]
+fn render_strips_json_trace_path_marker_from_stderr() {
+    // jp emits this shape instead of the text marker when `--format` is
+    // json or json-pretty; it must be stripped the same way.
+    let mut launch = fixture_launch();
+    launch.stderr = "some real error\n{\"trace_log\":\"/tmp/x\"}\n".into();
+
+    let report = render(&[], 0, &launch, &["c".into()], fixture_paths());
+    let stderr_start = report.find("## stderr").unwrap();
+    let footer_start = report.find("**Files:**").unwrap();
+    let stderr_section = &report[stderr_start..footer_start];
+    assert!(stderr_section.contains("some real error"));
+    assert!(!stderr_section.contains("trace_log"));
+}
+
+#[test]
 fn render_footer_lists_all_three_sidecar_files() {
     let report = render(&[], 0, &fixture_launch(), &["c".into()], fixture_paths());
     assert!(report.contains("- Trace: `tmp/profiling/trace-x.jsonl`"));

@@ -90,6 +90,9 @@ Ok(
                     stream_idle_timeout_secs: Some(
                         60,
                     ),
+                    max_response_bytes: Some(
+                        1048576,
+                    ),
                     cache: None,
                 },
             },
@@ -111,6 +114,9 @@ Ok(
                         run: None,
                         format: None,
                         result: None,
+                        cancellation_response: Some(
+                            "This tool request was intentionally rejected by the user. Please evaluate and either ask the user why it was rejected, or infer the reason by looking at the historical messages in the conversation.",
+                        ),
                         style: PartialDisplayStyleConfig {
                             hidden: Some(
                                 false,
@@ -195,10 +201,24 @@ Ok(
                     table_max_column_width: Some(
                         40,
                     ),
+                    table_continuation_edge: Some(
+                        true,
+                    ),
                     theme: Some(
                         "gruvbox-dark",
                     ),
                     hr_style: None,
+                },
+                mcp_startup: PartialMcpStartupConfig {
+                    show: Some(
+                        true,
+                    ),
+                    delay_secs: Some(
+                        4,
+                    ),
+                    interval_ms: Some(
+                        100,
+                    ),
                 },
                 reasoning: PartialReasoningConfig {
                     display: None,
@@ -207,6 +227,9 @@ Ok(
                         Ansi256(
                             236,
                         ),
+                    ),
+                    extend_across_tool_calls: Some(
+                        true,
                     ),
                 },
                 streaming: PartialStreamingConfig {
@@ -282,6 +305,9 @@ Ok(
                 },
             },
             interrupt: PartialInterruptConfig {
+                escalation_cooldown_secs: Some(
+                    2,
+                ),
                 streaming: PartialStreamingInterruptConfig {
                     action: None,
                     compose_in_editor: None,

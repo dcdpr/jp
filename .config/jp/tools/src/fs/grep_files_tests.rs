@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
 use camino_tempfile::tempdir;
+use ignore::gitignore::Gitignore;
 
-use super::*;
+use super::{super::utils::suppress_matcher, *};
 
 #[tokio::test]
 async fn grep_with_restricted_policy_skips_ungranted_files() {
@@ -26,6 +27,7 @@ async fn grep_with_restricted_policy_skips_ungranted_files() {
         None,
         None,
         None,
+        &Gitignore::empty(),
     )
     .await
     .unwrap()
@@ -67,6 +69,7 @@ async fn greps_files_under_approved_external_mount() {
         None,
         Some(vec!["fork".to_owned()].into()),
         None,
+        &Gitignore::empty(),
     )
     .await
     .unwrap();
@@ -92,6 +95,7 @@ async fn dot_means_workspace_root() {
         None,
         Some(vec![".".to_owned()].into()),
         None,
+        &Gitignore::empty(),
     )
     .await
     .unwrap();
@@ -128,6 +132,7 @@ async fn subdir_scope_respects_root_ignore() {
         None,
         Some(vec!["docs".to_owned()].into()),
         None,
+        &Gitignore::empty(),
     )
     .await
     .unwrap()
@@ -163,6 +168,7 @@ async fn restricts_to_extensions() {
         None,
         Some(vec!["docs".to_owned()].into()),
         Some(vec!["md".to_owned()].into()),
+        &Gitignore::empty(),
     )
     .await
     .unwrap()
@@ -182,6 +188,7 @@ async fn rejects_workspace_escape() {
         None,
         Some(vec!["../escape".to_owned()].into()),
         None,
+        &Gitignore::empty(),
     )
     .await;
 
@@ -189,6 +196,102 @@ async fn rejects_workspace_escape() {
     assert!(
         err.to_string().contains("escape the workspace"),
         "unexpected error: {err}"
+    );
+}
+
+/// Workspace with one `.ignore`d fixture holding the sought text, mirroring
+/// `**/fixtures/` in the real workspace `.ignore`.
+fn fixtures_workspace(root: &camino::Utf8Path) {
+    std::fs::write(root.join(".ignore"), "**/fixtures/\n").unwrap();
+    std::fs::create_dir_all(root.join("crates/tests/fixtures")).unwrap();
+    std::fs::write(
+        root.join("crates/tests/fixtures/a.snap"),
+        "context_window: None",
+    )
+    .unwrap();
+}
+
+#[tokio::test]
+async fn ignored_directory_is_searched_when_named() {
+    // Regression: a sweep scoped to an `.ignore`d directory searched nothing and
+    // returned the same "no matches" as a real miss, which reads as evidence
+    // that the pattern is absent from files the tool never opened.
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    fixtures_workspace(root);
+
+    let matches = fs_grep_files(
+        root,
+        None,
+        "context_window: None".to_owned(),
+        None,
+        Some(vec!["crates/tests/fixtures".to_owned()].into()),
+        None,
+        &Gitignore::empty(),
+    )
+    .await
+    .unwrap()
+    .replace('\\', "/");
+
+    assert_eq!(
+        matches,
+        "crates/tests/fixtures/a.snap:1:context_window: None\n"
+    );
+}
+
+#[tokio::test]
+async fn explicitly_named_ignored_file_is_searched() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    fixtures_workspace(root);
+
+    let matches = fs_grep_files(
+        root,
+        None,
+        "context_window".to_owned(),
+        None,
+        Some(vec!["crates/tests/fixtures/a.snap".to_owned()].into()),
+        None,
+        &Gitignore::empty(),
+    )
+    .await
+    .unwrap()
+    .replace('\\', "/");
+
+    assert_eq!(
+        matches,
+        "crates/tests/fixtures/a.snap:1:context_window: None\n"
+    );
+}
+
+#[tokio::test]
+async fn suppressed_path_is_reported_so_the_caller_can_ask_the_user() {
+    // The tool will not return this content however it is asked, so the note points
+    // at the only route left rather than leaving the reader to conclude the text is
+    // absent.
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::create_dir_all(root.join(".git")).unwrap();
+    std::fs::write(root.join(".git/HEAD"), "ref: refs/heads/main").unwrap();
+
+    let matches = fs_grep_files(
+        root,
+        None,
+        "refs/heads".to_owned(),
+        None,
+        Some(vec![".git/HEAD".to_owned()].into()),
+        None,
+        &suppress_matcher(root, &[".git/".to_owned()]).unwrap(),
+    )
+    .await
+    .unwrap();
+
+    // Normalized: a resolved path carries native separators, so the note reads
+    // `.git\HEAD` on Windows.
+    assert_eq!(
+        matches.replace('\\', "/"),
+        "No matches found in the paths that were searched.\n\nNote: '.git/HEAD' is suppressed \
+         from this tool's results. If you need it, ask the user to provide it."
     );
 }
 
@@ -305,10 +408,18 @@ async fn test_grep_files() {
 
         let paths = (!paths.is_empty()).then_some(paths.into_iter().map(str::to_owned).collect());
 
-        let matches = fs_grep_files(root, None, pattern.to_owned(), Some(5), paths, None)
-            .await
-            .unwrap()
-            .replace('\\', "/");
+        let matches = fs_grep_files(
+            root,
+            None,
+            pattern.to_owned(),
+            Some(5),
+            paths,
+            None,
+            &Gitignore::empty(),
+        )
+        .await
+        .unwrap()
+        .replace('\\', "/");
 
         assert_eq!(matches, expected.join(""), "test case: {name}");
     }
