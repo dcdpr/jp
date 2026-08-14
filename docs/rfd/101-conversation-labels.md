@@ -70,8 +70,8 @@ Two commands set labels, split by whether a target's config is needed:
   conversation's effective config.
 - `jp c edit` takes **any number** of conversations and accepts literal
   directives only.
-  Literal directives need no config at all, so they are safe in bulk;
-  `:alias` is rejected at parse time with a pointer to `jp c label`.
+  Literal directives need no config at all, so they are safe in bulk; `:alias`
+  is rejected at parse time with a pointer to `jp c label`.
 
 `jp c fork` follows `jp c edit`: literal directives on any number of sources,
 `:alias` rejected.
@@ -87,8 +87,8 @@ jp c label <id> --no-label=stage,draft
 jp c ls --label=team=platform,branch
 ```
 
-An empty entry is an error rather than being forgiven, so `--label=a=1,`
-reports the stray comma instead of quietly meaning something else.
+An empty entry is an error rather than being forgiven, so `--label=a=1,` reports
+the stray comma instead of quietly meaning something else.
 A bare `--no-label` with no value still clears every label.
 
 **Writing a comma into a value.** Splitting makes a value containing a comma
@@ -105,8 +105,8 @@ A comma in a label value is rare and arrives mostly through scripting; a script
 that needs one at creation time can run `jp q --new` and then `jp c label`,
 which resolves the conversation from the session mapping without an ID.
 The filter commands carry it because there is no equivalent way to split a read
-across two commands: without it, a script could set a label it can never look
-up again.
+across two commands: without it, a script could set a label it can never look up
+again.
 
 The escape is only needed where a *value* is written, which is why the removal
 flags have no literal form: `--no-label` names keys, and the key grammar has no
@@ -219,8 +219,8 @@ second execution under `run = "unattended"`.
 We do not dedupe across resolution sources, because the configured command may
 be intentionally non-idempotent.
 
-**Alias scope.** Aliases are accepted only where exactly one target
-conversation is known: `q --new`, `q --fork`, `q --id`, and `c label`.
+**Alias scope.** Aliases are accepted only where exactly one target conversation
+is known: `q --new`, `q --fork`, `q --id`, and `c label`.
 
 On multi-target mutating commands (`c edit`, `c fork`), `:alias` is rejected at
 parse time with a pointer to `jp c label`.
@@ -258,9 +258,9 @@ It runs at three well-defined points:
    Detailed in [Resolution](#resolution).
 2. **Fork** (`jp c fork`): source labels are inherited, configured entries with
    `apply_on.fork = true` are re-resolved on top, then CLI directives apply.
-3. **Existing-conversation mutation** (`jp q --id --label`, `jp c label` /
-   `jp c edit --label` / `--no-label`): only the keys named on the CLI are
-   updated; unrelated configured labels are *not* re-resolved.
+3. **Existing-conversation mutation** (`jp q --id --label`, `jp c label` / `jp c
+   edit --label` / `--no-label`): only the keys named on the CLI are updated;
+   unrelated configured labels are *not* re-resolved.
    Literal `--label=k=v` and `--no-label=k` directives apply directly without
    spawning commands or invoking `run`-mode prompts; alias directives
    (`--label=:name`) still go through the full resolver and may spawn commands
@@ -481,8 +481,8 @@ them against that source's config.
 
 **Existing-conversation mutation.** `--label` (on `jp q --id`, `jp c label`, or
 `jp c edit`) and `--no-label` (on `jp c label` or `jp c edit`) apply only to the
-keys named on the CLI: start from `metadata.json.labels`, apply the directives in
-left-to-right order, and write the result back to `metadata.json` under the
+keys named on the CLI: start from `metadata.json.labels`, apply the directives
+in left-to-right order, and write the result back to `metadata.json` under the
 conversation lock.
 No `ConfigDelta` is emitted.
 Unrelated configured labels are left untouched, and no `apply_on` filtering is
@@ -579,8 +579,7 @@ writing a comma into a value is not, so the ergonomics were backwards.
 
 ### Splitting on `--labels`, literal on `--label`
 
-Give the two spellings different behavior, making the singular the escape
-hatch.
+Give the two spellings different behavior, making the singular the escape hatch.
 Rejected because the pair differs by one character, so a mistype is silently
 wrong in both directions: `--labels=branch=feat,exp` yields two labels and
 `--label=a=1,b=2` yields one label with a comma in its value.
@@ -677,16 +676,16 @@ context exposure) is designed.
   one `AppConfig` per invocation, layering at most one conversation's config
   (chosen by `ConversationLoadRequest::config_conversation`), and that `c edit`
   and `c fork` layer none at all.
-  There is therefore no per-target effective config available at command-execution
-  time.
-  Aliases are confined to single-target commands instead — `jp c label` loads its
-  one target's config, and `jp q` already did — rather than reshaping the
+  There is therefore no per-target effective config available at
+  command-execution time.
+  Aliases are confined to single-target commands instead — `jp c label` loads
+  its one target's config, and `jp q` already did — rather than reshaping the
   pipeline to rebuild a config per target.
   See [Alias scope](#alias-scope).
 
-- **`apply_on.fork` and the source conversation's config.** `jp c fork` layers no
-  per-conversation config, so a rule that exists only as a config delta on the
-  source conversation is invisible to `apply_on.fork` re-resolution there.
+- **`apply_on.fork` and the source conversation's config.** `jp c fork` layers
+  no per-conversation config, so a rule that exists only as a config delta on
+  the source conversation is invisible to `apply_on.fork` re-resolution there.
   `jp q --fork` layers the source's config and does see it.
   Accepted for now; the divergence disappears when `c fork` becomes
   single-source.
@@ -750,8 +749,8 @@ Mergeable independently of Phase 1, but depends on it.
    commands.
    Add `jp c label <ID>`, which loads the target's per-conversation config so
    the rule resolves against it, and resolve aliases during command execution.
-   Reject `:alias` on multi-target mutating commands and on filter commands
-   with a descriptive error at parse time.
+   Reject `:alias` on multi-target mutating commands and on filter commands with
+   a descriptive error at parse time.
 5. `--label` filter on `grep` (pre-filter on conversation set; `Scope` enum
    unchanged).
 

@@ -27,7 +27,6 @@ In disagreements between code and docs, the code is authoritative.
     - [EditorBackend](#editorbackend)
     - [InlineReply](#inlinereply)
     - [Inquiry](#inquiry)
-    - [Label](#label)
     - [Match](#match)
     - [Persona](#persona)
     - [Pinned Conversation](#pinned-conversation)
@@ -133,32 +132,6 @@ user — distinct from a regular chat message.
 Carried as `InquiryRequest` and `InquiryResponse` events within a conversation.
 Used for mid-turn clarification that should not appear in the main chat stream
 or be sent to the LLM provider as context.
-
-### Label
-
-A `key=value` annotation on a conversation, used to find conversations by the
-context they were created in (VCS branch, team, stage, ...).
-A label with an empty value is a *bare* label; filters treat it as "key present,
-any value".
-
-Labels live in two places with distinct roles.
-The *rules* that produce them are configuration, declared under
-`conversation.labels.<key>` and layered like any other config.
-The *resolved set* is conversation metadata: a `BTreeMap<String, String>` on
-`Conversation` in `jp_conversation`, persisted in `metadata.json`.
-Filters, `jp conversation show`, and the CLI `--label` flag all read and write
-the resolved set; they never write back to the rules.
-
-Label keys match `[A-Za-z0-9_-]+`.
-The excluded characters are all significant elsewhere: `.` separates dotted
-config paths, `=` and `,` are CLI separators, and `:` marks an alias reference.
-
-**Not the same as** a title (free-form, one per conversation, shown as the
-conversation's name) or an attachment (content added to the conversation, not an
-annotation about it).
-
-**Avoid.** *Tag*, *annotation*, *marker*.
-The word is **Label**.
 
 ### Match
 

@@ -11,9 +11,14 @@ These terms are tightly coupled — paraphrasing one usually breaks the model fo
 another.
 Use them as written.
 
+The cluster also covers a conversation's *state*: where it sits and how it is
+annotated.
+**Active**, **Live**, and **Archived** answer the first; **Label** answers the
+second.
+
 > [!NOTE]
-> Cluster status: **Turn**, **Active Conversation**, **Live Conversation**, and
-> **Archived Conversation** are defined below.
+> Cluster status: **Turn**, **Active Conversation**, **Live Conversation**,
+> **Archived Conversation**, and **Label** are defined below.
 > The remaining terms are placeholders and will land in subsequent passes.
 > Until then, see the [legacy single-page glossary] for the older definitions of
 > the unfilled terms.
@@ -80,6 +85,42 @@ is the source of truth.
 
 **Not the same as.** A removed conversation (archiving is reversible with `jp c
 unarchive`; removal is not).
+
+### Label
+
+A `key=value` annotation on a conversation, used to find it later by the context
+it was created in: the VCS branch, the team, a review stage.
+A label with an empty value is a *bare* label, and filters treat it as "key
+present, any value".
+
+Labels live in two places with distinct roles.
+The **rules** that produce them are configuration, declared under
+`conversation.labels.<key>` and layered like any other config; a rule's value is
+a literal string, or a command whose trimmed stdout becomes the value.
+The **resolved set** is the labels themselves, written at creation, on fork, and
+by the CLI.
+A rule is not a label until it has been resolved.
+
+**Implementation.** `Conversation::labels` in `jp_conversation`, a
+`BTreeMap<String, String>` persisted in `metadata.json`.
+Rules are `LabelConfig` in `jp_config::conversation::label`, turned into the map
+by the resolver in `jp_cli::cmd::label::resolve`.
+Keys match `[A-Za-z0-9_-]+`; every excluded character is significant somewhere
+else — `.` separates dotted config paths, `=` and `,` are CLI separators, and
+`:` marks a rule reference.
+
+**In context.** A key holds exactly one value, so setting the same key twice
+replaces rather than accumulates, and removal names a key rather than a pair.
+Labels are a fact recorded *about* a conversation: they are not sent to the LLM
+and not exposed to tools.
+
+**Not the same as.** A conversation's **title**, which is free-form, singular,
+and serves as the conversation's name rather than a fact about it.
+Also not an **Attachment**, which is content added *to* a conversation.
+
+**Avoid.** *Tag*, *annotation*, *marker*.
+When you mean a `key=value` pair stored on a conversation, the word is
+**Label**.
 
 ### Turn
 
