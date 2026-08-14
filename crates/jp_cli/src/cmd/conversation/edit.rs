@@ -317,7 +317,8 @@ impl Edit {
 
             if !self.labels.is_empty() {
                 let directives = self.labels.resolved();
-                conv.update_metadata(|m| label::apply(&mut m.labels, &directives));
+                let missing = conv.update_metadata(|m| label::apply(&mut m.labels, &directives));
+                label::report_missing(&ctx.printer, conv.id(), &missing);
             }
         }
 

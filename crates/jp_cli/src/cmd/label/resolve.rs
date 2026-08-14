@@ -15,6 +15,10 @@
 //!   would be dishonest.
 //!   Declining the confirmation prompt is the exception: the user has just said
 //!   no, so the label is dropped and the command continues.
+//!
+//! Declining and cancelling are different answers.
+//! An explicit `n` drops the one label; a prompt error (Ctrl-C, Esc, a closed
+//! terminal) aborts the surrounding command, because the user asked to stop.
 
 use std::collections::BTreeMap;
 
@@ -24,6 +28,7 @@ use jp_config::{
     conversation::label::{LabelConfig, LabelRunMode, LabelValueRef},
     types::command::{CommandConfig, shell_command_line},
 };
+use jp_inquire::{InlineOption, prompt::PromptBackend};
 use jp_printer::Printer;
 use tokio::process::Command;
 use tracing::warn;
@@ -46,6 +51,7 @@ pub(crate) struct Resolver<'a> {
     root: &'a Utf8Path,
     is_tty: bool,
     printer: &'a Printer,
+    prompts: &'a dyn PromptBackend,
 }
 
 impl<'a> Resolver<'a> {
@@ -54,12 +60,14 @@ impl<'a> Resolver<'a> {
         root: &'a Utf8Path,
         is_tty: bool,
         printer: &'a Printer,
+        prompts: &'a dyn PromptBackend,
     ) -> Self {
         Self {
             rules,
             root,
             is_tty,
             printer,
+            prompts,
         }
     }
 
@@ -174,16 +182,24 @@ impl<'a> Resolver<'a> {
                  on; set `conversation.labels.{key}.run` to \"unattended\" or \"deny\""
             ))),
             LabelRunMode::Ask => {
-                let approved = inquire::Confirm::new(&format!("Run `{cmd}` for label '{key}'?"))
-                    .with_default(false)
-                    .prompt_with_writer(&mut self.printer.prompt_writer())
-                    .unwrap_or(false);
+                let question = format!("Run `{cmd}` for label '{key}'?");
+                let options = vec![
+                    InlineOption::new('y', "Run it"),
+                    InlineOption::new('n', "Skip this label"),
+                ];
+                let mut writer = self.printer.prompt_writer();
 
-                Ok(if approved {
-                    Approval::Approved
-                } else {
-                    Approval::Declined
-                })
+                // Only an explicit `n` declines. A prompt error is a
+                // cancellation, not an answer, so it aborts the surrounding
+                // command rather than quietly dropping the label and carrying
+                // on to create a conversation and send a turn.
+                match self
+                    .prompts
+                    .inline_select(&question, options, Some('n'), &mut writer)?
+                {
+                    'y' => Ok(Approval::Approved),
+                    _ => Ok(Approval::Declined),
+                }
             }
         }
     }

@@ -1,3 +1,4 @@
+use jp_inquire::prompt::TerminalPromptBackend;
 use jp_workspace::ConversationHandle;
 
 use crate::{
@@ -60,11 +61,13 @@ impl Label {
         }
 
         let config = ctx.config();
+        let prompts = TerminalPromptBackend;
         let resolver = Resolver::new(
             &config.conversation.labels,
             ctx.workspace.root(),
             ctx.term.is_tty,
             &ctx.printer,
+            &prompts,
         );
         let directives = label::expand_aliases(&self.directives, &resolver).await?;
 
@@ -75,8 +78,10 @@ impl Label {
             }
         };
 
-        lock.as_mut()
+        let missing = lock
+            .as_mut()
             .update_metadata(|m| label::apply(&mut m.labels, &directives));
+        label::report_missing(&ctx.printer, lock.id(), &missing);
 
         ctx.printer.println("Conversation updated.");
         Ok(())

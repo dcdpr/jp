@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use jp_conversation::{ConversationStream, Error as ConversationError};
+use jp_inquire::prompt::TerminalPromptBackend;
 use jp_storage::backend::Projection;
 use jp_workspace::{ConversationHandle, ConversationLock};
 use tracing::debug;
@@ -136,7 +137,8 @@ impl Fork {
                     (None, Some(l)) => events.retain_last_turns(l),
                     (Some(f), Some(l)) => events.retain_first_and_last_turns(f, l),
                 }
-            })?;
+            })
+            .await?;
 
             if self.compact.should_compact() {
                 let cfg = ctx.config();
@@ -168,12 +170,12 @@ impl Fork {
                 });
             }
 
-            apply_fork_labels(ctx, &lock).await?;
-
             if !self.labels.is_empty() {
                 let directives = self.labels.resolved();
-                lock.as_mut()
+                let missing = lock
+                    .as_mut()
                     .update_metadata(|m| label::apply(&mut m.labels, &directives));
+                label::report_missing(&ctx.printer, lock.id(), &missing);
             }
 
             if self.activate
@@ -190,44 +192,37 @@ impl Fork {
     }
 }
 
-/// Re-resolve the `apply_on.fork` label rules over a fork's inherited labels.
-///
-/// The fork starts with a copy of the source's labels; a rule that opts into
-/// `fork` overwrites its own key, and every other inherited label survives.
-///
-/// # Errors
-///
-/// Returns an error when a rule needs confirmation and there is no terminal to
-/// ask on.
-pub(crate) async fn apply_fork_labels(ctx: &Ctx, lock: &ConversationLock) -> crate::Result<()> {
-    let config = ctx.config();
-    let resolved = Resolver::new(
-        &config.conversation.labels,
-        ctx.workspace.root(),
-        ctx.term.is_tty,
-        &ctx.printer,
-    )
-    .automatic(Trigger::Fork)
-    .await?;
-
-    if !resolved.is_empty() {
-        lock.as_mut().update_metadata(|m| m.labels.extend(resolved));
-    }
-
-    Ok(())
-}
-
 /// Fork a conversation and return the new conversation's lock.
-pub(crate) fn fork_conversation(
+///
+/// The fork inherits the source's labels, then every `apply_on.fork` rule is
+/// re-resolved over them.
+/// Resolution happens *before* the fork is created, so a rule that needs
+/// confirmation and finds no terminal to ask on fails without leaving an
+/// unreported conversation behind.
+pub(crate) async fn fork_conversation(
     ctx: &mut Ctx,
     source: &ConversationHandle,
     mut filter: impl FnMut(&mut ConversationStream),
 ) -> crate::Result<ConversationLock> {
     let now = ctx.now();
 
+    // Resolved up front: everything below this line writes to disk.
+    let config = ctx.config();
+    let prompts = TerminalPromptBackend;
+    let resolved = Resolver::new(
+        &config.conversation.labels,
+        ctx.workspace.root(),
+        ctx.term.is_tty,
+        &ctx.printer,
+        &prompts,
+    )
+    .automatic(Trigger::Fork)
+    .await?;
+
     let mut new_conversation = ctx.workspace.metadata(source)?.clone();
     new_conversation.last_activated_at = now;
     new_conversation.expires_at = None;
+    new_conversation.labels.extend(resolved);
 
     let mut new_events = ctx.workspace.events(source)?.clone().with_created_at(now);
 

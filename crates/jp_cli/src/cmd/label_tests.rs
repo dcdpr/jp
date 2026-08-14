@@ -293,6 +293,72 @@ fn bare_no_label_clears_every_label() {
     assert_eq!(labels, BTreeMap::from([("c".to_owned(), "3".to_owned())]));
 }
 
+/// A conversation ID is spelled entirely with characters the key grammar
+/// allows, so without this guard `--no-label <ID>` binds the ID as a key,
+/// leaves no positional target, and silently retargets the active conversation.
+#[test]
+fn a_conversation_id_is_rejected_as_a_key() {
+    let error = Mutating::try_parse_from(["jp", "--no-label=jp-c17866928997"]).unwrap_err();
+    let error = error.to_string();
+    assert!(error.contains("is a conversation ID"), "got: {error}");
+    assert!(error.contains("related=jp-c17866928997"), "got: {error}");
+
+    assert!(Mutating::try_parse_from(["jp", "--label=jp-c17866928997"]).is_err());
+    assert!(Filtering::try_parse_from(["jp", "--label=jp-c17866928997"]).is_err());
+}
+
+/// Only the *key* is constrained; an ID is a perfectly good label value.
+#[test]
+fn a_conversation_id_is_allowed_as_a_value() {
+    assert_eq!(parse(&["jp", "--label=related=jp-c17866928997"]), [
+        LabelDirective::Set {
+            key: "related".to_owned(),
+            value: "jp-c17866928997".to_owned()
+        },
+    ]);
+}
+
+/// Removing a key the conversation doesn't carry is not an error — removal is
+/// idempotent — but it is reported, so a directive that did nothing is
+/// visible.
+#[test]
+fn removing_an_absent_key_is_reported() {
+    let mut labels = BTreeMap::from([("kept".to_owned(), "yes".to_owned())]);
+
+    let missing = apply(
+        &mut labels,
+        &parse_resolved(&["jp", "--no-label=absent,kept,alsoabsent"]),
+    );
+
+    assert_eq!(missing, ["absent", "alsoabsent"], "in the order given");
+    assert!(labels.is_empty(), "the present key was still removed");
+}
+
+/// A key removed earlier in the same invocation counts as present: the check
+/// runs against the live map, not the starting one.
+#[test]
+fn a_key_set_then_removed_is_not_reported_missing() {
+    let mut labels = BTreeMap::new();
+
+    let missing = apply(
+        &mut labels,
+        &parse_resolved(&["jp", "--label=tmp=1", "--no-label=tmp"]),
+    );
+
+    assert!(missing.is_empty(), "got: {missing:?}");
+    assert!(labels.is_empty());
+}
+
+/// Clearing everything reports nothing, even when there was nothing to clear.
+#[test]
+fn a_bare_removal_never_reports_missing() {
+    let mut labels = BTreeMap::new();
+
+    let missing = apply(&mut labels, &parse_resolved(&["jp", "--no-label"]));
+
+    assert!(missing.is_empty());
+}
+
 #[test]
 fn selectors_and_together() {
     let filter = Filtering::try_parse_from(["jp", "--label=team=platform", "--label=draft"])
@@ -334,7 +400,8 @@ async fn expand_aliases_replaces_aliases_and_keeps_order() {
     let rules = alias_resolver_rules(r#"{ "stage": "review" }"#);
     let tmp = camino_tempfile::tempdir().unwrap();
     let (printer, _out, _err) = jp_printer::Printer::memory(jp_printer::OutputFormat::Text);
-    let resolver = resolve::Resolver::new(&rules, tmp.path(), false, &printer);
+    let prompts = jp_inquire::prompt::MockPromptBackend::new();
+    let resolver = resolve::Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
 
     let directives =
         WithAliases::try_parse_from(["jp", "--label=a=1", "--label=:stage", "--no-label=b"])
@@ -362,7 +429,8 @@ async fn expand_aliases_propagates_an_unknown_name() {
     let rules = alias_resolver_rules(r#"{ "stage": "review" }"#);
     let tmp = camino_tempfile::tempdir().unwrap();
     let (printer, _out, _err) = jp_printer::Printer::memory(jp_printer::OutputFormat::Text);
-    let resolver = resolve::Resolver::new(&rules, tmp.path(), false, &printer);
+    let prompts = jp_inquire::prompt::MockPromptBackend::new();
+    let resolver = resolve::Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
 
     let directives = WithAliases::try_parse_from(["jp", "--label=:missing"])
         .unwrap()

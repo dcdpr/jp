@@ -1127,10 +1127,9 @@ fn fork_reresolves_apply_on_fork_rules() {
     ctx.set_now(ctx.now() + Duration::from_secs(1));
 
     let source_handle = ctx.workspace.acquire_conversation(&source_id).unwrap();
-    let fork_lock = fork_conversation(&mut ctx, &source_handle, |_| {}).unwrap();
-    Runtime::new()
+    let fork_lock = Runtime::new()
         .unwrap()
-        .block_on(apply_fork_labels(&ctx, &fork_lock))
+        .block_on(fork_conversation(&mut ctx, &source_handle, |_| {}))
         .unwrap();
     let fork_id = fork_lock.id();
     drop(fork_lock);
@@ -1156,6 +1155,94 @@ fn fork_reresolves_apply_on_fork_rules() {
         .labels
         .clone();
     assert_eq!(source_labels["stage"], "inherited");
+}
+
+/// A rule that needs confirmation with no terminal to ask on fails the fork
+/// *before* anything is written.
+///
+/// The failure used to land after `fork_conversation` had already created and
+/// persisted the fork, leaving a conversation the user was never told about.
+#[test]
+fn a_failing_fork_rule_creates_no_conversation() {
+    use jp_config::conversation::label::{
+        ApplyOn, LabelCommand, LabelConfig, LabelObject, LabelRunMode, LabelValue,
+    };
+
+    let mut config = AppConfig::new_test();
+    config.conversation.labels.insert(
+        "branch".to_owned(),
+        LabelConfig::Object(LabelObject {
+            value: LabelValue::Command(LabelCommand {
+                cmd: jp_config::types::command::CommandConfigOrString::String("echo x".to_owned()),
+            }),
+            apply_on: ApplyOn {
+                new: false,
+                fork: true,
+            },
+            // The default policy: needs a terminal, and the test Ctx has none.
+            run: LabelRunMode::Ask,
+        }),
+    );
+
+    let tmp = tempdir().unwrap();
+    let (printer, _, _) = Printer::memory(OutputFormat::TextPretty);
+    let storage = tmp.path().join(".jp");
+    let user = tmp.path().join("user");
+    let fs = Arc::new(
+        FsStorageBackend::new(&storage)
+            .unwrap()
+            .with_user_storage(&user, None, "abc")
+            .unwrap(),
+    );
+    let workspace = Workspace::new(tmp.path()).with_backend(fs);
+    let mut ctx = Ctx::new(
+        workspace,
+        None,
+        Runtime::new().unwrap(),
+        Globals::default(),
+        config,
+        None,
+        printer,
+    );
+
+    let source_id = ConversationId::try_from(ctx.now()).unwrap();
+    ctx.workspace.create_conversation_with_id(
+        source_id,
+        Conversation::default().with_last_activated_at(ctx.now()),
+        ctx.config(),
+    );
+    let handle = ctx.workspace.acquire_conversation(&source_id).unwrap();
+    drop(ctx.workspace.test_lock(handle));
+
+    ctx.set_now(ctx.now() + Duration::from_secs(1));
+
+    // Driven through `Fork::run`, not `fork_conversation`, so this reproduces
+    // the original defect: resolution used to run after the fork was already
+    // created and persisted.
+    let fork = Fork {
+        target: PositionalIds::default(),
+        activate: false,
+        from: None,
+        until: None,
+        last: None,
+        first: None,
+        title: None,
+        compact: CompactFlag::default(),
+        labels: LabelDirectives::default(),
+        no_turns: false,
+    };
+
+    let source_handle = ctx.workspace.acquire_conversation(&source_id).unwrap();
+    let result = Runtime::new()
+        .unwrap()
+        .block_on(fork.run(&mut ctx, &[source_handle]));
+
+    assert!(result.is_err(), "a rule that cannot be confirmed must fail");
+    assert_eq!(
+        ctx.workspace.conversations().count(),
+        1,
+        "the source survives and no fork was created"
+    );
 }
 
 /// Create two conversations with distinct content, fork only one, and verify
@@ -1327,7 +1414,10 @@ fn fork_inherits_local_only_projection() {
     );
 
     let source = ctx.workspace.acquire_conversation(&id).unwrap();
-    let lock = fork_conversation(&mut ctx, &source, |_| {}).unwrap();
+    let lock = Runtime::new()
+        .unwrap()
+        .block_on(fork_conversation(&mut ctx, &source, |_| {}))
+        .unwrap();
 
     assert_eq!(
         lock.projection(),

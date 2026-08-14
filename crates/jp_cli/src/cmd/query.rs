@@ -88,7 +88,7 @@ use jp_conversation::{
     event::{ChatRequest, ChatResponse},
     thread::{Thread, ThreadBuilder},
 };
-use jp_inquire::prompt::TerminalPromptBackend;
+use jp_inquire::prompt::{PromptBackend, TerminalPromptBackend};
 use jp_llm::{
     ToolError, provider,
     tool::{
@@ -359,6 +359,17 @@ impl Query {
         // 4. Lock contention: user picks "new" or "fork" from the prompt.
         let lock = self.acquire_lock(ctx, handle, start_new).await?;
 
+        // `--label=:name` is accepted here, so resolve aliases against this
+        // conversation's config. Resolved before the side effects below, so an
+        // unknown alias fails without having created a symlink or rewritten the
+        // title first.
+        let prompts = TerminalPromptBackend;
+        let directives = if self.labels.is_empty() {
+            label::Resolved::default()
+        } else {
+            label::expand_aliases(&self.labels, &label_resolver(ctx, &cfg, &prompts)).await?
+        };
+
         // Create symlinks and seed approvals for any `--mount` flags before the
         // turn runs, so tools can reach the mounted paths.
         create_mount_effects(&self.mount, &ctx.workspace, ctx.fs_backend.as_deref(), now)?;
@@ -368,13 +379,11 @@ impl Query {
         // source's metadata, including any title), or resumed.
         apply_title_override(&lock, self.title.as_deref(), self.no_title);
 
-        // `--label=:name` is accepted here, so resolve aliases against this
-        // conversation's config before touching metadata.
-        if !self.labels.is_empty() {
-            let directives =
-                label::expand_aliases(&self.labels, &label_resolver(ctx, &cfg)).await?;
-            lock.as_mut()
+        if !directives.is_empty() {
+            let missing = lock
+                .as_mut()
                 .update_metadata(|m| label::apply(&mut m.labels, &directives));
+            label::report_missing(&ctx.printer, lock.id(), &missing);
         }
 
         // Record this conversation as the session's active conversation.
@@ -800,7 +809,10 @@ impl Query {
         // Resolved before the conversation exists so a rule that needs
         // confirmation, and finds no terminal to ask on, aborts without leaving
         // a half-labelled conversation behind.
-        let labels = label_resolver(ctx, &cfg).automatic(Trigger::New).await?;
+        let prompts = TerminalPromptBackend;
+        let labels = label_resolver(ctx, &cfg, &prompts)
+            .automatic(Trigger::New)
+            .await?;
 
         let ws = &mut ctx.workspace;
         let projection = if self.is_local(&cfg.conversation) {
@@ -1611,26 +1623,29 @@ async fn fork_conversation(
     source: &ConversationHandle,
     fork_turns: Option<usize>,
 ) -> Result<ConversationLock> {
-    let lock = fork::fork_conversation(ctx, source, |events| {
+    fork::fork_conversation(ctx, source, |events| {
         if let Some(n) = fork_turns {
             events.retain_last_turns(n);
         }
-    })?;
-
-    fork::apply_fork_labels(ctx, &lock).await?;
-    Ok(lock)
+    })
+    .await
 }
 
 /// Build a label resolver for this run.
 ///
 /// Commands run at the workspace root so a rule produces the same value
 /// wherever in the tree the user invoked JP from.
-fn label_resolver<'a>(ctx: &'a Ctx, cfg: &'a AppConfig) -> Resolver<'a> {
+fn label_resolver<'a>(
+    ctx: &'a Ctx,
+    cfg: &'a AppConfig,
+    prompts: &'a dyn PromptBackend,
+) -> Resolver<'a> {
     Resolver::new(
         &cfg.conversation.labels,
         ctx.workspace.root(),
         ctx.term.is_tty,
         &ctx.printer,
+        prompts,
     )
 }
 

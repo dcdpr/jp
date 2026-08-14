@@ -20,6 +20,8 @@ use std::{collections::BTreeMap, str::FromStr};
 
 use clap::{ArgAction, ArgMatches, Error, error::ErrorKind};
 use jp_config::conversation::label;
+use jp_conversation::ConversationId;
+use jp_printer::Printer;
 
 /// The prefix marking a `--label` value as a reference to a configured rule.
 const ALIAS_PREFIX: char = ':';
@@ -41,6 +43,31 @@ pub(crate) enum LabelDirective {
     Alias(String),
 }
 
+/// Reject a label key that is spelled like a conversation ID.
+///
+/// The ID grammar (`jp-c…`) is a subset of the label-key grammar, so a
+/// mistyped `jp c label --no-label <ID>` binds the ID as a key, leaves no
+/// positional target, and silently retargets the session's active conversation.
+/// A bare conversation ID is meaningless as a key — it carries no value — so
+/// refusing it costs nothing and turns that mistake into an error.
+/// The ID is still fine as a label *value* (`related=jp-c…`).
+///
+/// This is a CLI-level rule, not part of the key grammar: a config file has no
+/// positional argument to swallow, so `conversation.labels` is unaffected.
+fn reject_conversation_id(key: &str) -> Result<(), String> {
+    if key.parse::<ConversationId>().is_ok() {
+        return Err(format!(
+            "'{key}' is a conversation ID, not a label key: a bare ID carries no value, and \
+             accepting it here would swallow the conversation this command was meant to \
+             target.\n\nTo label a conversation *with* an ID, give it a key: \
+             `--label=related={key}`.\nTo target that conversation, put the ID before the flag: \
+             `jp conversation label {key} --no-label=KEY`."
+        ));
+    }
+
+    Ok(())
+}
+
 impl LabelDirective {
     fn set<const ALIASES: bool>(raw: &str) -> Result<Self, String> {
         if let Some(name) = raw.strip_prefix(ALIAS_PREFIX) {
@@ -58,6 +85,7 @@ impl LabelDirective {
 
         let (key, value) = raw.split_once('=').unwrap_or((raw, ""));
         label::validate_key(key)?;
+        reject_conversation_id(key)?;
 
         Ok(Self::Set {
             key: key.to_owned(),
@@ -71,6 +99,7 @@ impl LabelDirective {
         }
 
         label::validate_key(raw)?;
+        reject_conversation_id(raw)?;
         Ok(Self::Remove(raw.to_owned()))
     }
 
@@ -337,19 +366,44 @@ pub(crate) async fn expand_aliases(
 }
 
 /// Apply `directives` to a conversation's label set, in order.
-pub(crate) fn apply(labels: &mut BTreeMap<String, String>, directives: &Resolved) {
+///
+/// Returns the keys named by a `--no-label` directive that matched nothing, in
+/// the order they were given.
+/// Removal is idempotent, so this is not an error, but it is worth telling the
+/// user about: a removal that did nothing usually means the key was mistyped or
+/// the command targeted a different conversation than intended.
+pub(crate) fn apply(labels: &mut BTreeMap<String, String>, directives: &Resolved) -> Vec<String> {
+    let mut missing = vec![];
+
     for directive in &directives.0 {
         match directive {
             LabelDirective::Set { key, value } => {
                 labels.insert(key.clone(), value.clone());
             }
             LabelDirective::Remove(key) => {
-                labels.remove(key);
+                if labels.remove(key).is_none() {
+                    missing.push(key.clone());
+                }
             }
             LabelDirective::RemoveAll => labels.clear(),
             // `Resolved` can only be built from alias-free directives.
             LabelDirective::Alias(_) => unreachable!("alias in resolved directives"),
         }
+    }
+
+    missing
+}
+
+/// Report `--no-label` keys that matched nothing on `id`.
+///
+/// Names the conversation so a removal aimed at the wrong one is visible: the
+/// reported ID is the conversation actually targeted, which is not always the
+/// one the user typed.
+pub(crate) fn report_missing(printer: &Printer, id: ConversationId, missing: &[String]) {
+    for key in missing {
+        printer.eprintln(format!(
+            "⚠ Conversation {id} has no label '{key}'; nothing to remove."
+        ));
     }
 }
 
@@ -381,10 +435,12 @@ impl FromStr for LabelSelector {
 
         let Some((key, value)) = s.split_once('=') else {
             label::validate_key(s)?;
+            reject_conversation_id(s)?;
             return Ok(Self::Present(s.to_owned()));
         };
 
         label::validate_key(key)?;
+        reject_conversation_id(key)?;
         Ok(Self::Exact {
             key: key.to_owned(),
             value: value.to_owned(),

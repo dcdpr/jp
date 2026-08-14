@@ -178,6 +178,18 @@ clears every label on the conversation.
 Like `--label`, it is a direct metadata mutation — no `ConfigDelta`, no
 negative-delta machinery.
 
+Removing a key the conversation doesn't carry is not an error: removal is
+idempotent, so a script can say `--no-label=draft` to mean "ensure `draft` is
+gone" without having to check first.
+It is reported, though — `⚠ Conversation <id> has no label '<key>'; nothing to
+remove.` — because a directive that did nothing usually means a mistyped key or
+a command that targeted a different conversation than intended, and the message
+names both.
+This follows `jp c unarchive` on a conversation that isn't archived, which
+reports and continues; it differs from `--tool=<unknown>`, which errors, because
+that names something absent from *configuration* rather than requesting a state
+that already holds.
+
 `--no-label` is accepted on `jp c label` and `jp c edit` only.
 On `jp q` it is rejected: a query starts or continues a turn, and silently
 stripping labels mid-turn is a surprising side effect of asking a question.
@@ -291,6 +303,16 @@ This excludes `.` (separator in dotted `ConfigDelta` paths against
 `conversation.labels.<key>`), `=` and `,` (CLI parsing), `:` (alias prefix),
 whitespace, and other path-significant characters.
 Validation rejects malformed keys at config load and CLI parse time.
+
+The CLI adds one rejection the config grammar does not: a key spelled like a
+conversation ID (`jp-c…`).
+The ID grammar is a subset of the key grammar, so `jp c label --no-label <ID>`
+would otherwise bind the ID as a key, leave no positional target, and silently
+retarget the session's active conversation.
+A bare ID carries no value and is meaningless as a key, so refusing it costs
+nothing; an ID is still fine as a label *value* (`related=jp-c…`).
+This is a CLI-level rule rather than a grammar change: a config file has no
+positional argument to swallow.
 
 ### Config shape
 
