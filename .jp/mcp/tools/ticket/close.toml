@@ -1,0 +1,30 @@
+[conversation.tools.ticket_close]
+enable = false
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "Mark a ticket as Done."
+description = """
+Move a ticket to `Done`, taking it off the active board.
+
+Close a ticket when the work it describes is finished, not when it is merely
+understood. Nothing else changes: the file keeps its description and its
+comments, and the close date comes from git history rather than the file.
+
+Closing an already-closed ticket is a no-op.
+"""
+
+examples = """
+```json
+{"id": "T0042"}
+```
+"""
+
+[conversation.tools.ticket_close.style]
+parameters = "function_call"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.ticket_close.parameters.id]
+type = "string"
+required = true
+summary = "The ticket to close: `42`, `042`, or `T0042`."

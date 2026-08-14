@@ -1,0 +1,64 @@
+[conversation.tools.ticket_create]
+enable = false
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "File a work item as a ticket under docs/ticket/."
+description = """
+Create a ticket: a bug, a feature, or a chore, recorded as a markdown file in
+the repository and tracked on the board.
+
+Write a ticket when the work is clear enough to start, and an RFD when it needs
+a design first. The signal is whether there is a decision to argue about: "the
+tool call header misaligns below 80 columns" is a ticket even if the fix is
+subtle; "how should tool output be bounded?" is an RFD even if the
+implementation is trivial.
+
+The ticket opens at status `Todo`, is numbered from a counter that never reuses
+an id, and is attributed to you (`jp`). The title becomes the filename slug, so
+keep it short and specific.
+"""
+
+examples = """
+File a bug with a description:
+```json
+{"kind": "bug", "title": "Tool call header misaligned", "body": "The header \
+renders one column left of the body when the terminal is narrower than 80 \
+columns."}
+```
+
+File a chore with no description:
+```json
+{"kind": "chore", "title": "Bump the deny list"}
+```
+"""
+
+[conversation.tools.ticket_create.style]
+parameters = "function_call"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.ticket_create.parameters.kind]
+type = "string"
+required = true
+enum = ["bug", "feature", "chore"]
+summary = "What kind of work the ticket describes."
+
+[conversation.tools.ticket_create.parameters.title]
+type = "string"
+required = true
+summary = "One-line summary of the work. Becomes the heading and the filename slug."
+
+[conversation.tools.ticket_create.parameters.body]
+type = "string"
+required = false
+summary = "The description, as markdown. Omit for a ticket whose title says everything."
+
+[conversation.tools.ticket_create.parameters.implements]
+type = "string"
+required = false
+summary = "The RFD this work comes from, e.g. `045`."
+description = """
+Set this when the ticket is a phase of an accepted RFD's implementation plan.
+An RFD counts as in development while a ticket claiming it sits in the In
+Progress column, so this is what puts it there.
+"""

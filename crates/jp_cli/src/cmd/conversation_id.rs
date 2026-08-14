@@ -214,7 +214,9 @@ fn validate_multi<const MULTI: bool>(ids: &[ConversationTarget]) -> Result<(), c
             }
             if matches!(
                 target,
-                ConversationTarget::AllSession | ConversationTarget::AllPinned
+                ConversationTarget::AllLive
+                    | ConversationTarget::AllSession
+                    | ConversationTarget::AllPinned
             ) {
                 let kw = target.keyword_name().expect("multi-target has keyword");
                 return Err(clap::Error::raw(
@@ -315,10 +317,11 @@ fn keyword_help(session: bool, multi: bool, ansi: bool) -> String {
     let h_pick_pinned = h("select from pinned");
     let h_pick_session = h("select from session");
 
-    let h_alias_latest = h("target latest active in workspace");
+    let h_alias_active = h("target the session's active conversation");
+    let h_alias_recent = h("target most recently activated in workspace");
     let h_alias_newest = h("target newest created");
-    let h_alias_pinned = h("target latest pinned");
-    let h_alias_session = h("target previous active in session");
+    let h_alias_pinned = h("target most recently pinned");
+    let h_alias_session = h("target the session's previous conversation");
 
     let mut help = indoc::formatdoc! {"
         {picker}:
@@ -327,7 +330,8 @@ fn keyword_help(session: bool, multi: bool, ansi: bool) -> String {
           ?s, ?session                  {h_pick_session}
 
         {aliases}:
-          l, latest                     {h_alias_latest}
+          ., active                     {h_alias_active}
+          r, recent                     {h_alias_recent}
           n, newest                     {h_alias_newest}
           p, pinned                     {h_alias_pinned}
           s, session                    {h_alias_session}
@@ -335,11 +339,13 @@ fn keyword_help(session: bool, multi: bool, ansi: bool) -> String {
 
     if multi {
         let multi_target = t("Multi-Target Keywords");
+        let h_multi_live = h("target all live conversations");
         let h_multi_pinned = h("target all pinned");
         let h_multi_session = h("target all activated in session");
         let h_stdin = h("read IDs from stdin, one per line");
         help.push_str(&indoc::formatdoc! {"
             \n{multi_target}:
+              +l, +live                     {h_multi_live}
               +p, +pinned                   {h_multi_pinned}
               +s, +session                  {h_multi_session}
               -                             {h_stdin}

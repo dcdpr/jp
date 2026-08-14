@@ -48,7 +48,7 @@ pub(crate) struct Ls {
     #[arg(long)]
     local: bool,
 
-    /// Show archived conversations instead of active ones.
+    /// Show archived conversations instead of live ones.
     #[arg(long)]
     archived: bool,
 

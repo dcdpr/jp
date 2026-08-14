@@ -2059,6 +2059,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "jp-ticket"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "camino-tempfile",
+ "chrono",
+ "clap",
+ "jp_github",
+ "jp_plugin",
+ "serde",
+ "serde_json",
+ "ticket",
+ "tokio",
+]
+
+[[package]]
 name = "jp_attachment"
 version = "0.1.0"
 dependencies = [
@@ -4588,6 +4604,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ticket"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "camino-tempfile",
+ "indoc",
+ "serde",
+]
+
+[[package]]
 name = "timeago"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4774,6 +4800,7 @@ dependencies = [
  "similar",
  "strip-ansi-escapes",
  "test-log",
+ "ticket",
  "tokio",
  "toml",
  "url",

@@ -1,6 +1,6 @@
 {
   "001-jp-rfd-process.md": {
-    "hash": "45bbfb5aa52f98002b13208b1098392958d1a7c05f3cc8191fd93b1945fab6fa",
+    "hash": "530085202f0a497981e72bffbc56f6cbf4164bb29f1fd45b50335dd4fecfba34",
     "summary": "Establishes lightweight Request for Discussion process for proposing and tracking design decisions with clear lifecycle states."
   },
   "002-using-llms.md": {
@@ -156,7 +156,7 @@
     "summary": "Hide conversations from default listings and expose conversation_id to tools for sub-agent workflows."
   },
   "041-rfd-lifecycle-enhancements.md": {
-    "hash": "c640083e40b592c53f088a16eda1a5b30dd4c20e27433cc61c48f0f06c10cf0c",
+    "hash": "3d71aebd35512ed91f2dd0a566cddcbd3f36a9642fe9d47912ef520a9c7e013b",
     "summary": "Defer RFD numbering to Discussion, auto-create tracking issues, add Extends/Extended by metadata."
   },
   "042-tool-options.md": {
@@ -344,7 +344,7 @@
     "summary": "Convention for multi-value CLI arguments: `-` reads line-oriented values from stdin, starting with conversation targeting."
   },
   "087-session-scoped-active-workspace.md": {
-    "hash": "63795fd09a15895ff477f2a6210cdda7698f6cb7421534934b244749bf74e828",
+    "hash": "33c87af5d75b59ef2f8ed995ede4f62bcac538e4c7139257676f174ae19c1bbf",
     "summary": "Session-scoped active workspace lets JP commands run from anywhere after selecting a workspace with `jp w use`."
   },
   "088-unified-editor-service-and-inline-reply-widget.md": {
@@ -394,5 +394,9 @@
   "101-conversation-labels.md": {
     "hash": "59dda05a7b62e2257785113402b026269ccb2d13535d858a1b4282016af18e4d",
     "summary": "Conversations gain configurable key-value labels—static, command-backed, or CLI-set—for filtering and organizing by context like VCS branches."
+  },
+  "100-in-repo-ticket-tracking.md": {
+    "hash": "e302846bc2a87c51849d39807dfd39b29dfd8fde1f7899e2f196e7f4480d5332",
+    "summary": "Lightweight markdown-based work items tracked in-repo, displacing GitHub issues from assistant context with kanban board and RFD promotion mechanics."
   }
 }

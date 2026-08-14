@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
+use assert_matches::assert_matches;
 use chrono::{DateTime, Utc};
+use clap::Parser as _;
 use indexmap::IndexMap;
 use jp_config::{
     AppConfig, PartialAppConfig, ToPartial,
@@ -20,13 +22,17 @@ use jp_llm::{
 };
 use jp_printer::{OutputFormat, Printer, SharedBuffer};
 use jp_term::width::display_width;
-use jp_workspace::{ConversationHandle, Workspace};
+use jp_workspace::{
+    ConversationHandle, Workspace,
+    session::{Session, SessionId, SessionSource},
+};
 use relative_path::RelativePathBuf;
 use serde_json::Value;
+use tokio::runtime::Runtime;
 
 use super::*;
 use crate::{
-    KeyValueOrPath,
+    Globals, KeyValueOrPath,
     cmd::target::{ConversationTarget, PickerFilter},
     config_pipeline::ConfigPipeline,
     signals::testing::detached_router,
@@ -73,6 +79,14 @@ fn effective(partial: &PartialAppConfig, name: &str) -> Enable {
         .clone()
         .unwrap_or_default()
         .effective(&defaults)
+}
+
+/// Query input carrying `text` as the inline query, with `--quote` unset.
+fn inline_query(text: &str) -> QueryInput {
+    QueryInput {
+        query: Some(vec![text.to_owned()]),
+        ..Default::default()
+    }
 }
 
 /// Helper to build directives from a list.
@@ -809,7 +823,7 @@ async fn query_sequence_new_cfg_profile_then_model_override_persists_for_plain_q
 
     let query1 = Query {
         new_conversation: true,
-        query: Some(vec!["is this thing on?".to_owned()]),
+        input: inline_query("is this thing on?"),
         ..Default::default()
     };
     let cfg1 = build_query_config(
@@ -840,7 +854,7 @@ async fn query_sequence_new_cfg_profile_then_model_override_persists_for_plain_q
     let handle2 = workspace.acquire_conversation(&conversation_id).unwrap();
     let query2 = Query {
         model: Some("gpt".to_owned()),
-        query: Some(vec!["are you there?".to_owned()]),
+        input: inline_query("are you there?"),
         ..Default::default()
     };
     let cfg2 = build_query_config(&workspace, base.clone(), &[], &query2, Some(&handle2));
@@ -856,7 +870,7 @@ async fn query_sequence_new_cfg_profile_then_model_override_persists_for_plain_q
 
     let handle3 = workspace.acquire_conversation(&conversation_id).unwrap();
     let query3 = Query {
-        query: Some(vec!["plain query".to_owned()]),
+        input: inline_query("plain query"),
         ..Default::default()
     };
     let cfg3 = build_query_config(&workspace, base, &[], &query3, Some(&handle3));
@@ -1099,7 +1113,10 @@ fn edit_message_quote_without_editor_is_synthesized() {
     // inline.
     let config = AppConfig::new_test();
     let query = Query {
-        quote: true,
+        input: QueryInput {
+            quote: Some(true),
+            ..Default::default()
+        },
         no_edit: true,
         ..Default::default()
     };
@@ -1189,6 +1206,179 @@ fn picker_new_item_gated_by_bare_id_flag() {
         ..Default::default()
     };
     assert!(!bare_id.allows_new_from_picker());
+}
+
+/// The query words a parse produced, for comparison against a static slice.
+fn query_words(query: &Query) -> &[String] {
+    query.input.query.as_deref().unwrap_or_default()
+}
+
+#[test]
+fn bare_quote_uses_the_blockquote_prefix() {
+    let query = parse_query(&["--quote"]).unwrap();
+    assert_eq!(query.input.quote, Some(true));
+    assert!(query_words(&query).is_empty());
+}
+
+#[test]
+fn quote_true_is_the_same_as_a_bare_quote() {
+    let query = parse_query(&["--quote=true"]).unwrap();
+    assert_eq!(query.input.quote, Some(true));
+    assert!(query_words(&query).is_empty());
+}
+
+#[test]
+fn quote_false_still_quotes_but_drops_the_prefix() {
+    let query = parse_query(&["--quote=false"]).unwrap();
+    assert_eq!(query.input.quote, Some(false));
+    assert!(query_words(&query).is_empty());
+}
+
+#[test]
+fn quote_is_absent_when_not_given() {
+    let query = parse_query(&[]).unwrap();
+    assert_eq!(query.input.quote, None);
+}
+
+#[test]
+fn quote_takes_an_unattached_bool() {
+    let query = parse_query(&["--quote", "false"]).unwrap();
+    assert_eq!(query.input.quote, Some(false));
+    assert!(query_words(&query).is_empty());
+
+    let query = parse_query(&["--quote", "true"]).unwrap();
+    assert_eq!(query.input.quote, Some(true));
+    assert!(query_words(&query).is_empty());
+}
+
+#[test]
+fn quote_takes_an_unattached_bool_ahead_of_the_query() {
+    let query = parse_query(&["--quote", "false", "and", "now?"]).unwrap();
+    assert_eq!(query.input.quote, Some(false));
+    assert_eq!(query_words(&query), ["and".to_owned(), "now?".to_owned()]);
+}
+
+#[test]
+fn quote_does_not_swallow_a_following_flag() {
+    let query = parse_query(&["--quote", "--model", "foo"]).unwrap();
+    assert_eq!(query.input.quote, Some(true));
+    assert_eq!(query.model.as_deref(), Some("foo"));
+}
+
+#[test]
+fn quote_does_not_swallow_the_positional_query() {
+    let query = parse_query(&["--quote", "what about X?"]).unwrap();
+    assert_eq!(query.input.quote, Some(true));
+    assert_eq!(query_words(&query), ["what about X?".to_owned()]);
+}
+
+#[test]
+fn quote_only_takes_the_word_directly_after_it() {
+    // `false` is the query here: it sits before the flag, so it was never
+    // offered as the flag's value.
+    let query = parse_query(&["false", "--quote"]).unwrap();
+    assert_eq!(query.input.quote, Some(true));
+    assert_eq!(query_words(&query), ["false".to_owned()]);
+
+    // Same when another flag sits between the two.
+    let query = parse_query(&["--quote", "--model", "foo", "false"]).unwrap();
+    assert_eq!(query.input.quote, Some(true));
+    assert_eq!(query_words(&query), ["false".to_owned()]);
+}
+
+#[test]
+fn a_double_dash_shields_a_bool_from_quote() {
+    let query = parse_query(&["--quote", "--", "false"]).unwrap();
+    assert_eq!(query.input.quote, Some(true));
+    assert_eq!(query_words(&query), ["false".to_owned()]);
+}
+
+#[test]
+fn words_before_and_after_a_double_dash_form_one_query() {
+    let query = parse_query(&["why", "--", "--model", "foo"]).unwrap();
+    assert_eq!(query.input.quote, None);
+    assert_eq!(query_words(&query), [
+        "why".to_owned(),
+        "--model".to_owned(),
+        "foo".to_owned()
+    ]);
+}
+
+#[test]
+fn quote_with_an_attached_value_leaves_a_following_bool_in_the_query() {
+    // `--quote=false` has its value already, so the `true` after it is query
+    // text. Without the attached/bare distinction both forms would look
+    // identical here, since clap records the same index for either.
+    let query = parse_query(&["--quote=false", "true"]).unwrap();
+    assert_eq!(query.input.quote, Some(false));
+    assert_eq!(query_words(&query), ["true".to_owned()]);
+}
+
+#[test]
+fn quote_rejects_an_attached_non_boolean_value() {
+    assert!(parse_query(&["--quote=foo"]).is_err());
+}
+
+/// A stream whose last assistant message is a two-line reply.
+fn stream_with_assistant_reply() -> ConversationStream {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("question");
+    stream
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::message("line one\nline two"))
+        .build()
+        .unwrap();
+    stream
+}
+
+#[test]
+fn quote_false_seeds_the_message_verbatim() {
+    let mut request = ChatRequest::default();
+    assert!(seed_quoted_reply(
+        &mut request,
+        &stream_with_assistant_reply(),
+        false
+    ));
+
+    // The trailing blank line separates the seed from the reply the user is
+    // about to type below it.
+    assert_eq!(request.content, "line one\nline two\n\n");
+}
+
+#[test]
+fn quote_true_seeds_the_message_as_a_blockquote() {
+    let mut request = ChatRequest::default();
+    assert!(seed_quoted_reply(
+        &mut request,
+        &stream_with_assistant_reply(),
+        true
+    ));
+
+    assert_eq!(request.content, "> line one\n> line two\n\n");
+}
+
+#[test]
+fn quote_seeds_above_an_already_composed_request() {
+    let mut request = ChatRequest::from("and what about X?");
+    assert!(seed_quoted_reply(
+        &mut request,
+        &stream_with_assistant_reply(),
+        false
+    ));
+
+    assert_eq!(request.content, "line one\nline two\n\nand what about X?");
+}
+
+#[test]
+fn quote_leaves_the_request_untouched_without_an_assistant_message() {
+    let mut request = ChatRequest::from("only my words");
+    assert!(!seed_quoted_reply(
+        &mut request,
+        &ConversationStream::new_test(),
+        true
+    ));
+
+    assert_eq!(request.content, "only my words");
 }
 
 #[test]
@@ -1596,4 +1786,255 @@ fn mcp_startup_line_ultra_narrow_keeps_bounded_timer() {
     let visible = line.strip_prefix("\r\x1b[K").expect("control prefix");
     assert!(display_width(visible) <= 6, "must fit width: {line:?}");
     assert!(visible.contains("7.0s"), "timer must survive: {line:?}");
+}
+
+#[test]
+fn arg_file_path_recognizes_sigil() {
+    assert_eq!(arg_file_path("@notes.md"), Some("notes.md"));
+    assert_eq!(arg_file_path("@~/notes.md"), Some("~/notes.md"));
+    assert_eq!(arg_file_path("notes.md"), None);
+    assert_eq!(arg_file_path(""), None);
+}
+
+// A bare `@` is ordinary prose, not a reference to the empty path. Reading it
+// as a path is what made `jp q ... drop the @ entirely ...` fail.
+#[test]
+fn arg_file_path_ignores_bare_sigil() {
+    assert_eq!(arg_file_path("@"), None);
+    assert_eq!(arg_file_path("@ "), None);
+    assert_eq!(arg_file_path("@\t"), None);
+}
+
+#[test]
+fn query_file_path_only_for_single_value_query() {
+    let one = ["@notes.md".to_owned()];
+    assert_eq!(query_file_path(&one), Some("notes.md"));
+
+    let trailing = ["hello".to_owned(), "@notes.md".to_owned()];
+    assert_eq!(query_file_path(&trailing), None);
+
+    let leading = ["@notes.md".to_owned(), "extra".to_owned()];
+    assert_eq!(query_file_path(&leading), None);
+
+    let plain = ["hello".to_owned()];
+    assert_eq!(query_file_path(&plain), None);
+
+    assert_eq!(query_file_path(&[]), None);
+}
+
+#[test]
+fn read_arg_file_returns_file_contents() {
+    let dir = camino_tempfile::tempdir().unwrap();
+    let path = dir.path().join("notes.md");
+    std::fs::write(&path, "# Notes\n\nbody\n").unwrap();
+
+    assert_eq!(read_arg_file(path.as_str()).unwrap(), "# Notes\n\nbody\n");
+}
+
+/// Host for [`Query`]'s arguments, so tests can drive the real clap parser
+/// rather than constructing a [`Query`] the CLI could never produce.
+#[derive(clap::Parser)]
+struct QueryArgs {
+    #[command(flatten)]
+    query: Query,
+}
+
+/// Parse `jp query <args>`, always with `--no-edit` so no editor opens.
+fn parse_query(args: &[&str]) -> std::result::Result<Query, clap::Error> {
+    let argv = ["query", "--no-edit"]
+        .into_iter()
+        .chain(args.iter().copied());
+
+    QueryArgs::try_parse_from(argv).map(|parsed| parsed.query)
+}
+
+/// Build the request for `args`, with no piped stdin and an empty stream.
+///
+/// Runs the same two steps `run` does: resolve the query, then compose it.
+fn built_request(args: &[&str]) -> String {
+    built_request_against(args, &ConversationStream::new_test())
+}
+
+/// Build the request for `args` against `stream`, with no piped stdin.
+fn built_request_against(args: &[&str], stream: &ConversationStream) -> String {
+    let query = parse_query(args).unwrap();
+    let resolved = query.resolve_query().unwrap();
+
+    query
+        .build_conversation(
+            "",
+            resolved.as_deref(),
+            stream,
+            &AppConfig::new_test(),
+            Utf8Path::new("/tmp"),
+        )
+        .unwrap()
+        .chat_request
+        .expect("non-empty request")
+        .content
+}
+
+#[test]
+fn build_conversation_seeds_a_verbatim_quote_above_the_query() {
+    let built = built_request_against(
+        &["--quote=false", "and", "what", "about", "X?"],
+        &stream_with_assistant_reply(),
+    );
+
+    assert_eq!(built, "line one\nline two\n\nand what about X?");
+}
+
+#[test]
+fn build_conversation_seeds_a_blockquoted_quote_above_the_query() {
+    let built = built_request_against(
+        &["--quote", "and", "what", "about", "X?"],
+        &stream_with_assistant_reply(),
+    );
+
+    assert_eq!(built, "> line one\n> line two\n\nand what about X?");
+}
+
+#[test]
+fn build_conversation_reads_single_at_path_query() {
+    let dir = camino_tempfile::tempdir().unwrap();
+    let path = dir.path().join("notes.md");
+    std::fs::write(&path, "# Notes\n\nbody\n").unwrap();
+
+    assert_eq!(
+        built_request(&[format!("@{path}").as_str()]),
+        "# Notes\n\nbody\n"
+    );
+}
+
+// A bare `@` is the whole query: there is no path after the sigil, so it is
+// text. Reading it as the empty path is what aborted the query.
+#[test]
+fn build_conversation_keeps_lone_bare_sigil() {
+    assert_eq!(built_request(&["@"]), "@");
+}
+
+// The reported failure: a bare `@` mid-sentence was read as the empty path and
+// aborted the query before it was ever sent.
+#[test]
+fn build_conversation_keeps_bare_sigil_in_prose() {
+    assert_eq!(
+        built_request(&["we", "should", "drop", "the", "@", "entirely"]),
+        "we should drop the @ entirely"
+    );
+}
+
+// An `@path` that names a real file is still ordinary text when it is one word
+// of a longer query: only a single-value query reads from disk.
+#[test]
+fn build_conversation_keeps_at_path_word_in_multi_word_query() {
+    let dir = camino_tempfile::tempdir().unwrap();
+    let path = dir.path().join("notes.md");
+    std::fs::write(&path, "file contents").unwrap();
+
+    assert_eq!(
+        built_request(&["see", format!("@{path}").as_str()]),
+        format!("see @{path}")
+    );
+    // Leading position too: it is the value count that decides, not where the
+    // sigil sits.
+    assert_eq!(
+        built_request(&[format!("@{path}").as_str(), "is", "stale"]),
+        format!("@{path} is stale")
+    );
+}
+
+#[test]
+fn build_conversation_prepends_query_to_piped_stdin() {
+    let built = parse_query(&["look", "at", "this"])
+        .unwrap()
+        .build_conversation(
+            "piped payload",
+            Some("look at this"),
+            &ConversationStream::new_test(),
+            &AppConfig::new_test(),
+            Utf8Path::new("/tmp"),
+        )
+        .unwrap();
+
+    assert_eq!(
+        built.chat_request.unwrap().content,
+        "look at this\n\npiped payload"
+    );
+}
+
+// A query naming an unreadable file must fail before any conversation or
+// session state is touched. The read used to happen after the conversation was
+// created and recorded as the session's active one, so a typo'd path left an
+// empty conversation behind that the next query silently targeted.
+#[test]
+fn run_missing_at_path_query_leaves_conversation_and_session_untouched() {
+    let dir = camino_tempfile::tempdir().unwrap();
+    let missing = dir.path().join("missing.md");
+
+    let session = Session {
+        id: SessionId::new("jp-cli-query-test").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let mut ctx = Ctx::new(
+        Workspace::new("/tmp/jp-cli-query-test"),
+        None,
+        Runtime::new().unwrap(),
+        Globals::default(),
+        AppConfig::new_test(),
+        Some(session.clone()),
+        printer,
+    );
+
+    let query = parse_query(&["--new", &format!("@{missing}")]).unwrap();
+    let result = Runtime::new()
+        .unwrap()
+        .block_on(query.run(&mut ctx, None, false));
+
+    let Err(error) = result else {
+        panic!("a query naming a missing file must fail");
+    };
+    // Pin that it failed on the unreadable path, not on something the test
+    // environment happens to be missing further down `run`.
+    assert_eq!(
+        error
+            .metadata
+            .iter()
+            .find(|(key, _)| key == "path")
+            .map(|(_, value)| value),
+        Some(&Value::from(missing.as_str())),
+    );
+
+    assert_eq!(ctx.workspace.conversations().count(), 0);
+    assert_eq!(ctx.workspace.session_active_conversation(&session), None);
+}
+
+#[test]
+fn resolve_query_missing_at_path_errors() {
+    let dir = camino_tempfile::tempdir().unwrap();
+    let path = dir.path().join("missing.md");
+    let query = parse_query(&[&format!("@{path}")]).unwrap();
+
+    let Err(error) = query.resolve_query() else {
+        panic!("a query naming a missing file must fail, not be sent verbatim");
+    };
+    assert_matches!(&error, Error::ArgFile { path: p, .. } if p == path.as_str());
+}
+
+#[test]
+fn read_arg_file_error_names_the_path() {
+    let dir = camino_tempfile::tempdir().unwrap();
+    let path = dir.path().join("missing.md");
+
+    let error = read_arg_file(path.as_str()).unwrap_err();
+
+    assert_matches!(&error, Error::ArgFile { path: p, .. } if p == path.as_str());
+    // The OS-supplied cause differs per platform, so pin the part we own: the
+    // path is in the message clap renders, which is what "IO error" dropped.
+    assert!(
+        error
+            .to_string()
+            .starts_with(&format!("cannot read '{path}': ")),
+        "unexpected message: {error}"
+    );
 }
