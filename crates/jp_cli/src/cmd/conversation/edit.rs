@@ -85,7 +85,7 @@ pub(crate) struct Edit {
 
     /// Set or remove labels on the conversation.
     #[command(flatten)]
-    labels: LabelDirectives<true, false>,
+    labels: LabelDirectives<true, false, false>,
 
     /// Open `events.json` in `$EDITOR`.
     #[arg(long, short = 'e', group = "file", conflicts_with_all = FILE_CONFLICTS)]
@@ -103,9 +103,9 @@ pub(crate) struct Edit {
 /// Flags that open a file in `$EDITOR` cannot be combined with the ones that
 /// mutate metadata directly.
 ///
-/// `labels` and `no_labels` are listed by id because they come from a flattened
+/// The label flags are listed by id because they come from a flattened
 /// [`LabelDirectives`], which declares no clap group of its own.
-const FILE_CONFLICTS: [&str; 3] = ["property", "labels", "no_labels"];
+const FILE_CONFLICTS: [&str; 3] = ["property", "label", "no_label"];
 
 impl Edit {
     pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {

@@ -52,12 +52,25 @@ pub(crate) struct Ls {
     #[arg(long)]
     archived: bool,
 
-    /// Only show conversations carrying this label.
+    /// Only show conversations carrying these labels.
     ///
     /// `key=value` matches the exact value, a bare `key` matches any value.
-    /// Repeat the flag to require several labels at once.
-    #[arg(long = "label", value_name = "KEY[=VALUE]")]
+    /// Several are separated by commas, and the flag can also be repeated;
+    /// every selector must match.
+    #[arg(
+        long = "label",
+        alias = "labels",
+        value_name = "KEY[=VALUE],...",
+        value_delimiter = ','
+    )]
     labels: Vec<LabelSelector>,
+
+    /// Match one label, taking the value literally.
+    ///
+    /// Identical to `--label` except that the value is never split, so it can
+    /// contain commas.
+    #[arg(long = "raw-label", value_name = "KEY=VALUE", hide_short_help = true)]
+    raw_labels: Vec<LabelSelector>,
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
@@ -107,6 +120,18 @@ struct Details {
 }
 
 impl Ls {
+    /// Every `--label` and `--raw-label` selector, in one list.
+    ///
+    /// The two flags differ only in whether they split on commas; every
+    /// selector must match, so the order they arrive in doesn't matter.
+    fn label_filters(&self) -> Vec<LabelSelector> {
+        self.labels
+            .iter()
+            .chain(&self.raw_labels)
+            .cloned()
+            .collect()
+    }
+
     pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
         ConversationLoadRequest::explicit_or_none(&self.target)
     }
@@ -140,10 +165,11 @@ impl Ls {
                 id,
             };
 
+        let label_filters = self.label_filters();
         let matches_filters = |id: &ConversationId, c: &Conversation, local: bool| -> bool {
             filter_ids.as_ref().is_none_or(|f| f.contains(id))
                 && (!self.local || local)
-                && label::matches(&c.labels, &self.labels)
+                && label::matches(&c.labels, &label_filters)
         };
 
         // `local` is derived from storage presence: a conversation is shown as

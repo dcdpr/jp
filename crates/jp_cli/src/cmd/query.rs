@@ -324,7 +324,7 @@ pub(crate) struct Query {
     /// Applied to the resolved conversation (new, forked, or resumed) before
     /// the turn runs.
     #[command(flatten)]
-    labels: LabelDirectives<false, true>,
+    labels: LabelDirectives<false, true, false>,
 
     /// The tool to use.
     ///

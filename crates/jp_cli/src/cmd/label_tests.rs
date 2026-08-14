@@ -5,19 +5,20 @@ use super::*;
 #[derive(Debug, clap::Parser)]
 struct Mutating {
     #[command(flatten)]
-    labels: LabelDirectives<true, false>,
+    labels: LabelDirectives<true, false, false>,
 }
 
 #[derive(Debug, clap::Parser)]
 struct SetOnly {
     #[command(flatten)]
-    labels: LabelDirectives<false, false>,
+    labels: LabelDirectives<false, false, false>,
 }
 
+/// The full surface, as `jp c label` has it.
 #[derive(Debug, clap::Parser)]
 struct WithAliases {
     #[command(flatten)]
-    labels: LabelDirectives<true, true>,
+    labels: LabelDirectives<true, true, true>,
 }
 
 #[derive(Debug, clap::Parser)]
@@ -49,15 +50,128 @@ fn key_value_and_bare_keys_parse() {
     ]);
 }
 
-/// Label values are user-controlled text; only the first `=` separates the key.
+/// Only the first `=` separates key from value, so a value may contain one.
 #[test]
-fn values_may_contain_separators() {
-    assert_eq!(parse(&["jp", "--label=branch=feat/a=b,c"]), [
+fn only_the_first_equals_separates() {
+    assert_eq!(parse(&["jp", "--label=branch=feat/a=b"]), [
         LabelDirective::Set {
             key: "branch".to_owned(),
-            value: "feat/a=b,c".to_owned()
+            value: "feat/a=b".to_owned()
         },
     ]);
+}
+
+/// Splitting is the default, and the plural spelling is a plain alias, so a
+/// mistype between the two is harmless.
+#[test]
+fn the_flag_splits_on_commas_under_either_spelling() {
+    assert_eq!(
+        parse(&["jp", "--labels=team=platform,branch=main,draft"]),
+        parse(&["jp", "--label=team=platform,branch=main,draft"])
+    );
+
+    assert_eq!(parse(&["jp", "--label=team=platform,branch=main,draft"]), [
+        LabelDirective::Set {
+            key: "team".to_owned(),
+            value: "platform".to_owned()
+        },
+        LabelDirective::Set {
+            key: "branch".to_owned(),
+            value: "main".to_owned()
+        },
+        LabelDirective::Set {
+            key: "draft".to_owned(),
+            value: String::new()
+        },
+    ]);
+}
+
+#[test]
+fn removal_splits_on_commas_under_either_spelling() {
+    assert_eq!(
+        parse(&["jp", "--no-labels=team,branch"]),
+        parse(&["jp", "--no-label=team,branch"])
+    );
+
+    assert_eq!(parse(&["jp", "--no-label=team,branch"]), [
+        LabelDirective::Remove("team".to_owned()),
+        LabelDirective::Remove("branch".to_owned()),
+    ]);
+}
+
+/// A bare `--no-label` still clears everything: an empty value is never split,
+/// so it can't expand to zero directives.
+#[test]
+fn a_bare_removal_still_clears_everything() {
+    assert_eq!(parse(&["jp", "--no-label"]), [LabelDirective::RemoveAll]);
+}
+
+/// Removal names keys, and a key can never contain a comma, so `--no-label`
+/// needs no literal form.
+/// A `key=value` argument is rejected outright.
+#[test]
+fn removal_takes_keys_not_pairs() {
+    let error = Mutating::try_parse_from(["jp", "--no-label=team=platform"]).unwrap_err();
+    assert!(error.to_string().contains("invalid character '='"));
+}
+
+/// `--raw-label` is the only way to write a comma into a value.
+#[test]
+fn the_raw_flag_keeps_commas_in_the_value() {
+    let parsed = WithAliases::try_parse_from(["jp", "--raw-label=branch=feat,exp"])
+        .unwrap()
+        .labels
+        .0;
+
+    assert_eq!(parsed, [LabelDirective::Set {
+        key: "branch".to_owned(),
+        value: "feat,exp".to_owned()
+    }]);
+}
+
+/// The escape is only worth carrying where labelling is the command's job.
+#[test]
+fn the_raw_flag_is_absent_from_bulk_commands() {
+    assert!(Mutating::try_parse_from(["jp", "--raw-label=a=1,2"]).is_err());
+    assert!(SetOnly::try_parse_from(["jp", "--raw-label=a=1,2"]).is_err());
+}
+
+/// The flags interleave by command-line position, and entries expanded from one
+/// `--label` keep their left-to-right order within it.
+#[test]
+fn directives_interleave_in_command_line_order() {
+    let parsed =
+        WithAliases::try_parse_from(["jp", "--label=a=1", "--raw-label=b=2,x", "--label=c=3,d=4"])
+            .unwrap()
+            .labels
+            .0;
+
+    assert_eq!(parsed, [
+        LabelDirective::Set {
+            key: "a".to_owned(),
+            value: "1".to_owned()
+        },
+        LabelDirective::Set {
+            key: "b".to_owned(),
+            value: "2,x".to_owned()
+        },
+        LabelDirective::Set {
+            key: "c".to_owned(),
+            value: "3".to_owned()
+        },
+        LabelDirective::Set {
+            key: "d".to_owned(),
+            value: "4".to_owned()
+        },
+    ]);
+}
+
+/// A stray comma produces an empty entry rather than being silently forgiven,
+/// so a typo is reported instead of changing what the flag means.
+#[test]
+fn a_stray_comma_is_rejected() {
+    let error = Mutating::try_parse_from(["jp", "--label=team=platform,"]).unwrap_err();
+    assert!(error.to_string().contains("must not be empty"));
 }
 
 #[test]

@@ -23,7 +23,7 @@ pub(crate) struct Label {
     target: PositionalIds<true, false>,
 
     #[command(flatten)]
-    directives: LabelDirectives<true, true>,
+    directives: LabelDirectives<true, true, true>,
 }
 
 impl Label {

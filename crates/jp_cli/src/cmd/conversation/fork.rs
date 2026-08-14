@@ -84,7 +84,7 @@ pub(crate) struct Fork {
     ///
     /// Applied on top of the labels inherited from the source conversation.
     #[command(flatten)]
-    labels: LabelDirectives<false, false>,
+    labels: LabelDirectives<false, false, false>,
 }
 
 impl Fork {

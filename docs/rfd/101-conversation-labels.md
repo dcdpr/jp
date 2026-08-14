@@ -76,6 +76,46 @@ Two commands set labels, split by whether a target's config is needed:
 `jp c fork` follows `jp c edit`: literal directives on any number of sources,
 `:alias` rejected.
 
+`--label` splits its value on `,`, so several labels fit in one flag.
+`--labels` is a plain alias, as `--tools` is for `--tool`, so a mistype between
+the two does the same thing:
+
+```sh
+jp q --new --label=team=platform,branch=main
+jp c label <id> --labels=stage=review,draft
+jp c label <id> --no-label=stage,draft
+jp c ls --label=team=platform,branch
+```
+
+An empty entry is an error rather than being forgiven, so `--label=a=1,`
+reports the stray comma instead of quietly meaning something else.
+A bare `--no-label` with no value still clears every label.
+
+**Writing a comma into a value.** Splitting makes a value containing a comma
+unwritable, so `--raw-label` takes its value literally:
+
+```sh
+jp c label <id> --raw-label=branch=feat,exp
+jp c ls --raw-label=branch=feat,exp
+```
+
+It exists only on `jp c label`, `jp c ls`, and `jp c grep`, and is hidden from
+`-h` (it still appears in `--help`).
+A comma in a label value is rare and arrives mostly through scripting; a script
+that needs one at creation time can run `jp q --new` and then `jp c label`,
+which resolves the conversation from the session mapping without an ID.
+The filter commands carry it because there is no equivalent way to split a read
+across two commands: without it, a script could set a label it can never look
+up again.
+
+The escape is only needed where a *value* is written, which is why the removal
+flags have no literal form: `--no-label` names keys, and the key grammar has no
+comma in it.
+The same goes for `:alias` references and presence-only filters.
+
+Command-backed rules are unaffected either way: `value.cmd` output never passes
+through CLI parsing, so a branch named `feat,exp` has always resolved correctly.
+
 Bare labels (no `=`) are sugar for `key=""`.
 Filter semantics treat them as "key present, any value."
 
@@ -530,12 +570,27 @@ The right place for the policy is on the *consumer*.
 This RFD puts `run` on `LabelObject` (the label consumer), consistent with how
 `ToolConfig` carries its own `run` for tools.
 
-### Comma-split `--label` values
+### No comma splitting at all
 
-Allow `--label=a,b=c,d` to split into multiple labels in one flag.
-Rejected because label values can contain `,` (VCS branch names like `feat,
-exploration` are user-controlled), so the split has no safe escape rule.
-`--label` is already repeatable; the ergonomic case is covered.
+Make `--label` repeatable only, so `,` is always literal and no escape is
+needed.
+Rejected as needless friction: setting three labels is the common case and
+writing a comma into a value is not, so the ergonomics were backwards.
+
+### Splitting on `--labels`, literal on `--label`
+
+Give the two spellings different behavior, making the singular the escape
+hatch.
+Rejected because the pair differs by one character, so a mistype is silently
+wrong in both directions: `--labels=branch=feat,exp` yields two labels and
+`--label=a=1,b=2` yields one label with a comma in its value.
+Neither is detectable without also rejecting a legitimate value.
+It also breaks the `--tool` / `--tools` convention, where the plural is a plain
+alias.
+
+The shipped design keeps the two spellings identical and moves the escape to a
+third flag nobody types by accident.
+See [Setting labels](#user-facing-behavior).
 
 ### `key`-absence triggering multi-key cmd mode
 
@@ -602,9 +657,19 @@ context exposure) is designed.
 ## Risks and Open Questions
 
 - **Hyrum's Law surface.** The on-disk `labels` field name, the CLI flag syntax
-  (`--label`, `:alias`), the `apply_on` field shape, and the rendering in `jp c
-  show` all become part of the public contract once shipped.
+  (`--label` / `--labels` and their `--no-` forms, `:alias`), the `apply_on`
+  field shape, and the rendering in `jp c show` all become part of the public
+  contract once shipped.
   Validate the shapes before merging Phase 1.
+
+- **A comma in a value is unwritable without `--raw-label`.** Anyone who reaches
+  for `--label=branch=feat,exp` gets two labels, one of them nonsense, with no
+  error.
+  The failure is silent because it is indistinguishable from a deliberate
+  two-label call.
+  Accepted on the grounds that commas in label values are rare and mostly
+  scripted; the mitigation is that `--label`'s long help names `--raw-label`
+  directly.
 
 - **Alias resolution and config layering.** *Resolved during Phase 2.* `:alias`
   must resolve against the merged config, not the workspace root config alone.
@@ -649,8 +714,10 @@ Mergeable independently.
    `map_with_strategy` merge.
 3. CLI: `--label` on `query`, `label`, `edit`, and `conversation fork`;
    `--no-label` on `label` and `edit` only; `--label` filter on `ls`.
-   Repeatable flag parsing (no comma splitting); directives applied
-   left-to-right, last one wins per key.
+   Repeatable flag parsing; `--label` (alias `--labels`) splits on `,`, and
+   `--raw-label` takes its value literally.
+   Directives applied left-to-right, last one wins per key; entries expanded
+   from one `--label` keep their order within that flag's position.
    Label key validator enforcing `[A-Za-z0-9_-]+`.
    All flag paths are direct metadata mutations with no config-pipeline
    integration and no `ConfigDelta`:
