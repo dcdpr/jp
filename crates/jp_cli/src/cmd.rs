@@ -4,6 +4,7 @@ mod config;
 mod conversation;
 pub(crate) mod conversation_id;
 mod init;
+pub(crate) mod label;
 mod lock;
 pub(crate) mod plugin;
 mod query;
@@ -501,6 +502,7 @@ impl From<crate::error::Error> for Error {
             )]
             .into(),
             Compaction(error) => [("message", "Compaction error".into()), ("error", error)].into(),
+            Label(error) => [("message", "Label error".into()), ("error", error)].into(),
             Summarize { model, reason } => [
                 ("message", "Summarization failed".to_owned()),
                 ("model", model),

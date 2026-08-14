@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     panic::{AssertUnwindSafe, catch_unwind, resume_unwind},
     sync::Arc,
     time::Duration,
@@ -19,7 +20,7 @@ use tokio::runtime::Runtime;
 use super::*;
 use crate::{
     Globals,
-    cmd::{compact_flag::CompactFlag, conversation_id::PositionalIds},
+    cmd::{compact_flag::CompactFlag, conversation_id::PositionalIds, label::LabelDirective},
 };
 
 #[test]
@@ -42,6 +43,7 @@ fn test_conversation_fork() {
                 first: None,
                 title: None,
                 compact: CompactFlag::default(),
+                labels: LabelDirectives::default(),
                 no_turns: false,
             },
             setup: |ctx| {
@@ -87,6 +89,7 @@ fn test_conversation_fork() {
                 first: None,
                 title: None,
                 compact: CompactFlag::default(),
+                labels: LabelDirectives::default(),
                 no_turns: false,
             },
             setup: |ctx| {
@@ -142,6 +145,7 @@ fn test_conversation_fork() {
                 first: None,
                 title: None,
                 compact: CompactFlag::default(),
+                labels: LabelDirectives::default(),
                 no_turns: true,
             },
             setup: |ctx| {
@@ -200,6 +204,7 @@ fn test_conversation_fork() {
                 first: None,
                 title: None,
                 compact: CompactFlag::default(),
+                labels: LabelDirectives::default(),
                 no_turns: false,
             },
             setup: |ctx| {
@@ -257,6 +262,7 @@ fn test_conversation_fork() {
                 first: None,
                 title: None,
                 compact: CompactFlag::default(),
+                labels: LabelDirectives::default(),
                 no_turns: false,
             },
             setup: |ctx| {
@@ -313,6 +319,7 @@ fn test_conversation_fork() {
                 first: None,
                 title: None,
                 compact: CompactFlag::default(),
+                labels: LabelDirectives::default(),
                 no_turns: false,
             },
             setup: |ctx| {
@@ -370,6 +377,7 @@ fn test_conversation_fork() {
                 first: None,
                 title: None,
                 compact: CompactFlag::default(),
+                labels: LabelDirectives::default(),
                 no_turns: false,
             },
             setup: |ctx| {
@@ -450,6 +458,7 @@ fn test_conversation_fork() {
                 first: None,
                 title: None,
                 compact: CompactFlag::default(),
+                labels: LabelDirectives::default(),
                 no_turns: false,
             },
             setup: |ctx| {
@@ -529,6 +538,7 @@ fn test_conversation_fork() {
                 first: None,
                 title: None,
                 compact: CompactFlag::default(),
+                labels: LabelDirectives::default(),
                 no_turns: false,
             },
             setup: |ctx| {
@@ -576,6 +586,7 @@ fn test_conversation_fork() {
                 first: None,
                 title: None,
                 compact: CompactFlag::default(),
+                labels: LabelDirectives::default(),
                 no_turns: false,
             },
             setup: |ctx| {
@@ -618,6 +629,7 @@ fn test_conversation_fork() {
                 until: None,
                 last: None,
                 compact: CompactFlag::default(),
+                labels: LabelDirectives::default(),
                 no_turns: false,
                 first: Some(None),
                 title: None,
@@ -697,6 +709,7 @@ fn test_conversation_fork() {
                 until: None,
                 last: Some(Some(1)),
                 compact: CompactFlag::default(),
+                labels: LabelDirectives::default(),
                 no_turns: false,
                 first: Some(Some(2)),
                 title: None,
@@ -769,6 +782,7 @@ fn test_conversation_fork() {
                 until: None,
                 last: None,
                 compact: CompactFlag::default(),
+                labels: LabelDirectives::default(),
                 no_turns: false,
                 first: Some(Some(10)),
                 title: None,
@@ -816,6 +830,7 @@ fn test_conversation_fork() {
                 until: None,
                 last: None,
                 compact: CompactFlag::default(),
+                labels: LabelDirectives::default(),
                 no_turns: false,
                 first: None,
                 title: Some("my custom title".to_owned()),
@@ -841,6 +856,70 @@ fn test_conversation_fork() {
                 assert_eq!(convs[1].1.title.as_deref(), Some("my custom title"));
             },
         }),
+        ("labels are inherited and overridden by the cli", TestCase {
+            args: Fork {
+                target: PositionalIds::default(),
+                activate: false,
+                from: None,
+                until: None,
+                last: None,
+                first: None,
+                title: None,
+                compact: CompactFlag::default(),
+                labels: LabelDirectives(vec![
+                    LabelDirective::Set {
+                        key: "branch".to_owned(),
+                        value: "feat".to_owned(),
+                    },
+                    LabelDirective::Set {
+                        key: "draft".to_owned(),
+                        value: String::new(),
+                    },
+                ]),
+                no_turns: false,
+            },
+            setup: |ctx| {
+                let id = ConversationId::try_from(ctx.now()).unwrap();
+                ctx.workspace.create_conversation_with_id(
+                    id,
+                    Conversation {
+                        labels: BTreeMap::from([
+                            ("branch".to_owned(), "main".to_owned()),
+                            ("team".to_owned(), "platform".to_owned()),
+                        ]),
+                        ..Conversation::default().with_last_activated_at(ctx.now())
+                    },
+                    ctx.config(),
+                );
+
+                let h = ctx.workspace.acquire_conversation(&id).unwrap();
+                let _lock = ctx.workspace.test_lock(h);
+                id
+            },
+            assert: |mut convs, source_id| {
+                assert_eq!(convs.len(), 2);
+                convs.sort_by_key(|v| v.0);
+                assert_eq!(source_id, convs[0].0);
+
+                assert_eq!(
+                    convs[0].1.labels,
+                    BTreeMap::from([
+                        ("branch".to_owned(), "main".to_owned()),
+                        ("team".to_owned(), "platform".to_owned()),
+                    ]),
+                    "the source conversation is untouched"
+                );
+                assert_eq!(
+                    convs[1].1.labels,
+                    BTreeMap::from([
+                        ("branch".to_owned(), "feat".to_owned()),
+                        ("draft".to_owned(), String::new()),
+                        ("team".to_owned(), "platform".to_owned()),
+                    ]),
+                    "inherited labels survive, named ones are overwritten"
+                );
+            },
+        }),
         ("with from and until", TestCase {
             args: Fork {
                 target: PositionalIds::default(),
@@ -851,6 +930,7 @@ fn test_conversation_fork() {
                 first: None,
                 title: None,
                 compact: CompactFlag::default(),
+                labels: LabelDirectives::default(),
                 no_turns: false,
             },
             setup: |ctx| {
@@ -974,6 +1054,110 @@ fn test_conversation_fork() {
     }
 }
 
+/// A rule with `apply_on.fork` is re-resolved on the fork and overwrites the
+/// inherited value for its own key; every other inherited label survives, and a
+/// rule that only opts into `new` is left alone.
+#[test]
+fn fork_reresolves_apply_on_fork_rules() {
+    use jp_config::conversation::label::{
+        ApplyOn, LabelConfig, LabelObject, LabelRunMode, LabelValue,
+    };
+
+    let rule = |value: &str, apply_on: ApplyOn| {
+        LabelConfig::Object(LabelObject {
+            value: LabelValue::Static(value.to_owned()),
+            apply_on,
+            run: LabelRunMode::Ask,
+        })
+    };
+
+    let mut config = AppConfig::new_test();
+    config.conversation.labels.insert(
+        "stage".to_owned(),
+        rule("forked", ApplyOn {
+            new: false,
+            fork: true,
+        }),
+    );
+    config.conversation.labels.insert(
+        "only_new".to_owned(),
+        rule("fresh", ApplyOn {
+            new: true,
+            fork: false,
+        }),
+    );
+
+    let tmp = tempdir().unwrap();
+    let (printer, _, _) = Printer::memory(OutputFormat::TextPretty);
+    let storage = tmp.path().join(".jp");
+    let user = tmp.path().join("user");
+    let fs = Arc::new(
+        FsStorageBackend::new(&storage)
+            .unwrap()
+            .with_user_storage(&user, None, "abc")
+            .unwrap(),
+    );
+    let workspace = Workspace::new(tmp.path()).with_backend(fs);
+    let mut ctx = Ctx::new(
+        workspace,
+        None,
+        Runtime::new().unwrap(),
+        Globals::default(),
+        config,
+        None,
+        printer,
+    );
+
+    let source_id = ConversationId::try_from(ctx.now()).unwrap();
+    ctx.workspace.create_conversation_with_id(
+        source_id,
+        Conversation {
+            labels: BTreeMap::from([
+                ("stage".to_owned(), "inherited".to_owned()),
+                ("team".to_owned(), "platform".to_owned()),
+            ]),
+            ..Conversation::default().with_last_activated_at(ctx.now())
+        },
+        ctx.config(),
+    );
+    let handle = ctx.workspace.acquire_conversation(&source_id).unwrap();
+    let lock = ctx.workspace.test_lock(handle);
+    drop(lock);
+
+    ctx.set_now(ctx.now() + Duration::from_secs(1));
+
+    let source_handle = ctx.workspace.acquire_conversation(&source_id).unwrap();
+    let fork_lock = fork_conversation(&mut ctx, &source_handle, |_| {}).unwrap();
+    Runtime::new()
+        .unwrap()
+        .block_on(apply_fork_labels(&ctx, &fork_lock))
+        .unwrap();
+    let fork_id = fork_lock.id();
+    drop(fork_lock);
+
+    let fork_handle = ctx.workspace.acquire_conversation(&fork_id).unwrap();
+    let labels = ctx.workspace.metadata(&fork_handle).unwrap().labels.clone();
+
+    assert_eq!(
+        labels,
+        BTreeMap::from([
+            // `apply_on.fork` overwrote the inherited value.
+            ("stage".to_owned(), "forked".to_owned()),
+            // An inherited label with no matching rule is untouched.
+            ("team".to_owned(), "platform".to_owned()),
+        ])
+    );
+
+    // The source conversation is unchanged.
+    let source_labels = ctx
+        .workspace
+        .metadata(&source_handle)
+        .unwrap()
+        .labels
+        .clone();
+    assert_eq!(source_labels["stage"], "inherited");
+}
+
 /// Create two conversations with distinct content, fork only one, and verify
 /// the fork carries the source's events (not the other conversation's).
 #[test]
@@ -1060,6 +1244,7 @@ fn fork_targets_correct_source() {
         last: None,
         first: None,
         compact: CompactFlag::default(),
+        labels: LabelDirectives::default(),
         no_turns: false,
         title: Some("forked-from-b".to_owned()),
     };

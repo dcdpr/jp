@@ -9,6 +9,7 @@ pub(crate) mod compact;
 mod edit;
 pub(crate) mod fork;
 mod grep;
+mod label;
 mod ls;
 mod path;
 mod print;
@@ -33,6 +34,7 @@ impl Conversation {
             Commands::Fork(args) => args.run(ctx, &handles).await,
             Commands::Compact(args) => args.run(ctx, handles).await,
             Commands::Grep(args) => args.run(ctx, handles),
+            Commands::Label(args) => args.run(ctx, handles).await,
             Commands::Print(args) => args.run(ctx, &handles),
             Commands::Path(args) => args.run(ctx, handles),
             Commands::List(args) => args.run(ctx, &handles),
@@ -50,6 +52,7 @@ impl Conversation {
             Commands::Fork(args) => args.conversation_load_request(),
             Commands::Compact(args) => args.conversation_load_request(),
             Commands::Grep(args) => args.conversation_load_request(),
+            Commands::Label(args) => args.conversation_load_request(),
             Commands::Print(args) => args.conversation_load_request(),
             Commands::Path(args) => args.conversation_load_request(),
             Commands::List(args) => args.conversation_load_request(),
@@ -74,6 +77,7 @@ impl IntoPartialAppConfig for Conversation {
             | Commands::Edit(_)
             | Commands::Fork(_)
             | Commands::Grep(_)
+            | Commands::Label(_)
             | Commands::Print(_)
             | Commands::Path(_)
             | Commands::List(_)
@@ -122,6 +126,15 @@ enum Commands {
     /// Search through conversation history.
     #[command(name = "grep", alias = "rg", visible_alias = "g")]
     Grep(grep::Grep),
+
+    /// Set or remove labels on a conversation.
+    ///
+    /// Targets a single conversation, so `--label=:name` can resolve a
+    /// `conversation.labels` rule against that conversation's config.
+    /// Use `jp conversation edit --label` to set literal labels on several
+    /// conversations at once.
+    #[command(name = "label", alias = "labels")]
+    Label(label::Label),
 
     /// Print conversation history to the terminal.
     #[command(name = "print", visible_alias = "p")]

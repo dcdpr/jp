@@ -199,6 +199,146 @@ fn deserialize_dedup_inherit_from_toml() {
 }
 
 #[test]
+fn deserialize_labels_from_toml() {
+    use crate::conversation::label::PartialLabelConfig;
+
+    let toml = r#"
+        [labels]
+        team = "platform"
+
+        [labels.stage]
+        value = "review"
+        apply_on = { fork = true }
+    "#;
+
+    let partial: PartialConversationConfig = toml::from_str(toml).unwrap();
+
+    assert_eq!(
+        partial.labels.get("team"),
+        Some(&PartialLabelConfig::Static("platform".to_owned()))
+    );
+
+    let PartialLabelConfig::Object(stage) = partial.labels.get("stage").unwrap() else {
+        panic!("expected the object form");
+    };
+    assert_eq!(stage.apply_on.fork, Some(true));
+    assert_eq!(stage.apply_on.new, None, "unset fields stay absent");
+}
+
+#[test]
+fn merge_labels_deep_merges_entries() {
+    use schematic::PartialConfig as _;
+
+    use crate::conversation::label::PartialLabelConfig;
+
+    let mut base: PartialConversationConfig =
+        toml::from_str("[labels]\nteam = \"platform\"\n").unwrap();
+    let next: PartialConversationConfig = toml::from_str("[labels]\nbranch = \"main\"\n").unwrap();
+
+    base.merge(&(), next).unwrap();
+
+    assert_eq!(
+        base.labels.get("team"),
+        Some(&PartialLabelConfig::Static("platform".to_owned()))
+    );
+    assert_eq!(
+        base.labels.get("branch"),
+        Some(&PartialLabelConfig::Static("main".to_owned()))
+    );
+}
+
+#[test]
+fn merge_labels_honors_replace_strategy() {
+    use schematic::PartialConfig as _;
+
+    let mut base: PartialConversationConfig =
+        toml::from_str("[labels]\nteam = \"platform\"\n").unwrap();
+    let next: PartialConversationConfig = toml::from_str(
+        r#"
+        [labels]
+        strategy = "replace"
+        value = { branch = "main" }
+    "#,
+    )
+    .unwrap();
+
+    base.merge(&(), next).unwrap();
+
+    assert!(base.labels.get("team").is_none(), "replace drops the base");
+    assert!(base.labels.get("branch").is_some());
+}
+
+#[test]
+fn labels_survive_the_full_build() {
+    use camino_tempfile::tempdir;
+    use schematic::ConfigLoader;
+
+    use crate::{conversation::label::LabelValueRef, util};
+
+    let tmp = tempdir().unwrap();
+    let path = tmp.path().join("config.toml");
+
+    std::fs::write(&path, indoc::indoc! {r#"
+            [assistant.model]
+            id = "anthropic/test"
+
+            [conversation.tools.'*']
+            run = "unattended"
+
+            [conversation.labels]
+            team = "platform"
+
+            [conversation.labels.stage]
+            value = "review"
+            apply_on = { new = false, fork = true }
+        "#})
+    .unwrap();
+
+    let partial = ConfigLoader::<crate::AppConfig>::new()
+        .file(&*path)
+        .unwrap()
+        .load_partial(&())
+        .unwrap();
+
+    let config = util::build(partial).unwrap();
+    let labels = &config.conversation.labels;
+
+    assert_eq!(labels.len(), 2);
+    assert_eq!(
+        labels.get("team").unwrap().value(),
+        LabelValueRef::Static("platform")
+    );
+
+    let stage = labels.get("stage").unwrap();
+    assert_eq!(stage.value(), LabelValueRef::Static("review"));
+    assert!(!stage.apply_on().new);
+    assert!(stage.apply_on().fork);
+}
+
+#[test]
+fn invalid_label_key_is_rejected_by_build() {
+    use crate::{
+        conversation::tool::RunMode,
+        model::id::{PartialModelIdConfig, PartialModelIdOrAliasConfig, ProviderId},
+        util,
+    };
+
+    let mut partial = crate::PartialAppConfig::default();
+    partial.conversation.tools.defaults.run = Some(RunMode::Ask);
+    partial.assistant.model.id = PartialModelIdOrAliasConfig::Id(PartialModelIdConfig {
+        provider: Some(ProviderId::Anthropic),
+        name: "claude-opus-4".parse().ok(),
+    });
+    partial.conversation.labels.insert(
+        "team.platform".to_owned(),
+        crate::conversation::label::PartialLabelConfig::Static("x".to_owned()),
+    );
+
+    let error = util::build(partial).unwrap_err().to_string();
+    assert!(error.contains("invalid character"), "got: {error}");
+}
+
+#[test]
 fn deserialize_attachments_array_from_toml() {
     // [[attachments]] array-of-tables syntax.
     let toml = r#"

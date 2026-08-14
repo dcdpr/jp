@@ -8,9 +8,9 @@
   advances to Discussion status.
 -->
 
-# RFD D38: Conversation Labels
+# RFD 101: Conversation Labels
 
-- **Status**: Draft
+- **Status**: Accepted
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-19
@@ -56,8 +56,25 @@ or both.
 
 ```sh
 jp q --new --label=team=platform --label=branch=main
-jp c edit <id> --label=foo=bar
+jp c label <id> --label=foo=bar
+jp c label <id> --no-label=foo # remove one label
+jp c label <id> --no-label     # remove all labels
+jp c edit +session --label=sprint=42 # bulk, literal values only
 ```
+
+Two commands set labels, split by whether a target's config is needed:
+
+- `jp c label` takes a **single** conversation and accepts both literal
+  directives and `:alias` references.
+  A single target is what makes an alias resolvable: the rule comes from that
+  conversation's effective config.
+- `jp c edit` takes **any number** of conversations and accepts literal
+  directives only.
+  Literal directives need no config at all, so they are safe in bulk;
+  `:alias` is rejected at parse time with a pointer to `jp c label`.
+
+`jp c fork` follows `jp c edit`: literal directives on any number of sources,
+`:alias` rejected.
 
 Bare labels (no `=`) are sugar for `key=""`.
 Filter semantics treat them as "key present, any value."
@@ -94,30 +111,47 @@ Configured labels are resolved first; CLI `--label` flags are applied on top.
 jp q --new --label=branch=main --label=branch=feat # branch=feat
 ```
 
-**Persistence on existing conversations.** `--label` flows through the standard
-`IntoPartialAppConfig::apply_cli_config` pipeline.
-`jp q --id` already participates via the existing `impl IntoPartialAppConfig for
-Query`.
-`jp c edit` does not today — the conversation subcommand falls through
-`Commands::Conversation(_)` to a no-op in `crates/jp_cli/src/cmd.rs`, and
-`run_property_edit` mutates metadata directly.
-This RFD introduces a new `IntoPartialAppConfig` impl on the conversation
-subcommand chain so `c edit --label` flows through the same pipeline.
-Both subcommands produce the same `ConfigDelta` shape against
-`conversation.labels.<key>.value` using the same mechanism as any other config
-field — `conversation.labels` is not a special case.
-The resolved label set is then rewritten into `metadata.json`. v1 has no flag
-for *removing* a label — see [Label removal](#label-removal).
+`--label` is a *metadata mutation*, not a config override.
+It does not merge into `PartialAppConfig` and does not emit a `ConfigDelta`
+against `conversation.labels`.
+The distinction is deliberate: `conversation.labels` declares label *rules*
+(what to produce, and when), while `--label` states *this conversation carries
+this value*.
+Unlike `--model` (shorthand for `--cfg assistant.model`), `--label` has no
+config-key equivalent.
+Users who want to declare a rule from the CLI use the generic config override:
+`--cfg conversation.labels.<key>.value=...`.
 
-**Label removal.** v1 has no `--no-label` flag.
-Removing a label happens by editing the underlying source directly: `jp c edit
---metadata` drops the entry from the resolved set in `metadata.json`; `jp c edit
---events` or `jp c edit --base-config` edits the per-conversation config when
-the label is configured there.
-Removing a label declared in a higher config layer (workspace, user-global) for
-a single conversation — without touching the shared layer — requires negative
-`ConfigDelta` support and is deferred (see [Future
-work](#future-work-out-of-scope-future-rfds)).
+**Persistence on existing conversations.** `--label` on `jp q --id <id>`, `jp c
+label <id>`, and `jp c edit <id>`, and `--no-label` on the latter two, write
+directly to `metadata.json.labels` via `ConversationMut::update_metadata`, under
+the conversation lock.
+No `ConfigDelta` is emitted and the config pipeline is not involved.
+This keeps `jp c edit` on the direct-metadata path it already uses for
+`--title`, `--pin`, and the other property flags, rather than requiring a new
+`IntoPartialAppConfig` impl on the conversation subcommand chain.
+
+**Label removal.** `--no-label` removes labels from a conversation's resolved
+set.
+With a key (`--no-label=foo`) it removes that key; without one (`--no-label`) it
+clears every label on the conversation.
+Like `--label`, it is a direct metadata mutation — no `ConfigDelta`, no
+negative-delta machinery.
+
+`--no-label` is accepted on `jp c label` and `jp c edit` only.
+On `jp q` it is rejected: a query starts or continues a turn, and silently
+stripping labels mid-turn is a surprising side effect of asking a question.
+On `jp c fork` it is also rejected: fork produces a new conversation from a
+source, and users who want to strip inherited labels can fork then run `c label
+--no-label`.
+
+Removal affects the conversation's stored labels, not the rules that produced
+them.
+A label removed from a conversation whose config still declares it with
+`apply_on.new` reappears on the *next* conversation created under that config.
+It does not come back on the current one, because configured entries are not
+re-resolved for existing conversations (see [Existing-conversation
+mutation](#existing-conversation-mutation)).
 
 **Filtering.** `ls` and `grep` accept `--label` filters with `kubectl`
 semantics: AND across flags, exact match on `key=value`, presence match on `key`
@@ -145,8 +179,16 @@ second execution under `run = "unattended"`.
 We do not dedupe across resolution sources, because the configured command may
 be intentionally non-idempotent.
 
-**Alias scope.** Aliases are accepted only on mutating commands (`q --new`, `q
---id`, `c edit`).
+**Alias scope.** Aliases are accepted only where exactly one target
+conversation is known: `q --new`, `q --fork`, `q --id`, and `c label`.
+
+On multi-target mutating commands (`c edit`, `c fork`), `:alias` is rejected at
+parse time with a pointer to `jp c label`.
+A rule resolves against one conversation's effective config, and JP's config
+pipeline produces a single resolved config per invocation, so there is no
+per-target config to resolve against on a command that may target several
+conversations.
+
 On filter commands (`ls`, `grep`), `:alias` is rejected with an error directing
 the user to the resolved label syntax — filters operate on persisted label
 values, not on configured entries.
@@ -176,14 +218,15 @@ It runs at three well-defined points:
    Detailed in [Resolution](#resolution).
 2. **Fork** (`jp c fork`): source labels are inherited, configured entries with
    `apply_on.fork = true` are re-resolved on top, then CLI directives apply.
-3. **Existing-conversation mutation** (`jp q --id`, `jp c edit --label`): only
-   the keys named on the CLI are updated; unrelated configured labels are *not*
-   re-resolved.
-   Literal `--label=k=v` directives apply directly without spawning commands or
-   invoking `run`-mode prompts; alias directives (`--label=:name`) still go
-   through the full resolver and may spawn commands and prompt per the
-   configured `run` policy.
-   The mutation flows through the standard config-delta pipeline.
+3. **Existing-conversation mutation** (`jp q --id --label`, `jp c label` /
+   `jp c edit --label` / `--no-label`): only the keys named on the CLI are
+   updated; unrelated configured labels are *not* re-resolved.
+   Literal `--label=k=v` and `--no-label=k` directives apply directly without
+   spawning commands or invoking `run`-mode prompts; alias directives
+   (`--label=:name`) still go through the full resolver and may spawn commands
+   and prompt per the configured `run` policy.
+   The result is written straight to `metadata.json`; no `ConfigDelta` is
+   emitted.
    Detailed in [Existing-conversation
    mutation](#existing-conversation-mutation).
 
@@ -374,22 +417,39 @@ The resolution steps:
 6. Apply CLI `--label` directives on top of the config-resolved set; last value
    wins for repeated keys (see [User-facing behavior](#user-facing-behavior)).
 
+**Failure semantics.** Steps 3–5 describe **automatic-application** semantics:
+rejection at the `Ask` prompt, denial via `run = "deny"`, spawn errors, and
+non-zero exits all cause the entry to be omitted with a warning; the command
+still succeeds.
+**Explicit-alias resolution** (a `--label=:name` directive) uses stricter
+semantics: a missing alias, a `run = "deny"` entry, a spawn failure, or a
+non-zero exit all return an error and leave metadata unchanged — the user asked
+for the label, and silently omitting it would be dishonest.
+Interactive rejection at the `Ask` prompt is the exception: the user has just
+told the terminal not to run the command, so the alias is omitted with a
+warning, and the surrounding command continues.
+
 **Fork.** When a conversation is forked, the source conversation's labels are
 cloned into the new conversation as the starting point.
 Configured entries with `apply_on.fork = true` are then re-resolved and override
 the inherited values.
-Finally, CLI directives apply on top.
+Finally, CLI `--label` directives apply on top (`--no-label` is not accepted on
+fork; see [Label removal](#label-removal)).
+`jp c fork` accepts multiple source conversations and takes literal directives
+only; `jp q --fork` is a single-source path, so it accepts aliases and resolves
+them against that source's config.
 
-**Existing-conversation mutation.** `--label` on `jp q --id` or `jp c edit`
-applies only to the keys named on the CLI: start from `metadata.json.labels`,
-apply the `--label` directives in left-to-right order, emit a `ConfigDelta`
-against `conversation.labels.<key>.value` reflecting the net change, and rewrite
-`metadata.json`.
+**Existing-conversation mutation.** `--label` (on `jp q --id`, `jp c label`, or
+`jp c edit`) and `--no-label` (on `jp c label` or `jp c edit`) apply only to the
+keys named on the CLI: start from `metadata.json.labels`, apply the directives in
+left-to-right order, and write the result back to `metadata.json` under the
+conversation lock.
+No `ConfigDelta` is emitted.
 Unrelated configured labels are left untouched, and no `apply_on` filtering is
 applied.
 
-Literal `--label=k=v` directives bypass the resolver — no command spawn, no
-`run`-mode prompt.
+Literal `--label=k=v` and `--no-label=k` directives bypass the resolver — no
+command spawn, no `run`-mode prompt.
 Alias directives (`--label=:name`) are different: they resolve the named config
 entry through the standard resolver (including command execution and the
 `run`-mode prompt) before applying the resulting `key=value` to the
@@ -397,13 +457,18 @@ conversation.
 An alias on an existing conversation is conceptually "evaluate this configured
 entry now, then apply its value as a mutation."
 
+**Multi-target edits.** `jp c edit` accepts multiple conversation handles and
+loops over them, applying its literal directives to each.
+Aliases are not accepted there (see [Alias scope](#alias-scope)), so there is no
+per-target resolution to perform.
+
 Refreshing a command-backed label (re-running its command) requires either using
-an alias directive, editing the config, or forking.
+an alias directive on `jp c label`, editing the config, or forking.
 
 Precedence (most → least specific):
 
 ```text
-CLI --label (last value wins for repeated keys)
+CLI --label / --no-label (applied left-to-right; last directive wins per key)
   > re-resolved configured labels (apply_on.fork on fork, apply_on.new on new)
   > inherited source-conversation labels (fork only)
 ```
@@ -501,8 +566,8 @@ covers the case unambiguously.
 An earlier draft included `apply_on = "turn"` to re-resolve labels at every turn
 before sending to the LLM.
 Removed from v1: no existing data path in JP exposes conversation metadata
-labels to the LLM prompt or to tool context (`jp_tool::Context` carries only
-`root` and `action`; `Context.labels` is itself a Non-Goal).
+labels to the LLM prompt or to `jp_tool::Context`; `Context.labels` is itself a
+Non-Goal.
 A turn-start refresh would only affect persisted metadata read by later `show` /
 `ls` / `grep` invocations, which doesn't justify the resolution cost or the
 failure-semantic complexity.
@@ -514,10 +579,12 @@ context exposure) is designed.
 - **Multi-key cmd output.** A single cmd produces a single label value in v1.
 - **`Context.labels` exposure to tools.** Tools do not see labels until an
   explicit opt-in is designed (labels may carry sensitive data).
-- **Dedicated label-change event type and history UI.** Label-config mutations
-  land as `ConfigDelta` events and are recoverable from the `events.json` stream
-  like any other config change. v1 ships no label-specific event type, no
-  label-change render, and no history UI.
+- **Label-value change history.** `--label` / `--no-label` mutations write
+  straight to `metadata.json` and leave no event-stream record; only the current
+  set is recoverable.
+  Changes to the *rules* (`conversation.labels`, via `--cfg` or a config file
+  edit) do land as `ConfigDelta` events like any other config change. v1 ships
+  no label-specific event type, no label-change render, and no history UI.
 - **Negative filters.** No `--label=!foo` or `--label=foo!=bar`.
   AND-of-match only.
 - **Cardinality limits.** No hard cap on label count or value length.
@@ -525,6 +592,12 @@ context exposure) is designed.
   conversation.
 - **Turn-time label refresh.** See the corresponding entry under
   [Alternatives](#turn-time-label-refresh).
+- **Per-target alias resolution.** A single invocation resolves one config, so a
+  command that may target several conversations cannot resolve a rule per
+  target.
+  Aliases are confined to single-target commands instead of building a
+  per-target config pipeline.
+  Revisit if multi-target commands ever become per-target invocations.
 
 ## Risks and Open Questions
 
@@ -533,10 +606,25 @@ context exposure) is designed.
   show` all become part of the public contract once shipped.
   Validate the shapes before merging Phase 1.
 
-- **Alias resolution and config layering.** `:alias` must resolve against the
-  merged config at flag-parse time, not the workspace root config alone.
-  Implementation must thread the merged config through CLI parsing; verify this
-  against the existing config pipeline.
+- **Alias resolution and config layering.** *Resolved during Phase 2.* `:alias`
+  must resolve against the merged config, not the workspace root config alone.
+  Verifying this against the config pipeline showed that `resolve_config` builds
+  one `AppConfig` per invocation, layering at most one conversation's config
+  (chosen by `ConversationLoadRequest::config_conversation`), and that `c edit`
+  and `c fork` layer none at all.
+  There is therefore no per-target effective config available at command-execution
+  time.
+  Aliases are confined to single-target commands instead — `jp c label` loads its
+  one target's config, and `jp q` already did — rather than reshaping the
+  pipeline to rebuild a config per target.
+  See [Alias scope](#alias-scope).
+
+- **`apply_on.fork` and the source conversation's config.** `jp c fork` layers no
+  per-conversation config, so a rule that exists only as a config delta on the
+  source conversation is invisible to `apply_on.fork` re-resolution there.
+  `jp q --fork` layers the source's config and does see it.
+  Accepted for now; the divergence disappears when `c fork` becomes
+  single-source.
 
 - **Workspace cwd vs. user cwd.** Cmd resolution runs at workspace root.
   A user invoking `jp q --new` from a subdirectory may expect commands to run
@@ -559,14 +647,22 @@ Mergeable independently.
    (`value.cmd = ...`) are rejected at this phase.
    Wire it into `ConversationConfig` as `MergeableMap<LabelConfig>` with
    `map_with_strategy` merge.
-3. CLI: `--label` on `query` and `edit`; `--label` filter on `ls`.
-   Repeatable flag parsing (no comma splitting); last value wins for repeated
-   keys.
+3. CLI: `--label` on `query`, `label`, `edit`, and `conversation fork`;
+   `--no-label` on `label` and `edit` only; `--label` filter on `ls`.
+   Repeatable flag parsing (no comma splitting); directives applied
+   left-to-right, last one wins per key.
    Label key validator enforcing `[A-Za-z0-9_-]+`.
-   Introduce an `IntoPartialAppConfig` impl on the conversation subcommand chain
-   so `c edit --label` flows through the same `apply_cli_config` pipeline as `q
-   --id --label`; replace the direct `conv.update_metadata(...)` path in
-   `run_property_edit` with the delta-aware path for label flags.
+   All flag paths are direct metadata mutations with no config-pipeline
+   integration and no `ConfigDelta`:
+   - `c edit --label` / `--no-label`: apply directives in `run_property_edit`
+     after `acquire_lock`, via the existing `conv.update_metadata(...)` path
+     already used for `--title`, `--pin`, etc.
+   - `q --new` / `q --id --label`: apply directives inside `Query::run` after
+     `acquire_lock` (or after `create_new_conversation` for `--new`), via
+     `lock.as_mut().update_metadata(...)`.
+   - `c fork --label`: apply directives inside `fork::run` after
+     `fork_conversation` returns the new lock, via
+     `lock.as_mut().update_metadata(...)`.
 4. `jp c show` renders the labels block.
 
 ### Phase 2: command-backed labels, `apply_on`, `run` policy, aliasing, grep filter
@@ -582,8 +678,13 @@ Mergeable independently of Phase 1, but depends on it.
    Pass the resolved map into `Workspace::create_and_lock_conversation`.
 3. Wire fork: clone source labels, then re-resolve configured entries with
    `apply_on.fork = true` on top.
-4. Implement `--label=:alias` resolution in CLI flag parsing; reject `:alias` on
-   filter commands with a descriptive error.
+4. Parse `--label=:name` during CLI parsing into a
+   `LabelDirective::Alias(String)` variant, accepted only on single-target
+   commands.
+   Add `jp c label <ID>`, which loads the target's per-conversation config so
+   the rule resolves against it, and resolve aliases during command execution.
+   Reject `:alias` on multi-target mutating commands and on filter commands
+   with a descriptive error at parse time.
 5. `--label` filter on `grep` (pre-filter on conversation set; `Scope` enum
    unchanged).
 
@@ -596,9 +697,6 @@ Mergeable independently of Phase 1, but depends on it.
 - `execute(policy)` type-level guarantee for command execution.
 - Plugin-emitted labels via a future plugin event-subscription mechanism.
 - LLM-driven auto-tagging (the [#101] follow-up).
-- Durable label removal — a `--no-label` flag (suppressing a label from a
-  higher config layer for a single conversation) requires negative `ConfigDelta`
-  support; depends on a future RFD picking up the negative-delta work.
 - Richer label key grammars (namespaced keys like `team.platform`, Unicode) —
   requires escaping for dotted `ConfigDelta` paths, or a non-path-based mutation
   API for map entries.
@@ -619,8 +717,8 @@ Mergeable independently of Phase 1, but depends on it.
   fulfills.
 
 [#101]: https://github.com/dcdpr/jp/issues/101
-[RFD 031]: ../031-durable-conversation-storage-with-workspace-projection.md
-[RFD 040]: ../040-hidden-conversations-and-tool-context.md
-[RFD 077]: ../077-plugin-configuration-and-trust-policy.md
-[cmd-cfg]: ../../architecture/ubiquitous-language.md#commandconfig
-[tools]: ../../../crates/jp_config/src/conversation/tool.rs
+[RFD 031]: 031-durable-conversation-storage-with-workspace-projection.md
+[RFD 040]: 040-hidden-conversations-and-tool-context.md
+[RFD 077]: 077-plugin-configuration-and-trust-policy.md
+[cmd-cfg]: ../architecture/ubiquitous-language.md#commandconfig
+[tools]: ../../crates/jp_config/src/conversation/tool.rs

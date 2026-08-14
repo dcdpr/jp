@@ -36,6 +36,21 @@ pub(crate) fn attachment_detail_item(url: &Url) -> DetailItem {
     )
 }
 
+/// Build a list item for a conversation label.
+///
+/// The terminal text reads as `key=value`, or as the bare key when the label
+/// carries an empty value.
+/// The JSON form is always an object with `key` and `value`.
+pub(crate) fn label_detail_item(key: &str, value: &str) -> DetailItem {
+    let text = if value.is_empty() {
+        key.to_owned()
+    } else {
+        format!("{key}={value}")
+    };
+
+    DetailItem::new(text, json!({ "key": key, "value": value }))
+}
+
 /// Build a list item for a persisted compaction.
 ///
 /// The terminal text reads as `turns X..Y (N total, POLICY)`, where `POLICY` is

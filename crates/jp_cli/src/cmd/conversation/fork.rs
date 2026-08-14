@@ -6,7 +6,15 @@ use jp_workspace::{ConversationHandle, ConversationLock};
 use tracing::debug;
 
 use crate::{
-    cmd::{ConversationLoadRequest, Output, conversation_id::PositionalIds, time::TimeThreshold},
+    cmd::{
+        ConversationLoadRequest, Output,
+        conversation_id::PositionalIds,
+        label::{
+            self, LabelDirectives,
+            resolve::{Resolver, Trigger},
+        },
+        time::TimeThreshold,
+    },
     ctx::Ctx,
 };
 
@@ -71,6 +79,12 @@ pub(crate) struct Fork {
     /// Set a custom title for the forked conversation.
     #[arg(long, short)]
     title: Option<String>,
+
+    /// Set labels on the forked conversation.
+    ///
+    /// Applied on top of the labels inherited from the source conversation.
+    #[command(flatten)]
+    labels: LabelDirectives<false, false>,
 }
 
 impl Fork {
@@ -154,6 +168,14 @@ impl Fork {
                 });
             }
 
+            apply_fork_labels(ctx, &lock).await?;
+
+            if !self.labels.is_empty() {
+                let directives = self.labels.resolved();
+                lock.as_mut()
+                    .update_metadata(|m| label::apply(&mut m.labels, &directives));
+            }
+
             if self.activate
                 && let Some(session) = &ctx.session
                 && let Err(error) =
@@ -166,6 +188,33 @@ impl Fork {
         ctx.printer.println("Conversation forked.");
         Ok(())
     }
+}
+
+/// Re-resolve the `apply_on.fork` label rules over a fork's inherited labels.
+///
+/// The fork starts with a copy of the source's labels; a rule that opts into
+/// `fork` overwrites its own key, and every other inherited label survives.
+///
+/// # Errors
+///
+/// Returns an error when a rule needs confirmation and there is no terminal to
+/// ask on.
+pub(crate) async fn apply_fork_labels(ctx: &Ctx, lock: &ConversationLock) -> crate::Result<()> {
+    let config = ctx.config();
+    let resolved = Resolver::new(
+        &config.conversation.labels,
+        ctx.workspace.root(),
+        ctx.term.is_tty,
+        &ctx.printer,
+    )
+    .automatic(Trigger::Fork)
+    .await?;
+
+    if !resolved.is_empty() {
+        lock.as_mut().update_metadata(|m| m.labels.extend(resolved));
+    }
+
+    Ok(())
 }
 
 /// Fork a conversation and return the new conversation's lock.

@@ -32,6 +32,7 @@ use crate::{
     cmd::{
         ConversationLoadRequest, Output,
         conversation_id::PositionalIds,
+        label::{self, LabelDirectives},
         lock::{LockOutcome, LockRequest, acquire_lock},
     },
     ctx::Ctx,
@@ -82,18 +83,29 @@ pub(crate) struct Edit {
     #[arg(long, group = "property")]
     no_title: bool,
 
+    /// Set or remove labels on the conversation.
+    #[command(flatten)]
+    labels: LabelDirectives<true, false>,
+
     /// Open `events.json` in `$EDITOR`.
-    #[arg(long, short = 'e', group = "file", conflicts_with = "property")]
+    #[arg(long, short = 'e', group = "file", conflicts_with_all = FILE_CONFLICTS)]
     events: bool,
 
     /// Open `metadata.json` in `$EDITOR`.
-    #[arg(long, short = 'm', group = "file", conflicts_with = "property")]
+    #[arg(long, short = 'm', group = "file", conflicts_with_all = FILE_CONFLICTS)]
     metadata: bool,
 
     /// Open `base_config.json` in `$EDITOR`.
-    #[arg(long, short = 'b', group = "file", conflicts_with = "property")]
+    #[arg(long, short = 'b', group = "file", conflicts_with_all = FILE_CONFLICTS)]
     base_config: bool,
 }
+
+/// Flags that open a file in `$EDITOR` cannot be combined with the ones that
+/// mutate metadata directly.
+///
+/// `labels` and `no_labels` are listed by id because they come from a flattened
+/// [`LabelDirectives`], which declares no clap group of its own.
+const FILE_CONFLICTS: [&str; 3] = ["property", "labels", "no_labels"];
 
 impl Edit {
     pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
@@ -116,6 +128,7 @@ impl Edit {
             || self.no_expires_at
             || self.title.is_some()
             || self.no_title
+            || !self.labels.is_empty()
     }
 
     /// Open the conversation directory or specific files in `$EDITOR`.
@@ -300,6 +313,11 @@ impl Edit {
                 });
             } else if self.no_expires_at {
                 conv.update_metadata(|m| m.expires_at = None);
+            }
+
+            if !self.labels.is_empty() {
+                let directives = self.labels.resolved();
+                conv.update_metadata(|m| label::apply(&mut m.labels, &directives));
             }
         }
 

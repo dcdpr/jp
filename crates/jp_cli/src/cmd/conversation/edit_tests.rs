@@ -2,8 +2,36 @@ use std::{fs, time::Duration};
 
 use camino::Utf8PathBuf;
 use camino_tempfile::tempdir;
+use clap::Parser as _;
 
 use super::{Edit, ExpirationDuration};
+
+#[derive(Debug, clap::Parser)]
+struct Cmd {
+    #[command(flatten)]
+    edit: Edit,
+}
+
+#[test]
+fn label_flags_take_the_property_edit_path() {
+    let cmd = Cmd::try_parse_from(["edit", "--label=team=platform"]).unwrap();
+    assert!(cmd.edit.has_property_flags());
+
+    let cmd = Cmd::try_parse_from(["edit", "--no-label"]).unwrap();
+    assert!(cmd.edit.has_property_flags());
+
+    let cmd = Cmd::try_parse_from(["edit"]).unwrap();
+    assert!(!cmd.edit.has_property_flags());
+}
+
+/// Opening a file in `$EDITOR` and mutating metadata are separate modes; the
+/// label flags belong to the second, like `--title` and `--pin`.
+#[test]
+fn label_flags_conflict_with_the_file_flags() {
+    assert!(Cmd::try_parse_from(["edit", "-e", "--label=a=1"]).is_err());
+    assert!(Cmd::try_parse_from(["edit", "-m", "--no-label"]).is_err());
+    assert!(Cmd::try_parse_from(["edit", "-b", "--label=a=1"]).is_err());
+}
 
 #[test]
 fn parse_now() {
