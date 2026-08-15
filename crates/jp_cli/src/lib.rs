@@ -48,7 +48,9 @@ use jp_config::{
     },
 };
 use jp_printer::{OutputFormat, OutputWidth, Printer};
-use jp_storage::backend::{FsStorageBackend, NullLockBackend, NullPersistBackend};
+use jp_storage::backend::{
+    FsStorageBackend, NullLockBackend, NullPersistBackend, ReadOnlySessionBackend,
+};
 use jp_term::table::{DetailRow, details, details_markdown};
 use jp_workspace::{Workspace, user_data_dir};
 use relative_path::RelativePath;
@@ -894,6 +896,9 @@ fn load_partial_configs_from_files(
 /// to [`NullPersistBackend`] and the lock backend to [`NullLockBackend`] so
 /// that ephemeral queries never write to disk and never block on lock
 /// contention.
+/// The session backend is wrapped in [`ReadOnlySessionBackend`] for the same
+/// reason: the run still needs to read which conversation the session is on,
+/// but must not record one that it never persisted.
 fn load_workspace(
     workspace: Option<&WorkspaceIdOrPath>,
     persist: bool,
@@ -954,7 +959,8 @@ fn load_workspace(
     if !persist {
         workspace = workspace
             .with_persist(Arc::new(NullPersistBackend))
-            .with_locker(Arc::new(NullLockBackend));
+            .with_locker(Arc::new(NullLockBackend))
+            .with_sessions(Arc::new(ReadOnlySessionBackend::new(fs.clone())));
     }
     info!(workspace = %workspace.root(), "Using existing workspace.");
 
