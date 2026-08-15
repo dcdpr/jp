@@ -89,7 +89,9 @@ impl Workspace {
     #[must_use]
     pub fn session_active_conversation(&self, session: &Session) -> Option<ConversationId> {
         let mapping = self.load_session_mapping(session)?;
-        self.resolvable_history(&mapping).first().copied()
+        self.resolvable_history(&mapping, |id| self.state.conversations.contains_key(id))
+            .first()
+            .copied()
     }
 
     /// Get the previous conversation ID for the given session.
@@ -102,14 +104,21 @@ impl Workspace {
     #[must_use]
     pub fn session_previous_conversation(&self, session: &Session) -> Option<ConversationId> {
         let mapping = self.load_session_mapping(session)?;
-        self.resolvable_history(&mapping).get(1).copied()
+        self.resolvable_history(&mapping, |id| self.state.conversations.contains_key(id))
+            .get(1)
+            .copied()
     }
 
     /// The session's history reduced to conversations that still resolve, most
     /// recent first.
     ///
-    /// An entry whose conversation exists in neither the live index nor the
-    /// archive is skipped.
+    /// `is_live` reports whether a conversation is present in the live
+    /// partition.
+    /// Pass the workspace index to answer what this process can open; pass a
+    /// set scanned from the backing store to also see conversations another
+    /// process created since that index was loaded.
+    ///
+    /// An entry whose conversation is neither live nor archived is skipped.
     /// Such an entry means the conversation was created but never persisted (a
     /// `--no-persist` run) or was deleted, and treating it as the session's
     /// active conversation would detach the session from the conversation it
@@ -120,18 +129,22 @@ impl Workspace {
     /// Archiving is a deliberate act on a specific conversation, so the session
     /// waits for the user to choose a new target rather than silently reaching
     /// further back into its history.
-    fn resolvable_history(&self, mapping: &SessionMapping) -> Vec<ConversationId> {
+    fn resolvable_history(
+        &self,
+        mapping: &SessionMapping,
+        is_live: impl Fn(&ConversationId) -> bool,
+    ) -> Vec<ConversationId> {
         let mut ids = Vec::new();
         let mut archived = None;
 
         for entry in &mapping.history {
-            if self.state.conversations.contains_key(&entry.id) {
+            if is_live(&entry.id) {
                 ids.push(entry.id);
                 continue;
             }
 
-            // Read the archive lazily: the scan is I/O, and every entry hits
-            // the live index on the common path.
+            // Read the archive lazily: the scan is I/O, and every entry is
+            // live on the common path.
             let archived = archived.get_or_insert_with(|| self.archived_conversation_ids());
             if archived.contains(&entry.id) {
                 break;
@@ -169,20 +182,35 @@ impl Workspace {
 
     /// Returns the active conversation ID from every session mapping.
     ///
-    /// Resolution matches [`session_active_conversation`], so a caller
-    /// protecting "conversations some session is working on" sees exactly the
-    /// conversations those sessions would open.
+    /// Entries resolve by the same rule as [`session_active_conversation`],
+    /// against conversations scanned from the backing store rather than the
+    /// workspace index.
+    /// The answer therefore covers every session on the machine, including one
+    /// working on a conversation another process created moments ago.
     ///
     /// [`session_active_conversation`]: Self::session_active_conversation
     #[must_use]
     pub fn all_active_conversation_ids(&self) -> Vec<ConversationId> {
+        // The index loaded at startup cannot answer for other sessions: a
+        // conversation another process created since is missing from it, and a
+        // caller protecting these ids would leave that conversation
+        // unprotected. An `expires_at` conversation stays on disk only while it
+        // appears here, so the omission deletes it.
+        let live: HashSet<_> = self
+            .loader
+            .load_conversation_ids(ConversationFilter::default())
+            .into_iter()
+            .collect();
+
         self.sessions
             .list_session_keys()
             .into_iter()
             .filter_map(|key| {
                 let value = self.sessions.load_session(&key).ok()??;
                 let mapping = mapping_from_value(value, &key)?;
-                self.resolvable_history(&mapping).first().copied()
+                self.resolvable_history(&mapping, |id| live.contains(id))
+                    .first()
+                    .copied()
             })
             .collect()
     }

@@ -385,8 +385,8 @@ fn cleanup_removes_stale_hwnd_session() {
 
 #[test]
 fn all_active_conversation_ids_across_sessions() {
-    let (_tmp, mut ws, _fs) = setup();
-    let config = std::sync::Arc::new(jp_config::AppConfig::new_test());
+    let (_tmp, ws, fs) = setup();
+    let fs = fs.unwrap();
 
     let session_a = Session {
         id: SessionId::new("sess-a").unwrap(),
@@ -400,12 +400,10 @@ fn all_active_conversation_ids_across_sessions() {
     let id1 = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
     let id2 = ConversationId::try_from(datetime!(2025-07-19 15:00:00 Z)).unwrap();
 
-    ws.create_conversation_with_id(
-        id1,
-        jp_conversation::Conversation::default(),
-        config.clone(),
-    );
-    ws.create_conversation_with_id(id2, jp_conversation::Conversation::default(), config);
+    // Written to the store, not just this process's index: the answer spans
+    // every session on the machine, so it resolves against the store.
+    fs.write_test_conversation(&id1, &jp_conversation::Conversation::default());
+    fs.write_test_conversation(&id2, &jp_conversation::Conversation::default());
 
     ws.record_session_activation(&session_a, id1, datetime!(2025-07-19 14:00:00 Z))
         .unwrap();
@@ -806,6 +804,57 @@ fn ephemeral_cleanup_protects_the_conversation_the_session_resolves_to() {
         fs.load_conversation_ids(ConversationFilter::default())
             .contains(&expired),
         "the session resolves to this conversation, so cleanup must not delete it"
+    );
+}
+
+/// Another terminal can create a conversation after this process loaded its
+/// index.
+/// A bare `--tmp` conversation is expired the moment it is created, so
+/// appearing in the active set is the only thing keeping it on disk.
+#[test]
+fn ephemeral_cleanup_protects_a_conversation_created_after_the_index_was_loaded() {
+    let tmp = tempdir().unwrap();
+    let storage_path = tmp.path().join("storage");
+    let user_root = tmp.path().join("user");
+
+    let fs = Arc::new(
+        FsStorageBackend::new(&storage_path)
+            .unwrap()
+            .with_user_storage(&user_root, None, "abc")
+            .unwrap(),
+    );
+    // Persistence stays enabled: the removal under test has to reach the disk,
+    // otherwise the assertion below holds no matter which ids are protected.
+    let mut ws = Workspace::new(tmp.path()).with_backend(fs.clone());
+    ws.load_conversation_index();
+
+    // Another process creates an expires-immediately conversation and records
+    // it as its session's active one, both after the index load above.
+    let other_session = Session {
+        id: SessionId::new("other-tab").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    let other = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
+    let meta = jp_conversation::Conversation::default()
+        .with_ephemeral(Some(datetime!(2025-07-19 14:00:00 Z)));
+    fs.write_test_conversation(&other, &meta);
+    ws.record_session_activation(&other_session, other, datetime!(2025-07-19 14:00:00 Z))
+        .unwrap();
+
+    // Preconditions: invisible to this process's index, and due for removal.
+    assert!(!ws.conversations().any(|(id, _)| *id == other));
+    assert_eq!(
+        fs.load_expired_conversation_ids(datetime!(2026-01-01 00:00:00 Z)),
+        vec![other]
+    );
+
+    let active = ws.all_active_conversation_ids();
+    ws.remove_ephemeral_conversations(&active);
+
+    assert!(
+        fs.load_conversation_ids(ConversationFilter::default())
+            .contains(&other),
+        "another session is working on this conversation, so cleanup must not delete it"
     );
 }
 
