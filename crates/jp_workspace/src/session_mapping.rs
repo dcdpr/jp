@@ -90,9 +90,7 @@ impl Workspace {
     ///
     /// Returns `None` if no session mapping exists, the session is unknown, or
     /// the session's history holds no conversation that still resolves.
-    /// See [`resolvable_history`] for which entries count.
-    ///
-    /// [`resolvable_history`]: Self::resolvable_history
+    /// See `resolvable_history` for which entries count.
     #[must_use]
     pub fn session_active_conversation(&self, session: &Session) -> Option<ConversationId> {
         let mapping = self.load_session_mapping(session)?;
@@ -105,9 +103,7 @@ impl Workspace {
     /// to `cd -` in a shell.
     /// Returns `None` if the session's history holds fewer than two
     /// conversations that still resolve.
-    /// See [`resolvable_history`] for which entries count.
-    ///
-    /// [`resolvable_history`]: Self::resolvable_history
+    /// See `resolvable_history` for which entries count.
     #[must_use]
     pub fn session_previous_conversation(&self, session: &Session) -> Option<ConversationId> {
         let mapping = self.load_session_mapping(session)?;
