@@ -3,7 +3,7 @@ use std::fmt;
 use chrono::{DateTime, Utc};
 use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
-use jp_term::table::{DetailItem, DetailRow, details};
+use jp_term::table::{DetailItem, DetailRow, Details, details};
 
 use super::datetime::DateTimeFmt;
 
@@ -169,9 +169,16 @@ impl DetailsFmt {
         self.title.as_deref()
     }
 
-    /// Return rows for a table displaying the conversation details.
+    /// Return the named fields of the conversation details view.
+    ///
+    /// Always [`Details::Fields`]: every row is a named property, so the JSON
+    /// form is an object whether or not the optional rows are present.
     #[must_use]
-    pub fn rows(&self) -> Vec<DetailRow> {
+    pub fn rows(&self) -> Details {
+        Details::Fields(self.fields())
+    }
+
+    fn fields(&self) -> Vec<DetailRow> {
         let mut rows = vec![];
 
         rows.push(self.scalar("ID", self.id.to_string()));
