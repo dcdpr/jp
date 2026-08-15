@@ -280,7 +280,7 @@
     "summary": "Replace Workspace's optional Storage with four focused trait objects (Persist, Load, Lock, Session) for cleaner polymorphism."
   },
   "070-negative-config-deltas.md": {
-    "hash": "dd648e260c9e0106271ab0891855c06a6776f29a5bda11fb33ad2d3fbb4ca47c",
+    "hash": "4302104ffbc8d0f6d22fd3550c9bb025cb7bf4fde484cad5ce90b435705ff0eb",
     "summary": "Introduces `-C` flag to selectively revert previously applied config sources using provenance tracking via claims maps."
   },
   "071-conversation-archiving.md": {
@@ -390,6 +390,10 @@
   "098-request-response-event-linking.md": {
     "hash": "9e4099d9ae5835c978c66ac78fde41f8ce24313d59f33abde3e555fd3651f236",
     "summary": "Request-response linking via persistent event IDs detects answer scope under structural edits."
+  },
+  "101-conversation-labels.md": {
+    "hash": "8942119ffa726cd4f1b14a34dfc0cb46c34fdb4b7286276bdc238c2235fe1bfc",
+    "summary": "Conversations gain configurable key-value labels—static, command-backed, or CLI-set—managed through `jp c label` and used to filter by context like VCS branches."
   },
   "100-in-repo-ticket-tracking.md": {
     "hash": "e302846bc2a87c51849d39807dfd39b29dfd8fde1f7899e2f196e7f4480d5332",

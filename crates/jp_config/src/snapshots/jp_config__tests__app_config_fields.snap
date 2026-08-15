@@ -76,6 +76,7 @@ expression: "AppConfig::fields()"
     "editor.inline.edit_mode",
     "conversation.attachments",
     "conversation.default_id",
+    "conversation.labels",
     "conversation.start_local",
     "conversation.tools",
     "conversation.tools.*.cancellation_response",

@@ -57,6 +57,24 @@ pub fn print_details(printer: &Printer, title: Option<&str>, rows: Vec<DetailRow
     printer.println_raw(&output);
 }
 
+/// Print the outcome of an operation in the format dictated by the printer.
+///
+/// - Text formats → the prose `text`
+/// - `Json` / `JsonPretty` → `json`, as one object per call
+///
+/// The two forms are supplied separately because they carry different things: a
+/// sentence names the change for a reader, while the object exposes its parts
+/// for a script.
+/// Passing prose through [`Printer::println`] in a JSON format would wrap it in
+/// a `{"message": "..."}` envelope, leaving the caller to parse English.
+pub fn print_outcome(printer: &Printer, text: &str, json: &Value) {
+    if printer.format().is_json() {
+        print_json(printer, json);
+    } else {
+        printer.println(text);
+    }
+}
+
 /// Print a JSON value in the format dictated by the printer.
 ///
 /// - Text formats → `serde_json::to_string_pretty`
