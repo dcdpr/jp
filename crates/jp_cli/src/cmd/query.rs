@@ -299,7 +299,7 @@ pub(crate) struct Query {
     /// Applied to the resolved conversation (new, forked, or resumed) before
     /// the turn runs.
     #[command(flatten)]
-    labels: LabelDirectives<false, true, false>,
+    labels: LabelDirectives<true, false>,
 
     /// The tool to use.
     ///
@@ -357,18 +357,20 @@ impl Query {
         // 2. picker "start new": `start_new` is set, create a fresh conversation.
         // 3. --fork/--id/session: resolve an existing conversation, lock it.
         // 4. Lock contention: user picks "new" or "fork" from the prompt.
-        let lock = self.acquire_lock(ctx, handle, start_new).await?;
-
         // `--label=:name` is accepted here, so resolve aliases against this
-        // conversation's config. Resolved before the side effects below, so an
-        // unknown alias fails without having created a symlink or rewritten the
-        // title first.
+        // conversation's config, which `resolve_config` has already layered.
+        //
+        // Resolved before `acquire_lock`, because that call may create or fork
+        // a conversation and persist it: an unknown alias failing afterwards
+        // would leave one behind that the user was never told about.
         let prompts = TerminalPromptBackend;
         let directives = if self.labels.is_empty() {
             label::Resolved::default()
         } else {
             label::expand_aliases(&self.labels, &label_resolver(ctx, &cfg, &prompts)).await?
         };
+
+        let lock = self.acquire_lock(ctx, handle, start_new).await?;
 
         // Create symlinks and seed approvals for any `--mount` flags before the
         // turn runs, so tools can reach the mounted paths.

@@ -95,7 +95,7 @@ enum Commands {
     Remove(rm::Rm),
 
     /// List conversations.
-    #[command(name = "ls", alias = "list", visible_alias = "l")]
+    #[command(name = "ls", alias = "list")]
     List(ls::Ls),
 
     /// Show conversation details.
@@ -127,13 +127,10 @@ enum Commands {
     #[command(name = "grep", alias = "rg", visible_alias = "g")]
     Grep(grep::Grep),
 
-    /// Set or remove labels on a conversation.
+    /// Manage the labels on a conversation.
     ///
-    /// Targets a single conversation, so `--label=:name` can resolve a
-    /// `conversation.labels` rule against that conversation's config.
-    /// Use `jp conversation edit --label` to set literal labels on several
-    /// conversations at once.
-    #[command(name = "label", alias = "labels")]
+    /// `jp c label add`, `rm`, `reset`, and `ls`; a bare `jp c label` lists.
+    #[command(name = "label", visible_alias = "l", alias = "labels")]
     Label(label::Label),
 
     /// Print conversation history to the terminal.

@@ -22,7 +22,8 @@
 //! apply_on = { new = true, fork = true }
 //! ```
 //!
-//! Label keys may contain ASCII letters, digits, underscores, and hyphens.
+//! A label key starts with an ASCII letter, followed by any number of letters,
+//! digits, underscores, and hyphens.
 
 use schematic::{Config, ConfigEnum};
 use serde::{Deserialize, Serialize};
@@ -35,30 +36,38 @@ use crate::{
     types::command::{CommandConfigOrString, PartialCommandConfigOrString},
 };
 
-/// The characters a label key may contain.
+/// The label key grammar, in words.
 ///
-/// Everything else is excluded because it is significant somewhere the key is
-/// used: `.` separates dotted config paths, `=` and `,` are CLI parsing
-/// separators, and `:` marks an alias reference.
-const KEY_GRAMMAR: &str = "ASCII letters, digits, underscores, and hyphens";
+/// Every excluded character is significant somewhere the key is used: `.`
+/// separates dotted config paths, `=` and `,` are CLI separators, and `:` marks
+/// an alias reference.
+/// The leading character is narrower still, because a key that starts with `-`
+/// would be read as a flag where keys are written as bare command arguments.
+const KEY_GRAMMAR: &str = "a label key starts with an ASCII letter, followed by any number of \
+                           letters, digits, underscores, and hyphens";
 
-/// Validate a label key against the `[A-Za-z0-9_-]+` grammar.
+/// Validate a label key against the `[A-Za-z][A-Za-z0-9_-]*` grammar.
 ///
 /// # Errors
 ///
-/// Returns a human-readable message if the key is empty or contains a character
-/// outside the grammar.
+/// Returns a human-readable message if the key is empty, starts with something
+/// other than an ASCII letter, or contains a character outside the grammar.
 pub fn validate_key(key: &str) -> Result<(), String> {
-    if key.is_empty() {
+    let mut chars = key.chars();
+
+    let Some(first) = chars.next() else {
         return Err("label key must not be empty".to_owned());
+    };
+
+    if !first.is_ascii_alphabetic() {
+        return Err(format!(
+            "label key '{key}' starts with '{first}': {KEY_GRAMMAR}"
+        ));
     }
 
-    if let Some(invalid) = key
-        .chars()
-        .find(|c| !c.is_ascii_alphanumeric() && *c != '_' && *c != '-')
-    {
+    if let Some(invalid) = chars.find(|c| !c.is_ascii_alphanumeric() && *c != '_' && *c != '-') {
         return Err(format!(
-            "invalid character '{invalid}' in label key '{key}': keys may contain {KEY_GRAMMAR}"
+            "invalid character '{invalid}' in label key '{key}': {KEY_GRAMMAR}"
         ));
     }
 

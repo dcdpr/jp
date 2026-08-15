@@ -1158,10 +1158,10 @@ fn fork_reresolves_apply_on_fork_rules() {
 }
 
 /// A rule that needs confirmation with no terminal to ask on fails the fork
-/// *before* anything is written.
+/// before anything is written.
 ///
-/// The failure used to land after `fork_conversation` had already created and
-/// persisted the fork, leaving a conversation the user was never told about.
+/// Resolution runs ahead of conversation creation precisely so this path cannot
+/// leave a fork behind that the user was never told about.
 #[test]
 fn a_failing_fork_rule_creates_no_conversation() {
     use jp_config::conversation::label::{
@@ -1216,9 +1216,8 @@ fn a_failing_fork_rule_creates_no_conversation() {
 
     ctx.set_now(ctx.now() + Duration::from_secs(1));
 
-    // Driven through `Fork::run`, not `fork_conversation`, so this reproduces
-    // the original defect: resolution used to run after the fork was already
-    // created and persisted.
+    // Driven through `Fork::run` rather than `fork_conversation` directly, so
+    // the assertion covers the whole command path from flags to persistence.
     let fork = Fork {
         target: PositionalIds::default(),
         activate: false,

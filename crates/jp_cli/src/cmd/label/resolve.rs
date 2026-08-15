@@ -75,9 +75,10 @@ impl<'a> Resolver<'a> {
     ///
     /// # Errors
     ///
-    /// Returns an error only when a rule needs confirmation and there is no
-    /// terminal to ask on.
-    /// Every other failure drops that one label.
+    /// Returns an error when a rule needs confirmation and there is no terminal
+    /// to ask on, or when the confirmation prompt is cancelled or the prompt
+    /// backend fails.
+    /// Every other failure drops that one label and leaves the rest intact.
     pub(crate) async fn automatic(&self, trigger: Trigger) -> Result<BTreeMap<String, String>> {
         let wanted: Vec<_> = self
             .rules
@@ -169,10 +170,14 @@ impl<'a> Resolver<'a> {
 
     /// Decide whether `cmd` may run under `run`, prompting when required.
     ///
+    /// Only an explicit `n` declines; every other answer to the prompt is
+    /// treated as a decline too, but a *failure* to prompt is not an answer.
+    ///
     /// # Errors
     ///
     /// Returns an error when confirmation is required and no terminal is
-    /// available, since neither running nor skipping is a safe assumption.
+    /// available, since neither running nor skipping is a safe assumption, and
+    /// when the prompt is cancelled (Ctrl-C, Esc) or the backend fails.
     fn approve(&self, key: &str, cmd: &CommandConfig, run: LabelRunMode) -> Result<Approval> {
         match run {
             LabelRunMode::Unattended => Ok(Approval::Approved),

@@ -1,16 +1,23 @@
-//! CLI parsing for the `--label` and `--no-label` flags.
+//! Label directives and filters for the commands that carry label flags.
 //!
-//! Two shapes share the flag name:
+//! `jp conversation label` owns label management and takes its keys as bare
+//! arguments, so it needs no flags.
+//! What lives here serves the commands whose argument slot is already spoken
+//! for:
 //!
-//! - On mutating commands ([`LabelDirectives`]), `--label` sets a label and
-//!   `--no-label` removes one (or all).
-//!   Directives are applied in command-line order, so the last one wins per
-//!   key.
-//! - On listing commands ([`LabelSelector`]), `--label` filters the
+//! - `--label` on `jp query` and `jp conversation fork` sets one label, and is
+//!   repeatable.
+//!   `jp conversation fork` additionally has `--reset-labels`, which drops
+//!   everything accumulated up to that point.
+//! - `--label` on `jp conversation ls` and `jp conversation grep` filters the
 //!   conversation set: every selector must match.
 //!
-//! `--label=:name` is an *alias*: it names a `conversation.labels` rule and
-//! resolves to whatever that rule produces.
+//! Values are taken literally.
+//! A label containing a comma needs no escaping, because one flag carries one
+//! label.
+//!
+//! `:name` is an *alias*: it names a `conversation.labels` rule and resolves to
+//! whatever that rule produces.
 //! Aliases are only accepted where a single target conversation is known,
 //! because a rule resolves against that conversation's effective config.
 
@@ -23,59 +30,40 @@ use jp_config::conversation::label;
 use jp_conversation::ConversationId;
 use jp_printer::Printer;
 
-/// The prefix marking a `--label` value as a reference to a configured rule.
+/// The prefix marking a label argument as a reference to a configured rule.
 const ALIAS_PREFIX: char = ':';
 
-/// A single label mutation, in command-line order.
+/// A single label mutation, in the order it was given.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum LabelDirective {
     /// Set `key` to `value`.
-    /// A bare `--label=key` sets an empty value.
+    /// A bare `key` sets an empty value.
     Set { key: String, value: String },
 
     /// Remove a single label.
     Remove(String),
 
-    /// Remove every label on the conversation.
+    /// Remove every label accumulated so far.
     RemoveAll,
 
     /// Resolve the named `conversation.labels` rule and set its result.
     Alias(String),
 }
 
-/// Reject a label key that is spelled like a conversation ID.
-///
-/// The ID grammar (`jp-c…`) is a subset of the label-key grammar, so a
-/// mistyped `jp c label --no-label <ID>` binds the ID as a key, leaves no
-/// positional target, and silently retargets the session's active conversation.
-/// A bare conversation ID is meaningless as a key — it carries no value — so
-/// refusing it costs nothing and turns that mistake into an error.
-/// The ID is still fine as a label *value* (`related=jp-c…`).
-///
-/// This is a CLI-level rule, not part of the key grammar: a config file has no
-/// positional argument to swallow, so `conversation.labels` is unaffected.
-fn reject_conversation_id(key: &str) -> Result<(), String> {
-    if key.parse::<ConversationId>().is_ok() {
-        return Err(format!(
-            "'{key}' is a conversation ID, not a label key: a bare ID carries no value, and \
-             accepting it here would swallow the conversation this command was meant to \
-             target.\n\nTo label a conversation *with* an ID, give it a key: \
-             `--label=related={key}`.\nTo target that conversation, put the ID before the flag: \
-             `jp conversation label {key} --no-label=KEY`."
-        ));
-    }
-
-    Ok(())
-}
-
 impl LabelDirective {
-    fn set<const ALIASES: bool>(raw: &str) -> Result<Self, String> {
+    /// Parse a `KEY[=VALUE]` argument, or `:NAME` when `ALIASES` is on.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message naming the problem when the key is malformed, or when
+    /// an alias is given where the command cannot resolve one.
+    pub(crate) fn parse_set<const ALIASES: bool>(raw: &str) -> Result<Self, String> {
         if let Some(name) = raw.strip_prefix(ALIAS_PREFIX) {
             if !ALIASES {
                 return Err(format!(
                     "label alias ':{name}' is not supported here, because this command may target \
                      several conversations and a rule resolves against one conversation's config; \
-                     use `jp conversation label <ID> --label=:{name}`"
+                     use `jp conversation label add :{name}`"
                 ));
             }
 
@@ -85,7 +73,6 @@ impl LabelDirective {
 
         let (key, value) = raw.split_once('=').unwrap_or((raw, ""));
         label::validate_key(key)?;
-        reject_conversation_id(key)?;
 
         Ok(Self::Set {
             key: key.to_owned(),
@@ -93,13 +80,13 @@ impl LabelDirective {
         })
     }
 
-    fn remove(raw: &str) -> Result<Self, String> {
-        if raw.is_empty() {
-            return Ok(Self::RemoveAll);
-        }
-
+    /// Parse a bare `KEY` argument for removal.
+    ///
+    /// # Errors
+    ///
+    /// Returns a message naming the problem when the key is malformed.
+    pub(crate) fn parse_remove(raw: &str) -> Result<Self, String> {
         label::validate_key(raw)?;
-        reject_conversation_id(raw)?;
         Ok(Self::Remove(raw.to_owned()))
     }
 
@@ -112,32 +99,25 @@ impl LabelDirective {
     }
 }
 
-/// The ordered label directives of a single invocation.
+/// The ordered label flags of a single invocation.
 ///
-/// Three switches decide which flags a command registers:
+/// Two switches decide which flags a command registers:
 ///
-/// - `REMOVABLE`: `--no-label` / `--no-labels`.
-///   Off for commands that only set.
-/// - `ALIASES`: `--label=:name`.
+/// - `ALIASES`: whether `--label=:name` is accepted.
 ///   Off for commands that may target several conversations, since a rule
 ///   resolves against one conversation's config.
-/// - `RAW`: `--raw-label`, which takes its value literally.
-///   Off everywhere the escape isn't reachable in practice.
+/// - `RESET`: whether `--reset-labels` is registered.
 ///
-/// | Command   | `REMOVABLE` | `ALIASES` | `RAW` |
-/// | --------- | ----------- | --------- | ----- |
-/// | `c label` | yes         | yes       | yes   |
-/// | `query`   | no          | yes       | no    |
-/// | `c edit`  | yes         | no        | no    |
-/// | `c fork`  | no          | no        | no    |
+/// | Command  | `ALIASES` | `RESET` |
+/// | -------- | --------- | ------- |
+/// | `query`  | yes       | no      |
+/// | `c fork` | no        | yes     |
 #[derive(Debug, Clone, Default)]
-pub(crate) struct LabelDirectives<const REMOVABLE: bool, const ALIASES: bool, const RAW: bool>(
+pub(crate) struct LabelDirectives<const ALIASES: bool, const RESET: bool>(
     pub(crate) Vec<LabelDirective>,
 );
 
-impl<const REMOVABLE: bool, const ALIASES: bool, const RAW: bool> std::ops::Deref
-    for LabelDirectives<REMOVABLE, ALIASES, RAW>
-{
+impl<const ALIASES: bool, const RESET: bool> std::ops::Deref for LabelDirectives<ALIASES, RESET> {
     type Target = [LabelDirective];
 
     fn deref(&self) -> &Self::Target {
@@ -145,28 +125,34 @@ impl<const REMOVABLE: bool, const ALIASES: bool, const RAW: bool> std::ops::Dere
     }
 }
 
-impl<const REMOVABLE: bool, const ALIASES: bool, const RAW: bool> clap::FromArgMatches
-    for LabelDirectives<REMOVABLE, ALIASES, RAW>
+impl<const ALIASES: bool, const RESET: bool> clap::FromArgMatches
+    for LabelDirectives<ALIASES, RESET>
 {
     fn from_arg_matches(matches: &ArgMatches) -> Result<Self, Error> {
-        let mut indexed = vec![];
-        let set = LabelDirective::set::<ALIASES>;
+        let values: Vec<String> = matches
+            .get_many("label")
+            .map(|v| v.cloned().collect())
+            .unwrap_or_default();
+        let indices: Vec<usize> = matches
+            .indices_of("label")
+            .map(Iterator::collect)
+            .unwrap_or_default();
 
-        indexed.extend(collect(matches, "label", Split::OnComma, set)?);
-        if RAW {
-            indexed.extend(collect(matches, "raw_label", Split::No, set)?);
-        }
-        if REMOVABLE {
-            indexed.extend(collect(
-                matches,
-                "no_label",
-                Split::OnComma,
-                LabelDirective::remove,
-            )?);
+        let mut indexed = Vec::with_capacity(values.len());
+        for (value, index) in values.into_iter().zip(indices) {
+            let directive = LabelDirective::parse_set::<ALIASES>(&value)
+                .map_err(|error| Error::raw(ErrorKind::InvalidValue, format!("{error}\n")))?;
+            indexed.push((index, directive));
         }
 
-        // Stable, so the entries a single `--label` expanded to keep their
-        // left-to-right order within that flag's position.
+        // `--reset-labels` is positioned like any other directive, so
+        // `--label=a=1 --reset-labels --label=b=2` keeps only `b`.
+        if RESET && matches.get_flag("reset_labels") {
+            for index in matches.indices_of("reset_labels").into_iter().flatten() {
+                indexed.push((index, LabelDirective::RemoveAll));
+            }
+        }
+
         indexed.sort_by_key(|(index, _)| *index);
         Ok(Self(indexed.into_iter().map(|(_, d)| d).collect()))
     }
@@ -177,59 +163,7 @@ impl<const REMOVABLE: bool, const ALIASES: bool, const RAW: bool> clap::FromArgM
     }
 }
 
-/// Whether a flag's value carries one directive or a comma-separated list.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Split {
-    /// The value is one directive; `,` is part of it.
-    No,
-
-    /// The value is a list of directives separated by `,`.
-    OnComma,
-}
-
-/// Pair each directive from `id` with its position on the command line, parsing
-/// it with `parse`.
-///
-/// Under [`Split::OnComma`] one value expands to several directives that share
-/// the flag's position; the caller's stable sort keeps them in order.
-/// An empty value is never split, so a bare `--no-label` still means "remove
-/// every label" rather than expanding to nothing.
-fn collect(
-    matches: &ArgMatches,
-    id: &str,
-    split: Split,
-    parse: fn(&str) -> Result<LabelDirective, String>,
-) -> Result<Vec<(usize, LabelDirective)>, Error> {
-    let values: Vec<String> = matches
-        .get_many(id)
-        .map(|v| v.cloned().collect())
-        .unwrap_or_default();
-    let indices: Vec<usize> = matches
-        .indices_of(id)
-        .map(Iterator::collect)
-        .unwrap_or_default();
-
-    let mut collected = Vec::with_capacity(values.len());
-    for (value, index) in values.into_iter().zip(indices) {
-        let parts: Vec<&str> = if split == Split::OnComma && !value.is_empty() {
-            value.split(',').collect()
-        } else {
-            vec![value.as_str()]
-        };
-
-        for part in parts {
-            let directive = parse(part)
-                .map_err(|error| Error::raw(ErrorKind::InvalidValue, format!("{error}\n")))?;
-            collected.push((index, directive));
-        }
-    }
-
-    Ok(collected)
-}
-
-impl<const REMOVABLE: bool, const ALIASES: bool, const RAW: bool> clap::Args
-    for LabelDirectives<REMOVABLE, ALIASES, RAW>
-{
+impl<const ALIASES: bool, const RESET: bool> clap::Args for LabelDirectives<ALIASES, RESET> {
     fn augment_args(cmd: clap::Command) -> clap::Command {
         let alias_help = if ALIASES {
             "\n\n`:name` resolves the `conversation.labels.name` rule and applies whatever it \
@@ -238,69 +172,43 @@ impl<const REMOVABLE: bool, const ALIASES: bool, const RAW: bool> clap::Args
             ""
         };
         let value_name = if ALIASES {
-            "KEY[=VALUE]|:NAME,..."
+            "KEY[=VALUE]|:NAME"
         } else {
-            "KEY[=VALUE],..."
-        };
-        let raw_hint = if RAW {
-            "\n\nUse `--raw-label` for a value that contains a comma."
-        } else {
-            ""
+            "KEY[=VALUE]"
         };
 
-        let mut cmd = cmd.arg(
+        let cmd = cmd.arg(
             clap::Arg::new("label")
                 .long("label")
-                .alias("labels")
                 .value_name(value_name)
-                .help("Set labels on the conversation, separated by commas")
+                .help("Set a label on the conversation")
                 .long_help(format!(
-                    "Set labels on the conversation.\n\nAccepts `key=value`, or a bare `key` for \
-                     an empty value. Several are separated by commas, and the flag can also be \
-                     repeated; the last value wins when a key is repeated.\n\nLabel keys may \
-                     contain ASCII letters, digits, underscores, and \
-                     hyphens.{alias_help}{raw_hint}"
+                    "Set a label on the conversation.\n\nAccepts `key=value`, or a bare `key` for \
+                     an empty value. The value is taken literally, so it may contain commas. \
+                     Repeat the flag to set several labels; the last value wins when a key is \
+                     repeated.\n\nA label key starts with a letter, followed by any number of \
+                     letters, digits, underscores, and hyphens.{alias_help}\n\nUse `jp \
+                     conversation label` to manage labels on an existing conversation."
                 ))
                 .action(ArgAction::Append)
                 .num_args(1),
         );
 
-        if RAW {
-            cmd = cmd.arg(
-                clap::Arg::new("raw_label")
-                    .long("raw-label")
-                    .value_name("KEY=VALUE")
-                    .help("Set one label, taking the value literally")
-                    .long_help(
-                        "Set one label, taking the value literally.\n\nIdentical to `--label` \
-                         except that the value is never split, so it can contain commas. Repeat \
-                         the flag to set several.\n\nMostly useful from scripts; label values \
-                         rarely contain commas.",
-                    )
-                    .action(ArgAction::Append)
-                    .num_args(1),
-            );
-        }
-
-        if !REMOVABLE {
+        if !RESET {
             return cmd;
         }
 
         cmd.arg(
-            clap::Arg::new("no_label")
-                .long("no-label")
-                .alias("no-labels")
-                .value_name("KEY,...")
-                .help("Remove labels from the conversation, separated by commas")
+            clap::Arg::new("reset_labels")
+                .long("reset-labels")
+                .help("Drop every label inherited from the source conversation")
                 .long_help(
-                    "Remove labels from the conversation.\n\nWith one or more comma-separated \
-                     keys, removes those labels; without a value, removes every label. Evaluated \
-                     left-to-right together with `--label`.\n\nRemoval names keys, and a key can \
-                     never contain a comma, so there is no literal form of this flag.",
+                    "Drop every label accumulated so far.\n\nA fork inherits the source \
+                     conversation's labels by default. This flag discards them, along with any \
+                     `--label` given before it, so `--reset-labels --label=a=1` produces exactly \
+                     one label.",
                 )
-                .action(ArgAction::Append)
-                .num_args(0..=1)
-                .default_missing_value(""),
+                .action(ArgAction::SetTrue),
         )
     }
 
@@ -326,7 +234,7 @@ impl std::ops::Deref for Resolved {
     }
 }
 
-impl<const REMOVABLE: bool, const RAW: bool> LabelDirectives<REMOVABLE, false, RAW> {
+impl<const RESET: bool> LabelDirectives<false, RESET> {
     /// These directives are alias-free by construction: the parser rejects
     /// `:name` when `ALIASES` is off.
     pub(crate) fn resolved(&self) -> Resolved {
@@ -335,7 +243,7 @@ impl<const REMOVABLE: bool, const RAW: bool> LabelDirectives<REMOVABLE, false, R
 }
 
 /// Replace each alias directive with the `key=value` its rule resolves to,
-/// preserving command-line order.
+/// preserving the order they were given in.
 ///
 /// A directive whose confirmation prompt the user declines is dropped.
 ///
@@ -367,8 +275,8 @@ pub(crate) async fn expand_aliases(
 
 /// Apply `directives` to a conversation's label set, in order.
 ///
-/// Returns the keys named by a `--no-label` directive that matched nothing, in
-/// the order they were given.
+/// Returns the keys named for removal that matched nothing, in the order they
+/// were given.
 /// Removal is idempotent, so this is not an error, but it is worth telling the
 /// user about: a removal that did nothing usually means the key was mistyped or
 /// the command targeted a different conversation than intended.
@@ -394,11 +302,11 @@ pub(crate) fn apply(labels: &mut BTreeMap<String, String>, directives: &Resolved
     missing
 }
 
-/// Report `--no-label` keys that matched nothing on `id`.
+/// Report removal keys that matched nothing on `id`.
 ///
 /// Names the conversation so a removal aimed at the wrong one is visible: the
 /// reported ID is the conversation actually targeted, which is not always the
-/// one the user typed.
+/// one the user had in mind.
 pub(crate) fn report_missing(printer: &Printer, id: ConversationId, missing: &[String]) {
     for key in missing {
         printer.eprintln(format!(
@@ -435,12 +343,10 @@ impl FromStr for LabelSelector {
 
         let Some((key, value)) = s.split_once('=') else {
             label::validate_key(s)?;
-            reject_conversation_id(s)?;
             return Ok(Self::Present(s.to_owned()));
         };
 
         label::validate_key(key)?;
-        reject_conversation_id(key)?;
         Ok(Self::Exact {
             key: key.to_owned(),
             value: value.to_owned(),

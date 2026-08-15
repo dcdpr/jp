@@ -105,9 +105,11 @@ A rule is not a label until it has been resolved.
 `BTreeMap<String, String>` persisted in `metadata.json`.
 Rules are `LabelConfig` in `jp_config::conversation::label`, turned into the map
 by the resolver in `jp_cli::cmd::label::resolve`.
-Keys match `[A-Za-z0-9_-]+`; every excluded character is significant somewhere
-else — `.` separates dotted config paths, `=` and `,` are CLI separators, and
-`:` marks a rule reference.
+Keys match `[A-Za-z][A-Za-z0-9_-]*`; every excluded character is significant
+somewhere else — `.` separates dotted config paths, `=` splits a key from its
+value, `:` marks a rule reference, and a leading `-` would read as a flag where
+keys are written as bare command arguments.
+Values carry no such restriction.
 
 **In context.** A key holds exactly one value, so setting the same key twice
 replaces rather than accumulates, and removal names a key rather than a pair.

@@ -32,7 +32,7 @@ use crate::{
     model::{ModelConfig, PartialModelConfig},
     partial::{ToPartial, partial_opt, partial_opts},
     types::{
-        map::{MergeableMap, map_to_mergeable_partial},
+        map::{MergeableMap, MergedMap, MergedMapStrategy, map_to_mergeable_partial},
         vec::{MergeableVec, MergedVec, vec_to_mergeable_partial},
     },
     validate::Validator,
@@ -154,15 +154,35 @@ impl PartialConfigDelta for PartialConversationConfig {
                     .collect::<Vec<_>>()
                     .into()
             },
-            labels: next
-                .labels
-                .into_iter()
-                .filter_map(|(key, next)| match self.labels.get(&key) {
-                    Some(prev) if prev == &next => None,
-                    Some(prev) => Some((key, prev.delta(next))),
-                    None => Some((key, next)),
-                })
-                .collect(),
+            labels: {
+                // A key in the previous state that is absent from the next one
+                // can only have been dropped by a replacing layer, and a
+                // minimal delta has no way to spell "removed": it carries
+                // entries, and a missing entry means "unchanged". Emit the
+                // whole wrapper in that case so the fold replaces the map
+                // instead of deep-merging the dropped rule back in.
+                let dropped = self.labels.keys().any(|key| !next.labels.contains_key(key));
+
+                if dropped {
+                    // Force replace semantics rather than trusting the shape
+                    // `next` arrived in: a plain `Map` deep-merges on the fold
+                    // and resurrects the dropped rule.
+                    MergeableMap::Merged(MergedMap {
+                        value: next.labels.into_map(),
+                        strategy: Some(MergedMapStrategy::Replace),
+                        discard_when_merged: false,
+                    })
+                } else {
+                    next.labels
+                        .into_iter()
+                        .filter_map(|(key, next)| match self.labels.get(&key) {
+                            Some(prev) if prev == &next => None,
+                            Some(prev) => Some((key, prev.delta(next))),
+                            None => Some((key, next)),
+                        })
+                        .collect()
+                }
+            },
             inquiry: self.inquiry.delta(next.inquiry),
             start_local: delta_opt(self.start_local.as_ref(), next.start_local),
             default_id: delta_opt(self.default_id.as_ref(), next.default_id),

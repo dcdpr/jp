@@ -117,25 +117,12 @@ pub(crate) struct Grep {
     #[arg(long)]
     limit: Option<NonZeroUsize>,
 
-    /// Only search conversations carrying these labels.
+    /// Only search conversations carrying this label.
     ///
     /// `key=value` matches the exact value, a bare `key` matches any value.
-    /// Several are separated by commas, and the flag can also be repeated;
-    /// every selector must match.
-    #[arg(
-        long = "label",
-        alias = "labels",
-        value_name = "KEY[=VALUE],...",
-        value_delimiter = ','
-    )]
+    /// Repeat the flag to require several; every selector must match.
+    #[arg(long = "label", value_name = "KEY[=VALUE]")]
     labels: Vec<LabelSelector>,
-
-    /// Match one label, taking the value literally.
-    ///
-    /// Identical to `--label` except that the value is never split, so it can
-    /// contain commas.
-    #[arg(long = "raw-label", value_name = "KEY=VALUE", hide_short_help = true)]
-    raw_labels: Vec<LabelSelector>,
 
     /// Restrict the search to specific parts of the conversation.
     ///
@@ -150,18 +137,6 @@ pub(crate) struct Grep {
 }
 
 impl Grep {
-    /// Every `--label` and `--raw-label` selector, in one list.
-    ///
-    /// The two flags differ only in whether they split on commas; every
-    /// selector must match, so the order they arrive in doesn't matter.
-    fn label_filters(&self) -> Vec<LabelSelector> {
-        self.labels
-            .iter()
-            .chain(&self.raw_labels)
-            .cloned()
-            .collect()
-    }
-
     pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
         ConversationLoadRequest::explicit_or_none(&self.target)
     }
@@ -194,12 +169,11 @@ impl Grep {
 
         // Narrow the candidate set before any searching: reading a
         // conversation's events costs far more than checking its metadata.
-        let label_filters = self.label_filters();
-        if !label_filters.is_empty() {
+        if !self.labels.is_empty() {
             let matching: HashSet<_> = ctx
                 .workspace
                 .conversations()
-                .filter(|(_, c)| label::matches(&c.labels, &label_filters))
+                .filter(|(_, c)| label::matches(&c.labels, &self.labels))
                 .map(|(id, _)| *id)
                 .collect();
             ids.retain(|id| matching.contains(id));

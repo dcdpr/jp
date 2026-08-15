@@ -315,6 +315,54 @@ fn labels_survive_the_full_build() {
     assert!(stage.apply_on().fork);
 }
 
+/// A replacing layer drops a rule, and the recorded delta has to carry that
+/// removal.
+/// A minimal entry-wise delta cannot: a missing entry means "unchanged", so the
+/// dropped rule would deep-merge back in on the next fold.
+#[test]
+fn label_delta_carries_a_removal_through_the_fold() {
+    use schematic::PartialConfig as _;
+
+    use crate::conversation::label::PartialLabelConfig;
+
+    let prev: PartialConversationConfig =
+        toml::from_str("[labels]\nteam = \"platform\"\nbranch = \"main\"\n").unwrap();
+
+    // What a `--cfg` layer with `strategy = "replace"` resolves to: `team` is
+    // gone, `branch` survives.
+    let next: PartialConversationConfig = toml::from_str("[labels]\nbranch = \"main\"\n").unwrap();
+
+    let delta = prev.delta(next);
+
+    // Fold the delta back over the previous state, as the event stream does.
+    let mut folded = prev;
+    folded.merge(&(), delta).unwrap();
+
+    assert!(
+        folded.labels.get("team").is_none(),
+        "the dropped rule must not come back: {:?}",
+        folded.labels
+    );
+    assert_eq!(
+        folded.labels.get("branch"),
+        Some(&PartialLabelConfig::Static("main".to_owned()))
+    );
+}
+
+/// The common case stays minimal: adding a rule records only that rule.
+#[test]
+fn label_delta_stays_minimal_when_nothing_is_dropped() {
+    let prev: PartialConversationConfig =
+        toml::from_str("[labels]\nteam = \"platform\"\n").unwrap();
+    let next: PartialConversationConfig =
+        toml::from_str("[labels]\nteam = \"platform\"\nbranch = \"main\"\n").unwrap();
+
+    let delta = prev.delta(next);
+
+    assert_eq!(delta.labels.len(), 1, "got: {:?}", delta.labels);
+    assert!(delta.labels.contains_key("branch"));
+}
+
 #[test]
 fn invalid_label_key_is_rejected_by_build() {
     use crate::{

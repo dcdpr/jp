@@ -2010,9 +2010,9 @@ fn run_missing_at_path_query_leaves_conversation_and_session_untouched() {
 }
 
 // A `--label=:name` naming a rule that isn't configured must fail before any
-// other flag has written anything. Alias expansion used to run after
-// `--mount` had created its symlinks and `--title` had rewritten metadata, so
-// a typo'd alias reported failure with the title already changed on disk.
+// other flag has written anything: alias expansion runs ahead of `--mount`'s
+// symlinks and `--title`'s metadata write, so a typo'd alias leaves the
+// conversation exactly as it was.
 #[test]
 fn run_failing_alias_leaves_the_title_untouched() {
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
