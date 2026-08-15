@@ -273,33 +273,46 @@ pub(crate) async fn expand_aliases(
     Ok(Resolved(expanded))
 }
 
+/// What applying a set of directives did to one conversation.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(crate) struct Applied {
+    /// Labels that were removed, paired with the value each held.
+    ///
+    /// Reporting the value alongside the key is what makes a removal
+    /// recoverable: the printed line is the `add` that puts them back.
+    pub(crate) removed: Vec<(String, String)>,
+
+    /// Keys named for removal that matched nothing, in the order given.
+    pub(crate) missing: Vec<String>,
+}
+
 /// Apply `directives` to a conversation's label set, in order.
 ///
-/// Returns the keys named for removal that matched nothing, in the order they
-/// were given.
-/// Removal is idempotent, so this is not an error, but it is worth telling the
-/// user about: a removal that did nothing usually means the key was mistyped or
-/// the command targeted a different conversation than intended.
-pub(crate) fn apply(labels: &mut BTreeMap<String, String>, directives: &Resolved) -> Vec<String> {
-    let mut missing = vec![];
+/// Removal is idempotent, so naming an absent key is not an error, but it is
+/// worth telling the user about: a removal that did nothing usually means the
+/// key was mistyped or the command targeted a different conversation than
+/// intended.
+pub(crate) fn apply(labels: &mut BTreeMap<String, String>, directives: &Resolved) -> Applied {
+    let mut applied = Applied::default();
 
     for directive in &directives.0 {
         match directive {
             LabelDirective::Set { key, value } => {
                 labels.insert(key.clone(), value.clone());
             }
-            LabelDirective::Remove(key) => {
-                if labels.remove(key).is_none() {
-                    missing.push(key.clone());
-                }
+            LabelDirective::Remove(key) => match labels.remove(key) {
+                Some(value) => applied.removed.push((key.clone(), value)),
+                None => applied.missing.push(key.clone()),
+            },
+            LabelDirective::RemoveAll => {
+                applied.removed.extend(std::mem::take(labels));
             }
-            LabelDirective::RemoveAll => labels.clear(),
             // `Resolved` can only be built from alias-free directives.
             LabelDirective::Alias(_) => unreachable!("alias in resolved directives"),
         }
     }
 
-    missing
+    applied
 }
 
 /// Report removal keys that matched nothing on `id`.

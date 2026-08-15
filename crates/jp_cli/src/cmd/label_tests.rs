@@ -258,7 +258,7 @@ fn remove_all_clears_then_later_sets_apply() {
 fn removing_an_absent_key_is_reported() {
     let mut labels = BTreeMap::from([("kept".to_owned(), "yes".to_owned())]);
 
-    let missing = apply(
+    let applied = apply(
         &mut labels,
         &resolved(vec![
             LabelDirective::Remove("absent".to_owned()),
@@ -267,8 +267,36 @@ fn removing_an_absent_key_is_reported() {
         ]),
     );
 
-    assert_eq!(missing, ["absent", "alsoabsent"], "in the order given");
+    assert_eq!(
+        applied.missing,
+        ["absent", "alsoabsent"],
+        "in the order given"
+    );
+    assert_eq!(
+        applied.removed,
+        [("kept".to_owned(), "yes".to_owned())],
+        "the value is captured so the removal can be undone"
+    );
     assert!(labels.is_empty(), "the present key was still removed");
+}
+
+/// A bare `rm` reports every label it took, with values, so the printed line is
+/// the `add` that puts them back.
+#[test]
+fn removing_everything_reports_each_label_with_its_value() {
+    let mut labels = BTreeMap::from([
+        ("foo".to_owned(), String::new()),
+        ("qux".to_owned(), "quux".to_owned()),
+    ]);
+
+    let applied = apply(&mut labels, &resolved(vec![LabelDirective::RemoveAll]));
+
+    assert_eq!(applied.removed, [
+        ("foo".to_owned(), String::new()),
+        ("qux".to_owned(), "quux".to_owned()),
+    ]);
+    assert!(applied.missing.is_empty());
+    assert!(labels.is_empty());
 }
 
 /// A key set earlier in the same invocation counts as present: the check runs
@@ -277,7 +305,7 @@ fn removing_an_absent_key_is_reported() {
 fn a_key_set_then_removed_is_not_reported_missing() {
     let mut labels = BTreeMap::new();
 
-    let missing = apply(
+    let applied = apply(
         &mut labels,
         &resolved(vec![
             LabelDirective::Set {
@@ -288,17 +316,18 @@ fn a_key_set_then_removed_is_not_reported_missing() {
         ]),
     );
 
-    assert!(missing.is_empty(), "got: {missing:?}");
+    assert!(applied.missing.is_empty(), "got: {applied:?}");
     assert!(labels.is_empty());
 }
 
 #[test]
-fn a_reset_never_reports_missing() {
+fn a_bare_removal_never_reports_missing() {
     let mut labels = BTreeMap::new();
 
-    let missing = apply(&mut labels, &resolved(vec![LabelDirective::RemoveAll]));
+    let applied = apply(&mut labels, &resolved(vec![LabelDirective::RemoveAll]));
 
-    assert!(missing.is_empty());
+    assert!(applied.missing.is_empty());
+    assert!(applied.removed.is_empty());
 }
 
 // ── Filters ──────────────────────────────────────────────────────────────────

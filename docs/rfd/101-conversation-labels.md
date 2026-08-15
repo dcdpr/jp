@@ -7,12 +7,12 @@
 
 ## Summary
 
-Conversations gain a `BTreeMap<String, String>` of labels — `key=value`
-annotations stored alongside other metadata.
+Conversations gain one or more `key=value` labels, stored alongside their other
+metadata.
 Labels are configurable via `conversation.labels.<name>`, can be static or
 produced by an external command at conversation creation (and optionally
 re-resolved on fork), and are settable, filterable, and aliasable from the CLI.
-`jp c label` owns label management, with `add`, `rm`, `reset`, and `ls` verbs.
+`jp c label` owns label management, with `add`, `rm`, and `ls` verbs.
 
 ## Motivation
 
@@ -48,9 +48,14 @@ operation:
 jp c label add team=platform branch=main # add to the active conversation
 jp c label add --id=jp-c17866928997 draft # add to a named conversation
 jp c label rm team draft                  # remove by key
-jp c label reset                          # remove every label
+jp c label rm                             # remove every label
 jp c label                                # list; `jp c label ls` is the same
 ```
+
+Each mutation reports the labels it touched and the conversation they landed on.
+A removal names the labels it actually took, values included, so the reported
+line can be pasted back as an `add` — label mutations leave no event-stream
+record (see [Non-Goals](#non-goals)), so the output is the only undo.
 
 Keys and `key=value` pairs are **bare arguments**, so the shell splits them and
 the conversation is never one of them.
@@ -144,10 +149,15 @@ to `metadata.json.labels` via `ConversationMut::update_metadata`, under the
 conversation lock.
 No `ConfigDelta` is emitted and the config pipeline is not involved.
 
-**Label removal.** `jp c label rm <key>...` removes named keys; `jp c label
-reset` clears every label.
+**Label removal.** `jp c label rm <key>...` removes named keys; a bare `jp c
+label rm` clears every label.
 Both are direct metadata mutations — no `ConfigDelta`, no negative-delta
 machinery.
+
+A bare `rm` is safe to spell that way because the argument slot holds only label
+keys: an empty slot cannot swallow the conversation, which is always `--id`.
+The same shape on a flag with an optional value would be ambiguous, which is why
+it is not offered there.
 
 Removing a key the conversation doesn't carry is not an error: removal is
 idempotent, so a script can say `jp c label rm draft` to mean "ensure `draft` is
@@ -699,9 +709,11 @@ Mergeable independently.
    (`value.cmd = ...`) are rejected at this phase.
    Wire it into `ConversationConfig` as `MergeableMap<LabelConfig>` with
    `map_with_strategy` merge.
-3. CLI: `jp c label` with `add`, `rm`, `reset`, and `ls` verbs, taking keys and
+3. CLI: `jp c label` with `add`, `rm`, and `ls` verbs, taking keys and
    `key=value` pairs as bare arguments and the conversation as a global `--id`.
-   A bare `jp c label` lists.
+   A bare `jp c label` lists; a bare `jp c label rm` clears every label.
+   Each mutation reports the labels and the conversation it touched; removals
+   name the labels actually taken, values included.
    `--label` on `query` and `conversation fork`, repeatable, one label per
    occurrence, values taken literally; `--label` filter on `ls`.
    Directives applied left-to-right, last one wins per key.

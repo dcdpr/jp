@@ -385,7 +385,7 @@ impl Query {
             let missing = lock
                 .as_mut()
                 .update_metadata(|m| label::apply(&mut m.labels, &directives));
-            label::report_missing(&ctx.printer, lock.id(), &missing);
+            label::report_missing(&ctx.printer, lock.id(), &missing.missing);
         }
 
         // Record this conversation as the session's active conversation.

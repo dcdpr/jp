@@ -5,10 +5,12 @@
 //! The conversation is named with `--id`, which is accepted on either side of
 //! the verb.
 
-use jp_conversation::Conversation;
+use crossterm::style::Stylize as _;
+use jp_conversation::{Conversation, ConversationId};
 use jp_inquire::prompt::TerminalPromptBackend;
 use jp_term::table::DetailItem;
 use jp_workspace::ConversationHandle;
+use serde_json::{Value, json};
 
 use crate::{
     cmd::{
@@ -19,8 +21,8 @@ use crate::{
     },
     ctx::Ctx,
     error::Error,
-    format::label_detail_item,
-    output::print_details,
+    format::{label_detail_item, label_text},
+    output::{print_details, print_outcome},
 };
 
 /// Manage labels on a conversation.
@@ -44,12 +46,10 @@ enum Commands {
     Add(Add),
 
     /// Remove labels from the conversation.
+    ///
+    /// With no keys, removes every label.
     #[command(name = "rm", visible_alias = "r", aliases = ["remove", "del", "delete"])]
     Rm(Rm),
-
-    /// Remove every label from the conversation.
-    #[command(name = "reset", alias = "clear")]
-    Reset,
 
     /// List the conversation's labels.
     #[command(name = "ls", alias = "list")]
@@ -70,10 +70,11 @@ pub(crate) struct Add {
 #[derive(Debug, clap::Args)]
 pub(crate) struct Rm {
     /// The label keys to remove.
+    /// With none given, every label is removed.
     ///
     /// Removing a key the conversation doesn't carry is not an error, but it is
     /// reported.
-    #[arg(value_name = "KEY", required = true)]
+    #[arg(value_name = "KEY")]
     keys: Vec<String>,
 }
 
@@ -108,12 +109,15 @@ impl Label {
                 .iter()
                 .map(|raw| LabelDirective::parse_set::<true>(raw))
                 .collect::<Result<Vec<_>, _>>(),
+            // A bare `rm` clears everything. Unlike a flag with an optional
+            // value, the argument slot here holds only label keys, so an empty
+            // slot cannot swallow the conversation target.
+            Commands::Rm(args) if args.keys.is_empty() => Ok(vec![LabelDirective::RemoveAll]),
             Commands::Rm(args) => args
                 .keys
                 .iter()
                 .map(|raw| LabelDirective::parse_remove(raw))
                 .collect::<Result<Vec<_>, _>>(),
-            Commands::Reset => Ok(vec![LabelDirective::RemoveAll]),
             Commands::Ls => unreachable!("handled above"),
         }
         .map_err(Error::Label)?;
@@ -133,6 +137,12 @@ impl Label {
         if handles.is_empty() {
             return Err(Error::NoConversationTarget.into());
         }
+
+        // Past a handful of targets, one line each is noise for a reader.
+        // A machine reader wants every record, so JSON never collapses.
+        let collapse = !ctx.printer.format().is_json() && handles.len() > MAX_LISTED_TARGETS;
+        let count = handles.len();
+        let mut report = Report::new(matches!(command, Commands::Add(_)));
 
         for handle in handles {
             let lock = match acquire_lock(LockRequest::from_ctx(handle, ctx)).await? {
@@ -156,14 +166,140 @@ impl Label {
             );
             let directives = label::expand_aliases(&directives, &resolver).await?;
 
-            let missing = lock
+            let applied = lock
                 .as_mut()
                 .update_metadata(|m| label::apply(&mut m.labels, &directives));
-            label::report_missing(&ctx.printer, lock.id(), &missing);
+            label::report_missing(&ctx.printer, lock.id(), &applied.missing);
+
+            let labels = report.touched(&directives, &applied);
+
+            if !collapse {
+                let id = lock.id();
+                let title = lock.metadata().title.clone();
+                print_outcome(
+                    &ctx.printer,
+                    &report.line(&labels, &conversation_target(id, title.as_deref())),
+                    &report.json(&labels, id, title.as_deref()),
+                );
+            }
         }
 
-        ctx.printer.println("Conversation(s) updated.");
+        if collapse {
+            let target = format!("{} conversations", count.to_string().bold().yellow());
+            let labels = report.union.clone();
+            ctx.printer.println(report.line(&labels, &target));
+        }
+
         Ok(())
+    }
+}
+
+/// How many conversations are named individually before the report collapses to
+/// a count.
+const MAX_LISTED_TARGETS: usize = 6;
+
+/// Accumulates what an invocation did, so it can be reported per conversation
+/// or as one collapsed line.
+#[derive(Debug)]
+struct Report {
+    /// Whether the invocation added labels; otherwise it removed them.
+    added: bool,
+
+    /// Every label touched across all targets, in first-seen order.
+    ///
+    /// Only used for the collapsed line: with one target per line the exact
+    /// per-target set is reported instead.
+    union: Vec<(String, String)>,
+}
+
+impl Report {
+    const fn new(added: bool) -> Self {
+        Self {
+            added,
+            union: vec![],
+        }
+    }
+
+    /// Record one target's outcome and return the labels to name for it.
+    ///
+    /// Additions are taken from the directives, since every named label is set
+    /// whether or not it was already there.
+    /// Removals are taken from what was actually in the map, so the reported
+    /// line lists real values rather than the keys the user asked about.
+    fn touched(
+        &mut self,
+        directives: &label::Resolved,
+        applied: &label::Applied,
+    ) -> Vec<(String, String)> {
+        let labels: Vec<(String, String)> = if self.added {
+            directives
+                .iter()
+                .filter_map(|d| match d {
+                    LabelDirective::Set { key, value } => Some((key.clone(), value.clone())),
+                    _ => None,
+                })
+                .collect()
+        } else {
+            applied.removed.clone()
+        };
+
+        for label in &labels {
+            if !self.union.contains(label) {
+                self.union.push(label.clone());
+            }
+        }
+
+        labels
+    }
+
+    /// The reported line for one target, which is either a named conversation
+    /// or a count.
+    ///
+    /// A removal that matched nothing says so rather than printing an empty
+    /// list; the per-key warnings above explain why.
+    fn line(&self, labels: &[(String, String)], target: &str) -> String {
+        if labels.is_empty() {
+            return format!("No labels to remove from {target}");
+        }
+
+        let list = labels
+            .iter()
+            .map(|(key, value)| label_text(key, value))
+            .collect::<Vec<_>>()
+            .join(", ")
+            .bold();
+
+        if self.added {
+            format!("Added labels {list} to {target}")
+        } else {
+            format!("Removed labels {list} from {target}")
+        }
+    }
+
+    /// The machine-readable form of one target's outcome.
+    ///
+    /// Labels carry the same `{key, value}` shape `jp c show` emits, so a
+    /// script reads both commands the same way.
+    /// An empty array is the removal that matched nothing; there is no prose
+    /// equivalent to parse.
+    fn json(&self, labels: &[(String, String)], id: ConversationId, title: Option<&str>) -> Value {
+        json!({
+            "action": if self.added { "added" } else { "removed" },
+            "conversation": { "id": id.to_string(), "title": title },
+            "labels": labels
+                .iter()
+                .map(|(key, value)| label_detail_item(key, value).json)
+                .collect::<Vec<_>>(),
+        })
+    }
+}
+
+/// Render a conversation as `<id>: <title>`, matching `jp c use`.
+fn conversation_target(id: ConversationId, title: Option<&str>) -> String {
+    let id = id.to_string().bold().yellow();
+    match title {
+        Some(title) => format!("{id}: {}", title.yellow()),
+        None => id.to_string(),
     }
 }
 
