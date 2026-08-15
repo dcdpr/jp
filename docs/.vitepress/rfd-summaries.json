@@ -392,7 +392,7 @@
     "summary": "Request-response linking via persistent event IDs detects answer scope under structural edits."
   },
   "101-conversation-labels.md": {
-    "hash": "e048e3c1c302768ea1e00e586aed926617e9f74ddb6f90d6addfce10b5691874",
+    "hash": "8942119ffa726cd4f1b14a34dfc0cb46c34fdb4b7286276bdc238c2235fe1bfc",
     "summary": "Conversations gain configurable key-value labels—static, command-backed, or CLI-set—managed through `jp c label` and used to filter by context like VCS branches."
   },
   "100-in-repo-ticket-tracking.md": {
