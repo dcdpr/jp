@@ -66,11 +66,6 @@ impl SessionMapping {
         }
     }
 
-    /// The currently active conversation for this session, if any.
-    pub fn active_conversation_id(&self) -> Option<ConversationId> {
-        self.history.first().map(|e| e.id)
-    }
-
     /// Record that a conversation was activated in this session.
     ///
     /// If the conversation was already in the history, it is moved to the front
@@ -173,6 +168,12 @@ impl Workspace {
     }
 
     /// Returns the active conversation ID from every session mapping.
+    ///
+    /// Resolution matches [`session_active_conversation`], so a caller
+    /// protecting "conversations some session is working on" sees exactly the
+    /// conversations those sessions would open.
+    ///
+    /// [`session_active_conversation`]: Self::session_active_conversation
     #[must_use]
     pub fn all_active_conversation_ids(&self) -> Vec<ConversationId> {
         self.sessions
@@ -181,7 +182,7 @@ impl Workspace {
             .filter_map(|key| {
                 let value = self.sessions.load_session(&key).ok()??;
                 let mapping = mapping_from_value(value, &key)?;
-                mapping.active_conversation_id()
+                self.resolvable_history(&mapping).first().copied()
             })
             .collect()
     }
@@ -274,6 +275,16 @@ impl Workspace {
             drop(fs::remove_file(&path));
         }
 
+        // Session maintenance rewrites files through the session backend but
+        // deletes them with direct filesystem calls. A backend that discards
+        // writes would report a successful migration and then remove the only
+        // remaining copy, so a run that cannot write session state does not
+        // maintain it either.
+        if self.sessions.is_read_only() {
+            debug!("Skipping session mapping cleanup: session storage is read-only.");
+            return;
+        }
+
         // Remove stale session mappings.
         //
         // Re-scan conversation IDs from disk instead of using the in-memory
@@ -291,6 +302,16 @@ impl Workspace {
             .into_iter()
             .collect();
         conversation_ids.extend(self.archived_conversation_ids());
+
+        // A concurrent archive or unarchive moves a conversation between the
+        // two partitions and can land between the scans above, leaving it in
+        // neither. Re-reading the live partition catches a move in either
+        // direction, because a conversation missed at its source is already at
+        // its destination by the time the destination is read.
+        conversation_ids.extend(
+            self.loader
+                .load_conversation_ids(ConversationFilter::default()),
+        );
 
         // Use filesystem-specific file listing for path-based removal.
         for path in fs.list_session_files() {

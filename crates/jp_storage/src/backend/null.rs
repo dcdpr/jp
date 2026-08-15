@@ -112,6 +112,10 @@ impl SessionBackend for ReadOnlySessionBackend {
     fn list_session_keys(&self) -> Vec<String> {
         self.0.list_session_keys()
     }
+
+    fn is_read_only(&self) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]
