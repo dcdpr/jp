@@ -1,4 +1,4 @@
-use jp_term::table::DetailRow;
+use jp_term::table::{DetailItem, Details};
 
 use crate::{cmd::Output, ctx::Ctx, output::print_details};
 
@@ -17,12 +17,12 @@ impl Ls {
 
         let title = Some("Attachments".to_owned());
 
-        let mut rows = vec![];
+        let mut items = vec![];
         for uri in uris {
-            rows.push(DetailRow::bare(uri.to_url()?));
+            items.push(DetailItem::plain(uri.to_url()?.to_string()));
         }
 
-        print_details(&ctx.printer, title.as_deref(), rows);
+        print_details(&ctx.printer, title.as_deref(), Details::Items(items));
         Ok(())
     }
 }

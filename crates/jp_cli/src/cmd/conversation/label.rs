@@ -8,7 +8,7 @@
 use crossterm::style::Stylize as _;
 use jp_conversation::{Conversation, ConversationId};
 use jp_inquire::prompt::TerminalPromptBackend;
-use jp_term::table::DetailItem;
+use jp_term::table::{DetailItem, Details};
 use jp_workspace::ConversationHandle;
 use serde_json::{Value, json};
 
@@ -22,7 +22,7 @@ use crate::{
     ctx::Ctx,
     error::Error,
     format::{label_detail_item, label_text},
-    output::{print_details, print_outcome},
+    output::{print_details_with_json, print_outcome},
 };
 
 /// Manage labels on a conversation.
@@ -310,9 +310,24 @@ fn list(ctx: &Ctx, handles: &[ConversationHandle]) -> Output {
     }
 
     for handle in handles {
+        let id = handle.id();
         let conversation = ctx.workspace.metadata(handle)?;
-        let rows = label_rows(&conversation);
-        print_details(&ctx.printer, Some(&handle.id().to_string()), rows);
+
+        let json = json!({
+            "conversation": { "id": id.to_string(), "title": conversation.title },
+            "labels": conversation
+                .labels
+                .iter()
+                .map(|(key, value)| label_detail_item(key, value).json)
+                .collect::<Vec<_>>(),
+        });
+
+        print_details_with_json(
+            &ctx.printer,
+            Some(&id.to_string()),
+            label_rows(&conversation),
+            &json,
+        );
     }
 
     Ok(())
@@ -322,20 +337,22 @@ fn list(ctx: &Ctx, handles: &[ConversationHandle]) -> Output {
 #[path = "label_tests.rs"]
 mod tests;
 
-/// One detail row per label, or a single "no labels" row.
-fn label_rows(conversation: &Conversation) -> Vec<jp_term::table::DetailRow> {
-    use jp_term::table::DetailRow;
-
+/// The conversation's labels, for the text views.
+///
+/// A listing rather than named fields: label keys are user-chosen, so they are
+/// data rather than a fixed set of properties.
+/// The empty case says so in words; the JSON form is supplied separately and
+/// stays an empty array.
+fn label_rows(conversation: &Conversation) -> Details {
     if conversation.labels.is_empty() {
-        return vec![DetailRow::bare("No labels.")];
+        return Details::Items(vec![DetailItem::plain("No labels.")]);
     }
 
-    conversation
-        .labels
-        .iter()
-        .map(|(key, value)| {
-            let DetailItem { text, .. } = label_detail_item(key, value);
-            DetailRow::bare(text)
-        })
-        .collect()
+    Details::Items(
+        conversation
+            .labels
+            .iter()
+            .map(|(key, value)| label_detail_item(key, value))
+            .collect(),
+    )
 }
