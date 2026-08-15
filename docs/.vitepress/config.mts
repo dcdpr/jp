@@ -5,6 +5,7 @@ import { dirname, posix, resolve } from 'node:path'
 import { defineConfig } from 'vitepress'
 import abnfGrammar from './grammars/abnf.tmLanguage.json'
 import { joinMultilineInlineCode } from './join-inline-code.mjs'
+import { rfdRedirectServer, writeRfdRedirects } from './rfd-redirects.mjs'
 
 // Rewrite relative links that climb above the docs root to absolute GitHub
 // URLs. The repo tree is the parent of the docs root, so any link resolving
@@ -480,9 +481,17 @@ export default defineConfig({
             const content = readFileSync(src, 'utf-8')
             writeFileSync(dest, content.startsWith(BOM) ? content : BOM + content)
         }
+
+        writeRfdRedirects(siteConfig)
     },
     vite: {
-        plugins: [serveMarkdownAsUtf8, rfdPriorityWriter, ticketBoardWriter, ticketWriter],
+        plugins: [
+            serveMarkdownAsUtf8,
+            rfdRedirectServer,
+            rfdPriorityWriter,
+            ticketBoardWriter,
+            ticketWriter,
+        ],
         // The priority board persists itself by writing `rfd/.priority.json` via
         // the dev middleware above. It isn't part of the module graph, so it
         // must not trigger a dev-server reload — the board owns its in-memory
