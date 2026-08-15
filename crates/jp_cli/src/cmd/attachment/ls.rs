@@ -10,19 +10,20 @@ impl Ls {
     pub(crate) fn run(self, ctx: &mut Ctx) -> Output {
         let uris = &ctx.config().conversation.attachments;
 
-        if uris.is_empty() {
-            ctx.printer.println("No attachments in current context.");
-            return Ok(());
-        }
-
-        let title = Some("Attachments".to_owned());
-
         let mut items = vec![];
         for uri in uris {
             items.push(DetailItem::plain(uri.to_url()?.to_string()));
         }
 
-        print_details(&ctx.printer, title.as_deref(), Details::Items(items));
+        // The text views swap an empty listing for a sentence; JSON keeps the
+        // array, so a script sees one shape whether or not anything was
+        // attached.
+        if items.is_empty() && !ctx.printer.format().is_json() {
+            ctx.printer.println("No attachments in current context.");
+            return Ok(());
+        }
+
+        print_details(&ctx.printer, Some("Attachments"), Details::Items(items));
         Ok(())
     }
 }

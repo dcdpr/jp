@@ -38,6 +38,41 @@ fn empty_ctx() -> (Ctx, Runtime) {
     (ctx, runtime)
 }
 
+/// A listing's JSON shape is a property of the command, not of whether this
+/// particular conversation happens to have anything attached.
+/// The empty case previously took a `println` shortcut, which wraps prose in a
+/// `{"message": ...}` envelope and left a consumer with no `details` at all.
+#[test]
+fn an_empty_listing_is_still_an_array_in_json() {
+    let tmp = tempdir().unwrap();
+    let workspace = Workspace::new(tmp.path().to_path_buf());
+    let (printer, out, _err) = Printer::memory(OutputFormat::Json);
+    let mut ctx = Ctx::new(
+        workspace,
+        None,
+        Runtime::new().unwrap(),
+        Globals::default(),
+        AppConfig::new_test(),
+        None,
+        printer,
+    );
+
+    assert!(
+        ctx.config().conversation.attachments.is_empty(),
+        "the test config must carry no attachments"
+    );
+
+    ls::Ls {}.run(&mut ctx).unwrap();
+    ctx.printer.flush();
+
+    let parsed: serde_json::Value = serde_json::from_str(out.lock().trim()).unwrap();
+    assert_eq!(parsed["details"], serde_json::json!([]));
+    assert!(
+        parsed.get("message").is_none(),
+        "an outcome sentence would mean the prose shortcut ran: {parsed}"
+    );
+}
+
 #[test]
 fn register_attachment_returns_typed_missing_for_unknown_conversation() {
     let (ctx, runtime) = empty_ctx();
