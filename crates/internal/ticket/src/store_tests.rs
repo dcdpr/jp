@@ -368,6 +368,52 @@ fn deleting_removes_the_file() {
     );
 }
 
+/// Two files claiming one id makes every write by that id ambiguous, so the
+/// lookup refuses rather than landing on whichever the directory yielded first.
+#[test]
+fn a_write_by_a_duplicated_id_is_refused() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = new_ticket(&dir, "First");
+
+    fs::write(
+        dir.path().join(format!("{}second.md", id.file_prefix())),
+        render::ticket(id, "Second", Kind::Bug, "john", DATE, None, ""),
+    )
+    .unwrap();
+
+    let error = close(dir.path(), id).unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .starts_with(&format!("{id} is claimed by more than one file: ")),
+        "{error}"
+    );
+}
+
+/// `reassign` writes into the ticket directory and deletes the source, so a
+/// path that merely parses as a heading must not reach either step.
+#[test]
+fn reassign_refuses_a_path_outside_the_ticket_directory() {
+    let dir = Utf8TempDir::new().unwrap();
+    let outside = dir.path().join("elsewhere");
+    fs::create_dir_all(&outside).unwrap();
+
+    // An RFD heading splits on `:` exactly like a ticket's does.
+    let rfd = outside.join("102-collision-resistant-ticket-identifiers.md");
+    fs::write(&rfd, "# RFD 102: Collision-Resistant Ticket Identifiers\n").unwrap();
+
+    let error = reassign(dir.path(), &rfd, 4_200).unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .ends_with("is not a ticket file in the ticket directory."),
+        "{error}"
+    );
+    assert!(rfd.exists(), "the source file was removed");
+}
+
 /// A reassigned ticket keeps its slug and its content; only the id moves.
 #[test]
 fn reassign_renames_the_file_and_rewrites_the_heading() {

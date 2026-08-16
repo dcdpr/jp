@@ -64,7 +64,7 @@ enum Command {
 
     /// Append a comment to a ticket.
     Comment {
-        /// Ticket id: `42`, `042`, or `T0042`.
+        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
         /// Omit it to choose.
         id: Option<TicketId>,
 
@@ -84,7 +84,7 @@ enum Command {
 
     /// Mark a ticket as Done.
     Close {
-        /// Ticket id: `42`, `042`, or `T0042`.
+        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
         /// Omit it to choose.
         id: Option<TicketId>,
     },
@@ -93,7 +93,7 @@ enum Command {
     ///
     /// Metadata and comments the flags don't name are left alone.
     Edit {
-        /// Ticket id: `42`, `042`, or `T0042`.
+        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
         /// Omit it to choose.
         id: Option<TicketId>,
 
@@ -116,16 +116,17 @@ enum Command {
 
     /// Delete a ticket outright.
     ///
-    /// Its number stays retired: the counter never goes backwards.
+    /// Its id is not retired: a later creation in the same time bucket can draw
+    /// it again.
     Delete {
-        /// Ticket id: `42`, `042`, or `T0042`.
+        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
         /// Omit it to choose.
         id: Option<TicketId>,
     },
 
     /// Read one ticket, with its comments numbered for replies.
     Show {
-        /// Ticket id: `42`, `042`, or `T0042`.
+        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
         /// Omit it to choose.
         id: Option<TicketId>,
 
@@ -136,7 +137,7 @@ enum Command {
 
     /// Record that a ticket became an RFD, and close it.
     Promote {
-        /// Ticket id: `42`, `042`, or `T0042`.
+        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
         /// Omit it to choose.
         id: Option<TicketId>,
 
@@ -401,36 +402,52 @@ fn with_email(name: String) -> String {
 ///
 /// The new id lands in the bucket the ticket was created in, so it keeps its
 /// place in time rather than jumping to now.
-/// References are rewritten only in what the branch introduced; the same token
-/// on `base` belongs to the ticket that won the id, and rewriting it there
-/// would redirect it.
+/// A file the branch touched is only rewritten when `base` does not already
+/// name the old id: an occurrence that predates the branch may belong to the
+/// ticket that kept the id, and nothing here can tell which.
+/// Those files are reported instead.
 fn refresh(dir: &Utf8Path, path: &Utf8Path, base: &str) -> Result<Output, String> {
-    let bucket = created_bucket(dir, path)?;
+    let path = resolve_ticket_path(dir, path)?;
+    let bucket = created_bucket(dir, &path)?;
     let changed = branch_files(dir, base)?;
 
-    let done = store::reassign(dir, path, bucket).map_err(|error| error.to_string())?;
+    let done = store::reassign(dir, &path, bucket).map_err(|error| error.to_string())?;
     let mut output = Output::from(format!("{} -> {} at {}\n", done.old, done.new, done.path));
 
     let new = done.new.to_string();
-    for file in changed {
-        if file == path {
+
+    // The renamed file is not in `changed` — git has never seen its new name —
+    // so a reply inside it would otherwise keep naming the winning ticket.
+    if rewrite(&done.path, &done.old, &new)? {
+        output.text.push_str(&format!("  rewrote {}\n", done.path));
+    }
+
+    let mut ambiguous = vec![];
+    for file in changed.iter().chain([&dir.join(".board.json")]) {
+        if *file == path {
             continue;
         }
-        if rewrite(&file, &done.old, &new)? {
+        if names_on_base(dir, base, file, &done.old) {
+            ambiguous.push(file.clone());
+            continue;
+        }
+        if rewrite(file, &done.old, &new)? {
             output.text.push_str(&format!("  rewrote {file}\n"));
         }
     }
 
-    let board = dir.join(".board.json");
-    if rewrite(&board, &done.old, &new)? {
-        output.text.push_str(&format!("  rewrote {board}\n"));
+    if !ambiguous.is_empty() {
+        let names = ambiguous
+            .iter()
+            .map(|file| file.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        output.warnings.push(format!(
+            "{} already appeared in these files on {base}, so the occurrence may belong to the \
+             ticket that kept the id. Left alone for you to sort out: {names}.",
+            done.old
+        ));
     }
-
-    output.warnings.push(format!(
-        "Occurrences of {} outside this branch's changes were left alone; they may belong to the \
-         ticket that kept the id.",
-        done.old
-    ));
 
     Ok(output)
 }
@@ -513,15 +530,56 @@ fn git(dir: &Utf8Path, args: &[&str]) -> Option<String> {
         .and_then(|output| String::from_utf8(output.stdout).ok())
 }
 
+/// Resolve a user-supplied ticket path to one that exists.
+///
+/// A relative path is taken against the repository root first — the spelling
+/// `just ticket-refresh` documents — then against the ticket directory, so
+/// naming a file from inside `docs/ticket/` works too.
+/// Everything downstream gets an absolute path: git runs in the ticket
+/// directory, where a workspace-relative path would resolve against the wrong
+/// place and silently match no commit.
+fn resolve_ticket_path(dir: &Utf8Path, path: &Utf8Path) -> Result<Utf8PathBuf, String> {
+    let candidates = if path.is_absolute() {
+        vec![path.to_path_buf()]
+    } else {
+        vec![repo_root(dir)?.join(path), dir.join(path)]
+    };
+
+    candidates
+        .into_iter()
+        .find(|candidate| candidate.exists())
+        .ok_or_else(|| format!("No ticket file at {path}."))
+}
+
+/// The repository root that holds `dir`.
+fn repo_root(dir: &Utf8Path) -> Result<Utf8PathBuf, String> {
+    git(dir, &["rev-parse", "--show-toplevel"])
+        .map(|text| Utf8PathBuf::from(text.trim()))
+        .ok_or_else(|| format!("{dir} is not inside a git repository."))
+}
+
+/// Whether `base` already carries `token` in `file`.
+///
+/// A file that named the id before the branch touched it is ambiguous: the
+/// occurrence may be the winning ticket's.
+/// A file `base` doesn't have at all is the branch's own, so it is not.
+fn names_on_base(dir: &Utf8Path, base: &str, file: &Utf8Path, token: &str) -> bool {
+    let Ok(root) = repo_root(dir) else {
+        return false;
+    };
+    let Ok(relative) = file.strip_prefix(&root) else {
+        return false;
+    };
+
+    git(dir, &["show", &format!("{base}:{relative}")])
+        .is_some_and(|content| content.contains(token))
+}
+
 /// The bucket of the commit that added `path`.
 ///
 /// Falls back to the current bucket for a file git has never seen, which is
 /// what an uncommitted ticket looks like.
 fn created_bucket(dir: &Utf8Path, path: &Utf8Path) -> Result<u32, String> {
-    if !path.exists() {
-        return Err(format!("No file at {path}."));
-    }
-
     let added = git(dir, &[
         "log",
         "--diff-filter=A",
@@ -543,9 +601,7 @@ fn created_bucket(dir: &Utf8Path, path: &Utf8Path) -> Result<u32, String> {
 /// git reports them relative to the repository root, which is not where this
 /// runs, so they are resolved against it before being handed on.
 fn branch_files(dir: &Utf8Path, base: &str) -> Result<Vec<Utf8PathBuf>, String> {
-    let root = git(dir, &["rev-parse", "--show-toplevel"])
-        .map(|text| Utf8PathBuf::from(text.trim()))
-        .ok_or_else(|| format!("{dir} is not inside a git repository."))?;
+    let root = repo_root(dir)?;
 
     let changed =
         git(dir, &["diff", "--name-only", &format!("{base}...HEAD")]).ok_or_else(|| {

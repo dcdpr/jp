@@ -5,7 +5,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-08-05
 - **Extends**: [RFD 001], [RFD 041]
-- **Extended by**: [RFD 102](102-collision-resistant-ticket-identifiers.md)
+- **Extended by**: [RFD 102]
 
 ## Summary
 
@@ -71,7 +71,7 @@ References to a deleted ticket render as dangling.
 
 A ticket is a single markdown file at `docs/ticket/<id>-slug.md`.
 The canonical reference form is `T-02wt0kx`; tooling accepts `T02wt0kx`, the
-bare body, any case, and unique prefixes.
+bare body, and any case.
 The id's shape and allocation are specified in [RFD 102].
 
 Description and full discussion live in that one file, so reading a ticket is

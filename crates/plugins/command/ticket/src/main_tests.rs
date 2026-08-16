@@ -498,7 +498,127 @@ fn refresh_rewrites_the_branch_and_leaves_the_base_alone() {
         "{}",
         output.text
     );
+
+    // `NOTES.md` names the winner but the branch never touched it, so it is not
+    // a candidate at all and there is nothing to report.
+    assert!(output.warnings.is_empty(), "{:?}", output.warnings);
+}
+
+/// A reply inside the losing ticket names the id it is losing.
+/// The renamed file is not in `git diff`, so nothing else in `refresh` would
+/// reach it.
+#[test]
+fn refresh_rewrites_a_reference_inside_the_ticket_it_renames() {
+    let repo = git_repo();
+    let root = repo.path();
+    let dir = root.join("docs/ticket");
+
+    let losing = dir.join("02wt0kx-loser.md");
+    std::fs::write(
+        &losing,
+        "# T-02wt0kx: Loser\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: jane\n- \
+         **Date**: 2026-08-14\n\nBody.\n\n## Comments\n\n-----\n\n- **From**: john\n- **Date**: \
+         2026-08-14T10:00:00Z\n\nFirst.\n\n-----\n\n- **From**: jp\n- **Date**: \
+         2026-08-14T11:00:00Z\n- **Re**: T-02wt0kx#1\n\nSecond.\n",
+    )
+    .unwrap();
+    commit(root, "Add the losing ticket", None);
+
+    execute(
+        &dir,
+        Command::Refresh {
+            path: losing,
+            base: "main".to_owned(),
+        },
+        &serde_json::json!({}),
+    )
+    .unwrap();
+
+    let fresh = store::list(&dir).unwrap().pop().unwrap().ticket.unwrap();
+    assert_eq!(fresh.comments[1].re, Some(format!("{}#1", fresh.id)));
+}
+
+/// `just ticket-refresh` documents a workspace-relative path, and git runs in
+/// the ticket directory, so the path has to be resolved before either sees it.
+#[test]
+fn refresh_accepts_a_repository_relative_path() {
+    let repo = git_repo();
+    let root = repo.path();
+    let dir = root.join("docs/ticket");
+
+    std::fs::write(
+        dir.join("02wt0kx-filed-earlier.md"),
+        "# T-02wt0kx: Filed earlier\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: \
+         john\n- **Date**: 2026-08-14\n\nBody.\n",
+    )
+    .unwrap();
+    // 2026-08-14T00:00:00Z is 345,600 seconds past the epoch: bucket 69,120.
+    commit(root, "File it", Some("2026-08-14T00:00:00Z"));
+
+    execute(
+        &dir,
+        Command::Refresh {
+            path: Utf8PathBuf::from("docs/ticket/02wt0kx-filed-earlier.md"),
+            base: "main".to_owned(),
+        },
+        &serde_json::json!({}),
+    )
+    .unwrap();
+
+    // The add-date drove the bucket, which only happens when git resolved the
+    // path. A silent fallback would put it at the current bucket instead.
+    let fresh = store::list(&dir).unwrap()[0].ticket.as_ref().unwrap().id;
+    assert_eq!(fresh.bucket(), 69_120);
+}
+
+/// A file the branch edited that already named the id on `base` is ambiguous:
+/// the occurrence may be the winning ticket's.
+/// Report it, don't redirect it.
+#[test]
+fn refresh_reports_a_file_that_named_the_id_on_base() {
+    let repo = git_repo();
+    let root = repo.path();
+    let dir = root.join("docs/ticket");
+
+    std::fs::write(root.join("SHARED.md"), "Tracked in T-02wt0kx.\n").unwrap();
+    commit(root, "Reference the winner", None);
+
+    git(root, &["checkout", "-b", "loser"]);
+    let losing = dir.join("02wt0kx-loser.md");
+    std::fs::write(
+        &losing,
+        "# T-02wt0kx: Loser\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: jane\n- \
+         **Date**: 2026-08-14\n\nBody.\n",
+    )
+    .unwrap();
+    // The branch touches the file for an unrelated reason.
+    std::fs::write(
+        root.join("SHARED.md"),
+        "Tracked in T-02wt0kx.\nAlso worth reading.\n",
+    )
+    .unwrap();
+    commit(root, "Add the losing ticket", None);
+
+    let output = execute(
+        &dir,
+        Command::Refresh {
+            path: losing,
+            base: "main".to_owned(),
+        },
+        &serde_json::json!({}),
+    )
+    .unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(root.join("SHARED.md")).unwrap(),
+        "Tracked in T-02wt0kx.\nAlso worth reading.\n"
+    );
     assert_eq!(output.warnings.len(), 1, "{:?}", output.warnings);
+    assert!(
+        output.warnings[0].contains("SHARED.md"),
+        "{}",
+        output.warnings[0]
+    );
 }
 
 /// The new id must sit where the ticket was filed, not where the clock is now,

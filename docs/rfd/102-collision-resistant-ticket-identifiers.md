@@ -39,14 +39,14 @@ T - 0 2 w t 0 k x
                      33,554,432 buckets, exhausts December 2031
 ```
 
-|           |                                                                                                    |
-| --------- | -------------------------------------------------------------------------------------------------- |
-| Canonical | `T-02wt0kx`                                                                                        |
-| Filename  | `docs/ticket/02wt0kx-slug.md`                                                                      |
-| Alphabet  | Crockford base-32, lowercase: `0123456789abcdefghjkmnpqrstvwxyz`                                   |
-| Input     | `T-02wt0kx`, `T02wt0kx`, `02wt0kx`, any case; `i`/`l` map to `1`, `o` maps to `0`                  |
-| Expiry    | past the final bucket, allocation refuses rather than wrapping or widening                         |
-| Ordering  | lexicographic, to the bucket; sequential local creations are always ordered                        |
+|           |                                                                                   |
+| --------- | --------------------------------------------------------------------------------- |
+| Canonical | `T-02wt0kx`                                                                       |
+| Filename  | `docs/ticket/02wt0kx-slug.md`                                                     |
+| Alphabet  | Crockford base-32, lowercase: `0123456789abcdefghjkmnpqrstvwxyz`                  |
+| Input     | `T-02wt0kx`, `T02wt0kx`, `02wt0kx`, any case; `i`/`l` map to `1`, `o` maps to `0` |
+| Expiry    | past the final bucket, allocation refuses rather than wrapping or widening        |
+| Ordering  | lexicographic, to the bucket; sequential local creations are always ordered       |
 
 The alphabet excludes `i`, `l`, `o`, and `u` so an id read off a screen during a
 call is unambiguous.
@@ -132,9 +132,8 @@ makes `ls docs/ticket/` and the board read in creation order.
 ## Implementation Plan
 
 1. **Id, allocation, and migration.** `TicketId` becomes a fixed-width base-32
-   newtype with lenient parsing; `store::allocate_id`
-   computes the bucket, draws or increments the tail, and no longer reads or
-   writes `.counter`.
+   newtype with lenient parsing; `store::allocate_id` computes the bucket, draws
+   or increments the tail, and no longer reads or writes `.counter`.
    The four existing tickets migrate in the same change: all landed in `e4f8b96`
    at `2026-08-10T08:30:28Z`, which is bucket `005zd`, so they take sequential
    tails `T-005zd00` through `T-005zd03`.

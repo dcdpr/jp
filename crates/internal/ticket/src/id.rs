@@ -5,7 +5,12 @@
 //! The canonical form prefixes them with `T-`, as in `T-02wt0kx`.
 //!
 //! Every position is fixed width and the alphabet's ASCII order matches its
-//! digit order, so comparing two ids as bytes orders them by creation time.
+//! digit order, so comparing two ids as bytes orders them by bucket, then tail.
+//!
+//! That is creation order for ids allocated in one directory, where the tail
+//! continues from the highest id in the bucket.
+//! Ids drawn in separate checkouts that share a bucket carry unrelated tails,
+//! so between those two the order is arbitrary.
 //!
 //! The alphabet omits `i`, `l`, `o`, and `u` so an id read off a screen is
 //! unambiguous; input maps `i` and `l` to `1` and `o` to `0` so a

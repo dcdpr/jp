@@ -10,7 +10,7 @@ use std::{
     collections::hash_map::RandomState,
     fmt, fs,
     hash::BuildHasher,
-    io,
+    io::{self, Write},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -51,6 +51,10 @@ pub enum Error {
         id: TicketId,
         paths: Vec<Utf8PathBuf>,
     },
+    /// A path that isn't a ticket file in the directory being written to.
+    NotATicketFile(Utf8PathBuf),
+    /// Every id drawn was already claimed on disk.
+    Contended,
     /// The clock reads before the epoch ids are measured from.
     ClockBeforeEpoch,
     /// The time component has no bucket left to express.
@@ -78,6 +82,12 @@ impl fmt::Display for Error {
                     .join(", ");
                 write!(f, "{id} is claimed by more than one file: {names}.")
             }
+            Self::NotATicketFile(path) => {
+                write!(f, "{path} is not a ticket file in the ticket directory.")
+            }
+            Self::Contended => f.write_str(
+                "Every id drawn was already taken; another process is creating tickets.",
+            ),
             Self::ClockBeforeEpoch => {
                 f.write_str("The system clock reads before 2026-08-10, when ticket ids start.")
             }
@@ -121,9 +131,19 @@ pub struct Entry {
     pub ticket: std::result::Result<Ticket, ParseError>,
 }
 
+/// How many ids to draw before giving up on a contended directory.
+///
+/// Each attempt sees the file the previous one lost to, so the tail advances
+/// every round rather than redrawing into the same clash.
+const CLAIM_ATTEMPTS: usize = 16;
+
 /// Create a ticket at `Todo`, returning its id and path.
 ///
 /// `implements` names the RFD this work comes from, if any.
+///
+/// Creating the file exclusively is what claims the id: two processes drawing
+/// in the same bucket can land on one tail, and the loser finds out here rather
+/// than overwriting the winner's ticket.
 pub fn create(
     dir: &Utf8Path,
     kind: Kind,
@@ -133,14 +153,32 @@ pub fn create(
     implements: Option<&str>,
     description: &str,
 ) -> Result<(TicketId, Utf8PathBuf)> {
-    let id = allocate_id(dir)?;
-    let path = dir.join(format!("{}{}.md", id.file_prefix(), slug(title)));
-    fs::write(
-        &path,
-        render::ticket(id, title, kind, authors, date, implements, description),
-    )?;
+    let slug = slug(title);
 
-    Ok((id, path))
+    for _ in 0..CLAIM_ATTEMPTS {
+        let id = allocate_id(dir)?;
+        let path = dir.join(format!("{}{slug}.md", id.file_prefix()));
+
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(mut file) => {
+                let document =
+                    render::ticket(id, title, kind, authors, date, implements, description);
+                file.write_all(document.as_bytes())?;
+
+                return Ok((id, path));
+            }
+            // Another process claimed this id first. The next attempt sees its
+            // file and draws a higher tail.
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+
+    Err(Error::Contended)
 }
 
 /// Record that a ticket became an RFD, and close it.
@@ -355,12 +393,24 @@ pub fn locate_ticket(dir: &Utf8Path, id: TicketId) -> Result<Utf8PathBuf> {
 }
 
 /// Resolve a ticket id to its file.
+///
+/// Two files claiming the id is an error rather than a choice: a write by id
+/// would otherwise land on whichever one the directory happened to yield first.
 fn locate(dir: &Utf8Path, id: TicketId) -> Result<Utf8PathBuf> {
-    files(dir)?
+    let mut claiming: Vec<Utf8PathBuf> = files(dir)?
         .into_iter()
-        .find(|(found, _)| *found == id)
+        .filter(|(found, _)| *found == id)
         .map(|(_, path)| path)
-        .ok_or(Error::NoSuchTicket(id))
+        .collect();
+
+    if claiming.len() > 1 {
+        return Err(Error::Duplicate {
+            id,
+            paths: claiming,
+        });
+    }
+
+    claiming.pop().ok_or(Error::NoSuchTicket(id))
 }
 
 /// Every `NNNN-slug.md` in `dir`, paired with its id and ordered by it.
@@ -393,6 +443,40 @@ fn files(dir: &Utf8Path) -> Result<Vec<(TicketId, Utf8PathBuf)>> {
     files.sort_unstable();
 
     Ok(files)
+}
+
+/// The slug of `path`, when it is a ticket file directly inside `dir`.
+///
+/// Both id shapes are accepted, because a ticket left in the pre-RFD-102 format
+/// is exactly what a migration reassigns.
+fn ticket_filename<'a>(dir: &Utf8Path, path: &'a Utf8Path) -> Option<&'a str> {
+    if !same_directory(dir, path.parent()?) || path.extension() != Some("md") {
+        return None;
+    }
+
+    let (id, slug) = path.file_stem()?.split_once('-')?;
+    if slug.is_empty() {
+        return None;
+    }
+
+    let legacy = id.len() == 4 && id.bytes().all(|byte| byte.is_ascii_digit());
+    (legacy || id.parse::<TicketId>().is_ok()).then_some(slug)
+}
+
+/// Whether two paths name the same directory.
+///
+/// A repository reached through a symlink — `/tmp` on macOS, a linked home —
+/// has two spellings for one directory, and comparing the strings alone would
+/// reject a ticket sitting right where it belongs.
+fn same_directory(left: &Utf8Path, right: &Utf8Path) -> bool {
+    if left == right {
+        return true;
+    }
+
+    match (left.canonicalize_utf8(), right.canonicalize_utf8()) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
+    }
 }
 
 /// The first id claimed by more than one file, if any.
@@ -466,6 +550,7 @@ pub fn bucket_at(unix_seconds: u64) -> Result<u32> {
 }
 
 /// What a reassignment changed.
+#[derive(Debug)]
 pub struct Reassigned {
     /// The id the ticket carried, as written in its heading.
     ///
@@ -483,13 +568,15 @@ pub struct Reassigned {
 /// so it keeps its position relative to everything around it.
 /// The slug is kept, and references held by other files are the caller's to fix
 /// — nothing here knows which of them meant this ticket.
+///
+/// `path` must name a ticket file directly inside `dir`.
+/// This writes and then deletes, so a path that merely happens to carry a `#
+/// <token>: Title` heading — an RFD, say — would be moved into the ticket
+/// directory and removed from where it lives.
 pub fn reassign(dir: &Utf8Path, path: &Utf8Path, bucket: u32) -> Result<Reassigned> {
+    let slug =
+        ticket_filename(dir, path).ok_or_else(|| Error::NotATicketFile(path.to_path_buf()))?;
     let source = fs::read_to_string(path)?;
-    let slug = path
-        .file_stem()
-        .and_then(|stem| stem.split_once('-'))
-        .map(|(_, slug)| slug)
-        .ok_or(ParseError::MissingTitle)?;
 
     let new = allocate_in(dir, bucket)?;
     let (old, updated) = render::set_id(&source, new).ok_or(ParseError::MissingTitle)?;

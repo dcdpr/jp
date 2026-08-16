@@ -1994,10 +1994,10 @@ ticket-add KIND *TITLE: _install-ticket
 # comes from the arguments, from stdin when piped, or from the inline composer
 # when neither is given.
 #
-#   just ticket-comment 42 "Reproduced at 72 columns."
-#   just ticket-comment 42#1 "The wrap calculation is off."
-#   git log -1 | just ticket-comment 42
-#   just ticket-comment 42
+#   just ticket-comment T-02wt0kx "Reproduced at 72 columns."
+#   just ticket-comment T-02wt0kx#1 "The wrap calculation is off."
+#   git log -1 | just ticket-comment T-02wt0kx
+#   just ticket-comment T-02wt0kx
 #
 # The author comes from your JP or git identity.
 [group('ticket')]
