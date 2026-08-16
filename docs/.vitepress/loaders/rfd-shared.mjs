@@ -61,18 +61,25 @@ export function parseReferences(content, ownNum) {
 }
 
 // Every document a body links to, as the labels `documents.mjs` keys on:
-// `042` and `D12` for RFDs, `T0001` for tickets.
+// `042` and `D12` for RFDs, `T-005zd00` for tickets.
 //
-// The slug must carry a letter, so a date like `2026-08-05` isn't read as a
-// link to ticket 2026.
+// RFDs are matched through their linked filename; the slug must carry a letter,
+// so a date like `2026-08-05` isn't read as a link. Tickets are matched through
+// the canonical `T-` token, which is distinctive enough to appear in prose.
 export function referencedLabels(content) {
     const labels = new Set()
-    const pattern = /\b(\d{3,4}|D\d{2})-[a-z0-9-]*[a-z][a-z0-9-]*(?:\.md)?/g
+
+    const rfds = /\b(\d{3}|D\d{2})-[a-z0-9-]*[a-z][a-z0-9-]*(?:\.md)?/g
     let match
-    while ((match = pattern.exec(content)) !== null) {
-        const id = match[1]
-        labels.add(id.length === 4 && !id.startsWith('D') ? `T${id}` : id)
+    while ((match = rfds.exec(content)) !== null) {
+        labels.add(match[1])
     }
+
+    const tickets = /\bT-([0-9a-z]{7})\b/g
+    while ((match = tickets.exec(content)) !== null) {
+        labels.add(`T-${match[1]}`)
+    }
+
     return [...labels]
 }
 

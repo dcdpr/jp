@@ -145,6 +145,29 @@ enum Command {
         to: String,
     },
 
+    /// Give a ticket a fresh id, after CI reports two files claiming one.
+    ///
+    /// The losing branch runs this: its commits are still rewritable and every
+    /// reference to the id on it is unambiguously its own.
+    Refresh {
+        /// Path to the ticket file.
+        ///
+        /// A path, not an id: when two files share an id, the id names both.
+        path: Utf8PathBuf,
+
+        /// Revision the branch forked from, for deciding which references it
+        /// introduced.
+        #[arg(long, default_value = "main")]
+        base: String,
+    },
+
+    /// Convert tickets left in the pre-RFD-102 `NNNN-slug.md` format.
+    ///
+    /// Transitional: run it on a branch cut before the id change, after
+    /// rebasing.
+    /// Delete this command once no such branch is left.
+    Migrate,
+
     /// Import GitHub issues as tickets, or refresh ones already imported.
     Import {
         /// Issue numbers.
@@ -298,19 +321,27 @@ fn required<T>(value: Option<T>, what: &str) -> Result<T, String> {
     value.ok_or_else(|| format!("No {what} given, and no terminal to ask for one."))
 }
 
-/// Read `jp ticket 42` as `jp ticket show 42`.
+/// Read `jp ticket T-02wt0kx` as `jp ticket show T-02wt0kx`.
 ///
-/// A bare id is the most common thing to type, and no subcommand name parses as
-/// one, so the two can't collide.
+/// A bare id is the most common thing to type.
+/// An exact subcommand name always wins: `comment` and `promote` are seven
+/// characters that fold onto the id alphabet, so both parse as ids and would
+/// otherwise be swallowed by the alias.
 fn with_show_alias(args: &[String]) -> Vec<String> {
-    match args.first() {
-        Some(first) if first.parse::<TicketId>().is_ok() => {
-            let mut expanded = vec!["show".to_owned()];
-            expanded.extend(args.iter().cloned());
-            expanded
-        }
-        _ => args.to_vec(),
+    let Some(first) = args.first() else {
+        return args.to_vec();
+    };
+
+    let is_subcommand = Args::command()
+        .get_subcommands()
+        .any(|sub| sub.get_name() == first || sub.get_all_aliases().any(|alias| alias == first));
+    if is_subcommand || first.parse::<TicketId>().is_err() {
+        return args.to_vec();
     }
+
+    let mut expanded = vec!["show".to_owned()];
+    expanded.extend(args.iter().cloned());
+    expanded
 }
 
 /// Decide who to attribute a write to.
@@ -364,6 +395,188 @@ fn with_email(name: String) -> String {
         Some(email) => format!("{name} <{email}>"),
         None => name,
     }
+}
+
+/// Give a ticket a fresh id and carry its branch's references over.
+///
+/// The new id lands in the bucket the ticket was created in, so it keeps its
+/// place in time rather than jumping to now.
+/// References are rewritten only in what the branch introduced; the same token
+/// on `base` belongs to the ticket that won the id, and rewriting it there
+/// would redirect it.
+fn refresh(dir: &Utf8Path, path: &Utf8Path, base: &str) -> Result<Output, String> {
+    let bucket = created_bucket(dir, path)?;
+    let changed = branch_files(dir, base)?;
+
+    let done = store::reassign(dir, path, bucket).map_err(|error| error.to_string())?;
+    let mut output = Output::from(format!("{} -> {} at {}\n", done.old, done.new, done.path));
+
+    let new = done.new.to_string();
+    for file in changed {
+        if file == path {
+            continue;
+        }
+        if rewrite(&file, &done.old, &new)? {
+            output.text.push_str(&format!("  rewrote {file}\n"));
+        }
+    }
+
+    let board = dir.join(".board.json");
+    if rewrite(&board, &done.old, &new)? {
+        output.text.push_str(&format!("  rewrote {board}\n"));
+    }
+
+    output.warnings.push(format!(
+        "Occurrences of {} outside this branch's changes were left alone; they may belong to the \
+         ticket that kept the id.",
+        done.old
+    ));
+
+    Ok(output)
+}
+
+/// Convert every ticket left in the pre-RFD-102 format.
+///
+/// Each one lands in the bucket of the commit that added it, so a branch's
+/// tickets keep their order against those already on `main`.
+fn migrate(dir: &Utf8Path) -> Result<Output, String> {
+    let entries = std::fs::read_dir(dir).map_err(|error| error.to_string())?;
+
+    let mut legacy: Vec<Utf8PathBuf> = vec![];
+    for entry in entries {
+        let path = entry.map_err(|error| error.to_string())?.path();
+        let Ok(path) = Utf8PathBuf::try_from(path) else {
+            continue;
+        };
+        if path
+            .file_name()
+            .is_some_and(|name| name.len() > 5 && name[..4].bytes().all(|b| b.is_ascii_digit()))
+            && path.extension() == Some("md")
+        {
+            legacy.push(path);
+        }
+    }
+    legacy.sort();
+
+    if legacy.is_empty() {
+        return Ok("No tickets to migrate.\n".to_owned().into());
+    }
+
+    let mut output = Output::default();
+    let mut renamed = vec![];
+    for path in &legacy {
+        let bucket = created_bucket(dir, path)?;
+        let done = store::reassign(dir, path, bucket).map_err(|error| error.to_string())?;
+        output
+            .text
+            .push_str(&format!("{} -> {} at {}\n", done.old, done.new, done.path));
+        renamed.push((done.old, done.new.to_string()));
+    }
+
+    // References are rewritten after every rename, so a ticket that names
+    // another one is fixed whichever order they were converted in.
+    let mut targets: Vec<Utf8PathBuf> = store::list(dir)
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(|entry| entry.path)
+        .collect();
+    targets.push(dir.join(".board.json"));
+
+    for target in targets {
+        for (old, new) in &renamed {
+            if rewrite(&target, old, new)? {
+                output
+                    .text
+                    .push_str(&format!("  rewrote {old} in {target}\n"));
+            }
+        }
+    }
+
+    output.warnings.push(
+        "References outside `docs/ticket/` were not touched. Commit messages naming the old ids \
+         stay dangling."
+            .to_owned(),
+    );
+
+    Ok(output)
+}
+
+/// Run git inside `dir`, so the repository found is the one holding the tickets
+/// rather than whatever the process was launched from.
+fn git(dir: &Utf8Path, args: &[&str]) -> Option<String> {
+    std::process::Command::new("git")
+        .current_dir(dir)
+        .args(args)
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+}
+
+/// The bucket of the commit that added `path`.
+///
+/// Falls back to the current bucket for a file git has never seen, which is
+/// what an uncommitted ticket looks like.
+fn created_bucket(dir: &Utf8Path, path: &Utf8Path) -> Result<u32, String> {
+    if !path.exists() {
+        return Err(format!("No file at {path}."));
+    }
+
+    let added = git(dir, &[
+        "log",
+        "--diff-filter=A",
+        "--format=%at",
+        "-1",
+        "--",
+        path.as_str(),
+    ])
+    .and_then(|text| text.trim().parse::<u64>().ok());
+
+    match added {
+        Some(seconds) => store::bucket_at(seconds).map_err(|error| error.to_string()),
+        None => store::current_bucket().map_err(|error| error.to_string()),
+    }
+}
+
+/// Every file the branch changed against `base`, as absolute paths.
+///
+/// git reports them relative to the repository root, which is not where this
+/// runs, so they are resolved against it before being handed on.
+fn branch_files(dir: &Utf8Path, base: &str) -> Result<Vec<Utf8PathBuf>, String> {
+    let root = git(dir, &["rev-parse", "--show-toplevel"])
+        .map(|text| Utf8PathBuf::from(text.trim()))
+        .ok_or_else(|| format!("{dir} is not inside a git repository."))?;
+
+    let changed =
+        git(dir, &["diff", "--name-only", &format!("{base}...HEAD")]).ok_or_else(|| {
+            format!(
+                "`git diff {base}...HEAD` failed; pass --base with a revision this branch forked \
+                 from."
+            )
+        })?;
+
+    Ok(changed
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| root.join(line))
+        .collect())
+}
+
+/// Replace every `old` with `new` in `file`, reporting whether anything moved.
+///
+/// A file that isn't there, or isn't text, is skipped rather than failing the
+/// run: the caller is working through a list it didn't curate.
+fn rewrite(file: &Utf8Path, old: &str, new: &str) -> Result<bool, String> {
+    let Ok(source) = std::fs::read_to_string(file) else {
+        return Ok(false);
+    };
+    if !source.contains(old) {
+        return Ok(false);
+    }
+
+    std::fs::write(file, source.replace(old, new)).map_err(|error| error.to_string())?;
+
+    Ok(true)
 }
 
 fn git_config(key: &str) -> Option<String> {
@@ -478,6 +691,10 @@ fn execute(dir: &Utf8Path, command: Command, config: &Value) -> Result<Output, S
 
             Ok(format!("{path}: promoted to {to}, closed as Done\n").into())
         }
+
+        Command::Refresh { path, base } => refresh(dir, &path, &base),
+
+        Command::Migrate => migrate(dir),
 
         Command::Import {
             numbers,
@@ -734,7 +951,7 @@ fn row(ticket: &Ticket) -> String {
         .as_deref()
         .map_or_else(String::new, |by| format!(" (blocked by {by})"));
 
-    format!("{id:<6} {status:<12} {kind:<8} {}{blocked}\n", ticket.title)
+    format!("{id:<9} {status:<12} {kind:<8} {}{blocked}\n", ticket.title)
 }
 
 fn help_text() -> String {

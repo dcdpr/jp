@@ -20,7 +20,7 @@ fn new_ticket(dir: &Utf8TempDir, title: &str) -> TicketId {
 }
 
 #[test]
-fn create_writes_a_numbered_file() {
+fn create_writes_a_file_named_for_its_id() {
     let dir = Utf8TempDir::new().unwrap();
 
     let (id, path) = create(
@@ -34,10 +34,9 @@ fn create_writes_a_numbered_file() {
     )
     .unwrap();
 
-    assert_eq!(id.to_string(), "T0001");
     assert_eq!(
         path.file_name(),
-        Some("0001-tool-call-header-misaligned.md")
+        Some(format!("{}tool-call-header-misaligned.md", id.file_prefix()).as_str())
     );
 
     let ticket = parse::document(&fs::read_to_string(&path).unwrap()).unwrap();
@@ -47,38 +46,89 @@ fn create_writes_a_numbered_file() {
     assert_eq!(ticket.metadata.kind, Kind::Bug);
 }
 
+/// Tickets created back to back land in one bucket, where the tail increments
+/// rather than being redrawn.
+/// A ticket that references an earlier one must never sort above it.
 #[test]
-fn ids_increment() {
+fn ids_created_in_sequence_stay_ordered() {
     let dir = Utf8TempDir::new().unwrap();
 
-    assert_eq!(new_ticket(&dir, "First").number(), 1);
-    assert_eq!(new_ticket(&dir, "Second").number(), 2);
-    assert_eq!(new_ticket(&dir, "Third").number(), 3);
+    let first = new_ticket(&dir, "First");
+    let second = new_ticket(&dir, "Second");
+    let third = new_ticket(&dir, "Third");
+
+    assert!(first < second, "{first} !< {second}");
+    assert!(second < third, "{second} !< {third}");
+
+    // Same bucket means the tail did the ordering, which is the case the
+    // increment rule exists for. A test run straddling a bucket boundary is
+    // still ordered, just by the time component.
+    if first.bucket() == third.bucket() {
+        assert_eq!(second.tail(), first.tail() + 1);
+        assert_eq!(third.tail(), second.tail() + 1);
+    }
 }
 
-/// The counter is the authority, so a deleted ticket's number stays retired.
+/// Nothing records ids after their file is gone, so a deleted id can come back.
+/// [RFD 102] accepts that in exchange for allocation needing no coordination.
+///
+/// [RFD 102]: ../../../../docs/rfd/102-collision-resistant-ticket-identifiers.md
 #[test]
-fn deleting_a_ticket_does_not_free_its_id() {
+fn deleting_a_ticket_frees_its_id_within_the_bucket() {
     let dir = Utf8TempDir::new().unwrap();
 
-    new_ticket(&dir, "First");
-    let second = locate(dir.path(), new_ticket(&dir, "Second")).unwrap();
-    fs::remove_file(second).unwrap();
+    let first = new_ticket(&dir, "First");
+    let second = new_ticket(&dir, "Second");
+    fs::remove_file(locate(dir.path(), second).unwrap()).unwrap();
+    let third = new_ticket(&dir, "Third");
 
-    assert_eq!(new_ticket(&dir, "Third").number(), 3);
+    if first.bucket() == third.bucket() {
+        assert_eq!(third, second, "the freed tail was not handed out again");
+    }
 }
 
-/// A counter that lost an increment (a bad merge, a hand-created file) must
-/// still not collide with what is on disk.
+/// An id from a machine with a fast clock must not drag later local ids into
+/// its bucket, or one bad clock skews every timestamp after it.
 #[test]
-fn a_stale_counter_does_not_collide() {
+fn an_id_in_a_future_bucket_is_ignored() {
     let dir = Utf8TempDir::new().unwrap();
+    let present = new_ticket(&dir, "Present");
 
-    new_ticket(&dir, "First");
-    new_ticket(&dir, "Second");
-    fs::write(dir.path().join(COUNTER), "1\n").unwrap();
+    let future = TicketId::new(present.bucket() + 10_000, 5).unwrap();
+    fs::write(
+        dir.path()
+            .join(format!("{}future.md", future.file_prefix())),
+        render::ticket(future, "Future", Kind::Bug, "john", DATE, None, ""),
+    )
+    .unwrap();
 
-    assert_eq!(new_ticket(&dir, "Third").number(), 3);
+    let next = new_ticket(&dir, "Next");
+
+    assert!(next.bucket() < future.bucket());
+    assert!(next > present);
+}
+
+/// Two files claiming one id leaves every reference to it ambiguous, so the
+/// board refuses to render rather than pick one.
+#[test]
+fn list_rejects_a_duplicated_id() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = new_ticket(&dir, "First");
+
+    fs::write(
+        dir.path().join(format!("{}second.md", id.file_prefix())),
+        render::ticket(id, "Second", Kind::Bug, "john", DATE, None, ""),
+    )
+    .unwrap();
+
+    let error = list(dir.path()).unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .starts_with(&format!("{id} is claimed by more than one file: ")),
+        "{error}"
+    );
 }
 
 #[test]
@@ -96,7 +146,7 @@ fn comments_append_and_number_from_one() {
     let ticket = parse::document(&fs::read_to_string(path).unwrap()).unwrap();
     assert_eq!(ticket.comments.len(), 2);
     assert_eq!(ticket.comments[0].from, "john");
-    assert_eq!(ticket.comments[1].re.as_deref(), Some("T0001#1"));
+    assert_eq!(ticket.comments[1].re, Some(format!("{id}#1")));
 }
 
 #[test]
@@ -106,16 +156,21 @@ fn replies_must_reference_an_existing_comment() {
 
     let error = append_comment(dir.path(), id, "jp", STAMP, Some(1), "Reply.").unwrap_err();
 
-    assert_eq!(error.to_string(), "T0001 has no comment #1 to reply to.");
+    assert_eq!(
+        error.to_string(),
+        format!("{id} has no comment #1 to reply to.")
+    );
 }
 
 #[test]
 fn commenting_on_a_missing_ticket_fails() {
     let dir = Utf8TempDir::new().unwrap();
 
-    let error = append_comment(dir.path(), TicketId::new(9), "jp", STAMP, None, "Hi.").unwrap_err();
+    let missing: TicketId = "T-zzzzzzz".parse().unwrap();
 
-    assert_eq!(error.to_string(), "No ticket T0009.");
+    let error = append_comment(dir.path(), missing, "jp", STAMP, None, "Hi.").unwrap_err();
+
+    assert_eq!(error.to_string(), "No ticket T-zzzzzzz.");
 }
 
 #[test]
@@ -164,7 +219,8 @@ fn list_is_ordered_by_id_and_skips_other_files() {
 fn list_reports_unreadable_tickets_alongside_the_rest() {
     let dir = Utf8TempDir::new().unwrap();
     new_ticket(&dir, "Readable");
-    fs::write(dir.path().join("0009-mangled.md"), "no heading here\n").unwrap();
+    // Sorts last, so the readable ticket stays at index zero.
+    fs::write(dir.path().join("zzzzzzz-mangled.md"), "no heading here\n").unwrap();
 
     let entries = list(dir.path()).unwrap();
 
@@ -297,9 +353,8 @@ fn editing_one_part_leaves_the_other() {
     assert_eq!(ticket.description, "Description.");
 }
 
-/// A deleted ticket's number stays retired: the counter never goes backwards.
 #[test]
-fn deleting_removes_the_file_and_keeps_the_number_retired() {
+fn deleting_removes_the_file() {
     let dir = Utf8TempDir::new().unwrap();
     let id = new_ticket(&dir, "Mistaken");
 
@@ -307,11 +362,58 @@ fn deleting_removes_the_file_and_keeps_the_number_retired() {
 
     assert!(!path.exists());
     assert!(list(dir.path()).unwrap().is_empty());
-    assert_eq!(new_ticket(&dir, "Next").number(), 2);
     assert_eq!(
         delete(dir.path(), id).unwrap_err().to_string(),
-        "No ticket T0001."
+        format!("No ticket {id}.")
     );
+}
+
+/// A reassigned ticket keeps its slug and its content; only the id moves.
+#[test]
+fn reassign_renames_the_file_and_rewrites_the_heading() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = new_ticket(&dir, "Tool call header misaligned");
+    let path = locate(dir.path(), id).unwrap();
+
+    let done = reassign(dir.path(), &path, id.bucket() + 1).unwrap();
+
+    assert_eq!(done.old, id.to_string());
+    assert_ne!(done.new, id);
+    assert!(!path.exists());
+    assert_eq!(
+        done.path.file_name(),
+        Some(format!("{}tool-call-header-misaligned.md", done.new.file_prefix()).as_str())
+    );
+
+    let ticket = parse::document(&fs::read_to_string(&done.path).unwrap()).unwrap();
+    assert_eq!(ticket.id, done.new);
+    assert_eq!(ticket.title, "Tool call header misaligned");
+    assert_eq!(ticket.description, "Description.");
+}
+
+/// A ticket written before the id format changed carries a heading no parser
+/// accepts, so reassigning it must not go through one.
+#[test]
+fn reassign_converts_a_ticket_from_the_old_format() {
+    let dir = Utf8TempDir::new().unwrap();
+    let path = dir.path().join("0005-old-ticket.md");
+    fs::write(
+        &path,
+        "# T0005: Old ticket\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: john\n- \
+         **Date**: 2026-08-05\n\nBody.\n",
+    )
+    .unwrap();
+
+    let done = reassign(dir.path(), &path, 4_200).unwrap();
+
+    assert_eq!(done.old, "T0005");
+    assert_eq!(done.new.bucket(), 4_200);
+    assert!(!path.exists());
+
+    let ticket = parse::document(&fs::read_to_string(&done.path).unwrap()).unwrap();
+    assert_eq!(ticket.id, done.new);
+    assert_eq!(ticket.title, "Old ticket");
+    assert_eq!(ticket.description, "Body.");
 }
 
 #[test]

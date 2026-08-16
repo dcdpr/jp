@@ -4611,6 +4611,7 @@ dependencies = [
  "camino-tempfile",
  "indoc",
  "serde",
+ "serde_json",
 ]
 
 [[package]]

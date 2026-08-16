@@ -24,6 +24,67 @@ fn run_command(dir: &Utf8TempDir, command: Command) -> Result<Output, String> {
     )
 }
 
+/// Run git in `dir`, failing the test with its stderr rather than a bare status
+/// code.
+fn git(dir: &Utf8Path, args: &[&str]) -> String {
+    let output = std::process::Command::new("git")
+        .current_dir(dir)
+        .args(args)
+        .output()
+        .unwrap_or_else(|error| panic!("git {args:?}: {error}"));
+
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    String::from_utf8(output.stdout).unwrap()
+}
+
+/// A repository with `docs/ticket/`, one commit on `main`, and nothing else.
+///
+/// The config is set locally so the machine's identity, default branch name,
+/// and signing setup can't reach in and change what the test does.
+fn git_repo() -> Utf8TempDir {
+    let dir = Utf8TempDir::new().unwrap();
+    let root = dir.path();
+
+    git(root, &["init", "--initial-branch=main"]);
+    git(root, &["config", "user.name", "tester"]);
+    git(root, &["config", "user.email", "tester@example.com"]);
+    git(root, &["config", "commit.gpgsign", "false"]);
+
+    std::fs::create_dir_all(root.join("docs/ticket")).unwrap();
+    std::fs::write(root.join("README.md"), "# Fixture\n").unwrap();
+    commit(root, "Initial commit", None);
+
+    dir
+}
+
+/// Stage everything and commit, optionally at a fixed instant.
+///
+/// `at` fixes both dates so a test that reads a commit's timestamp back gets
+/// the value it wrote rather than whatever the clock said.
+fn commit(root: &Utf8Path, message: &str, at: Option<&str>) {
+    git(root, &["add", "-A"]);
+
+    let mut command = std::process::Command::new("git");
+    command.current_dir(root).args(["commit", "-m", message]);
+    if let Some(at) = at {
+        command
+            .env("GIT_AUTHOR_DATE", at)
+            .env("GIT_COMMITTER_DATE", at);
+    }
+
+    let output = command.output().unwrap();
+    assert!(
+        output.status.success(),
+        "git commit failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 /// Drive the plugin the way the host does: one JSON message in, the reply
 /// stream out.
 fn exchange(message: &HostToPlugin) -> Vec<PluginToHost> {
@@ -103,7 +164,7 @@ fn add_rejects_an_unknown_kind() {
 
 #[test]
 fn comment_takes_an_author_and_a_reply_target() {
-    let args = parse(&["comment", "T0042", "--author", "jp", "--re", "1"]).unwrap();
+    let args = parse(&["comment", "T-02wt0kx", "--author", "jp", "--re", "1"]).unwrap();
 
     match args.command {
         Command::Comment {
@@ -112,7 +173,7 @@ fn comment_takes_an_author_and_a_reply_target() {
             re,
             body,
         } => {
-            assert_eq!(id, Some(TicketId::new(42)));
+            assert_eq!(id, Some("T-02wt0kx".parse().unwrap()));
             assert_eq!(author.as_deref(), Some("jp"));
             assert_eq!(re, Some(1));
             assert_eq!(body, None);
@@ -124,25 +185,36 @@ fn comment_takes_an_author_and_a_reply_target() {
 /// A bare id is the common case, so it reads as `show`.
 #[test]
 fn a_bare_id_is_a_show() {
-    for args in [&["42"][..], &["042"], &["T0042"], &["t42"]] {
+    for args in [&["02wt0kx"][..], &["T02wt0kx"], &["T-02wt0kx"], &[
+        "t-02WT0KX",
+    ]] {
         match parse(args).unwrap().command {
             Command::Show { id, json } => {
-                assert_eq!(id, Some(TicketId::new(42)), "{args:?}");
+                assert_eq!(id, Some("T-02wt0kx".parse().unwrap()), "{args:?}");
                 assert!(!json);
             }
             other => panic!("expected show for {args:?}, got {other:?}"),
         }
     }
 
-    match parse(&["T0042", "--json"]).unwrap().command {
+    match parse(&["T-02wt0kx", "--json"]).unwrap().command {
         Command::Show { json, .. } => assert!(json),
         other => panic!("expected show, got {other:?}"),
     }
 }
 
-/// No subcommand name parses as an id, so the alias can't shadow one.
+/// An exact subcommand always wins over id parsing.
+///
+/// `comment` and `promote` are seven characters that fold onto the id alphabet,
+/// so they genuinely parse as ids; only the subcommand check keeps the alias
+/// from swallowing them.
 #[test]
 fn subcommands_are_not_mistaken_for_ids() {
+    assert!(
+        "comment".parse::<TicketId>().is_ok(),
+        "this test guards nothing if `comment` stops parsing as an id"
+    );
+
     for name in [
         "add", "comment", "close", "show", "promote", "import", "list",
     ] {
@@ -151,6 +223,14 @@ fn subcommands_are_not_mistaken_for_ids() {
             vec![name.to_owned()],
             "{name} was read as an id"
         );
+    }
+
+    match parse(&["comment", "T-02wt0kx", "--body", "Hi."])
+        .unwrap()
+        .command
+    {
+        Command::Comment { .. } => {}
+        other => panic!("expected comment, got {other:?}"),
     }
 }
 
@@ -245,17 +325,29 @@ fn commands_run_against_the_resolved_directory() {
         implements: None,
     })
     .unwrap();
-    assert!(created.text.contains("(T0001)"), "{}", created.text);
     assert!(created.warnings.is_empty());
 
+    // Ids are generated, so the rest of the lifecycle follows the one that was
+    // just handed out rather than a fixed number.
+    let id = store::list(dir.path()).unwrap()[0]
+        .ticket
+        .as_ref()
+        .unwrap()
+        .id;
+    assert!(
+        created.text.contains(&format!("({id})")),
+        "{}",
+        created.text
+    );
+
     let commented = run_command(&dir, Command::Comment {
-        id: Some(TicketId::new(1)),
+        id: Some(id),
         author: Some("john".to_owned()),
         re: None,
         body: Some("Reproduced at 72 columns.".to_owned()),
     })
     .unwrap();
-    assert_eq!(commented.text, "Added T0001#1 by john\n");
+    assert_eq!(commented.text, format!("Added {id}#1 by john\n"));
 
     let listed = run_command(&dir, Command::List {
         status: None,
@@ -265,13 +357,10 @@ fn commands_run_against_the_resolved_directory() {
     .unwrap();
     assert_eq!(
         listed.text,
-        "T0001  Todo         Bug      Tool call header misaligned\n"
+        format!("{id} Todo         Bug      Tool call header misaligned\n")
     );
 
-    let closed = run_command(&dir, Command::Close {
-        id: Some(TicketId::new(1)),
-    })
-    .unwrap();
+    let closed = run_command(&dir, Command::Close { id: Some(id) }).unwrap();
     assert!(closed.text.contains("Todo -> Done"), "{}", closed.text);
 
     let json = run_command(&dir, Command::List {
@@ -282,9 +371,183 @@ fn commands_run_against_the_resolved_directory() {
     .unwrap();
     let rows: Vec<serde_json::Value> = serde_json::from_str(&json.text).unwrap();
     assert_eq!(rows.len(), 1);
-    assert_eq!(rows[0]["id"], "T0001");
+    assert_eq!(rows[0]["id"], id.to_string());
     assert_eq!(rows[0]["status"], "Done");
     assert_eq!(rows[0]["comments"], 1);
+}
+
+/// A branch cut before the id change carries tickets the new parser skips
+/// silently, so migration has to find them by filename and fix what names them.
+#[test]
+fn migrate_converts_legacy_tickets_and_the_board() {
+    let dir = Utf8TempDir::new().unwrap();
+    std::fs::write(
+        dir.path().join("0005-old-ticket.md"),
+        "# T0005: Old ticket\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: john\n- \
+         **Date**: 2026-08-05\n\nBody.\n",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join(".board.json"),
+        "{\"todo\":[\"T0005\"],\"in_progress\":[],\"done\":[]}\n",
+    )
+    .unwrap();
+
+    let output = run_command(&dir, Command::Migrate).unwrap();
+
+    let id = store::list(dir.path()).unwrap()[0]
+        .ticket
+        .as_ref()
+        .unwrap()
+        .id;
+    assert!(!dir.path().join("0005-old-ticket.md").exists());
+    assert!(
+        dir.path()
+            .join(format!("{}old-ticket.md", id.file_prefix()))
+            .exists()
+    );
+
+    let board = std::fs::read_to_string(dir.path().join(".board.json")).unwrap();
+    assert_eq!(
+        board,
+        format!("{{\"todo\":[\"{id}\"],\"in_progress\":[],\"done\":[]}}\n")
+    );
+
+    assert!(
+        output.text.starts_with(&format!("T0005 -> {id} at ")),
+        "{}",
+        output.text
+    );
+}
+
+/// The whole point of `refresh`: the branch's own references follow the new id,
+/// and references that were already on `base` do not — they belong to the
+/// ticket that kept it.
+#[test]
+fn refresh_rewrites_the_branch_and_leaves_the_base_alone() {
+    let repo = git_repo();
+    let root = repo.path();
+    let dir = root.join("docs/ticket");
+
+    // On `main`: the ticket that wins the id, and a file naming it.
+    std::fs::write(
+        dir.join("02wt0kx-winner.md"),
+        "# T-02wt0kx: Winner\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: john\n- \
+         **Date**: 2026-08-14\n\nBody.\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("NOTES.md"), "See T-02wt0kx for the winner.\n").unwrap();
+    commit(root, "Add the winning ticket", None);
+
+    // On the branch: a second ticket that drew the same id, and a file of its
+    // own naming it.
+    git(root, &["checkout", "-b", "loser"]);
+    let losing = dir.join("02wt0kx-loser.md");
+    std::fs::write(
+        &losing,
+        "# T-02wt0kx: Loser\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: jane\n- \
+         **Date**: 2026-08-14\n\nOther body.\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("BRANCH.md"), "Fixes T-02wt0kx on this branch.\n").unwrap();
+    commit(root, "Add the losing ticket", Some("2026-08-14T12:00:00Z"));
+
+    let output = execute(
+        &dir,
+        Command::Refresh {
+            path: losing.clone(),
+            base: "main".to_owned(),
+        },
+        &serde_json::json!({}),
+    )
+    .unwrap();
+
+    // The loser moved.
+    assert!(!losing.exists());
+    let fresh = store::list(&dir)
+        .unwrap()
+        .into_iter()
+        .map(|entry| entry.ticket.unwrap())
+        .find(|ticket| ticket.title == "Loser")
+        .expect("the losing ticket survived under a new id");
+    assert_ne!(fresh.id.to_string(), "T-02wt0kx");
+
+    // The branch's own reference followed it.
+    assert_eq!(
+        std::fs::read_to_string(root.join("BRANCH.md")).unwrap(),
+        format!("Fixes {} on this branch.\n", fresh.id)
+    );
+
+    // The reference that was already on `main` did not.
+    assert_eq!(
+        std::fs::read_to_string(root.join("NOTES.md")).unwrap(),
+        "See T-02wt0kx for the winner.\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("02wt0kx-winner.md"))
+            .unwrap()
+            .lines()
+            .next(),
+        Some("# T-02wt0kx: Winner")
+    );
+
+    assert!(
+        output
+            .text
+            .starts_with(&format!("T-02wt0kx -> {} at ", fresh.id)),
+        "{}",
+        output.text
+    );
+    assert_eq!(output.warnings.len(), 1, "{:?}", output.warnings);
+}
+
+/// The new id must sit where the ticket was filed, not where the clock is now,
+/// or a refreshed ticket jumps ahead of everything it was created alongside.
+#[test]
+fn refresh_keeps_the_ticket_in_the_bucket_it_was_created_in() {
+    let repo = git_repo();
+    let root = repo.path();
+    let dir = root.join("docs/ticket");
+
+    let path = dir.join("02wt0kx-filed-earlier.md");
+    std::fs::write(
+        &path,
+        "# T-02wt0kx: Filed earlier\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: \
+         john\n- **Date**: 2026-08-14\n\nBody.\n",
+    )
+    .unwrap();
+    // 2026-08-14T00:00:00Z is 345,600 seconds past the epoch: bucket 69,120.
+    commit(root, "File it", Some("2026-08-14T00:00:00Z"));
+
+    execute(
+        &dir,
+        Command::Refresh {
+            path,
+            base: "main".to_owned(),
+        },
+        &serde_json::json!({}),
+    )
+    .unwrap();
+
+    let fresh = store::list(&dir).unwrap()[0].ticket.as_ref().unwrap().id;
+    assert_eq!(fresh.bucket(), 69_120);
+}
+
+#[test]
+fn migrate_of_a_converted_directory_does_nothing() {
+    let dir = Utf8TempDir::new().unwrap();
+    run_command(&dir, Command::Add {
+        kind: Some(Kind::Chore),
+        title: Some("Already current".to_owned()),
+        author: Some("john".to_owned()),
+        body: None,
+        implements: None,
+    })
+    .unwrap();
+
+    let output = run_command(&dir, Command::Migrate).unwrap();
+
+    assert_eq!(output.text, "No tickets to migrate.\n");
 }
 
 #[test]
@@ -292,7 +555,7 @@ fn an_empty_comment_is_refused() {
     let dir = Utf8TempDir::new().unwrap();
 
     let error = run_command(&dir, Command::Comment {
-        id: Some(TicketId::new(1)),
+        id: Some("T-02wt0kx".parse().unwrap()),
         author: Some("jp".to_owned()),
         re: None,
         body: Some("   ".to_owned()),
@@ -307,11 +570,11 @@ fn a_missing_ticket_is_an_error() {
     let dir = Utf8TempDir::new().unwrap();
 
     let error = run_command(&dir, Command::Close {
-        id: Some(TicketId::new(9)),
+        id: Some("T-zzzzzzz".parse().unwrap()),
     })
     .unwrap_err();
 
-    assert_eq!(error, "No ticket T0009.");
+    assert_eq!(error, "No ticket T-zzzzzzz.");
 }
 
 #[test]
@@ -348,18 +611,27 @@ fn a_run_reports_ready_then_output_then_exit() {
             PluginToHost::Print(print),
             PluginToHost::Exit(exit),
         ] => {
-            assert!(print.text.contains("(T0001)"), "{}", print.text);
             assert_eq!(print.channel, "content");
             assert_eq!(exit.code, 0);
+
+            // The id is generated, so the file it produced is what names it.
+            let ticket_dir = dir.path().join("docs/ticket");
+            let names: Vec<String> = std::fs::read_dir(&ticket_dir)
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+                .collect();
+            assert_eq!(names.len(), 1, "{names:?}");
+
+            let id = names[0]
+                .strip_suffix("-tool-call-header-misaligned.md")
+                .unwrap_or_else(|| panic!("unexpected filename {}", names[0]));
+            assert_eq!(
+                print.text,
+                format!("Created {ticket_dir}/{} (T-{id})\n", names[0])
+            );
         }
         other => panic!("unexpected exchange: {other:?}"),
     }
-
-    assert!(
-        dir.path()
-            .join("docs/ticket/0001-tool-call-header-misaligned.md")
-            .exists()
-    );
 }
 
 #[test]
@@ -395,7 +667,7 @@ fn unreadable_tickets_are_warned_about_separately() {
         implements: None,
     })
     .unwrap();
-    std::fs::write(dir.path().join("0009-mangled.md"), "no heading here\n").unwrap();
+    std::fs::write(dir.path().join("zzzzzzz-mangled.md"), "no heading here\n").unwrap();
 
     let listed = run_command(&dir, Command::List {
         status: None,
@@ -407,5 +679,5 @@ fn unreadable_tickets_are_warned_about_separately() {
     let rows: Vec<serde_json::Value> = serde_json::from_str(&listed.text).unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(listed.warnings.len(), 1);
-    assert!(listed.warnings[0].contains("0009-mangled.md"));
+    assert!(listed.warnings[0].contains("zzzzzzz-mangled.md"));
 }

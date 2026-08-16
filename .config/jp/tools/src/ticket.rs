@@ -207,7 +207,7 @@ fn render_list(tickets: &[&Ticket], unreadable: &[String]) -> String {
             .map_or_else(String::new, |by| format!(" [blocked by {by}]"));
 
         out.push_str(&format!(
-            "{id:<6} {status:<12} {kind:<8} {}{blocked}{comments}\n",
+            "{id:<9} {status:<12} {kind:<8} {}{blocked}{comments}\n",
             ticket.title
         ));
     }
@@ -274,17 +274,11 @@ fn render_ticket(ticket: &Ticket, path: &str) -> String {
 
 /// Read a ticket id from a tool argument.
 ///
-/// Models pass ids both as strings (`"T0042"`) and as bare numbers, so both are
-/// accepted.
+/// An id carries letters, so anything that isn't a string is rejected outright
+/// rather than coerced.
 fn id_arg(value: &Value) -> Result<TicketId, String> {
     match value {
         Value::String(id) => id.parse().map_err(|error: ParseError| error.to_string()),
-        Value::Number(number) => number
-            .as_u64()
-            .and_then(|number| u32::try_from(number).ok())
-            .filter(|number| *number > 0)
-            .map(TicketId::new)
-            .ok_or_else(|| format!("`{number}` is not a ticket id.")),
         other => Err(format!("`{other}` is not a ticket id.")),
     }
 }

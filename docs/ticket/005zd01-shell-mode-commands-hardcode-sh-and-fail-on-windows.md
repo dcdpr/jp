@@ -1,4 +1,4 @@
-# T0002: Shell-mode commands hardcode `sh` and fail on Windows
+# T-005zd01: Shell-mode commands hardcode `sh` and fail on Windows
 
 - **Status**: Todo
 - **Kind**: Bug

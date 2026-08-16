@@ -117,6 +117,29 @@ fn push_comment(out: &mut String, comment: &Comment) {
     out.push('\n');
 }
 
+/// Replace the id in a ticket's title heading, keeping the title.
+///
+/// The existing id is returned as written rather than parsed, so a heading
+/// carrying an id from an older format can be rewritten too.
+/// Returns `None` when the document doesn't open with a `# <id>: Title`
+/// heading.
+#[must_use]
+pub fn set_id(document: &str, id: TicketId) -> Option<(String, String)> {
+    let mut lines: Vec<String> = document.lines().map(ToOwned::to_owned).collect();
+    let index = lines.iter().position(|line| !line.trim().is_empty())?;
+
+    let (old, title) = lines[index].strip_prefix("# ")?.split_once(':')?;
+    let old = old.trim().to_owned();
+    lines[index] = format!("# {id}:{title}");
+
+    let mut out = lines.join("\n");
+    if document.ends_with('\n') {
+        out.push('\n');
+    }
+
+    Some((old, out))
+}
+
 /// Set a field in the ticket's metadata block, returning the new document.
 ///
 /// An existing field is replaced in place; one the ticket doesn't carry yet

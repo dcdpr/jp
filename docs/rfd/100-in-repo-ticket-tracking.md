@@ -5,6 +5,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-08-05
 - **Extends**: [RFD 001], [RFD 041]
+- **Extended by**: [RFD 102](102-collision-resistant-ticket-identifiers.md)
 
 ## Summary
 
@@ -59,21 +60,25 @@ without pushing task work back into RFDs.
 
 Unlike RFDs, tickets can be deleted — a ticket carrying false claims or
 imported spam is removed outright, so that nothing reads it as true.
-Ticket numbers are never reused: the next id comes from a monotonic counter, not
-from the highest file on disk.
 References to a deleted ticket render as dangling.
+
+> [!TIP]
+> [RFD 102] replaces the counter with a time-ordered random id, so that two
+> checkouts allocate without coordinating.
+> Ids become collision-resistant rather than never-reused.
 
 ## Ticket Format
 
-A ticket is a single markdown file at `docs/ticket/NNNN-slug.md`, where `NNNN`
-is a zero-padded sequential number.
-The canonical reference form is `T0042`; tooling accepts `42`, `042`, and `T42`.
+A ticket is a single markdown file at `docs/ticket/<id>-slug.md`.
+The canonical reference form is `T-02wt0kx`; tooling accepts `T02wt0kx`, the
+bare body, any case, and unique prefixes.
+The id's shape and allocation are specified in [RFD 102].
 
 Description and full discussion live in that one file, so reading a ticket is
 one `fs_read_file`, one `cat`, or one page on the website.
 
 ````markdown
-# T0042: Tool call header misaligned
+# T-02wt0kx: Tool call header misaligned
 
 - **Status**: In Progress
 - **Kind**: Bug
@@ -97,7 +102,7 @@ Reproduced at 72 columns. Not at 80.
 
 - **From**: jp
 - **Date**: 2026-08-05T14:31:02Z
-- **Re**: T0042#1
+- **Re**: T-02wt0kx#1
 
 The wrap calculation in `jp_printer` uses the pre-indent width:
 
@@ -119,7 +124,7 @@ parses with a three-line regex and renders as visible content.
 | `Kind`        | yes      | `Bug`, `Feature`, `Chore`      |
 | `Authors`     | yes      |                                |
 | `Date`        | yes      | `YYYY-MM-DD`                   |
-| `Blocked by`  | no       | `T0041`, or free text          |
+| `Blocked by`  | no       | `T-02wt0m3`, or free text      |
 | `Implements`  | no       | The RFD this ticket implements |
 | `Promoted to` | no       | The RFD this ticket became     |
 | `GitHub`      | no       | `#123`, set by import          |
@@ -142,7 +147,7 @@ information arrives, and authors fix their own comments.
 Deleting a comment replaces its body with a marker naming the reason (`deleted`,
 `off-topic`, `spam`) and keeps the block.
 
-Replies are recorded as `- **Re**: T0042#1`, referencing a comment by its
+Replies are recorded as `- **Re**: T-02wt0kx#1`, referencing a comment by its
 1-based position.
 Storage stays flat; the website and terminal render the thread.
 Positions are not identifiers: two branches appending concurrently can shift
@@ -318,3 +323,4 @@ How the tooling gets there is not fixed.
 [PR #872]: https://github.com/dcdpr/jp/pull/872
 [RFD 001]: 001-jp-rfd-process.md
 [RFD 041]: 041-rfd-lifecycle-enhancements.md
+[RFD 102]: 102-collision-resistant-ticket-identifiers.md

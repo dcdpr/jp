@@ -185,17 +185,17 @@ const ticketBoardWriter = {
         const readTickets = () => {
             const tickets = new Map()
             for (const name of readdirSync(dir)) {
-                if (!/^\d{4}-.+\.md$/.test(name)) continue
+                if (!/^[0-9a-z]{7}-.+\.md$/.test(name)) continue
                 const file = resolve(dir, name)
                 const content = readFileSync(file, 'utf-8')
                 const field = (key) =>
                     content.match(new RegExp(`^- \\*\\*${key}\\*\\*:\\s*(.+)`, 'm'))?.[1]?.trim()
                         ?? null
-                const id = `T${name.slice(0, 4)}`
+                const id = `T-${name.slice(0, 7)}`
                 tickets.set(id, {
                     id,
                     file,
-                    title: content.match(/^# T\d+:\s*(.+)/m)?.[1]?.trim() ?? name,
+                    title: content.match(/^# T-[0-9a-z]{7}:\s*(.+)/m)?.[1]?.trim() ?? name,
                     status: field('Status'),
                     kind: field('Kind'),
                     blockedBy: field('Blocked by'),

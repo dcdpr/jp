@@ -1,10 +1,10 @@
 //! In-repo tickets: work items tracked as markdown files under `docs/ticket/`.
 //!
-//! A ticket is a single file, `docs/ticket/NNNN-slug.md`, holding a metadata
+//! A ticket is a single file, `docs/ticket/<id>-slug.md`, holding a metadata
 //! block, a description, and an append-only list of comments:
 //!
 //! ```markdown
-//! # T0042: Tool call header misaligned
+//! # T-02wt0kx: Tool call header misaligned
 //!
 //! - **Status**: Todo
 //! - **Kind**: Bug
@@ -29,74 +29,24 @@
 //! Each comment opens with its own separator, so writing one appends the
 //! separator, the metadata, and the body, leaving everything above untouched.
 //!
-//! [`parse`] reads a document, [`render`] writes one, [`store`] holds the file
-//! operations (id allocation, create, comment, close, list, import), and
-//! [`import`] carries the rules for content that comes from upstream.
+//! [`id`] defines the identifier, [`parse`] reads a document, [`render`] writes
+//! one, [`store`] holds the file operations (id allocation, create, comment,
+//! close, list, import), and [`import`] carries the rules for content that
+//! comes from upstream.
 //!
 //! The format is specified in `docs/rfd/100-in-repo-ticket-tracking.md`.
 
 use std::{fmt, str::FromStr};
 
-use serde::{Serialize, Serializer};
+use serde::Serialize;
 
+pub mod id;
 pub mod import;
 pub mod parse;
 pub mod render;
 pub mod store;
 
-/// A ticket id.
-///
-/// The canonical form is `T0042`; `42`, `042`, and `T42` all parse to the same
-/// id.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct TicketId(u32);
-
-impl TicketId {
-    #[must_use]
-    pub fn new(number: u32) -> Self {
-        Self(number)
-    }
-
-    /// The bare number, without the `T` prefix or zero padding.
-    #[must_use]
-    pub fn number(self) -> u32 {
-        self.0
-    }
-
-    /// The filename prefix this id's file carries, e.g. `0042-`.
-    #[must_use]
-    pub fn file_prefix(self) -> String {
-        format!("{:04}-", self.0)
-    }
-}
-
-impl fmt::Display for TicketId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "T{:04}", self.0)
-    }
-}
-
-impl FromStr for TicketId {
-    type Err = ParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let trimmed = s.trim();
-        trimmed
-            .strip_prefix(['T', 't'])
-            .unwrap_or(trimmed)
-            .parse::<u32>()
-            .ok()
-            .filter(|number| *number > 0)
-            .map(Self)
-            .ok_or_else(|| ParseError::Id(s.to_owned()))
-    }
-}
-
-impl Serialize for TicketId {
-    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.collect_str(self)
-    }
-}
+pub use id::TicketId;
 
 /// Where a ticket sits on the board.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -192,8 +142,8 @@ pub struct Metadata {
 ///
 /// `from` is a short handle (`john`, `jp`); imported GitHub comments use
 /// `gh:username`.
-/// `re` holds a reference to the comment being replied to, in `T0042#1` form,
-/// where the number is the 1-based position of that comment in the file.
+/// `re` holds a reference to the comment being replied to, in `T-02wt0kx#1`
+/// form, where the number is the 1-based position of that comment in the file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Comment {
     pub from: String,
@@ -215,7 +165,7 @@ pub struct Ticket {
 /// A document that doesn't hold a well-formed ticket.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParseError {
-    /// The document doesn't open with a `# T0042: Title` heading.
+    /// The document doesn't open with a `# T-02wt0kx: Title` heading.
     MissingTitle,
     /// The title heading isn't followed by a metadata block.
     MissingMetadata,
@@ -223,7 +173,7 @@ pub enum ParseError {
     MissingField(&'static str),
     /// A metadata field holds a value the format doesn't define.
     InvalidValue { field: &'static str, value: String },
-    /// A ticket id that is neither `42`, `042`, nor `T0042`.
+    /// A string that isn't a ticket id.
     Id(String),
 }
 
@@ -231,7 +181,7 @@ impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::MissingTitle => {
-                f.write_str("Ticket does not open with a `# T0042: Title` heading.")
+                f.write_str("Ticket does not open with a `# T-02wt0kx: Title` heading.")
             }
             Self::MissingMetadata => {
                 f.write_str("Ticket title is not followed by a metadata block.")
@@ -240,7 +190,7 @@ impl fmt::Display for ParseError {
             Self::InvalidValue { field, value } => {
                 write!(f, "`{value}` is not a valid `{field}` value.")
             }
-            Self::Id(value) => write!(f, "`{value}` is not a ticket id (try 42, 042, or T0042)."),
+            Self::Id(value) => write!(f, "`{value}` is not a ticket id (try T-02wt0kx)."),
         }
     }
 }
