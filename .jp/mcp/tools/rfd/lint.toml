@@ -2,7 +2,7 @@
 enable = false
 run = "unattended"
 source = "local"
-command = "just rfd-lint {{tool.arguments.nnn}} {{tool.arguments.flag | default('')}}"
+command = "just rfd-lint {{tool.arguments.nnn}}"
 description = """Check RFDs deterministically: prose budget against the category \
 target and hard limit, sentence length, hedging, banned vocabulary, filler, \
 link hygiene, metadata, filename/heading agreement, duplicated sentences, and \
@@ -15,7 +15,11 @@ Draft or Discussion. Everything line-level is a warning and never gates.
 
 Use it to measure your own work rather than counting words by hand. A hand \
 count is wrong by a hundred words or more on a document of any size, and the \
-budget decisions that follow from it are wrong with it."""
+budget decisions that follow from it are wrong with it.
+
+The `--summary`, `--errors-only`, and `--json` modes are not exposed here. An \
+optional parameter rendered through `default('')` fails to template, so this \
+tool takes ids only. Run `just rfd-lint` directly for those modes."""
 
 [conversation.tools.rfd_lint.style]
 inline_results = "full"
@@ -26,15 +30,4 @@ parameters = "function_call"
 description = """One or more RFD ids, space separated: permanent numbers (95, \
 095) or draft IDs (D24)."""
 required = true
-type = "string"
-
-# Documented in the description rather than constrained with `enum`. An
-# optional parameter carrying an `enum` fails to render through
-# `default('')`; `renumber.toml` proves the plain-string form works.
-[conversation.tools.rfd_lint.parameters.flag]
-description = """Optional output mode, one of `--summary`, `--errors-only`, or \
-`--json`. `--summary` prints a word-count table with no findings, worst first. \
-`--errors-only` drops the warnings. `--json` emits the full report as \
-structured data. Omit it for the normal report."""
-required = false
 type = "string"
