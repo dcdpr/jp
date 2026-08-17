@@ -438,8 +438,8 @@ same effect as the router's 2nd-Ctrl-C path.
 
 A prompt that *cannot run* is a different case, and must not escalate.
 An I/O failure or a missing terminal answers nothing, so treating it as an
-escalation would end the run on a decision the user never made — silently, since
-there is no menu on screen to explain it.
+escalation would end the run on a decision the user never made — silently,
+since there is no menu on screen to explain it.
 The handler returns `PromptFailed` instead: the event loop leaves its work as it
 was and leaves the press on the escalation ladder.
 The user's next Ctrl-C then reaches the router with the count intact and
@@ -500,8 +500,8 @@ uses).
 Cancelling an interrupt menu by either means escalates, so the two are treated
 alike.
 What must stay distinct is cancellation versus failure: every other
-`InquireError` — `NotTTY`, an I/O error, a custom error — means the prompt never
-ran, and maps to `PromptFailed` rather than an escalation.
+`InquireError` — `NotTTY`, an I/O error, a custom error — means the prompt
+never ran, and maps to `PromptFailed` rather than an escalation.
 
 For non-interrupt prompts (tool permissions, tool questions), distinguishing ESC
 ("skip this prompt") from Ctrl-C ("I want the interrupt menu") remains valuable
@@ -520,8 +520,8 @@ This tells the router to notify the next handler down the stack.
 If no handler remains, the router cancels the `shutdown_token`.
 
 Declining leaves the press on the escalation ladder.
-Nothing has acted on it yet — it is only being offered to a different handler —
-so it still counts if the user presses again.
+Nothing has acted on it yet — it is only being offered to a different handler
+— so it still counts if the user presses again.
 
 ### Interaction With RFD 026 and RFD 027
 

@@ -151,10 +151,21 @@ Still open until it reproduces.
 
 Fixed one proven cause of this symptom, though not the evidence recorded above.
 
-The escalation ladder was counting presses it had already answered. `EscalationState::bump` only reset on elapsed time, so answering a menu and interrupting again inside the 2s cooldown counted as press two and routed straight to `Shutdown`, bypassing the handler stack — no menu, no message. A delivered press is now an `InterruptNotice` the handler resolves: `handled()` clears the count, `decline()` and dropping leave it intact. Only unanswered presses escalate.
+The escalation ladder was counting presses it had already answered.
+`EscalationState::bump` only reset on elapsed time, so answering a menu and
+interrupting again inside the 2s cooldown counted as press two and routed
+straight to `Shutdown`, bypassing the handler stack — no menu, no message.
+A delivered press is now an `InterruptNotice` the handler resolves: `handled()`
+clears the count, `decline()` and dropping leave it intact.
+Only unanswered presses escalate.
 
-Also split a user-cancelled menu from one that could not run. The latter returns `PromptFailed` and leaves the press on the ladder rather than escalating on a decision nobody made.
+Also split a user-cancelled menu from one that could not run.
+The latter returns `PromptFailed` and leaves the press on the ladder rather than
+escalating on a decision nobody made.
 
-Confirmed live: eight presses, five inside the cooldown of an answered one, all reached the handler.
+Confirmed live: eight presses, five inside the cooldown of an answered one, all
+reached the handler.
 
-Staying open because the traces in the description showed `routed=Handler` with a ~20ms return — a different signature from this bug — and those files are gone.
+Staying open because the traces in the description showed `routed=Handler` with
+a ~20ms return — a different signature from this bug — and those files are
+gone.
