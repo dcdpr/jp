@@ -69,14 +69,15 @@ use crate::{
     editor::build_editor_backend,
     error::Error,
     render::metadata::set_rendered_arguments,
-    signals::SignalRouter,
+    signals::{InterruptNotice, SignalRouter},
     timer::LineTimer,
 };
 
 /// Events produced by the merged streaming loop sources.
 enum StreamingLoopEvent {
-    /// A Ctrl-C interrupt notification from the signal router.
-    Interrupt,
+    /// A Ctrl-C press delivered by the signal router, carried as the notice the
+    /// loop resolves once it has decided what the press did.
+    Interrupt(InterruptNotice),
     /// An event from the LLM provider stream.
     Llm(Box<Result<Event, StreamError>>),
     /// A tick from the preparing indicator timer, carrying the elapsed time
@@ -155,7 +156,7 @@ fn event_keeps_waiting_indicator(event: &StreamingLoopEvent) -> bool {
             result.as_ref(),
             Ok(Event::KeepAlive | Event::Patch(_) | Event::Flush { .. })
         ),
-        StreamingLoopEvent::Interrupt | StreamingLoopEvent::PreparingTick(_) => false,
+        StreamingLoopEvent::Interrupt(_) | StreamingLoopEvent::PreparingTick(_) => false,
     }
 }
 
@@ -268,10 +269,11 @@ pub(super) async fn run_turn_loop(
     loop {
         // A Ctrl-C that landed between phases ends the turn gracefully:
         // commit any partial assistant content and complete.
-        if turn_interrupt_rx.try_recv().is_ok() {
+        if let Ok(notice) = turn_interrupt_rx.try_recv() {
             info!("Interrupt received between turn phases; completing the turn.");
             lock.as_mut()
                 .update_events(|stream| turn_coordinator.complete_early(stream));
+            notice.handled();
         }
 
         match turn_coordinator.current_phase() {
@@ -333,7 +335,7 @@ pub(super) async fn run_turn_loop(
                 // guard deregisters the handler when the cycle ends.
                 let (interrupt_guard, interrupt_rx) = signals.push_handler();
                 let interrupt_stream = StreamSource::Interrupt(
-                    ReceiverStream::new(interrupt_rx).map(|()| StreamingLoopEvent::Interrupt),
+                    ReceiverStream::new(interrupt_rx).map(StreamingLoopEvent::Interrupt),
                 );
 
                 let raw_stream = provider
@@ -411,7 +413,7 @@ pub(super) async fn run_turn_loop(
                     }
 
                     match event {
-                        StreamingLoopEvent::Interrupt => {
+                        StreamingLoopEvent::Interrupt(notice) => {
                             // Clear the preparing display before showing the
                             // interrupt menu to avoid visual conflicts.
                             tool_renderer.clear_temp_line();
@@ -431,8 +433,25 @@ pub(super) async fn run_turn_loop(
                                     !llm_alive,
                                 )
                             });
+
+                            // The menu answered the press, so it no longer
+                            // counts toward the router's escalation ladder: the
+                            // next one opens this menu again instead of
+                            // bypassing it. An escalation is the user asking to
+                            // get past the menu, and a menu that could not run
+                            // answered nothing; both leave the press in place so
+                            // the ladder still gets the user out.
                             match action {
-                                StreamingInterruptResult::Continue => {}
+                                StreamingInterruptResult::Escalate
+                                | StreamingInterruptResult::PromptFailed => {}
+                                _ => notice.handled(),
+                            }
+
+                            match action {
+                                // Either the user chose to keep waiting, or the
+                                // menu could not be shown and nothing happened.
+                                StreamingInterruptResult::Continue
+                                | StreamingInterruptResult::PromptFailed => {}
                                 StreamingInterruptResult::Break => break,
                                 StreamingInterruptResult::Abort => return Ok(()),
                                 // The menu itself was cancelled with Ctrl-C:
@@ -480,7 +499,7 @@ pub(super) async fn run_turn_loop(
                                         // A Ctrl-C cut the backoff wait short:
                                         // run the streaming interrupt flow with
                                         // the stream known dead.
-                                        StreamErrorOutcome::Interrupted => {
+                                        StreamErrorOutcome::Interrupted(notice) => {
                                             let action = conv.update_events(|stream| {
                                                 handle_streaming_interrupt(
                                                     &mut turn_coordinator,
@@ -493,6 +512,13 @@ pub(super) async fn run_turn_loop(
                                                     true,
                                                 )
                                             });
+
+                                            match action {
+                                                StreamingInterruptResult::Escalate
+                                                | StreamingInterruptResult::PromptFailed => {}
+                                                _ => notice.handled(),
+                                            }
+
                                             match action {
                                                 // With a dead stream, "continue"
                                                 // commits partial output as
@@ -500,7 +526,11 @@ pub(super) async fn run_turn_loop(
                                                 // for a fresh request; a
                                                 // keep-polling Continue cannot
                                                 // occur here.
+                                                // A menu that could not run also
+                                                // breaks: the stream is dead, so
+                                                // there is nothing to resume.
                                                 StreamingInterruptResult::Continue
+                                                | StreamingInterruptResult::PromptFailed
                                                 | StreamingInterruptResult::Break => break,
                                                 StreamingInterruptResult::Abort => {
                                                     return Ok(());
