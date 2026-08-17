@@ -49,7 +49,7 @@ use jp_config::{
 };
 use jp_printer::{OutputFormat, OutputWidth, Printer};
 use jp_storage::backend::{FsStorageBackend, NullLockBackend, NullPersistBackend};
-use jp_term::table::{DetailRow, details, details_markdown};
+use jp_term::table::{DetailRow, Details, details, details_markdown};
 use jp_workspace::{Workspace, user_data_dir};
 use relative_path::RelativePath;
 use serde_json::Value;
@@ -715,6 +715,7 @@ fn parse_error(error: cmd::Error, format: OutputFormat) -> (u8, String) {
             })
             .collect();
 
+        let rows = Details::Fields(rows);
         let rendered = if format.is_pretty() {
             details(message.as_deref(), rows)
         } else {

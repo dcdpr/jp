@@ -3,6 +3,25 @@ use jp_conversation::{Compaction, ReasoningPolicy, SummaryPolicy, ToolCallPolicy
 use super::*;
 
 #[test]
+fn label_detail_item_renders_key_and_value() {
+    let item = label_detail_item("branch", "main");
+
+    assert_eq!(item.text, "branch=main");
+    assert_eq!(item.json["key"], "branch");
+    assert_eq!(item.json["value"], "main");
+}
+
+/// A bare label carries an empty value; showing `draft=` would suggest the
+/// value is meaningful, so only the key is rendered.
+#[test]
+fn label_detail_item_renders_a_bare_label_as_the_key_alone() {
+    let item = label_detail_item("draft", "");
+
+    assert_eq!(item.text, "draft");
+    assert_eq!(item.json["value"], "");
+}
+
+#[test]
 fn compaction_detail_item_summary_takes_precedence_over_mechanical_label() {
     // A compaction can carry a summary alongside stale reasoning/tool_calls
     // fields (e.g. from an older DSL rule); summary must still win the label.

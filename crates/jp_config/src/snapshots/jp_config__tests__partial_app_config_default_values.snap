@@ -164,6 +164,9 @@ Ok(
                         discard_when_merged: true,
                     },
                 ),
+                labels: Map(
+                    {},
+                ),
                 inquiry: PartialInquiryConfig {
                     assistant: PartialAssistantOverrideConfig {
                         system_prompt: None,
