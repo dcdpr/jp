@@ -100,13 +100,13 @@ pub fn replace_content(
     Some(out)
 }
 
-/// Write one comment: the separator that opens it, its metadata, and its body.
+/// Render one comment: the separator that opens it, its metadata, and its body.
 ///
 /// A comment carries its own separator, so appending one never has to touch
 /// what is already there.
-/// Expects `out` not to end in a newline.
-fn push_comment(out: &mut String, comment: &Comment) {
-    out.push_str("\n\n-----\n\n");
+#[must_use]
+pub fn comment(comment: &Comment) -> String {
+    let mut out = String::from("-----\n\n");
     out.push_str(&format!("- **From**: {}\n", comment.from));
     out.push_str(&format!("- **Date**: {}\n", comment.date));
     if let Some(re) = &comment.re {
@@ -115,6 +115,16 @@ fn push_comment(out: &mut String, comment: &Comment) {
     out.push('\n');
     out.push_str(comment.body.trim());
     out.push('\n');
+
+    out
+}
+
+/// Append one comment to a document.
+///
+/// Expects `out` not to end in a newline.
+fn push_comment(out: &mut String, entry: &Comment) {
+    out.push_str("\n\n");
+    out.push_str(&comment(entry));
 }
 
 /// Set a field in the ticket's metadata block, returning the new document.

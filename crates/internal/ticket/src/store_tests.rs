@@ -81,6 +81,27 @@ fn a_stale_counter_does_not_collide() {
     assert_eq!(new_ticket(&dir, "Third").number(), 3);
 }
 
+/// A preview needs the id `create` is about to hand out, without burning it.
+#[test]
+fn peeking_names_the_next_id_without_taking_it() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    assert_eq!(peek_next_id(dir.path()).unwrap().number(), 1);
+    assert_eq!(peek_next_id(dir.path()).unwrap().number(), 1);
+    assert_eq!(new_ticket(&dir, "First").number(), 1);
+    assert_eq!(peek_next_id(dir.path()).unwrap().number(), 2);
+}
+
+/// Peeking is read-only: a directory that doesn't exist yet stays that way.
+#[test]
+fn peeking_does_not_create_the_ticket_directory() {
+    let dir = Utf8TempDir::new().unwrap();
+    let tickets = dir.path().join("docs/ticket");
+
+    assert_eq!(peek_next_id(&tickets).unwrap().number(), 1);
+    assert!(!tickets.exists());
+}
+
 #[test]
 fn comments_append_and_number_from_one() {
     let dir = Utf8TempDir::new().unwrap();

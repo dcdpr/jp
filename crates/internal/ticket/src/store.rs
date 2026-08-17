@@ -349,10 +349,11 @@ fn files(dir: &Utf8Path) -> Result<Vec<(TicketId, Utf8PathBuf)>> {
     Ok(files)
 }
 
-/// Hand out the next id, recording it in the counter file.
-fn allocate_id(dir: &Utf8Path) -> Result<TicketId> {
-    fs::create_dir_all(dir)?;
-
+/// The id the next ticket will carry.
+///
+/// Reads the counter without advancing it, so a caller that renders a ticket
+/// before it exists names the id [`create`] goes on to hand out.
+pub fn peek_next_id(dir: &Utf8Path) -> Result<TicketId> {
     let counter = fs::read_to_string(dir.join(COUNTER))
         .ok()
         .and_then(|text| text.trim().parse::<u32>().ok())
@@ -363,10 +364,17 @@ fn allocate_id(dir: &Utf8Path) -> Result<TicketId> {
         .max()
         .unwrap_or(0);
 
-    let next = counter.max(highest) + 1;
-    fs::write(dir.join(COUNTER), format!("{next}\n"))?;
+    Ok(TicketId::new(counter.max(highest) + 1))
+}
 
-    Ok(TicketId::new(next))
+/// Hand out the next id, recording it in the counter file.
+fn allocate_id(dir: &Utf8Path) -> Result<TicketId> {
+    fs::create_dir_all(dir)?;
+
+    let id = peek_next_id(dir)?;
+    fs::write(dir.join(COUNTER), format!("{}\n", id.number()))?;
+
+    Ok(id)
 }
 
 /// Build the filename slug from a title.

@@ -6,13 +6,18 @@
 //! Tickets the assistant writes are attributed to `jp`, and comments are
 //! rendered with their 1-based positions so a reply can name the comment it
 //! answers.
+//!
+//! `ticket_create` and `ticket_comment` also answer the format-arguments
+//! action, previewing the document they are about to write in the shape it
+//! takes on disk.
 
-use std::path::MAIN_SEPARATOR;
+use std::{fs, path::MAIN_SEPARATOR};
 
 // The leading `::` picks the crate over this module, which shares its name.
-use ::ticket::{Kind, ParseError, Status, Ticket, TicketId, store};
+use ::ticket::{Comment, Kind, ParseError, Status, Ticket, TicketId, parse, render, store};
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{Local, SecondsFormat, Utc};
+use jp_md::format::Formatter;
 use serde_json::Value;
 
 use crate::{
@@ -35,13 +40,29 @@ pub fn run(ctx: Context, t: Tool) -> ToolResult {
             let Ok(kind) = t.req::<String>("kind")?.parse::<Kind>() else {
                 return error("`kind` must be one of: bug, feature, chore.");
             };
-            create(
-                root,
-                kind,
-                &t.req::<String>("title")?,
-                t.opt::<String>("implements")?.as_deref(),
-                t.opt("body")?,
-            )
+            let title = t.req::<String>("title")?;
+            let implements = t.opt::<String>("implements")?;
+            let body = t.opt::<String>("body")?;
+
+            if ctx.action.is_format_arguments() {
+                // Peek rather than allocate: the call still has to be
+                // approved, and a preview that burned an id would leave a gap
+                // in the board for every rejected call.
+                let id = store::peek_next_id(&dir(root))?;
+                let date = Local::now().format("%Y-%m-%d").to_string();
+
+                return Ok(preview_create(
+                    id,
+                    kind,
+                    &title,
+                    implements.as_deref(),
+                    body.as_deref(),
+                    &date,
+                )
+                .into());
+            }
+
+            create(root, kind, &title, implements.as_deref(), body)
         }
 
         "comment" => {
@@ -49,7 +70,15 @@ pub fn run(ctx: Context, t: Tool) -> ToolResult {
                 Ok(id) => id,
                 Err(message) => return error(message),
             };
-            comment(root, id, t.opt("re")?, &t.req::<String>("body")?)
+            let re = t.opt("re")?;
+            let body = t.req::<String>("body")?;
+
+            if ctx.action.is_format_arguments() {
+                let date = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
+                return Ok(preview_comment(root, id, re, &body, &date).into());
+            }
+
+            comment(root, id, re, &body)
         }
 
         "close" => match id_arg(&t.req("id")?) {
@@ -107,6 +136,26 @@ fn create(
     Ok(format!("Created {id} at {}", relative(root, &path)).into())
 }
 
+/// Render the ticket file `create` is about to write.
+fn preview_create(
+    id: TicketId,
+    kind: Kind,
+    title: &str,
+    implements: Option<&str>,
+    body: Option<&str>,
+    date: &str,
+) -> String {
+    preview(&render::ticket(
+        id,
+        title.trim(),
+        kind,
+        HANDLE,
+        date,
+        implements,
+        body.unwrap_or_default(),
+    ))
+}
+
 fn comment(root: &Utf8Path, id: TicketId, re: Option<usize>, body: &str) -> ToolResult {
     if body.trim().is_empty() {
         return error("`body` must not be empty.");
@@ -121,6 +170,30 @@ fn comment(root: &Utf8Path, id: TicketId, re: Option<usize>, body: &str) -> Tool
         )),
         Err(other) => Err(other.into()),
     }
+}
+
+/// Render the comment block `comment` is about to append, under the heading of
+/// the ticket it lands on.
+fn preview_comment(
+    root: &Utf8Path,
+    id: TicketId,
+    re: Option<usize>,
+    body: &str,
+    date: &str,
+) -> String {
+    let heading = match title_of(root, id) {
+        Some(title) => format!("# {id}: {title}"),
+        None => format!("# {id}\n\n\u{26a0} No {id}; this call will fail."),
+    };
+
+    let comment = Comment {
+        from: HANDLE.to_owned(),
+        date: date.to_owned(),
+        re: re.map(|position| format!("{id}#{position}")),
+        body: body.to_owned(),
+    };
+
+    preview(&format!("{heading}\n\n{}", render::comment(&comment)))
 }
 
 fn close(root: &Utf8Path, id: TicketId) -> ToolResult {
@@ -183,6 +256,36 @@ fn relative(root: &Utf8Path, path: &Utf8Path) -> String {
         .unwrap_or(path)
         .as_str()
         .replace(MAIN_SEPARATOR, "/")
+}
+
+/// The title of a ticket on disk, if it is there and readable.
+fn title_of(root: &Utf8Path, id: TicketId) -> Option<String> {
+    let path = store::locate_ticket(&dir(root), id).ok()?;
+    let document = fs::read_to_string(path).ok()?;
+
+    parse::document(&document).ok().map(|ticket| ticket.title)
+}
+
+/// Style a document for the terminal as a tool-call preview.
+///
+/// The document is quoted first, so the transcript carries a marker down the
+/// whole preview and the reader can see where the ticket ends and the
+/// conversation resumes.
+/// Falls back to the unstyled source if the markdown can't be formatted.
+fn preview(document: &str) -> String {
+    let mut quoted = String::with_capacity(document.len() * 2);
+    for line in document.lines() {
+        quoted.push('>');
+        if !line.is_empty() {
+            quoted.push(' ');
+            quoted.push_str(line);
+        }
+        quoted.push('\n');
+    }
+
+    Formatter::new()
+        .format_terminal(&quoted)
+        .unwrap_or_else(|_| quoted.clone())
 }
 
 /// Render the board as one line per ticket.

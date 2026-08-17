@@ -6,6 +6,9 @@ use serde_json::json;
 
 use super::*;
 
+const DATE: &str = "2026-08-05";
+const STAMP: &str = "2026-08-05T14:03:11Z";
+
 /// The directory holding this module's tool declarations.
 fn declarations() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../.jp/mcp/tools/ticket")
@@ -31,9 +34,19 @@ fn advertised(file: &str, tool: &str, parameter: &str) -> Vec<String> {
 /// Drive a tool through the public `run` entry point, exercising argument
 /// parsing and dispatch.
 fn run_tool(dir: &Utf8TempDir, name: &str, args: Value) -> ToolResult {
+    dispatch(dir, Action::Run, name, args)
+}
+
+/// Drive a tool through the argument-formatting path JP takes before asking for
+/// approval.
+fn preview_tool(dir: &Utf8TempDir, name: &str, args: Value) -> ToolResult {
+    dispatch(dir, Action::FormatArguments, name, args)
+}
+
+fn dispatch(dir: &Utf8TempDir, action: Action, name: &str, args: Value) -> ToolResult {
     let ctx = Context {
         root: dir.path().to_path_buf(),
-        action: Action::Run,
+        action,
         access: None,
         workspace_id: "test".into(),
         conversation_id: "test".into(),
@@ -56,6 +69,12 @@ fn content(result: ToolResult) -> String {
         Outcome::Success { content } => content,
         other => panic!("expected success, got: {other:?}"),
     }
+}
+
+/// A preview as a terminal shows it, with the ANSI styling removed.
+fn strip_ansi(rendered: String) -> String {
+    let bytes = strip_ansi_escapes::strip(rendered);
+    String::from_utf8(bytes).expect("valid utf-8 after stripping ANSI")
 }
 
 fn error_message(result: ToolResult) -> String {
@@ -91,6 +110,136 @@ fn create_reports_the_id_and_a_workspace_relative_path() {
         dir.path()
             .join("docs/ticket/0001-tool-call-header-misaligned.md")
             .exists()
+    );
+}
+
+#[test]
+fn create_preview_renders_the_file_that_will_be_written() {
+    let out = strip_ansi(preview_create(
+        TicketId::new(1),
+        Kind::Bug,
+        "Tool call header misaligned",
+        Some("045"),
+        Some("The header renders one column left of the body."),
+        DATE,
+    ));
+
+    // The preview is quoted, so the rail shows where the ticket ends and the
+    // conversation resumes. Written line by line because the blank lines carry
+    // a trailing space that an editor would trim out of a block literal.
+    assert_eq!(
+        out,
+        concat!(
+            "> # T0001: Tool call header misaligned\n",
+            "> \n",
+            "> - **Status**: Todo\n",
+            "> - **Kind**: Bug\n",
+            "> - **Authors**: jp\n",
+            "> - **Date**: 2026-08-05\n",
+            "> - **Implements**: 045\n",
+            "> \n",
+            "> The header renders one column left of the body.\n",
+        )
+    );
+}
+
+/// The previewed id is the one `create` goes on to use, and the preview itself
+/// leaves the board untouched.
+#[test]
+fn create_preview_writes_nothing() {
+    let dir = Utf8TempDir::new().unwrap();
+    create_ticket(&dir, "Tool call header misaligned");
+
+    let out = strip_ansi(content(preview_tool(
+        &dir,
+        "ticket_create",
+        json!({
+            "kind": "chore",
+            "title": "Bump the deny list"
+        }),
+    )));
+
+    assert!(out.starts_with("> # T0002: Bump the deny list\n"), "{out}");
+    assert_eq!(
+        std::fs::read_dir(dir.path().join("docs/ticket"))
+            .unwrap()
+            .count(),
+        2,
+        "the preview added a file: only the first ticket and the counter belong here"
+    );
+    assert_eq!(
+        content(run_tool(
+            &dir,
+            "ticket_create",
+            json!({ "kind": "chore", "title": "Bump the deny list" })
+        )),
+        "Created T0002 at docs/ticket/0002-bump-the-deny-list.md"
+    );
+}
+
+#[test]
+fn comment_preview_renders_the_block_under_the_ticket_it_lands_on() {
+    let dir = Utf8TempDir::new().unwrap();
+    create_ticket(&dir, "Tool call header misaligned");
+    run_tool(
+        &dir,
+        "ticket_comment",
+        json!({ "id": 1, "body": "Reproduced at 72 columns." }),
+    )
+    .unwrap();
+
+    let out = strip_ansi(preview_comment(
+        dir.path(),
+        TicketId::new(1),
+        Some(1),
+        "The wrap calculation is off.",
+        STAMP,
+    ));
+
+    assert_eq!(
+        out,
+        concat!(
+            "> # T0001: Tool call header misaligned\n",
+            "> \n",
+            "> ──────────────────────────────────────────────────────────────────────────────\n",
+            "> \n",
+            "> - **From**: jp\n",
+            "> - **Date**: 2026-08-05T14:03:11Z\n",
+            "> - **Re**: T0001#1\n",
+            "> \n",
+            "> The wrap calculation is off.\n",
+        )
+    );
+}
+
+/// An id that isn't on the board is worth knowing before approving the call,
+/// not after.
+#[test]
+fn comment_preview_warns_about_a_missing_ticket() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let out = strip_ansi(preview_comment(
+        dir.path(),
+        TicketId::new(9),
+        None,
+        "Reproduced at 72 columns.",
+        STAMP,
+    ));
+
+    assert_eq!(
+        out,
+        concat!(
+            "> # T0009\n",
+            "> \n",
+            "> \u{26a0} No T0009; this call will fail.\n",
+            "> \n",
+            "> ──────────────────────────────────────────────────────────────────────────────\n",
+            "> \n",
+            "> - **From**: jp\n",
+            "> - **Date**: 2026-08-05T14:03:11Z\n",
+            "> \n",
+            "> Reproduced at 72 columns.\n",
+        )
     );
 }
 
