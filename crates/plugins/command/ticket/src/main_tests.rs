@@ -745,10 +745,11 @@ fn a_run_reports_ready_then_output_then_exit() {
             let id = names[0]
                 .strip_suffix("-tool-call-header-misaligned.md")
                 .unwrap_or_else(|| panic!("unexpected filename {}", names[0]));
-            assert_eq!(
-                print.text,
-                format!("Created {ticket_dir}/{} (T-{id})\n", names[0])
-            );
+
+            // Joined rather than concatenated with `/`: the reported path comes
+            // out of `Utf8Path::join`, which separates with `\` on Windows.
+            let path = ticket_dir.join(&names[0]);
+            assert_eq!(print.text, format!("Created {path} (T-{id})\n"));
         }
         other => panic!("unexpected exchange: {other:?}"),
     }
