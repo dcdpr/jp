@@ -71,6 +71,67 @@ fn access_on_local_tool_is_accepted_by_validation() {
 }
 
 #[test]
+fn tool_style_fills_unset_fields_from_the_global_defaults() {
+    use crate::{
+        PartialAppConfig,
+        conversation::tool::style::{InlineResults, PartialDisplayStyleConfig},
+        util::build,
+    };
+
+    let mut partial = PartialAppConfig::new_test();
+    partial.conversation.tools.defaults.style.hidden = Some(true);
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("my_tool".to_owned(), PartialToolConfig {
+            source: Some(ToolSource::Local { tool: None }),
+            style: Some(PartialDisplayStyleConfig {
+                inline_results: Some(InlineResults::Full),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+
+    let config = build(partial).unwrap();
+    let tool = config.conversation.tools.get("my_tool").unwrap();
+
+    assert!(tool.style().hidden);
+    assert_eq!(tool.style().inline_results, InlineResults::Full);
+}
+
+#[test]
+fn tool_style_overrides_the_global_default_per_field() {
+    use crate::{
+        PartialAppConfig,
+        conversation::tool::style::{InlineResults, PartialDisplayStyleConfig},
+        util::build,
+    };
+
+    let mut partial = PartialAppConfig::new_test();
+    partial.conversation.tools.defaults.style.hidden = Some(true);
+    partial.conversation.tools.defaults.style.inline_results = Some(InlineResults::Off);
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("my_tool".to_owned(), PartialToolConfig {
+            source: Some(ToolSource::Local { tool: None }),
+            style: Some(PartialDisplayStyleConfig {
+                hidden: Some(false),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+
+    let config = build(partial).unwrap();
+    let tool = config.conversation.tools.get("my_tool").unwrap();
+
+    assert!(!tool.style().hidden);
+    assert_eq!(tool.style().inline_results, InlineResults::Off);
+}
+
+#[test]
 fn test_enable_config_from_bool() {
     assert_eq!(PartialEnableConfig::from(true), PartialEnableConfig::ON);
     assert_eq!(PartialEnableConfig::from(false), PartialEnableConfig::OFF);
