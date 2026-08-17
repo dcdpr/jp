@@ -1343,6 +1343,22 @@ fn test_thematic_break_line_style_ignores_terminal_width() {
 }
 
 #[test]
+fn test_thematic_break_line_style_fits_inside_a_blockquote() {
+    // A blockquote's `> ` narrows the text column by two. A rule that ignored
+    // the prefix would overflow the line and wrap.
+    let mut formatter = Formatter::with_width(40);
+    formatter.hr_style = HrStyle::Line;
+
+    let actual = formatter
+        .format_terminal("> above\n>\n> ---\n>\n> below")
+        .unwrap();
+    assert!(
+        actual.contains(&"─".repeat(38)) && !actual.contains(&"─".repeat(39)),
+        "Expected a 38-char unicode line inside the quote.\nActual: {actual:?}"
+    );
+}
+
+#[test]
 fn test_table_is_fitted_to_the_terminal_width() {
     // A table is laid out, not wrapped, so it has to fit the terminal on its
     // own: `wrap_width` being wider than the terminal must not let it overflow.
