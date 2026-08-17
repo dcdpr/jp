@@ -82,9 +82,28 @@ impl PartialConfigDelta for PartialToolsConfig {
 
 impl FillDefaults for PartialToolsConfig {
     fn fill_from(self, defaults: Self) -> Self {
+        let tool_defaults = self.defaults.fill_from(defaults.defaults);
+
+        // A tool declaring any `style` field of its own resolves to a whole
+        // `DisplayStyleConfig`, at which point the fields it didn't set are
+        // indistinguishable from the ones it did. Fill the gaps from the `*`
+        // block here, while the partial still records what the tool asked for,
+        // so a single `[conversation.tools.'*'.style]` key reaches every tool.
+        let tools = self
+            .tools
+            .into_iter()
+            .map(|(name, mut tool)| {
+                tool.style = tool
+                    .style
+                    .map(|style| style.fill_from(tool_defaults.style.clone()));
+
+                (name, tool)
+            })
+            .collect();
+
         Self {
-            defaults: self.defaults.fill_from(defaults.defaults),
-            tools: self.tools,
+            defaults: tool_defaults,
+            tools,
         }
     }
 }
@@ -430,7 +449,8 @@ pub struct ToolConfig {
 
     /// How to display the results of the tool in the terminal.
     ///
-    /// Overrides the global default.
+    /// Overrides the global default field by field: keys set here win, keys
+    /// left out take their value from `conversation.tools.'*'.style`.
     /// The error overlay lives at `style.error.*` (see
     /// [`DisplayStyleConfig::error`]).
     #[setting(nested)]
@@ -1210,6 +1230,9 @@ impl ToolConfigWithDefaults {
     }
 
     /// Return the display style of the tool.
+    ///
+    /// Fields the tool does not set carry the value from the global `*`
+    /// defaults, so the returned style is already fully resolved.
     #[must_use]
     pub fn style(&self) -> &DisplayStyleConfig {
         self.tool.style.as_ref().unwrap_or(&self.defaults.style)
