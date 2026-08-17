@@ -1,0 +1,41 @@
+[conversation.tools.markdown_format]
+enable = false
+run = "unattended"
+
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "Format standalone Markdown files: reflow paragraphs, canonicalize structure, and normalize reference links."
+description = """
+Runs `comfort` over Markdown files with the same flags CI enforces, so a \
+formatted file is one CI accepts.
+
+This covers `.md` files only — RFDs, tickets, READMEs, the docs site. Markdown \
+inside Rust doc comments is `cargo_format`'s job.
+"""
+
+examples = """
+Format every Markdown file in the workspace:
+```json
+{}
+```
+
+Format a single draft:
+```json
+{"paths": ["docs/rfd/drafts/D01-knowledge-base.md"]}
+```
+
+Format a directory tree:
+```json
+{"paths": ["docs/rfd", "docs/ticket"]}
+```
+"""
+
+[conversation.tools.markdown_format.style]
+inline_results = "off"
+results_file_link = "off"
+parameters = "function_call"
+
+[conversation.tools.markdown_format.parameters.paths]
+type = "array"
+items.type = "string"
+summary = "Markdown files or directories to format. Directories are walked recursively. If omitted, every Markdown file in the workspace is formatted."
