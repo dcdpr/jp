@@ -612,32 +612,62 @@ fn string_literal_enum() {
     let schema = parse_schema_dsl(r#"status "active"|"inactive"|"archived""#).unwrap();
     assert_eq!(
         schema["properties"]["status"],
-        json!({"enum": ["active", "inactive", "archived"]})
+        json!({"type": "string", "enum": ["active", "inactive", "archived"]})
     );
 }
 
 #[test]
 fn single_string_literal() {
     let schema = parse_schema_dsl(r#"kind "fixed""#).unwrap();
-    assert_eq!(schema["properties"]["kind"], json!({"const": "fixed"}));
+    assert_eq!(
+        schema["properties"]["kind"],
+        json!({"type": "string", "const": "fixed"})
+    );
 }
 
 #[test]
 fn number_literal() {
     let schema = parse_schema_dsl("version 1").unwrap();
-    assert_eq!(schema["properties"]["version"], json!({"const": 1}));
+    assert_eq!(
+        schema["properties"]["version"],
+        json!({"type": "integer", "const": 1})
+    );
 }
 
 #[test]
 fn negative_number_literal() {
     let schema = parse_schema_dsl("offset -1").unwrap();
-    assert_eq!(schema["properties"]["offset"], json!({"const": -1}));
+    assert_eq!(
+        schema["properties"]["offset"],
+        json!({"type": "integer", "const": -1})
+    );
 }
 
 #[test]
 fn float_literal() {
     let schema = parse_schema_dsl("ratio 0.5").unwrap();
-    assert_eq!(schema["properties"]["ratio"], json!({"const": 0.5}));
+    assert_eq!(
+        schema["properties"]["ratio"],
+        json!({"type": "number", "const": 0.5})
+    );
+}
+
+#[test]
+fn integer_literal_enum_has_integer_type() {
+    let schema = parse_schema_dsl("value 1|2|3").unwrap();
+    assert_eq!(
+        schema["properties"]["value"],
+        json!({"type": "integer", "enum": [1, 2, 3]})
+    );
+}
+
+#[test]
+fn numeric_literal_enum_has_number_type() {
+    let schema = parse_schema_dsl("value 1|2.5").unwrap();
+    assert_eq!(
+        schema["properties"]["value"],
+        json!({"type": "number", "enum": [1, 2.5]})
+    );
 }
 
 #[test]
@@ -645,7 +675,13 @@ fn mixed_literal_enum() {
     let schema = parse_schema_dsl(r#"value "foo"|"bar"|42"#).unwrap();
     assert_eq!(
         schema["properties"]["value"],
-        json!({"enum": ["foo", "bar", 42]})
+        json!({
+            "anyOf": [
+                {"type": "string", "const": "foo"},
+                {"type": "string", "const": "bar"},
+                {"type": "integer", "const": 42}
+            ]
+        })
     );
 }
 
@@ -654,26 +690,35 @@ fn literal_mixed_with_type() {
     let schema = parse_schema_dsl(r#"value "special"|int"#).unwrap();
     assert_eq!(
         schema["properties"]["value"],
-        json!({"anyOf": [{"const": "special"}, {"type": "integer"}]})
+        json!({"anyOf": [{"type": "string", "const": "special"}, {"type": "integer"}]})
     );
 }
 
 #[test]
 fn boolean_literal_true() {
     let schema = parse_schema_dsl("answer true").unwrap();
-    assert_eq!(schema["properties"]["answer"], json!({"const": true}));
+    assert_eq!(
+        schema["properties"]["answer"],
+        json!({"type": "boolean", "const": true})
+    );
 }
 
 #[test]
 fn boolean_literal_false() {
     let schema = parse_schema_dsl("answer false").unwrap();
-    assert_eq!(schema["properties"]["answer"], json!({"const": false}));
+    assert_eq!(
+        schema["properties"]["answer"],
+        json!({"type": "boolean", "const": false})
+    );
 }
 
 #[test]
 fn null_literal() {
     let schema = parse_schema_dsl("cleared null").unwrap();
-    assert_eq!(schema["properties"]["cleared"], json!({"const": null}));
+    assert_eq!(
+        schema["properties"]["cleared"],
+        json!({"type": "null", "const": null})
+    );
 }
 
 #[test]
@@ -681,7 +726,7 @@ fn nullable_string() {
     let schema = parse_schema_dsl("value null|string").unwrap();
     assert_eq!(
         schema["properties"]["value"],
-        json!({"anyOf": [{"const": null}, {"type": "string"}]})
+        json!({"anyOf": [{"type": "null", "const": null}, {"type": "string"}]})
     );
 }
 
@@ -690,7 +735,10 @@ fn enum_in_array() {
     let schema = parse_schema_dsl(r#"tags ["foo"|"bar"|"baz"]"#).unwrap();
     assert_eq!(
         schema["properties"]["tags"],
-        json!({"type": "array", "items": {"enum": ["foo", "bar", "baz"]}})
+        json!({
+            "type": "array",
+            "items": {"type": "string", "enum": ["foo", "bar", "baz"]}
+        })
     );
 }
 
@@ -700,7 +748,7 @@ fn enum_in_nested_object() {
     let config = &schema["properties"]["config"];
     assert_eq!(
         config["properties"]["mode"],
-        json!({"enum": ["fast", "slow"]})
+        json!({"type": "string", "enum": ["fast", "slow"]})
     );
     assert_eq!(config["properties"]["count"], json!({"type": "integer"}));
 }
@@ -710,15 +758,21 @@ fn enum_with_description() {
     let schema = parse_schema_dsl(r#"status "active"|"inactive": current status"#).unwrap();
     assert_eq!(
         schema["properties"]["status"],
-        json!({"enum": ["active", "inactive"], "description": "current status"})
+        json!({
+            "type": "string",
+            "enum": ["active", "inactive"],
+            "description": "current status"
+        })
     );
 }
 
 #[test]
-fn true_false_enum_is_not_bool_type() {
-    // true|false produces enum, not {"type": "boolean"}
+fn true_false_enum_has_boolean_type() {
     let schema = parse_schema_dsl("flag true|false").unwrap();
-    assert_eq!(schema["properties"]["flag"], json!({"enum": [true, false]}));
+    assert_eq!(
+        schema["properties"]["flag"],
+        json!({"type": "boolean", "enum": [true, false]})
+    );
 }
 
 #[test]
@@ -728,7 +782,7 @@ fn field_level_union_with_literal_and_array() {
         schema["properties"]["value"],
         json!({
             "anyOf": [
-                {"type": "array", "items": {"enum": ["a", "b"]}},
+                {"type": "array", "items": {"type": "string", "enum": ["a", "b"]}},
                 {"type": "integer"}
             ]
         })
