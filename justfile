@@ -1839,8 +1839,10 @@ rfd-board-prune:
         exit 0
     fi
 
+    # Both id spaces: the board ranks published RFDs and drafts alike, and a
+    # draft can be abandoned.
     stale=""
-    for file in docs/rfd/[0-9][0-9][0-9]-*.md; do
+    for file in docs/rfd/[0-9][0-9][0-9]-*.md docs/rfd/drafts/D[0-9][0-9]-*.md; do
         [ -f "$file" ] || continue
         basename_f=$(basename "$file")
         case "$basename_f" in 000-*) continue ;; esac
@@ -1868,17 +1870,18 @@ rfd-board-prune:
     echo "Pruned from the priority board:${stale}"
 
 # Mark an RFD as abandoned with the given reason.
+#
+# Accepts: a permanent number (41, 041) or a draft ID (D01). A draft the author
+# has decided not to pursue can be abandoned when the rationale is worth keeping
+# as a record, or simply deleted when it isn't (see RFD 001).
 [group('rfd')]
 rfd-abandon NNN +REASON:
     #!/usr/bin/env sh
     set -eu
 
-    n=$(echo "{{NNN}}" | sed 's/^0*//')
-    num=$(printf "%03d" "${n:-0}")
-    file=$(ls docs/rfd/${num}-*.md 2>/dev/null | head -1)
-    if [ -z "$file" ]; then
-        echo "No RFD found with number ${num}." >&2; exit 1
-    fi
+    out=$(just _rfd-resolve "{{NNN}}") || exit 1
+    rfd_id="${out%% *}"
+    file="${out#* }"
 
     current=$(sed -n 's/^- \*\*Status\*\*: \([A-Za-z]*\).*/\1/p' "$file" | head -1)
     case "$current" in
@@ -1897,7 +1900,7 @@ rfd-abandon NNN +REASON:
     mv "${file}.tmp" "$file"
 
     # An abandoned RFD is no longer work to prioritise.
-    just _rfd-priority-remove "$num"
+    just _rfd-priority-remove "$rfd_id"
 
     # Remind the user to close the tracking issue if one exists.
     tracking=$(sed -n 's/^- \*\*Tracking Issue\*\*: \[#\([0-9]*\)\].*/\1/p' "$file" | head -1)
@@ -1917,7 +1920,7 @@ rfd-abandon NNN +REASON:
         for r in $(echo "$required_by_line" | grep -oE 'RFD (D[0-9]+|[0-9]{3})' | awk '{print $2}'); do
             echo "  RFD ${r}" >&2
         done
-        echo "Their dependency on RFD ${num} is now broken — review and update." >&2
+        echo "Their dependency on RFD ${rfd_id} is now broken — review and update." >&2
     fi
 
 # Generate or update AI summaries for RFD documents.

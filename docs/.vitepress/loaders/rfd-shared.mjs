@@ -201,8 +201,9 @@ export function checkPriority(entries, priority) {
 // Reject terminal RFDs listed on the priority board.
 //
 // The board ranks open work, so an Implemented, Superseded, or Abandoned RFD has
-// no place on it. `graph` supplies the statuses; ids it doesn't know (drafts,
-// when the graph is published-only) are left to `checkPriority`.
+// no place on it. `graph` supplies the statuses and must span every id space the
+// board can hold — drafts included, since a draft can be abandoned. Ids it
+// doesn't know are left to `checkPriority`.
 //
 // This is an error rather than a warning because the board file is what a human
 // reads and reorders: nothing renders a stale id, so nothing else would ever
