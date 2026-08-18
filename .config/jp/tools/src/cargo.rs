@@ -1,7 +1,9 @@
 use camino::{Utf8Path, Utf8PathBuf};
+use jp_tool::{AccessPolicy, Outcome};
 
 use crate::{
     Context, Tool,
+    fs::utils::resolve_workspace_path,
     util::{ToolResult, error, unknown_tool},
 };
 
@@ -35,12 +37,12 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
     // invoked with; set `options.root` in the tool config to point the cargo
     // tooling at a different cargo workspace.
     let configured: Option<String> = t.option_or("root", None);
-    let root = match cargo_root(&ctx.root, configured.as_deref()) {
+    let root = match cargo_root(&ctx.root, configured.as_deref(), ctx.access.as_ref()) {
         Ok(root) => root,
         Err(message) => return error(message),
     };
 
-    match t.name.trim_start_matches("cargo_") {
+    let outcome = match t.name.trim_start_matches("cargo_") {
         "check" => cargo_check(&root, t.opt("package")?, checksum_freshness).await,
         "expand" => {
             cargo_expand(&root, t.req("item")?, t.opt("package")?, checksum_freshness).await
@@ -57,19 +59,63 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
         }
         "format" => cargo_format(&root, t.opt("package")?).await,
         "update" => cargo_update(&root, t.req("packages")?).await,
-        _ => unknown_tool(t),
+        _ => return unknown_tool(t),
+    };
+
+    if root == ctx.root {
+        return outcome;
+    }
+
+    note_root(outcome, &root)
+}
+
+/// Name the directory cargo ran in, for failures from a redirected root.
+///
+/// A redirected root turns an ordinary cargo failure into a baffling one
+/// (`package ID specification ... did not match any packages`), because nothing
+/// in cargo's own message hints that it ran somewhere other than the workspace.
+/// Successes are left alone: the caller asked for the redirect, so it only
+/// needs restating when something goes wrong.
+fn note_root(outcome: ToolResult, root: &Utf8Path) -> ToolResult {
+    let note = format!("(cargo ran in `{root}`, set by the `root` tool option.)");
+
+    match outcome {
+        Ok(Outcome::Error {
+            message,
+            trace,
+            transient,
+        }) => Ok(Outcome::Error {
+            message: format!("{message}\n\n{note}"),
+            trace,
+            transient,
+        }),
+        Err(error) => Err(format!("{error}\n\n{note}").into()),
+        ok => ok,
     }
 }
 
 /// Resolve which cargo workspace the cargo tools operate in.
 ///
-/// `None` keeps `default`, the root the tool was invoked with.
-/// A relative path is joined onto that root; an absolute path is taken as-is,
-/// so a checkout outside the workspace can be targeted deliberately.
+/// `None`, an empty value, or `.` all keep `default`, the root the tool was
+/// invoked with.
+/// Anything else is a workspace-relative path, resolved under the same
+/// confinement every other tool path gets: absolute paths and `..` escapes are
+/// refused, and symlinks are canonicalized before the workspace check.
+/// An approved `external` mount is the only sanctioned way to reach a checkout
+/// outside the workspace.
 ///
-/// The directory is required to exist, so a typo surfaces here rather than as a
-/// confusing cargo failure in the wrong place.
-fn cargo_root(default: &Utf8Path, configured: Option<&str>) -> Result<Utf8PathBuf, String> {
+/// The confinement matters more here than for a read: `cargo` runs build
+/// scripts and proc macros, so an unvetted directory is arbitrary code
+/// execution.
+///
+/// The target is required to be a directory, so a typo (or naming the manifest
+/// instead of the directory holding it) surfaces here rather than as a
+/// confusing cargo failure somewhere else.
+fn cargo_root(
+    default: &Utf8Path,
+    configured: Option<&str>,
+    access: Option<&AccessPolicy>,
+) -> Result<Utf8PathBuf, String> {
     // An empty value or `.` resolves to the invocation root, so a config layer
     // can unload a previously-set root without naming the default.
     let configured = configured.filter(|value| !value.is_empty() && *value != ".");
@@ -78,20 +124,16 @@ fn cargo_root(default: &Utf8Path, configured: Option<&str>) -> Result<Utf8PathBu
         return Ok(default.to_owned());
     };
 
-    let path = Utf8Path::new(configured);
-    let root = if path.is_absolute() {
-        path.to_owned()
-    } else {
-        default.join(path)
-    };
+    let resolved = resolve_workspace_path(default, configured, access)?;
 
-    if !root.is_dir() {
+    if !resolved.absolute.is_dir() {
         return Err(format!(
-            "The `root` option `{configured}` resolved to `{root}`, which is not a directory."
+            "The `root` option `{configured}` resolved to `{}`, which is not a directory.",
+            resolved.absolute
         ));
     }
 
-    Ok(root)
+    Ok(resolved.absolute)
 }
 
 #[cfg(test)]
