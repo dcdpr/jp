@@ -22,11 +22,11 @@ pub fn describe_tools() -> PartialToolConfig {
             "Get detailed descriptions and usage examples for one or more tools.".to_owned(),
         ),
         parameters: IndexMap::from([("tools".to_owned(), PartialToolParameterConfig {
-            kind: PartialOneOrManyTypes::One("array".to_owned()),
+            kind: Some(PartialOneOrManyTypes::One("array".to_owned())),
             required: Some(true),
             description: Some("Array of tool names to describe".to_owned()),
             items: Some(Box::new(PartialToolParameterConfig {
-                kind: PartialOneOrManyTypes::One("string".to_owned()),
+                kind: Some(PartialOneOrManyTypes::One("string".to_owned())),
                 ..Default::default()
             })),
             ..Default::default()

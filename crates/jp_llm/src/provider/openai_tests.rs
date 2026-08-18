@@ -126,13 +126,14 @@ mod make_schema_nullable {
 
 mod parameters_with_strict_mode {
     use indexmap::IndexMap;
-    use jp_config::conversation::tool::{OneOrManyTypes, ToolParameterConfig};
+    use jp_config::conversation::tool::OneOrManyTypes;
     use serde_json::json;
 
     use super::super::parameters_with_strict_mode;
+    use crate::tool::ToolParameterSchema;
 
-    fn cfg(kind: &str) -> ToolParameterConfig {
-        ToolParameterConfig {
+    fn cfg(kind: &str) -> ToolParameterSchema {
+        ToolParameterSchema {
             kind: OneOrManyTypes::One(kind.to_owned()),
             default: None,
             required: false,
@@ -151,11 +152,11 @@ mod parameters_with_strict_mode {
     #[test]
     fn nullable_array_parameter_renders_as_anyof() {
         let mut params = IndexMap::new();
-        params.insert("crate_name".to_owned(), ToolParameterConfig {
+        params.insert("crate_name".to_owned(), ToolParameterSchema {
             required: true,
             ..cfg("string")
         });
-        params.insert("kinds".to_owned(), ToolParameterConfig {
+        params.insert("kinds".to_owned(), ToolParameterSchema {
             items: Some(Box::new(cfg("string"))),
             ..cfg("array")
         });
@@ -194,7 +195,7 @@ mod parameters_with_strict_mode {
     #[test]
     fn required_array_parameter_is_not_wrapped() {
         let mut params = IndexMap::new();
-        params.insert("paths".to_owned(), ToolParameterConfig {
+        params.insert("paths".to_owned(), ToolParameterSchema {
             required: true,
             items: Some(Box::new(cfg("string"))),
             ..cfg("array")
@@ -206,6 +207,28 @@ mod parameters_with_strict_mode {
         assert_eq!(paths["type"], json!("array"));
         assert_eq!(paths["items"], json!({ "type": "string" }));
         assert!(paths.get("anyOf").is_none());
+    }
+
+    #[test]
+    fn array_enum_keeps_complete_array_values() {
+        let mut params = IndexMap::new();
+        params.insert("tags".to_owned(), ToolParameterSchema {
+            required: true,
+            enumeration: vec![json!(["projects/jp"]), json!(["task", "idea"])],
+            items: Some(Box::new(cfg("string"))),
+            ..cfg("array")
+        });
+
+        let schema = parameters_with_strict_mode(params, true);
+
+        assert_eq!(
+            schema["properties"]["tags"],
+            json!({
+                "type": "array",
+                "enum": [["projects/jp"], ["task", "idea"]],
+                "items": { "type": "string" }
+            })
+        );
     }
 }
 

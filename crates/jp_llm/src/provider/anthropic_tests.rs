@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use indexmap::IndexMap;
 use jp_config::{
-    conversation::tool::{OneOrManyTypes, ToolParameterConfig},
+    conversation::tool::OneOrManyTypes,
     model::{
         id::ModelIdConfig,
         parameters::{PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningEffort},
@@ -17,7 +17,10 @@ use serde_json::Map;
 use test_log::test;
 
 use super::*;
-use crate::test::{TestRequest, run_test};
+use crate::{
+    test::{TestRequest, run_test},
+    tool::ToolParameterSchema,
+};
 
 const MAGIC_STRING: &str = "ANTHROPIC_MAGIC_STRING_TRIGGER_REDACTED_THINKING_46C9A13E193C177646C7398A98432ECCCE4C1253D5E2D82641AC0E52CC2876CB";
 
@@ -197,7 +200,7 @@ async fn test_fable_5_forced_tool_soft_forces() -> Result {
         .model(id)
         .model_details(details)
         .enable_reasoning()
-        .tool("run_me", vec![("foo", ToolParameterConfig {
+        .tool("run_me", vec![("foo", ToolParameterSchema {
             kind: OneOrManyTypes::One("string".into()),
             default: Some("foo".into()),
             required: false,

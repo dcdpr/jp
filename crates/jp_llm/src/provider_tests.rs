@@ -1,15 +1,15 @@
 use std::sync::Arc;
 
 use indexmap::IndexMap;
-use jp_config::{
-    assistant::tool_choice::ToolChoice,
-    conversation::tool::{OneOrManyTypes, ToolParameterConfig},
-};
+use jp_config::{assistant::tool_choice::ToolChoice, conversation::tool::OneOrManyTypes};
 use jp_conversation::event::ChatRequest;
 use jp_test::{Result, function_name};
 
 use super::*;
-use crate::test::{TestRequest, fixture_attachment, run_test, test_model_details};
+use crate::{
+    test::{TestRequest, fixture_attachment, run_test, test_model_details},
+    tool::ToolParameterSchema,
+};
 
 macro_rules! test_all_providers {
         ($($fn:ident),* $(,)?) => {
@@ -45,7 +45,7 @@ fn tool_call_base(provider: ProviderId) -> TestRequest {
             "Please run the tool, providing whatever arguments you want.",
         ))
         .tool("run_me", vec![
-            ("foo", ToolParameterConfig {
+            ("foo", ToolParameterSchema {
                 kind: OneOrManyTypes::One("string".into()),
                 default: Some("foo".into()),
                 required: false,
@@ -56,22 +56,22 @@ fn tool_call_base(provider: ProviderId) -> TestRequest {
                 items: None,
                 properties: IndexMap::default(),
             }),
-            ("bar", ToolParameterConfig {
+            ("bar", ToolParameterSchema {
                 kind: OneOrManyTypes::Many(vec!["string".into(), "array".into()]),
                 default: None,
                 required: true,
                 summary: None,
                 description: None,
                 examples: None,
-                enumeration: vec!["foo".into(), vec!["foo", "bar"].into()],
-                items: Some(Box::new(ToolParameterConfig {
+                enumeration: vec!["foo".into()],
+                items: Some(Box::new(ToolParameterSchema {
                     kind: OneOrManyTypes::One("string".into()),
                     default: None,
                     required: false,
                     summary: None,
                     description: None,
                     examples: None,
-                    enumeration: vec![],
+                    enumeration: vec!["foo".into(), "bar".into()],
                     items: None,
                     properties: IndexMap::default(),
                 })),

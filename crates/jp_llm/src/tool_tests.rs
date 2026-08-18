@@ -3,6 +3,7 @@ use jp_config::{
     AppConfig, Config as _,
     conversation::tool::{PartialToolConfig, ToolConfig},
 };
+use jp_mcp::Client;
 use jp_tool::Outcome;
 
 use super::*;
@@ -128,9 +129,9 @@ fn test_execution_outcome_helper_methods() {
     assert!(cancelled.is_cancelled());
 }
 
-/// Build a minimal `ToolParameterConfig` for use in validation tests.
-fn param(kind: &str, required: bool) -> ToolParameterConfig {
-    ToolParameterConfig {
+/// Build a minimal `ToolParameterSchema` for use in validation tests.
+fn param(kind: &str, required: bool) -> ToolParameterSchema {
+    ToolParameterSchema {
         kind: kind.to_owned().into(),
         required,
         default: None,
@@ -143,19 +144,51 @@ fn param(kind: &str, required: bool) -> ToolParameterConfig {
     }
 }
 
+#[tokio::test]
+async fn local_tool_rejects_scalar_enum_on_array_parameter() {
+    let partial: PartialToolConfig = serde_json::from_value(json!({
+        "source": "local",
+        "parameters": {
+            "tags": {
+                "type": "array",
+                "enum": ["projects/jp", "task", "idea"],
+                "items": { "type": "string" }
+            }
+        }
+    }))
+    .unwrap();
+    let tool = ToolConfig::from_partial(partial, vec![]).unwrap();
+    let mut app = AppConfig::new_test();
+    app.conversation
+        .tools
+        .insert("bear_note_create".to_owned(), tool);
+    let config = app.conversation.tools.get("bear_note_create").unwrap();
+
+    let error = resolve_tool("bear_note_create", &config, &Client::new(IndexMap::new()))
+        .await
+        .unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "Invalid schema at `tools.bear_note_create.parameters.tags.enum`: enum value \
+         \"projects/jp\" has type string, but the schema requires array; use \
+         `tools.bear_note_create.parameters.tags.items.enum` to constrain array elements"
+    );
+}
+
 #[test]
 fn coerces_json_strings_to_declared_parameter_types() {
     let parameters = IndexMap::from_iter([
         ("path".to_owned(), param("string", true)),
         ("start_line".to_owned(), param("integer", false)),
         ("enabled".to_owned(), param("boolean", false)),
-        ("string_or_integer".to_owned(), ToolParameterConfig {
+        ("string_or_integer".to_owned(), ToolParameterSchema {
             kind: vec!["string".to_owned(), "integer".to_owned()].into(),
             ..param("string", false)
         }),
-        ("patterns".to_owned(), ToolParameterConfig {
+        ("patterns".to_owned(), ToolParameterSchema {
             kind: "array".to_owned().into(),
-            items: Some(Box::new(ToolParameterConfig {
+            items: Some(Box::new(ToolParameterSchema {
                 kind: "object".to_owned().into(),
                 properties: IndexMap::from_iter([("count".to_owned(), param("integer", true))]),
                 ..param("object", false)
@@ -218,7 +251,7 @@ async fn execute_coerces_json_strings_before_calling_tool() {
             json!({"start_line": "1"}),
             &IndexMap::new(),
             &config,
-            &jp_mcp::Client::new(IndexMap::new()),
+            &Client::new(IndexMap::new()),
             Utf8Path::new("/tmp"),
             CancellationToken::new(),
             &builtins,
@@ -239,7 +272,7 @@ async fn execute_coerces_json_strings_before_calling_tool() {
 fn test_validate_tool_arguments() {
     struct TestCase {
         arguments: Map<String, Value>,
-        parameters: IndexMap<String, ToolParameterConfig>,
+        parameters: IndexMap<String, ToolParameterSchema>,
         want: Result<(), ToolError>,
     }
 
@@ -295,10 +328,10 @@ fn test_validate_nested_array_item_properties() {
     //   patterns: array of { old: string (required), new: string (required) }
     let parameters = IndexMap::from_iter([
         ("path".to_owned(), param("string", true)),
-        ("patterns".to_owned(), ToolParameterConfig {
+        ("patterns".to_owned(), ToolParameterSchema {
             kind: "array".to_owned().into(),
             required: true,
-            items: Some(Box::new(ToolParameterConfig {
+            items: Some(Box::new(ToolParameterSchema {
                 kind: "object".to_owned().into(),
                 required: false,
                 properties: IndexMap::from_iter([
@@ -402,7 +435,7 @@ fn test_validate_nested_array_item_properties() {
 fn test_validate_nested_object_properties() {
     let parameters = IndexMap::from_iter([
         ("name".to_owned(), param("string", true)),
-        ("config".to_owned(), ToolParameterConfig {
+        ("config".to_owned(), ToolParameterSchema {
             kind: "object".to_owned().into(),
             required: false,
             properties: IndexMap::from_iter([
@@ -449,8 +482,8 @@ fn test_validate_nested_object_properties() {
 }
 
 /// Build a parameter with a default value.
-fn param_with_default(kind: &str, required: bool, default: Value) -> ToolParameterConfig {
-    ToolParameterConfig {
+fn param_with_default(kind: &str, required: bool, default: Value) -> ToolParameterSchema {
+    ToolParameterSchema {
         default: Some(default),
         ..param(kind, required)
     }
@@ -513,7 +546,7 @@ fn test_apply_defaults_skips_params_without_default() {
 
 #[test]
 fn test_apply_defaults_recurses_into_objects() {
-    let parameters = IndexMap::from_iter([("config".to_owned(), ToolParameterConfig {
+    let parameters = IndexMap::from_iter([("config".to_owned(), ToolParameterSchema {
         kind: "object".to_owned().into(),
         required: false,
         properties: IndexMap::from_iter([(
@@ -532,10 +565,10 @@ fn test_apply_defaults_recurses_into_objects() {
 
 #[test]
 fn test_apply_defaults_recurses_into_array_items() {
-    let parameters = IndexMap::from_iter([("items".to_owned(), ToolParameterConfig {
+    let parameters = IndexMap::from_iter([("items".to_owned(), ToolParameterSchema {
         kind: "array".to_owned().into(),
         required: true,
-        items: Some(Box::new(ToolParameterConfig {
+        items: Some(Box::new(ToolParameterSchema {
             kind: "object".to_owned().into(),
             required: false,
             properties: IndexMap::from_iter([(
@@ -889,7 +922,7 @@ async fn test_execute_local_exposes_invocation_ids_in_context() {
         workspace_id: "ws-abc".to_owned(),
         conversation_id: "conv-xyz".to_owned(),
     };
-    let mcp_client = jp_mcp::Client::new(IndexMap::new());
+    let mcp_client = Client::new(IndexMap::new());
     let builtins = builtin::BuiltinExecutors::new();
 
     let outcome = definition
@@ -952,7 +985,7 @@ async fn test_tool_definitions_forced_tool_drops_locked_off() {
         ToolConfig::from_partial(locked_off, vec![]).expect("resolved tool config"),
     );
 
-    let mcp_client = jp_mcp::Client::new(IndexMap::new());
+    let mcp_client = Client::new(IndexMap::new());
 
     // Forcing the toggleable OFF tool keeps it in the definitions.
     let defs = tool_definitions(cfg.conversation.tools.iter(), &mcp_client, Some("off_tool"))
@@ -982,17 +1015,17 @@ mod merge_mcp_param {
     use jp_config::conversation::tool::{OneOrManyTypes, ToolParameterConfig};
     use serde_json::{Value, json};
 
-    use super::super::merge_mcp_param;
+    use super::super::{merge_mcp_param, merge_mcp_parameter};
 
     fn cfg(kind: &str) -> ToolParameterConfig {
         ToolParameterConfig {
-            kind: OneOrManyTypes::One(kind.to_owned()),
+            kind: Some(OneOrManyTypes::One(kind.to_owned())),
             default: None,
-            required: false,
+            required: None,
             summary: None,
             description: None,
             examples: None,
-            enumeration: vec![],
+            enumeration: None,
             items: None,
             properties: IndexMap::default(),
         }
@@ -1022,28 +1055,31 @@ mod merge_mcp_param {
         ));
     }
 
-    /// When the user override declares `items`, it wins even if the MCP schema
-    /// also has a usable `items`.
-    /// Mirrors the existing `kind` / `default` / `enumeration` override
-    /// semantics.
     #[test]
-    fn user_items_override_replaces_mcp_items() {
+    fn item_enum_override_preserves_mcp_item_type() {
         let opts = json!({
             "type": "array",
-            "items": { "type": "integer" }
+            "items": { "type": "string" }
         });
-        let override_cfg = ToolParameterConfig {
-            items: Some(Box::new(cfg("string"))),
-            ..cfg("array")
-        };
+        let override_cfg: ToolParameterConfig = serde_json::from_value(json!({
+            "items": {
+                "enum": ["projects/jp", "task", "idea"]
+            }
+        }))
+        .unwrap();
 
-        let merged = merge_mcp_param("xs", &opts, Some(&override_cfg), false).unwrap();
+        let merged = merge_mcp_param("tags", &opts, Some(&override_cfg), false).unwrap();
 
         let items = merged.items.expect("items present");
         assert!(matches!(
             items.kind,
             OneOrManyTypes::One(ref s) if s == "string"
         ));
+        assert_eq!(items.enumeration, vec![
+            Value::from("projects/jp"),
+            Value::from("task"),
+            Value::from("idea")
+        ]);
     }
 
     /// When the user provides no override, fall back to the MCP schema's
@@ -1064,21 +1100,20 @@ mod merge_mcp_param {
         ));
     }
 
-    /// MCP `items` without a parsable `type` (e.g. `$ref`) and no user override
-    /// results in `items: None`.
-    /// This is the exact pre-fix state that produced the `array schema missing
-    /// items` error from OpenAI — documented here so a future change that adds
-    /// `$ref` resolution will surface as a test update.
     #[test]
-    fn no_items_when_mcp_uses_ref_and_no_user_override() {
+    fn unresolved_mcp_item_reference_is_rejected() {
         let opts = json!({
             "type": "array",
             "items": { "$ref": "#/$defs/EntryType" }
         });
 
-        let merged = merge_mcp_param("kinds", &opts, None, false).unwrap();
+        let error = merge_mcp_param("kinds", &opts, None, false).unwrap_err();
 
-        assert!(merged.items.is_none());
+        assert_eq!(
+            error.to_string(),
+            "Invalid schema at `parameters.kinds.items.type`: schema does not declare a supported \
+             type"
+        );
     }
 
     /// User `properties` override is honored, mirroring `items`.
@@ -1114,7 +1149,7 @@ mod merge_mcp_param {
     fn override_can_tighten_required() {
         let opts = json!({ "type": "string" });
         let override_cfg = ToolParameterConfig {
-            required: true,
+            required: Some(true),
             ..cfg("string")
         };
 
@@ -1128,7 +1163,7 @@ mod merge_mcp_param {
     fn override_cannot_loosen_required() {
         let opts = json!({ "type": "string" });
         let override_cfg = ToolParameterConfig {
-            required: false,
+            required: Some(false),
             ..cfg("string")
         };
 
@@ -1137,19 +1172,18 @@ mod merge_mcp_param {
         assert!(merged.required, "MCP-required field cannot be loosened");
     }
 
-    /// `kind` override wins (existing behavior, exercised here for completeness
-    /// alongside the new `items` / `properties` tests).
     #[test]
-    fn user_kind_override_replaces_mcp_kind() {
+    fn user_cannot_change_mcp_parameter_type() {
         let opts = json!({ "type": "integer" });
         let override_cfg = cfg("string");
 
-        let merged = merge_mcp_param("x", &opts, Some(&override_cfg), false).unwrap();
+        let error = merge_mcp_param("count", &opts, Some(&override_cfg), false).unwrap_err();
 
-        assert!(matches!(
-            merged.kind,
-            OneOrManyTypes::One(ref s) if s == "string"
-        ));
+        assert_eq!(
+            error.to_string(),
+            "Invalid schema at `parameters.count.type`: MCP declares integer, but the \
+             configuration declares string"
+        );
     }
 
     /// `enum` from MCP carries through when no user override.
@@ -1167,5 +1201,150 @@ mod merge_mcp_param {
             Value::from("b"),
             Value::from("c")
         ]);
+    }
+
+    #[test]
+    fn unsupported_parameter_type_is_rejected() {
+        let opts = json!({ "type": "strng" });
+
+        let error = merge_mcp_param("name", &opts, None, false).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "Invalid schema at `parameters.name.type`: unsupported JSON type `strng`"
+        );
+    }
+
+    #[test]
+    fn malformed_mcp_enum_is_rejected() {
+        let opts = json!({
+            "type": "string",
+            "enum": "task"
+        });
+
+        let error = merge_mcp_param("kind", &opts, None, false).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "Invalid schema at `parameters.kind.enum`: enum must be an array"
+        );
+    }
+
+    #[test]
+    fn default_values_must_match_nested_item_schema() {
+        let opts = json!({
+            "type": "array",
+            "default": ["task", 1],
+            "items": { "type": "string" }
+        });
+
+        let error = merge_mcp_param("tags", &opts, None, false).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "Invalid schema at `parameters.tags.default[1]`: default value 1 has type integer, \
+             but the schema requires string"
+        );
+    }
+
+    #[test]
+    fn duplicate_enum_values_are_rejected() {
+        let opts = json!({ "type": "string" });
+        let override_cfg = ToolParameterConfig {
+            enumeration: Some(vec![Value::from("task"), Value::from("task")]),
+            ..cfg("string")
+        };
+
+        let error = merge_mcp_param("kind", &opts, Some(&override_cfg), false).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "Invalid schema at `parameters.kind.enum`: enum values must be unique; duplicate \
+             value \"task\""
+        );
+    }
+
+    #[test]
+    fn complete_array_enum_values_must_match_item_schema() {
+        let opts = json!({
+            "type": "array",
+            "items": { "type": "string" }
+        });
+        let override_cfg = ToolParameterConfig {
+            enumeration: Some(vec![json!(["task", 1])]),
+            ..cfg("array")
+        };
+
+        let error = merge_mcp_param("tags", &opts, Some(&override_cfg), false).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "Invalid schema at `parameters.tags.enum[0][1]`: enum value 1 has type integer, but \
+             the schema requires string"
+        );
+    }
+
+    #[test]
+    fn array_without_items_is_rejected() {
+        let opts = json!({ "type": "array" });
+
+        let error = merge_mcp_param("tags", &opts, None, false).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "Invalid schema at `parameters.tags.items`: array schemas must declare an item schema"
+        );
+    }
+
+    #[test]
+    fn schema_errors_retain_the_tool_path() {
+        let source = json!({
+            "type": "array",
+            "items": { "type": "string" }
+        });
+        let override_config = ToolParameterConfig {
+            enumeration: Some(vec![Value::from("projects/jp")]),
+            ..cfg("array")
+        };
+
+        let error = merge_mcp_parameter(
+            "tools.bear_note_create.parameters.tags",
+            &source,
+            Some(&override_config),
+            false,
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "Invalid schema at `tools.bear_note_create.parameters.tags.enum`: enum value \
+             \"projects/jp\" has type string, but the schema requires array; use \
+             `tools.bear_note_create.parameters.tags.items.enum` to constrain array elements"
+        );
+    }
+
+    #[test]
+    fn scalar_enum_on_array_parameter_is_rejected() {
+        let opts = json!({
+            "type": "array",
+            "items": { "type": "string" }
+        });
+        let override_cfg = ToolParameterConfig {
+            enumeration: Some(vec![
+                Value::from("projects/jp"),
+                Value::from("task"),
+                Value::from("idea"),
+            ]),
+            ..cfg("array")
+        };
+
+        let error = merge_mcp_param("tags", &opts, Some(&override_cfg), false).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "Invalid schema at `parameters.tags.enum`: enum value \"projects/jp\" has type \
+             string, but the schema requires array; use `parameters.tags.items.enum` to constrain \
+             array elements"
+        );
     }
 }

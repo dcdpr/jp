@@ -2,6 +2,7 @@
 
 pub mod builtin;
 pub mod executor;
+mod schema;
 
 use std::{ffi::OsStr, process::Stdio, sync::Arc};
 
@@ -21,6 +22,8 @@ use jp_mcp::{
 };
 use jp_tool::{Action, Outcome, Question};
 use minijinja::{Environment, ErrorKind as MinijinjaErrorKind, value::ValueKind};
+pub use schema::ToolParameterSchema;
+use schema::{format_types, parameter_accepts_value, validate_parameter_schema};
 use serde_json::{Map, Value, json};
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, BufReader},
@@ -602,7 +605,7 @@ pub struct InvocationContext {
 pub struct ToolDefinition {
     pub name: String,
     pub docs: ToolDocs,
-    pub parameters: IndexMap<String, ToolParameterConfig>,
+    pub parameters: IndexMap<String, ToolParameterSchema>,
 }
 
 impl ToolDefinition {
@@ -744,9 +747,9 @@ impl ToolDefinition {
 
         // Apply configured defaults for missing parameters, then validate.
         if let Some(args) = arguments.as_object_mut() {
-            apply_parameter_defaults(args, config.parameters());
+            apply_parameter_defaults(args, &self.parameters);
 
-            if let Err(error) = validate_tool_arguments(args, config.parameters()) {
+            if let Err(error) = validate_tool_arguments(args, &self.parameters) {
                 return Ok(ExecutionOutcome::Completed {
                     id,
                     result: Err(format!(
@@ -988,7 +991,7 @@ pub(crate) fn split_description(text: &str) -> (String, Option<String>) {
 
 fn coerce_parameter_types(
     arguments: &mut Map<String, Value>,
-    parameters: &IndexMap<String, ToolParameterConfig>,
+    parameters: &IndexMap<String, ToolParameterSchema>,
 ) {
     for (name, config) in parameters {
         let Some(value) = arguments.get_mut(name) else {
@@ -999,7 +1002,7 @@ fn coerce_parameter_types(
     }
 }
 
-fn coerce_parameter_value(value: &mut Value, config: &ToolParameterConfig) {
+fn coerce_parameter_value(value: &mut Value, config: &ToolParameterSchema) {
     if let Value::String(raw) = value
         && !config.kind.has_type("string")
         && let Ok(parsed) = serde_json::from_str(raw)
@@ -1024,20 +1027,6 @@ fn coerce_parameter_value(value: &mut Value, config: &ToolParameterConfig) {
     }
 }
 
-fn parameter_accepts_value(value: &Value, types: &OneOrManyTypes) -> bool {
-    match value {
-        Value::Null => types.has_type("null"),
-        Value::Bool(_) => types.has_type("boolean"),
-        Value::Number(number) => {
-            types.has_type("number")
-                || (types.has_type("integer") && (number.is_i64() || number.is_u64()))
-        }
-        Value::String(_) => types.has_type("string"),
-        Value::Array(_) => types.has_type("array"),
-        Value::Object(_) => types.has_type("object"),
-    }
-}
-
 /// Fill in configured default values for missing parameters.
 ///
 /// LLMs commonly omit parameters that have a `default` in the JSON schema, even
@@ -1047,7 +1036,7 @@ fn parameter_accepts_value(value: &Value, types: &OneOrManyTypes) -> bool {
 /// retries.
 fn apply_parameter_defaults(
     arguments: &mut Map<String, Value>,
-    parameters: &IndexMap<String, ToolParameterConfig>,
+    parameters: &IndexMap<String, ToolParameterSchema>,
 ) {
     for (name, cfg) in parameters {
         if !arguments.contains_key(name) {
@@ -1080,7 +1069,7 @@ fn apply_parameter_defaults(
 
 fn validate_tool_arguments(
     arguments: &Map<String, Value>,
-    parameters: &IndexMap<String, ToolParameterConfig>,
+    parameters: &IndexMap<String, ToolParameterSchema>,
 ) -> Result<(), ToolError> {
     let unknown = arguments
         .keys()
@@ -1181,19 +1170,39 @@ async fn resolve_tool(
     config: &ToolConfigWithDefaults,
     mcp_client: &jp_mcp::Client,
 ) -> Result<ToolDefinition, ToolError> {
-    match config.source() {
+    let definition = match config.source() {
         ToolSource::Local { .. } | ToolSource::Builtin { .. } => {
             let docs = ToolDocs::from_config(config);
-            Ok(ToolDefinition {
+            let parameters = config
+                .parameters()
+                .iter()
+                .map(|(parameter_name, parameter)| {
+                    resolve_config_parameter(
+                        &format!("tools.{name}.parameters.{parameter_name}"),
+                        parameter,
+                    )
+                    .map(|schema| (parameter_name.clone(), schema))
+                })
+                .collect::<Result<_, _>>()?;
+            ToolDefinition {
                 name: name.to_owned(),
                 docs,
-                parameters: config.parameters().clone(),
-            })
+                parameters,
+            }
         }
         ToolSource::Mcp { server, tool } => {
-            resolve_mcp_tool(server, name, tool.as_deref(), config, mcp_client).await
+            resolve_mcp_tool(server, name, tool.as_deref(), config, mcp_client).await?
         }
+    };
+
+    for (parameter_name, parameter) in &definition.parameters {
+        validate_parameter_schema(
+            &format!("tools.{name}.parameters.{parameter_name}"),
+            parameter,
+        )?;
     }
+
+    Ok(definition)
 }
 
 /// Resolve an MCP tool: fetch from server, merge config overrides, auto-split
@@ -1242,7 +1251,12 @@ async fn resolve_mcp_tool(
     {
         let override_cfg = user_overrides.get(param_name.as_str());
         let required_in_mcp = required_properties.iter().any(|p| *p == param_name);
-        let param = merge_mcp_param(param_name, opts, override_cfg, required_in_mcp)?;
+        let param = merge_mcp_parameter(
+            &format!("tools.{name}.parameters.{param_name}"),
+            opts,
+            override_cfg,
+            required_in_mcp,
+        )?;
         params.insert(param_name.to_owned(), param);
     }
 
@@ -1317,151 +1331,252 @@ async fn resolve_mcp_tool(
     })
 }
 
-/// Merge an MCP server's schema for a single parameter with the user's TOML
-/// override, producing the resolved [`ToolParameterConfig`] used by the rest of
-/// the pipeline.
-///
-/// User overrides win wholesale for fields that affect the parameter's shape
-/// (`kind`, `items`, `properties`, `enumeration`) and value constraints
-/// (`default`, `description`).
-/// The only field that's *not* freely replaceable is `required`: the MCP
-/// server's contract allows tightening (`false → true`) but not loosening,
-/// since loosening could produce LLM calls that drop arguments the server
-/// expects.
-///
-/// Item-level (`items`) and nested-object (`properties`) overrides are handled
-/// here even when the MCP schema doesn't declare them (e.g. the MCP server
-/// emits `items: {"$ref": ...}` which our parser can't inline today).
-/// This keeps the override surface symmetric with `kind`, `default`, and
-/// `enumeration`.
+fn resolve_config_parameter(
+    path: &str,
+    config: &ToolParameterConfig,
+) -> Result<ToolParameterSchema, ToolError> {
+    let kind = config
+        .kind
+        .clone()
+        .ok_or_else(|| ToolError::InvalidSchema {
+            path: format!("{path}.type"),
+            message: "local and built-in tool parameters must declare a type".to_owned(),
+        })?;
+    let items = config
+        .items
+        .as_deref()
+        .map(|items| resolve_config_parameter(&format!("{path}.items"), items))
+        .transpose()?
+        .map(Box::new);
+    let properties = config
+        .properties
+        .iter()
+        .map(|(name, property)| {
+            resolve_config_parameter(&format!("{path}.properties.{name}"), property)
+                .map(|schema| (name.clone(), schema))
+        })
+        .collect::<Result<_, _>>()?;
+
+    Ok(ToolParameterSchema {
+        kind,
+        default: config.default.clone(),
+        required: config.required.unwrap_or(false),
+        summary: config.summary.clone(),
+        description: config.description.clone(),
+        examples: config.examples.clone(),
+        enumeration: config.enumeration.clone().unwrap_or_default(),
+        items,
+        properties,
+    })
+}
+
+#[cfg(test)]
 fn merge_mcp_param(
     name: &str,
-    opts: &Value,
-    override_cfg: Option<&ToolParameterConfig>,
+    source: &Value,
+    override_config: Option<&ToolParameterConfig>,
     required_in_mcp: bool,
-) -> Result<ToolParameterConfig, ToolError> {
-    let kind = match override_cfg.map(|v| v.kind.clone()) {
-        Some(kind) => kind,
-        None => match opts.get("type").unwrap_or(&Value::Null) {
-            Value::String(v) => OneOrManyTypes::One(v.to_owned()),
-            Value::Array(v) => OneOrManyTypes::Many(
-                v.iter()
-                    .filter_map(Value::as_str)
-                    .map(str::to_owned)
-                    .collect(),
-            ),
-            value => {
-                if value.is_null()
-                    && let Some(any) = opts
-                        .get("anyOf")
-                        .and_then(Value::as_array)
-                        .map(|v| {
-                            v.iter()
-                                .filter_map(|v| {
-                                    v.get("type").and_then(Value::as_str).map(str::to_owned)
-                                })
-                                .collect::<Vec<_>>()
-                        })
-                        .filter(|v| !v.is_empty())
-                {
-                    OneOrManyTypes::Many(any)
-                } else {
-                    return Err(ToolError::InvalidType {
-                        key: name.to_owned(),
-                        value: value.to_owned(),
-                        need: vec!["string", "array"],
-                    });
-                }
-            }
-        },
+) -> Result<ToolParameterSchema, ToolError> {
+    merge_mcp_parameter(
+        &format!("parameters.{name}"),
+        source,
+        override_config,
+        required_in_mcp,
+    )
+}
+
+fn merge_mcp_parameter(
+    path: &str,
+    source: &Value,
+    override_config: Option<&ToolParameterConfig>,
+    required_in_mcp: bool,
+) -> Result<ToolParameterSchema, ToolError> {
+    let schema = merge_mcp_schema_node(path, source, override_config, required_in_mcp)?;
+    validate_parameter_schema(path, &schema)?;
+    Ok(schema)
+}
+
+fn merge_mcp_schema_node(
+    path: &str,
+    source: &Value,
+    override_config: Option<&ToolParameterConfig>,
+    required_in_mcp: bool,
+) -> Result<ToolParameterSchema, ToolError> {
+    let source_kind = parse_schema_kind(path, source)?;
+    let override_kind = override_config.and_then(|config| config.kind.as_ref());
+    let kind = match (source_kind, override_kind) {
+        (Some(source), Some(config)) if &source != config => {
+            return Err(ToolError::InvalidSchema {
+                path: format!("{path}.type"),
+                message: format!(
+                    "MCP declares {}, but the configuration declares {}",
+                    format_types(&source),
+                    format_types(config)
+                ),
+            });
+        }
+        (Some(source), _) => source,
+        (None, Some(config)) => config.clone(),
+        (None, None) => {
+            return Err(ToolError::InvalidSchema {
+                path: format!("{path}.type"),
+                message: "schema does not declare a supported type".to_owned(),
+            });
+        }
     };
 
-    let default = override_cfg
-        .and_then(|v| v.default.clone())
-        .or_else(|| opts.get("default").cloned());
-
+    let default = override_config
+        .and_then(|config| config.default.clone())
+        .or_else(|| source.get("default").cloned());
     let description = merge_description(
-        override_cfg.and_then(|v| v.description.clone()),
-        opts.get("description").and_then(Value::as_str),
+        override_config.and_then(|config| config.description.clone()),
+        source.get("description").and_then(Value::as_str),
     );
+    let enumeration =
+        if let Some(enumeration) = override_config.and_then(|config| config.enumeration.clone()) {
+            enumeration
+        } else {
+            parse_schema_enum(path, source)?
+        };
+    let required = required_in_mcp
+        || override_config
+            .and_then(|config| config.required)
+            .unwrap_or(false);
 
-    let mut enumeration: Vec<Value> = override_cfg
-        .map(|v| v.enumeration.clone())
-        .into_iter()
-        .flatten()
-        .collect();
+    let items = merge_mcp_items(path, source, override_config)?;
+    let properties = merge_mcp_properties(path, source, override_config)?;
 
-    if enumeration.is_empty() {
-        enumeration = opts
-            .get("enum")
-            .and_then(|v| v.as_array())
-            .into_iter()
-            .flatten()
-            .cloned()
-            .collect();
-    }
-
-    // An MCP tool's parameter `requiredness` can be switched from `false`
-    // to `true`, but not the other way around. This is because allowing
-    // this could break the contract with the external tool's expectations.
-    let required = match (required_in_mcp, override_cfg.map(|v| v.required)) {
-        (v, None) => v,
-        (true, _) => true,
-        (false, Some(cfg)) => cfg,
-    };
-
-    // Items: user override wins wholesale (same policy as `kind`).
-    // Otherwise fall back to the MCP schema, which we can only parse
-    // when its `items` declares a plain `type` — schemas that use
-    // `$ref` for items resolve to `None` here, in which case the
-    // user's TOML is the only path to a usable `items` config.
-    let items = override_cfg.and_then(|v| v.items.clone()).or_else(|| {
-        opts.get("items").and_then(|v| v.as_object()).and_then(|v| {
-            Some(Box::new(ToolParameterConfig {
-                kind: match v.get("type")? {
-                    Value::String(v) => OneOrManyTypes::One(v.to_owned()),
-                    Value::Array(v) => OneOrManyTypes::Many(
-                        v.iter()
-                            .filter_map(Value::as_str)
-                            .map(str::to_owned)
-                            .collect(),
-                    ),
-                    _ => return None,
-                },
-                default: None,
-                required: false,
-                summary: None,
-                description: None,
-                examples: None,
-                enumeration: vec![],
-                items: None,
-                properties: IndexMap::default(),
-            }))
-        })
-    });
-
-    // Properties: user override wins when non-empty. We don't currently
-    // parse nested `properties` from the MCP schema into
-    // `ToolParameterConfig`, so without an override this stays empty
-    // — same situation as `items` with a `$ref`. A future change can
-    // add MCP-side nested-property resolution; that's symmetric with
-    // the `$ref`-resolution follow-up for `items`.
-    let properties = override_cfg
-        .map(|v| v.properties.clone())
-        .filter(|p| !p.is_empty())
-        .unwrap_or_default();
-
-    Ok(ToolParameterConfig {
+    Ok(ToolParameterSchema {
         kind,
         default,
         required,
-        summary: None,
+        summary: override_config.and_then(|config| config.summary.clone()),
         description,
-        examples: None,
+        examples: override_config.and_then(|config| config.examples.clone()),
         enumeration,
         items,
         properties,
     })
+}
+
+fn merge_mcp_items(
+    path: &str,
+    source: &Value,
+    override_config: Option<&ToolParameterConfig>,
+) -> Result<Option<Box<ToolParameterSchema>>, ToolError> {
+    match (
+        source.get("items"),
+        override_config.and_then(|config| config.items.as_deref()),
+    ) {
+        (Some(source_items), override_items) => merge_mcp_schema_node(
+            &format!("{path}.items"),
+            source_items,
+            override_items,
+            false,
+        )
+        .map(Box::new)
+        .map(Some),
+        (None, Some(override_items)) => {
+            resolve_config_parameter(&format!("{path}.items"), override_items)
+                .map(Box::new)
+                .map(Some)
+        }
+        (None, None) => Ok(None),
+    }
+}
+
+fn merge_mcp_properties(
+    path: &str,
+    source: &Value,
+    override_config: Option<&ToolParameterConfig>,
+) -> Result<IndexMap<String, ToolParameterSchema>, ToolError> {
+    let source_required = source
+        .get("required")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .collect::<Vec<_>>();
+    let mut properties = IndexMap::new();
+
+    if let Some(source_properties) = source.get("properties").and_then(Value::as_object) {
+        for (name, source_property) in source_properties {
+            let override_property = override_config.and_then(|config| config.properties.get(name));
+            let required = source_required.iter().any(|required| required == name);
+            let property = merge_mcp_schema_node(
+                &format!("{path}.properties.{name}"),
+                source_property,
+                override_property,
+                required,
+            )?;
+            properties.insert(name.clone(), property);
+        }
+    }
+
+    if let Some(override_config) = override_config {
+        for (name, override_property) in &override_config.properties {
+            if properties.contains_key(name) {
+                continue;
+            }
+            let property =
+                resolve_config_parameter(&format!("{path}.properties.{name}"), override_property)?;
+            properties.insert(name.clone(), property);
+        }
+    }
+
+    Ok(properties)
+}
+
+fn parse_schema_enum(path: &str, schema: &Value) -> Result<Vec<Value>, ToolError> {
+    match schema.get("enum") {
+        Some(Value::Array(values)) => Ok(values.clone()),
+        Some(_) => Err(ToolError::InvalidSchema {
+            path: format!("{path}.enum"),
+            message: "enum must be an array".to_owned(),
+        }),
+        None => Ok(Vec::new()),
+    }
+}
+
+fn parse_schema_kind(path: &str, schema: &Value) -> Result<Option<OneOrManyTypes>, ToolError> {
+    if let Some(type_) = schema.get("type") {
+        return match type_ {
+            Value::String(type_) => Ok(Some(OneOrManyTypes::One(type_.clone()))),
+            Value::Array(types) => {
+                let types = types
+                    .iter()
+                    .map(|type_| {
+                        type_
+                            .as_str()
+                            .map(str::to_owned)
+                            .ok_or_else(|| ToolError::InvalidSchema {
+                                path: format!("{path}.type"),
+                                message: "type arrays may contain only strings".to_owned(),
+                            })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(Some(OneOrManyTypes::Many(types)))
+            }
+            _ => Err(ToolError::InvalidSchema {
+                path: format!("{path}.type"),
+                message: "type must be a string or an array of strings".to_owned(),
+            }),
+        };
+    }
+
+    let types = schema
+        .get("anyOf")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|variant| variant.get("type").and_then(Value::as_str))
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    if types.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(OneOrManyTypes::Many(types)))
 }
 
 /// Merge a user-provided description with an MCP server description.

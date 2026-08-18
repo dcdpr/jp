@@ -6,7 +6,6 @@ use jp_attachment::Attachment;
 use jp_config::{
     AppConfig, Config as _, PartialAppConfig, ToPartial as _,
     assistant::tool_choice::ToolChoice,
-    conversation::tool::ToolParameterConfig,
     model::{
         id::{ModelIdConfig, ModelIdOrAliasConfig, Name, PartialModelIdOrAliasConfig, ProviderId},
         parameters::{
@@ -29,7 +28,7 @@ use crate::{
     model::{ModelDetails, ReasoningDetails},
     provider::get_provider,
     query::ChatQuery,
-    tool::{ToolDefinition, ToolDocs},
+    tool::{ToolDefinition, ToolDocs, ToolParameterSchema},
 };
 
 /// An entry in the per-request event log used for snapshot testing.
@@ -216,7 +215,7 @@ impl TestRequest {
         self.tool_choice(ToolChoice::Function(name.into()))
     }
 
-    pub fn tool<S: Into<String>, I: IntoIterator<Item = (&'static str, ToolParameterConfig)>>(
+    pub fn tool<S: Into<String>, I: IntoIterator<Item = (&'static str, ToolParameterSchema)>>(
         mut self,
         name: S,
         definitions: I,

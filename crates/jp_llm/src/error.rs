@@ -460,12 +460,8 @@ pub enum ToolError {
         error: minijinja::Error,
     },
 
-    #[error("Invalid `type` property for {key}, got {value:?}, expected one of {need:?}")]
-    InvalidType {
-        key: String,
-        value: Value,
-        need: Vec<&'static str>,
-    },
+    #[error("Invalid schema at `{path}`: {message}")]
+    InvalidSchema { path: String, message: String },
 
     #[error("Needs input: {question:?}")]
     NeedsInput { question: jp_tool::Question },

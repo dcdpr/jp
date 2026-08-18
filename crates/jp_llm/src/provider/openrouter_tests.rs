@@ -1,12 +1,12 @@
 use std::iter;
 
 use indexmap::IndexMap;
-use jp_config::{conversation::tool::ToolParameterConfig, providers::llm::LlmProviderConfig};
+use jp_config::providers::llm::LlmProviderConfig;
 use jp_conversation::event::{ToolCallRequest, ToolCallResponse};
 use jp_test::{Result, function_name};
 
 use super::*;
-use crate::{model::ReasoningDetails, test::TestRequest};
+use crate::{model::ReasoningDetails, test::TestRequest, tool::ToolParameterSchema};
 
 macro_rules! test_all_models {
         ($($fn:ident),* $(,)?) => {
@@ -66,11 +66,11 @@ async fn test_anthropic_opus_5_parallel_tool_round_trip() -> Result {
             .enable_reasoning()
             .tool(
                 "list_items",
-                iter::empty::<(&'static str, ToolParameterConfig)>(),
+                iter::empty::<(&'static str, ToolParameterSchema)>(),
             )
             .tool(
                 "search_items",
-                iter::empty::<(&'static str, ToolParameterConfig)>(),
+                iter::empty::<(&'static str, ToolParameterSchema)>(),
             )
             .chat_request(
                 "Call both list_items and search_items in parallel. Do not answer with text \
@@ -106,7 +106,7 @@ async fn test_anthropic_opus_5_parallel_tool_round_trip() -> Result {
 #[test]
 fn request_preserves_integer_tool_parameter_type() -> Result {
     let request = TestRequest::chat(ProviderId::Openrouter)
-        .tool("fs_read_file", [("start_line", ToolParameterConfig {
+        .tool("fs_read_file", [("start_line", ToolParameterSchema {
             kind: "integer".to_owned().into(),
             required: false,
             default: None,
@@ -204,7 +204,7 @@ fn forced_tool_request(
         .tool_choice_fn("edit_file")
         .tool(
             "edit_file",
-            iter::empty::<(&'static str, ToolParameterConfig)>(),
+            iter::empty::<(&'static str, ToolParameterSchema)>(),
         )
         .chat_request("Edit the file");
     let request = if enable_reasoning {

@@ -4,11 +4,10 @@ use async_trait::async_trait;
 use base64::Engine as _;
 use chrono::NaiveDate;
 use futures::{StreamExt as _, TryStreamExt as _, stream};
-use indexmap::{IndexMap, IndexSet};
+use indexmap::IndexMap;
 use jp_attachment::AttachmentContent;
 use jp_config::{
     assistant::tool_choice::ToolChoice,
-    conversation::tool::{OneOrManyTypes, ToolParameterConfig},
     model::{
         id::{Name, ProviderId},
         parameters::{CustomReasoningConfig, ReasoningConfig, ReasoningEffort},
@@ -40,7 +39,7 @@ use crate::{
     provider::trace_to_tmpfile,
     query::ChatQuery,
     stream::with_tool_call_keepalive,
-    tool::ToolDefinition,
+    tool::{ToolDefinition, ToolParameterSchema},
 };
 
 static PROVIDER: ProviderId = ProviderId::Openai;
@@ -1639,7 +1638,7 @@ impl TryFrom<&OpenaiConfig> for Openai {
 ///    otherwise refuse.
 /// 2. The Python SDK doesn't inject nullability — Pydantic emits the `anyOf:
 ///    [..., null]` form upstream.
-///    Our function-calling pipeline goes through `ToolParameterConfig` which
+///    Our function-calling pipeline goes through `ToolParameterSchema` which
 ///    encodes optionality as `required: bool`, so we have to bridge that here.
 ///
 /// See: <https://platform.openai.com/docs/guides/structured-outputs>
@@ -1786,7 +1785,7 @@ fn convert_tool_choice(choice: ToolChoice) -> types::ToolChoice {
 }
 
 pub(crate) fn parameters_with_strict_mode(
-    parameters: IndexMap<String, ToolParameterConfig>,
+    parameters: IndexMap<String, ToolParameterSchema>,
     strict: bool,
 ) -> Map<String, Value> {
     let required = parameters
@@ -1797,8 +1796,7 @@ pub(crate) fn parameters_with_strict_mode(
 
     let properties = parameters
         .into_iter()
-        .map(|(k, mut cfg)| {
-            sanitize_parameter(&mut cfg);
+        .map(|(k, cfg)| {
             let needs_null = strict && !cfg.required;
 
             let mut schema = cfg.to_json_schema();
@@ -1926,77 +1924,6 @@ fn make_schema_nullable(schema: &mut Value) {
             Value::Object(Map::from_iter([("type".to_owned(), "null".into())])),
         ]),
     );
-}
-
-/// Sanitizes the parameter shape to fit Openai's limitations. specifically
-/// moving array-based enums into the 'items' configuration.
-fn sanitize_parameter(config: &mut ToolParameterConfig) {
-    if let Some(items) = &mut config.items {
-        sanitize_parameter(items);
-    }
-
-    let allows_array = match &config.kind {
-        OneOrManyTypes::One(t) => t == "array",
-        OneOrManyTypes::Many(types) => types.iter().any(|t| t == "array"),
-    };
-
-    if !allows_array || !config.enumeration.iter().any(Value::is_array) {
-        return;
-    }
-
-    let (arrays, other): (Vec<Value>, Vec<Value>) =
-        config.enumeration.drain(..).partition(Value::is_array);
-
-    config.enumeration = other;
-
-    // Flatten [["foo", "bar"], ["baz"]] -> ["foo", "bar", "baz"]
-    let items: Vec<Value> = arrays
-        .into_iter()
-        .flat_map(|v| match v {
-            Value::Array(v) => v,
-            _ => vec![],
-        })
-        .collect();
-
-    let items_config = config.items.get_or_insert_with(|| {
-        let mut inferred_types: IndexSet<_> = items
-            .iter()
-            .map(|v| match v {
-                Value::String(_) => "string",
-                Value::Number(n) if n.is_i64() || n.is_u64() => "integer",
-                Value::Number(_) => "number",
-                Value::Bool(_) => "boolean",
-                Value::Null => "null",
-                Value::Object(_) => "object",
-                Value::Array(_) => "array",
-            })
-            .map(str::to_owned)
-            .collect();
-
-        // Construct the correct kind
-        let kind = if inferred_types.len() == 1
-            && let Some(first) = inferred_types.pop()
-        {
-            OneOrManyTypes::One(first)
-        } else {
-            OneOrManyTypes::Many(inferred_types.into_iter().collect())
-        };
-
-        Box::new(ToolParameterConfig {
-            kind,
-            default: None,
-            required: false,
-            summary: None,
-            description: None,
-            examples: None,
-            enumeration: vec![],
-            items: None,
-            properties: IndexMap::default(),
-        })
-    });
-
-    // Append the flattened values to the items enum
-    items_config.enumeration.extend(items);
 }
 
 fn convert_tools(tools: Vec<ToolDefinition>) -> Vec<types::Tool> {
