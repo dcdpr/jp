@@ -77,21 +77,28 @@ fn create_ticket(dir: &Utf8TempDir, title: &str) -> String {
     ))
 }
 
+/// Ids are generated, so tests follow the ones that were handed out.
+fn ids(dir: &Utf8TempDir) -> Vec<TicketId> {
+    store::list(&dir.path().join(store::DEFAULT_DIR))
+        .unwrap()
+        .into_iter()
+        .filter_map(|entry| entry.ticket.as_ref().ok().map(|_| entry.id))
+        .collect()
+}
+
 #[test]
 fn create_reports_the_id_and_a_workspace_relative_path() {
     let dir = Utf8TempDir::new().unwrap();
 
     let out = create_ticket(&dir, "Tool call header misaligned");
 
-    assert_eq!(
-        out,
-        "Created T0001 at docs/ticket/0001-tool-call-header-misaligned.md"
+    let id = ids(&dir)[0];
+    let path = format!(
+        "docs/ticket/{}tool-call-header-misaligned.md",
+        id.file_prefix()
     );
-    assert!(
-        dir.path()
-            .join("docs/ticket/0001-tool-call-header-misaligned.md")
-            .exists()
-    );
+    assert_eq!(out, format!("Created {id} at {path}"));
+    assert!(dir.path().join(&path).exists());
 }
 
 #[test]
@@ -131,11 +138,13 @@ fn comments_are_attributed_to_the_assistant_and_numbered() {
     let dir = Utf8TempDir::new().unwrap();
     create_ticket(&dir, "Tool call header misaligned");
 
+    let id = ids(&dir)[0];
+
     let first = content(run_tool(
         &dir,
         "ticket_comment",
         json!({
-            "id": 1,
+            "id": id.as_str(),
             "body": "Reproduced at 72 columns."
         }),
     ));
@@ -143,19 +152,24 @@ fn comments_are_attributed_to_the_assistant_and_numbered() {
         &dir,
         "ticket_comment",
         json!({
-            "id": "T0001",
+            "id": id.to_string(),
             "re": 1,
             "body": "The wrap calculation is off."
         }),
     ));
 
-    assert_eq!(first, "Added T0001#1");
-    assert_eq!(second, "Added T0001#2");
+    assert_eq!(first, format!("Added {id}#1"));
+    assert_eq!(second, format!("Added {id}#2"));
 
-    let shown = content(run_tool(&dir, "ticket_show", json!({ "id": "1" })));
-    assert!(shown.contains("### T0001#1 — jp at "), "{shown}");
+    let shown = content(run_tool(
+        &dir,
+        "ticket_show",
+        json!({ "id": id.to_string() }),
+    ));
+    assert!(shown.contains(&format!("### {id}#1 — jp at ")), "{shown}");
     assert!(
-        shown.contains("### T0001#2 — jp at ") && shown.contains("replying to T0001#1"),
+        shown.contains(&format!("### {id}#2 — jp at "))
+            && shown.contains(&format!("replying to {id}#1")),
         "{shown}"
     );
 }
@@ -165,17 +179,19 @@ fn a_reply_to_a_missing_comment_is_reported_to_the_model() {
     let dir = Utf8TempDir::new().unwrap();
     create_ticket(&dir, "Tool call header misaligned");
 
+    let id = ids(&dir)[0];
+
     let out = error_message(run_tool(
         &dir,
         "ticket_comment",
         json!({
-            "id": 1,
+            "id": id.to_string(),
             "re": 3,
             "body": "Reply."
         }),
     ));
 
-    assert_eq!(out, "No T0001, or no comment #3 on it.");
+    assert_eq!(out, format!("No {id}, or no comment #3 on it."));
 }
 
 #[test]
@@ -184,11 +200,15 @@ fn an_unusable_id_is_reported_to_the_model() {
 
     assert_eq!(
         error_message(run_tool(&dir, "ticket_close", json!({ "id": "nope" }))),
-        "`nope` is not a ticket id (try 42, 042, or T0042)."
+        "`nope` is not a ticket id (try T-02wt0kx)."
     );
     assert_eq!(
         error_message(run_tool(&dir, "ticket_close", json!({ "id": 7 }))),
-        "No T0007."
+        "`7` is not a ticket id."
+    );
+    assert_eq!(
+        error_message(run_tool(&dir, "ticket_close", json!({ "id": "T-zzzzzzz" }))),
+        "No T-zzzzzzz."
     );
 }
 
@@ -197,13 +217,23 @@ fn close_reports_the_transition_once() {
     let dir = Utf8TempDir::new().unwrap();
     create_ticket(&dir, "Tool call header misaligned");
 
+    let id = ids(&dir)[0];
+
     assert_eq!(
-        content(run_tool(&dir, "ticket_close", json!({ "id": 1 }))),
-        "T0001: Todo -> Done"
+        content(run_tool(
+            &dir,
+            "ticket_close",
+            json!({ "id": id.to_string() })
+        )),
+        format!("{id}: Todo -> Done")
     );
     assert_eq!(
-        content(run_tool(&dir, "ticket_close", json!({ "id": 1 }))),
-        "T0001 was already Done."
+        content(run_tool(
+            &dir,
+            "ticket_close",
+            json!({ "id": id.to_string() })
+        )),
+        format!("{id} was already Done.")
     );
 }
 
@@ -212,16 +242,21 @@ fn list_shows_one_line_per_ticket_and_filters() {
     let dir = Utf8TempDir::new().unwrap();
     create_ticket(&dir, "Still open");
     create_ticket(&dir, "Finished");
-    run_tool(&dir, "ticket_close", json!({ "id": 2 })).unwrap();
+    let [open, finished] = ids(&dir)[..] else {
+        panic!("expected two tickets")
+    };
+    run_tool(&dir, "ticket_close", json!({ "id": finished.to_string() })).unwrap();
 
     let all = content(run_tool(&dir, "ticket_list", json!({})));
     assert_eq!(
         all,
-        "T0001  Todo         Bug      Still open\nT0002  Done         Bug      Finished\n"
+        format!(
+            "{open} Todo         Bug      Still open\n{finished} Done         Bug      Finished\n"
+        )
     );
 
     let todo = content(run_tool(&dir, "ticket_list", json!({ "status": "todo" })));
-    assert_eq!(todo, "T0001  Todo         Bug      Still open\n");
+    assert_eq!(todo, format!("{open} Todo         Bug      Still open\n"));
 
     let chores = content(run_tool(&dir, "ticket_list", json!({ "kind": "chore" })));
     assert_eq!(chores, "No tickets match.\n");
@@ -231,17 +266,19 @@ fn list_shows_one_line_per_ticket_and_filters() {
 fn list_names_the_files_it_could_not_read() {
     let dir = Utf8TempDir::new().unwrap();
     create_ticket(&dir, "Readable");
+    let id = ids(&dir)[0];
+    // Sorts after the readable ticket, so listing order is stable.
     std::fs::write(
-        dir.path().join("docs/ticket/0009-mangled.md"),
+        dir.path().join("docs/ticket/zzzzzzz-mangled.md"),
         "no heading here\n",
     )
     .unwrap();
 
     let out = content(run_tool(&dir, "ticket_list", json!({})));
 
-    assert!(out.starts_with("T0001  Todo"), "{out}");
+    assert!(out.starts_with(&format!("{id} Todo")), "{out}");
     assert!(
-        out.contains("- docs/ticket/0009-mangled.md: Ticket does not open with"),
+        out.contains("- docs/ticket/zzzzzzz-mangled.md: Ticket does not open with"),
         "{out}"
     );
 }
@@ -251,14 +288,22 @@ fn show_renders_metadata_and_the_description() {
     let dir = Utf8TempDir::new().unwrap();
     create_ticket(&dir, "Tool call header misaligned");
 
-    let out = content(run_tool(&dir, "ticket_show", json!({ "id": 1 })));
+    let id = ids(&dir)[0];
+    let out = content(run_tool(
+        &dir,
+        "ticket_show",
+        json!({ "id": id.to_string() }),
+    ));
 
     assert!(
-        out.starts_with("# T0001: Tool call header misaligned\n"),
+        out.starts_with(&format!("# {id}: Tool call header misaligned\n")),
         "{out}"
     );
     assert!(
-        out.contains("- **Path**: docs/ticket/0001-tool-call-header-misaligned.md"),
+        out.contains(&format!(
+            "- **Path**: docs/ticket/{}tool-call-header-misaligned.md",
+            id.file_prefix()
+        )),
         "{out}"
     );
     assert!(out.contains("- **Status**: Todo"), "{out}");
@@ -272,18 +317,21 @@ fn show_reports_a_missing_ticket() {
     let dir = Utf8TempDir::new().unwrap();
 
     assert_eq!(
-        error_message(run_tool(&dir, "ticket_show", json!({ "id": 4 }))),
-        "No T0004."
+        error_message(run_tool(&dir, "ticket_show", json!({ "id": "T-zzzzzzz" }))),
+        "No T-zzzzzzz."
     );
 }
 
 #[test]
-fn ids_are_read_from_strings_and_numbers() {
-    assert_eq!(id_arg(&json!("T0042")), Ok(TicketId::new(42)));
-    assert_eq!(id_arg(&json!("042")), Ok(TicketId::new(42)));
-    assert_eq!(id_arg(&json!(42)), Ok(TicketId::new(42)));
-    assert!(id_arg(&json!(0)).is_err());
-    assert!(id_arg(&json!(-1)).is_err());
+fn ids_are_read_from_every_accepted_spelling() {
+    let expected: TicketId = "T-02wt0kx".parse().unwrap();
+
+    assert_eq!(id_arg(&json!("T-02wt0kx")), Ok(expected));
+    assert_eq!(id_arg(&json!("T02wt0kx")), Ok(expected));
+    assert_eq!(id_arg(&json!("02wt0kx")), Ok(expected));
+
+    // Ids carry letters, so a bare number can never be one.
+    assert!(id_arg(&json!(42)).is_err());
     assert!(id_arg(&json!(null)).is_err());
 }
 
