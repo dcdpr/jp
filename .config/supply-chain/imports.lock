@@ -248,8 +248,8 @@ user-login = "BurntSushi"
 user-name = "Andrew Gallant"
 
 [[publisher.h2]]
-version = "0.4.12"
-when = "2025-08-06"
+version = "0.4.16"
+when = "2026-08-17"
 user-id = 359
 user-login = "seanmonstar"
 user-name = "Sean McArthur"

@@ -13,12 +13,12 @@
 
 use std::ops::Range;
 
-use crate::{Comment, Metadata, ParseError, Ticket, TicketId};
+use crate::{Comment, Metadata, ParseError, Ticket};
 
 /// Read a ticket document.
 pub fn document(source: &str) -> Result<Ticket, ParseError> {
     let doc = Doc::new(source);
-    let (id, title) = doc.title()?;
+    let title = doc.title()?;
     let header = doc.metadata_range().ok_or(ParseError::MissingMetadata)?;
     let metadata = metadata(header.clone().filter_map(|i| meta_line(doc.lines[i])))?;
 
@@ -39,7 +39,6 @@ pub fn document(source: &str) -> Result<Ticket, ParseError> {
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(Ticket {
-        id,
         title,
         metadata,
         description,
@@ -95,20 +94,18 @@ impl<'a> Doc<'a> {
         Self { lines, fenced }
     }
 
-    /// The id and title from the `# T0042: Title` heading.
-    fn title(&self) -> Result<(TicketId, String), ParseError> {
-        let line = self
-            .lines
+    /// The title from the `# Title` heading.
+    ///
+    /// A ticket's id is not in its document — it lives in the filename, so
+    /// there is exactly one place that names the ticket and nothing to keep in
+    /// step.
+    fn title(&self) -> Result<String, ParseError> {
+        self.lines
             .iter()
             .find(|line| !line.trim().is_empty())
-            .ok_or(ParseError::MissingTitle)?;
-
-        let (id, title) = line
-            .strip_prefix("# ")
-            .and_then(|rest| rest.split_once(':'))
-            .ok_or(ParseError::MissingTitle)?;
-
-        Ok((id.parse()?, title.trim().to_owned()))
+            .and_then(|line| line.strip_prefix("# "))
+            .map(|title| title.trim().to_owned())
+            .ok_or(ParseError::MissingTitle)
     }
 
     fn metadata_range(&self) -> Option<Range<usize>> {
