@@ -1,9 +1,10 @@
 use camino::{Utf8Path, Utf8PathBuf};
-use jp_tool::{AccessPolicy, Outcome};
+use jp_tool::{AccessPolicy, Capability, Outcome};
+use serde_json::Value;
 
 use crate::{
     Context, Tool,
-    fs::utils::resolve_workspace_path,
+    fs::utils::{authorize, resolve_workspace_path},
     util::{ToolResult, error, unknown_tool},
 };
 
@@ -36,13 +37,33 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
     // Which cargo workspace to operate in. Defaults to the root the tool was
     // invoked with; set `options.root` in the tool config to point the cargo
     // tooling at a different cargo workspace.
-    let configured: Option<String> = t.option_or("root", None);
-    let root = match cargo_root(&ctx.root, configured.as_deref(), ctx.access.as_ref()) {
+    //
+    // A present `root` must be a string. `option_or` cannot be used here: it
+    // reports a malformed value as an absent one, which would silently run
+    // `cargo_format` or `cargo_update` against the host workspace — writing to
+    // it, and reporting success — after the user asked for another one.
+    let configured = match t.options.get("root") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(value)) => Some(value.clone()),
+        Some(other) => {
+            return error(format!(
+                "The `root` tool option must be a string, got `{other}`."
+            ));
+        }
+    };
+
+    let subcommand = t.name.trim_start_matches("cargo_");
+    let root = match cargo_root(
+        &ctx.root,
+        configured.as_deref(),
+        ctx.access.as_ref(),
+        required_capabilities(subcommand),
+    ) {
         Ok(root) => root,
         Err(message) => return error(message),
     };
 
-    let outcome = match t.name.trim_start_matches("cargo_") {
+    let outcome = match subcommand {
         "check" => cargo_check(&root, t.opt("package")?, checksum_freshness).await,
         "expand" => {
             cargo_expand(&root, t.req("item")?, t.opt("package")?, checksum_freshness).await
@@ -67,6 +88,24 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
     }
 
     note_root(outcome, &root)
+}
+
+/// Capabilities a cargo subcommand needs on the directory it runs in.
+///
+/// `fmt` and `update` never compile: the first rewrites sources, the second the
+/// lockfile.
+/// The rest build, so they also write artifacts and run build scripts and proc
+/// macros.
+fn required_capabilities(subcommand: &str) -> &'static [Capability] {
+    match subcommand {
+        "format" | "update" => &[Capability::Read, Capability::Update],
+        _ => &[
+            Capability::Read,
+            Capability::Create,
+            Capability::Update,
+            Capability::Execute,
+        ],
+    }
 }
 
 /// Name the directory cargo ran in, for failures from a redirected root.
@@ -111,10 +150,16 @@ fn note_root(outcome: ToolResult, root: &Utf8Path) -> ToolResult {
 /// The target is required to be a directory, so a typo (or naming the manifest
 /// instead of the directory holding it) surfaces here rather than as a
 /// confusing cargo failure somewhere else.
+///
+/// A configured target must also grant `capabilities` outright.
+/// `external` only permits a path to resolve outside the workspace; it is not a
+/// capability grant, so reaching a mount says nothing about what may be done
+/// once there.
 fn cargo_root(
     default: &Utf8Path,
     configured: Option<&str>,
     access: Option<&AccessPolicy>,
+    capabilities: &[Capability],
 ) -> Result<Utf8PathBuf, String> {
     // An empty value or `.` resolves to the invocation root, so a config layer
     // can unload a previously-set root without naming the default.
@@ -131,6 +176,13 @@ fn cargo_root(
             "The `root` option `{configured}` resolved to `{}`, which is not a directory.",
             resolved.absolute
         ));
+    }
+
+    // Only a configured root is authorized. The invocation root is where these
+    // tools have always run, so demanding grants for it here would revoke
+    // access this option never handed out.
+    for capability in capabilities {
+        authorize(access, *capability, &resolved.relative)?;
     }
 
     Ok(resolved.absolute)
