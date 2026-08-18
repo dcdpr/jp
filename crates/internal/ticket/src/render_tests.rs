@@ -3,7 +3,7 @@ use indoc::indoc;
 use super::*;
 use crate::parse;
 
-fn comment(from: &str, body: &str, re: Option<&str>) -> Comment {
+fn new_comment(from: &str, body: &str, re: Option<&str>) -> Comment {
     Comment {
         from: from.to_owned(),
         date: "2026-08-05T14:03:11Z".to_owned(),
@@ -69,7 +69,7 @@ fn first_comment_opens_the_comments_section() {
 
     let out = append_comment(
         &document,
-        &comment("john", "Reproduced at 72 columns.", None),
+        &new_comment("john", "Reproduced at 72 columns.", None),
     );
 
     assert_eq!(out, indoc! {"
@@ -93,6 +93,25 @@ fn first_comment_opens_the_comments_section() {
         "});
 }
 
+#[test]
+fn renders_a_comment_block() {
+    let out = comment(&new_comment(
+        "jp",
+        "The wrap calculation is off.",
+        Some("#1"),
+    ));
+
+    assert_eq!(out, indoc! {"
+            -----
+
+            - **From**: jp
+            - **Date**: 2026-08-05T14:03:11Z
+            - **Re**: #1
+
+            The wrap calculation is off.
+        "});
+}
+
 /// A second comment is written at the end and nothing above it moves.
 #[test]
 fn later_comments_are_a_pure_append() {
@@ -105,12 +124,12 @@ fn later_comments_are_a_pure_append() {
             None,
             "Description.",
         ),
-        &comment("john", "Reproduced at 72 columns.", None),
+        &new_comment("john", "Reproduced at 72 columns.", None),
     );
 
     let out = append_comment(
         &document,
-        &comment("jp", "The wrap calculation is off.", Some("#1")),
+        &new_comment("jp", "The wrap calculation is off.", Some("#1")),
     );
 
     assert!(out.starts_with(&document));
@@ -138,9 +157,9 @@ fn appended_comments_parse_back() {
                 None,
                 "Description.",
             ),
-            &comment("john", "First.", None),
+            &new_comment("john", "First.", None),
         ),
-        &comment("jp", "Second.", Some("#1")),
+        &new_comment("jp", "Second.", Some("#1")),
     );
 
     let parsed = parse::document(&document).unwrap();
