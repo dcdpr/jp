@@ -3,7 +3,7 @@ use std::io;
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::{Utf8TempDir, tempdir};
 use indoc::indoc;
-use jp_tool::{Action, Outcome};
+use jp_tool::{Action, Context, Outcome};
 use pretty_assertions::assert_eq;
 use serde_json::json;
 
@@ -120,7 +120,7 @@ fn single_package_updates_only_that_package() {
         .args(&["update", "--color=never", "serde"])
         .returns(success("    Updating serde v1.0.200 -> v1.0.210"));
 
-    let result = cargo_update_impl(&ctx, &[name("serde")], &runner).unwrap();
+    let result = cargo_update_impl(&ctx.root, &[name("serde")], &runner).unwrap();
     assert_eq!(
         result.unwrap_content(),
         "Updating serde v1.0.200 -> v1.0.210"
@@ -140,7 +140,7 @@ fn each_package_gets_its_own_invocation() {
         .args(&["update", "--color=never", "tokio"])
         .returns(success("    Updating tokio v1.40.0 -> v1.44.0"));
 
-    let result = cargo_update_impl(&ctx, &[name("serde"), name("tokio")], &runner).unwrap();
+    let result = cargo_update_impl(&ctx.root, &[name("serde"), name("tokio")], &runner).unwrap();
     assert_eq!(result.unwrap_content(), indoc! {"
             2/2 update commands succeeded.
 
@@ -157,7 +157,7 @@ fn pinned_package_is_updated_with_precise() {
         .args(&["update", "--color=never", "serde", "--precise", "1.0.210"])
         .returns(success("    Updating serde v1.0.200 -> v1.0.210"));
 
-    let result = cargo_update_impl(&ctx, &[pinned("serde", "1.0.210")], &runner).unwrap();
+    let result = cargo_update_impl(&ctx.root, &[pinned("serde", "1.0.210")], &runner).unwrap();
     assert_eq!(
         result.unwrap_content(),
         "Updating serde v1.0.200 -> v1.0.210"
@@ -176,7 +176,7 @@ fn each_pinned_package_gets_its_own_version() {
         .returns(success("    Updating tokio v1.40.0 -> v1.44.0"));
 
     let packages = [pinned("serde", "1.0.210"), pinned("tokio", "1.44.0")];
-    let result = cargo_update_impl(&ctx, &packages, &runner).unwrap();
+    let result = cargo_update_impl(&ctx.root, &packages, &runner).unwrap();
     assert_eq!(result.unwrap_content(), indoc! {"
             2/2 update commands succeeded.
 
@@ -205,7 +205,7 @@ fn packages_are_updated_in_request_order() {
         .returns(success(""));
 
     let packages = [name("serde"), pinned("tokio", "1.44.0"), name("regex")];
-    let result = cargo_update_impl(&ctx, &packages, &runner).unwrap();
+    let result = cargo_update_impl(&ctx.root, &packages, &runner).unwrap();
     assert_eq!(result.unwrap_content(), indoc! {"
             3/3 update commands succeeded.
 
@@ -244,7 +244,7 @@ fn lockfile_changes_are_reported_as_a_diff() {
         stderr: "    Updating serde v1.0.200 -> v1.0.210".to_owned(),
     };
 
-    let result = cargo_update_impl(&ctx, &[name("serde")], &runner).unwrap();
+    let result = cargo_update_impl(&ctx.root, &[name("serde")], &runner).unwrap();
     assert_eq!(result.unwrap_content(), indoc! {r#"
             ```diff
             Updating serde v1.0.200 -> v1.0.210
@@ -273,7 +273,7 @@ fn an_unchanged_lockfile_produces_no_diff() {
         .expect("cargo")
         .returns(success("    Updating crates.io index"));
 
-    let result = cargo_update_impl(&ctx, &[name("serde")], &runner).unwrap();
+    let result = cargo_update_impl(&ctx.root, &[name("serde")], &runner).unwrap();
     assert_eq!(result.unwrap_content(), indoc! {"
             Updating crates.io index
 
@@ -289,7 +289,7 @@ fn nothing_reported_and_nothing_changed_says_so() {
         .expect("cargo")
         .returns(success(""));
 
-    let result = cargo_update_impl(&ctx, &[name("serde")], &runner).unwrap();
+    let result = cargo_update_impl(&ctx.root, &[name("serde")], &runner).unwrap();
     assert_eq!(
         result.unwrap_content(),
         "Nothing to update, the lockfile is unchanged."
@@ -311,7 +311,7 @@ fn a_failing_package_does_not_stop_the_others() {
         .args(&["update", "--color=never", "tokio"])
         .returns(success("    Updating tokio v1.40.0 -> v1.44.0"));
 
-    let result = cargo_update_impl(&ctx, &[name("srde"), name("tokio")], &runner).unwrap();
+    let result = cargo_update_impl(&ctx.root, &[name("srde"), name("tokio")], &runner).unwrap();
     assert_eq!(result.unwrap_content(), indoc! {"
             1/2 update commands succeeded.
 
@@ -338,7 +338,7 @@ fn a_failed_pinned_package_is_reported_with_its_version() {
         });
 
     let packages = [name("serde"), pinned("tokio", "99.0.0")];
-    let result = cargo_update_impl(&ctx, &packages, &runner).unwrap();
+    let result = cargo_update_impl(&ctx.root, &packages, &runner).unwrap();
     assert_eq!(result.unwrap_content(), indoc! {"
             1/2 update commands succeeded.
 
@@ -366,7 +366,7 @@ fn every_package_failing_is_an_error() {
             status: ExitCode::from_code(101),
         });
 
-    let result = cargo_update_impl(&ctx, &[name("srde"), name("tokoi")], &runner).unwrap();
+    let result = cargo_update_impl(&ctx.root, &[name("srde"), name("tokoi")], &runner).unwrap();
     assert_eq!(error_message(&result), indoc! {"
             cargo update failed:
             * srde: error: package ID specification `srde` did not match any packages
@@ -378,7 +378,7 @@ fn no_packages_is_rejected_without_running_cargo() {
     let (_dir, ctx) = ctx();
     let runner = MockProcessRunner::never_called();
 
-    let result = cargo_update_impl(&ctx, &[], &runner).unwrap();
+    let result = cargo_update_impl(&ctx.root, &[], &runner).unwrap();
     assert_eq!(error_message(&result), "At least one package is required.");
 }
 
@@ -387,7 +387,7 @@ fn package_name_looking_like_a_flag_is_rejected_without_running_cargo() {
     let (_dir, ctx) = ctx();
     let runner = MockProcessRunner::never_called();
 
-    let result = cargo_update_impl(&ctx, &[name("--workspace")], &runner).unwrap();
+    let result = cargo_update_impl(&ctx.root, &[name("--workspace")], &runner).unwrap();
     assert_eq!(
         error_message(&result),
         "Invalid package name '--workspace': must not start with '-'."
@@ -399,7 +399,7 @@ fn blank_package_name_is_rejected_without_running_cargo() {
     let (_dir, ctx) = ctx();
     let runner = MockProcessRunner::never_called();
 
-    let result = cargo_update_impl(&ctx, &[name("  ")], &runner).unwrap();
+    let result = cargo_update_impl(&ctx.root, &[name("  ")], &runner).unwrap();
     assert_eq!(error_message(&result), "Empty package name.");
 }
 
@@ -408,7 +408,7 @@ fn version_looking_like_a_flag_is_rejected_without_running_cargo() {
     let (_dir, ctx) = ctx();
     let runner = MockProcessRunner::never_called();
 
-    let result = cargo_update_impl(&ctx, &[pinned("serde", "-Zfoo")], &runner).unwrap();
+    let result = cargo_update_impl(&ctx.root, &[pinned("serde", "-Zfoo")], &runner).unwrap();
     assert_eq!(
         error_message(&result),
         "Invalid version '-Zfoo': must not start with '-'."
@@ -422,7 +422,7 @@ fn an_invalid_package_rejects_the_whole_call() {
     let (_dir, ctx) = ctx();
     let runner = MockProcessRunner::never_called();
 
-    let result = cargo_update_impl(&ctx, &[name("serde"), name("-x")], &runner).unwrap();
+    let result = cargo_update_impl(&ctx.root, &[name("serde"), name("-x")], &runner).unwrap();
     assert_eq!(
         error_message(&result),
         "Invalid package name '-x': must not start with '-'."
