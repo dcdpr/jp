@@ -466,11 +466,7 @@ fn migrate(dir: &Utf8Path) -> Result<Output, String> {
         let Ok(path) = Utf8PathBuf::try_from(path) else {
             continue;
         };
-        if path
-            .file_name()
-            .is_some_and(|name| name.len() > 5 && name[..4].bytes().all(|b| b.is_ascii_digit()))
-            && path.extension() == Some("md")
-        {
+        if path.file_name().is_some_and(legacy_filename) && path.extension() == Some("md") {
             legacy.push(path);
         }
     }
@@ -525,6 +521,19 @@ fn migrate(dir: &Utf8Path) -> Result<Output, String> {
     );
 
     Ok(output)
+}
+
+/// Whether `name` opens with the pre-RFD-102 `NNNN-` id.
+///
+/// Indexed through the bytes rather than by slicing the string: a name whose
+/// fourth byte falls mid-character, `aéé.md`, would panic a byte range.
+fn legacy_filename(name: &str) -> bool {
+    let bytes = name.as_bytes();
+
+    bytes
+        .get(..4)
+        .is_some_and(|id| id.iter().all(u8::is_ascii_digit))
+        && bytes.get(4) == Some(&b'-')
 }
 
 /// Run git inside `dir`, so the repository found is the one holding the tickets
@@ -629,11 +638,22 @@ fn branch_files(dir: &Utf8Path, base: &str) -> Result<Vec<Utf8PathBuf>, String> 
 
 /// Replace every `old` with `new` in `file`, reporting whether anything moved.
 ///
-/// A file that isn't there, or isn't text, is skipped rather than failing the
-/// run: the caller is working through a list it didn't curate.
+/// A file the branch deleted, or one that isn't text, is skipped rather than
+/// failing the run: the caller is working through a list it didn't curate.
+/// Any other read failure is an error, so an incomplete repair can't report
+/// success.
 fn rewrite(file: &Utf8Path, old: &str, new: &str) -> Result<bool, String> {
-    let Ok(source) = std::fs::read_to_string(file) else {
-        return Ok(false);
+    let source = match std::fs::read_to_string(file) {
+        Ok(source) => source,
+        Err(error)
+            if matches!(
+                error.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::InvalidData
+            ) =>
+        {
+            return Ok(false);
+        }
+        Err(error) => return Err(format!("{file}: {error}")),
     };
     if !source.contains(old) {
         return Ok(false);

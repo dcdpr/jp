@@ -694,6 +694,58 @@ fn refresh_keeps_the_ticket_in_the_bucket_it_was_created_in() {
     assert_eq!(fresh.bucket(), 69_120);
 }
 
+/// The scan walks whatever is in the ticket directory, so a name whose fourth
+/// byte falls mid-character must not take the command down.
+#[test]
+fn migrate_skips_a_non_ascii_filename_without_panicking() {
+    let dir = Utf8TempDir::new().unwrap();
+    std::fs::write(dir.path().join("a\u{e9}\u{e9}.md"), "not a ticket\n").unwrap();
+
+    let output = run_command(&dir, Command::Migrate).unwrap();
+
+    assert_eq!(output.text, "No tickets to migrate.\n");
+}
+
+/// `12345-foo.md` is not a pre-RFD-102 ticket: the id is five digits, so the
+/// fifth byte is not the separator.
+#[test]
+fn migrate_ignores_a_filename_that_only_starts_with_digits() {
+    let dir = Utf8TempDir::new().unwrap();
+    std::fs::write(dir.path().join("12345-foo.md"), "not a ticket\n").unwrap();
+
+    let output = run_command(&dir, Command::Migrate).unwrap();
+
+    assert_eq!(output.text, "No tickets to migrate.\n");
+}
+
+/// An unreadable candidate must not be mistaken for one that holds no
+/// reference, or `refresh` reports success on an incomplete repair.
+#[test]
+fn rewriting_an_unreadable_file_is_an_error() {
+    let dir = Utf8TempDir::new().unwrap();
+    let directory = dir.path().join("a-directory");
+    std::fs::create_dir(&directory).unwrap();
+
+    // Reading a directory fails with neither `NotFound` nor `InvalidData`.
+    let error = rewrite(&directory, "T-02wt0kx", "T-03abcde").unwrap_err();
+
+    assert!(error.starts_with(directory.as_str()), "{error}");
+}
+
+/// A file the branch deleted is expected to be gone, and a binary one is
+/// expected not to be text.
+/// Neither is a failure.
+#[test]
+fn rewriting_a_missing_or_binary_file_is_skipped() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    assert!(!rewrite(&dir.path().join("gone.md"), "a", "b").unwrap());
+
+    let binary = dir.path().join("binary.bin");
+    std::fs::write(&binary, [0xff, 0xfe, 0x00]).unwrap();
+    assert!(!rewrite(&binary, "a", "b").unwrap());
+}
+
 #[test]
 fn migrate_of_a_converted_directory_does_nothing() {
     let dir = Utf8TempDir::new().unwrap();
