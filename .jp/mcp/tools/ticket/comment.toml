@@ -8,7 +8,7 @@ Add a comment to a ticket's discussion, attributed to you (`jp`).
 
 Comments are append-only: they are never removed or reordered, so write what you
 mean. The reply target is a comment's 1-based position, which `ticket_show`
-prints next to each comment (`T0042#1`).
+prints next to each comment (`T-02wt0kx#1`).
 
 Findings, reproductions, and links to the code belong here. A comment that turns
 the ticket into a design argument is a signal the work wants an RFD instead.
@@ -17,13 +17,13 @@ the ticket into a design argument is a signal the work wants an RFD instead.
 examples = """
 Record a finding:
 ```json
-{"id": "T0042", "body": "The wrap calculation in `jp_printer` uses the \
+{"id": "T-02wt0kx", "body": "The wrap calculation in `jp_printer` uses the \
 pre-indent width."}
 ```
 
 Reply to the first comment:
 ```json
-{"id": "T0042", "re": 1, "body": "Confirmed at 72 columns, not at 80."}
+{"id": "T-02wt0kx", "re": 1, "body": "Confirmed at 72 columns, not at 80."}
 ```
 """
 
@@ -35,7 +35,7 @@ results_file_link = "off"
 [conversation.tools.ticket_comment.parameters.id]
 type = "string"
 required = true
-summary = "The ticket to comment on: `42`, `042`, or `T0042`."
+summary = "The ticket to comment on: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`."
 
 [conversation.tools.ticket_comment.parameters.body]
 type = "string"

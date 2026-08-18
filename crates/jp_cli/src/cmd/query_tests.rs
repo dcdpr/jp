@@ -2009,6 +2009,61 @@ fn run_missing_at_path_query_leaves_conversation_and_session_untouched() {
     assert_eq!(ctx.workspace.session_active_conversation(&session), None);
 }
 
+// A `--label=:name` naming a rule that isn't configured must fail before any
+// other flag has written anything: alias expansion runs ahead of `--mount`'s
+// symlinks and `--title`'s metadata write, so a typo'd alias leaves the
+// conversation exactly as it was.
+#[test]
+fn run_failing_alias_leaves_the_title_untouched() {
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let mut workspace = Workspace::new("/tmp/jp-cli-query-label-test");
+    let id = make_id(4242);
+    workspace.create_conversation_with_id(
+        id,
+        Conversation {
+            title: Some("original".to_owned()),
+            ..Default::default()
+        },
+        Arc::new(AppConfig::new_test()),
+    );
+
+    let mut ctx = Ctx::new(
+        workspace,
+        None,
+        Runtime::new().unwrap(),
+        Globals::default(),
+        AppConfig::new_test(),
+        None,
+        printer,
+    );
+
+    let handle = ctx.workspace.acquire_conversation(&id).unwrap();
+    let query = parse_query(&["--title", "changed", "--label=:missing", "hello"]).unwrap();
+    let result = Runtime::new()
+        .unwrap()
+        .block_on(query.run(&mut ctx, Some(handle), false));
+
+    let Err(error) = result else {
+        panic!("a query naming an unknown label alias must fail");
+    };
+    // Pin that it failed on the alias, not on something else further down
+    // `run` that the test environment happens to be missing.
+    assert!(
+        error.to_string().contains("unknown label alias")
+            || error.metadata.iter().any(|(_, value)| value
+                .as_str()
+                .is_some_and(|v| v.contains("unknown label alias"))),
+        "got: {error:?}"
+    );
+
+    let handle = ctx.workspace.acquire_conversation(&id).unwrap();
+    assert_eq!(
+        ctx.workspace.metadata(&handle).unwrap().title.as_deref(),
+        Some("original"),
+        "the title must not have been rewritten before the alias failed"
+    );
+}
+
 #[test]
 fn resolve_query_missing_at_path_errors() {
     let dir = camino_tempfile::tempdir().unwrap();

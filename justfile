@@ -1990,14 +1990,14 @@ ticket-add KIND *TITLE: _install-ticket
 
 # Append a comment to a ticket.
 #
-# NNN is 42, 042, or T0042; append `#N` to reply to the Nth comment. The body
+# NNN is T-02wt0kx or 02wt0kx; append `#N` to reply to the Nth comment. The body
 # comes from the arguments, from stdin when piped, or from the inline composer
 # when neither is given.
 #
-#   just ticket-comment 42 "Reproduced at 72 columns."
-#   just ticket-comment 42#1 "The wrap calculation is off."
-#   git log -1 | just ticket-comment 42
-#   just ticket-comment 42
+#   just ticket-comment T-02wt0kx "Reproduced at 72 columns."
+#   just ticket-comment T-02wt0kx#1 "The wrap calculation is off."
+#   git log -1 | just ticket-comment T-02wt0kx
+#   just ticket-comment T-02wt0kx
 #
 # The author comes from your JP or git identity.
 [group('ticket')]
@@ -2008,7 +2008,7 @@ ticket-comment NNN *BODY: _install-ticket
 
     shift # remove NNN from positional params
 
-    # `T0042#1` addresses a comment; split the reply target off the id.
+    # `T-02wt0kx#1` addresses a comment; split the reply target off the id.
     id="{{NNN}}"
     re=""
     case "$id" in
@@ -2035,7 +2035,7 @@ ticket-comment NNN *BODY: _install-ticket
 
     jp ticket "$@"
 
-# Mark a ticket as Done. NNN is 42, 042, or T0042.
+# Mark a ticket as Done. NNN is T-02wt0kx or 02wt0kx.
 [group('ticket')]
 ticket-close NNN: _install-ticket
     @jp ticket close {{quote(NNN)}}
@@ -2135,6 +2135,36 @@ ticket-promote NNN CATEGORY="design": _install-ticket
     ' "$file" > "${file}.tmp" && mv "${file}.tmp" "$file"
 
     jp ticket promote "$id" --to "$draft"
+
+# Give a ticket a fresh id, after CI reports two files claiming one.
+#
+# PATH names the losing ticket file — an id would name both. Run this on the
+# branch that has not merged yet: its commits are still rewritable and every
+# reference to the id on it is unambiguously its own.
+#
+# References are rewritten in what the branch changed against BASE (`main` by
+# default). Occurrences elsewhere are reported, not touched: the same token on
+# BASE belongs to the ticket that kept the id.
+#
+#   just ticket-refresh docs/ticket/02wt0kx-some-bug.md
+#   just ticket-refresh docs/ticket/02wt0kx-some-bug.md develop
+[group('ticket')]
+ticket-refresh PATH BASE="main": _install-ticket
+    @jp ticket refresh {{quote(PATH)}} --base {{quote(BASE)}}
+
+# Convert tickets left in the pre-RFD-102 `NNNN-slug.md` format.
+#
+# Run it on a branch cut before the id change, after rebasing onto main. Each
+# ticket lands in the time bucket of the commit that added it, so it keeps its
+# order against tickets already on main.
+#
+# The docs build rejects the old filename shape, so a branch that merges without
+# running this fails rather than dropping the ticket silently.
+#
+# Transitional: delete this recipe once no such branch is left.
+[group('ticket')]
+ticket-migrate: _install-ticket
+    @jp ticket migrate
 
 # Search across all tickets.
 [group('ticket')]

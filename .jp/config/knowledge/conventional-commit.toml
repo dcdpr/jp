@@ -83,7 +83,7 @@ title = "Conventional Commit: Commit Message Header Format"
 description = "[type]([scope])[!]: [subject line]"
 items = [
     """\
-    [type]: Commit Type: build|ci|docs|feat|enhance|fix|perf|refactor|test\
+    [type]: Commit Type: build|chore|ci|docs|feat|enhance|fix|perf|refactor|test\
     """,
     """\
     [scope]: Commit Scope: One or more comma-space-separated scopes relevant to the changes.\
@@ -112,6 +112,10 @@ items = [
     npm)\
     """,
     """\
+    chore: A change to the project's own tooling or workflow, with no effect on what JP does for \
+    its users (example scopes: ticket, rfd)\
+    """,
+    """\
     ci: Changes to our CI configuration files and scripts (example scopes: github-actions, travis)\
     """,
     """\
@@ -130,7 +134,9 @@ items = [
     perf: A code change that improves performance\
     """,
     """\
-    refactor: A code change that has no impact on the user experience\
+    refactor: A code change that has no impact on the user experience. Reach for `chore` instead \
+    when the change is to tooling JP's users never run, even if it adds or removes behaviour \
+    there\
     """,
     """\
     test: Adding missing tests or correcting existing tests\

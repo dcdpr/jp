@@ -26,11 +26,11 @@ export const DONE_HEAD = 8
 
 // Parse one ticket file.
 export function parseTicket(content, filename) {
-    const id = filename.match(/^(\d{4})/)?.[1] ?? '0000'
-    const rawTitle = content.match(/^# T\d+:\s*(.+)/m)?.[1]?.trim() ?? filename
+    const id = filename.match(/^([0-9a-z]{7})-/)?.[1] ?? '0000000'
+    const rawTitle = content.match(/^# (.+)/m)?.[1]?.trim() ?? filename
 
     return {
-        id: `T${id}`,
+        id: `T-${id}`,
         num: id,
         title: unescapeTitle(rawTitle),
         status: field(content, 'Status'),
@@ -145,6 +145,43 @@ export function inDevelopmentRfds(tickets) {
     return [...rfds].sort()
 }
 
+// Files left in the pre-RFD-102 `NNNN-slug.md` shape.
+//
+// A branch cut before the id change carries them, and the reader below would
+// skip them silently — the ticket would vanish from the board with nothing
+// said. Aborting the build is the only way that becomes visible.
+export function findLegacyIds(files) {
+    const legacy = files.filter(f => /^\d{4}-.+\.md$/.test(f))
+    if (legacy.length === 0) return null
+
+    return `Tickets still in the pre-RFD-102 id format:\n` +
+        legacy.map(f => `  ${f}`).join('\n') + '\n\n' +
+        `Run \`just ticket-migrate\` on this branch to convert them.`
+}
+
+// Ids claimed by more than one file.
+//
+// Ids are collision-resistant, not unique by construction, so two checkouts can
+// draw the same one. Every reference to it is then ambiguous, which is why the
+// build stops rather than rendering one of them.
+export function findDuplicateIds(files) {
+    const byId = new Map()
+    for (const f of files) {
+        const id = f.slice(0, 7)
+        byId.set(id, [...(byId.get(id) ?? []), f])
+    }
+
+    const clashes = [...byId.entries()].filter(([, group]) => group.length > 1)
+    if (clashes.length === 0) return null
+
+    const report = clashes
+        .map(([id, group]) => `  T-${id}: ${group.join(', ')}`)
+        .join('\n')
+    return `Duplicate ticket ids found:\n${report}\n\n` +
+        `Each ticket id must map to exactly one file. ` +
+        `Give the losing branch a fresh id before merging.`
+}
+
 // Read every ticket, ordered by id.
 //
 // Paths resolve from this file's location, so the result doesn't depend on the
@@ -152,12 +189,19 @@ export function inDevelopmentRfds(tickets) {
 export function loadTickets() {
     const dir = resolve(import.meta.dirname, '../../ticket')
 
-    let files
+    let names
     try {
-        files = readdirSync(dir).filter(f => /^\d{4}-.+\.md$/.test(f)).sort()
+        names = readdirSync(dir)
     } catch {
         return []
     }
+
+    const legacy = findLegacyIds(names)
+    if (legacy) throw new Error(legacy)
+
+    const files = names.filter(f => /^[0-9a-z]{7}-.+\.md$/.test(f)).sort()
+    const duplicate = findDuplicateIds(files)
+    if (duplicate) throw new Error(duplicate)
 
     return files.map(f => ({
         ...parseTicket(readFileSync(resolve(dir, f), 'utf-8'), f),
