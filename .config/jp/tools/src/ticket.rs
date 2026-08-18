@@ -144,7 +144,13 @@ fn show(root: &Utf8Path, id: TicketId) -> ToolResult {
     };
 
     match entry.ticket {
-        Ok(ticket) => Ok(render_ticket(entry.id, &ticket, &relative(root, &entry.path)).into()),
+        Ok(ticket) => {
+            let rendered = render_ticket(entry.id, &ticket, &relative(root, &entry.path));
+            // The terminal keys syntax highlighting off a leading code fence,
+            // so the fence is what gets a ticket displayed as markdown rather
+            // than as a flat wall of text.
+            Ok(format!("```markdown\n{}\n```", rendered.trim_end()).into())
+        }
         Err(problem) => error(format!("{id} is not a well-formed ticket: {problem}")),
     }
 }
