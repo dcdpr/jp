@@ -74,11 +74,15 @@ The canonical reference form is `T-02wt0kx`; tooling accepts `T02wt0kx`, the
 bare body, and any case.
 The id's shape and allocation are specified in [RFD 102].
 
+The filename carries the id and the document does not, so there is one place
+that names a ticket and nothing to keep in step.
+Renaming a ticket is a rename.
+
 Description and full discussion live in that one file, so reading a ticket is
 one `fs_read_file`, one `cat`, or one page on the website.
 
 ````markdown
-# T-02wt0kx: Tool call header misaligned
+# Tool call header misaligned
 
 - **Status**: In Progress
 - **Kind**: Bug
@@ -102,7 +106,7 @@ Reproduced at 72 columns. Not at 80.
 
 - **From**: jp
 - **Date**: 2026-08-05T14:31:02Z
-- **Re**: T-02wt0kx#1
+- **Re**: #1
 
 The wrap calculation in `jp_printer` uses the pre-indent width:
 
@@ -147,8 +151,9 @@ information arrives, and authors fix their own comments.
 Deleting a comment replaces its body with a marker naming the reason (`deleted`,
 `off-topic`, `spam`) and keeps the block.
 
-Replies are recorded as `- **Re**: T-02wt0kx#1`, referencing a comment by its
-1-based position.
+Replies are recorded as `- **Re**: #1`, referencing a comment by its 1-based
+position.
+A reply always targets a comment on the same ticket, so it names no id.
 Storage stays flat; the website and terminal render the thread.
 Positions are not identifiers: two branches appending concurrently can shift
 one, and a reply then points at the wrong comment.

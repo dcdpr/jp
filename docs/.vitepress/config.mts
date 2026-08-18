@@ -195,7 +195,7 @@ const ticketBoardWriter = {
                 tickets.set(id, {
                     id,
                     file,
-                    title: content.match(/^# T-[0-9a-z]{7}:\s*(.+)/m)?.[1]?.trim() ?? name,
+                    title: content.match(/^# (.+)/m)?.[1]?.trim() ?? name,
                     status: field('Status'),
                     kind: field('Kind'),
                     blockedBy: field('Blocked by'),

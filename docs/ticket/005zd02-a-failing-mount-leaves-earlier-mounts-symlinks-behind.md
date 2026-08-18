@@ -1,4 +1,4 @@
-# T-005zd02: A failing `--mount` leaves earlier mounts' symlinks behind
+# A failing `--mount` leaves earlier mounts' symlinks behind
 
 - **Status**: Todo
 - **Kind**: Bug

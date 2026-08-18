@@ -82,7 +82,7 @@ fn ids(dir: &Utf8TempDir) -> Vec<TicketId> {
     store::list(&dir.path().join(store::DEFAULT_DIR))
         .unwrap()
         .into_iter()
-        .filter_map(|entry| entry.ticket.ok().map(|ticket| ticket.id))
+        .filter_map(|entry| entry.ticket.as_ref().ok().map(|_| entry.id))
         .collect()
 }
 

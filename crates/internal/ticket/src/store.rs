@@ -127,6 +127,8 @@ impl From<io::Error> for Error {
 /// ticket shouldn't hide the rest of the board.
 #[derive(Debug)]
 pub struct Entry {
+    /// The id, which the filename carries and the document does not.
+    pub id: TicketId,
     pub path: Utf8PathBuf,
     pub ticket: std::result::Result<Ticket, ParseError>,
 }
@@ -165,8 +167,7 @@ pub fn create(
             .open(&path)
         {
             Ok(mut file) => {
-                let document =
-                    render::ticket(id, title, kind, authors, date, implements, description);
+                let document = render::ticket(title, kind, authors, date, implements, description);
                 file.write_all(document.as_bytes())?;
 
                 return Ok((id, path));
@@ -214,7 +215,6 @@ pub fn edit(
 
     let updated = render::replace_content(
         &source,
-        id,
         title.unwrap_or(&ticket.title),
         description.unwrap_or(&ticket.description),
         &ticket.comments,
@@ -242,7 +242,8 @@ pub fn set_field(dir: &Utf8Path, id: TicketId, key: &str, value: &str) -> Result
 ///
 /// Unlike an RFD, a ticket can go: one carrying false claims or imported spam
 /// is removed outright so nothing reads it as true.
-/// Its number is not reused — the counter never goes backwards.
+/// Its id is not retired: a later creation in the same time bucket can draw it
+/// again.
 pub fn delete(dir: &Utf8Path, id: TicketId) -> Result<Utf8PathBuf> {
     let path = locate(dir, id)?;
     fs::remove_file(&path)?;
@@ -269,7 +270,9 @@ pub fn append_comment(
         Some(position) if position == 0 || position > count => {
             return Err(Error::NoSuchComment { id, position });
         }
-        Some(position) => Some(format!("{id}#{position}")),
+        // A reply always targets a comment on this ticket, so the position
+        // alone says everything. Nothing in a ticket names the ticket.
+        Some(position) => Some(format!("#{position}")),
         None => None,
     };
 
@@ -312,7 +315,7 @@ pub fn import(dir: &Utf8Path, upstream: &Import<'_>) -> Result<Imported> {
     });
 
     let (id, path, created) = if let Some(entry) = existing {
-        (entry.ticket.map_err(Error::Parse)?.id, entry.path, false)
+        (entry.id, entry.path, false)
     } else {
         let (id, path) = create(
             dir,
@@ -335,7 +338,7 @@ pub fn import(dir: &Utf8Path, upstream: &Import<'_>) -> Result<Imported> {
     };
 
     let source = fs::read_to_string(&path)?;
-    let updated = render::replace_content(&source, id, &title, &description, &comments)
+    let updated = render::replace_content(&source, &title, &description, &comments)
         .ok_or(ParseError::MissingMetadata)?;
     fs::write(&path, updated)?;
 
@@ -377,9 +380,10 @@ pub fn list(dir: &Utf8Path) -> Result<Vec<Entry>> {
 
     files
         .into_iter()
-        .map(|(_, path)| {
+        .map(|(id, path)| {
             let source = fs::read_to_string(&path)?;
             Ok(Entry {
+                id,
                 ticket: parse::document(&source),
                 path,
             })
@@ -445,11 +449,13 @@ fn files(dir: &Utf8Path) -> Result<Vec<(TicketId, Utf8PathBuf)>> {
     Ok(files)
 }
 
-/// The slug of `path`, when it is a ticket file directly inside `dir`.
+/// The reference token and slug of `path`, when it is a ticket file directly
+/// inside `dir`.
 ///
-/// Both id shapes are accepted, because a ticket left in the pre-RFD-102 format
-/// is exactly what a migration reassigns.
-fn ticket_filename<'a>(dir: &Utf8Path, path: &'a Utf8Path) -> Option<&'a str> {
+/// The token is the id as other documents write it: `T-02wt0kx` now, `T0005`
+/// for a ticket left in the pre-RFD-102 format, which is exactly what a
+/// migration reassigns.
+fn ticket_filename<'a>(dir: &Utf8Path, path: &'a Utf8Path) -> Option<(String, &'a str)> {
     if !same_directory(dir, path.parent()?) || path.extension() != Some("md") {
         return None;
     }
@@ -459,8 +465,11 @@ fn ticket_filename<'a>(dir: &Utf8Path, path: &'a Utf8Path) -> Option<&'a str> {
         return None;
     }
 
-    let legacy = id.len() == 4 && id.bytes().all(|byte| byte.is_ascii_digit());
-    (legacy || id.parse::<TicketId>().is_ok()).then_some(slug)
+    if id.len() == 4 && id.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Some((format!("T{id}"), slug));
+    }
+
+    id.parse::<TicketId>().ok().map(|id| (id.to_string(), slug))
 }
 
 /// Whether two paths name the same directory.
@@ -552,39 +561,36 @@ pub fn bucket_at(unix_seconds: u64) -> Result<u32> {
 /// What a reassignment changed.
 #[derive(Debug)]
 pub struct Reassigned {
-    /// The id the ticket carried, as written in its heading.
+    /// The reference token the ticket is leaving behind, as other documents
+    /// write it.
     ///
     /// A string rather than a [`TicketId`], so a ticket from an older format
-    /// can report the id it is leaving behind.
+    /// can report `T0005`.
     pub old: String,
     pub new: TicketId,
     pub path: Utf8PathBuf,
 }
 
-/// Give the ticket at `path` a new id, renaming its file and rewriting its
-/// heading.
+/// Give the ticket at `path` a new id by renaming its file.
 ///
 /// `bucket` places the new id in time; pass the one the ticket was created in
 /// so it keeps its position relative to everything around it.
 /// The slug is kept, and references held by other files are the caller's to fix
 /// — nothing here knows which of them meant this ticket.
 ///
-/// `path` must name a ticket file directly inside `dir`.
-/// This writes and then deletes, so a path that merely happens to carry a `#
-/// <token>: Title` heading — an RFD, say — would be moved into the ticket
-/// directory and removed from where it lives.
+/// The document is not touched: a ticket names itself nowhere inside its own
+/// file, so moving the file is the whole operation.
+///
+/// `path` must name a ticket file directly inside `dir`, or an unrelated file
+/// would be renamed into the ticket directory.
 pub fn reassign(dir: &Utf8Path, path: &Utf8Path, bucket: u32) -> Result<Reassigned> {
-    let slug =
+    let (old, slug) =
         ticket_filename(dir, path).ok_or_else(|| Error::NotATicketFile(path.to_path_buf()))?;
-    let source = fs::read_to_string(path)?;
 
     let new = allocate_in(dir, bucket)?;
-    let (old, updated) = render::set_id(&source, new).ok_or(ParseError::MissingTitle)?;
-
     let target = dir.join(format!("{}{slug}.md", new.file_prefix()));
-    fs::write(&target, updated)?;
     if target != path {
-        fs::remove_file(path)?;
+        fs::rename(path, &target)?;
     }
 
     Ok(Reassigned {

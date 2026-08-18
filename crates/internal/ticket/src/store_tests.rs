@@ -40,7 +40,6 @@ fn create_writes_a_file_named_for_its_id() {
     );
 
     let ticket = parse::document(&fs::read_to_string(&path).unwrap()).unwrap();
-    assert_eq!(ticket.id, id);
     assert_eq!(ticket.title, "Tool call header misaligned");
     assert_eq!(ticket.metadata.status, Status::Todo);
     assert_eq!(ticket.metadata.kind, Kind::Bug);
@@ -98,7 +97,7 @@ fn an_id_in_a_future_bucket_is_ignored() {
     fs::write(
         dir.path()
             .join(format!("{}future.md", future.file_prefix())),
-        render::ticket(future, "Future", Kind::Bug, "john", DATE, None, ""),
+        render::ticket("Future", Kind::Bug, "john", DATE, None, ""),
     )
     .unwrap();
 
@@ -117,7 +116,7 @@ fn list_rejects_a_duplicated_id() {
 
     fs::write(
         dir.path().join(format!("{}second.md", id.file_prefix())),
-        render::ticket(id, "Second", Kind::Bug, "john", DATE, None, ""),
+        render::ticket("Second", Kind::Bug, "john", DATE, None, ""),
     )
     .unwrap();
 
@@ -146,7 +145,7 @@ fn comments_append_and_number_from_one() {
     let ticket = parse::document(&fs::read_to_string(path).unwrap()).unwrap();
     assert_eq!(ticket.comments.len(), 2);
     assert_eq!(ticket.comments[0].from, "john");
-    assert_eq!(ticket.comments[1].re, Some(format!("{id}#1")));
+    assert_eq!(ticket.comments[1].re.as_deref(), Some("#1"));
 }
 
 #[test]
@@ -377,7 +376,7 @@ fn a_write_by_a_duplicated_id_is_refused() {
 
     fs::write(
         dir.path().join(format!("{}second.md", id.file_prefix())),
-        render::ticket(id, "Second", Kind::Bug, "john", DATE, None, ""),
+        render::ticket("Second", Kind::Bug, "john", DATE, None, ""),
     )
     .unwrap();
 
@@ -432,15 +431,14 @@ fn reassign_renames_the_file_and_rewrites_the_heading() {
     );
 
     let ticket = parse::document(&fs::read_to_string(&done.path).unwrap()).unwrap();
-    assert_eq!(ticket.id, done.new);
     assert_eq!(ticket.title, "Tool call header misaligned");
     assert_eq!(ticket.description, "Description.");
 }
 
-/// A ticket written before the id format changed carries a heading no parser
-/// accepts, so reassigning it must not go through one.
+/// Reassigning is a rename: the document is untouched, so a pre-RFD-102 heading
+/// survives verbatim and stripping it is the migration's job.
 #[test]
-fn reassign_converts_a_ticket_from_the_old_format() {
+fn reassign_renames_a_legacy_file_without_touching_it() {
     let dir = Utf8TempDir::new().unwrap();
     let path = dir.path().join("0005-old-ticket.md");
     fs::write(
@@ -456,10 +454,21 @@ fn reassign_converts_a_ticket_from_the_old_format() {
     assert_eq!(done.new.bucket(), 4_200);
     assert!(!path.exists());
 
-    let ticket = parse::document(&fs::read_to_string(&done.path).unwrap()).unwrap();
-    assert_eq!(ticket.id, done.new);
+    let source = fs::read_to_string(&done.path).unwrap();
+    assert!(source.starts_with("# T0005: Old ticket\n"), "{source}");
+
+    let stripped = render::strip_heading_id(&source, &done.old).unwrap();
+    let ticket = parse::document(&stripped).unwrap();
     assert_eq!(ticket.title, "Old ticket");
     assert_eq!(ticket.description, "Body.");
+}
+
+/// A title that merely contains a colon is not an id prefix.
+#[test]
+fn stripping_a_heading_id_leaves_an_unrelated_colon_alone() {
+    let document = "# Fix: the wrap calculation\n\n- **Status**: Todo\n";
+
+    assert_eq!(render::strip_heading_id(document, "T0005"), None);
 }
 
 #[test]

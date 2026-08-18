@@ -1,4 +1,4 @@
-# T-005zd03: Command outcome messages emit prose in `--format=json`
+# Command outcome messages emit prose in `--format=json`
 
 - **Status**: Todo
 - **Kind**: Bug

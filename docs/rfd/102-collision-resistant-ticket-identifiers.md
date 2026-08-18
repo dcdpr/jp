@@ -63,6 +63,25 @@ Exact subcommand names win over id parsing.
 both parse as ids; the bare-id alias applies only when the first argument is not
 a subcommand.
 
+## The filename is the only place a ticket names itself
+
+The id is in the filename and nowhere in the document: the heading is `# Title`,
+and a reply is `- **Re**: #1` rather than `- **Re**: T-02wt0kx#1`.
+
+Two copies of one fact can disagree, and the tool that repairs a collision is
+precisely the one pointed at files somebody has been hand-resolving.
+With one copy, `jp ticket refresh` and `jp ticket migrate` are renames —
+nothing inside the file has to be rewritten to match.
+
+This diverges from RFDs, which carry the number in both the filename and the `#
+RFD 102:` heading.
+That is deliberate: RFD numbers are permanent by policy and renumbering is rare,
+while ticket ids are reassigned as a normal part of resolving a collision.
+
+The cost is that a ticket read outside its filename — pasted into a chat,
+quoted in an issue — carries no id, and `git grep T-02wt0kx` finds references
+to a ticket rather than the ticket itself.
+
 **The time component is not a contract.** Nothing may parse it back out of an id
 or depend on how ids are generated.
 The alphabet and the seven-character width *are* contractual: they appear in
@@ -95,6 +114,8 @@ Otherwise one skewed clock drags every subsequent local timestamp forward.
 | `.counter` | authority              | deleted                               |
 | Ordering   | strict                 | to the 5-second bucket                |
 | Reuse      | never                  | not guaranteed                        |
+| Heading    | `# T0042: Title`       | `# Title`                             |
+| Reply      | `- **Re**: T0042#1`    | `- **Re**: #1`                        |
 
 A deleted ticket's id is no longer retired.
 The local check only sees files that exist, so a later creation in the same

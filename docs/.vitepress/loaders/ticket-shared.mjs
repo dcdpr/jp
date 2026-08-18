@@ -27,7 +27,7 @@ export const DONE_HEAD = 8
 // Parse one ticket file.
 export function parseTicket(content, filename) {
     const id = filename.match(/^([0-9a-z]{7})-/)?.[1] ?? '0000000'
-    const rawTitle = content.match(/^# T-[0-9a-z]{7}:\s*(.+)/m)?.[1]?.trim() ?? filename
+    const rawTitle = content.match(/^# (.+)/m)?.[1]?.trim() ?? filename
 
     return {
         id: `T-${id}`,

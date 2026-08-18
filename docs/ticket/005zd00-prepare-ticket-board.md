@@ -1,4 +1,4 @@
-# T-005zd00: prepare ticket board
+# prepare ticket board
 
 - **Status**: In Progress
 - **Kind**: Chore

@@ -329,11 +329,7 @@ fn commands_run_against_the_resolved_directory() {
 
     // Ids are generated, so the rest of the lifecycle follows the one that was
     // just handed out rather than a fixed number.
-    let id = store::list(dir.path()).unwrap()[0]
-        .ticket
-        .as_ref()
-        .unwrap()
-        .id;
+    let id = store::list(dir.path()).unwrap()[0].id;
     assert!(
         created.text.contains(&format!("({id})")),
         "{}",
@@ -395,17 +391,20 @@ fn migrate_converts_legacy_tickets_and_the_board() {
 
     let output = run_command(&dir, Command::Migrate).unwrap();
 
-    let id = store::list(dir.path()).unwrap()[0]
-        .ticket
-        .as_ref()
-        .unwrap()
-        .id;
+    let id = store::list(dir.path()).unwrap()[0].id;
     assert!(!dir.path().join("0005-old-ticket.md").exists());
     assert!(
         dir.path()
             .join(format!("{}old-ticket.md", id.file_prefix()))
             .exists()
     );
+
+    // The legacy heading carried the id too; it lives only in the filename now.
+    let converted = dir
+        .path()
+        .join(format!("{}old-ticket.md", id.file_prefix()));
+    let source = std::fs::read_to_string(&converted).unwrap();
+    assert!(source.starts_with("# Old ticket\n"), "{source}");
 
     let board = std::fs::read_to_string(dir.path().join(".board.json")).unwrap();
     assert_eq!(
@@ -432,8 +431,8 @@ fn refresh_rewrites_the_branch_and_leaves_the_base_alone() {
     // On `main`: the ticket that wins the id, and a file naming it.
     std::fs::write(
         dir.join("02wt0kx-winner.md"),
-        "# T-02wt0kx: Winner\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: john\n- \
-         **Date**: 2026-08-14\n\nBody.\n",
+        "# Winner\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: john\n- **Date**: \
+         2026-08-14\n\nBody.\n",
     )
     .unwrap();
     std::fs::write(root.join("NOTES.md"), "See T-02wt0kx for the winner.\n").unwrap();
@@ -445,8 +444,8 @@ fn refresh_rewrites_the_branch_and_leaves_the_base_alone() {
     let losing = dir.join("02wt0kx-loser.md");
     std::fs::write(
         &losing,
-        "# T-02wt0kx: Loser\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: jane\n- \
-         **Date**: 2026-08-14\n\nOther body.\n",
+        "# Loser\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: jane\n- **Date**: \
+         2026-08-14\n\nOther body.\n",
     )
     .unwrap();
     std::fs::write(root.join("BRANCH.md"), "Fixes T-02wt0kx on this branch.\n").unwrap();
@@ -467,8 +466,7 @@ fn refresh_rewrites_the_branch_and_leaves_the_base_alone() {
     let fresh = store::list(&dir)
         .unwrap()
         .into_iter()
-        .map(|entry| entry.ticket.unwrap())
-        .find(|ticket| ticket.title == "Loser")
+        .find(|entry| entry.ticket.as_ref().is_ok_and(|t| t.title == "Loser"))
         .expect("the losing ticket survived under a new id");
     assert_ne!(fresh.id.to_string(), "T-02wt0kx");
 
@@ -488,7 +486,7 @@ fn refresh_rewrites_the_branch_and_leaves_the_base_alone() {
             .unwrap()
             .lines()
             .next(),
-        Some("# T-02wt0kx: Winner")
+        Some("# Winner")
     );
 
     assert!(
@@ -504,11 +502,11 @@ fn refresh_rewrites_the_branch_and_leaves_the_base_alone() {
     assert!(output.warnings.is_empty(), "{:?}", output.warnings);
 }
 
-/// A reply inside the losing ticket names the id it is losing.
-/// The renamed file is not in `git diff`, so nothing else in `refresh` would
-/// reach it.
+/// A reply names a position, not a ticket, so a rename has nothing to fix
+/// inside the file.
+/// That is what lets `reassign` be a plain rename.
 #[test]
-fn refresh_rewrites_a_reference_inside_the_ticket_it_renames() {
+fn refresh_leaves_a_reply_alone() {
     let repo = git_repo();
     let root = repo.path();
     let dir = root.join("docs/ticket");
@@ -516,15 +514,16 @@ fn refresh_rewrites_a_reference_inside_the_ticket_it_renames() {
     let losing = dir.join("02wt0kx-loser.md");
     std::fs::write(
         &losing,
-        "# T-02wt0kx: Loser\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: jane\n- \
-         **Date**: 2026-08-14\n\nBody.\n\n## Comments\n\n-----\n\n- **From**: john\n- **Date**: \
+        "# Loser\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: jane\n- **Date**: \
+         2026-08-14\n\nBody.\n\n## Comments\n\n-----\n\n- **From**: john\n- **Date**: \
          2026-08-14T10:00:00Z\n\nFirst.\n\n-----\n\n- **From**: jp\n- **Date**: \
-         2026-08-14T11:00:00Z\n- **Re**: T-02wt0kx#1\n\nSecond.\n",
+         2026-08-14T11:00:00Z\n- **Re**: #1\n\nSecond.\n",
     )
     .unwrap();
+    let before = std::fs::read_to_string(&losing).unwrap();
     commit(root, "Add the losing ticket", None);
 
-    execute(
+    let output = execute(
         &dir,
         Command::Refresh {
             path: losing,
@@ -534,8 +533,50 @@ fn refresh_rewrites_a_reference_inside_the_ticket_it_renames() {
     )
     .unwrap();
 
-    let fresh = store::list(&dir).unwrap().pop().unwrap().ticket.unwrap();
-    assert_eq!(fresh.comments[1].re, Some(format!("{}#1", fresh.id)));
+    let entry = store::list(&dir).unwrap().pop().unwrap();
+    assert_eq!(std::fs::read_to_string(&entry.path).unwrap(), before);
+    assert_eq!(entry.ticket.unwrap().comments[1].re.as_deref(), Some("#1"));
+    assert!(output.warnings.is_empty(), "{:?}", output.warnings);
+}
+
+/// Prose inside the renamed ticket naming its old id is ambiguous the same way
+/// any other file's is — it may mean the ticket that kept the id — so it is
+/// reported rather than redirected.
+#[test]
+fn refresh_reports_prose_naming_the_old_id_in_the_renamed_ticket() {
+    let repo = git_repo();
+    let root = repo.path();
+    let dir = root.join("docs/ticket");
+
+    let losing = dir.join("02wt0kx-loser.md");
+    std::fs::write(
+        &losing,
+        "# Loser\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: jane\n- **Date**: \
+         2026-08-14\n\nProbably a duplicate of T-02wt0kx.\n",
+    )
+    .unwrap();
+    commit(root, "Add the losing ticket", None);
+
+    let output = execute(
+        &dir,
+        Command::Refresh {
+            path: losing,
+            base: "main".to_owned(),
+        },
+        &serde_json::json!({}),
+    )
+    .unwrap();
+
+    let entry = store::list(&dir).unwrap().pop().unwrap();
+    let source = std::fs::read_to_string(&entry.path).unwrap();
+    assert!(source.contains("duplicate of T-02wt0kx."), "{source}");
+
+    assert_eq!(output.warnings.len(), 1, "{:?}", output.warnings);
+    assert!(
+        output.warnings[0].contains(entry.path.as_str()),
+        "{}",
+        output.warnings[0]
+    );
 }
 
 /// `just ticket-refresh` documents a workspace-relative path, and git runs in
@@ -548,8 +589,8 @@ fn refresh_accepts_a_repository_relative_path() {
 
     std::fs::write(
         dir.join("02wt0kx-filed-earlier.md"),
-        "# T-02wt0kx: Filed earlier\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: \
-         john\n- **Date**: 2026-08-14\n\nBody.\n",
+        "# Filed earlier\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: john\n- **Date**: \
+         2026-08-14\n\nBody.\n",
     )
     .unwrap();
     // 2026-08-14T00:00:00Z is 345,600 seconds past the epoch: bucket 69,120.
@@ -567,7 +608,7 @@ fn refresh_accepts_a_repository_relative_path() {
 
     // The add-date drove the bucket, which only happens when git resolved the
     // path. A silent fallback would put it at the current bucket instead.
-    let fresh = store::list(&dir).unwrap()[0].ticket.as_ref().unwrap().id;
+    let fresh = store::list(&dir).unwrap()[0].id;
     assert_eq!(fresh.bucket(), 69_120);
 }
 
@@ -587,8 +628,8 @@ fn refresh_reports_a_file_that_named_the_id_on_base() {
     let losing = dir.join("02wt0kx-loser.md");
     std::fs::write(
         &losing,
-        "# T-02wt0kx: Loser\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: jane\n- \
-         **Date**: 2026-08-14\n\nBody.\n",
+        "# Loser\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: jane\n- **Date**: \
+         2026-08-14\n\nBody.\n",
     )
     .unwrap();
     // The branch touches the file for an unrelated reason.
@@ -632,8 +673,8 @@ fn refresh_keeps_the_ticket_in_the_bucket_it_was_created_in() {
     let path = dir.join("02wt0kx-filed-earlier.md");
     std::fs::write(
         &path,
-        "# T-02wt0kx: Filed earlier\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: \
-         john\n- **Date**: 2026-08-14\n\nBody.\n",
+        "# Filed earlier\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: john\n- **Date**: \
+         2026-08-14\n\nBody.\n",
     )
     .unwrap();
     // 2026-08-14T00:00:00Z is 345,600 seconds past the epoch: bucket 69,120.
@@ -649,7 +690,7 @@ fn refresh_keeps_the_ticket_in_the_bucket_it_was_created_in() {
     )
     .unwrap();
 
-    let fresh = store::list(&dir).unwrap()[0].ticket.as_ref().unwrap().id;
+    let fresh = store::list(&dir).unwrap()[0].id;
     assert_eq!(fresh.bucket(), 69_120);
 }
 

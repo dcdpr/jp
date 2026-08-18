@@ -23,7 +23,7 @@ use jp_plugin::message::{
 };
 use serde::Serialize;
 use serde_json::Value;
-use ticket::{Comment, Kind, Metadata, Status, Ticket, TicketId, import::Import, store};
+use ticket::{Comment, Kind, Metadata, Status, Ticket, TicketId, import::Import, render, store};
 
 #[derive(Debug, Parser)]
 #[command(name = "jp ticket", about = "Track work items as markdown files.")]
@@ -415,14 +415,15 @@ fn refresh(dir: &Utf8Path, path: &Utf8Path, base: &str) -> Result<Output, String
     let mut output = Output::from(format!("{} -> {} at {}\n", done.old, done.new, done.path));
 
     let new = done.new.to_string();
+    let mut ambiguous = vec![];
 
-    // The renamed file is not in `changed` — git has never seen its new name —
-    // so a reply inside it would otherwise keep naming the winning ticket.
-    if rewrite(&done.path, &done.old, &new)? {
-        output.text.push_str(&format!("  rewrote {}\n", done.path));
+    // A ticket names itself nowhere structurally, so anything left inside the
+    // renamed file is prose — and prose naming the old id is ambiguous the same
+    // way any other file's is: it may mean the ticket that kept the id.
+    if std::fs::read_to_string(&done.path).is_ok_and(|source| source.contains(&done.old)) {
+        ambiguous.push(done.path.clone());
     }
 
-    let mut ambiguous = vec![];
     for file in changed.iter().chain([&dir.join(".board.json")]) {
         if *file == path {
             continue;
@@ -484,6 +485,14 @@ fn migrate(dir: &Utf8Path) -> Result<Output, String> {
     for path in &legacy {
         let bucket = created_bucket(dir, path)?;
         let done = store::reassign(dir, path, bucket).map_err(|error| error.to_string())?;
+
+        // A pre-RFD-102 ticket carried its id in the heading as well as the
+        // filename. `reassign` only renames, so the heading is stripped here.
+        let source = std::fs::read_to_string(&done.path).map_err(|error| error.to_string())?;
+        if let Some(stripped) = render::strip_heading_id(&source, &done.old) {
+            std::fs::write(&done.path, stripped).map_err(|error| error.to_string())?;
+        }
+
         output
             .text
             .push_str(&format!("{} -> {} at {}\n", done.old, done.new, done.path));
@@ -931,7 +940,9 @@ fn show(dir: &Utf8Path, id: TicketId, json: bool) -> Result<Output, String> {
         return Ok(format!("{json}\n").into());
     }
 
-    let mut out = format!("# {}: {}\n\n", ticket.id, ticket.title);
+    // The rendered view names the ticket even though the file doesn't: the id
+    // is what a reply or a `Blocked by` has to quote.
+    let mut out = format!("# {}: {}\n\n", entry.id, ticket.title);
     out.push_str(&format!("- **Path**: {}\n", entry.path));
     out.push_str(&format!("- **Status**: {}\n", ticket.metadata.status));
     out.push_str(&format!("- **Kind**: {}\n", ticket.metadata.kind));
@@ -941,7 +952,7 @@ fn show(dir: &Utf8Path, id: TicketId, json: bool) -> Result<Output, String> {
     for (index, comment) in ticket.comments.iter().enumerate() {
         out.push_str(&format!(
             "\n## {}#{} \u{2014} {} at {}\n\n{}\n",
-            ticket.id,
+            entry.id,
             index + 1,
             comment.from,
             comment.date,
@@ -961,14 +972,14 @@ fn list(
     let entries = store::list(dir).map_err(|error| error.to_string())?;
 
     let mut warnings = vec![];
-    let mut tickets: Vec<(&Ticket, &str)> = vec![];
+    let mut tickets: Vec<(TicketId, &Ticket, &str)> = vec![];
     for entry in &entries {
         match &entry.ticket {
-            Ok(ticket) => tickets.push((ticket, entry.path.as_str())),
+            Ok(ticket) => tickets.push((entry.id, ticket, entry.path.as_str())),
             Err(error) => warnings.push(format!("{}: {error}", entry.path)),
         }
     }
-    tickets.retain(|(ticket, _)| {
+    tickets.retain(|(_, ticket, _)| {
         status.is_none_or(|status| status == ticket.metadata.status)
             && kind.is_none_or(|kind| kind == ticket.metadata.kind)
     });
@@ -976,8 +987,8 @@ fn list(
     let text = if json {
         let rows: Vec<Row<'_>> = tickets
             .iter()
-            .map(|(ticket, path)| Row {
-                id: ticket.id,
+            .map(|(id, ticket, path)| Row {
+                id: *id,
                 title: &ticket.title,
                 metadata: &ticket.metadata,
                 comments: ticket.comments.len(),
@@ -990,15 +1001,18 @@ fn list(
 
         format!("{json}\n")
     } else {
-        tickets.iter().map(|(ticket, _)| row(ticket)).collect()
+        tickets
+            .iter()
+            .map(|(id, ticket, _)| row(*id, ticket))
+            .collect()
     };
 
     Ok(Output { text, warnings })
 }
 
 /// One line of the human-readable listing.
-fn row(ticket: &Ticket) -> String {
-    let id = ticket.id.to_string();
+fn row(id: TicketId, ticket: &Ticket) -> String {
+    let id = id.to_string();
     let status = ticket.metadata.status.to_string();
     let kind = ticket.metadata.kind.to_string();
     let blocked = ticket

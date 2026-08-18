@@ -4,7 +4,7 @@
 //! block, a description, and an append-only list of comments:
 //!
 //! ```markdown
-//! # T-02wt0kx: Tool call header misaligned
+//! # Tool call header misaligned
 //!
 //! - **Status**: Todo
 //! - **Kind**: Bug
@@ -33,6 +33,9 @@
 //! one, [`store`] holds the file operations (id allocation, create, comment,
 //! close, list, import), and [`import`] carries the rules for content that
 //! comes from upstream.
+//!
+//! The id is in the filename and nowhere else, so renaming a ticket is a rename
+//! and there is no second copy to keep in step.
 //!
 //! The format is specified in `docs/rfd/100-in-repo-ticket-tracking.md`.
 
@@ -142,8 +145,9 @@ pub struct Metadata {
 ///
 /// `from` is a short handle (`john`, `jp`); imported GitHub comments use
 /// `gh:username`.
-/// `re` holds a reference to the comment being replied to, in `T-02wt0kx#1`
-/// form, where the number is the 1-based position of that comment in the file.
+/// `re` holds the comment being replied to, as `#1`, where the number is the
+/// 1-based position of that comment in the file.
+/// A reply always targets a comment on the same ticket, so it names no id.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Comment {
     pub from: String,
@@ -153,9 +157,11 @@ pub struct Comment {
 }
 
 /// A parsed ticket document.
+///
+/// Carries no id: that is the filename's, and a caller who read the file has it
+/// already.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Ticket {
-    pub id: TicketId,
     pub title: String,
     pub metadata: Metadata,
     pub description: String,
@@ -165,7 +171,7 @@ pub struct Ticket {
 /// A document that doesn't hold a well-formed ticket.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParseError {
-    /// The document doesn't open with a `# T-02wt0kx: Title` heading.
+    /// The document doesn't open with a `# Title` heading.
     MissingTitle,
     /// The title heading isn't followed by a metadata block.
     MissingMetadata,
@@ -180,9 +186,7 @@ pub enum ParseError {
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::MissingTitle => {
-                f.write_str("Ticket does not open with a `# T-02wt0kx: Title` heading.")
-            }
+            Self::MissingTitle => f.write_str("Ticket does not open with a `# Title` heading."),
             Self::MissingMetadata => {
                 f.write_str("Ticket title is not followed by a metadata block.")
             }

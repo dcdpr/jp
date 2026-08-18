@@ -10,7 +10,7 @@
 //! A ticket is read far more often than it is written, and by hand as often as
 //! by tooling, so the file is never round-tripped through the parser.
 
-use crate::{Comment, Kind, Status, TicketId, parse};
+use crate::{Comment, Kind, Status, parse};
 
 /// Render a new ticket, opened at `Todo`.
 ///
@@ -18,7 +18,6 @@ use crate::{Comment, Kind, Status, TicketId, parse};
 /// RFD's implementation plan.
 #[must_use]
 pub fn ticket(
-    id: TicketId,
     title: &str,
     kind: Kind,
     authors: &str,
@@ -26,7 +25,7 @@ pub fn ticket(
     implements: Option<&str>,
     description: &str,
 ) -> String {
-    let mut out = format!("# {id}: {title}\n\n");
+    let mut out = format!("# {title}\n\n");
     out.push_str(&format!("- **Status**: {}\n", Status::Todo));
     out.push_str(&format!("- **Kind**: {kind}\n"));
     out.push_str(&format!("- **Authors**: {authors}\n"));
@@ -70,7 +69,6 @@ pub fn append_comment(document: &str, comment: &Comment) -> String {
 #[must_use]
 pub fn replace_content(
     document: &str,
-    id: TicketId,
     title: &str,
     description: &str,
     comments: &[Comment],
@@ -78,7 +76,7 @@ pub fn replace_content(
     let header = parse::metadata_range(document)?;
     let lines: Vec<&str> = document.lines().collect();
 
-    let mut out = format!("# {id}: {title}\n\n");
+    let mut out = format!("# {title}\n\n");
     for index in header {
         out.push_str(lines[index]);
         out.push('\n');
@@ -117,27 +115,32 @@ fn push_comment(out: &mut String, comment: &Comment) {
     out.push('\n');
 }
 
-/// Replace the id in a ticket's title heading, keeping the title.
+/// Drop a leading ` <id>:  ` from the title heading.
 ///
-/// The existing id is returned as written rather than parsed, so a heading
-/// carrying an id from an older format can be rewritten too.
-/// Returns `None` when the document doesn't open with a `# <id>: Title`
-/// heading.
+/// Tickets written before RFD 102 carried their id in the heading as well as
+/// the filename; it lives only in the filename now.
+/// `id` is matched exactly, so a title that merely contains a colon — `Fix:
+/// the thing` — is left alone.
+/// Returns `None` when the heading doesn't open with that id.
 #[must_use]
-pub fn set_id(document: &str, id: TicketId) -> Option<(String, String)> {
+pub fn strip_heading_id(document: &str, id: &str) -> Option<String> {
     let mut lines: Vec<String> = document.lines().map(ToOwned::to_owned).collect();
     let index = lines.iter().position(|line| !line.trim().is_empty())?;
 
-    let (old, title) = lines[index].strip_prefix("# ")?.split_once(':')?;
-    let old = old.trim().to_owned();
-    lines[index] = format!("# {id}:{title}");
+    let title = lines[index]
+        .strip_prefix("# ")?
+        .strip_prefix(id)?
+        .strip_prefix(':')?
+        .trim()
+        .to_owned();
+    lines[index] = format!("# {title}");
 
     let mut out = lines.join("\n");
     if document.ends_with('\n') {
         out.push('\n');
     }
 
-    Some((old, out))
+    Some(out)
 }
 
 /// Set a field in the ticket's metadata block, returning the new document.
