@@ -164,9 +164,13 @@ fn preview_create(
 }
 
 fn comment(root: &Utf8Path, id: TicketId, re: Option<usize>, body: &str) -> ToolResult {
+    let tickets = dir(root);
     let date = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
-    match store::append_comment(&dir(root), id, HANDLE, &date, re, body.trim()) {
-        Ok(position) => Ok(format!("Added {id}#{position}").into()),
+    match store::append_comment(&tickets, id, HANDLE, &date, re, body.trim()) {
+        Ok(position) => {
+            reflow(&store::locate_ticket(&tickets, id)?)?;
+            Ok(format!("Added {id}#{position}").into())
+        }
         Err(store::Error::NoSuchTicket(_) | store::Error::NoSuchComment { .. }) => error(format!(
             "No {id}, or no comment #{} on it.",
             re.unwrap_or(0)

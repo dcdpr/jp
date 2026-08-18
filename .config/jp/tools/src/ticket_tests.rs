@@ -454,6 +454,38 @@ fn comments_are_attributed_to_the_assistant_and_numbered() {
     );
 }
 
+/// A comment body is reflowed for the same reason a description is: the file it
+/// lands in is one CI checks.
+#[test]
+fn comment_reflows_the_body_with_comfort() {
+    let dir = Utf8TempDir::new().unwrap();
+    create_ticket(&dir, "Wrapping is wrong");
+    let id = ids(&dir)[0];
+
+    run_tool(
+        &dir,
+        "ticket_comment",
+        json!({
+            "id": id.to_string(),
+            "body": "The first sentence. The second one, which the model wrote on the same line."
+        }),
+    )
+    .unwrap();
+
+    let source = std::fs::read_to_string(
+        dir.path()
+            .join(format!("docs/ticket/{}wrapping-is-wrong.md", id.file_prefix())),
+    )
+    .unwrap();
+
+    assert!(
+        source.ends_with(
+            "\nThe first sentence.\nThe second one, which the model wrote on the same line.\n"
+        ),
+        "{source}"
+    );
+}
+
 #[test]
 fn a_reply_to_a_missing_comment_is_reported_to_the_model() {
     let dir = Utf8TempDir::new().unwrap();
