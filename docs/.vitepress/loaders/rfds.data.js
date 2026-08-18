@@ -8,13 +8,16 @@ import {
     checkRequiresOnImplemented,
     checkStatusGate,
     checkSummaries,
+    checkTerminalOnBoard,
     findCycles,
     findDuplicateIds,
     findStrayDraftRefs,
+    loadPriority,
 } from './rfd-shared.mjs'
 
 const rfdDir = resolve(import.meta.dirname, '../../rfd')
 const cachePath = resolve(import.meta.dirname, '../rfd-summaries.json')
+const priorityPath = resolve(import.meta.dirname, '../../rfd/.priority.json')
 
 function loadSummaries() {
     try {
@@ -39,6 +42,10 @@ export default {
         const summaries = loadSummaries()
         const graph = buildGraph(rfdDir, files)
 
+        // Only published RFDs reach a terminal status, so the published graph
+        // carries every status the board check needs.
+        const priority = loadPriority(priorityPath)
+
         // Every validation aborts the published build.
         const errors = [
             checkSummaries(rfdDir, files, summaries),
@@ -48,6 +55,7 @@ export default {
             checkStatusGate(graph),
             checkRequiresOnImplemented(graph),
             findCycles(graph),
+            checkTerminalOnBoard(graph, priority),
         ]
         for (const error of errors) {
             if (error) throw new Error(error)
