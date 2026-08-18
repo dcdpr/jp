@@ -321,6 +321,14 @@ fn splits_metadata_lines() {
     assert_eq!(meta_line("  - **Indented**: value"), None);
 }
 
+/// A markdown formatter escapes a value that opens with `#`, since the bare
+/// form would read as a heading.
+#[test]
+fn reads_a_value_through_its_markdown_escape() {
+    assert_eq!(meta_line(r"- **Re**: \#1"), Some(("Re", "#1")));
+    assert_eq!(meta_line("- **Re**: #1"), Some(("Re", "#1")));
+}
+
 #[test]
 fn recognizes_separators() {
     assert!(is_separator("-----"));

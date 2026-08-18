@@ -38,6 +38,7 @@ jp_test = { path = "crates/jp_test" }
 jp_tool = { path = "crates/jp_tool" }
 jp_workspace = { path = "crates/jp_workspace" }
 
+comfort = { path = "crates/contrib/comfort" }
 grizzly = { path = "crates/contrib/grizzly", default-features = false }
 schematic = { path = "crates/contrib/schematic", default-features = false }
 ticket = { path = "crates/internal/ticket" }

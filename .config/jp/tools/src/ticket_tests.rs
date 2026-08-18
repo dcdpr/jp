@@ -350,6 +350,37 @@ fn preview_rejects_the_arguments_execution_would_reject() {
     );
 }
 
+/// Markdown in this repository is laid out by `comfort`, and a body arrives
+/// from the model as one long line per paragraph.
+#[test]
+fn create_reflows_the_body_with_comfort() {
+    let dir = Utf8TempDir::new().unwrap();
+    run_tool(
+        &dir,
+        "ticket_create",
+        json!({
+            "kind": "bug",
+            "title": "Wrapping is wrong",
+            "body": "The first sentence. The second one, which the model wrote on the same line."
+        }),
+    )
+    .unwrap();
+
+    let id = ids(&dir)[0];
+    let source = std::fs::read_to_string(dir.path().join(format!(
+        "docs/ticket/{}wrapping-is-wrong.md",
+        id.file_prefix()
+    )))
+    .unwrap();
+
+    assert!(
+        source.ends_with(
+            "\nThe first sentence.\nThe second one, which the model wrote on the same line.\n"
+        ),
+        "{source}"
+    );
+}
+
 #[test]
 fn create_rejects_an_unknown_kind() {
     let dir = Utf8TempDir::new().unwrap();
@@ -420,6 +451,38 @@ fn comments_are_attributed_to_the_assistant_and_numbered() {
         shown.contains(&format!("### {id}#2 — jp at "))
             && shown.contains(&format!("replying to {id}#1")),
         "{shown}"
+    );
+}
+
+/// A comment body is reflowed for the same reason a description is: the file it
+/// lands in is one CI checks.
+#[test]
+fn comment_reflows_the_body_with_comfort() {
+    let dir = Utf8TempDir::new().unwrap();
+    create_ticket(&dir, "Wrapping is wrong");
+    let id = ids(&dir)[0];
+
+    run_tool(
+        &dir,
+        "ticket_comment",
+        json!({
+            "id": id.to_string(),
+            "body": "The first sentence. The second one, which the model wrote on the same line."
+        }),
+    )
+    .unwrap();
+
+    let source = std::fs::read_to_string(dir.path().join(format!(
+        "docs/ticket/{}wrapping-is-wrong.md",
+        id.file_prefix()
+    )))
+    .unwrap();
+
+    assert!(
+        source.ends_with(
+            "\nThe first sentence.\nThe second one, which the model wrote on the same line.\n"
+        ),
+        "{source}"
     );
 }
 
