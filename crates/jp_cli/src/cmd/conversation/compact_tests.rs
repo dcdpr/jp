@@ -956,6 +956,35 @@ fn timeline_says_so_when_a_threshold_caught_nothing() {
 }
 
 #[test]
+fn timeline_does_not_itemize_a_summary_rule() {
+    // `-k 's+r,over=1kb'` parses: the threshold binds to `r`, and the summary
+    // rule carries it. A summary replaces its whole range, so projection never
+    // consults the threshold and itemizing it would name items nothing selected.
+    let stream = stream_with_a_large_and_a_small_call();
+    let compaction = Compaction::new(0, 0)
+        .with_tool_calls(PolicySpec::over(
+            ToolCallPolicy::Strip {
+                request: false,
+                response: true,
+            },
+            ByteSize::from_bytes(1024),
+        ))
+        .with_summary(jp_conversation::SummaryPolicy {
+            summary: "the gist".to_owned(),
+        });
+
+    let segments = segments_for_compactions(std::slice::from_ref(&compaction), &stream, "conv");
+    let lines = timeline_lines(&segments, 0, true);
+
+    assert_eq!(lines.len(), 1, "no item lines: {lines:?}");
+    assert!(
+        lines[0].contains("summary"),
+        "summary wins the label: {}",
+        lines[0]
+    );
+}
+
+#[test]
 fn timeline_does_not_itemize_a_rule_without_a_threshold() {
     // An unnarrowed rule reaches everything in range by definition, so listing
     // each call would be noise.

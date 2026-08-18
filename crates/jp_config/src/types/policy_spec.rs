@@ -21,7 +21,7 @@ use schematic::{Schema, SchemaBuilder, Schematic};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Map, Value};
 
-use super::{byte_size::ByteSize, json_value::JsonValue};
+use super::byte_size::ByteSize;
 use crate::BoxedError;
 
 /// A compaction policy plus the options qualifying which items it applies to.
@@ -119,11 +119,25 @@ impl<'de, P: DeserializeOwned> Deserialize<'de> for PolicySpec<P> {
         let policy = match serde_json::from_value::<P>(value.clone()) {
             Ok(policy) => policy,
             Err(error) => {
-                let promoted = value
-                    .as_object()
-                    .and_then(|map| map.get("policy"))
+                let Some(map) = value.as_object() else {
+                    return Err(D::Error::custom(error));
+                };
+                let promoted = map
+                    .get("policy")
                     .cloned()
                     .ok_or_else(|| D::Error::custom(&error))?;
+
+                // `P` did not consume the map, so `policy` is the only key it
+                // can account for and anything left is a mistake. Reporting it
+                // matters because the leftover is typically a misspelled option
+                // (`oer = "1MB"`), and silently dropping it would apply the
+                // policy to every item instead of the large ones. The rest of
+                // this config tree rejects unknown fields, so this does too.
+                if let Some(unknown) = map.keys().find(|key| *key != "policy") {
+                    return Err(D::Error::custom(format!(
+                        "unknown policy option `{unknown}`"
+                    )));
+                }
 
                 serde_json::from_value(promoted).map_err(|_| D::Error::custom(error))?
             }
@@ -184,13 +198,20 @@ impl<P: fmt::Display> fmt::Display for PolicySpec<P> {
 
 impl<P: Schematic> Schematic for PolicySpec<P> {
     fn build_schema(mut schema: SchemaBuilder) -> Schema {
-        // Either the bare policy or a table carrying it plus options. The table
-        // shape depends on `P`, so it is described only as an object.
+        // Either the bare policy, or a table carrying it alongside the options
+        // that qualify it. The table is described field by field so a schema
+        // consumer still validates `policy` against `P` and still rejects an
+        // unknown key, rather than falling back to "any value here".
+        let table = schema.nest().structure(schematic::schema::StructType {
+            required: Some(vec!["policy".to_owned()]),
+            ..schematic::schema::StructType::new([
+                ("policy".to_owned(), schema.infer::<P>()),
+                ("over".to_owned(), schema.infer::<ByteSize>()),
+            ])
+        });
+
         schema.union(schematic::schema::UnionType {
-            variants_types: vec![
-                Box::new(schema.infer::<P>()),
-                Box::new(schema.infer::<JsonValue>()),
-            ],
+            variants_types: vec![Box::new(schema.infer::<P>()), Box::new(table)],
             ..Default::default()
         })
     }

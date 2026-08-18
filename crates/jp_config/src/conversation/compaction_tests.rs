@@ -68,6 +68,47 @@ fn a_policy_without_a_threshold_serializes_back_as_a_bare_string() {
 }
 
 #[test]
+fn a_misspelled_option_key_is_rejected() {
+    // Silently dropping the leftover key would apply the policy to every item
+    // in range instead of the large ones, which is the opposite of what the
+    // line asks for. Every other type in this config tree rejects unknown
+    // fields, so this does too.
+    let err = toml::from_str::<PartialCompactionRuleConfig>(
+        r#"tool_calls = { policy = "strip-responses", oer = "1MB" }"#,
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert!(err.contains("unknown policy option `oer`"), "{err}");
+}
+
+#[test]
+fn a_tagged_policy_keeps_its_own_sibling_fields() {
+    // The rejection above must not catch a policy that legitimately serializes
+    // as a map with fields of its own, which is how the stored `ToolCallPolicy`
+    // is shaped.
+    #[derive(Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+    #[serde(tag = "policy", rename_all = "snake_case")]
+    enum Tagged {
+        Strip { request: bool, response: bool },
+    }
+
+    let spec: PolicySpec<Tagged> = serde_json::from_value(serde_json::json!({
+        "policy": "strip",
+        "request": false,
+        "response": true,
+        "over": "1MB",
+    }))
+    .unwrap();
+
+    assert_eq!(spec.policy, Tagged::Strip {
+        request: false,
+        response: true,
+    });
+    assert_eq!(spec.over, Some(ByteSize::from_bytes(1024 * 1024)));
+}
+
+#[test]
 fn assigning_a_policy_string_accepts_an_over_option() {
     // `--cfg ...tool_calls=sres,over=1MB` goes through `FromStr`, which shares
     // its option syntax with the inline DSL.

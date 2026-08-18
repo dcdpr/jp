@@ -193,22 +193,34 @@ pub struct CompactionRuleConfig {
     #[setting(default = default_keep_last)]
     pub keep_last: RuleBound,
 
-    /// Policy for reasoning (thinking) blocks.
+    /// What to do with reasoning (thinking) blocks in the compacted range.
     ///
-    /// Accepts `"strip"`, or a table adding a size threshold:
+    /// The only mode is `"strip"`, which drops the blocks from the view sent to
+    /// the model.
+    /// If unset, reasoning blocks in the range are left alone.
+    ///
+    /// A table form adds a size threshold:
     ///
     /// ```toml
     /// reasoning = { policy = "strip", over = "16KB" }
     /// ```
     ///
-    /// With `over` set, only reasoning blocks larger than that are stripped.
+    /// With `over` set, only blocks larger than that are stripped.
     /// Sizes accept `"512KB"`, `"1MB"`, or a bare byte count, and the
     /// comparison is strict: a block of exactly the threshold is left alone.
     pub reasoning: Option<PolicySpec<ReasoningMode>>,
 
-    /// Policy for tool call arguments and responses.
+    /// What to do with tool call arguments and responses in the compacted
+    /// range.
     ///
-    /// Accepts a mode string, or a table adding a size threshold:
+    /// - `"strip"`: replace request arguments *and* response content.
+    /// - `"strip-requests"`: replace request arguments, keep responses.
+    /// - `"strip-responses"`: replace response content, keep arguments.
+    /// - `"omit"`: remove the request and response entirely.
+    ///
+    /// If unset, tool calls in the range are left alone.
+    ///
+    /// A table form adds a size threshold:
     ///
     /// ```toml
     /// tool_calls = { policy = "strip-responses", over = "1MB" }

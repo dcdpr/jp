@@ -5,7 +5,7 @@
 //!
 //! See [`apply`] for the entry point.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use chrono::{DateTime, Utc};
 use serde_json::{Map, Value};
@@ -127,7 +127,7 @@ pub(super) fn apply(events: &mut Vec<InternalEvent>) -> Vec<TurnOrigin> {
     let turn_indices = assign_turn_indices(events);
     let max_turn = turn_indices.iter().copied().max().unwrap_or(0);
     let policies = resolve_policies(max_turn, &compactions);
-    let tool_calls = build_tool_calls(events);
+    let tool_calls = build_tool_calls(events, &turn_indices);
 
     // Inject a summary once per contiguous run of turns that resolve to the
     // same winning summary. Injecting only at the originating `from_turn` drops
@@ -197,7 +197,7 @@ pub(super) fn apply(events: &mut Vec<InternalEvent>) -> Vec<TurnOrigin> {
                     continue;
                 }
 
-                let Some(event) = apply_mechanical(*conv_event, policy, &tool_calls) else {
+                let Some(event) = apply_mechanical(*conv_event, policy, tool_calls.get(&i)) else {
                     continue;
                 };
 
@@ -228,14 +228,20 @@ pub struct AffectedItem {
 
 /// List the items `compaction`'s mechanical policies reach, in stream order.
 ///
-/// Only the reasoning and tool-call policies select items; a summary replaces
-/// its whole range rather than picking from it, so it contributes nothing here.
+/// Only the reasoning and tool-call policies select items.
+/// A summary replaces every event in its range rather than picking from it, so
+/// a compaction carrying one reports nothing even when its mechanical policies
+/// are narrowed: projection ignores them.
 pub(super) fn affected_items(
     events: &[InternalEvent],
     compaction: &Compaction,
 ) -> Vec<AffectedItem> {
+    if compaction.summary.is_some() {
+        return Vec::new();
+    }
+
     let turn_indices = assign_turn_indices(events);
-    let tool_calls = build_tool_calls(events);
+    let tool_calls = build_tool_calls(events, &turn_indices);
     let mut items = Vec::new();
 
     for (index, entry) in events.iter().enumerate() {
@@ -266,41 +272,35 @@ pub(super) fn affected_items(
         let Some(spec) = &compaction.tool_calls else {
             continue;
         };
-        let sizes = tool_call_sizes(event, &tool_calls);
+        let Some(info) = tool_calls.get(&index) else {
+            continue;
+        };
 
         match &spec.policy {
             // Report the pair once, from its request, since both halves go
             // together.
             ToolCallPolicy::Omit => {
-                if let Some(request) = event.as_tool_call_request()
-                    && spec.covers(sizes.pair)
-                {
+                if event.is_tool_call_request() && spec.covers(info.pair) {
                     items.push(AffectedItem {
                         turn,
-                        name: tool_name(&tool_calls, &request.id).to_owned(),
-                        size: ByteSize::from_bytes(sizes.pair),
+                        name: info.name.clone(),
+                        size: ByteSize::from_bytes(info.pair),
                     });
                 }
             }
             ToolCallPolicy::Strip { request, response } => {
-                if *request
-                    && let Some(req) = event.as_tool_call_request()
-                    && spec.covers(sizes.own)
-                {
+                if *request && event.is_tool_call_request() && spec.covers(info.own) {
                     items.push(AffectedItem {
                         turn,
-                        name: format!("{} (request)", tool_name(&tool_calls, &req.id)),
-                        size: ByteSize::from_bytes(sizes.own),
+                        name: format!("{} (request)", info.name),
+                        size: ByteSize::from_bytes(info.own),
                     });
                 }
-                if *response
-                    && let Some(resp) = event.as_tool_call_response()
-                    && spec.covers(sizes.own)
-                {
+                if *response && event.is_tool_call_response() && spec.covers(info.own) {
                     items.push(AffectedItem {
                         turn,
-                        name: format!("{} (response)", tool_name(&tool_calls, &resp.id)),
-                        size: ByteSize::from_bytes(sizes.own),
+                        name: format!("{} (response)", info.name),
+                        size: ByteSize::from_bytes(info.own),
                     });
                 }
             }
@@ -318,7 +318,7 @@ pub(super) fn affected_items(
 fn apply_mechanical(
     mut event: ConversationEvent,
     policy: &TurnPolicy,
-    tool_calls: &HashMap<String, ToolCall>,
+    info: Option<&ToolCallInfo>,
 ) -> Option<ConversationEvent> {
     if let Some(spec) = &policy.reasoning
         && matches!(spec.policy, ReasoningPolicy::Strip)
@@ -332,9 +332,10 @@ fn apply_mechanical(
     // A `None` tool-call policy means "no opinion", so the event passes through
     // untouched rather than being dropped.
     if let Some(spec) = policy.tool_calls.as_ref() {
-        // Sizes are read up front so the lookup's borrow is released before the
-        // strip helpers mutate the event.
-        let sizes = tool_call_sizes(&event, tool_calls);
+        // A non-tool event has no entry, and reports zero, which no threshold
+        // covers.
+        let own = info.map_or(0, |i| i.own);
+        let pair = info.map_or(0, |i| i.pair);
 
         match &spec.policy {
             ToolCallPolicy::Omit => {
@@ -342,7 +343,7 @@ fn apply_mechanical(
                 // judged on the two halves combined. Both halves read the same
                 // total, so a pair is never half-removed.
                 if (event.is_tool_call_request() || event.is_tool_call_response())
-                    && spec.covers(sizes.pair)
+                    && spec.covers(pair)
                 {
                     return None;
                 }
@@ -350,11 +351,11 @@ fn apply_mechanical(
             ToolCallPolicy::Strip { request, response } => {
                 // Each half is judged on its own size, so a call with a short
                 // request and a huge response loses only the response.
-                if *request && event.is_tool_call_request() && spec.covers(sizes.own) {
+                if *request && event.is_tool_call_request() && spec.covers(own) {
                     strip_tool_request(&mut event);
                 }
-                if *response && event.is_tool_call_response() && spec.covers(sizes.own) {
-                    strip_tool_response(&mut event, tool_calls);
+                if *response && event.is_tool_call_response() && spec.covers(own) {
+                    strip_tool_response(&mut event, info.map_or("unknown", |i| i.name.as_str()));
                 }
             }
         }
@@ -534,18 +535,12 @@ fn strip_tool_request(event: &mut ConversationEvent) {
     }
 }
 
-/// The tool name recorded for a call ID, or `unknown` when no request for it
-/// survives in the stream.
-fn tool_name<'a>(tool_calls: &'a HashMap<String, ToolCall>, id: &str) -> &'a str {
-    tool_calls
-        .get(id)
-        .map_or("unknown", |call| call.name.as_str())
-}
-
 /// Replace a tool call response's content with a compact status line.
-fn strip_tool_response(event: &mut ConversationEvent, tool_calls: &HashMap<String, ToolCall>) {
+///
+/// `name` is the tool named by the paired request, or `unknown` when no request
+/// for it survives in the stream.
+fn strip_tool_response(event: &mut ConversationEvent, name: &str) {
     if let Some(resp) = event.as_tool_call_response_mut() {
-        let name = tool_name(tool_calls, &resp.id);
         let status = if resp.result.is_ok() {
             "success"
         } else {
@@ -560,82 +555,85 @@ fn strip_tool_response(event: &mut ConversationEvent, tool_calls: &HashMap<Strin
     }
 }
 
-/// What the tool call policies need to know about a single call.
+/// What the tool call policies need to know about the tool call event at one
+/// stream position.
 ///
-/// The name feeds a stripped response's status line; the two sizes feed a
-/// spec's `over` threshold.
+/// The name feeds a stripped response's status line; the sizes feed a spec's
+/// `over` threshold.
 #[derive(Default)]
-struct ToolCall {
-    /// Name of the tool, taken from the request.
+struct ToolCallInfo {
+    /// Name of the tool, taken from the request half of the pair.
     name: String,
-    /// Byte size of the request arguments.
-    request_size: u64,
-    /// Byte size of the response content.
-    response_size: u64,
-}
-
-impl ToolCall {
-    /// Combined size of both halves.
-    const fn pair_size(&self) -> u64 {
-        self.request_size.saturating_add(self.response_size)
-    }
-}
-
-/// Size figures for whichever half of a tool call pair an event holds.
-#[derive(Clone, Copy, Default)]
-struct ToolSizes {
-    /// Size of this event's own half.
+    /// Byte size of this event's own half.
     own: u64,
-    /// Combined size of both halves.
+    /// Combined byte size of both halves of the pair.
+    ///
+    /// Equal to `own` for a half whose partner is missing from the stream.
     pair: u64,
 }
 
-/// Build a map from tool call ID to the name and sizes of that call.
-fn build_tool_calls(events: &[InternalEvent]) -> HashMap<String, ToolCall> {
-    let mut calls: HashMap<String, ToolCall> = HashMap::new();
-    for event in events {
-        let Some(conv_event) = event.as_event() else {
+/// Map each tool call event's stream position to its name and sizes.
+///
+/// Keyed by position rather than by call ID because a call ID is not unique: a
+/// provider may reuse one synthetic ID across streaming cycles, which
+/// [`TurnMut::build`] explicitly permits.
+/// Keying by ID would give every occurrence the last one's sizes, so a
+/// threshold would reach the wrong halves.
+///
+/// Pairing mirrors `TurnMut::build`'s count-based rule: a response binds to the
+/// oldest request in its turn that carries the same ID and has no response yet.
+///
+/// [`TurnMut::build`]: super::TurnMut::build
+fn build_tool_calls(
+    events: &[InternalEvent],
+    turn_indices: &[usize],
+) -> HashMap<usize, ToolCallInfo> {
+    let mut calls: HashMap<usize, ToolCallInfo> = HashMap::new();
+    // Positions of requests still awaiting a response, oldest first, per
+    // (turn, call ID). Scoped by turn because request-response pairing is
+    // turn-local, so an orphaned request cannot capture a later turn's response.
+    let mut pending: HashMap<(usize, &str), VecDeque<usize>> = HashMap::new();
+
+    for (index, entry) in events.iter().enumerate() {
+        let Some(event) = entry.as_event() else {
             continue;
         };
+        let turn = turn_indices[index];
 
-        if let Some(req) = conv_event.as_tool_call_request() {
-            let call = calls.entry(req.id.clone()).or_default();
-            call.name.clone_from(&req.name);
-            call.request_size = arguments_size(&req.arguments);
-        } else if let Some(resp) = conv_event.as_tool_call_response() {
-            calls.entry(resp.id.clone()).or_default().response_size =
-                byte_count(resp.content().len());
+        if let Some(req) = event.as_tool_call_request() {
+            let own = arguments_size(&req.arguments);
+            calls.insert(index, ToolCallInfo {
+                name: req.name.clone(),
+                own,
+                // Stands alone until its response is found.
+                pair: own,
+            });
+            pending
+                .entry((turn, req.id.as_str()))
+                .or_default()
+                .push_back(index);
+        } else if let Some(resp) = event.as_tool_call_response() {
+            let own = byte_count(resp.content().len());
+            let request = pending
+                .get_mut(&(turn, resp.id.as_str()))
+                .and_then(VecDeque::pop_front);
+
+            // Both halves must read the same `pair` total, so a threshold on
+            // `Omit` either removes a pair or leaves it whole.
+            let (name, pair) = match request.and_then(|pos| calls.get_mut(&pos)) {
+                Some(request) => {
+                    let pair = request.own.saturating_add(own);
+                    request.pair = pair;
+                    (request.name.clone(), pair)
+                }
+                None => ("unknown".to_owned(), own),
+            };
+
+            calls.insert(index, ToolCallInfo { name, own, pair });
         }
     }
+
     calls
-}
-
-/// Look up the sizes for whichever half of a tool call pair `event` holds.
-///
-/// Both halves report the same `pair` total, so a threshold on `Omit` either
-/// removes a pair or leaves it whole.
-/// A non-tool event reports zero, which no threshold covers.
-fn tool_call_sizes(event: &ConversationEvent, calls: &HashMap<String, ToolCall>) -> ToolSizes {
-    let (id, own_is_request) = if let Some(req) = event.as_tool_call_request() {
-        (&req.id, true)
-    } else if let Some(resp) = event.as_tool_call_response() {
-        (&resp.id, false)
-    } else {
-        return ToolSizes::default();
-    };
-
-    let Some(call) = calls.get(id) else {
-        return ToolSizes::default();
-    };
-
-    ToolSizes {
-        own: if own_is_request {
-            call.request_size
-        } else {
-            call.response_size
-        },
-        pair: call.pair_size(),
-    }
 }
 
 /// Byte size of a tool call request's arguments as the provider receives them.

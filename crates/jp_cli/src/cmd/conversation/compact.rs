@@ -523,10 +523,17 @@ struct TimelineSegment {
 ///
 /// Returns `None` for a rule with no threshold: it reaches everything in its
 /// range by definition, so listing each item would be noise.
+/// Also `None` for a summary, which replaces its whole range regardless of any
+/// mechanical policy it happens to carry, so naming individual items would
+/// describe a selection that never happened.
 fn threshold_items(
     events: &ConversationStream,
     compaction: &Compaction,
 ) -> Option<Vec<AffectedItem>> {
+    if compaction.summary.is_some() {
+        return None;
+    }
+
     let narrowed = compaction
         .reasoning
         .as_ref()

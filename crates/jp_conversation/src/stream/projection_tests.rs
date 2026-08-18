@@ -727,6 +727,171 @@ fn threshold_is_measured_against_the_raw_stream() {
     );
 }
 
+/// One turn holding two tool calls that share the ID `tc1`, as a provider
+/// reusing a synthetic ID across streaming cycles produces.
+///
+/// The first response is 4096 bytes and the second is 2, so a 1 KB threshold
+/// separates them.
+/// Both requests carry the same short arguments.
+fn reused_call_id_stream() -> ConversationStream {
+    let mut stream = ConversationStream::new_test();
+    stream.push(ConversationEvent::new(TurnStart, ts(0)));
+    stream.push(ConversationEvent::new(ChatRequest::from("go"), ts(0)));
+
+    for body in ["x".repeat(4096), "ok".to_owned()] {
+        stream.push(ConversationEvent::new(
+            ToolCallRequest {
+                id: "tc1".into(),
+                name: "fs_read_file".into(),
+                arguments: Map::from_iter([("path".into(), "a.log".into())]),
+            },
+            ts(0),
+        ));
+        stream.push(ConversationEvent::new(
+            ToolCallResponse {
+                id: "tc1".into(),
+                result: Ok(body),
+            },
+            ts(0),
+        ));
+    }
+
+    stream
+}
+
+/// Every tool call response in the stream, in stream order.
+fn response_contents(stream: &ConversationStream) -> Vec<String> {
+    stream
+        .iter()
+        .filter_map(|e| {
+            e.event
+                .as_tool_call_response()
+                .map(|r| r.content().to_owned())
+        })
+        .collect()
+}
+
+#[test]
+fn over_threshold_sizes_each_occurrence_of_a_reused_call_id() {
+    // A provider may reuse one synthetic call ID across cycles, so sizes cannot
+    // be keyed by ID: that gives every occurrence the last one's size, and the
+    // oversized response the threshold exists to catch survives untouched.
+    let mut stream = reused_call_id_stream();
+    stream.add_compaction(tool_call_compaction(PolicySpec::over(
+        ToolCallPolicy::Strip {
+            request: false,
+            response: true,
+        },
+        ByteSize::from_bytes(ONE_KB),
+    )));
+
+    stream.apply_projection();
+
+    assert_eq!(response_contents(&stream), vec![
+        "[compacted] fs_read_file: success".to_owned(),
+        "ok".to_owned(),
+    ]);
+}
+
+#[test]
+fn over_threshold_on_omit_pairs_a_reused_call_id_by_occurrence() {
+    // Each pair is judged on its own combined size: the first totals ~4 KB and
+    // is removed, the second totals ~18 bytes and survives whole.
+    let mut stream = reused_call_id_stream();
+    stream.add_compaction(tool_call_compaction(PolicySpec::over(
+        ToolCallPolicy::Omit,
+        ByteSize::from_bytes(ONE_KB),
+    )));
+
+    stream.apply_projection();
+
+    assert_eq!(response_contents(&stream), vec!["ok".to_owned()]);
+    assert_eq!(
+        stream
+            .iter()
+            .filter(|e| e.event.as_tool_call_request().is_some())
+            .count(),
+        1,
+        "only the small pair's request survives"
+    );
+}
+
+#[test]
+fn affected_items_sizes_each_occurrence_of_a_reused_call_id() {
+    let stream = reused_call_id_stream();
+    let compaction = tool_call_compaction(PolicySpec::over(
+        ToolCallPolicy::Strip {
+            request: false,
+            response: true,
+        },
+        ByteSize::from_bytes(ONE_KB),
+    ));
+
+    let items = stream.affected_items(&compaction);
+
+    assert_eq!(items.len(), 1, "only the oversized occurrence");
+    assert_eq!(items[0].name, "fs_read_file (response)");
+    assert_eq!(items[0].size.as_bytes(), 4096);
+}
+
+#[test]
+fn affected_items_reports_nothing_for_a_summary_compaction() {
+    // A summary replaces every event in its range, so projection ignores the
+    // mechanical policies. Itemizing them would name items the summary made
+    // irrelevant.
+    let stream = mixed_size_tool_calls();
+    let compaction = Compaction {
+        summary: Some(SummaryPolicy {
+            summary: "the gist".into(),
+        }),
+        ..tool_call_compaction(PolicySpec::over(
+            ToolCallPolicy::Strip {
+                request: false,
+                response: true,
+            },
+            ByteSize::from_bytes(ONE_KB),
+        ))
+    };
+
+    assert!(stream.affected_items(&compaction).is_empty());
+}
+
+#[test]
+fn a_thresholded_overlay_replaces_an_earlier_policy_for_its_whole_turn() {
+    // Stacking stays latest-wins per content type, so a later thresholded
+    // overlay takes over the turn entirely: an item below its threshold is left
+    // raw rather than falling back to the earlier, broader policy. Adding a
+    // targeted rule can therefore un-compact items an earlier rule had reached.
+    let mut stream = mixed_size_tool_calls();
+
+    stream.add_compaction(Compaction {
+        timestamp: ts(1),
+        ..tool_call_compaction(PolicySpec::new(ToolCallPolicy::Strip {
+            request: false,
+            response: true,
+        }))
+    });
+    stream.add_compaction(Compaction {
+        timestamp: ts(2),
+        ..tool_call_compaction(PolicySpec::over(
+            ToolCallPolicy::Omit,
+            ByteSize::from_bytes(ONE_KB),
+        ))
+    });
+
+    stream.apply_projection();
+
+    assert_eq!(
+        stream.find_tool_call_response("small").unwrap().content(),
+        "ok",
+        "the earlier blanket strip does not apply below the later threshold"
+    );
+    assert!(
+        stream.find_tool_call_response("big").is_none(),
+        "the oversized pair is omitted by the later overlay"
+    );
+}
+
 #[test]
 fn affected_items_reports_an_omitted_pair_once() {
     // `Omit` removes both halves together, so reporting each half would
