@@ -44,6 +44,14 @@ pub fn run(ctx: Context, t: Tool) -> ToolResult {
             let implements = t.opt::<String>("implements")?;
             let body = t.opt::<String>("body")?;
 
+            // Checked before the action split so a preview fails too: an
+            // unattended formatter that errors fails the call ahead of the
+            // approval prompt, which tells the assistant to fix the arguments
+            // rather than asking the user about a call that cannot land.
+            if title.trim().is_empty() {
+                return error("`title` must not be empty.");
+            }
+
             if ctx.action.is_format_arguments() {
                 let date = Local::now().format("%Y-%m-%d").to_string();
                 return Ok(preview_create(
@@ -67,9 +75,13 @@ pub fn run(ctx: Context, t: Tool) -> ToolResult {
             let re = t.opt("re")?;
             let body = t.req::<String>("body")?;
 
+            if body.trim().is_empty() {
+                return error("`body` must not be empty.");
+            }
+
             if ctx.action.is_format_arguments() {
                 let date = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
-                return Ok(preview_comment(root, id, re, &body, &date).into());
+                return preview_comment(root, id, re, &body, &date);
             }
 
             comment(root, id, re, &body)
@@ -112,10 +124,6 @@ fn create(
     implements: Option<&str>,
     body: Option<String>,
 ) -> ToolResult {
-    if title.trim().is_empty() {
-        return error("`title` must not be empty.");
-    }
-
     let date = Local::now().format("%Y-%m-%d").to_string();
     let (id, path) = store::create(
         &dir(root),
@@ -152,10 +160,6 @@ fn preview_create(
 }
 
 fn comment(root: &Utf8Path, id: TicketId, re: Option<usize>, body: &str) -> ToolResult {
-    if body.trim().is_empty() {
-        return error("`body` must not be empty.");
-    }
-
     let date = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
     match store::append_comment(&dir(root), id, HANDLE, &date, re, body.trim()) {
         Ok(position) => Ok(format!("Added {id}#{position}").into()),
@@ -169,18 +173,36 @@ fn comment(root: &Utf8Path, id: TicketId, re: Option<usize>, body: &str) -> Tool
 
 /// Render the comment block `comment` is about to append, under the heading of
 /// the ticket it lands on.
+///
+/// Fails when the ticket or the reply target isn't there, the same two
+/// conditions the append itself rejects, so a call that cannot land is answered
+/// before it is put to the user.
 fn preview_comment(
     root: &Utf8Path,
     id: TicketId,
     re: Option<usize>,
     body: &str,
     date: &str,
-) -> String {
+) -> ToolResult {
+    let Ok(path) = store::locate_ticket(&dir(root), id) else {
+        return error(format!("No {id}."));
+    };
+    let document = fs::read_to_string(path)?;
+
+    // The count comes from the same tolerant reader the append uses, so the
+    // two agree on a file with a hand-mangled header.
+    let count = parse::comment_count(&document);
+    if let Some(position) = re
+        && (position == 0 || position > count)
+    {
+        return error(format!("No comment #{position} on {id}."));
+    }
+
     // The heading names the ticket, which its own file doesn't: the id is what
     // makes the preview readable next to the call that produced it.
-    let heading = match title_of(root, id) {
+    let heading = match parse::title(&document) {
         Some(title) => format!("# {id}: {title}"),
-        None => format!("# {id}\n\n\u{26a0} No {id}; this call will fail."),
+        None => format!("# {id}"),
     };
 
     let comment = Comment {
@@ -190,7 +212,7 @@ fn preview_comment(
         body: body.to_owned(),
     };
 
-    preview(&format!("{heading}\n\n{}", render::comment(&comment)))
+    Ok(preview(&format!("{heading}\n\n{}", render::comment(&comment))).into())
 }
 
 fn close(root: &Utf8Path, id: TicketId) -> ToolResult {
@@ -253,14 +275,6 @@ fn relative(root: &Utf8Path, path: &Utf8Path) -> String {
         .unwrap_or(path)
         .as_str()
         .replace(MAIN_SEPARATOR, "/")
-}
-
-/// The title of a ticket on disk, if it is there and readable.
-fn title_of(root: &Utf8Path, id: TicketId) -> Option<String> {
-    let path = store::locate_ticket(&dir(root), id).ok()?;
-    let document = fs::read_to_string(path).ok()?;
-
-    parse::document(&document).ok().map(|ticket| ticket.title)
 }
 
 /// Style a document for the terminal as a tool-call preview.

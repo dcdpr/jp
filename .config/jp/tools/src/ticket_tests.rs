@@ -194,14 +194,21 @@ fn create_preview_writes_nothing() {
 fn comment_preview_renders_the_block_under_the_ticket_it_lands_on() {
     let dir = Utf8TempDir::new().unwrap();
     let id = write_ticket(&dir, "Tool call header misaligned");
+    // The reply target has to exist, or the preview rejects the call.
+    run_tool(
+        &dir,
+        "ticket_comment",
+        json!({ "id": FIXED_ID, "body": "Reproduced at 72 columns." }),
+    )
+    .unwrap();
 
-    let out = strip_ansi(preview_comment(
+    let out = strip_ansi(content(preview_comment(
         dir.path(),
         id,
         Some(1),
         "The wrap calculation is off.",
         STAMP,
-    ));
+    )));
 
     assert_eq!(
         out,
@@ -219,13 +226,14 @@ fn comment_preview_renders_the_block_under_the_ticket_it_lands_on() {
     );
 }
 
-/// An id that isn't on the board is worth knowing before approving the call,
-/// not after.
+/// A call that cannot land is answered before the user is asked about it: the
+/// preview fails, and JP turns that into a tool failure ahead of the approval
+/// prompt so the assistant can correct the id.
 #[test]
-fn comment_preview_warns_about_a_missing_ticket() {
+fn comment_preview_rejects_a_missing_ticket() {
     let dir = Utf8TempDir::new().unwrap();
 
-    let out = strip_ansi(preview_comment(
+    let out = error_message(preview_comment(
         dir.path(),
         FIXED_ID.parse().unwrap(),
         None,
@@ -233,20 +241,87 @@ fn comment_preview_warns_about_a_missing_ticket() {
         STAMP,
     ));
 
+    assert_eq!(out, "No T-02wt0kx.");
+}
+
+/// The preview knows the comment count, which the assistant cannot see, so a
+/// reply to a comment that isn't there fails here rather than at the write.
+#[test]
+fn comment_preview_rejects_a_missing_reply_target() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = write_ticket(&dir, "Tool call header misaligned");
+
+    let out = error_message(preview_comment(
+        dir.path(),
+        id,
+        Some(3),
+        "The wrap calculation is off.",
+        STAMP,
+    ));
+
+    assert_eq!(out, "No comment #3 on T-02wt0kx.");
+}
+
+/// A hand-edited ticket that lost a metadata field still takes a comment: the
+/// append never reads the header, so the preview must not demand one either.
+#[test]
+fn comment_preview_tolerates_a_malformed_header() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id: TicketId = FIXED_ID.parse().unwrap();
+    let tickets = dir.path().join(store::DEFAULT_DIR);
+    std::fs::create_dir_all(&tickets).unwrap();
+    std::fs::write(
+        tickets.join(format!("{}slug.md", id.file_prefix())),
+        "# Tool call header misaligned\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Date**: \
+         2026-08-05\n\nSomething is wrong.\n",
+    )
+    .unwrap();
+
+    let out = strip_ansi(content(preview_comment(
+        dir.path(),
+        id,
+        None,
+        "Reproduced at 72 columns.",
+        STAMP,
+    )));
+
     assert_eq!(
-        out,
-        concat!(
-            "> # T-02wt0kx\n",
-            "> \n",
-            "> \u{26a0} No T-02wt0kx; this call will fail.\n",
-            "> \n",
-            "> ────────────────────────────────────────────────────────────────────────────────\n",
-            "> \n",
-            "> - **From**: jp\n",
-            "> - **Date**: 2026-08-05T14:03:11Z\n",
-            "> \n",
-            "> Reproduced at 72 columns.\n",
-        )
+        out.lines().next(),
+        Some("> # T-02wt0kx: Tool call header misaligned")
+    );
+
+    // The write the preview promised really does land.
+    assert_eq!(
+        content(run_tool(
+            &dir,
+            "ticket_comment",
+            json!({ "id": FIXED_ID, "body": "Reproduced at 72 columns." })
+        )),
+        "Added T-02wt0kx#1"
+    );
+}
+
+/// Arguments execution rejects are rejected by the preview too, so the
+/// assistant is corrected before the call reaches the user.
+#[test]
+fn preview_rejects_the_arguments_execution_would_reject() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    assert_eq!(
+        error_message(preview_tool(
+            &dir,
+            "ticket_create",
+            json!({ "kind": "chore", "title": "   " })
+        )),
+        "`title` must not be empty."
+    );
+    assert_eq!(
+        error_message(preview_tool(
+            &dir,
+            "ticket_comment",
+            json!({ "id": FIXED_ID, "body": "  \n " })
+        )),
+        "`body` must not be empty."
     );
 }
 

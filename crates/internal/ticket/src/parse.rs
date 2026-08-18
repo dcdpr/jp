@@ -55,6 +55,16 @@ pub fn comment_count(source: &str) -> usize {
     Doc::new(source).boundaries().len()
 }
 
+/// The title from a document's `# Title` heading.
+///
+/// Tolerant of a malformed header, like [`comment_count`], so a caller that
+/// only needs to name a ticket doesn't have to be able to read the rest of it.
+/// Returns `None` when the first non-empty line isn't a level-one heading.
+#[must_use]
+pub fn title(source: &str) -> Option<String> {
+    Doc::new(source).title().ok()
+}
+
 /// The line range of the metadata block that follows the title heading.
 ///
 /// Returns `None` when the heading is missing, or when the first thing after it
