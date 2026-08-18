@@ -1,4 +1,4 @@
-# T0001: prepare ticket board
+# prepare ticket board
 
 - **Status**: In Progress
 - **Kind**: Chore

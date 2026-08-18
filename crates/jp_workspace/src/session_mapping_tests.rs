@@ -3,7 +3,10 @@ use std::sync::Arc;
 use camino_tempfile::{Utf8TempDir, tempdir};
 use datetime_literal::datetime;
 use jp_conversation::ConversationId;
-use jp_storage::backend::{FsStorageBackend, LockBackend, SessionBackend};
+use jp_storage::backend::{
+    ConversationFilter, FsStorageBackend, LoadBackend, LockBackend, NullLockBackend,
+    PersistBackend, ReadOnlySessionBackend, SessionBackend,
+};
 use test_log::test;
 
 use super::*;
@@ -11,6 +14,17 @@ use crate::{
     Workspace,
     session::{Session, SessionId, SessionSource},
 };
+
+impl SessionMapping {
+    /// The conversation recorded at the front of the stored history.
+    ///
+    /// Reads the file as written, with none of the resolution
+    /// `Workspace::session_active_conversation` applies, so a test can pin what
+    /// landed on disk separately from what a session resolves to.
+    fn active_conversation_id(&self) -> Option<ConversationId> {
+        self.history.first().map(|e| e.id)
+    }
+}
 
 fn test_session() -> Session {
     Session {
@@ -156,16 +170,6 @@ fn load_returns_none_when_missing() {
     let session = test_session();
 
     assert!(ws.session_active_conversation(&session).is_none());
-}
-
-#[test]
-fn previous_conversation_id_with_single_entry() {
-    let mut mapping = SessionMapping::new(SessionId::new("12345").unwrap(), SessionSource::Getsid);
-    let id = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
-    mapping.activate(id, datetime!(2025-07-19 14:00:00 Z));
-
-    assert_eq!(mapping.active_conversation_id(), Some(id));
-    assert_eq!(mapping.previous_conversation_id(), None);
 }
 
 #[test]
@@ -381,8 +385,8 @@ fn cleanup_removes_stale_hwnd_session() {
 
 #[test]
 fn all_active_conversation_ids_across_sessions() {
-    let (_tmp, mut ws, _fs) = setup();
-    let config = std::sync::Arc::new(jp_config::AppConfig::new_test());
+    let (_tmp, ws, fs) = setup();
+    let fs = fs.unwrap();
 
     let session_a = Session {
         id: SessionId::new("sess-a").unwrap(),
@@ -396,12 +400,10 @@ fn all_active_conversation_ids_across_sessions() {
     let id1 = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
     let id2 = ConversationId::try_from(datetime!(2025-07-19 15:00:00 Z)).unwrap();
 
-    ws.create_conversation_with_id(
-        id1,
-        jp_conversation::Conversation::default(),
-        config.clone(),
-    );
-    ws.create_conversation_with_id(id2, jp_conversation::Conversation::default(), config);
+    // Written to the store, not just this process's index: the answer spans
+    // every session on the machine, so it resolves against the store.
+    fs.write_test_conversation(&id1, &jp_conversation::Conversation::default());
+    fs.write_test_conversation(&id2, &jp_conversation::Conversation::default());
 
     ws.record_session_activation(&session_a, id1, datetime!(2025-07-19 14:00:00 Z))
         .unwrap();
@@ -546,6 +548,314 @@ fn active_conversation_returns_none_for_deleted_conversation() {
     // The raw mapping still has the entry.
     let mapping = ws.load_session_mapping(&session).unwrap();
     assert_eq!(mapping.active_conversation_id(), Some(id));
+}
+
+/// A `--no-persist` run creates a conversation, records it as the session's
+/// active one, and never writes it to disk.
+/// That entry must not detach the session from the conversation it was working
+/// on.
+#[test]
+fn active_conversation_skips_entry_that_never_materialized() {
+    let (_tmp, mut ws, _fs) = setup();
+    let session = test_session();
+    let config = std::sync::Arc::new(jp_config::AppConfig::new_test());
+
+    let live = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
+    let ghost = ConversationId::try_from(datetime!(2025-07-19 15:00:00 Z)).unwrap();
+    ws.create_conversation_with_id(live, jp_conversation::Conversation::default(), config);
+
+    ws.record_session_activation(&session, live, datetime!(2025-07-19 14:00:00 Z))
+        .unwrap();
+    ws.record_session_activation(&session, ghost, datetime!(2025-07-19 15:00:00 Z))
+        .unwrap();
+
+    // Precondition: the ghost really is at the front of the stored history.
+    let mapping = ws.load_session_mapping(&session).unwrap();
+    assert_eq!(mapping.active_conversation_id(), Some(ghost));
+
+    assert_eq!(ws.session_active_conversation(&session), Some(live));
+}
+
+#[test]
+fn previous_conversation_skips_entry_that_never_materialized() {
+    let (_tmp, mut ws, _fs) = setup();
+    let session = test_session();
+    let config = std::sync::Arc::new(jp_config::AppConfig::new_test());
+
+    let older = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
+    let ghost = ConversationId::try_from(datetime!(2025-07-19 15:00:00 Z)).unwrap();
+    let newer = ConversationId::try_from(datetime!(2025-07-19 16:00:00 Z)).unwrap();
+    ws.create_conversation_with_id(
+        older,
+        jp_conversation::Conversation::default(),
+        config.clone(),
+    );
+    ws.create_conversation_with_id(newer, jp_conversation::Conversation::default(), config);
+
+    ws.record_session_activation(&session, older, datetime!(2025-07-19 14:00:00 Z))
+        .unwrap();
+    ws.record_session_activation(&session, ghost, datetime!(2025-07-19 15:00:00 Z))
+        .unwrap();
+    ws.record_session_activation(&session, newer, datetime!(2025-07-19 16:00:00 Z))
+        .unwrap();
+
+    assert_eq!(ws.session_active_conversation(&session), Some(newer));
+    assert_eq!(ws.session_previous_conversation(&session), Some(older));
+}
+
+/// Archiving the active conversation leaves the session without a target, so
+/// the caller opens the picker.
+/// Silently falling back to the conversation behind it would move the user
+/// somewhere they didn't ask to go.
+#[test]
+fn active_conversation_is_none_when_the_head_entry_is_archived() {
+    let (_tmp, mut ws, fs) = setup();
+    let fs = fs.unwrap();
+    let session = test_session();
+    let config = std::sync::Arc::new(jp_config::AppConfig::new_test());
+
+    let live = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
+    let archived = ConversationId::try_from(datetime!(2025-07-19 15:00:00 Z)).unwrap();
+    ws.create_conversation_with_id(live, jp_conversation::Conversation::default(), config);
+
+    fs.write_test_conversation(&archived, &jp_conversation::Conversation::default());
+    fs.archive(&archived).unwrap();
+
+    ws.record_session_activation(&session, live, datetime!(2025-07-19 14:00:00 Z))
+        .unwrap();
+    ws.record_session_activation(&session, archived, datetime!(2025-07-19 15:00:00 Z))
+        .unwrap();
+
+    assert_eq!(ws.session_active_conversation(&session), None);
+    assert_eq!(ws.session_previous_conversation(&session), None);
+}
+
+/// Archiving is reversible, so cleanup must leave the entry in place —
+/// unarchiving would otherwise restore a conversation the session has
+/// forgotten.
+#[test]
+fn cleanup_keeps_archived_conversations_in_session_history() {
+    let tmp = tempdir().unwrap();
+    let storage_path = tmp.path().join("storage");
+    let user_root = tmp.path().join("user");
+
+    let fs = Arc::new(
+        FsStorageBackend::new(&storage_path)
+            .unwrap()
+            .with_user_storage(&user_root, None, "abc")
+            .unwrap(),
+    );
+    let mut ws = Workspace::new(tmp.path()).with_backend(fs.clone());
+    ws.disable_persistence();
+
+    let session = Session {
+        id: SessionId::new("archive-session").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    let archived = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
+
+    fs.write_test_conversation(&archived, &jp_conversation::Conversation::default());
+    fs.archive(&archived).unwrap();
+
+    ws.record_session_activation(&session, archived, datetime!(2025-07-19 14:00:00 Z))
+        .unwrap();
+
+    ws.cleanup_stale_files(Some(&fs));
+
+    let mapping = ws
+        .load_session_mapping(&session)
+        .expect("session referencing an archived conversation must survive cleanup");
+    assert_eq!(mapping.active_conversation_id(), Some(archived));
+}
+
+/// Cleanup reads lock state from the filesystem backend it is handed, not from
+/// the workspace's lock backend — which is a no-op under `--no-persist` and
+/// would report every conversation as unlocked, deleting another process's
+/// session while it is mid-write.
+#[test]
+fn cleanup_reads_lock_state_from_the_filesystem_not_the_workspace_backend() {
+    let tmp = tempdir().unwrap();
+    let storage_path = tmp.path().join("storage");
+    let user_root = tmp.path().join("user");
+
+    let fs = Arc::new(
+        FsStorageBackend::new(&storage_path)
+            .unwrap()
+            .with_user_storage(&user_root, None, "abc")
+            .unwrap(),
+    );
+    let mut ws = Workspace::new(tmp.path()).with_backend(fs.clone());
+    ws.disable_persistence();
+    ws = ws.with_locker(Arc::new(NullLockBackend));
+
+    let session = Session {
+        id: SessionId::new("other-tab").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    // Not on disk yet, but another process holds its write lock.
+    let in_flight = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
+    let _lock = fs
+        .try_lock(&in_flight.to_string(), None)
+        .unwrap()
+        .expect("should acquire lock");
+
+    ws.record_session_activation(&session, in_flight, datetime!(2025-07-19 14:00:00 Z))
+        .unwrap();
+
+    ws.cleanup_stale_files(Some(&fs));
+
+    let mapping = ws
+        .load_session_mapping(&session)
+        .expect("session whose conversation is mid-write must survive cleanup");
+    assert_eq!(mapping.active_conversation_id(), Some(in_flight));
+}
+
+/// A `--no-persist` run installs a session backend that discards writes, so
+/// cleanup's legacy-filename migration would report a successful write to the
+/// new key and then delete the old file, leaving no copy at all.
+#[test]
+fn cleanup_skips_session_maintenance_when_session_storage_is_read_only() {
+    let tmp = tempdir().unwrap();
+    let storage_path = tmp.path().join("storage");
+    let user_root = tmp.path().join("user");
+
+    let fs = Arc::new(
+        FsStorageBackend::new(&storage_path)
+            .unwrap()
+            .with_user_storage(&user_root, None, "abc")
+            .unwrap(),
+    );
+    let mut ws = Workspace::new(tmp.path()).with_backend(fs.clone());
+    ws.disable_persistence();
+    ws = ws.with_sessions(Arc::new(ReadOnlySessionBackend::new(fs.clone())));
+
+    let session = Session {
+        id: SessionId::new("ci-123").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    let id = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
+    fs.write_test_conversation(&id, &jp_conversation::Conversation::default());
+
+    // A pre-migration file, keyed on the bare session value. Written straight
+    // through `fs` so it exists despite the read-only wrapper on the
+    // workspace.
+    let legacy = serde_json::json!({
+        "history": [{ "id": id, "activated_at": "2025-07-19T14:00:00Z" }],
+        "source": { "type": "env", "key": "JP_SESSION" }
+    });
+    fs.save_session("ci-123", &legacy).unwrap();
+
+    ws.cleanup_stale_files(Some(&fs));
+
+    let files = fs.list_session_files();
+    assert_eq!(files.len(), 1, "the only copy of the mapping must survive");
+    assert_eq!(files[0].file_stem().unwrap(), "ci-123");
+    assert_eq!(
+        ws.load_session_mapping(&session)
+            .and_then(|m| m.active_conversation_id()),
+        Some(id)
+    );
+}
+
+/// The set that protects conversations from ephemeral cleanup has to agree with
+/// what the session actually resolves to.
+/// A ghost at the front of the history would otherwise protect nothing real
+/// while the expired conversation the session is attached to is deleted.
+#[test]
+fn ephemeral_cleanup_protects_the_conversation_the_session_resolves_to() {
+    let tmp = tempdir().unwrap();
+    let storage_path = tmp.path().join("storage");
+    let user_root = tmp.path().join("user");
+
+    let fs = Arc::new(
+        FsStorageBackend::new(&storage_path)
+            .unwrap()
+            .with_user_storage(&user_root, None, "abc")
+            .unwrap(),
+    );
+    // Persistence stays enabled: the removal under test has to reach the disk,
+    // otherwise the assertion below holds no matter which ids are protected.
+    let mut ws = Workspace::new(tmp.path()).with_backend(fs.clone());
+
+    let session = test_session();
+    let expired = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
+    let ghost = ConversationId::try_from(datetime!(2025-07-19 15:00:00 Z)).unwrap();
+
+    let meta = jp_conversation::Conversation::default()
+        .with_ephemeral(Some(datetime!(2020-01-01 00:00:00 Z)));
+    fs.write_test_conversation(&expired, &meta);
+    ws.load_conversation_index();
+
+    ws.record_session_activation(&session, expired, datetime!(2025-07-19 14:00:00 Z))
+        .unwrap();
+    ws.record_session_activation(&session, ghost, datetime!(2025-07-19 15:00:00 Z))
+        .unwrap();
+
+    // Precondition: the conversation really is due for removal.
+    assert_eq!(
+        fs.load_expired_conversation_ids(datetime!(2026-01-01 00:00:00 Z)),
+        vec![expired]
+    );
+
+    let active = ws.all_active_conversation_ids();
+    ws.remove_ephemeral_conversations(&active);
+
+    assert!(
+        fs.load_conversation_ids(ConversationFilter::default())
+            .contains(&expired),
+        "the session resolves to this conversation, so cleanup must not delete it"
+    );
+}
+
+/// Another terminal can create a conversation after this process loaded its
+/// index.
+/// A bare `--tmp` conversation is expired the moment it is created, so
+/// appearing in the active set is the only thing keeping it on disk.
+#[test]
+fn ephemeral_cleanup_protects_a_conversation_created_after_the_index_was_loaded() {
+    let tmp = tempdir().unwrap();
+    let storage_path = tmp.path().join("storage");
+    let user_root = tmp.path().join("user");
+
+    let fs = Arc::new(
+        FsStorageBackend::new(&storage_path)
+            .unwrap()
+            .with_user_storage(&user_root, None, "abc")
+            .unwrap(),
+    );
+    // Persistence stays enabled: the removal under test has to reach the disk,
+    // otherwise the assertion below holds no matter which ids are protected.
+    let mut ws = Workspace::new(tmp.path()).with_backend(fs.clone());
+    ws.load_conversation_index();
+
+    // Another process creates an expires-immediately conversation and records
+    // it as its session's active one, both after the index load above.
+    let other_session = Session {
+        id: SessionId::new("other-tab").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    let other = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
+    let meta = jp_conversation::Conversation::default()
+        .with_ephemeral(Some(datetime!(2025-07-19 14:00:00 Z)));
+    fs.write_test_conversation(&other, &meta);
+    ws.record_session_activation(&other_session, other, datetime!(2025-07-19 14:00:00 Z))
+        .unwrap();
+
+    // Preconditions: invisible to this process's index, and due for removal.
+    assert!(!ws.conversations().any(|(id, _)| *id == other));
+    assert_eq!(
+        fs.load_expired_conversation_ids(datetime!(2026-01-01 00:00:00 Z)),
+        vec![other]
+    );
+
+    let active = ws.all_active_conversation_ids();
+    ws.remove_ephemeral_conversations(&active);
+
+    assert!(
+        fs.load_conversation_ids(ConversationFilter::default())
+            .contains(&other),
+        "another session is working on this conversation, so cleanup must not delete it"
+    );
 }
 
 #[test]

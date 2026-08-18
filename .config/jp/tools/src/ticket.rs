@@ -45,14 +45,8 @@ pub fn run(ctx: Context, t: Tool) -> ToolResult {
             let body = t.opt::<String>("body")?;
 
             if ctx.action.is_format_arguments() {
-                // Peek rather than allocate: the call still has to be
-                // approved, and a preview that burned an id would leave a gap
-                // in the board for every rejected call.
-                let id = store::peek_next_id(&dir(root))?;
                 let date = Local::now().format("%Y-%m-%d").to_string();
-
                 return Ok(preview_create(
-                    id,
                     kind,
                     &title,
                     implements.as_deref(),
@@ -137,8 +131,10 @@ fn create(
 }
 
 /// Render the ticket file `create` is about to write.
+///
+/// The id is left out because the file doesn't carry one: it is drawn when the
+/// ticket is claimed, and the result names it.
 fn preview_create(
-    id: TicketId,
     kind: Kind,
     title: &str,
     implements: Option<&str>,
@@ -146,7 +142,6 @@ fn preview_create(
     date: &str,
 ) -> String {
     preview(&render::ticket(
-        id,
         title.trim(),
         kind,
         HANDLE,
@@ -181,6 +176,8 @@ fn preview_comment(
     body: &str,
     date: &str,
 ) -> String {
+    // The heading names the ticket, which its own file doesn't: the id is what
+    // makes the preview readable next to the call that produced it.
     let heading = match title_of(root, id) {
         Some(title) => format!("# {id}: {title}"),
         None => format!("# {id}\n\n\u{26a0} No {id}; this call will fail."),
@@ -189,7 +186,7 @@ fn preview_comment(
     let comment = Comment {
         from: HANDLE.to_owned(),
         date: date.to_owned(),
-        re: re.map(|position| format!("{id}#{position}")),
+        re: re.map(|position| format!("#{position}")),
         body: body.to_owned(),
     };
 
@@ -217,7 +214,7 @@ fn show(root: &Utf8Path, id: TicketId) -> ToolResult {
     };
 
     match entry.ticket {
-        Ok(ticket) => Ok(render_ticket(&ticket, &relative(root, &entry.path)).into()),
+        Ok(ticket) => Ok(render_ticket(entry.id, &ticket, &relative(root, &entry.path)).into()),
         Err(problem) => error(format!("{id} is not a well-formed ticket: {problem}")),
     }
 }
@@ -229,11 +226,11 @@ fn list(root: &Utf8Path, status: Option<Status>, kind: Option<Kind>) -> ToolResu
     let mut unreadable = vec![];
     for entry in &entries {
         match &entry.ticket {
-            Ok(ticket) => tickets.push(ticket),
+            Ok(ticket) => tickets.push((entry.id, ticket)),
             Err(problem) => unreadable.push(format!("{}: {problem}", relative(root, &entry.path))),
         }
     }
-    tickets.retain(|ticket| {
+    tickets.retain(|(_, ticket)| {
         status.is_none_or(|status| status == ticket.metadata.status)
             && kind.is_none_or(|kind| kind == ticket.metadata.kind)
     });
@@ -289,14 +286,14 @@ fn preview(document: &str) -> String {
 }
 
 /// Render the board as one line per ticket.
-fn render_list(tickets: &[&Ticket], unreadable: &[String]) -> String {
+fn render_list(tickets: &[(TicketId, &Ticket)], unreadable: &[String]) -> String {
     let mut out = String::new();
 
     if tickets.is_empty() {
         out.push_str("No tickets match.\n");
     }
-    for ticket in tickets {
-        let id = ticket.id.to_string();
+    for (id, ticket) in tickets {
+        let id = id.to_string();
         let status = ticket.metadata.status.to_string();
         let kind = ticket.metadata.kind.to_string();
         let comments = match ticket.comments.len() {
@@ -310,7 +307,7 @@ fn render_list(tickets: &[&Ticket], unreadable: &[String]) -> String {
             .map_or_else(String::new, |by| format!(" [blocked by {by}]"));
 
         out.push_str(&format!(
-            "{id:<6} {status:<12} {kind:<8} {}{blocked}{comments}\n",
+            "{id:<9} {status:<12} {kind:<8} {}{blocked}{comments}\n",
             ticket.title
         ));
     }
@@ -326,9 +323,11 @@ fn render_list(tickets: &[&Ticket], unreadable: &[String]) -> String {
 }
 
 /// Render one ticket, numbering the comments so a reply can name its target.
-fn render_ticket(ticket: &Ticket, path: &str) -> String {
+fn render_ticket(id: TicketId, ticket: &Ticket, path: &str) -> String {
     let metadata = &ticket.metadata;
-    let mut out = format!("# {}: {}\n\n", ticket.id, ticket.title);
+    // The rendered view names the ticket even though the file doesn't: the id
+    // is what a `Blocked by` or a later reference has to quote.
+    let mut out = format!("# {id}: {}\n\n", ticket.title);
 
     out.push_str(&format!("- **Path**: {path}\n"));
     out.push_str(&format!("- **Status**: {}\n", metadata.status));
@@ -357,14 +356,18 @@ fn render_ticket(ticket: &Ticket, path: &str) -> String {
 
     out.push_str(&format!("\n## Comments ({})\n", ticket.comments.len()));
     for (index, comment) in ticket.comments.iter().enumerate() {
-        let re = comment
-            .re
-            .as_deref()
-            .map_or_else(String::new, |re| format!(", replying to {re}"));
+        // Stored as `#1`, shown with the id so the reference matches the
+        // comment headings around it and can be quoted straight back.
+        let re = comment.re.as_deref().map_or_else(String::new, |re| {
+            re.strip_prefix('#').map_or_else(
+                || format!(", replying to {re}"),
+                |position| format!(", replying to {id}#{position}"),
+            )
+        });
 
         out.push_str(&format!(
             "\n### {}#{} — {} at {}{re}\n\n{}\n",
-            ticket.id,
+            id,
             index + 1,
             comment.from,
             comment.date,
@@ -377,17 +380,11 @@ fn render_ticket(ticket: &Ticket, path: &str) -> String {
 
 /// Read a ticket id from a tool argument.
 ///
-/// Models pass ids both as strings (`"T0042"`) and as bare numbers, so both are
-/// accepted.
+/// An id carries letters, so anything that isn't a string is rejected outright
+/// rather than coerced.
 fn id_arg(value: &Value) -> Result<TicketId, String> {
     match value {
         Value::String(id) => id.parse().map_err(|error: ParseError| error.to_string()),
-        Value::Number(number) => number
-            .as_u64()
-            .and_then(|number| u32::try_from(number).ok())
-            .filter(|number| *number > 0)
-            .map(TicketId::new)
-            .ok_or_else(|| format!("`{number}` is not a ticket id.")),
         other => Err(format!("`{other}` is not a ticket id.")),
     }
 }

@@ -15,7 +15,6 @@ fn new_comment(from: &str, body: &str, re: Option<&str>) -> Comment {
 #[test]
 fn renders_a_new_ticket() {
     let out = ticket(
-        TicketId::new(42),
         "Tool call header misaligned",
         Kind::Bug,
         "John Doe",
@@ -25,7 +24,7 @@ fn renders_a_new_ticket() {
     );
 
     assert_eq!(out, indoc! {"
-            # T0042: Tool call header misaligned
+            # Tool call header misaligned
 
             - **Status**: Todo
             - **Kind**: Bug
@@ -39,7 +38,6 @@ fn renders_a_new_ticket() {
 #[test]
 fn renders_a_new_ticket_without_a_description() {
     let out = ticket(
-        TicketId::new(1),
         "Bump the deny list",
         Kind::Chore,
         "john",
@@ -49,7 +47,7 @@ fn renders_a_new_ticket_without_a_description() {
     );
 
     assert_eq!(out, indoc! {"
-            # T0001: Bump the deny list
+            # Bump the deny list
 
             - **Status**: Todo
             - **Kind**: Chore
@@ -61,7 +59,6 @@ fn renders_a_new_ticket_without_a_description() {
 #[test]
 fn first_comment_opens_the_comments_section() {
     let document = ticket(
-        TicketId::new(42),
         "Tool call header misaligned",
         Kind::Bug,
         "John Doe",
@@ -76,7 +73,7 @@ fn first_comment_opens_the_comments_section() {
     );
 
     assert_eq!(out, indoc! {"
-            # T0042: Tool call header misaligned
+            # Tool call header misaligned
 
             - **Status**: Todo
             - **Kind**: Bug
@@ -101,7 +98,7 @@ fn renders_a_comment_block() {
     let out = comment(&new_comment(
         "jp",
         "The wrap calculation is off.",
-        Some("T0042#1"),
+        Some("#1"),
     ));
 
     assert_eq!(out, indoc! {"
@@ -109,7 +106,7 @@ fn renders_a_comment_block() {
 
             - **From**: jp
             - **Date**: 2026-08-05T14:03:11Z
-            - **Re**: T0042#1
+            - **Re**: #1
 
             The wrap calculation is off.
         "});
@@ -120,7 +117,6 @@ fn renders_a_comment_block() {
 fn later_comments_are_a_pure_append() {
     let document = append_comment(
         &ticket(
-            TicketId::new(42),
             "Tool call header misaligned",
             Kind::Bug,
             "John Doe",
@@ -133,7 +129,7 @@ fn later_comments_are_a_pure_append() {
 
     let out = append_comment(
         &document,
-        &new_comment("jp", "The wrap calculation is off.", Some("T0042#1")),
+        &new_comment("jp", "The wrap calculation is off.", Some("#1")),
     );
 
     assert!(out.starts_with(&document));
@@ -143,7 +139,7 @@ fn later_comments_are_a_pure_append() {
 
             - **From**: jp
             - **Date**: 2026-08-05T14:03:11Z
-            - **Re**: T0042#1
+            - **Re**: #1
 
             The wrap calculation is off.
         "});
@@ -154,7 +150,6 @@ fn appended_comments_parse_back() {
     let document = append_comment(
         &append_comment(
             &ticket(
-                TicketId::new(7),
                 "Round trip",
                 Kind::Feature,
                 "john",
@@ -164,7 +159,7 @@ fn appended_comments_parse_back() {
             ),
             &new_comment("john", "First.", None),
         ),
-        &new_comment("jp", "Second.", Some("T0007#1")),
+        &new_comment("jp", "Second.", Some("#1")),
     );
 
     let parsed = parse::document(&document).unwrap();
@@ -173,13 +168,13 @@ fn appended_comments_parse_back() {
     assert_eq!(parsed.comments.len(), 2);
     assert_eq!(parsed.comments[0].body, "First.");
     assert_eq!(parsed.comments[1].body, "Second.");
-    assert_eq!(parsed.comments[1].re.as_deref(), Some("T0007#1"));
+    assert_eq!(parsed.comments[1].re.as_deref(), Some("#1"));
 }
 
 #[test]
 fn replaces_a_metadata_field() {
     let document = indoc! {"
-        # T0042: Tool call header misaligned
+        # Tool call header misaligned
 
         - **Status**: Todo
         - **Kind**: Bug
@@ -200,7 +195,7 @@ fn replaces_a_metadata_field() {
 #[test]
 fn only_the_header_block_is_rewritten() {
     let document = indoc! {"
-        # T0042: Quoting metadata
+        # Quoting metadata
 
         - **Status**: Todo
         - **Kind**: Bug
@@ -230,7 +225,7 @@ fn only_the_header_block_is_rewritten() {
 #[test]
 fn adds_a_field_the_ticket_lacks() {
     let document = indoc! {"
-        # T0042: Tool call header misaligned
+        # Tool call header misaligned
 
         - **Status**: Todo
         - **Kind**: Bug
@@ -243,7 +238,7 @@ fn adds_a_field_the_ticket_lacks() {
     let out = set_metadata(document, "GitHub", "#123").unwrap();
 
     assert_eq!(out, indoc! {"
-            # T0042: Tool call header misaligned
+            # Tool call header misaligned
 
             - **Status**: Todo
             - **Kind**: Bug
@@ -257,8 +252,5 @@ fn adds_a_field_the_ticket_lacks() {
 
 #[test]
 fn reports_a_document_with_no_metadata_block() {
-    assert_eq!(
-        set_metadata("# T0001: Bare\n\nProse.\n", "Status", "Done"),
-        None
-    );
+    assert_eq!(set_metadata("# Bare\n\nProse.\n", "Status", "Done"), None);
 }
