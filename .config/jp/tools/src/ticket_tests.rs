@@ -262,6 +262,31 @@ fn comment_preview_rejects_a_missing_reply_target() {
     assert_eq!(out, "No comment #3 on T-02wt0kx.");
 }
 
+/// Two files claiming one id is a different problem from a missing ticket, and
+/// points at a different fix.
+#[test]
+fn comment_preview_reports_a_duplicated_id() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = write_ticket(&dir, "Tool call header misaligned");
+    std::fs::write(
+        dir.path()
+            .join(store::DEFAULT_DIR)
+            .join(format!("{}other.md", id.file_prefix())),
+        render::ticket("Other", Kind::Bug, HANDLE, DATE, None, "Something else."),
+    )
+    .unwrap();
+
+    let error =
+        preview_comment(dir.path(), id, None, "Reproduced at 72 columns.", STAMP).unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("is claimed by more than one file: "),
+        "{error}"
+    );
+}
+
 /// A hand-edited ticket that lost a metadata field still takes a comment: the
 /// append never reads the header, so the preview must not demand one either.
 #[test]

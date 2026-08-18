@@ -184,8 +184,10 @@ fn preview_comment(
     body: &str,
     date: &str,
 ) -> ToolResult {
-    let Ok(path) = store::locate_ticket(&dir(root), id) else {
-        return error(format!("No {id}."));
+    let path = match store::locate_ticket(&dir(root), id) {
+        Ok(path) => path,
+        Err(store::Error::NoSuchTicket(_)) => return error(format!("No {id}.")),
+        Err(other) => return Err(other.into()),
     };
     let document = fs::read_to_string(path)?;
 
