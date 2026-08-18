@@ -618,7 +618,10 @@ pub fn current_bucket() -> Result<u32> {
 /// A random tail.
 ///
 /// `RandomState` is seeded by the OS once per thread and advances per call, so
-/// two processes starting in the same second still draw different values.
+/// two processes starting in the same second draw independently.
+/// Independent is not distinct: ten bits leave a 1-in-1,024 chance they land on
+/// the same tail, which is the collision `store::list` and the docs build exist
+/// to catch.
 /// Ten bits do not warrant a dependency on a generator.
 fn random_tail() -> u16 {
     let value = RandomState::new().hash_one(SystemTime::now()) % u64::from(TAIL_SPACE);

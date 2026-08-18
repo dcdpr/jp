@@ -203,6 +203,9 @@ enum Command {
 /// One ticket in `show --json` output.
 #[derive(Serialize)]
 struct Detail<'a> {
+    /// Carried explicitly: the document has no id, and `just ticket-promote`
+    /// reads this field.
+    id: TicketId,
     #[serde(flatten)]
     ticket: &'a Ticket,
     path: &'a str,
@@ -420,8 +423,13 @@ fn refresh(dir: &Utf8Path, path: &Utf8Path, base: &str) -> Result<Output, String
     // A ticket names itself nowhere structurally, so anything left inside the
     // renamed file is prose — and prose naming the old id is ambiguous the same
     // way any other file's is: it may mean the ticket that kept the id.
-    if std::fs::read_to_string(&done.path).is_ok_and(|source| source.contains(&done.old)) {
-        ambiguous.push(done.path.clone());
+    //
+    // The rename put this file here a line ago, so a read failure is not one of
+    // the expected cases `rewrite` tolerates.
+    match std::fs::read_to_string(&done.path) {
+        Ok(source) if source.contains(&done.old) => ambiguous.push(done.path.clone()),
+        Ok(_) => {}
+        Err(error) => return Err(format!("{}: {error}", done.path)),
     }
 
     for file in changed.iter().chain([&dir.join(".board.json")]) {
@@ -482,11 +490,14 @@ fn migrate(dir: &Utf8Path) -> Result<Output, String> {
         let bucket = created_bucket(dir, path)?;
         let done = store::reassign(dir, path, bucket).map_err(|error| error.to_string())?;
 
-        // A pre-RFD-102 ticket carried its id in the heading as well as the
-        // filename. `reassign` only renames, so the heading is stripped here.
+        // A pre-RFD-102 ticket embedded its id in the heading and in reply
+        // targets. `reassign` only renames, so those are converted here — and
+        // before the cross-file rewrite below, which would otherwise turn a
+        // reply into `T-<new>#1` and leave the ticket naming itself again.
         let source = std::fs::read_to_string(&done.path).map_err(|error| error.to_string())?;
-        if let Some(stripped) = render::strip_heading_id(&source, &done.old) {
-            std::fs::write(&done.path, stripped).map_err(|error| error.to_string())?;
+        let converted = render::strip_ids(&source, &done.old);
+        if converted != source {
+            std::fs::write(&done.path, converted).map_err(|error| error.to_string())?;
         }
 
         output
@@ -952,6 +963,7 @@ fn show(dir: &Utf8Path, id: TicketId, json: bool) -> Result<Output, String> {
 
     if json {
         let json = serde_json::to_string_pretty(&Detail {
+            id: entry.id,
             ticket: &ticket,
             path: entry.path.as_str(),
         })

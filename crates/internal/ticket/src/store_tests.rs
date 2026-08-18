@@ -457,18 +457,32 @@ fn reassign_renames_a_legacy_file_without_touching_it() {
     let source = fs::read_to_string(&done.path).unwrap();
     assert!(source.starts_with("# T0005: Old ticket\n"), "{source}");
 
-    let stripped = render::strip_heading_id(&source, &done.old).unwrap();
+    let stripped = render::strip_ids(&source, &done.old);
     let ticket = parse::document(&stripped).unwrap();
     assert_eq!(ticket.title, "Old ticket");
     assert_eq!(ticket.description, "Body.");
 }
 
-/// A title that merely contains a colon is not an id prefix.
+/// A title that merely contains a colon is not an id prefix, and a reply naming
+/// another ticket is not this one's to rewrite.
 #[test]
-fn stripping_a_heading_id_leaves_an_unrelated_colon_alone() {
-    let document = "# Fix: the wrap calculation\n\n- **Status**: Todo\n";
+fn stripping_ids_leaves_unrelated_colons_and_replies_alone() {
+    let document = "# Fix: the wrap calculation\n\n- **Status**: Todo\n\n- **Re**: T0009#2\n";
 
-    assert_eq!(render::strip_heading_id(document, "T0005"), None);
+    assert_eq!(render::strip_ids(document, "T0005"), document);
+}
+
+/// The old format embedded the id in the reply target too, so a migration has
+/// to convert both or the document goes on naming itself.
+#[test]
+fn stripping_ids_converts_the_heading_and_its_own_replies() {
+    let document = "# T0005: Old ticket\n\n- **Status**: Todo\n\n-----\n\n- **From**: jp\n- \
+                    **Re**: T0005#1\n\nBody.\n";
+
+    assert_eq!(
+        render::strip_ids(document, "T0005"),
+        "# Old ticket\n\n- **Status**: Todo\n\n-----\n\n- **From**: jp\n- **Re**: #1\n\nBody.\n"
+    );
 }
 
 #[test]

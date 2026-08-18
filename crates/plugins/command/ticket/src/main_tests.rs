@@ -746,6 +746,62 @@ fn rewriting_a_missing_or_binary_file_is_skipped() {
     assert!(!rewrite(&binary, "a", "b").unwrap());
 }
 
+/// A legacy reply named the ticket it lives on.
+/// The cross-file rewrite would turn that into `T-<new>#1` and leave the
+/// migrated ticket naming itself, so the conversion has to reach the `Re` field
+/// first.
+#[test]
+fn migrate_converts_a_legacy_reply_to_the_positional_form() {
+    let dir = Utf8TempDir::new().unwrap();
+    std::fs::write(
+        dir.path().join("0005-old-ticket.md"),
+        "# T0005: Old ticket\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Authors**: john\n- \
+         **Date**: 2026-08-05\n\nBody.\n\n## Comments\n\n-----\n\n- **From**: john\n- **Date**: \
+         2026-08-05T10:00:00Z\n\nFirst.\n\n-----\n\n- **From**: jp\n- **Date**: \
+         2026-08-05T11:00:00Z\n- **Re**: T0005#1\n\nSecond.\n",
+    )
+    .unwrap();
+
+    run_command(&dir, Command::Migrate).unwrap();
+
+    let entry = store::list(dir.path()).unwrap().pop().unwrap();
+    let ticket = entry.ticket.unwrap();
+    assert_eq!(ticket.title, "Old ticket");
+    assert_eq!(ticket.comments[1].re.as_deref(), Some("#1"));
+
+    // The whole point: nothing inside the file names the ticket any more.
+    let source = std::fs::read_to_string(&entry.path).unwrap();
+    assert!(!source.contains(&entry.id.to_string()), "{source}");
+    assert!(!source.contains("T0005"), "{source}");
+}
+
+/// `just ticket-promote` reads `.id` out of this, so the field has to survive
+/// the document losing its own.
+#[test]
+fn show_json_carries_the_id() {
+    let dir = Utf8TempDir::new().unwrap();
+    run_command(&dir, Command::Add {
+        kind: Some(Kind::Bug),
+        title: Some("Tool call header misaligned".to_owned()),
+        author: Some("john".to_owned()),
+        body: Some("The header renders one column left.".to_owned()),
+        implements: None,
+    })
+    .unwrap();
+    let id = store::list(dir.path()).unwrap()[0].id;
+
+    let out = run_command(&dir, Command::Show {
+        id: Some(id),
+        json: true,
+    })
+    .unwrap();
+
+    let detail: serde_json::Value = serde_json::from_str(&out.text).unwrap();
+    assert_eq!(detail["id"], id.to_string());
+    assert_eq!(detail["title"], "Tool call header misaligned");
+    assert_eq!(detail["description"], "The header renders one column left.");
+}
+
 #[test]
 fn migrate_of_a_converted_directory_does_nothing() {
     let dir = Utf8TempDir::new().unwrap();
