@@ -350,6 +350,37 @@ fn preview_rejects_the_arguments_execution_would_reject() {
     );
 }
 
+/// Markdown in this repository is laid out by `comfort`, and a body arrives
+/// from the model as one long line per paragraph.
+#[test]
+fn create_reflows_the_body_with_comfort() {
+    let dir = Utf8TempDir::new().unwrap();
+    run_tool(
+        &dir,
+        "ticket_create",
+        json!({
+            "kind": "bug",
+            "title": "Wrapping is wrong",
+            "body": "The first sentence. The second one, which the model wrote on the same line."
+        }),
+    )
+    .unwrap();
+
+    let id = ids(&dir)[0];
+    let source = std::fs::read_to_string(dir.path().join(format!(
+        "docs/ticket/{}wrapping-is-wrong.md",
+        id.file_prefix()
+    )))
+    .unwrap();
+
+    assert!(
+        source.ends_with(
+            "\nThe first sentence.\nThe second one, which the model wrote on the same line.\n"
+        ),
+        "{source}"
+    );
+}
+
 #[test]
 fn create_rejects_an_unknown_kind() {
     let dir = Utf8TempDir::new().unwrap();

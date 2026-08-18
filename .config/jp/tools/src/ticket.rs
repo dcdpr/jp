@@ -11,12 +11,15 @@
 //! action, previewing the document they are about to write in the shape it
 //! takes on disk.
 
-use std::{fs, path::MAIN_SEPARATOR};
+use std::{fs, io, path::MAIN_SEPARATOR};
 
-// The leading `::` picks the crate over this module, which shares its name.
 use ::ticket::{Comment, Kind, ParseError, Status, Ticket, TicketId, parse, render, store};
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{Local, SecondsFormat, Utc};
+use comfort::{
+    DEFAULT_MAX_WIDTH,
+    format::{FormatOptions, format_markdown_with},
+};
 use jp_md::format::Formatter;
 use serde_json::Value;
 
@@ -134,6 +137,7 @@ fn create(
         implements,
         &body.unwrap_or_default(),
     )?;
+    reflow(&path)?;
 
     Ok(format!("Created {id} at {}", relative(root, &path)).into())
 }
@@ -265,6 +269,28 @@ fn list(root: &Utf8Path, status: Option<Status>, kind: Option<Kind>) -> ToolResu
 /// The ticket directory inside the workspace.
 fn dir(root: &Utf8Path) -> Utf8PathBuf {
     root.join(store::DEFAULT_DIR)
+}
+
+/// Lay out a markdown file the way `comfort` does.
+///
+/// A body arrives as the model wrote it — one long line per paragraph — and
+/// the repository's markdown carries semantic line breaks.
+/// The options mirror the `fmt-markdown-ci` recipe in the justfile, so a ticket
+/// written here is one CI accepts as it stands.
+fn reflow(path: &Utf8Path) -> io::Result<()> {
+    let source = fs::read_to_string(path)?;
+    let formatted = format_markdown_with(&source, &FormatOptions {
+        max_width: DEFAULT_MAX_WIDTH,
+        canonical: true,
+        reference_links: true,
+        prune_reference_links: true,
+    });
+
+    if formatted == source {
+        return Ok(());
+    }
+
+    fs::write(path, formatted)
 }
 
 /// A path the model can hand straight to `fs_read_file`.

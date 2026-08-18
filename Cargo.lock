@@ -4773,6 +4773,7 @@ dependencies = [
  "camino-tempfile",
  "chrono",
  "clean-path",
+ "comfort",
  "convert_case 0.11.0",
  "crossbeam-channel",
  "crossterm",
