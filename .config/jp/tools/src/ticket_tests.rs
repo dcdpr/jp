@@ -472,10 +472,10 @@ fn comment_reflows_the_body_with_comfort() {
     )
     .unwrap();
 
-    let source = std::fs::read_to_string(
-        dir.path()
-            .join(format!("docs/ticket/{}wrapping-is-wrong.md", id.file_prefix())),
-    )
+    let source = std::fs::read_to_string(dir.path().join(format!(
+        "docs/ticket/{}wrapping-is-wrong.md",
+        id.file_prefix()
+    )))
     .unwrap();
 
     assert!(
