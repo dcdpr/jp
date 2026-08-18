@@ -1,19 +1,33 @@
 use std::fs;
 
-use camino::Utf8Path;
+use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::tempdir;
-use jp_tool::{AccessPolicy, Capability, FsRule, Outcome};
+use jp_tool::{AccessPolicy, Action, Capability, Context, FsRule, Outcome};
 use pretty_assertions::assert_eq;
+use serde_json::{Map, json};
 
-use super::{cargo_root, note_root, required_capabilities};
+use super::{Tool, cargo_root, note_root, required_capabilities, run};
 
 /// Capabilities for a building subcommand, which is the demanding case.
 const BUILDS: &[Capability] = &[
     Capability::Read,
     Capability::Create,
     Capability::Update,
+    Capability::Delete,
     Capability::Execute,
 ];
+
+/// Create `relative` under `root` as a cargo package.
+///
+/// A bare directory is not enough: `cargo_root` requires a manifest, because
+/// without one cargo would search parent directories and operate on the
+/// enclosing workspace.
+fn package_dir(root: &Utf8Path, relative: &str) -> Utf8PathBuf {
+    let dir = root.join(relative);
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(dir.join("Cargo.toml"), "[package]\nname = \"game\"\n").unwrap();
+    dir
+}
 
 #[test]
 fn no_option_keeps_the_invocation_root() {
@@ -52,8 +66,7 @@ fn an_empty_or_dot_option_resolves_to_the_invocation_root() {
 #[test]
 fn a_relative_option_is_joined_onto_the_invocation_root() {
     let dir = tempdir().unwrap();
-    let nested = dir.path().join("crates/game");
-    fs::create_dir_all(&nested).unwrap();
+    let nested = package_dir(dir.path(), "crates/game");
 
     assert_eq!(
         cargo_root(dir.path(), Some("crates/game"), None, BUILDS).unwrap(),
@@ -150,7 +163,7 @@ fn a_file_is_rejected() {
 #[test]
 fn a_configured_root_needs_the_capabilities_its_subcommand_uses() {
     let dir = tempdir().unwrap();
-    fs::create_dir_all(dir.path().join("crates/game")).unwrap();
+    package_dir(dir.path(), "crates/game");
 
     let policy = AccessPolicy {
         fs: vec![FsRule::new("crates/game").with_read(true).with_update(true)],
@@ -199,28 +212,90 @@ fn the_invocation_root_is_not_authorized() {
     );
 }
 
-/// Neither subcommand compiles, so neither needs to create artifacts or execute
-/// anything.
+/// `fmt` rewrites sources in place and does nothing else.
 #[test]
-fn only_building_subcommands_require_create_and_execute() {
-    for subcommand in ["format", "update"] {
-        let capabilities = required_capabilities(subcommand);
-        assert_eq!(
-            capabilities,
-            &[Capability::Read, Capability::Update],
-            "{subcommand} does not compile"
-        );
-    }
+fn formatting_needs_no_more_than_read_and_update() {
+    assert_eq!(required_capabilities("format"), &[
+        Capability::Read,
+        Capability::Update
+    ]);
+}
 
+/// `cargo update` writes a `Cargo.lock` when the target has none, so declaring
+/// only read plus update would authorize a command that creates a file the
+/// policy denied.
+#[test]
+fn updating_needs_create_for_a_missing_lockfile() {
+    assert_eq!(required_capabilities("update"), &[
+        Capability::Read,
+        Capability::Create,
+        Capability::Update
+    ]);
+}
+
+/// Compiling writes artifacts, removes stale ones, and runs build scripts, proc
+/// macros and test binaries.
+/// None of that is sandboxed, so the declaration has to cover deletion too.
+#[test]
+fn building_subcommands_declare_every_capability() {
     for subcommand in ["check", "test", "expand"] {
         let capabilities = required_capabilities(subcommand);
-        assert!(
-            capabilities.contains(&Capability::Execute),
-            "{subcommand} runs build scripts and proc macros"
-        );
-        assert!(
-            capabilities.contains(&Capability::Create),
-            "{subcommand} writes build artifacts"
-        );
+
+        for required in [
+            Capability::Read,
+            Capability::Create,
+            Capability::Update,
+            Capability::Delete,
+            Capability::Execute,
+        ] {
+            assert!(
+                capabilities.contains(&required),
+                "{subcommand} can {}",
+                required.as_str()
+            );
+        }
     }
+}
+
+/// A directory without a manifest is not a cargo workspace: cargo would search
+/// parent directories and rewrite the enclosing workspace instead, reporting
+/// success while touching a project the caller never named.
+#[test]
+fn a_directory_without_a_manifest_is_rejected() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("crates")).unwrap();
+
+    let error = cargo_root(dir.path(), Some("crates"), None, BUILDS).unwrap_err();
+
+    assert!(error.contains("no `Cargo.toml`"), "got: {error}");
+    assert!(error.contains("enclosing workspace"), "got: {error}");
+}
+
+/// `Tool::option_or` reports a malformed value as an absent one, which would
+/// silently run against the host workspace while reporting success.
+/// Every other test here calls `cargo_root` directly, so only driving `run`
+/// catches a regression to reading the option through `option_or`.
+#[tokio::test]
+async fn a_non_string_root_option_fails_the_invocation() {
+    let dir = tempdir().unwrap();
+    let ctx = Context {
+        root: dir.path().to_owned(),
+        action: Action::Run,
+        access: None,
+        workspace_id: "test".into(),
+        conversation_id: "test".into(),
+    };
+    let tool = Tool {
+        name: "cargo_check".to_owned(),
+        arguments: Map::new(),
+        answers: Map::new(),
+        options: Map::from_iter([("root".to_owned(), json!(1))]),
+    };
+
+    // Returns before cargo is spawned, so no process fixture is needed.
+    let Outcome::Error { message, .. } = run(ctx, tool).await.unwrap() else {
+        panic!("expected an error outcome");
+    };
+
+    assert!(message.contains("must be a string"), "got: {message}");
 }

@@ -92,17 +92,25 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
 
 /// Capabilities a cargo subcommand needs on the directory it runs in.
 ///
-/// `fmt` and `update` never compile: the first rewrites sources, the second the
-/// lockfile.
-/// The rest build, so they also write artifacts and run build scripts and proc
-/// macros.
+/// These gate whether cargo is spawned at all; they cannot bound what it does
+/// once running, because the subprocess is not sandboxed.
+/// Each set therefore describes everything its command can reach, rather than a
+/// confinement — and even the widest of them understates reality, since an
+/// unsandboxed process can touch paths outside the directory entirely.
 fn required_capabilities(subcommand: &str) -> &'static [Capability] {
     match subcommand {
-        "format" | "update" => &[Capability::Read, Capability::Update],
+        // Rewrites existing sources in place; never compiles, never creates.
+        "format" => &[Capability::Read, Capability::Update],
+        // Rewrites the lockfile, and creates it when the target has none.
+        "update" => &[Capability::Read, Capability::Create, Capability::Update],
+        // Compiling writes artifacts, removes stale ones, and runs build
+        // scripts, proc macros and test binaries — arbitrary code carrying the
+        // process's own filesystem access.
         _ => &[
             Capability::Read,
             Capability::Create,
             Capability::Update,
+            Capability::Delete,
             Capability::Execute,
         ],
     }
@@ -147,9 +155,11 @@ fn note_root(outcome: ToolResult, root: &Utf8Path) -> ToolResult {
 /// scripts and proc macros, so an unvetted directory is arbitrary code
 /// execution.
 ///
-/// The target is required to be a directory, so a typo (or naming the manifest
-/// instead of the directory holding it) surfaces here rather than as a
-/// confusing cargo failure somewhere else.
+/// The target is required to be a directory holding a `Cargo.toml`, so a typo
+/// (or naming the manifest instead of the directory holding it) surfaces here.
+/// Without the manifest check, cargo would search parent directories and
+/// silently operate on the enclosing workspace instead — rewriting sources or
+/// the lockfile of a project the caller never named, and reporting success.
 ///
 /// A configured target must also grant `capabilities` outright.
 /// `external` only permits a path to resolve outside the workspace; it is not a
@@ -174,6 +184,14 @@ fn cargo_root(
     if !resolved.absolute.is_dir() {
         return Err(format!(
             "The `root` option `{configured}` resolved to `{}`, which is not a directory.",
+            resolved.absolute
+        ));
+    }
+
+    if !resolved.absolute.join("Cargo.toml").is_file() {
+        return Err(format!(
+            "The `root` option `{configured}` resolved to `{}`, which has no `Cargo.toml`. Cargo \
+             would search parent directories and operate on the enclosing workspace instead.",
             resolved.absolute
         ));
     }
