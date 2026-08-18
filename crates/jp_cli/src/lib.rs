@@ -51,7 +51,6 @@ use jp_printer::{OutputFormat, OutputWidth, Printer};
 use jp_storage::backend::{
     FsStorageBackend, NullLockBackend, NullPersistBackend, ReadOnlySessionBackend,
 };
-use jp_term::table::{DetailRow, details, details_markdown};
 use jp_term::table::{DetailRow, Details, details, details_markdown};
 use jp_workspace::{Workspace, user_data_dir};
 use relative_path::RelativePath;

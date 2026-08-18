@@ -1,4 +1,4 @@
-# T0002: Session detaches from its conversation after a `--no-persist` query
+# Session detaches from its conversation after a `--no-persist` query
 
 - **Status**: Done
 - **Kind**: Bug
