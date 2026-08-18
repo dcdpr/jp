@@ -8,11 +8,11 @@
 use std::collections::{HashMap, HashSet};
 
 use chrono::{DateTime, Utc};
-use serde_json::Map;
+use serde_json::{Map, Value};
 
 use super::InternalEvent;
 use crate::{
-    ReasoningPolicy, ToolCallPolicy,
+    ByteSize, Compaction, PolicySpec, ReasoningPolicy, ToolCallPolicy,
     event::{ChatRequest, ChatResponse, ConversationEvent, TurnStart},
 };
 
@@ -61,12 +61,12 @@ struct TurnPolicy {
     /// Summary covering this turn.
     /// Takes precedence over per-type policies.
     summary: Option<ResolvedSummary>,
-    /// Reasoning policy.
+    /// Reasoning policy, with any size threshold that qualifies it.
     /// Ignored when `summary` is set.
-    reasoning: Option<ReasoningPolicy>,
-    /// Tool call policy.
+    reasoning: Option<PolicySpec<ReasoningPolicy>>,
+    /// Tool call policy, with any size threshold that qualifies it.
     /// Ignored when `summary` is set.
-    tool_calls: Option<ToolCallPolicy>,
+    tool_calls: Option<PolicySpec<ToolCallPolicy>>,
 }
 
 /// A summary that won the latest-timestamp contest for a set of turns.
@@ -127,7 +127,7 @@ pub(super) fn apply(events: &mut Vec<InternalEvent>) -> Vec<TurnOrigin> {
     let turn_indices = assign_turn_indices(events);
     let max_turn = turn_indices.iter().copied().max().unwrap_or(0);
     let policies = resolve_policies(max_turn, &compactions);
-    let tool_names = build_tool_name_map(events);
+    let tool_calls = build_tool_calls(events);
 
     // Inject a summary once per contiguous run of turns that resolve to the
     // same winning summary. Injecting only at the originating `from_turn` drops
@@ -197,35 +197,9 @@ pub(super) fn apply(events: &mut Vec<InternalEvent>) -> Vec<TurnOrigin> {
                     continue;
                 }
 
-                let mut event = *conv_event;
-
-                // Reasoning policy.
-                if matches!(policy.reasoning, Some(ReasoningPolicy::Strip))
-                    && event
-                        .as_chat_response()
-                        .is_some_and(ChatResponse::is_reasoning)
-                {
+                let Some(event) = apply_mechanical(*conv_event, policy, &tool_calls) else {
                     continue;
-                }
-
-                // Tool call policy.
-                if let Some(tc_policy) = &policy.tool_calls {
-                    match tc_policy {
-                        ToolCallPolicy::Omit => {
-                            if event.is_tool_call_request() || event.is_tool_call_response() {
-                                continue;
-                            }
-                        }
-                        ToolCallPolicy::Strip { request, response } => {
-                            if *request {
-                                strip_tool_request(&mut event);
-                            }
-                            if *response {
-                                strip_tool_response(&mut event, &tool_names);
-                            }
-                        }
-                    }
-                }
+                };
 
                 projected.push(InternalEvent::Event(Box::new(event)));
                 event_origins.push(TurnOrigin::Kept(turn));
@@ -235,6 +209,158 @@ pub(super) fn apply(events: &mut Vec<InternalEvent>) -> Vec<TurnOrigin> {
 
     *events = projected;
     collect_turn_origins(events, &event_origins)
+}
+
+/// An item a compaction's mechanical policies reach.
+///
+/// Reported so a preview can say what a size threshold actually selected.
+/// A turn range predicts what it covers; a threshold does not.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AffectedItem {
+    /// 0-based raw turn the item sits in.
+    pub turn: usize,
+    /// What the item is: a tool name qualified by the half being reached
+    /// (`fs_read_file (response)`), or `reasoning`.
+    pub name: String,
+    /// Byte size of the content the policy would remove.
+    pub size: ByteSize,
+}
+
+/// List the items `compaction`'s mechanical policies reach, in stream order.
+///
+/// Only the reasoning and tool-call policies select items; a summary replaces
+/// its whole range rather than picking from it, so it contributes nothing here.
+pub(super) fn affected_items(
+    events: &[InternalEvent],
+    compaction: &Compaction,
+) -> Vec<AffectedItem> {
+    let turn_indices = assign_turn_indices(events);
+    let tool_calls = build_tool_calls(events);
+    let mut items = Vec::new();
+
+    for (index, entry) in events.iter().enumerate() {
+        let turn = turn_indices[index];
+        if turn < compaction.from_turn || turn > compaction.to_turn {
+            continue;
+        }
+
+        let Some(event) = entry.as_event() else {
+            continue;
+        };
+
+        if let Some(spec) = &compaction.reasoning
+            && matches!(spec.policy, ReasoningPolicy::Strip)
+            && let Some(response) = event.as_chat_response()
+            && response.is_reasoning()
+        {
+            let size = reasoning_size(response);
+            if spec.covers(size) {
+                items.push(AffectedItem {
+                    turn,
+                    name: "reasoning".to_owned(),
+                    size: ByteSize::from_bytes(size),
+                });
+            }
+        }
+
+        let Some(spec) = &compaction.tool_calls else {
+            continue;
+        };
+        let sizes = tool_call_sizes(event, &tool_calls);
+
+        match &spec.policy {
+            // Report the pair once, from its request, since both halves go
+            // together.
+            ToolCallPolicy::Omit => {
+                if let Some(request) = event.as_tool_call_request()
+                    && spec.covers(sizes.pair)
+                {
+                    items.push(AffectedItem {
+                        turn,
+                        name: tool_name(&tool_calls, &request.id).to_owned(),
+                        size: ByteSize::from_bytes(sizes.pair),
+                    });
+                }
+            }
+            ToolCallPolicy::Strip { request, response } => {
+                if *request
+                    && let Some(req) = event.as_tool_call_request()
+                    && spec.covers(sizes.own)
+                {
+                    items.push(AffectedItem {
+                        turn,
+                        name: format!("{} (request)", tool_name(&tool_calls, &req.id)),
+                        size: ByteSize::from_bytes(sizes.own),
+                    });
+                }
+                if *response
+                    && let Some(resp) = event.as_tool_call_response()
+                    && spec.covers(sizes.own)
+                {
+                    items.push(AffectedItem {
+                        turn,
+                        name: format!("{} (response)", tool_name(&tool_calls, &resp.id)),
+                        size: ByteSize::from_bytes(sizes.own),
+                    });
+                }
+            }
+        }
+    }
+
+    items
+}
+
+/// Apply a turn's mechanical policies (reasoning and tool calls) to one event.
+///
+/// Returns `None` when the policies drop the event from the projected view.
+/// A policy whose spec carries an `over` threshold reaches only the items
+/// larger than it; without one, every item in range is reached.
+fn apply_mechanical(
+    mut event: ConversationEvent,
+    policy: &TurnPolicy,
+    tool_calls: &HashMap<String, ToolCall>,
+) -> Option<ConversationEvent> {
+    if let Some(spec) = &policy.reasoning
+        && matches!(spec.policy, ReasoningPolicy::Strip)
+        && let Some(response) = event.as_chat_response()
+        && response.is_reasoning()
+        && spec.covers(reasoning_size(response))
+    {
+        return None;
+    }
+
+    // A `None` tool-call policy means "no opinion", so the event passes through
+    // untouched rather than being dropped.
+    if let Some(spec) = policy.tool_calls.as_ref() {
+        // Sizes are read up front so the lookup's borrow is released before the
+        // strip helpers mutate the event.
+        let sizes = tool_call_sizes(&event, tool_calls);
+
+        match &spec.policy {
+            ToolCallPolicy::Omit => {
+                // Removing a pair is not a per-half choice, so the threshold is
+                // judged on the two halves combined. Both halves read the same
+                // total, so a pair is never half-removed.
+                if (event.is_tool_call_request() || event.is_tool_call_response())
+                    && spec.covers(sizes.pair)
+                {
+                    return None;
+                }
+            }
+            ToolCallPolicy::Strip { request, response } => {
+                // Each half is judged on its own size, so a call with a short
+                // request and a huge response loses only the response.
+                if *request && event.is_tool_call_request() && spec.covers(sizes.own) {
+                    strip_tool_request(&mut event);
+                }
+                if *response && event.is_tool_call_response() && spec.covers(sizes.own) {
+                    strip_tool_response(&mut event, tool_calls);
+                }
+            }
+        }
+    }
+
+    Some(event)
 }
 
 /// Group projected events into turns (matching [`IterTurns`]) and return each
@@ -408,10 +534,18 @@ fn strip_tool_request(event: &mut ConversationEvent) {
     }
 }
 
+/// The tool name recorded for a call ID, or `unknown` when no request for it
+/// survives in the stream.
+fn tool_name<'a>(tool_calls: &'a HashMap<String, ToolCall>, id: &str) -> &'a str {
+    tool_calls
+        .get(id)
+        .map_or("unknown", |call| call.name.as_str())
+}
+
 /// Replace a tool call response's content with a compact status line.
-fn strip_tool_response(event: &mut ConversationEvent, tool_names: &HashMap<String, String>) {
+fn strip_tool_response(event: &mut ConversationEvent, tool_calls: &HashMap<String, ToolCall>) {
     if let Some(resp) = event.as_tool_call_response_mut() {
-        let name = tool_names.get(&resp.id).map_or("unknown", String::as_str);
+        let name = tool_name(tool_calls, &resp.id);
         let status = if resp.result.is_ok() {
             "success"
         } else {
@@ -426,17 +560,105 @@ fn strip_tool_response(event: &mut ConversationEvent, tool_names: &HashMap<Strin
     }
 }
 
-/// Build a map from tool call ID → tool name for response stripping.
-fn build_tool_name_map(events: &[InternalEvent]) -> HashMap<String, String> {
-    let mut map = HashMap::new();
+/// What the tool call policies need to know about a single call.
+///
+/// The name feeds a stripped response's status line; the two sizes feed a
+/// spec's `over` threshold.
+#[derive(Default)]
+struct ToolCall {
+    /// Name of the tool, taken from the request.
+    name: String,
+    /// Byte size of the request arguments.
+    request_size: u64,
+    /// Byte size of the response content.
+    response_size: u64,
+}
+
+impl ToolCall {
+    /// Combined size of both halves.
+    const fn pair_size(&self) -> u64 {
+        self.request_size.saturating_add(self.response_size)
+    }
+}
+
+/// Size figures for whichever half of a tool call pair an event holds.
+#[derive(Clone, Copy, Default)]
+struct ToolSizes {
+    /// Size of this event's own half.
+    own: u64,
+    /// Combined size of both halves.
+    pair: u64,
+}
+
+/// Build a map from tool call ID to the name and sizes of that call.
+fn build_tool_calls(events: &[InternalEvent]) -> HashMap<String, ToolCall> {
+    let mut calls: HashMap<String, ToolCall> = HashMap::new();
     for event in events {
-        if let InternalEvent::Event(ev) = event
-            && let Some(req) = ev.as_tool_call_request()
-        {
-            map.insert(req.id.clone(), req.name.clone());
+        let Some(conv_event) = event.as_event() else {
+            continue;
+        };
+
+        if let Some(req) = conv_event.as_tool_call_request() {
+            let call = calls.entry(req.id.clone()).or_default();
+            call.name.clone_from(&req.name);
+            call.request_size = arguments_size(&req.arguments);
+        } else if let Some(resp) = conv_event.as_tool_call_response() {
+            calls.entry(resp.id.clone()).or_default().response_size =
+                byte_count(resp.content().len());
         }
     }
-    map
+    calls
+}
+
+/// Look up the sizes for whichever half of a tool call pair `event` holds.
+///
+/// Both halves report the same `pair` total, so a threshold on `Omit` either
+/// removes a pair or leaves it whole.
+/// A non-tool event reports zero, which no threshold covers.
+fn tool_call_sizes(event: &ConversationEvent, calls: &HashMap<String, ToolCall>) -> ToolSizes {
+    let (id, own_is_request) = if let Some(req) = event.as_tool_call_request() {
+        (&req.id, true)
+    } else if let Some(resp) = event.as_tool_call_response() {
+        (&resp.id, false)
+    } else {
+        return ToolSizes::default();
+    };
+
+    let Some(call) = calls.get(id) else {
+        return ToolSizes::default();
+    };
+
+    ToolSizes {
+        own: if own_is_request {
+            call.request_size
+        } else {
+            call.response_size
+        },
+        pair: call.pair_size(),
+    }
+}
+
+/// Byte size of a tool call request's arguments as the provider receives them.
+///
+/// Measured on the serialized JSON rather than the stored bytes: arguments are
+/// base64-encoded at rest, so the on-disk size is not what reaches the model.
+fn arguments_size(arguments: &Map<String, Value>) -> u64 {
+    serde_json::to_string(arguments).map_or(0, |json| byte_count(json.len()))
+}
+
+/// Byte size of a chat response's reasoning content.
+///
+/// Any other response kind reports zero.
+fn reasoning_size(response: &ChatResponse) -> u64 {
+    match response {
+        ChatResponse::Reasoning { reasoning } => byte_count(reasoning.len()),
+        _ => 0,
+    }
+}
+
+/// Narrow an in-memory length to the width the size thresholds compare against.
+fn byte_count(len: usize) -> u64 {
+    u64::try_from(len).unwrap_or(u64::MAX)
 }
 
 #[cfg(test)]

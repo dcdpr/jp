@@ -755,7 +755,7 @@ fn query_cfg_sourced_compaction_persists_as_config_delta() {
     // reasoning + tools default).
     let mut partial = base_config.to_partial();
     partial.conversation.compaction.rules = MergeableVec::Vec(vec![PartialCompactionRuleConfig {
-        reasoning: Some(ReasoningMode::Strip),
+        reasoning: Some(ReasoningMode::Strip.into()),
         ..Default::default()
     }]);
     let runtime_config = build(partial).unwrap();

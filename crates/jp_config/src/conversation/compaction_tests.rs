@@ -1,4 +1,97 @@
 use super::*;
+use crate::types::byte_size::ByteSize;
+
+// ---------------------------------------------------------------------------
+// Rule policies in TOML
+// ---------------------------------------------------------------------------
+
+/// Deserialize a single `[[conversation.compaction.rules]]` body from TOML.
+fn rule_from_toml(body: &str) -> PartialCompactionRuleConfig {
+    toml::from_str(body).unwrap()
+}
+
+#[test]
+fn bare_string_policies_still_parse() {
+    let rule = rule_from_toml(
+        r#"
+        reasoning = "strip"
+        tool_calls = "strip-responses"
+        "#,
+    );
+
+    assert_eq!(rule.reasoning, Some(ReasoningMode::Strip.into()));
+    assert_eq!(rule.tool_calls, Some(ToolCallsMode::StripResponses.into()));
+}
+
+#[test]
+fn table_policies_carry_a_size_threshold() {
+    let rule = rule_from_toml(
+        r#"
+        reasoning = { policy = "strip", over = "16KB" }
+        tool_calls = { policy = "strip-responses", over = "1MB" }
+        "#,
+    );
+
+    assert_eq!(
+        rule.reasoning,
+        Some(PolicySpec::over(
+            ReasoningMode::Strip,
+            ByteSize::from_bytes(16 * 1024)
+        ))
+    );
+    assert_eq!(
+        rule.tool_calls,
+        Some(PolicySpec::over(
+            ToolCallsMode::StripResponses,
+            ByteSize::from_bytes(1024 * 1024)
+        ))
+    );
+}
+
+#[test]
+fn a_policy_table_without_over_matches_the_bare_string() {
+    let table = rule_from_toml(r#"tool_calls = { policy = "omit" }"#);
+    let bare = rule_from_toml(r#"tool_calls = "omit""#);
+
+    assert_eq!(table.tool_calls, bare.tool_calls);
+}
+
+#[test]
+fn a_policy_without_a_threshold_serializes_back_as_a_bare_string() {
+    // Keeping the bare form when nothing narrows the policy means an existing
+    // config or event stream is not rewritten into the table shape.
+    let rule = rule_from_toml(r#"tool_calls = "strip""#);
+
+    let json = serde_json::to_value(&rule).unwrap();
+
+    assert_eq!(json["tool_calls"], serde_json::json!("strip"));
+}
+
+#[test]
+fn assigning_a_policy_string_accepts_an_over_option() {
+    // `--cfg ...tool_calls=sres,over=1MB` goes through `FromStr`, which shares
+    // its option syntax with the inline DSL.
+    let spec: PolicySpec<ToolCallsMode> = "sres,over=1MB".parse().unwrap();
+
+    assert_eq!(
+        spec,
+        PolicySpec::over(
+            ToolCallsMode::StripResponses,
+            ByteSize::from_bytes(1024 * 1024)
+        )
+    );
+}
+
+#[test]
+fn builtin_rules_carry_no_threshold() {
+    // The out-of-the-box behavior must stay "compact everything in range";
+    // adding a default threshold would silently change every workspace.
+    let rules = PartialCompactionConfig::builtin_rules();
+
+    assert_eq!(rules.len(), 1);
+    assert_eq!(rules[0].reasoning.and_then(|spec| spec.over), None);
+    assert_eq!(rules[0].tool_calls.and_then(|spec| spec.over), None);
+}
 
 #[test]
 fn tool_calls_mode_parse() {
@@ -119,8 +212,8 @@ fn rule_partial_roundtrip_json() {
     let rule = PartialCompactionRuleConfig {
         keep_first: None,
         keep_last: Some(RuleBound::Turns(3)),
-        reasoning: Some(ReasoningMode::Strip),
-        tool_calls: Some(ToolCallsMode::Strip),
+        reasoning: Some(ReasoningMode::Strip.into()),
+        tool_calls: Some(ToolCallsMode::Strip.into()),
         summary: None,
     };
     let json = serde_json::to_value(&rule).unwrap();
@@ -133,7 +226,7 @@ fn rule_partial_none_fields_omitted() {
     let rule = PartialCompactionRuleConfig {
         keep_first: None,
         keep_last: None,
-        reasoning: Some(ReasoningMode::Strip),
+        reasoning: Some(ReasoningMode::Strip.into()),
         tool_calls: None,
         summary: None,
     };
