@@ -1,0 +1,26 @@
+[conversation.tools.swift_check]
+enable = false
+run = "unattended"
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "Build the macOS app in `apps/macos`, validating that the Swift code compiles. The project treats warnings as errors, so anything reported is a failure. Builds the `jp_ffi` static library and regenerates the Xcode project first, so no setup step is needed."
+
+examples = """
+```json
+{}
+```
+Builds the Debug configuration.
+
+```json
+{"configuration": "Release"}
+```
+"""
+
+[conversation.tools.swift_check.style]
+inline_results = "full"
+results_file_link = "off"
+parameters = "function_call"
+
+[conversation.tools.swift_check.parameters.configuration]
+summary = "Xcode build configuration to build. Defaults to `Debug`."
+type = "string"
