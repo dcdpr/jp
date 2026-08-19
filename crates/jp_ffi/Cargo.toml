@@ -1,0 +1,40 @@
+[package]
+name = "jp_ffi"
+
+authors.workspace = true
+description.workspace = true
+documentation.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license-file.workspace = true
+publish.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+jp_conversation = { workspace = true }
+jp_plugin = { workspace = true }
+jp_workspace = { workspace = true }
+
+camino = { workspace = true }
+serde = { workspace = true, features = ["derive", "std"] }
+serde_json = { workspace = true, features = ["std"] }
+tracing = { workspace = true }
+
+[dev-dependencies]
+camino-tempfile = { workspace = true }
+chrono = { workspace = true }
+datetime_literal = { workspace = true }
+jp_storage = { workspace = true }
+pretty_assertions = { workspace = true, features = ["std"] }
+serial_test = { workspace = true }
+
+[lints]
+workspace = true
+
+[lib]
+# `staticlib` is what the native app links. `rlib` keeps the crate usable from
+# Rust, which is what lets the entry points be unit-tested in-process.
+crate-type = ["staticlib", "rlib"]
+doctest = false

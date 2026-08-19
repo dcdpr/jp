@@ -3,6 +3,7 @@ set fallback
 # see: <https://github.com/cargo-bins/cargo-quickinstall/releases>
 bacon_version        := "3.23.0"
 binstall_version     := "1.20.0"
+cbindgen_version     := "0.29.4"
 deny_version         := "0.19.9"
 expand_version       := "1.0.123"
 insta_version        := "1.48.0"
@@ -126,6 +127,59 @@ stage-and-commit: _install-jp
 [group('build')]
 build-changelog: (_install "jilu@" + jilu_version)
     @jilu
+
+# Build the static library and C header that the macOS app links against, and
+# stage both where the Xcode project expects them.
+#
+# Xcode runs this from a build phase, so `just` stays the single entry point for
+# building the Rust side rather than Xcode growing a competing one.
+#
+# PROFILE is a cargo profile directory name (`debug`, `release`, ...).
+[group('build')]
+build-ffi PROFILE="debug": (_install "cbindgen@" + cbindgen_version)
+    #!/usr/bin/env sh
+    set -eu
+
+    if ! which jq >/dev/null 2>&1; then
+        echo "jq not found. Install it with: brew install jq" >&2
+        exit 1
+    fi
+
+    # The `dev` profile builds into a `debug` directory, so the profile flag and
+    # the output directory disagree for that one case.
+    if [ "{{PROFILE}}" = "debug" ]; then
+        cargo build {{quiet_flag}} --package jp_ffi
+    else
+        cargo build {{quiet_flag}} --package jp_ffi --profile "{{PROFILE}}"
+    fi
+
+    # Ask cargo where it writes rather than assuming `./target`. The target
+    # directory is redirectable, and sibling git worktrees here share one that
+    # sits outside the checkout entirely.
+    target_dir=$(cargo metadata --format-version=1 --no-deps | jq -r '.target_directory')
+    lib="$target_dir/{{PROFILE}}/libjp_ffi.a"
+
+    if [ ! -f "$lib" ]; then
+        echo "cargo did not produce $lib" >&2
+        exit 1
+    fi
+
+    # Stage into a fixed, checkout-local directory. Xcode's search paths are
+    # static build settings, so they need one location that does not move with
+    # the developer's cargo configuration.
+    out="apps/macos/.build/{{PROFILE}}"
+    mkdir -p "$out/include"
+
+    # A debug staticlib bundles every dependency, so skip the copy when the
+    # staged one is already current.
+    if [ ! -f "$out/libjp_ffi.a" ] || [ "$lib" -nt "$out/libjp_ffi.a" ]; then
+        cp "$lib" "$out/libjp_ffi.a"
+    fi
+
+    cbindgen --config crates/jp_ffi/cbindgen.toml --crate jp_ffi --output "$out/include/jp_ffi.h"
+
+    echo "library: $out/libjp_ffi.a" >&2
+    echo "header:  $out/include/jp_ffi.h" >&2
 
 [group('profile')]
 [positional-arguments]
