@@ -1,0 +1,130 @@
+[conversation.tools.debug_app_drive]
+enable = false
+format = "unattended"
+run = "ask"
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "Run a list of steps against the running macOS app, reporting what each step changed in the accessibility tree and what the app wrote to its console. Changes the app. macOS only."
+
+examples = """
+Select a conversation and wait for its transcript to replace the spinner:
+```json
+{"steps": [
+  {"select": {"identifier": "sidebar.row.17800836875"}},
+  {"wait_for": {"identifier": "transcript.scroll", "timeout_ms": 10000}}
+]}
+```
+
+Type into the filter box and see what the list narrows to, reading only the
+sidebar so each step costs one small walk:
+```json
+{"steps": [{"type": {"identifier": "sidebar.filter", "text": "rfd"}}],
+ "identifier": "sidebar.", "max_matches": 50}
+```
+
+Close the front window through the menu bar, then look again once AppKit has
+finished with it:
+```json
+{"steps": [{"menu": {"path": ["File", "Close"]}}, {"snapshot": {}}]}
+```
+"""
+
+[conversation.tools.debug_app_drive.style]
+parameters = "just serve-tools {{context}} {{tool}}"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.debug_app_drive.parameters.steps]
+required = true
+type = "array"
+summary = "Steps to run, in order. Stops at the first failure."
+description = """
+Each step is a single-key object naming what to do:
+
+- `{"select": {"identifier": "…"}}` — write `AXSelected` on the nearest ancestor \
+that accepts it. The mechanism for list and outline rows, where the identified \
+element sits below the one that owns selection. Reaches a row that is not on \
+screen.
+- `{"press": {"identifier": "…"}}` — `AXPress` the element itself. The \
+mechanism for buttons and menu items.
+- `{"perform": {"identifier": "…", "action": "AXShowMenu"}}` — any named \
+accessibility action, for the long tail beyond press.
+- `{"menu": {"path": ["File", "Close"]}}` — press a menu item by the titles \
+leading to it. Brings the app forward first, and so takes focus from whatever \
+had it: AppKit disables every item acting on the front window or the responder \
+chain while the app is in the background, which is most of the menu bar. Add \
+`"under": "sidebar.list"` to start from the menu that element is showing rather \
+than the menu bar — open it first with `AXShowMenu`, in the same call, since it \
+closes as soon as the app deactivates. Titles are the only way in, because \
+SwiftUI gives every item in a context menu the same accessibility identifier.
+- `{"type": {"identifier": "…", "text": "…"}}` — put text into a field.
+- `{"resize": {"identifier": "…", "width": 1400, "height": 900}}` — write \
+`AXSize`, which for a window resizes it. One write rather than a gesture, so it \
+never enters live resize: use it to measure what a settled layout costs, and \
+`drag` for what happens during one. A window clamps to its own limits, so the \
+step reports the size it reached and whether that is what was asked for.
+- `{"drag": {"identifier": "…", "from": {"dx": 1.0, "dy": 0.5}, "to": {"dx": \
+0.6, "dy": 0.5}, "steps": 24, "pause_ms": 8}}` — hold the button down and move \
+across an element, `dx` and `dy` being fractions of its frame. The only step that \
+produces a gesture rather than a state: a window edge dragged rather than \
+resized, a split divider moved, a stretch of text selected. What a view does \
+*during* a drag can differ from what it does after one, and every other step here \
+sees only the after. Needs the window frontmost, like `click`, so it takes focus. \
+`steps` is how many moves are posted between the endpoints, and is the point of \
+the step — one jump exercises a single frame.
+- `{"wait_for": {"identifier": "…", "under": "…", "timeout_ms": 5000}}` — block \
+until an element appears. Set `under` to the container it will appear in: an \
+unscoped search for something absent reads every element in the app, which can \
+exhaust the timeout in a single attempt.
+- `{"click": {"identifier": "…"}}` — synthesize a mouse click. The last resort: \
+it needs the window frontmost and the element on screen, which a driven app \
+launched in the background is not.
+- `{"snapshot": {}}` — act on nothing and read again, for an effect that lands \
+after the step that caused it.
+
+There is no step that waits a fixed duration. Waiting and assuming the work \
+finished is a guess; if a wait cannot be written as `wait_for` against an \
+identifier, the app is missing that identifier and adding it is the fix.
+
+The whole list is checked before the first step runs, because a list abandoned \
+halfway leaves the app in a state nobody asked for.
+"""
+items = { type = "object" }
+
+[conversation.tools.debug_app_drive.parameters.reads]
+type = "string"
+summary = "Whether to read the tree between steps: `every_step` (the default) or `none`."
+description = """
+`none` is for measuring the app rather than watching it. A reading is the \
+driver's work but the *app* answers it, on the thread it draws on, and an \
+unscoped one walks every element the app publishes — which for a transcript is \
+thousands, in proportion to how much of a conversation is on screen.
+
+That makes a profile of a driven run partly a profile of the readings, scaled by \
+the very thing usually under study. A resize sweep with readings on is visibly \
+sluggish and a sweep with them off is not, on the same app and the same steps.
+
+With `none` a step still reports what it did and what the app wrote to its \
+console. It reports nothing about the tree, rather than claiming it did not \
+change.
+"""
+
+[conversation.tools.debug_app_drive.parameters.identifier]
+type = "string"
+summary = "Read only the elements whose accessibility identifier starts with this, and the ancestors leading to them."
+description = """
+Scopes every reading the run takes. Without it the whole application is walked \
+after each step, which for a large workspace is thousands of elements per step. \
+Pass the prefix the steps act under — `sidebar.`, `transcript.` — when the run \
+is about one region.
+"""
+
+[conversation.tools.debug_app_drive.parameters.max_matches]
+type = "integer"
+summary = "How many matches each reading stops at. Defaults to 5. Only applies with `identifier`."
+description = """
+Identifiers sit on leaves, so a prefix search cannot prune on the way down and \
+an unbounded one reads every element in the application. The default of 5 is \
+enough to see the shape of a region, but a delta cannot show a change to the \
+sixth row of a list: raise it when the run is about which of many rows moved.
+"""
