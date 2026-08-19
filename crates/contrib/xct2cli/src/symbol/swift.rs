@@ -13,13 +13,12 @@
 //! Loading needs `dlopen`, so off unix there is nothing to load and every Swift
 //! symbol keeps its mangled name.
 
+#[cfg(unix)]
+use std::{env, ffi::c_void, process::Command};
 use std::{
     ffi::{CString, c_char},
     sync::OnceLock,
 };
-
-#[cfg(unix)]
-use std::{env, ffi::c_void, process::Command};
 
 #[cfg(unix)]
 use libc::{RTLD_LAZY, RTLD_LOCAL, dlopen, dlsym};
