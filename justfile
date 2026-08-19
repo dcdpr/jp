@@ -357,6 +357,36 @@ test-app: gen-app (build-ffi "debug")
     xcodebuild test -project apps/macos/JP.xcodeproj -scheme JP \
         -destination platform=macOS -only-testing:JPTests -quiet
 
+# Run every one of the macOS app's UI tests.
+#
+# Takes over the screen for the length of the run. This is the CI job; while
+# writing a test, run it by name through the `swift_test_ui` tool instead, which
+# stops at the first failure.
+#
+# Every test runs here even after one fails, which is what `CI` means to that
+# tool and what a run nobody is watching should do.
+[group('test')]
+[macos]
+test-app-ui: gen-app (build-ffi "debug")
+    CI=1 xcodebuild test -project apps/macos/JP.xcodeproj -scheme JP \
+        -destination platform=macOS -only-testing:JPUITests -quiet
+
+# Format the macOS app's Swift sources.
+[group('fmt')]
+[macos]
+fmt-app:
+    swift format --in-place --recursive --parallel \
+        apps/macos/Sources apps/macos/Tests apps/macos/UITests \
+        apps/macos/Tools/jpdrive/Sources apps/macos/Tools/jpdrive/Tests
+
+# Check Swift formatting and lints without rewriting anything.
+[group('check')]
+[macos]
+lint-app:
+    swift format lint --strict --recursive --parallel \
+        apps/macos/Sources apps/macos/Tests apps/macos/UITests \
+        apps/macos/Tools/jpdrive/Sources apps/macos/Tools/jpdrive/Tests
+
 [group('profile')]
 [positional-arguments]
 profile-heap *ARGS:
