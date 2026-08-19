@@ -124,15 +124,35 @@ impl<'a> CallgraphBuilder<'a> {
         }
         let slide = match &self.slide {
             SlideMode::Manual(s) => *s,
-            SlideMode::Auto => self
-                .binary
-                .as_deref()
-                .and_then(|bin| BinaryInfo::open(bin).ok())
-                .and_then(|info| {
-                    let loads = self.bundle.image_loads().unwrap_or_default();
-                    info.slide_from(&loads)
-                })
-                .unwrap_or_default(),
+            SlideMode::Auto => {
+                let detected = match self.binary.as_deref() {
+                    Some(bin) => {
+                        let info = BinaryInfo::open(bin)?;
+                        let loads = match self.bundle.image_loads() {
+                            Ok(v) => v,
+                            Err(e) => {
+                                tracing::warn!("image_loads failed: {e}");
+                                Vec::new()
+                            }
+                        };
+                        let s = info.slide_from(&loads);
+                        match s {
+                            Some(s) => tracing::info!(
+                                %s,
+                                "auto-detected slide from kdebug DBG_DYLD events"
+                            ),
+                            None => tracing::warn!(
+                                "could not auto-detect slide; symbols will be wrong. Enumerate \
+                                 candidates with `BinaryInfo::enumerate_slides` and pass one \
+                                 through `SlideMode::Manual`."
+                            ),
+                        }
+                        s
+                    }
+                    None => None,
+                };
+                detected.unwrap_or_default()
+            }
         };
         Ok(Some(Symbolicator::new(SymbolicatorOptions {
             binary: self.binary.clone(),

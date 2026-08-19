@@ -241,13 +241,17 @@ fn read_processes<R: std::io::BufRead>(reader: &mut Reader<R>) -> Result<Vec<Toc
     loop {
         buf.clear();
         match reader.read_event_into(&mut buf)? {
-            Event::Empty(s) | Event::Start(s) if local_name(&s)? == "process" => {
-                let attrs = collect_attrs(&s)?;
-                let name = attrs.get("name").cloned().unwrap_or_default();
-                let pid = attrs.get("pid").and_then(|v| v.parse().ok()).unwrap_or(-1);
-                let path = attrs.get("path").cloned();
-                out.push(TocProcess { name, pid, path });
-                if matches!(reader.read_event_into(&mut Vec::new())?, Event::End(_)) {}
+            // Self-closing `<process/>` has no end tag to consume. Consuming one
+            // anyway swallows whatever follows, which for adjacent processes is
+            // the next one and for the last is `</processes>`.
+            Event::Empty(s) if local_name(&s)? == "process" => {
+                out.push(process(&s)?);
+            }
+            Event::Start(s) if local_name(&s)? == "process" => {
+                out.push(process(&s)?);
+                // Skip whatever the element wraps, so the loop resumes on the
+                // next sibling rather than inside this one.
+                skip_to_end(reader, "process")?;
             }
             Event::End(e) if std::str::from_utf8(e.name().as_ref())? == "processes" => break,
             Event::Eof => return Err(Error::Schema("EOF inside <processes>".into())),
@@ -289,6 +293,19 @@ fn table_from_attrs(s: &BytesStart<'_>) -> Result<Table> {
         schema,
         documentation,
         attributes: attrs,
+    })
+}
+
+/// One `<process>` element, from its attributes.
+///
+/// A process with no readable `pid` gets `-1`, which is what the rest of the
+/// crate treats as "not a real process".
+fn process(s: &BytesStart<'_>) -> Result<TocProcess> {
+    let attrs = collect_attrs(s)?;
+    Ok(TocProcess {
+        name: attrs.get("name").cloned().unwrap_or_default(),
+        pid: attrs.get("pid").and_then(|v| v.parse().ok()).unwrap_or(-1),
+        path: attrs.get("path").cloned(),
     })
 }
 
@@ -334,3 +351,7 @@ fn skip_to_end<R: std::io::BufRead>(reader: &mut Reader<R>, name: &str) -> Resul
     }
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "toc_tests.rs"]
+mod tests;

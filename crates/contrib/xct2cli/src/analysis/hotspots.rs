@@ -246,9 +246,9 @@ impl<'a> HotspotsBuilder<'a> {
                             }
                             None => {
                                 tracing::warn!(
-                                    "could not auto-detect slide; symbols will be wrong. Use \
-                                     `xct2cli slide` to inspect candidates and pass --slide \
-                                     explicitly."
+                                    "could not auto-detect slide; symbols will be wrong. \
+                                     Enumerate candidates with `BinaryInfo::enumerate_slides` and \
+                                     pass one through `SlideMode::Manual`."
                                 );
                             }
                         }

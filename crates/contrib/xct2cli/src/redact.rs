@@ -28,6 +28,13 @@ const REPLACEMENT: &[u8] = b"<environment redacted=\"true\"/>";
 /// rather than passed through, so malformed XML cannot become a disclosure.
 #[must_use]
 pub fn strip_environment(xml: Vec<u8>) -> Vec<u8> {
+    // Nothing to redact is the common case for a large export, and copying the
+    // whole thing into a second buffer to return it unchanged doubles the peak
+    // footprint of an input that can already run to hundreds of megabytes.
+    if find_element(&xml).is_none() {
+        return xml;
+    }
+
     let mut out = Vec::with_capacity(xml.len());
     let mut rest = xml.as_slice();
 

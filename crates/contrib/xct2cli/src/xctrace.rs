@@ -6,8 +6,6 @@ use std::{
     process::{Command, Stdio},
 };
 
-use camino::Utf8Path;
-
 use crate::error::{Error, Result};
 
 pub const DEFAULT_XCTRACE: &str = "/usr/bin/xctrace";
@@ -63,36 +61,6 @@ impl Xctrace {
         ])
     }
 
-    pub fn record_launch(
-        &self,
-        template: &str,
-        output_trace: &Utf8Path,
-        target: &Path,
-        target_args: &[OsString],
-        extra_env: &[(String, String)],
-    ) -> Result<()> {
-        let mut args: Vec<OsString> = vec![
-            "record".into(),
-            "--template".into(),
-            template.into(),
-            "--output".into(),
-            output_trace.as_os_str().into(),
-            "--no-prompt".into(),
-        ];
-        for (k, v) in extra_env {
-            args.push("--env".into());
-            args.push(format!("{k}={v}").into());
-        }
-        args.push("--launch".into());
-        args.push("--".into());
-        args.push(target.as_os_str().into());
-        for a in target_args {
-            args.push(a.clone());
-        }
-        let _ = self.run_args("record", &args)?;
-        Ok(())
-    }
-
     fn run(&self, sub: &'static str, tail: &[&OsStr]) -> Result<Vec<u8>> {
         let mut args: Vec<OsString> = Vec::with_capacity(tail.len() + 1);
         args.push(sub.into());
@@ -107,6 +75,9 @@ impl Xctrace {
         cmd.args(args);
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
+        // Safe to log verbatim: every subcommand reached from here passes paths
+        // and xpaths. Nothing constructs an `--env` argument, which is what a
+        // recording would carry and what must never reach a log.
         tracing::debug!(?args, binary = ?self.binary, "spawning xctrace");
         let out = cmd.output().map_err(|e| match e.kind() {
             std::io::ErrorKind::NotFound => Error::XctraceMissing(self.binary.clone()),

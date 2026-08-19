@@ -48,12 +48,15 @@ than fixed, so a diff against a fresh checkout stays readable.
   See "A recorded trace is a secret" below.
 - **Removed:** the `xct2cli` binary and its `cli` feature; `render`, which
   formatted reports for a terminal; `analysis::annotate`, which annotated
-  disassembly; and `analysis::{pmi, counters}`, which read hardware performance
-  counters.
+  disassembly; `analysis::{pmi, counters}`, which read hardware performance
+  counters; and `Xctrace::record_launch`, which started a recording.
   Dropping the first three also drops `capstone`, `annotate-snippets`, and
   `owo-colors`.
   The counter paths needed kperf, which needs root or
   `com.apple.private.kernel.kpc`.
+  Recording is spawned by the caller, which is what lets it use `--instrument`;
+  `record_launch` passed `--template`, and it carried the only code that built
+  an `--env` argument, so nothing here can put a credential on a command line.
 
 ## Recording a trace it can read
 
