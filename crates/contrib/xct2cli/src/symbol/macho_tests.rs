@@ -111,11 +111,20 @@ fn a_function_starting_past_the_end_of_text_has_no_length() {
 /// symbol nobody can demangle is still the only name that frame has.
 #[test]
 fn a_name_is_demangled_by_whichever_scheme_claims_it() {
-    assert_eq!(demangle("_$s2JP5TraceO5eventyyF"), "JP.Trace.event() -> ()");
     assert_eq!(
         demangle("_ZN4core3fmt9Formatter3pad17h0123456789abcdefE"),
         "core::fmt::Formatter::pad"
     );
     assert_eq!(demangle("main"), "main");
     assert_eq!(demangle(""), "");
+}
+
+/// Swift is the one scheme whose demangler is loaded out of the installed Xcode
+/// rather than linked in, so it is asserted only where there is one.
+/// Without a toolchain `demangle` hands back the mangled name, which is the
+/// documented degradation rather than a failure.
+#[cfg(target_os = "macos")]
+#[test]
+fn a_swift_name_is_demangled_through_the_toolchain() {
+    assert_eq!(demangle("_$s2JP5TraceO5eventyyF"), "JP.Trace.event() -> ()");
 }
