@@ -3,6 +3,7 @@ set fallback
 # see: <https://github.com/cargo-bins/cargo-quickinstall/releases>
 bacon_version        := "3.23.0"
 binstall_version     := "1.20.0"
+cbindgen_version     := "0.29.4"
 deny_version         := "0.19.9"
 expand_version       := "1.0.123"
 insta_version        := "1.48.0"
@@ -126,6 +127,72 @@ stage-and-commit: _install-jp
 [group('build')]
 build-changelog: (_install "jilu@" + jilu_version)
     @jilu
+
+# Build the static library and C header that the macOS app links against, and
+# stage both where the Xcode project expects them.
+#
+# Xcode runs this from a build phase, so `just` stays the single entry point for
+# building the Rust side rather than Xcode growing a competing one.
+#
+# PROFILE is a cargo profile directory name (`debug`, `release`, ...).
+[group('build')]
+build-ffi PROFILE="debug": (_install "cbindgen@" + cbindgen_version)
+    #!/usr/bin/env sh
+    set -eu
+
+    if ! which jq >/dev/null 2>&1; then
+        echo "jq not found. Install it with: brew install jq" >&2
+        exit 1
+    fi
+
+    # The `dev` profile builds into a `debug` directory, so the profile's name
+    # and its output directory disagree for that one case.
+    if [ "{{PROFILE}}" = "debug" ]; then
+        build_profile="dev"
+    else
+        build_profile="{{PROFILE}}"
+    fi
+
+    # Ask cargo which file it wrote rather than reconstructing the path. A
+    # configured build target (`[build] target` in `.cargo/config.toml`, or
+    # `CARGO_BUILD_TARGET`) inserts the triple into it, and `cargo metadata`
+    # reports only the outer target directory. The directory is redirectable
+    # too: sibling git worktrees here share one outside the checkout entirely.
+    #
+    # `json-render-diagnostics` and not `json`: the latter would send compiler
+    # errors down the pipe into `jq` instead of to the terminal.
+    #
+    # Deliberately not `{{quiet_flag}}`: a staticlib links the whole dependency
+    # graph, so a cold build runs long enough that silence reads as a hang.
+    # Cargo's status lines go to stderr and the JSON to stdout, so letting them
+    # through costs the pipe nothing.
+    lib=$(cargo build --package jp_ffi --profile "$build_profile" \
+            --message-format=json-render-diagnostics |
+        jq -r 'select(.reason == "compiler-artifact" and .target.name == "jp_ffi")
+               | .filenames[] | select(endswith(".a"))' |
+        tail -n 1)
+
+    if [ -z "$lib" ] || [ ! -f "$lib" ]; then
+        echo "cargo did not produce a jp_ffi static library" >&2
+        exit 1
+    fi
+
+    # Stage into a fixed, checkout-local directory. Xcode's search paths are
+    # static build settings, so they need one location that does not move with
+    # the developer's cargo configuration.
+    out="apps/macos/.build/{{PROFILE}}"
+    mkdir -p "$out/include"
+
+    # A debug staticlib bundles every dependency, so skip the copy when the
+    # staged one is already current.
+    if [ ! -f "$out/libjp_ffi.a" ] || [ "$lib" -nt "$out/libjp_ffi.a" ]; then
+        cp "$lib" "$out/libjp_ffi.a"
+    fi
+
+    cbindgen --config crates/jp_ffi/cbindgen.toml --crate jp_ffi --output "$out/include/jp_ffi.h"
+
+    echo "library: $out/libjp_ffi.a" >&2
+    echo "header:  $out/include/jp_ffi.h" >&2
 
 [group('profile')]
 [positional-arguments]
