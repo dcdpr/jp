@@ -42,7 +42,6 @@ comfort = { path = "crates/contrib/comfort" }
 grizzly = { path = "crates/contrib/grizzly", default-features = false }
 schematic = { path = "crates/contrib/schematic", default-features = false }
 ticket = { path = "crates/internal/ticket" }
-xct2cli = { path = "crates/contrib/xct2cli" }
 
 addr2line = { version = "0.26" }
 ahash = { version = "0.8", default-features = false, features = ["runtime-rng", "std", "serde"] }
