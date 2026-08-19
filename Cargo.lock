@@ -5707,7 +5707,6 @@ name = "xct2cli"
 version = "0.1.0"
 dependencies = [
  "addr2line 0.26.1",
- "camino",
  "cpp_demangle",
  "gimli 0.33.0",
  "libc",
