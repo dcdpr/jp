@@ -1,5 +1,3 @@
-use serde_json::json;
-
 use crate::message::*;
 
 #[test]
@@ -16,6 +14,9 @@ fn conversations_response_serializes_without_null_id() {
     });
 
     let json = serde_json::to_value(&resp).unwrap();
-    // When id is None, it should not appear in the JSON
-    assert!(json.get("id").is_none() || json.get("id") == Some(&json!(null)));
+    assert_eq!(
+        json.get("id"),
+        None,
+        "an absent id must be omitted, not null"
+    );
 }
