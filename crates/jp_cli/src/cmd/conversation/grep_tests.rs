@@ -81,7 +81,7 @@ fn setup_conversations_with(
 ) -> (Ctx, SharedBuffer) {
     let tmp = tempdir().unwrap();
     let config = AppConfig::new_test();
-    let workspace = Workspace::new(tmp.path());
+    let workspace = Workspace::in_memory(tmp.path());
     let (printer, out, _err) = Printer::memory(format);
     let printer = printer.with_output_width(width);
     let mut ctx = Ctx::new(

@@ -1001,7 +1001,7 @@ fn test_conversation_fork() {
                 .with_user_storage(&user, None, "abc")
                 .unwrap(),
         );
-        let workspace = Workspace::new(tmp.path()).with_backend(fs);
+        let workspace = Workspace::in_memory(tmp.path()).with_backend(fs);
         let mut ctx = Ctx::new(
             workspace,
             None,
@@ -1097,7 +1097,7 @@ fn fork_reresolves_apply_on_fork_rules() {
             .with_user_storage(&user, None, "abc")
             .unwrap(),
     );
-    let workspace = Workspace::new(tmp.path()).with_backend(fs);
+    let workspace = Workspace::in_memory(tmp.path()).with_backend(fs);
     let mut ctx = Ctx::new(
         workspace,
         None,
@@ -1194,7 +1194,7 @@ fn a_failing_fork_rule_creates_no_conversation() {
             .with_user_storage(&user, None, "abc")
             .unwrap(),
     );
-    let workspace = Workspace::new(tmp.path()).with_backend(fs);
+    let workspace = Workspace::in_memory(tmp.path()).with_backend(fs);
     let mut ctx = Ctx::new(
         workspace,
         None,
@@ -1260,7 +1260,7 @@ fn fork_targets_correct_source() {
             .with_user_storage(&user, None, "abc")
             .unwrap(),
     );
-    let workspace = Workspace::new(tmp.path()).with_backend(fs);
+    let workspace = Workspace::in_memory(tmp.path()).with_backend(fs);
     let mut ctx = Ctx::new(
         workspace,
         None,
@@ -1393,7 +1393,7 @@ fn fork_inherits_local_only_projection() {
             .with_user_storage(&user, None, "abc")
             .unwrap(),
     );
-    let workspace = Workspace::new(tmp.path()).with_backend(fs);
+    let workspace = Workspace::in_memory(tmp.path()).with_backend(fs);
     let mut ctx = Ctx::new(
         workspace,
         None,

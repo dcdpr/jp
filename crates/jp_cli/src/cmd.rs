@@ -734,6 +734,11 @@ impl From<jp_workspace::Error> for Error {
             ]
             .into(),
             MissingStorage => [("message", "Missing storage directory".into())].into(),
+            WorkspaceNotFound(path) => [
+                ("message", "No workspace found".into()),
+                ("path", path.to_string().into()),
+            ]
+            .into(),
             LockFailed(id) => [(
                 "message",
                 format!("Failed to lock conversation {id}").into(),

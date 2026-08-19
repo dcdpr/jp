@@ -21,7 +21,7 @@ fn make_id(secs: u64) -> ConversationId {
 /// missing-conversation path.
 fn empty_ctx() -> (Ctx, Runtime) {
     let tmp = tempdir().unwrap();
-    let workspace = Workspace::new(tmp.path().to_path_buf());
+    let workspace = Workspace::in_memory(tmp.path().to_path_buf());
 
     let (printer, _out, _err) = Printer::memory(OutputFormat::Text);
     let runtime = Runtime::new().unwrap();
@@ -45,7 +45,7 @@ fn empty_ctx() -> (Ctx, Runtime) {
 #[test]
 fn an_empty_listing_is_still_an_array_in_json() {
     let tmp = tempdir().unwrap();
-    let workspace = Workspace::new(tmp.path().to_path_buf());
+    let workspace = Workspace::in_memory(tmp.path().to_path_buf());
     let (printer, out, _err) = Printer::memory(OutputFormat::Json);
     let mut ctx = Ctx::new(
         workspace,
