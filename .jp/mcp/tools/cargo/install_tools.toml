@@ -1,0 +1,17 @@
+[conversation.tools.cargo_install_tools]
+enable = false
+run = "unattended"
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "Rebuild and install the `jp-tools` binary that serves these local tools. Needed after changing anything under `.config/jp/tools`: the running binary is the previously installed one, so source edits are not live until it is reinstalled. The rebuilt code takes effect on the next tool call, not the one that triggered the rebuild."
+
+examples = """
+```json
+{}
+```
+"""
+
+[conversation.tools.cargo_install_tools.style]
+inline_results = "off"
+results_file_link = "off"
+parameters = "function_call"

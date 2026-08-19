@@ -11,12 +11,14 @@ use crate::{
 mod check;
 mod expand;
 mod format;
+mod install_tools;
 mod test;
 mod update;
 
 use check::cargo_check;
 use expand::cargo_expand;
 use format::cargo_format;
+use install_tools::cargo_install_tools;
 use test::cargo_test;
 use update::cargo_update;
 
@@ -79,6 +81,7 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
             .await
         }
         "format" => cargo_format(&root, t.opt("package")?).await,
+        "install_tools" => cargo_install_tools(&root).await,
         "update" => cargo_update(&root, t.req("packages")?).await,
         _ => return unknown_tool(t),
     };
