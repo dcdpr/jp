@@ -2413,6 +2413,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "jp_ffi"
+version = "0.1.0"
+dependencies = [
+ "camino",
+ "camino-tempfile",
+ "chrono",
+ "datetime_literal",
+ "jp_conversation",
+ "jp_plugin",
+ "jp_storage",
+ "jp_workspace",
+ "pretty_assertions",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "tracing",
+]
+
+[[package]]
 name = "jp_github"
 version = "0.1.0"
 dependencies = [
