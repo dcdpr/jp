@@ -402,5 +402,9 @@
   "102-collision-resistant-ticket-identifiers.md": {
     "hash": "5b31c977edb43275206de792a76589c98b8af75f012b4e508a2fedfb9aecbd1a",
     "summary": "Replace sequential ticket ids with collision-resistant time-bucketed random ids to enable parallel distributed ticket creation."
+  },
+  "099-native-macos-app-for-browsing-conversations.md": {
+    "hash": "abd96dc8025eb5c1021bc2077eddf2a1c483ac9833f2dd7eef2b0594b8b75290",
+    "summary": "Native macOS app for browsing JP conversations via FFI, with public Workspace::open API extracted from CLI."
   }
 }

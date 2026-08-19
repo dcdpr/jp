@@ -355,8 +355,8 @@ every signature change into a two-repository dance.
   scroll position), `File > Open Recent`.
 - Double-click to open a conversation in its own window.
 - Manual QA checklist against the Mac behavior test plan.
-- `crates/plugins/command/gui` implementing the [RFD 072] protocol, launching the
-  app at `InitMessage.workspace.root` and exiting.
+- `crates/plugins/command/gui` implementing the [RFD 072] protocol, launching
+  the app at `InitMessage.workspace.root` and exiting.
   Folded in here rather than given a phase of its own: it is one small plugin
   that needs only an app accepting a workspace path, which Phase 3 delivers.
 
