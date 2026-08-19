@@ -5,8 +5,29 @@ use super::{
     InquiryResponse, InquirySource, ToolCallRequest, ToolCallResponse, TurnStart,
 };
 
-/// One value of every variant, so a new variant fails to compile here rather
-/// than going unnoticed.
+/// Fails to compile when a variant is added to [`EventKind`].
+///
+/// That is the reminder to extend [`every_kind`] below and
+/// [`EventKind::TYPE_TAGS`].
+/// Neither is checked by anything else, and the two tests here agree with each
+/// other when a variant is missing from both: the tags they compare are derived
+/// from `every_kind`, so a variant absent there is absent from both sides.
+/// A variant missing from `TYPE_TAGS` is unreachable on load, and the stream
+/// keeps every one of its events as raw JSON instead.
+#[expect(dead_code)]
+fn every_variant_is_listed(kind: &EventKind) {
+    match kind {
+        EventKind::TurnStart(_)
+        | EventKind::ChatRequest(_)
+        | EventKind::ChatResponse(_)
+        | EventKind::ToolCallRequest(_)
+        | EventKind::ToolCallResponse(_)
+        | EventKind::InquiryRequest(_)
+        | EventKind::InquiryResponse(_) => {}
+    }
+}
+
+/// One value of every variant.
 fn every_kind() -> Vec<EventKind> {
     vec![
         TurnStart.into(),

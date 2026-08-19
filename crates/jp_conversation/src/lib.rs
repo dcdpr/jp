@@ -43,8 +43,8 @@ pub use compaction::{
 pub use conversation::{Conversation, ConversationId};
 pub use error::Error;
 pub use event::{ConversationEvent, EventKind};
-pub use storage::{decode_event_value, rfc3339, rfc3339_str};
-pub use stream::{ConversationStream, IterTurns, StreamEntry, StreamError, Turn, TurnMut};
+pub use storage::{decode_event_value, rfc3339};
+pub use stream::{ConversationStream, IterTurns, StreamError, Turn, TurnMut};
 
 /// A wrapper around `DateTime<Utc>` that implements `Debug` to match `time`'s
 /// `OffsetDateTime` format (e.g. `2020-01-01 0:00:00.0 +00`).
@@ -88,7 +88,7 @@ fn fmt_dt(dt: &chrono::DateTime<chrono::Utc>) -> String {
 }
 
 /// Parse from `time`'s format or RFC 3339.
-pub(crate) fn parse_dt(s: &str) -> Result<chrono::DateTime<chrono::Utc>, String> {
+fn parse_dt(s: &str) -> Result<chrono::DateTime<chrono::Utc>, String> {
     chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%.f")
         .map(|dt| dt.and_utc())
         .or_else(|_| {

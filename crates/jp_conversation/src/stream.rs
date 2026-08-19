@@ -153,30 +153,6 @@ impl InternalEvent {
     }
 }
 
-/// One entry in a conversation stream, borrowed.
-///
-/// The stream holds more than conversation events, and a reader presenting it
-/// to somebody needs to see all of it.
-/// This is that view: what an entry is, without exposing the storage encoding
-/// [`InternalEvent`] carries.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum StreamEntry<'a> {
-    /// An event in the conversation.
-    Event(&'a ConversationEvent),
-
-    /// A change to the configuration every later entry is bound to.
-    ConfigDelta(&'a ConfigDelta),
-
-    /// An overlay changing how a range of earlier turns is projected.
-    Compaction(&'a Compaction),
-
-    /// An entry whose `type` tag this build does not recognize.
-    ///
-    /// Kept verbatim so it round-trips, and readable only as JSON: there is no
-    /// typed form of an entry this build has never heard of.
-    Unknown(&'a Value),
-}
-
 /// A configuration delta.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ConfigDelta {
@@ -1076,27 +1052,6 @@ impl ConversationStream {
             seen_event = true;
 
             Some((turn, &**event))
-        })
-    }
-
-    /// Returns every entry in the stream, in order, including the ones that are
-    /// not conversation events.
-    ///
-    /// [`Self::iter_events_by_turn`] and [`Self::iter`] both yield conversation
-    /// events alone, which is what building a provider request wants.
-    /// A reader showing the stream to somebody wants the config deltas,
-    /// compaction overlays and unrecognized entries too — they are part of
-    /// what happened.
-    ///
-    /// Borrows throughout, and allocates nothing: the point of this over
-    /// serializing the stream is that nothing is copied or re-encoded on the
-    /// way out.
-    pub fn iter_entries(&self) -> impl Iterator<Item = StreamEntry<'_>> {
-        self.events.iter().map(|internal| match internal {
-            InternalEvent::Event(event) => StreamEntry::Event(event),
-            InternalEvent::ConfigDelta(delta) => StreamEntry::ConfigDelta(delta),
-            InternalEvent::Compaction(compaction) => StreamEntry::Compaction(compaction),
-            InternalEvent::Unknown(value) => StreamEntry::Unknown(value),
         })
     }
 

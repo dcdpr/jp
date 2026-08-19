@@ -12,7 +12,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::{Map, Value};
 
-use crate::{event::EventKind, parse_dt};
+use crate::event::EventKind;
 
 /// A timestamp in the one format events cross a boundary in.
 ///
@@ -27,21 +27,6 @@ use crate::{event::EventKind, parse_dt};
 #[must_use]
 pub fn rfc3339(timestamp: DateTime<Utc>) -> String {
     timestamp.to_rfc3339_opts(SecondsFormat::AutoSi, true)
-}
-
-/// A stored timestamp, re-spelled as RFC 3339.
-///
-/// `None` for a value that parses as neither storage's format nor RFC 3339,
-/// which a caller should leave as it found it: a timestamp nobody can read is
-/// still better than no field at all.
-///
-/// For a caller holding raw JSON rather than a typed event — an entry written
-/// by a newer build, kept verbatim, whose timestamp still has to reach a reader
-/// in the same format as every other one.
-/// A caller holding the typed value calls [`rfc3339`] and parses nothing.
-#[must_use]
-pub fn rfc3339_str(timestamp: &str) -> Option<String> {
-    parse_dt(timestamp).ok().map(rfc3339)
 }
 
 /// Which encoding to apply to a given field.
