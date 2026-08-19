@@ -2307,10 +2307,11 @@ plugin-build-local: _install-jp (plugin-build "")
     target=$(rustc -vV | sed -n 's/host: //p')
     dir="$(jp path user-local --plugins=command)"
     mkdir -p "$dir"
-    for manifest in crates/plugins/command/*/Cargo.toml; do
-        [ -f "$manifest" ] || continue
-        id=$(cargo metadata --manifest-path "$manifest" --format-version=1 --no-deps \
-            | jq -r '.packages[0].metadata["jp-registry"].id')
+    # `[package.metadata.jp-registry]` marks a plugin as installable. Plugins
+    # without it are built but not installed here; `cargo install --path` them.
+    ids=$(cargo metadata --no-deps --format-version=1 \
+        | jq -r '.packages[] | select(.metadata["jp-registry"]) | .metadata["jp-registry"].id')
+    for id in $ids; do
         src="target/${target}/release/jp-${id}"
         [ -f "$src" ] || continue
         cp "$src" "${dir}/jp-${id}"
