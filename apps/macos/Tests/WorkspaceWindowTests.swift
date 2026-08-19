@@ -12,8 +12,12 @@ struct WorkspaceWindowTests {
     @Test("shows nothing when there is nothing to show")
     func showsNothingWithoutASource() {
         #expect(
-            WorkspaceWindow.chooseWorkspace(stored: nil, mostRecent: nil, environment: [:])
-                == nil
+            WorkspaceWindow.chooseWorkspace(
+                stored: nil,
+                mostRecent: nil,
+                environment: [:],
+                honorEnvironment: true
+            ) == nil
         )
     }
 
@@ -22,7 +26,8 @@ struct WorkspaceWindowTests {
         let chosen = WorkspaceWindow.chooseWorkspace(
             stored: nil,
             mostRecent: recent,
-            environment: [:]
+            environment: [:],
+            honorEnvironment: true
         )
 
         #expect(chosen == "/workspaces/recent")
@@ -35,7 +40,8 @@ struct WorkspaceWindowTests {
         let chosen = WorkspaceWindow.chooseWorkspace(
             stored: "/workspaces/stored",
             mostRecent: recent,
-            environment: [:]
+            environment: [:],
+            honorEnvironment: true
         )
 
         #expect(chosen == "/workspaces/stored")
@@ -48,7 +54,8 @@ struct WorkspaceWindowTests {
         let chosen = WorkspaceWindow.chooseWorkspace(
             stored: "/workspaces/stored",
             mostRecent: recent,
-            environment: ["JP_WORKSPACE": "/workspaces/named"]
+            environment: ["JP_WORKSPACE": "/workspaces/named"],
+            honorEnvironment: true
         )
 
         #expect(chosen == "/workspaces/named")
@@ -59,7 +66,8 @@ struct WorkspaceWindowTests {
         let chosen = WorkspaceWindow.chooseWorkspace(
             stored: nil,
             mostRecent: recent,
-            environment: ["JP_WORKSPACE": "/workspaces/named"]
+            environment: ["JP_WORKSPACE": "/workspaces/named"],
+            honorEnvironment: true
         )
 
         #expect(chosen == "/workspaces/named")
@@ -72,7 +80,8 @@ struct WorkspaceWindowTests {
         let chosen = WorkspaceWindow.chooseWorkspace(
             stored: "/workspaces/stored",
             mostRecent: recent,
-            environment: ["JP_WORKSPACE": ""]
+            environment: ["JP_WORKSPACE": ""],
+            honorEnvironment: true
         )
 
         #expect(chosen == "/workspaces/stored")
@@ -83,7 +92,38 @@ struct WorkspaceWindowTests {
         let chosen = WorkspaceWindow.chooseWorkspace(
             stored: "",
             mostRecent: recent,
-            environment: [:]
+            environment: [:],
+            honorEnvironment: true
+        )
+
+        #expect(chosen == "/workspaces/recent")
+    }
+
+    /// `JP_WORKSPACE` names where a launch starts, not where the window is stuck.
+    /// Consulted on every resolution it would undo File ▸ Open Workspace: the
+    /// chosen path is stored, the window resolves again, and the environment wins
+    /// back the window for the life of the process.
+    @Test("stops preferring JP_WORKSPACE once the window has resolved once")
+    func ignoresTheEnvironmentAfterTheFirstResolution() {
+        let chosen = WorkspaceWindow.chooseWorkspace(
+            stored: "/workspaces/opened-by-hand",
+            mostRecent: recent,
+            environment: ["JP_WORKSPACE": "/workspaces/named"],
+            honorEnvironment: false
+        )
+
+        #expect(chosen == "/workspaces/opened-by-hand")
+    }
+
+    /// A window with nothing stored still has somewhere to go once the launch
+    /// instruction stops applying.
+    @Test("falls through to the recents list once the environment stops applying")
+    func fallsThroughToRecentsAfterTheFirstResolution() {
+        let chosen = WorkspaceWindow.chooseWorkspace(
+            stored: nil,
+            mostRecent: recent,
+            environment: ["JP_WORKSPACE": "/workspaces/named"],
+            honorEnvironment: false
         )
 
         #expect(chosen == "/workspaces/recent")

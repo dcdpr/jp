@@ -68,19 +68,22 @@ enum ConversationEvent: Decodable, Sendable, Equatable {
 
     init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        let timestamp = try container.decode(String.self, forKey: .timestamp)
 
+        // The tag is read before anything else, so an unrecognized presentation
+        // throws `UnknownPresentation` rather than failing on a field it was
+        // never going to have. Decoding a shared field up here would make
+        // skipping such an event depend on it carrying that field.
         switch try container.decode(String.self, forKey: .type) {
         case "user_message":
             self = .userMessage(
-                timestamp: timestamp,
+                timestamp: try container.decode(String.self, forKey: .timestamp),
                 author: try container.decodeIfPresent(String.self, forKey: .author),
                 text: try container.decode(String.self, forKey: .text)
             )
 
         case "assistant_message":
             self = .assistantMessage(
-                timestamp: timestamp,
+                timestamp: try container.decode(String.self, forKey: .timestamp),
                 text: try container.decode(String.self, forKey: .text)
             )
 

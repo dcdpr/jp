@@ -68,6 +68,12 @@ struct WorkspaceWindow: View {
     /// opened, not after now.
     @State private var listingReadAt = Date()
 
+    /// Whether this window has already settled on a workspace once.
+    ///
+    /// `JP_WORKSPACE` is an instruction given at launch, not a standing
+    /// override, so it is consulted for the first resolution and no other.
+    @State private var hasResolvedWorkspace = false
+
     /// How tall the search field turned out to be.
     ///
     /// Measured because it follows the field's font rather than a number this view
@@ -476,9 +482,17 @@ struct WorkspaceWindow: View {
             let path = Self.chooseWorkspace(
                 stored: workspacePath,
                 mostRecent: recents.urls.first,
-                environment: ProcessInfo.processInfo.environment
+                environment: ProcessInfo.processInfo.environment,
+                honorEnvironment: !hasResolvedWorkspace
             )
         else { return }
+
+        // Every later load is a choice the person made in this window, so the
+        // launch instruction stops applying. Left applying, `show(_:)` would
+        // write the chosen path, this would overwrite it with the environment's,
+        // and File ▸ Open Workspace would appear to do nothing for the life of
+        // the process.
+        hasResolvedWorkspace = true
 
         // Writing this back changes `task(id:)`, which cancels this run and starts
         // another with the chosen path already stored. The second pass chooses the
@@ -495,25 +509,32 @@ struct WorkspaceWindow: View {
 
     /// The workspace a window should show, in order of precedence.
     ///
-    /// 1. `JP_WORKSPACE`, an instruction given at launch.
+    /// 1. `JP_WORKSPACE`, when `honorEnvironment` says this is the window's
+    ///    first resolution.
     /// 2. The path this window stored, so a reopened window comes back where it
     ///    was and two windows can sit on two workspaces.
     /// 3. The most recently opened workspace, which a new window overwhelmingly
     ///    wants and which saves choosing it again.
     ///
-    /// The environment comes first because it is the only one of the three a
-    /// caller sets deliberately, per launch. Below the stored path it would be
-    /// read exactly once in a window's life and silently ignored on every later
-    /// launch, which makes `just run-app <workspace>` a no-op after the first run
-    /// and leaves a harness unable to point an instance anywhere.
+    /// The environment outranks the stored path because it is the only one of the
+    /// three a caller sets deliberately, per launch. Below the stored path it
+    /// would be read exactly once in a window's life and silently ignored on
+    /// every later launch, which makes `just run-app <workspace>` a no-op after
+    /// the first run and leaves a harness unable to point an instance anywhere.
+    ///
+    /// It outranks it only once, though: `honorEnvironment` is false for every
+    /// resolution after the first, so a workspace chosen in the running app is
+    /// not overwritten by the one named at launch.
+    ///
     /// `nonisolated` because it reads none of the view's state. A `View` is
     /// main-actor isolated and its statics inherit that, which this does not need.
     nonisolated static func chooseWorkspace(
         stored: String?,
         mostRecent: URL?,
-        environment: [String: String]
+        environment: [String: String],
+        honorEnvironment: Bool
     ) -> String? {
-        if let named = environment["JP_WORKSPACE"], !named.isEmpty {
+        if honorEnvironment, let named = environment["JP_WORKSPACE"], !named.isEmpty {
             return named
         }
 

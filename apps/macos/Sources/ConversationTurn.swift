@@ -44,10 +44,14 @@ struct ConversationTurn: Decodable, Sendable, Equatable, Identifiable {
 
 /// An event that decodes to nothing when this build cannot draw it.
 ///
-/// A later library adding a presentation — a tool call, an attachment — would
-/// otherwise fail the whole conversation on an app that predates it. Only an
-/// unrecognized `type` is skipped; a known presentation missing its fields
-/// still throws.
+/// `jp_ffi` is linked into this binary, so the library and this mirror ship
+/// together and never disagree about a *version*. What they can disagree about
+/// is an edit: a presentation added to `DisplayEvent` on the Rust side without
+/// the matching case added here. Skipping it costs one event; failing would
+/// cost the whole conversation.
+///
+/// Only an unrecognized `type` is skipped. A known presentation missing its
+/// fields still throws, which is what keeps a wire-format mistake visible.
 private struct SkippableEvent: Decodable {
     let event: ConversationEvent?
 

@@ -97,6 +97,26 @@ struct ConversationTurnDecodingTests {
         )
     }
 
+    /// A presentation this build cannot draw is skipped on the strength of its
+    /// `type` alone, whatever else it does or does not carry. Reading any shared
+    /// field before the tag would make skipping depend on that field being
+    /// present, and an added presentation is exactly the thing least likely to
+    /// share the shape of the two here.
+    @Test("skips a presentation it does not know that shares no fields with one it does")
+    func skipsUnknownPresentationWithNoCommonFields() throws {
+        let json = """
+            [{"index":0,"events":[\
+            {"type":"tool_call","tool":"read_file","arguments":{}},\
+            {"type":"user_message","timestamp":"2024-09-01T10:00:01Z","text":"hi"}]}]
+            """
+
+        #expect(
+            try decode(json).first?.events == [
+                .userMessage(timestamp: "2024-09-01T10:00:01Z", author: nil, text: "hi")
+            ]
+        )
+    }
+
     /// Leniency stops at the `type` tag. A presentation this build *does* know,
     /// arriving without the fields it promises, is a wire-format mistake and
     /// fails rather than being quietly dropped.
