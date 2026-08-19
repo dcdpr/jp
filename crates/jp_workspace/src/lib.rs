@@ -138,13 +138,23 @@ impl Workspace {
     /// Conversations live in either root, so both are needed to see all of
     /// them.
     ///
+    /// The conversation index is not populated, so [`conversations`] is empty
+    /// until [`load_conversation_index`] is called.
+    /// Call [`sanitize`] before that: it repairs the backing store, and
+    /// indexing an unrepaired store carries the damage into the index.
+    ///
     /// Opening writes to disk: the user-local silo is created if missing, its
     /// `storage` symlink is repointed at this workspace root, and the workspace
     /// ID is persisted back to the store.
-    /// A store with no readable ID file is assigned a fresh ID.
+    /// A store whose ID file is missing, unreadable, or malformed is assigned a
+    /// fresh ID.
     ///
     /// Returns [`Error::WorkspaceNotFound`] when neither `dir` nor any of its
     /// parents holds a store.
+    ///
+    /// [`conversations`]: Self::conversations
+    /// [`load_conversation_index`]: Self::load_conversation_index
+    /// [`sanitize`]: Self::sanitize
     pub fn open(dir: &Utf8Path) -> Result<Self> {
         Self::open_with_storage_dir(dir, DEFAULT_STORAGE_DIR)
     }
@@ -155,7 +165,7 @@ impl Workspace {
     /// Behaves exactly like [`open`], which uses [`DEFAULT_STORAGE_DIR`].
     ///
     /// [`open`]: Self::open
-    pub fn open_with_storage_dir(dir: &Utf8Path, storage_dir: &str) -> Result<Self> {
+    fn open_with_storage_dir(dir: &Utf8Path, storage_dir: &str) -> Result<Self> {
         trace!(dir = %dir, storage_dir, "Finding workspace.");
         let root = Self::find_root(dir.to_path_buf(), storage_dir)
             .ok_or_else(|| Error::WorkspaceNotFound(dir.to_path_buf()))?;
@@ -239,7 +249,7 @@ impl Workspace {
     /// to.
     ///
     /// Set by [`with_sessions`] or [`with_backend`]; an in-memory workspace
-    /// starts with one that discards writes.
+    /// keeps its mappings for the lifetime of the backend.
     ///
     /// [`with_backend`]: Self::with_backend
     /// [`with_sessions`]: Self::with_sessions
