@@ -8,6 +8,17 @@
 /rustc-ice-*
 lcov.info
 
+# macOS app: the Xcode project is generated from `apps/macos/project.yml` by
+# `just gen-app`, and `.build/` holds the staged `jp_ffi` library and header, so
+# only the manifest and the sources are tracked.
+/apps/macos/*.xcodeproj
+/apps/macos/.build
+# SwiftPM's build directory for the `jpdrive` package, which is built by
+# `just build-drive` rather than by Xcode.
+/apps/macos/Tools/*/.build
+/apps/macos/**/xcuserdata
+.DS_Store
+
 # Logs
 *.log
 /tmp
