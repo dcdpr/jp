@@ -21,7 +21,7 @@ quiet_flag := if env_var_or_default("CI", "") == "true" { "" } else { "--quiet" 
 #
 # `grizzly` is deliberately absent: `jp_attachment_bear_note` depends on it, so
 # it is compiled either way.
-non_jp_excludes := "--exclude bookworm --exclude build-registry --exclude comfort --exclude jp-path --exclude jp-serve-web --exclude json_edit --exclude tools"
+non_jp_excludes := "--exclude bookworm --exclude build-registry --exclude comfort --exclude jp-gui --exclude jp-path --exclude jp-serve-web --exclude json_edit --exclude tools"
 
 alias r := run
 alias i := install
