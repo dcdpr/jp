@@ -1,0 +1,134 @@
+name: app
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+env:
+  CARGO_TERM_COLOR: always
+  JUST_TIMESTAMP: true
+  JUST_COLOR: always
+  JUST_EXPLAIN: true
+  JUST_VERBOSE: 4
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      lint-app: ${{ steps.filter.outputs.lint-app }}
+      test-drive: ${{ steps.filter.outputs.test-drive }}
+      test-app: ${{ steps.filter.outputs.test-app }}
+      test-app-ui: ${{ steps.filter.outputs.test-app-ui }}
+    steps:
+      - uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98 # v6
+        with:
+          fetch-depth: 0
+      - id: filter
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git diff --name-only HEAD^1 HEAD > changed-files.txt
+          else
+            before="${{ github.event.before }}"
+            if [ "$before" = "0000000000000000000000000000000000000000" ]; then
+              git diff-tree --no-commit-id --name-only -r HEAD > changed-files.txt
+            else
+              git diff --name-only "$before" HEAD > changed-files.txt
+            fi
+          fi
+
+          matches() {
+            grep -Eq "$1" changed-files.txt
+          }
+
+          set_task() {
+            if matches "$2"; then
+              echo "$1=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "$1=false" >> "$GITHUB_OUTPUT"
+            fi
+          }
+
+          workflow='^\.github/workflows/app\.yml$'
+          justfile='^justfile$'
+          swift='^apps/macos/'
+          drive='^apps/macos/Tools/'
+          # The app links `jp_ffi`, which links most of the workspace, so a
+          # Rust change anywhere can break the build it cannot break the Swift
+          # sources. `test-app` therefore watches Rust as well; the two Swift-
+          # only tasks do not.
+          rust='\.rs$|(^|/)Cargo\.toml$|^Cargo\.lock$|^rust-toolchain\.toml$'
+
+          set_task lint-app "$swift|$workflow|$justfile"
+          set_task test-drive "$drive|$workflow|$justfile"
+          set_task test-app "$swift|$rust|$workflow|$justfile"
+          set_task test-app-ui "$swift|$workflow|$justfile"
+  app:
+    needs: changes
+    runs-on: macos-latest
+    strategy:
+      # One failing task should not cancel the others: a formatting failure and
+      # a test failure are separate pieces of information, and a macOS run is
+      # too slow to pay for twice.
+      fail-fast: false
+      matrix:
+        task: [lint-app, test-drive, test-app, test-app-ui]
+    name: ${{ matrix.task }}
+    # The UI tests drive the app through the screen and are the slowest thing
+    # here by a wide margin. Cap the job so a hung run does not burn macOS
+    # minutes unnoticed.
+    timeout-minutes: 45
+    steps:
+      - name: Decide whether to run task
+        id: task
+        shell: bash
+        env:
+          TASK: ${{ matrix.task }}
+          LINT_APP: ${{ needs.changes.outputs.lint-app }}
+          TEST_DRIVE: ${{ needs.changes.outputs.test-drive }}
+          TEST_APP: ${{ needs.changes.outputs.test-app }}
+          TEST_APP_UI: ${{ needs.changes.outputs.test-app-ui }}
+        run: |
+          set -euo pipefail
+
+          case "$TASK" in
+            lint-app) run="$LINT_APP" ;;
+            test-drive) run="$TEST_DRIVE" ;;
+            test-app) run="$TEST_APP" ;;
+            test-app-ui) run="$TEST_APP_UI" ;;
+            *) echo "unknown task: $TASK" >&2; exit 1 ;;
+          esac
+
+          echo "run=$run" >> "$GITHUB_OUTPUT"
+          if [ "$run" != "true" ]; then
+            echo "Skipping $TASK because no relevant files changed."
+          fi
+      - if: ${{ steps.task.outputs.run == 'true' }}
+        uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98 # v6
+      - if: ${{ steps.task.outputs.run == 'true' }}
+        uses: extractions/setup-just@f8a3cce218d9f83db3a2ecd90e41ac3de6cdfd9b # v3
+      # Recorded on every run so a failure that turns out to be a toolchain
+      # difference is diagnosable from the log rather than by bisecting the
+      # runner image.
+      - name: Report toolchain versions
+        if: ${{ steps.task.outputs.run == 'true' }}
+        run: |
+          xcodebuild -version
+          swift --version
+      # Only the tasks that build the app need the project generated, and only
+      # they need cargo: `lint-app` and `test-drive` touch neither.
+      - if: ${{ steps.task.outputs.run == 'true' && (matrix.task == 'test-app' || matrix.task == 'test-app-ui') }}
+        run: brew install xcodegen
+      - if: ${{ steps.task.outputs.run == 'true' && (matrix.task == 'test-app' || matrix.task == 'test-app-ui') }}
+        uses: Swatinem/rust-cache@7e1e2d0a10862b34e5df481373b2b0f295d1a2ef # v2
+        with:
+          key: ${{ matrix.task }}
+          cache-bin: false
+          cache-workspace-crates: true
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - if: ${{ steps.task.outputs.run == 'true' }}
+        run: just ${{ matrix.task }}
