@@ -1,7 +1,7 @@
 use camino::{Utf8Path, Utf8PathBuf};
 use grep_printer::StandardBuilder;
 use grep_regex::RegexMatcher;
-use grep_searcher::SearcherBuilder;
+use grep_searcher::{BinaryDetection, SearcherBuilder};
 use ignore::gitignore::Gitignore;
 use jp_tool::AccessPolicy;
 
@@ -57,6 +57,11 @@ pub(crate) async fn fs_grep_files(
         .before_context(context.unwrap_or(0))
         .after_context(context.unwrap_or(0))
         .max_matches(Some(100))
+        // Stop reading a file once a NUL byte appears, as ripgrep does. Without
+        // this the searcher prints raw bytes from object files and archives,
+        // and the UTF-8 decode below then fails the *whole* search rather than
+        // the one file that caused it.
+        .binary_detection(BinaryDetection::quit(0))
         .build();
 
     for file in files {
