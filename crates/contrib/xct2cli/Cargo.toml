@@ -17,7 +17,6 @@ addr2line = { workspace = true }
 camino = { workspace = true }
 cpp_demangle = { workspace = true }
 gimli = { workspace = true }
-libc = { workspace = true }
 object = { workspace = true }
 quick-xml = { workspace = true, features = ["serialize"] }
 rustc-demangle = { workspace = true, features = ["std"] }
@@ -25,6 +24,10 @@ serde = { workspace = true, features = ["derive", "rc", "std"] }
 serde_json = { workspace = true, features = ["std"] }
 thiserror = { workspace = true, features = ["std"] }
 tracing = { workspace = true }
+
+# Only the Swift demangler needs `libc`, and only for `dlopen`.
+[target.'cfg(unix)'.dependencies]
+libc = { workspace = true }
 
 # The workspace's pedantic lints would mean a few hundred lines of stylistic
 # churn against code we did not write, and every line of that churn is a line

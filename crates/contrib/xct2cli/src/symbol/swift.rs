@@ -9,14 +9,19 @@
 //! Set `SWIFT_DEMANGLE_DYLIB` to point at a specific copy; otherwise
 //! `DEVELOPER_DIR`, `xcode-select -p`, and the Command Line Tools location are
 //! tried in that order.
+//!
+//! Loading needs `dlopen`, so off unix there is nothing to load and every Swift
+//! symbol keeps its mangled name.
 
 use std::{
-    env,
-    ffi::{CString, c_char, c_void},
-    process::Command,
+    ffi::{CString, c_char},
     sync::OnceLock,
 };
 
+#[cfg(unix)]
+use std::{env, ffi::c_void, process::Command};
+
+#[cfg(unix)]
 use libc::{RTLD_LAZY, RTLD_LOCAL, dlopen, dlsym};
 
 /// `swift_demangle_getDemangledName`, stable at libswiftDemangle major version
@@ -26,6 +31,7 @@ use libc::{RTLD_LAZY, RTLD_LOCAL, dlopen, dlsym};
 type DemangleFn = unsafe extern "C" fn(*const c_char, *mut c_char, usize) -> usize;
 
 /// Path of the demangler relative to a toolchain root.
+#[cfg(unix)]
 const RELATIVE_PATH: &str = "Toolchains/XcodeDefault.xctoolchain/usr/lib/libswiftDemangle.dylib";
 
 /// Demangled form of `name`, or `None` when it is not a Swift symbol or no
@@ -77,6 +83,12 @@ fn demangler() -> Option<DemangleFn> {
     *DEMANGLER.get_or_init(load)
 }
 
+#[cfg(not(unix))]
+fn load() -> Option<DemangleFn> {
+    None
+}
+
+#[cfg(unix)]
 fn load() -> Option<DemangleFn> {
     for path in candidate_paths() {
         let Ok(path) = CString::new(path) else {
@@ -107,6 +119,7 @@ fn load() -> Option<DemangleFn> {
 }
 
 /// Places to look for the demangler, most specific first.
+#[cfg(unix)]
 fn candidate_paths() -> Vec<String> {
     let mut paths = Vec::new();
     if let Ok(explicit) = env::var("SWIFT_DEMANGLE_DYLIB") {
@@ -123,6 +136,7 @@ fn candidate_paths() -> Vec<String> {
 }
 
 /// Active developer directory, per `xcode-select -p`.
+#[cfg(unix)]
 fn developer_dir() -> Option<String> {
     let output = Command::new("xcode-select").arg("-p").output().ok()?;
     if !output.status.success() {
