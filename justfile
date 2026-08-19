@@ -194,6 +194,123 @@ build-ffi PROFILE="debug": (_install "cbindgen@" + cbindgen_version)
     echo "library: $out/libjp_ffi.a" >&2
     echo "header:  $out/include/jp_ffi.h" >&2
 
+# Generate the macOS app's Xcode project from `apps/macos/project.yml`.
+#
+# The project file is generated rather than committed, so `project.yml` stays the
+# reviewable source of truth for targets, build settings, and the Rust build
+# phase.
+[group('build')]
+[macos]
+gen-app:
+    #!/usr/bin/env sh
+    set -eu
+
+    if ! which xcodegen >/dev/null 2>&1; then
+        echo "xcodegen not found. Install it with: brew install xcodegen" >&2
+        exit 1
+    fi
+
+    xcodegen generate --spec apps/macos/project.yml --project apps/macos
+
+# Build the macOS app.
+#
+# The library and its header are built first, not left to the project's own build
+# phase: Xcode scans the bridging header while planning the build, before any
+# script phase runs.
+[group('build')]
+[macos]
+build-app CONFIG="Debug": gen-app
+    #!/usr/bin/env sh
+    set -eu
+
+    if [ "{{CONFIG}}" = "Release" ]; then
+        just build-ffi release
+    else
+        just build-ffi debug
+    fi
+
+    xcodebuild build -project apps/macos/JP.xcodeproj -scheme JP \
+        -configuration {{CONFIG}} -destination platform=macOS -quiet
+
+# Build and launch the macOS app, with its output attached to this terminal.
+#
+# WORKSPACE is the workspace to open, defaulting to this checkout. The app has a
+# File ▸ Open Workspace menu item too; this just saves a step.
+#
+# Runs in the foreground so `tracing` output and crashes are visible, and Ctrl-C
+# quits. Use `open` on the printed bundle path instead to launch it detached.
+[group('build')]
+[macos]
+run-app WORKSPACE=justfile_directory(): build-app
+    #!/usr/bin/env sh
+    set -eu
+
+    if ! which jq >/dev/null 2>&1; then
+        echo "jq not found. Install it with: brew install jq" >&2
+        exit 1
+    fi
+
+    # Ask Xcode where it put the bundle. The derived data directory is keyed by a
+    # hash of the project path, so there is no path to hardcode.
+    app=$(xcodebuild -project apps/macos/JP.xcodeproj -scheme JP -configuration Debug \
+            -showBuildSettings -json |
+        jq -r 'first(.[] | select(.target == "JP") | .buildSettings) |
+               "\(.BUILT_PRODUCTS_DIR)/\(.FULL_PRODUCT_NAME)"')
+
+    if [ ! -d "$app" ]; then
+        echo "Could not locate the built app (looked for '$app')" >&2
+        exit 1
+    fi
+
+    echo "bundle:    $app" >&2
+    echo "workspace: {{WORKSPACE}}" >&2
+
+    JP_WORKSPACE="{{WORKSPACE}}" "$app/Contents/MacOS/JP"
+
+# Build and launch the macOS app through LaunchServices, detached.
+#
+# `run-app` execs the binary inside the bundle directly, which is convenient for
+# watching output but is not how macOS launches an app. Some AppKit behaviour
+# depends on the app being launched and registered normally, so this is the one to
+# reach for when the app misbehaves in ways the code does not explain.
+#
+# Output goes to the system log rather than this terminal, and the workspace comes
+# from the recents list rather than an environment variable.
+[group('build')]
+[macos]
+open-app: build-app
+    #!/usr/bin/env sh
+    set -eu
+
+    if ! which jq >/dev/null 2>&1; then
+        echo "jq not found. Install it with: brew install jq" >&2
+        exit 1
+    fi
+
+    app=$(xcodebuild -project apps/macos/JP.xcodeproj -scheme JP -configuration Debug \
+            -showBuildSettings -json |
+        jq -r 'first(.[] | select(.target == "JP") | .buildSettings) |
+               "\(.BUILT_PRODUCTS_DIR)/\(.FULL_PRODUCT_NAME)"')
+
+    if [ ! -d "$app" ]; then
+        echo "Could not locate the built app (looked for '$app')" >&2
+        exit 1
+    fi
+
+    echo "bundle: $app" >&2
+    open "$app"
+
+# Run the macOS app's unit tests.
+#
+# The UI tests are excluded: they launch the app and drive it through the screen,
+# so they cannot run alongside anything else using the machine. `test-app-ui`
+# runs those.
+[group('test')]
+[macos]
+test-app: gen-app (build-ffi "debug")
+    xcodebuild test -project apps/macos/JP.xcodeproj -scheme JP \
+        -destination platform=macOS -only-testing:JPTests -quiet
+
 [group('profile')]
 [positional-arguments]
 profile-heap *ARGS:
