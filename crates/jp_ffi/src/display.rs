@@ -71,16 +71,53 @@ pub(crate) enum DisplayEvent {
 /// Serializing to get here would base64-encode the fields storage encodes and
 /// then decode them again, reparse and reformat every timestamp, and allocate a
 /// whole second copy of the conversation — all to read four fields off it.
+///
+/// Adjacent assistant messages are joined into one, because a provider may
+/// deliver a single message as several items and the split can fall anywhere —
+/// mid-word, or between the two halves of a code fence.
+/// Rendering the pieces separately would parse each as its own Markdown
+/// document and break the construct that spans them.
+/// A caller cannot repair this after the fact: everything without prose is
+/// absent from this projection, so `message, message` and `message, tool call,
+/// message` would otherwise arrive identical.
 pub(crate) fn project_turns(stream: &ConversationStream) -> Vec<DisplayTurn> {
     let mut turns: Vec<DisplayTurn> = Vec::new();
+
+    // Whether the entry just read was itself an assistant message. Tracked over
+    // the stream rather than over the projection, so an event that shows
+    // nothing still ends the run: what the provider split is the message, and a
+    // tool call between two of them means they were never one message.
+    let mut in_message_run = false;
 
     // `iter_events_by_turn` rather than `iter_turns`: the latter resolves and
     // clones the accumulated config for every event and materializes the whole
     // stream up front, and none of that is read here.
     for (index, event) in stream.iter_events_by_turn() {
+        let continues_run = in_message_run;
+        in_message_run = matches!(
+            &event.kind,
+            EventKind::ChatResponse(ChatResponse::Message { .. })
+        );
+
         let Some(event) = project_event(event) else {
             continue;
         };
+
+        let open_run = continues_run
+            .then(|| turns.last_mut().filter(|turn| turn.index == index))
+            .flatten()
+            .and_then(|turn| turn.events.last_mut());
+
+        // Joined without a separator: the provider puts the blank lines where
+        // it wants segmentation, and the timestamp stays the one the region
+        // opened at.
+        if let (true, Some(DisplayEvent::AssistantMessage { text, .. })) =
+            (in_message_run, open_run)
+            && let DisplayEvent::AssistantMessage { text: next, .. } = &event
+        {
+            text.push_str(next);
+            continue;
+        }
 
         match turns.last_mut() {
             Some(turn) if turn.index == index => turn.events.push(event),

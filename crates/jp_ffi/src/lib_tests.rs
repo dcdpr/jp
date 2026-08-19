@@ -522,6 +522,7 @@ fn events_reports_what_the_work_cost() {
     );
 
     assert_eq!(timing_names(&events_timings(&root, CONVERSATION_ID)), [
+        "index.refresh",
         "storage.read",
         "project",
         "serialize"
@@ -534,6 +535,7 @@ fn conversations_reports_what_the_work_cost() {
     let (_tmp, _guard, root) = workspace_with_one_conversation();
 
     assert_eq!(timing_names(&conversations_timings(&root)), [
+        "index.refresh",
         "index.read",
         "sort",
         "serialize"
@@ -542,18 +544,111 @@ fn conversations_reports_what_the_work_cost() {
 
 /// A slot the caller passed is written whatever happens, so it never reads back
 /// whatever it declared the variable with.
-/// A call that failed before doing any of the work it measures reports an empty
-/// array.
+/// A call that failed partway reports the spans it got through, and nothing for
+/// the work it never reached.
 #[test]
 #[serial(env_vars)]
 fn a_failed_read_still_writes_the_timings_slot() {
     let (_tmp, _guard, root) = workspace_with_one_conversation();
 
-    assert_eq!(events_timings(&root, "17251488999"), "[]");
+    assert_eq!(timing_names(&events_timings(&root, "17251488999")), [
+        "index.refresh"
+    ]);
     assert!(
         take_last_error().is_some_and(|e| e.starts_with("conversation not found:")),
         "expected the missing conversation to be reported"
     );
+}
+
+/// A handle is not a snapshot: a conversation created while it is open shows up
+/// on the next read through it.
+///
+/// The workspace caches its index and every stream it has loaded, so a reader
+/// that opened once and never re-read would keep serving the workspace as it
+/// stood at open.
+/// Nothing about the JSON would look wrong.
+#[test]
+#[serial(env_vars)]
+fn a_read_sees_a_conversation_created_since_the_handle_was_opened() {
+    let (_tmp, _guard, root) = workspace_with_one_conversation();
+    let path = CString::new(root.as_str()).unwrap();
+
+    // SAFETY: `path` outlives the calls that borrow it. `ws` is checked
+    // non-null, used only between open and close, and not touched afterwards.
+    unsafe {
+        let ws = jp_workspace_open(path.as_ptr());
+        assert!(!ws.is_null(), "open failed: {:?}", take_last_error());
+
+        assert_eq!(
+            take_string(jp_workspace_conversations(ws, ptr::null_mut())),
+            r#"[{"id":"17251488000","title":"Reading list","last_activated_at":"2024-09-02T12:30:00Z","events_count":0}]"#
+        );
+
+        // Another terminal creates a conversation while this handle is open.
+        let fs = FsStorageBackend::new(&root.join(".jp")).unwrap();
+        fs.write_test_conversation(
+            &ConversationId::try_from(datetime!(2024-09-05 00:00:00 Z)).unwrap(),
+            &Conversation {
+                title: Some("Started elsewhere".to_owned()),
+                last_activated_at: datetime!(2024-09-05 12:00:00 Z),
+                ..Conversation::default()
+            },
+        );
+
+        let after = take_string(jp_workspace_conversations(ws, ptr::null_mut()));
+        jp_workspace_close(ws);
+
+        assert_eq!(
+            after,
+            r#"[{"id":"17254944000","title":"Started elsewhere","last_activated_at":"2024-09-05T12:00:00Z","events_count":0},{"id":"17251488000","title":"Reading list","last_activated_at":"2024-09-02T12:30:00Z","events_count":0}]"#
+        );
+    }
+}
+
+/// Turns appended to a conversation this handle has already read show up on the
+/// next read of it.
+///
+/// The stream cache is per conversation and separate from the index, so a
+/// reader can have the right list of conversations and a stale transcript for
+/// the one it is showing.
+#[test]
+#[serial(env_vars)]
+fn a_read_sees_turns_appended_since_the_conversation_was_last_read() {
+    let (_tmp, _guard, root) = workspace_with_one_conversation();
+    write_events(
+        &root,
+        r#"[{"timestamp":"2024-09-01 10:00:00.0","type":"chat_request","content":"first"}]"#,
+    );
+
+    let path = CString::new(root.as_str()).unwrap();
+    let id = CString::new(CONVERSATION_ID).unwrap();
+
+    // SAFETY: both `CString`s outlive the calls that borrow them. `ws` is
+    // checked non-null, used only between open and close, and not touched
+    // afterwards.
+    unsafe {
+        let ws = jp_workspace_open(path.as_ptr());
+        assert!(!ws.is_null(), "open failed: {:?}", take_last_error());
+
+        assert_eq!(
+            take_string(jp_workspace_events(ws, id.as_ptr(), ptr::null_mut())),
+            r#"[{"index":0,"events":[{"type":"user_message","timestamp":"2024-09-01T10:00:00Z","text":"first"}]}]"#
+        );
+
+        // Another terminal's `jp query` answers into the same conversation.
+        write_events(
+            &root,
+            r#"[{"timestamp":"2024-09-01 10:00:00.0","type":"chat_request","content":"first"},{"timestamp":"2024-09-01 10:00:05.0","type":"chat_response","message":"second"}]"#,
+        );
+
+        let after = take_string(jp_workspace_events(ws, id.as_ptr(), ptr::null_mut()));
+        jp_workspace_close(ws);
+
+        assert_eq!(
+            after,
+            r#"[{"index":0,"events":[{"type":"user_message","timestamp":"2024-09-01T10:00:00Z","text":"first"},{"type":"assistant_message","timestamp":"2024-09-01T10:00:05Z","text":"second"}]}]"#
+        );
+    }
 }
 
 /// The smallest `base_config.json` a conversation can be stored with.

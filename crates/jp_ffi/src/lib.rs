@@ -7,6 +7,10 @@
 //! which the caller releases with [`jp_string_free`]; no lock guard, reference,
 //! or borrow of workspace state crosses the boundary.
 //!
+//! Every read re-reads the conversation index before it answers, so a handle
+//! kept open across a concurrent `jp query` reports that query's turns rather
+//! than what it saw when it was opened.
+//!
 //! A read also measures the phases of its own work, and reports them through an
 //! optional out-parameter the caller may pass as null.
 //! They ride back on the call that produced them rather than on a call of their
@@ -30,13 +34,22 @@ use camino::Utf8Path;
 use jp_conversation::ConversationId;
 use jp_plugin::message::ConversationSummary;
 use jp_workspace::Workspace;
+use parking_lot::Mutex;
 
 use crate::{display::project_turns, error::guard, timing::Timings};
 
 /// An open workspace, owned by the caller between [`jp_workspace_open`] and
 /// [`jp_workspace_close`].
 pub struct WorkspaceRef {
-    workspace: Workspace,
+    /// Guarded because a read re-reads the conversation index first, which
+    /// needs `&mut`, and a caller is expected to make these calls off its main
+    /// thread.
+    /// Two overlapping reads on one handle would otherwise alias a `&mut` and
+    /// be undefined behavior.
+    ///
+    /// `parking_lot`'s mutex does not poison: a panic caught by [`guard`] while
+    /// the lock is held would otherwise leave the handle permanently unusable.
+    workspace: Mutex<Workspace>,
 }
 
 /// Open the workspace containing `path` and load its conversation index.
@@ -65,9 +78,15 @@ pub unsafe extern "C" fn jp_workspace_open(path: *const c_char) -> *mut Workspac
         let path = unsafe { borrow_str(path, "path") }?;
         let mut workspace = Workspace::open(Utf8Path::new(path)).map_err(|e| e.to_string())?;
 
+        // Every read re-reads the index, so this is not what makes the first
+        // one correct. It is here so a store that cannot be listed fails at
+        // `open`, where a caller is set up to handle it, rather than on the
+        // first read.
         workspace.load_conversation_index();
 
-        Ok(WorkspaceRef { workspace })
+        Ok(WorkspaceRef {
+            workspace: Mutex::new(workspace),
+        })
     })
     .map_or(ptr::null_mut(), |opened| Box::into_raw(Box::new(opened)))
 }
@@ -82,10 +101,14 @@ pub unsafe extern "C" fn jp_workspace_open(path: *const c_char) -> *mut Workspac
 /// Returns null on failure, leaving a message for [`jp_last_error`].
 /// Release the result with [`jp_string_free`].
 ///
+/// The conversation index is re-read first, so a conversation created since
+/// this handle was opened appears and one removed since is gone.
+///
 /// `timings` may be null.
 /// Given a slot, the call writes a JSON array of `{"name", "duration_ms"}`
-/// objects naming what it spent its time on — `index.read`, `sort`,
-/// `serialize` — which the caller also releases with [`jp_string_free`].
+/// objects naming what it spent its time on — `index.refresh`, `index.read`,
+/// `sort`, `serialize` — which the caller also releases with
+/// [`jp_string_free`].
 ///
 /// # Safety
 ///
@@ -103,14 +126,20 @@ pub unsafe extern "C" fn jp_workspace_conversations(
         // function's contract, so it points to a `WorkspaceRef` that outlives
         // the borrow. The borrow ends before this call returns, and the shared
         // reference is compatible with the caller's ownership of the handle:
-        // nothing here mutates through it.
+        // the workspace behind it is mutated only under its own lock.
         let opened = unsafe { borrow_workspace(ws) }?;
+        let mut workspace = opened.workspace.lock();
+
+        // Drops what this process cached, so the metadata read below comes from
+        // disk. Another terminal's `jp query` has been appending to these
+        // conversations, and a viewer that kept serving its first read would
+        // show a workspace that no longer exists.
+        measured.measure("index.refresh", || workspace.load_conversation_index());
 
         // Collecting first releases every read guard before the JSON is built,
         // so nothing borrowed from the workspace outlives this call.
         let mut summaries: Vec<_> = measured.measure("index.read", || {
-            opened
-                .workspace
+            workspace
                 .conversations()
                 .map(|(id, metadata)| ConversationSummary {
                     id: id.as_deciseconds().to_string(),
@@ -173,10 +202,14 @@ pub unsafe extern "C" fn jp_workspace_conversations(
 /// Returns null on failure, leaving a message for [`jp_last_error`].
 /// Release the result with [`jp_string_free`].
 ///
+/// The conversation index is re-read first, so turns appended by another
+/// process since this handle was opened are included.
+///
 /// `timings` may be null.
 /// Given a slot, the call writes a JSON array of `{"name", "duration_ms"}`
-/// objects naming what it spent its time on — `storage.read`, `project`,
-/// `serialize` — which the caller also releases with [`jp_string_free`].
+/// objects naming what it spent its time on — `index.refresh`, `storage.read`,
+/// `project`, `serialize` — which the caller also releases with
+/// [`jp_string_free`].
 ///
 /// # Safety
 ///
@@ -201,11 +234,17 @@ pub unsafe extern "C" fn jp_workspace_events(
                 borrow_str(conversation_id, "conversation_id")?,
             )
         };
+        let mut workspace = opened.workspace.lock();
+
+        // Drops the cached stream for every conversation, so the read below
+        // comes from disk rather than from whatever this handle saw first.
+        // Runs before `acquire_conversation`, because replacing the index while
+        // a conversation is held would detach the held `Arc` from the cache.
+        measured.measure("index.refresh", || workspace.load_conversation_index());
 
         let id = ConversationId::try_from_deciseconds_str(id)
             .map_err(|e| format!("invalid conversation ID: {e}"))?;
-        let handle = opened
-            .workspace
+        let handle = workspace
             .acquire_conversation(&id)
             .map_err(|e| format!("conversation not found: {e}"))?;
 
@@ -213,8 +252,7 @@ pub unsafe extern "C" fn jp_workspace_events(
         // boundary: no borrow of workspace state may outlive this call.
         let json = {
             let events = measured.measure("storage.read", || {
-                opened
-                    .workspace
+                workspace
                     .events(&handle)
                     .map_err(|e| format!("failed to load events: {e}"))
             })?;

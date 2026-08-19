@@ -245,6 +245,96 @@ fn keeps_sub_second_precision_in_a_timestamp() {
     }]);
 }
 
+/// A provider may deliver one message as several items, and the split can fall
+/// anywhere — here between the two halves of a code fence.
+/// Projecting the pieces apart would leave a reader parsing each as its own
+/// Markdown document: an unclosed fence in one, a stray closer in the other.
+///
+/// The region keeps the timestamp it opened at, not the one it closed at.
+#[test]
+fn joins_a_message_split_across_adjacent_items() {
+    let stream = events(vec![
+        event(TurnStart),
+        event(ChatRequest::from("show me")),
+        event(ChatResponse::message("Here:\n\n```rust\nfn main() {")),
+        ConversationEvent::new(
+            ChatResponse::message("}\n```\n"),
+            at() + TimeDelta::seconds(5),
+        ),
+    ]);
+
+    assert_eq!(project_turns(&stream), vec![DisplayTurn {
+        index: 0,
+        events: vec![
+            DisplayEvent::UserMessage {
+                timestamp: "2024-09-01T10:00:00Z".to_owned(),
+                author: None,
+                text: "show me".to_owned(),
+            },
+            DisplayEvent::AssistantMessage {
+                timestamp: "2024-09-01T10:00:00Z".to_owned(),
+                text: "Here:\n\n```rust\nfn main() {}\n```\n".to_owned(),
+            },
+        ],
+    }]);
+}
+
+/// A tool call between two messages means the provider closed the first and
+/// opened the second, so they stay apart — even though the call itself shows
+/// nothing and is absent from the projection.
+#[test]
+fn keeps_messages_apart_when_a_tool_call_separates_them() {
+    let stream = stream(vec![
+        TurnStart.into(),
+        ChatRequest::from("hi").into(),
+        ChatResponse::message("Looking.").into(),
+        ToolCallRequest::new(
+            "call-1".to_owned(),
+            "read_file".to_owned(),
+            serde_json::Map::new(),
+        )
+        .into(),
+        ChatResponse::message("Found it.").into(),
+    ]);
+
+    let turns = project_turns(&stream);
+    let texts: Vec<&str> = turns[0]
+        .events
+        .iter()
+        .map(|event| match event {
+            DisplayEvent::UserMessage { text, .. }
+            | DisplayEvent::AssistantMessage { text, .. } => text.as_str(),
+        })
+        .collect();
+
+    assert_eq!(texts, vec!["hi", "Looking.", "Found it."]);
+}
+
+/// Reasoning between two messages separates them too: the CLI renderer joins
+/// consecutive responses of the *same* kind, and reasoning is not a message.
+#[test]
+fn keeps_messages_apart_when_reasoning_separates_them() {
+    let stream = stream(vec![
+        TurnStart.into(),
+        ChatRequest::from("hi").into(),
+        ChatResponse::message("One.").into(),
+        ChatResponse::reasoning("thinking").into(),
+        ChatResponse::message("Two.").into(),
+    ]);
+
+    let turns = project_turns(&stream);
+    let texts: Vec<&str> = turns[0]
+        .events
+        .iter()
+        .map(|event| match event {
+            DisplayEvent::UserMessage { text, .. }
+            | DisplayEvent::AssistantMessage { text, .. } => text.as_str(),
+        })
+        .collect();
+
+    assert_eq!(texts, vec!["hi", "One.", "Two."]);
+}
+
 /// The wire shape a reader decodes: turns carrying an index and their events,
 /// each tagged with its presentation.
 #[test]

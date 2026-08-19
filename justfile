@@ -145,22 +145,35 @@ build-ffi PROFILE="debug": (_install "cbindgen@" + cbindgen_version)
         exit 1
     fi
 
-    # The `dev` profile builds into a `debug` directory, so the profile flag and
-    # the output directory disagree for that one case.
+    # The `dev` profile builds into a `debug` directory, so the profile's name
+    # and its output directory disagree for that one case.
     if [ "{{PROFILE}}" = "debug" ]; then
-        cargo build {{quiet_flag}} --package jp_ffi
+        build_profile="dev"
     else
-        cargo build {{quiet_flag}} --package jp_ffi --profile "{{PROFILE}}"
+        build_profile="{{PROFILE}}"
     fi
 
-    # Ask cargo where it writes rather than assuming `./target`. The target
-    # directory is redirectable, and sibling git worktrees here share one that
-    # sits outside the checkout entirely.
-    target_dir=$(cargo metadata --format-version=1 --no-deps | jq -r '.target_directory')
-    lib="$target_dir/{{PROFILE}}/libjp_ffi.a"
+    # Ask cargo which file it wrote rather than reconstructing the path. A
+    # configured build target (`[build] target` in `.cargo/config.toml`, or
+    # `CARGO_BUILD_TARGET`) inserts the triple into it, and `cargo metadata`
+    # reports only the outer target directory. The directory is redirectable
+    # too: sibling git worktrees here share one outside the checkout entirely.
+    #
+    # `json-render-diagnostics` and not `json`: the latter would send compiler
+    # errors down the pipe into `jq` instead of to the terminal.
+    #
+    # Deliberately not `{{quiet_flag}}`: a staticlib links the whole dependency
+    # graph, so a cold build runs long enough that silence reads as a hang.
+    # Cargo's status lines go to stderr and the JSON to stdout, so letting them
+    # through costs the pipe nothing.
+    lib=$(cargo build --package jp_ffi --profile "$build_profile" \
+            --message-format=json-render-diagnostics |
+        jq -r 'select(.reason == "compiler-artifact" and .target.name == "jp_ffi")
+               | .filenames[] | select(endswith(".a"))' |
+        tail -n 1)
 
-    if [ ! -f "$lib" ]; then
-        echo "cargo did not produce $lib" >&2
+    if [ -z "$lib" ] || [ ! -f "$lib" ]; then
+        echo "cargo did not produce a jp_ffi static library" >&2
         exit 1
     fi
 

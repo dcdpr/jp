@@ -2424,6 +2424,7 @@ dependencies = [
  "jp_plugin",
  "jp_storage",
  "jp_workspace",
+ "parking_lot",
  "pretty_assertions",
  "serde",
  "serde_json",
