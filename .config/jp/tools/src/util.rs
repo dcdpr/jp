@@ -1,5 +1,7 @@
 pub mod diff;
+pub mod paths;
 pub mod runner;
+pub mod trace;
 pub mod xml;
 
 use jp_tool::Outcome;

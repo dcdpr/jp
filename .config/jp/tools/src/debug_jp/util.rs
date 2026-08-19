@@ -6,6 +6,8 @@
 
 use camino::Utf8Path;
 
+use crate::util::paths;
+
 pub(crate) mod build;
 pub(crate) mod launch;
 pub(crate) mod profile_heap_parse;
@@ -13,18 +15,19 @@ pub(crate) mod profile_heap_render;
 pub(crate) mod profile_sampling_parse;
 pub(crate) mod profile_sampling_render;
 pub(crate) mod sandbox;
-pub(crate) mod trace_parse;
 pub(crate) mod trace_render;
 
-/// Render `path` relative to `root` when it lives under it; otherwise return it
-/// as-is.
+/// Every absolute path in `report`, named by the variable it lives under.
 ///
-/// Used to keep workspace-internal absolute paths out of the reports the tools
-/// attach to a conversation — a report showing `tmp/profiling/trace-N.jsonl`
-/// reads cleanly regardless of where the workspace lives on disk.
-pub(crate) fn relative_to(root: &Utf8Path, path: &Utf8Path) -> String {
-    path.strip_prefix(root)
-        .map_or_else(|_| path.to_string(), Utf8Path::to_string)
+/// Applied to the finished report rather than to each value that goes into it.
+/// These reports quote a subprocess's stderr verbatim, render dhat frames
+/// carrying source locations, and print trace fields naming whatever jp was
+/// reading — there is no enumerating where a path can turn up, so the whole
+/// text gets one pass.
+/// That also covers the artifact paths in the footer, which is why nothing
+/// upstream of here relativizes anything.
+pub(crate) fn shorten_paths(report: &str, root: &Utf8Path) -> String {
+    paths::shorten_within(report, &paths::shortenings(root))
 }
 
 /// Prepend a shutdown-warning banner to `report` when jp didn't exit on its own

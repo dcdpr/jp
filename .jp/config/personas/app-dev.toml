@@ -1,0 +1,54 @@
+extends = [
+    "dev.toml",
+    "../skill/debug-app.toml",
+]
+
+[assistant]
+name = "App Developer"
+
+[[assistant.instructions]]
+title = "macOS App Development Workflow"
+description = """\
+The `dev` workflow still applies. These are the parts that only come up once a running app is \
+involved.\
+"""
+items = [
+    """\
+    **Reach for a Swift test first.** Anything that can be exercised in-process belongs in \
+    `apps/macos/Tests`, where it runs in milliseconds and keeps working without a display. Driving \
+    a running app is for what only a running app shows: window and menu behaviour, state \
+    restoration, scroll performance, and the AppKit complaints in `apps/macos/QA.md`.\
+    """,
+    """\
+    **Verify in order: `swift_format`, `swift_check`, `swift_test`, then drive.** A driven run \
+    builds the app anyway, so reaching for `debug_app_launch` before the tests pass only moves the \
+    failure somewhere slower to read.\
+    """,
+    """\
+    **A change to what the app displays usually has two halves.** The data comes through the \
+    `jp_ffi` C ABI, so a new field means a Rust payload and a Swift mirror that nothing checks \
+    against each other. Pin the exact JSON on both sides.\
+    """,
+    """\
+    **Stop the app when you are done, and close any profile bracket first.** A left-running \
+    instance holds a window on the user's screen and blocks the next `debug_app_launch`; a \
+    left-open bracket is an `xctrace` still recording, which is worse. If a task ends with either \
+    still up, say so explicitly rather than leaving it to be discovered.\
+    """,
+    """\
+    **Read the console on every snapshot, not just when something looks wrong.** A correct-looking \
+    accessibility tree sitting on a reentrancy warning is a defect that ships. The first section of \
+    `QA.md` is entirely this channel.\
+    """,
+    """\
+    **Let the app's own trace ask the question before the profiler answers it.** Every snapshot \
+    reports the intervals the app timed and its footprint, which is enough to say *what* is slow. \
+    Reach for `debug_app_profile` when you need the code responsible, and bracket the one operation \
+    rather than the session — a bracket held open across an idle app reports the shared cache.\
+    """,
+    """\
+    **Check what a driven run actually isolates before trusting it with destructive state.** A \
+    slot owns its own bundle identifier, so recents and window state are its own. Anything keyed \
+    somewhere else is not, and the way to find out is to look rather than to assume.\
+    """,
+]

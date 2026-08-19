@@ -24,7 +24,7 @@ use crate::{
         launch::{LaunchSpec, Launcher, RealLauncher, Timeouts},
         profile_sampling_parse as sample_parse, profile_sampling_render as sample_render,
         sandbox::{Sandbox, SandboxOpts},
-        with_termination_note,
+        shorten_paths, with_termination_note,
     },
     util::{ToolResult, error, runner::DuctProcessRunner},
 };
@@ -214,9 +214,9 @@ fn execute(
     let raw = fs::read_to_string(&sample_path)
         .map_err(|e| format!("Failed to read sample output at {sample_path}: {e}"))?;
     let threads = sample_parse::parse(&raw);
-    let sample_path_display = crate::debug_jp::util::relative_to(workspace_root, &sample_path);
-    let report = sample_render::render(&threads, &launch_result, &spec.args, &sample_path_display);
+    let report = sample_render::render(&threads, &launch_result, &spec.args, sample_path.as_str());
     let report = with_termination_note(report, &launch_result);
+    let report = shorten_paths(&report, workspace_root);
 
     fs::write(&report_path, &report)?;
 

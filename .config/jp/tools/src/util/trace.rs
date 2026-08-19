@@ -1,8 +1,13 @@
-//! Parser for `JP_DEBUG=1` JSON-per-line trace logs.
+//! Parser for JSON-per-line trace logs.
 //!
-//! Each line is a `tracing-subscriber::fmt::json()`-formatted event.
-//! We keep parsing tolerant: a malformed line is skipped, not fatal, so a
-//! single truncated trailing line doesn't lose the whole report.
+//! Each line is a `tracing-subscriber::fmt::json()`-formatted event: what `jp`
+//! writes under `JP_DEBUG=1`, and what the macOS app writes to its own trace
+//! file.
+//! Two tool families read this format and neither owns it, so the parser lives
+//! here rather than beside either of them.
+//!
+//! Parsing is tolerant: a malformed line is skipped, not fatal, so a single
+//! truncated trailing line doesn't lose the whole report.
 
 use serde::Deserialize;
 use serde_json::{Map, Value};
@@ -150,5 +155,5 @@ struct RawSpan {
 }
 
 #[cfg(test)]
-#[path = "trace_parse_tests.rs"]
+#[path = "trace_tests.rs"]
 mod tests;

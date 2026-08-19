@@ -1,0 +1,108 @@
+[conversation.tools.debug_app_snapshot]
+enable = false
+format = "unattended"
+run = "ask"
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "Read the accessibility tree of the running macOS app, plus whatever it has written to its console since the last call, a summary of the intervals it timed and what it now occupies in memory, and optionally the pasteboard. Reads only. macOS only."
+
+examples = """
+The whole interface, and any console output since the last call:
+```json
+{}
+```
+
+Just the sidebar, to see which conversation is selected:
+```json
+{"identifier": "sidebar.", "max_matches": 1}
+```
+
+The transcript, with the actions each element advertises, to find what can be
+pressed:
+```json
+{"identifier": "transcript.", "actions": true}
+```
+
+Check what a Copy Link put on the clipboard:
+```json
+{"identifier": "sidebar.", "max_matches": 1, "pasteboard": true}
+```
+"""
+
+[conversation.tools.debug_app_snapshot.style]
+parameters = "just serve-tools {{context}} {{tool}}"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.debug_app_snapshot.parameters.identifier]
+type = "string"
+summary = "Keep only elements whose accessibility identifier starts with this, and the ancestors leading to them."
+description = """
+A prefix rather than an exact match, so `sidebar.` answers "what is under the \
+sidebar". Without it the whole application is walked, which for a large \
+workspace is thousands of elements.
+"""
+
+[conversation.tools.debug_app_snapshot.parameters.max_matches]
+type = "integer"
+summary = "How many matches to find before stopping a filtered read. Only applies with `identifier`."
+description = """
+Identifiers sit on leaves, so a prefix search cannot prune on the way down and \
+an unbounded one reads every element in the application. Use `1` when looking \
+up one identifier already known, or the walk continues past it looking for a \
+second.
+"""
+
+[conversation.tools.debug_app_snapshot.parameters.depth]
+type = "integer"
+summary = "How deep to walk before reporting a node's children as not walked."
+description = """
+A SwiftUI window nests deeply — the wrapper groups between a list and its rows \
+are several levels on their own — so a low cap hides the elements worth seeing.
+"""
+
+[conversation.tools.debug_app_snapshot.parameters.max_siblings]
+type = "integer"
+summary = "How many children to walk per level. Defaults to 0, meaning all of them."
+description = """
+A cap keeps a thousand near-identical sidebar rows from filling the report, but \
+it also hides the row that was just selected. Reading everything is the right \
+default for a snapshot meant to be diffed against another.
+"""
+
+[conversation.tools.debug_app_snapshot.parameters.frames]
+type = "boolean"
+summary = "Include each element's on-screen frame. Defaults to false."
+description = """
+Left out by default because coordinates change whenever a window moves or a \
+list scrolls, which turns every diff between two snapshots into noise. Useful \
+when the question is about layout rather than structure.
+"""
+
+[conversation.tools.debug_app_snapshot.parameters.menus]
+type = "boolean"
+summary = "Walk into the menu bar. Defaults to false."
+description = """
+Most of the menu bar belongs to macOS rather than to the app — the Apple menu, \
+Services, the window tiling submenus — and walking it adds some two hundred \
+lines around the handful describing the window. Pass this when the question is \
+about a menu.
+"""
+
+[conversation.tools.debug_app_snapshot.parameters.pasteboard]
+type = "boolean"
+summary = "Report what the pasteboard holds. Defaults to false."
+description = """
+The pasteboard is system-wide rather than the app's, so it is off by default: \
+it would otherwise put whatever the user last copied into every snapshot. Pass \
+this when checking something the app was asked to copy.
+"""
+
+[conversation.tools.debug_app_snapshot.parameters.actions]
+type = "boolean"
+summary = "Include the actions each element advertises. Defaults to false."
+description = """
+Actions say what an element can be asked to do — a menu item advertises \
+`AXPress` where a list row does not. Constant per element, so they add bulk \
+without adding signal to a diff.
+"""
