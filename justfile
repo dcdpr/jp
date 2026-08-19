@@ -181,6 +181,52 @@ build-ffi PROFILE="debug": (_install "cbindgen@" + cbindgen_version)
     echo "library: $out/libjp_ffi.a" >&2
     echo "header:  $out/include/jp_ffi.h" >&2
 
+# Build the `jpdrive` accessibility driver that the `debug_app_*` tools shell out
+# to.
+#
+# A standalone SwiftPM package rather than a target in the app's Xcode project,
+# so the binary lands at a predictable path with no derived-data lookup.
+[group('build')]
+[macos]
+build-drive CONFIG="release":
+    #!/usr/bin/env sh
+    set -eu
+
+    swift build --package-path apps/macos/Tools/jpdrive -c {{CONFIG}}
+
+    bin=$(swift build --package-path apps/macos/Tools/jpdrive -c {{CONFIG}} --show-bin-path)
+    echo "binary: $bin/jpdrive" >&2
+
+# Run the `jpdrive` test suite.
+#
+# Covers the driver's traversal against a fake accessibility tree, so it needs no
+# running app and no accessibility grant.
+[group('test')]
+[macos]
+test-drive *ARGS:
+    swift test --package-path apps/macos/Tools/jpdrive {{ARGS}}
+
+# Report whether this process may read another app's accessibility tree.
+#
+# Run under the terminal, under `just`, and under `serve-tools` to find out
+# whether a TCC grant given to the terminal reaches a tool it started. See
+# `apps/macos/Tools/jpdrive/README.md`.
+#
+# PID is the target application's process id, e.g. `$(pgrep -f JP.app)`.
+[group('debug')]
+[macos]
+drive-doctor PID="": build-drive
+    #!/usr/bin/env sh
+    set -eu
+
+    bin=$(swift build --package-path apps/macos/Tools/jpdrive -c release --show-bin-path)
+
+    if [ -n "{{PID}}" ]; then
+        "$bin/jpdrive" doctor --pid "{{PID}}"
+    else
+        "$bin/jpdrive" doctor
+    fi
+
 # Generate the macOS app's Xcode project from `apps/macos/project.yml`.
 #
 # The project file is generated rather than committed, so `project.yml` stays the
