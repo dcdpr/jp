@@ -57,7 +57,7 @@ fn make_turn_coordinator_with_output() -> (TurnCoordinator, Arc<Printer>, Shared
 /// Create a workspace with a single conversation and return a test lock.
 fn make_test_lock() -> (Workspace, ConversationLock) {
     let config = Arc::new(AppConfig::new_test());
-    let mut workspace = Workspace::new(camino::Utf8PathBuf::new());
+    let mut workspace = Workspace::in_memory(camino::Utf8PathBuf::new());
     let id = workspace.create_conversation(Conversation::default(), config);
     let handle = workspace.acquire_conversation(&id).unwrap();
     let lock = workspace.test_lock(handle);

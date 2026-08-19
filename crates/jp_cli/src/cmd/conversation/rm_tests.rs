@@ -26,7 +26,7 @@ fn empty_rm() -> Rm {
 }
 
 fn workspace_with_conversations(ids: &[ConversationId]) -> Workspace {
-    let mut ws = Workspace::new("/tmp/jp-cli-rm-test");
+    let mut ws = Workspace::in_memory("/tmp/jp-cli-rm-test");
     let config = Arc::new(AppConfig::new_test());
     for id in ids {
         ws.create_conversation_with_id(*id, Conversation::default(), config.clone());

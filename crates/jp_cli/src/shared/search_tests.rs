@@ -27,7 +27,7 @@ fn setup_ctx_with_conversations(
 ) -> Ctx {
     let tmp = tempdir().unwrap();
     let config = AppConfig::new_test();
-    let workspace = Workspace::new(tmp.path());
+    let workspace = Workspace::in_memory(tmp.path());
     let (printer, _, _) = Printer::memory(OutputFormat::TextPretty);
     let mut ctx = Ctx::new(
         workspace,
