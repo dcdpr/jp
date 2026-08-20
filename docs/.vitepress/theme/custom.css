@@ -126,6 +126,15 @@
     color: #fcd34d;
 }
 
+/* Labels group tickets by area. Deliberately quieter than the status and kind
+   badges next to them: a ticket can carry several, and they should read as
+   annotation rather than as state. */
+.doc-badge--label {
+    background: color-mix(in srgb, var(--vp-c-text-1) 8%, transparent);
+    color: var(--vp-c-text-2);
+    font-family: var(--vp-font-family-mono);
+}
+
 /* ── Document link colors (status-coded) ──────────────────────────── */
 
 /* Ticket statuses, matching the badge palette above. */

@@ -1,7 +1,26 @@
 use indoc::indoc;
 
 use super::*;
-use crate::parse;
+use crate::{Kind, Label, Vocabulary, parse};
+
+/// A ticket with everything but the parts under test fixed.
+fn draft<'a>(
+    title: &'a str,
+    kind: Kind,
+    authors: &'a str,
+    labels: &'a [Label],
+    description: &'a str,
+) -> NewTicket<'a> {
+    NewTicket {
+        kind,
+        title,
+        authors,
+        date: "2026-08-05",
+        implements: None,
+        labels,
+        description,
+    }
+}
 
 fn new_comment(from: &str, body: &str, re: Option<&str>) -> Comment {
     Comment {
@@ -14,14 +33,13 @@ fn new_comment(from: &str, body: &str, re: Option<&str>) -> Comment {
 
 #[test]
 fn renders_a_new_ticket() {
-    let out = ticket(
+    let out = ticket(&draft(
         "Tool call header misaligned",
         Kind::Bug,
         "John Doe",
-        "2026-08-05",
-        None,
+        &[],
         "The header renders one column left of the body.",
-    );
+    ));
 
     assert_eq!(out, indoc! {"
             # Tool call header misaligned
@@ -37,14 +55,13 @@ fn renders_a_new_ticket() {
 
 #[test]
 fn renders_a_new_ticket_without_a_description() {
-    let out = ticket(
+    let out = ticket(&draft(
         "Bump the deny list",
         Kind::Chore,
         "john",
-        "2026-08-05",
-        None,
+        &[],
         "   ",
-    );
+    ));
 
     assert_eq!(out, indoc! {"
             # Bump the deny list
@@ -58,14 +75,13 @@ fn renders_a_new_ticket_without_a_description() {
 
 #[test]
 fn first_comment_opens_the_comments_section() {
-    let document = ticket(
+    let document = ticket(&draft(
         "Tool call header misaligned",
         Kind::Bug,
         "John Doe",
-        "2026-08-05",
-        None,
+        &[],
         "The header renders one column left of the body.",
-    );
+    ));
 
     let out = append_comment(
         &document,
@@ -116,14 +132,13 @@ fn renders_a_comment_block() {
 #[test]
 fn later_comments_are_a_pure_append() {
     let document = append_comment(
-        &ticket(
+        &ticket(&draft(
             "Tool call header misaligned",
             Kind::Bug,
             "John Doe",
-            "2026-08-05",
-            None,
+            &[],
             "Description.",
-        ),
+        )),
         &new_comment("john", "Reproduced at 72 columns.", None),
     );
 
@@ -149,14 +164,13 @@ fn later_comments_are_a_pure_append() {
 fn appended_comments_parse_back() {
     let document = append_comment(
         &append_comment(
-            &ticket(
+            &ticket(&draft(
                 "Round trip",
                 Kind::Feature,
                 "john",
-                "2026-08-05",
-                None,
+                &[],
                 "Description.",
-            ),
+            )),
             &new_comment("john", "First.", None),
         ),
         &new_comment("jp", "Second.", Some("#1")),
@@ -253,4 +267,83 @@ fn adds_a_field_the_ticket_lacks() {
 #[test]
 fn reports_a_document_with_no_metadata_block() {
     assert_eq!(set_metadata("# Bare\n\nProse.\n", "Status", "Done"), None);
+    assert_eq!(remove_metadata("# Bare\n\nProse.\n", "Labels"), None);
+}
+
+#[test]
+fn removes_a_metadata_field() {
+    let document = indoc! {"
+        # Tool call header misaligned
+
+        - **Status**: Todo
+        - **Kind**: Bug
+        - **Authors**: john
+        - **Date**: 2026-08-05
+        - **Labels**: config
+
+        Description.
+    "};
+
+    let out = remove_metadata(document, "Labels").unwrap();
+
+    assert_eq!(out, indoc! {"
+            # Tool call header misaligned
+
+            - **Status**: Todo
+            - **Kind**: Bug
+            - **Authors**: john
+            - **Date**: 2026-08-05
+
+            Description.
+        "});
+}
+
+/// Clearing labels on a ticket that has none is not an error, so a caller
+/// doesn't have to read the ticket first to know which write to make.
+#[test]
+fn removing_a_field_the_ticket_lacks_changes_nothing() {
+    let document = indoc! {"
+        # Tool call header misaligned
+
+        - **Status**: Todo
+        - **Kind**: Bug
+        - **Authors**: john
+        - **Date**: 2026-08-05
+
+        Description.
+    "};
+
+    assert_eq!(remove_metadata(document, "Labels").unwrap(), document);
+}
+
+/// Labels are written after the fields every ticket carries, which is where
+/// `set_metadata` puts them too — so a ticket filed with labels and one
+/// labelled later look the same.
+#[test]
+fn renders_labels_after_the_required_fields() {
+    let vocabulary =
+        Vocabulary::parse(r#"{"active": {"app/macos": "The app.", "config": "Config."}}"#).unwrap();
+    let labels = vocabulary
+        .resolve(&["config".to_owned(), "app/macos".to_owned()])
+        .unwrap();
+
+    let out = ticket(&draft(
+        "Labelled",
+        Kind::Bug,
+        "john",
+        &labels,
+        "Description.",
+    ));
+
+    assert_eq!(out, indoc! {"
+            # Labelled
+
+            - **Status**: Todo
+            - **Kind**: Bug
+            - **Authors**: john
+            - **Date**: 2026-08-05
+            - **Labels**: app/macos, config
+
+            Description.
+        "});
 }
