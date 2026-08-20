@@ -69,6 +69,50 @@ fn reads_optional_metadata_fields() {
     assert_eq!(ticket.metadata.implements.as_deref(), Some("095"));
     assert_eq!(ticket.metadata.blocked_by, None);
     assert_eq!(ticket.metadata.github, None);
+    assert!(ticket.metadata.labels.is_empty());
+}
+
+/// Labels are read as written, without checking them against the vocabulary: a
+/// listing that hid a label the file carries would disagree with the file.
+#[test]
+fn reads_labels_as_written() {
+    let source = indoc! {"
+        # Labelled
+
+        - **Status**: Todo
+        - **Kind**: Bug
+        - **Authors**: john
+        - **Date**: 2026-08-05
+        - **Labels**: app/macos,  config , retired/label
+
+        Description.
+    "};
+
+    let ticket = document(source).unwrap();
+
+    assert_eq!(ticket.metadata.labels, [
+        "app/macos",
+        "config",
+        "retired/label"
+    ]);
+}
+
+/// An empty label line is no labels rather than one blank one.
+#[test]
+fn reads_an_empty_label_line_as_no_labels() {
+    let source = indoc! {"
+        # Labelled
+
+        - **Status**: Todo
+        - **Kind**: Bug
+        - **Authors**: john
+        - **Date**: 2026-08-05
+        - **Labels**:
+
+        Description.
+    "};
+
+    assert!(document(source).unwrap().metadata.labels.is_empty());
 }
 
 #[test]

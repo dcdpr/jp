@@ -38,6 +38,7 @@ export function parseTicket(content, filename) {
         authors: field(content, 'Authors'),
         date: field(content, 'Date'),
         blockedBy: field(content, 'Blocked by'),
+        labels: splitLabels(field(content, 'Labels')),
         implements: field(content, 'Implements'),
         promotedTo: field(content, 'Promoted to'),
         github: field(content, 'GitHub'),
@@ -46,6 +47,77 @@ export function parseTicket(content, filename) {
         links: referencedLabels(content).filter(label => label !== `T${id}`),
         slug: filename.replace(/\.md$/, ''),
     }
+}
+
+// Split a `Labels` metadata value into its labels.
+//
+// Read as written rather than checked against the vocabulary: a listing that
+// hid a label the file carries would disagree with the file. `findUnknownLabels`
+// below is what catches one the board doesn't define.
+export function splitLabels(value) {
+    if (!value) return []
+
+    return value.split(',').map(label => label.trim()).filter(Boolean)
+}
+
+// The labels the board defines: `{ active, retired }`, each a map of label to
+// description.
+//
+// A board with no `.labels.json` defines none, which is a board that hasn't
+// started using them.
+export function loadVocabulary() {
+    const path = resolve(import.meta.dirname, '../../ticket/.labels.json')
+
+    let raw
+    try {
+        raw = readFileSync(path, 'utf-8')
+    } catch {
+        return { active: {}, retired: {} }
+    }
+
+    if (raw.trim() === '') return { active: {}, retired: {} }
+
+    const parsed = JSON.parse(raw)
+    const isMap = v => v !== undefined && v !== null
+        && typeof v === 'object' && !Array.isArray(v)
+    if (!isMap(parsed)) {
+        throw new Error(`${path} is not a JSON object.`)
+    }
+
+    const active = parsed.active ?? {}
+    const retired = parsed.retired ?? {}
+    if (!isMap(active) || !isMap(retired)) {
+        throw new Error(
+            `${path} must have \`active\` and \`retired\` maps of label to description.`
+        )
+    }
+
+    return { active, retired }
+}
+
+// Labels used on a ticket that the vocabulary doesn't define.
+//
+// Retired labels count as defined: retiring one keeps existing tickets valid,
+// which is the whole difference between retiring and deleting. A typo in a
+// hand-edited ticket would otherwise sit there silently, grouping with nothing
+// and showing up as its own one-ticket category.
+export function findUnknownLabels(tickets, vocabulary) {
+    const known = new Set([
+        ...Object.keys(vocabulary.active ?? {}),
+        ...Object.keys(vocabulary.retired ?? {}),
+    ])
+    const offenders = tickets
+        .map(ticket => [ticket.id, ticket.labels.filter(label => !known.has(label))])
+        .filter(([, unknown]) => unknown.length > 0)
+
+    if (offenders.length === 0) return null
+
+    const report = offenders
+        .map(([id, unknown]) => `  ${id}: ${unknown.join(', ')}`)
+        .join('\n')
+    return `Tickets carry labels the vocabulary doesn't define:\n${report}\n\n` +
+        `Add them to the \`active\` or \`retired\` map in docs/ticket/.labels.json, ` +
+        `or fix the tickets (\`jp ticket label <id> --label ...\`).`
 }
 
 // Count the comments in a ticket.
@@ -203,10 +275,15 @@ export function loadTickets() {
     const duplicate = findDuplicateIds(files)
     if (duplicate) throw new Error(duplicate)
 
-    return files.map(f => ({
+    const tickets = files.map(f => ({
         ...parseTicket(readFileSync(resolve(dir, f), 'utf-8'), f),
         path: `/ticket/${f.replace(/\.md$/, '')}`,
     }))
+
+    const unknown = findUnknownLabels(tickets, loadVocabulary())
+    if (unknown) throw new Error(unknown)
+
+    return tickets
 }
 
 // Assemble the board: every ticket, plus the three columns in display order.
