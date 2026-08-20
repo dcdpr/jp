@@ -1,4 +1,6 @@
-use jp_conversation::{Compaction, ReasoningPolicy, SummaryPolicy, ToolCallPolicy};
+use jp_conversation::{
+    ByteSize, Compaction, PolicySpec, ReasoningPolicy, SummaryPolicy, ToolCallPolicy,
+};
 
 use super::*;
 
@@ -53,7 +55,7 @@ fn compaction_detail_item_reports_reasoning_and_tools_policy() {
     // 0-based turn 2 is displayed as turn 3; a single-turn range still reads
     // as an inclusive range for consistency with multi-turn ranges.
     assert_eq!(item.text, "turns 3..3 (1 total, reasoning + tools)");
-    assert!(item.json["reasoning"].as_bool().unwrap());
+    assert_eq!(item.json["reasoning"], "strip");
     assert_eq!(item.json["tool_calls"]["policy"], "strip");
     assert!(item.json["summary"].is_null());
 }
@@ -98,4 +100,45 @@ fn compaction_policy_label_describes_partial_tool_call_strip() {
 fn compaction_policy_label_is_none_without_any_policy() {
     let compaction = Compaction::new(0, 0);
     assert_eq!(compaction_policy_label(&compaction), None);
+}
+
+#[test]
+fn compaction_policy_label_names_a_size_threshold() {
+    // A rule that only reached the large items must not read the same as one
+    // that compacted everything in its range.
+    let compaction = Compaction::new(0, 0)
+        .with_reasoning(PolicySpec::over(
+            ReasoningPolicy::Strip,
+            ByteSize::from_bytes(16 * 1024),
+        ))
+        .with_tool_calls(PolicySpec::over(
+            ToolCallPolicy::Strip {
+                request: false,
+                response: true,
+            },
+            ByteSize::from_bytes(1024 * 1024),
+        ));
+
+    assert_eq!(
+        compaction_policy_label(&compaction),
+        Some("reasoning over 16KB + tool responses over 1MB".to_owned())
+    );
+}
+
+#[test]
+fn compaction_detail_item_reports_a_size_threshold() {
+    let compaction = Compaction::new(0, 0).with_tool_calls(PolicySpec::over(
+        ToolCallPolicy::Strip {
+            request: false,
+            response: true,
+        },
+        ByteSize::from_bytes(1024 * 1024),
+    ));
+
+    let item = compaction_detail_item(&compaction);
+
+    assert_eq!(item.text, "turns 1..1 (1 total, tool responses over 1MB)");
+    assert_eq!(item.json["tool_calls"]["policy"], "strip");
+    assert_eq!(item.json["tool_calls"]["response"], true);
+    assert_eq!(item.json["tool_calls"]["over"], "1MB");
 }

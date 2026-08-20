@@ -140,10 +140,16 @@ Ok(
                                     keep_first: None,
                                     keep_last: None,
                                     reasoning: Some(
-                                        Strip,
+                                        PolicySpec {
+                                            policy: Strip,
+                                            over: None,
+                                        },
                                     ),
                                     tool_calls: Some(
-                                        Strip,
+                                        PolicySpec {
+                                            policy: Strip,
+                                            over: None,
+                                        },
                                     ),
                                     summary: None,
                                 },

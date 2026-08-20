@@ -13,7 +13,10 @@ use crate::{
     internal::merge::vec_with_strategy,
     model::{ModelConfig, PartialModelConfig},
     partial::{ToPartial, partial_opt_config, partial_opts},
-    types::vec::{MergeableVec, MergedVec, vec_to_mergeable_partial},
+    types::{
+        policy_spec::PolicySpec,
+        vec::{MergeableVec, MergedVec, vec_to_mergeable_partial},
+    },
 };
 
 /// Compaction configuration.
@@ -62,8 +65,8 @@ impl PartialCompactionConfig {
     #[must_use]
     pub fn builtin_rules() -> Vec<PartialCompactionRuleConfig> {
         vec![PartialCompactionRuleConfig {
-            reasoning: Some(ReasoningMode::Strip),
-            tool_calls: Some(ToolCallsMode::Strip),
+            reasoning: Some(ReasoningMode::Strip.into()),
+            tool_calls: Some(ToolCallsMode::Strip.into()),
             ..Default::default()
         }]
     }
@@ -190,11 +193,45 @@ pub struct CompactionRuleConfig {
     #[setting(default = default_keep_last)]
     pub keep_last: RuleBound,
 
-    /// Policy for reasoning (thinking) blocks.
-    pub reasoning: Option<ReasoningMode>,
+    /// What to do with reasoning (thinking) blocks in the compacted range.
+    ///
+    /// The only mode is `"strip"`, which drops the blocks from the view sent to
+    /// the model.
+    /// If unset, reasoning blocks in the range are left alone.
+    ///
+    /// A table form adds a size threshold:
+    ///
+    /// ```toml
+    /// reasoning = { policy = "strip", over = "16KB" }
+    /// ```
+    ///
+    /// With `over` set, only blocks larger than that are stripped.
+    /// Sizes accept `"512KB"`, `"1MB"`, or a bare byte count, and the
+    /// comparison is strict: a block of exactly the threshold is left alone.
+    pub reasoning: Option<PolicySpec<ReasoningMode>>,
 
-    /// Policy for tool call arguments and responses.
-    pub tool_calls: Option<ToolCallsMode>,
+    /// What to do with tool call arguments and responses in the compacted
+    /// range.
+    ///
+    /// - `"strip"`: replace request arguments *and* response content.
+    /// - `"strip-requests"`: replace request arguments, keep responses.
+    /// - `"strip-responses"`: replace response content, keep arguments.
+    /// - `"omit"`: remove the request and response entirely.
+    ///
+    /// If unset, tool calls in the range are left alone.
+    ///
+    /// A table form adds a size threshold:
+    ///
+    /// ```toml
+    /// tool_calls = { policy = "strip-responses", over = "1MB" }
+    /// ```
+    ///
+    /// With `over` set, only the large parts of a call are compacted.
+    /// Each half is judged on its own size, so `"strip"` on a call with a short
+    /// request and a huge response drops only the response.
+    /// `"omit"` removes whole pairs, so it is judged on the request and
+    /// response combined.
+    pub tool_calls: Option<PolicySpec<ToolCallsMode>>,
 
     /// Summarization configuration.
     ///

@@ -5,8 +5,8 @@ use proptest::prelude::*;
 use serde_json::Map;
 
 use crate::{
-    Compaction, ConversationEvent, ConversationStream, EventKind, ReasoningPolicy, SummaryPolicy,
-    ToolCallPolicy,
+    ByteSize, Compaction, ConversationEvent, ConversationStream, EventKind, PolicySpec,
+    ReasoningPolicy, SummaryPolicy, ToolCallPolicy,
     event::{ChatRequest, ChatResponse, ToolCallRequest, ToolCallResponse, TurnStart},
     stream::TurnOrigin,
 };
@@ -179,7 +179,7 @@ fn mechanical_compaction_keeps_one_to_one_origins() {
         from_turn: 0,
         to_turn: 1,
         summary: None,
-        reasoning: Some(ReasoningPolicy::Strip),
+        reasoning: Some(ReasoningPolicy::Strip.into()),
         tool_calls: None,
     });
 
@@ -236,7 +236,7 @@ fn strip_reasoning_removes_reasoning_events() {
         from_turn: 0,
         to_turn: 1,
         summary: None,
-        reasoning: Some(ReasoningPolicy::Strip),
+        reasoning: Some(ReasoningPolicy::Strip.into()),
         tool_calls: None,
     });
 
@@ -275,10 +275,13 @@ fn strip_request_only_blanks_args_and_keeps_response() {
         to_turn: 1,
         summary: None,
         reasoning: None,
-        tool_calls: Some(ToolCallPolicy::Strip {
-            request: true,
-            response: false,
-        }),
+        tool_calls: Some(
+            ToolCallPolicy::Strip {
+                request: true,
+                response: false,
+            }
+            .into(),
+        ),
     });
 
     stream.apply_projection();
@@ -315,10 +318,13 @@ fn strip_tool_calls_replaces_content() {
         to_turn: 1,
         summary: None,
         reasoning: None,
-        tool_calls: Some(ToolCallPolicy::Strip {
-            request: true,
-            response: true,
-        }),
+        tool_calls: Some(
+            ToolCallPolicy::Strip {
+                request: true,
+                response: true,
+            }
+            .into(),
+        ),
     });
 
     stream.apply_projection();
@@ -357,10 +363,13 @@ fn strip_tool_response_only() {
         to_turn: 1,
         summary: None,
         reasoning: None,
-        tool_calls: Some(ToolCallPolicy::Strip {
-            request: false,
-            response: true,
-        }),
+        tool_calls: Some(
+            ToolCallPolicy::Strip {
+                request: false,
+                response: true,
+            }
+            .into(),
+        ),
     });
 
     stream.apply_projection();
@@ -410,10 +419,13 @@ fn strip_tool_response_preserves_error_status() {
         to_turn: 0,
         summary: None,
         reasoning: None,
-        tool_calls: Some(ToolCallPolicy::Strip {
-            request: false,
-            response: true,
-        }),
+        tool_calls: Some(
+            ToolCallPolicy::Strip {
+                request: false,
+                response: true,
+            }
+            .into(),
+        ),
     });
 
     stream.apply_projection();
@@ -421,6 +433,548 @@ fn strip_tool_response_preserves_error_status() {
     let resp = stream.find_tool_call_response("tc1").unwrap();
     assert!(resp.result.is_err(), "Error status should be preserved");
     assert_eq!(resp.content(), "[compacted] cargo_test: error");
+}
+
+// ---------------------------------------------------------------------------
+// Size thresholds (`over`)
+// ---------------------------------------------------------------------------
+
+/// One kibibyte, the threshold every test in this section uses.
+const ONE_KB: u64 = 1024;
+
+/// A single turn holding two tool calls of very different sizes.
+///
+/// `big` returns 4096 bytes and `small` returns 2, so a 1 KB threshold
+/// separates the two responses.
+/// Both requests carry ~16 bytes of arguments, so neither request crosses that
+/// threshold.
+fn mixed_size_tool_calls() -> ConversationStream {
+    let mut stream = ConversationStream::new_test();
+
+    stream.push(ConversationEvent::new(TurnStart, ts(0)));
+    stream.push(ConversationEvent::new(
+        ChatRequest::from("read them"),
+        ts(0),
+    ));
+
+    stream.push(ConversationEvent::new(
+        ToolCallRequest {
+            id: "big".into(),
+            name: "fs_read_file".into(),
+            arguments: Map::from_iter([("path".into(), "huge.log".into())]),
+        },
+        ts(0),
+    ));
+    stream.push(ConversationEvent::new(
+        ToolCallResponse {
+            id: "big".into(),
+            result: Ok("x".repeat(4096)),
+        },
+        ts(0),
+    ));
+
+    stream.push(ConversationEvent::new(
+        ToolCallRequest {
+            id: "small".into(),
+            name: "fs_read_file".into(),
+            arguments: Map::from_iter([("path".into(), "tiny.log".into())]),
+        },
+        ts(0),
+    ));
+    stream.push(ConversationEvent::new(
+        ToolCallResponse {
+            id: "small".into(),
+            result: Ok("ok".into()),
+        },
+        ts(0),
+    ));
+
+    stream
+}
+
+/// A compaction over turn 0 carrying `policy`.
+fn tool_call_compaction(policy: PolicySpec<ToolCallPolicy>) -> Compaction {
+    Compaction {
+        timestamp: ts(1),
+        from_turn: 0,
+        to_turn: 0,
+        summary: None,
+        reasoning: None,
+        tool_calls: Some(policy),
+    }
+}
+
+#[test]
+fn over_threshold_strips_only_the_large_response() {
+    let mut stream = mixed_size_tool_calls();
+    stream.add_compaction(tool_call_compaction(PolicySpec::over(
+        ToolCallPolicy::Strip {
+            request: false,
+            response: true,
+        },
+        ByteSize::from_bytes(ONE_KB),
+    )));
+
+    stream.apply_projection();
+
+    assert_eq!(
+        stream.find_tool_call_response("big").unwrap().content(),
+        "[compacted] fs_read_file: success"
+    );
+    assert_eq!(
+        stream.find_tool_call_response("small").unwrap().content(),
+        "ok",
+        "a response under the threshold must survive verbatim"
+    );
+}
+
+#[test]
+fn without_a_threshold_every_response_is_stripped() {
+    // The counterpart to the test above: the same stream and the same policy,
+    // minus the threshold, reaches the small response too. This is what pins
+    // the threshold as the cause of the difference rather than anything about
+    // the fixture.
+    let mut stream = mixed_size_tool_calls();
+    stream.add_compaction(tool_call_compaction(PolicySpec::new(
+        ToolCallPolicy::Strip {
+            request: false,
+            response: true,
+        },
+    )));
+
+    stream.apply_projection();
+
+    assert_eq!(
+        stream.find_tool_call_response("big").unwrap().content(),
+        "[compacted] fs_read_file: success"
+    );
+    assert_eq!(
+        stream.find_tool_call_response("small").unwrap().content(),
+        "[compacted] fs_read_file: success"
+    );
+}
+
+#[test]
+fn over_threshold_judges_each_half_on_its_own_size() {
+    // `big` has a ~16-byte request and a 4096-byte response. With both halves
+    // enabled and a 1 KB threshold, only the response is large enough to strip.
+    let mut stream = mixed_size_tool_calls();
+    stream.add_compaction(tool_call_compaction(PolicySpec::over(
+        ToolCallPolicy::Strip {
+            request: true,
+            response: true,
+        },
+        ByteSize::from_bytes(ONE_KB),
+    )));
+
+    stream.apply_projection();
+
+    let request = stream
+        .iter()
+        .filter_map(|e| e.event.as_tool_call_request().cloned())
+        .find(|r| r.id == "big")
+        .expect("big request present");
+    assert_eq!(
+        request.arguments.get("path").and_then(|v| v.as_str()),
+        Some("huge.log"),
+        "a request under the threshold keeps its arguments even when the response is stripped"
+    );
+    assert_eq!(
+        stream.find_tool_call_response("big").unwrap().content(),
+        "[compacted] fs_read_file: success"
+    );
+}
+
+#[test]
+fn over_threshold_on_omit_uses_the_pair_total() {
+    // Neither half of `split` crosses 1 KB on its own, but together they do, so
+    // the pair is removed. `small` stays well under the total and survives
+    // whole. This is what makes `Omit` a pair-level decision rather than a
+    // per-half one.
+    let mut stream = ConversationStream::new_test();
+    stream.push(ConversationEvent::new(TurnStart, ts(0)));
+    stream.push(ConversationEvent::new(ChatRequest::from("go"), ts(0)));
+
+    stream.push(ConversationEvent::new(
+        ToolCallRequest {
+            id: "split".into(),
+            name: "fs_modify_file".into(),
+            arguments: Map::from_iter([("data".into(), "x".repeat(700).into())]),
+        },
+        ts(0),
+    ));
+    stream.push(ConversationEvent::new(
+        ToolCallResponse {
+            id: "split".into(),
+            result: Ok("y".repeat(700)),
+        },
+        ts(0),
+    ));
+    stream.push(ConversationEvent::new(
+        ToolCallRequest {
+            id: "small".into(),
+            name: "fs_read_file".into(),
+            arguments: Map::from_iter([("path".into(), "tiny.log".into())]),
+        },
+        ts(0),
+    ));
+    stream.push(ConversationEvent::new(
+        ToolCallResponse {
+            id: "small".into(),
+            result: Ok("ok".into()),
+        },
+        ts(0),
+    ));
+
+    stream.add_compaction(tool_call_compaction(PolicySpec::over(
+        ToolCallPolicy::Omit,
+        ByteSize::from_bytes(ONE_KB),
+    )));
+
+    stream.apply_projection();
+
+    let call_ids: Vec<String> = stream
+        .iter()
+        .filter_map(|e| match &e.event.kind {
+            EventKind::ToolCallRequest(r) => Some(r.id.clone()),
+            EventKind::ToolCallResponse(r) => Some(r.id.clone()),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(
+        call_ids,
+        vec!["small".to_owned(), "small".to_owned()],
+        "both halves of `split` are removed together and `small` is untouched"
+    );
+}
+
+#[test]
+fn over_threshold_strips_only_large_reasoning_blocks() {
+    let mut stream = ConversationStream::new_test();
+    stream.push(ConversationEvent::new(TurnStart, ts(0)));
+    stream.push(ConversationEvent::new(ChatRequest::from("think"), ts(0)));
+    stream.push(ConversationEvent::new(
+        ChatResponse::reasoning("z".repeat(4096)),
+        ts(0),
+    ));
+    stream.push(ConversationEvent::new(
+        ChatResponse::reasoning("brief thought"),
+        ts(0),
+    ));
+    stream.push(ConversationEvent::new(ChatResponse::message("done"), ts(0)));
+
+    stream.add_compaction(Compaction {
+        timestamp: ts(1),
+        from_turn: 0,
+        to_turn: 0,
+        summary: None,
+        reasoning: Some(PolicySpec::over(
+            ReasoningPolicy::Strip,
+            ByteSize::from_bytes(ONE_KB),
+        )),
+        tool_calls: None,
+    });
+
+    stream.apply_projection();
+
+    let reasoning: Vec<&str> = stream
+        .iter()
+        .filter_map(|e| match &e.event.kind {
+            EventKind::ChatResponse(ChatResponse::Reasoning { reasoning }) => {
+                Some(reasoning.as_str())
+            }
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(
+        reasoning,
+        vec!["brief thought"],
+        "only the block over the threshold is stripped"
+    );
+}
+
+#[test]
+fn threshold_is_measured_against_the_raw_stream() {
+    // Projection reads raw events, so a second, identical compaction sees the
+    // same sizes as the first and reaches the same calls. Without this, a
+    // stripped response (now 33 bytes) would fall under the threshold and the
+    // second pass would disagree with the first.
+    let mut stream = mixed_size_tool_calls();
+    let policy = PolicySpec::over(
+        ToolCallPolicy::Strip {
+            request: false,
+            response: true,
+        },
+        ByteSize::from_bytes(ONE_KB),
+    );
+    stream.add_compaction(tool_call_compaction(policy.clone()));
+    stream.add_compaction(Compaction {
+        timestamp: ts(2),
+        ..tool_call_compaction(policy)
+    });
+
+    stream.apply_projection();
+
+    assert_eq!(
+        stream.find_tool_call_response("big").unwrap().content(),
+        "[compacted] fs_read_file: success"
+    );
+    assert_eq!(
+        stream.find_tool_call_response("small").unwrap().content(),
+        "ok"
+    );
+}
+
+/// One turn holding two tool calls that share the ID `tc1`, as a provider
+/// reusing a synthetic ID across streaming cycles produces.
+///
+/// The first response is 4096 bytes and the second is 2, so a 1 KB threshold
+/// separates them.
+/// Both requests carry the same short arguments.
+fn reused_call_id_stream() -> ConversationStream {
+    let mut stream = ConversationStream::new_test();
+    stream.push(ConversationEvent::new(TurnStart, ts(0)));
+    stream.push(ConversationEvent::new(ChatRequest::from("go"), ts(0)));
+
+    for body in ["x".repeat(4096), "ok".to_owned()] {
+        stream.push(ConversationEvent::new(
+            ToolCallRequest {
+                id: "tc1".into(),
+                name: "fs_read_file".into(),
+                arguments: Map::from_iter([("path".into(), "a.log".into())]),
+            },
+            ts(0),
+        ));
+        stream.push(ConversationEvent::new(
+            ToolCallResponse {
+                id: "tc1".into(),
+                result: Ok(body),
+            },
+            ts(0),
+        ));
+    }
+
+    stream
+}
+
+/// Every tool call response in the stream, in stream order.
+fn response_contents(stream: &ConversationStream) -> Vec<String> {
+    stream
+        .iter()
+        .filter_map(|e| {
+            e.event
+                .as_tool_call_response()
+                .map(|r| r.content().to_owned())
+        })
+        .collect()
+}
+
+#[test]
+fn over_threshold_sizes_each_occurrence_of_a_reused_call_id() {
+    // A provider may reuse one synthetic call ID across cycles, so sizes cannot
+    // be keyed by ID: that gives every occurrence the last one's size, and the
+    // oversized response the threshold exists to catch survives untouched.
+    let mut stream = reused_call_id_stream();
+    stream.add_compaction(tool_call_compaction(PolicySpec::over(
+        ToolCallPolicy::Strip {
+            request: false,
+            response: true,
+        },
+        ByteSize::from_bytes(ONE_KB),
+    )));
+
+    stream.apply_projection();
+
+    assert_eq!(response_contents(&stream), vec![
+        "[compacted] fs_read_file: success".to_owned(),
+        "ok".to_owned(),
+    ]);
+}
+
+#[test]
+fn over_threshold_on_omit_pairs_a_reused_call_id_by_occurrence() {
+    // Each pair is judged on its own combined size: the first totals ~4 KB and
+    // is removed, the second totals ~18 bytes and survives whole.
+    let mut stream = reused_call_id_stream();
+    stream.add_compaction(tool_call_compaction(PolicySpec::over(
+        ToolCallPolicy::Omit,
+        ByteSize::from_bytes(ONE_KB),
+    )));
+
+    stream.apply_projection();
+
+    assert_eq!(response_contents(&stream), vec!["ok".to_owned()]);
+    assert_eq!(
+        stream
+            .iter()
+            .filter(|e| e.event.as_tool_call_request().is_some())
+            .count(),
+        1,
+        "only the small pair's request survives"
+    );
+}
+
+#[test]
+fn affected_items_sizes_each_occurrence_of_a_reused_call_id() {
+    let stream = reused_call_id_stream();
+    let compaction = tool_call_compaction(PolicySpec::over(
+        ToolCallPolicy::Strip {
+            request: false,
+            response: true,
+        },
+        ByteSize::from_bytes(ONE_KB),
+    ));
+
+    let items = stream.affected_items(&compaction);
+
+    assert_eq!(items.len(), 1, "only the oversized occurrence");
+    assert_eq!(items[0].name, "fs_read_file (response)");
+    assert_eq!(items[0].size.as_bytes(), 4096);
+}
+
+#[test]
+fn affected_items_reports_nothing_for_a_summary_compaction() {
+    // A summary replaces every event in its range, so projection ignores the
+    // mechanical policies. Itemizing them would name items the summary made
+    // irrelevant.
+    let stream = mixed_size_tool_calls();
+    let compaction = Compaction {
+        summary: Some(SummaryPolicy {
+            summary: "the gist".into(),
+        }),
+        ..tool_call_compaction(PolicySpec::over(
+            ToolCallPolicy::Strip {
+                request: false,
+                response: true,
+            },
+            ByteSize::from_bytes(ONE_KB),
+        ))
+    };
+
+    assert!(stream.affected_items(&compaction).is_empty());
+}
+
+#[test]
+fn a_thresholded_overlay_replaces_an_earlier_policy_for_its_whole_turn() {
+    // Stacking stays latest-wins per content type, so a later thresholded
+    // overlay takes over the turn entirely: an item below its threshold is left
+    // raw rather than falling back to the earlier, broader policy. Adding a
+    // targeted rule can therefore un-compact items an earlier rule had reached.
+    let mut stream = mixed_size_tool_calls();
+
+    stream.add_compaction(Compaction {
+        timestamp: ts(1),
+        ..tool_call_compaction(PolicySpec::new(ToolCallPolicy::Strip {
+            request: false,
+            response: true,
+        }))
+    });
+    stream.add_compaction(Compaction {
+        timestamp: ts(2),
+        ..tool_call_compaction(PolicySpec::over(
+            ToolCallPolicy::Omit,
+            ByteSize::from_bytes(ONE_KB),
+        ))
+    });
+
+    stream.apply_projection();
+
+    assert_eq!(
+        stream.find_tool_call_response("small").unwrap().content(),
+        "ok",
+        "the earlier blanket strip does not apply below the later threshold"
+    );
+    assert!(
+        stream.find_tool_call_response("big").is_none(),
+        "the oversized pair is omitted by the later overlay"
+    );
+}
+
+#[test]
+fn affected_items_reports_an_omitted_pair_once() {
+    // `Omit` removes both halves together, so reporting each half would
+    // double-count a single decision.
+    let mut stream = mixed_size_tool_calls();
+    let compaction = tool_call_compaction(PolicySpec::over(
+        ToolCallPolicy::Omit,
+        ByteSize::from_bytes(ONE_KB),
+    ));
+
+    let items = stream.affected_items(&compaction);
+
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].turn, 0);
+    assert_eq!(items[0].name, "fs_read_file");
+    // The pair total: the request's serialized arguments
+    // (`{"path":"huge.log"}`, 19 bytes) plus the 4096-byte response.
+    assert_eq!(items[0].size.as_bytes(), 4096 + 19);
+
+    // Reporting must not disturb the stream it inspects.
+    stream.apply_projection();
+}
+
+#[test]
+fn affected_items_reports_each_stripped_half_separately() {
+    let stream = mixed_size_tool_calls();
+    let compaction = tool_call_compaction(PolicySpec::new(ToolCallPolicy::Strip {
+        request: true,
+        response: true,
+    }));
+
+    let items = stream.affected_items(&compaction);
+    let names: Vec<&str> = items.iter().map(|i| i.name.as_str()).collect();
+
+    assert_eq!(names, vec![
+        "fs_read_file (request)",
+        "fs_read_file (response)",
+        "fs_read_file (request)",
+        "fs_read_file (response)",
+    ]);
+}
+
+#[test]
+fn affected_items_reports_reasoning_blocks() {
+    let mut stream = ConversationStream::new_test();
+    stream.push(ConversationEvent::new(TurnStart, ts(0)));
+    stream.push(ConversationEvent::new(ChatRequest::from("think"), ts(0)));
+    stream.push(ConversationEvent::new(
+        ChatResponse::reasoning("z".repeat(4096)),
+        ts(0),
+    ));
+    stream.push(ConversationEvent::new(
+        ChatResponse::reasoning("brief"),
+        ts(0),
+    ));
+
+    let items = stream.affected_items(&Compaction {
+        timestamp: ts(1),
+        from_turn: 0,
+        to_turn: 0,
+        summary: None,
+        reasoning: Some(PolicySpec::over(
+            ReasoningPolicy::Strip,
+            ByteSize::from_bytes(ONE_KB),
+        )),
+        tool_calls: None,
+    });
+
+    assert_eq!(items.len(), 1, "only the block over the threshold");
+    assert_eq!(items[0].name, "reasoning");
+    assert_eq!(items[0].size.as_bytes(), 4096);
+}
+
+#[test]
+fn affected_items_ignores_turns_outside_the_range() {
+    let stream = mixed_size_tool_calls();
+    let out_of_range = Compaction {
+        from_turn: 1,
+        to_turn: 5,
+        ..tool_call_compaction(PolicySpec::new(ToolCallPolicy::Omit))
+    };
+
+    assert!(stream.affected_items(&out_of_range).is_empty());
 }
 
 // ---------------------------------------------------------------------------
@@ -436,7 +990,7 @@ fn omit_tool_calls_removes_them() {
         to_turn: 1,
         summary: None,
         reasoning: None,
-        tool_calls: Some(ToolCallPolicy::Omit),
+        tool_calls: Some(ToolCallPolicy::Omit.into()),
     });
 
     stream.apply_projection();
@@ -503,11 +1057,14 @@ fn summary_ignores_per_type_policies() {
         summary: Some(SummaryPolicy {
             summary: "Everything summarized.".into(),
         }),
-        reasoning: Some(ReasoningPolicy::Strip),
-        tool_calls: Some(ToolCallPolicy::Strip {
-            request: true,
-            response: true,
-        }),
+        reasoning: Some(ReasoningPolicy::Strip.into()),
+        tool_calls: Some(
+            ToolCallPolicy::Strip {
+                request: true,
+                response: true,
+            }
+            .into(),
+        ),
     });
 
     stream.apply_projection();
@@ -721,7 +1278,7 @@ fn timestamp_tie_breaks_by_stream_order() {
         to_turn: 1,
         summary: None,
         reasoning: None,
-        tool_calls: Some(ToolCallPolicy::Omit),
+        tool_calls: Some(ToolCallPolicy::Omit.into()),
     });
     stream.add_compaction(Compaction {
         timestamp: ts(2),
@@ -729,10 +1286,13 @@ fn timestamp_tie_breaks_by_stream_order() {
         to_turn: 1,
         summary: None,
         reasoning: None,
-        tool_calls: Some(ToolCallPolicy::Strip {
-            request: true,
-            response: true,
-        }),
+        tool_calls: Some(
+            ToolCallPolicy::Strip {
+                request: true,
+                response: true,
+            }
+            .into(),
+        ),
     });
 
     stream.apply_projection();
@@ -758,7 +1318,7 @@ fn later_compaction_wins_for_same_turn() {
         from_turn: 0,
         to_turn: 1,
         summary: None,
-        reasoning: Some(ReasoningPolicy::Strip),
+        reasoning: Some(ReasoningPolicy::Strip.into()),
         tool_calls: None,
     });
 
@@ -769,10 +1329,13 @@ fn later_compaction_wins_for_same_turn() {
         to_turn: 1,
         summary: None,
         reasoning: None,
-        tool_calls: Some(ToolCallPolicy::Strip {
-            request: true,
-            response: true,
-        }),
+        tool_calls: Some(
+            ToolCallPolicy::Strip {
+                request: true,
+                response: true,
+            }
+            .into(),
+        ),
     });
 
     stream.apply_projection();
@@ -805,7 +1368,7 @@ fn later_compaction_overrides_earlier_for_same_type() {
         to_turn: 1,
         summary: None,
         reasoning: None,
-        tool_calls: Some(ToolCallPolicy::Omit),
+        tool_calls: Some(ToolCallPolicy::Omit.into()),
     });
 
     // Later: strip tool calls instead (less aggressive).
@@ -815,10 +1378,13 @@ fn later_compaction_overrides_earlier_for_same_type() {
         to_turn: 1,
         summary: None,
         reasoning: None,
-        tool_calls: Some(ToolCallPolicy::Strip {
-            request: true,
-            response: true,
-        }),
+        tool_calls: Some(
+            ToolCallPolicy::Strip {
+                request: true,
+                response: true,
+            }
+            .into(),
+        ),
     });
 
     stream.apply_projection();
@@ -843,11 +1409,14 @@ fn summary_wins_over_mechanical_for_same_turns() {
         from_turn: 0,
         to_turn: 1,
         summary: None,
-        reasoning: Some(ReasoningPolicy::Strip),
-        tool_calls: Some(ToolCallPolicy::Strip {
-            request: true,
-            response: true,
-        }),
+        reasoning: Some(ReasoningPolicy::Strip.into()),
+        tool_calls: Some(
+            ToolCallPolicy::Strip {
+                request: true,
+                response: true,
+            }
+            .into(),
+        ),
     });
 
     // Later summary compaction for the same range.
@@ -882,8 +1451,8 @@ fn compaction_applies_only_to_covered_turns() {
         from_turn: 0,
         to_turn: 0,
         summary: None,
-        reasoning: Some(ReasoningPolicy::Strip),
-        tool_calls: Some(ToolCallPolicy::Omit),
+        reasoning: Some(ReasoningPolicy::Strip.into()),
+        tool_calls: Some(ToolCallPolicy::Omit.into()),
     });
 
     stream.apply_projection();
@@ -915,7 +1484,7 @@ fn compaction_beyond_max_turn_is_clamped() {
         from_turn: 0,
         to_turn: 99,
         summary: None,
-        reasoning: Some(ReasoningPolicy::Strip),
+        reasoning: Some(ReasoningPolicy::Strip.into()),
         tool_calls: None,
     });
 
@@ -971,7 +1540,7 @@ fn compaction_events_consumed_by_projection() {
         from_turn: 0,
         to_turn: 0,
         summary: None,
-        reasoning: Some(ReasoningPolicy::Strip),
+        reasoning: Some(ReasoningPolicy::Strip.into()),
         tool_calls: None,
     });
     assert_eq!(stream.compactions().count(), 1);
@@ -1026,7 +1595,7 @@ fn recompact_projected_stream_with_new_compaction() {
         from_turn: 0,
         to_turn: 1,
         summary: None,
-        reasoning: Some(ReasoningPolicy::Strip),
+        reasoning: Some(ReasoningPolicy::Strip.into()),
         tool_calls: None,
     });
 
@@ -1059,7 +1628,7 @@ fn recompact_projected_stream_with_new_compaction() {
         to_turn: 0,
         summary: None,
         reasoning: None,
-        tool_calls: Some(ToolCallPolicy::Omit),
+        tool_calls: Some(ToolCallPolicy::Omit.into()),
     });
 
     stream.apply_projection();
@@ -1216,8 +1785,8 @@ fn spec_to_compaction(spec: &CompactionSpec) -> Compaction {
         from_turn: spec.from,
         to_turn: spec.to,
         summary,
-        reasoning,
-        tool_calls,
+        reasoning: reasoning.map(Into::into),
+        tool_calls: tool_calls.map(Into::into),
     }
 }
 
@@ -1410,8 +1979,8 @@ proptest! {
                 from_turn: from,
                 to_turn: to,
                 summary: None,
-                reasoning,
-                tool_calls,
+                reasoning: reasoning.map(Into::into),
+                tool_calls: tool_calls.map(Into::into),
             });
         }
 
@@ -1551,7 +2120,7 @@ fn compaction_targets_correct_turn_with_implicit_leading_turn() {
         from_turn: 1,
         to_turn: 1,
         summary: None,
-        reasoning: Some(ReasoningPolicy::Strip),
+        reasoning: Some(ReasoningPolicy::Strip.into()),
         tool_calls: None,
     });
 
