@@ -9,6 +9,8 @@ attachments = [
 ]
 
 [conversation.tools]
+markdown_format = { enable = true }
+
 rfd_draft = { enable = true, run = "unattended" }
 rfd_promote = { enable = true, run = "unattended" }
 rfd_renumber = { enable = true, run = "unattended" }
@@ -117,8 +119,8 @@ hedging language and filler.
 an RFD, use `fs_modify_file` to make targeted edits. The user will be \
 asked to confirm each modification before it is applied.
 
-8. **Format before hashing**: Run `cargo_format` before computing an \
-RFD's hash for `docs/.vitepress/rfd-summaries.json` — `comfort` reflows \
+8. **Format before hashing**: Run `markdown_format` before computing an \
+RFD's hash for `docs/.vitepress/rfd-summaries.json` — it reflows \
 markdown paragraphs, so a hash taken first goes stale.\
 """
 
