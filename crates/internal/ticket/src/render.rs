@@ -10,31 +10,28 @@
 //! A ticket is read far more often than it is written, and by hand as often as
 //! by tooling, so the file is never round-tripped through the parser.
 
-use crate::{Comment, Kind, Status, parse};
+use crate::{Comment, NewTicket, Status, labels, parse};
 
 /// Render a new ticket, opened at `Todo`.
 ///
-/// `implements` names the RFD the work comes from, for a ticket seeded from an
-/// RFD's implementation plan.
+/// The optional fields are written last, in the same place [`set_metadata`]
+/// would put them, so a ticket that gains one later looks like one that was
+/// filed with it.
 #[must_use]
-pub fn ticket(
-    title: &str,
-    kind: Kind,
-    authors: &str,
-    date: &str,
-    implements: Option<&str>,
-    description: &str,
-) -> String {
-    let mut out = format!("# {title}\n\n");
+pub fn ticket(new: &NewTicket<'_>) -> String {
+    let mut out = format!("# {}\n\n", new.title);
     out.push_str(&format!("- **Status**: {}\n", Status::Todo));
-    out.push_str(&format!("- **Kind**: {kind}\n"));
-    out.push_str(&format!("- **Authors**: {authors}\n"));
-    out.push_str(&format!("- **Date**: {date}\n"));
-    if let Some(rfd) = implements {
+    out.push_str(&format!("- **Kind**: {}\n", new.kind));
+    out.push_str(&format!("- **Authors**: {}\n", new.authors));
+    out.push_str(&format!("- **Date**: {}\n", new.date));
+    if let Some(rfd) = new.implements {
         out.push_str(&format!("- **Implements**: {rfd}\n"));
     }
+    if !new.labels.is_empty() {
+        out.push_str(&format!("- **Labels**: {}\n", labels::join(new.labels)));
+    }
 
-    let description = description.trim();
+    let description = new.description.trim();
     if !description.is_empty() {
         out.push('\n');
         out.push_str(description);
@@ -190,6 +187,34 @@ pub fn set_metadata(document: &str, key: &str, value: &str) -> Option<String> {
         Some(index) => lines[index] = line,
         None => lines.insert(header.end, line),
     }
+
+    let mut out = lines.join("\n");
+    if document.ends_with('\n') {
+        out.push('\n');
+    }
+
+    Some(out)
+}
+
+/// Drop a field from the ticket's metadata block, returning the new document.
+///
+/// Returns `None` when the document has no metadata block; a document that
+/// doesn't carry the field comes back unchanged.
+///
+/// Only the header block is considered, so a line quoted in a comment is left
+/// alone.
+#[must_use]
+pub fn remove_metadata(document: &str, key: &str) -> Option<String> {
+    let header = parse::metadata_range(document)?;
+    let mut lines: Vec<String> = document.lines().map(ToOwned::to_owned).collect();
+
+    let existing = header.clone().find(|&i| {
+        parse::meta_line(&lines[i]).is_some_and(|(found, _)| found.eq_ignore_ascii_case(key))
+    });
+    let Some(index) = existing else {
+        return Some(document.to_owned());
+    };
+    lines.remove(index);
 
     let mut out = lines.join("\n");
     if document.ends_with('\n') {

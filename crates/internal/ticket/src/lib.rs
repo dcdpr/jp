@@ -31,8 +31,8 @@
 //!
 //! [`id`] defines the identifier, [`parse`] reads a document, [`render`] writes
 //! one, [`store`] holds the file operations (id allocation, create, comment,
-//! close, list, import), and [`import`] carries the rules for content that
-//! comes from upstream.
+//! close, list, import), [`labels`] holds the board's label vocabulary, and
+//! [`import`] carries the rules for content that comes from upstream.
 //!
 //! The id is in the filename and nowhere else, so renaming a ticket is a rename
 //! and there is no second copy to keep in step.
@@ -45,11 +45,13 @@ use serde::Serialize;
 
 pub mod id;
 pub mod import;
+pub mod labels;
 pub mod parse;
 pub mod render;
 pub mod store;
 
 pub use id::TicketId;
+pub use labels::{Label, Vocabulary};
 
 /// Where a ticket sits on the board.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -133,12 +135,33 @@ impl FromStr for Kind {
 pub struct Metadata {
     pub status: Status,
     pub kind: Kind,
+    /// The labels the ticket carries.
+    ///
+    /// Plain strings, not [`Label`]s: a hand-edited ticket can name a label the
+    /// vocabulary doesn't define, and dropping it here would make the listing
+    /// disagree with the file.
+    pub labels: Vec<String>,
     pub authors: String,
     pub date: String,
     pub blocked_by: Option<String>,
     pub implements: Option<String>,
     pub promoted_to: Option<String>,
     pub github: Option<String>,
+}
+
+/// The parts of a ticket that are settled when it is filed.
+///
+/// A struct rather than a run of positional arguments: five of these are
+/// strings, and at a call site nothing would catch two of them being swapped.
+pub struct NewTicket<'a> {
+    pub kind: Kind,
+    pub title: &'a str,
+    pub authors: &'a str,
+    pub date: &'a str,
+    /// The RFD this work comes from, if any.
+    pub implements: Option<&'a str>,
+    pub labels: &'a [Label],
+    pub description: &'a str,
 }
 
 /// One comment on a ticket.

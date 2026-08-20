@@ -396,7 +396,7 @@
     "summary": "Conversations gain configurable key-value labels—static, command-backed, or CLI-set—managed through `jp c label` and used to filter by context like VCS branches."
   },
   "100-in-repo-ticket-tracking.md": {
-    "hash": "1ce52e4dd0d9d326b503d8e03e86e7623ff8bc08080b13020f2023a7ed982a04",
+    "hash": "6936666c7892cfd924a245ee591c732ed7dff5b7ae1ec4943551298afbf03c62",
     "summary": "Lightweight markdown-based work items tracked in-repo, displacing GitHub issues from assistant context with kanban board and RFD promotion mechanics."
   },
   "102-collision-resistant-ticket-identifiers.md": {

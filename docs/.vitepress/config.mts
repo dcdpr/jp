@@ -199,6 +199,8 @@ const ticketBoardWriter = {
                     status: field('Status'),
                     kind: field('Kind'),
                     blockedBy: field('Blocked by'),
+                    labels: (field('Labels') ?? '')
+                        .split(',').map(label => label.trim()).filter(Boolean),
                     implements: field('Implements'),
                     path: `/ticket/${name.replace(/\.md$/, '')}`,
                 })

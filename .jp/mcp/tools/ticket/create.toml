@@ -24,7 +24,7 @@ File a bug with a description:
 ```json
 {"kind": "bug", "title": "Tool call header misaligned", "body": "The header \
 renders one column left of the body when the terminal is narrower than 80 \
-columns."}
+columns.", "labels": ["cli"]}
 ```
 
 File a chore with no description:
@@ -63,3 +63,21 @@ Set this when the ticket is a phase of an accepted RFD's implementation plan.
 An RFD counts as in development while a ticket claiming it sits in the In
 Progress column, so this is what puts it there.
 """
+
+[conversation.tools.ticket_create.parameters.labels]
+type = "array"
+required = false
+summary = "The areas of the system this ticket touches."
+description = """
+Labels group tickets by area, orthogonally to `kind`: `kind` says what type of
+work it is, a label says what part of the system it lands in. Apply every label
+that fits, or none when nothing does.
+
+The set is closed and defined in `docs/ticket/.labels.json`. A label outside it
+is refused, and the refusal names the ones you can use.
+"""
+
+# The accepted values live in `labels.toml`, generated from
+# `docs/ticket/.labels.json` by `just ticket-labels-sync`.
+[conversation.tools.ticket_create.parameters.labels.items]
+type = "string"

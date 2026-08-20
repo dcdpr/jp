@@ -1,0 +1,51 @@
+[conversation.tools.ticket_label]
+enable = false
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "Replace the labels on a ticket."
+description = """
+Set the areas of the system a ticket touches.
+
+The whole set is written: pass every label the ticket should end up with, not
+just the new ones. An empty list clears them. Read the ticket first with
+`ticket_show` if you mean to keep the labels it already carries.
+
+The set is closed and defined in `docs/ticket/.labels.json`. A label outside it
+is refused, and the refusal names the ones you can use.
+
+A label the board has retired stays valid on a ticket that already carries it,
+so listing it again keeps it. It cannot be added to a ticket that doesn't have
+it.
+"""
+
+examples = """
+Label a ticket:
+```json
+{"id": "T-02wt0kx", "labels": ["config", "cli"]}
+```
+
+Clear every label:
+```json
+{"id": "T-02wt0kx", "labels": []}
+```
+"""
+
+[conversation.tools.ticket_label.style]
+parameters = "function_call"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.ticket_label.parameters.id]
+type = "string"
+required = true
+summary = "Ticket id, e.g. `T-02wt0kx`."
+
+[conversation.tools.ticket_label.parameters.labels]
+type = "array"
+required = true
+summary = "Every label the ticket should carry. An empty list clears them."
+
+# The accepted values live in `labels.toml`, generated from
+# `docs/ticket/.labels.json` by `just ticket-labels-sync`.
+[conversation.tools.ticket_label.parameters.labels.items]
+type = "string"

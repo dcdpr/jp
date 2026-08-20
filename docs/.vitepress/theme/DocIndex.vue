@@ -156,7 +156,7 @@ const filtered = computed(() => {
 
     if (textQuery) {
         rows = rows.filter(r =>
-            [r[props.idField], r.title, r[props.filterField], r.status, r.summary]
+            [r[props.idField], r.title, r[props.filterField], r.status, r.summary, ...(r.labels ?? [])]
                 .some(v => v?.toLowerCase().includes(textQuery))
         )
     }
@@ -221,6 +221,7 @@ const filtered = computed(() => {
     <td>
         <a :href="entry.path">{{ entry.title }}</a>
         <span v-if="entry.blockedBy" class="doc-badge doc-badge--blocked">blocked by {{ entry.blockedBy }}</span>
+        <span v-for="label in entry.labels ?? []" :key="label" class="doc-badge doc-badge--label">{{ label }}</span>
         <div v-if="showSummaries && entry.summary" class="doc-summary">{{ entry.summary }}</div>
     </td>
     <td v-if="showCategory" class="doc-col-optional">{{ entry[filterField] }}</td>

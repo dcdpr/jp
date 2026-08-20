@@ -26,9 +26,16 @@ fn declaration(file: &str) -> toml::Value {
 }
 
 fn advertised(file: &str, tool: &str, parameter: &str) -> Vec<String> {
-    declaration(file)["conversation"]["tools"][tool]["parameters"][parameter]["enum"]
+    enum_values(
+        &declaration(file)["conversation"]["tools"][tool]["parameters"][parameter],
+        &format!("{tool}.{parameter}"),
+    )
+}
+
+fn enum_values(schema: &toml::Value, what: &str) -> Vec<String> {
+    schema["enum"]
         .as_array()
-        .unwrap_or_else(|| panic!("{tool}.{parameter} has no enum"))
+        .unwrap_or_else(|| panic!("{what} has no enum"))
         .iter()
         .map(|value| value.as_str().expect("string variant").to_owned())
         .collect()
@@ -99,6 +106,19 @@ fn create_ticket(dir: &Utf8TempDir, title: &str) -> String {
     ))
 }
 
+/// A ticket with everything but the title fixed.
+fn draft<'a>(title: &'a str, labels: &'a [Label]) -> NewTicket<'a> {
+    NewTicket {
+        kind: Kind::Bug,
+        title,
+        authors: HANDLE,
+        date: DATE,
+        implements: None,
+        labels,
+        description: "Something is wrong.",
+    }
+}
+
 /// File a ticket under [`FIXED_ID`], bypassing allocation so the test can
 /// assert against the id it will read back.
 fn write_ticket(dir: &Utf8TempDir, title: &str) -> TicketId {
@@ -107,11 +127,25 @@ fn write_ticket(dir: &Utf8TempDir, title: &str) -> TicketId {
     std::fs::create_dir_all(&tickets).unwrap();
     std::fs::write(
         tickets.join(format!("{}slug.md", id.file_prefix())),
-        render::ticket(title, Kind::Bug, HANDLE, DATE, None, "Something is wrong."),
+        render::ticket(&draft(title, &[])),
     )
     .unwrap();
 
     id
+}
+
+/// Give a board a vocabulary, so label writes have something to check against.
+fn write_vocabulary(dir: &Utf8TempDir) {
+    let tickets = dir.path().join(store::DEFAULT_DIR);
+    std::fs::create_dir_all(&tickets).unwrap();
+    std::fs::write(
+        tickets.join(::ticket::labels::FILE),
+        r#"{
+            "active": {"cli": "The command line.", "config": "Configuration."},
+            "retired": {"legacy-ui": "The old UI."}
+        }"#,
+    )
+    .unwrap();
 }
 
 /// Ids are generated, so tests follow the ones that were handed out.
@@ -144,6 +178,7 @@ fn create_preview_renders_the_file_that_will_be_written() {
         Kind::Bug,
         "Tool call header misaligned",
         Some("045"),
+        &[],
         Some("The header renders one column left of the body."),
         DATE,
     ));
@@ -272,7 +307,7 @@ fn comment_preview_reports_a_duplicated_id() {
         dir.path()
             .join(store::DEFAULT_DIR)
             .join(format!("{}other.md", id.file_prefix())),
-        render::ticket("Other", Kind::Bug, HANDLE, DATE, None, "Something else."),
+        render::ticket(&draft("Other", &[])),
     )
     .unwrap();
 
@@ -675,11 +710,15 @@ fn every_declared_tool_is_dispatched() {
         declared.extend(tools.keys().cloned());
     }
     declared.sort();
+    // A tool can be declared across more than one file: `labels.toml` carries
+    // the generated label enums for three of them.
+    declared.dedup();
 
     assert_eq!(declared, [
         "ticket_close",
         "ticket_comment",
         "ticket_create",
+        "ticket_label",
         "ticket_list",
         "ticket_show",
     ]);
@@ -729,4 +768,206 @@ fn advertised_values_match_the_parser() {
             "ticket_list does not advertise {status}"
         );
     }
+}
+
+#[test]
+fn create_writes_labels_and_list_shows_them() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_vocabulary(&dir);
+
+    content(run_tool(
+        &dir,
+        "ticket_create",
+        json!({
+            "kind": "bug",
+            "title": "Flag parsing drops the last value",
+            "labels": ["config", "cli"]
+        }),
+    ));
+
+    let id = ids(&dir)[0];
+    let listed = content(run_tool(&dir, "ticket_list", json!({})));
+
+    assert_eq!(
+        listed,
+        format!("{id} Todo         Bug      Flag parsing drops the last value [cli, config]\n")
+    );
+}
+
+#[test]
+fn list_narrows_to_tickets_carrying_every_label() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_vocabulary(&dir);
+
+    for (title, labels) in [
+        ("Both", json!(["cli", "config"])),
+        ("One", json!(["cli"])),
+        ("None", json!([])),
+    ] {
+        content(run_tool(
+            &dir,
+            "ticket_create",
+            json!({ "kind": "bug", "title": title, "labels": labels }),
+        ));
+    }
+
+    let listed = content(run_tool(
+        &dir,
+        "ticket_list",
+        json!({ "labels": ["config", "cli"] }),
+    ));
+
+    assert_eq!(listed.lines().count(), 1, "{listed}");
+    assert!(listed.contains("Both [cli, config]"), "{listed}");
+}
+
+/// The whole set is written, so a retried call lands the same way twice and a
+/// label left off the call is a label removed.
+#[test]
+fn label_replaces_the_whole_set() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_vocabulary(&dir);
+    let id = write_ticket(&dir, "Tool call header misaligned");
+
+    let out = content(run_tool(
+        &dir,
+        "ticket_label",
+        json!({ "id": FIXED_ID, "labels": ["config", "cli"] }),
+    ));
+    assert_eq!(out, format!("{id}: cli, config"));
+
+    let out = content(run_tool(
+        &dir,
+        "ticket_label",
+        json!({ "id": FIXED_ID, "labels": ["cli"] }),
+    ));
+    assert_eq!(out, format!("{id}: cli"));
+
+    let out = content(run_tool(
+        &dir,
+        "ticket_label",
+        json!({ "id": FIXED_ID, "labels": [] }),
+    ));
+    assert_eq!(out, format!("Cleared the labels on {id}."));
+
+    let shown = content(run_tool(&dir, "ticket_show", json!({ "id": FIXED_ID })));
+    assert!(!shown.contains("Labels"), "{shown}");
+}
+
+/// A typo names the vocabulary, so the assistant can fix the call rather than
+/// landing a label nothing groups by.
+#[test]
+fn an_unknown_label_is_refused_with_the_known_set() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_vocabulary(&dir);
+
+    let message = error_message(run_tool(
+        &dir,
+        "ticket_create",
+        json!({ "kind": "bug", "title": "Typo", "labels": ["clii"] }),
+    ));
+
+    assert_eq!(
+        message,
+        "`clii` is not a known label. Labels you can add: cli, config."
+    );
+    assert!(ids(&dir).is_empty(), "a ticket was filed anyway");
+}
+
+/// The case the active/retired split exists for: an old ticket carries a label
+/// the board has since retired, and adding a new one must not force the retired
+/// one off first.
+#[test]
+fn a_retired_label_already_on_a_ticket_can_be_kept() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_vocabulary(&dir);
+
+    // Written by hand: `legacy-ui` can no longer be applied through the tool,
+    // which is exactly the situation an old ticket is in.
+    let id = write_ticket(&dir, "Old ticket");
+    let path = store::locate_ticket(&dir.path().join(store::DEFAULT_DIR), id).unwrap();
+    let source = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        &path,
+        render::set_metadata(&source, "Labels", "legacy-ui").unwrap(),
+    )
+    .unwrap();
+
+    let out = content(run_tool(
+        &dir,
+        "ticket_label",
+        json!({ "id": FIXED_ID, "labels": ["legacy-ui", "cli"] }),
+    ));
+
+    assert_eq!(out, format!("{id}: cli, legacy-ui"));
+}
+
+#[test]
+fn a_retired_label_cannot_be_added_fresh() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_vocabulary(&dir);
+    write_ticket(&dir, "Fresh");
+
+    let message = error_message(run_tool(
+        &dir,
+        "ticket_label",
+        json!({ "id": FIXED_ID, "labels": ["legacy-ui"] }),
+    ));
+
+    assert_eq!(
+        message,
+        "`legacy-ui` is retired and can only stay on a ticket that already carries it. Labels you \
+         can add: cli, config."
+    );
+}
+
+/// The refusal has to land on the preview too: an unattended formatter that
+/// errors fails the call before the user is asked to approve one that cannot
+/// land.
+#[test]
+fn an_unknown_label_is_refused_before_the_preview() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_vocabulary(&dir);
+
+    let message = error_message(preview_tool(
+        &dir,
+        "ticket_create",
+        json!({ "kind": "bug", "title": "Typo", "labels": ["clii"] }),
+    ));
+
+    assert_eq!(
+        message,
+        "`clii` is not a known label. Labels you can add: cli, config."
+    );
+}
+
+#[test]
+fn labelling_a_missing_ticket_says_so() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_vocabulary(&dir);
+
+    let message = error_message(run_tool(
+        &dir,
+        "ticket_label",
+        json!({ "id": FIXED_ID, "labels": ["cli"] }),
+    ));
+
+    assert_eq!(message, format!("No {FIXED_ID}."));
+}
+
+/// The board's vocabulary has to parse, whatever it currently holds.
+///
+/// Deliberately not a comparison against the enums the tools advertise: those
+/// are a mirror kept by `just ticket-labels-sync`, and adding a label should
+/// never turn a second file into a failing test.
+#[test]
+fn the_board_vocabulary_parses() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../docs/ticket")
+        .join(::ticket::labels::FILE);
+    let source = std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
+
+    ::ticket::Vocabulary::parse(&source)
+        .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
 }

@@ -4,11 +4,11 @@ source = "local"
 command = "just serve-tools {{context}} {{tool}}"
 summary = "List the tickets in the repository, ordered by id."
 description = """
-One line per ticket: id, status, kind, title, and comment count.
+One line per ticket: id, status, kind, title, labels, and comment count.
 
 Use it to find what is open before filing something new, and to resolve a title
 you half-remember into an id for `ticket_show`. Filter by status to read one
-column of the board.
+column of the board, or by label to read one area of the system.
 
 Files that don't parse as tickets are named at the end rather than skipped
 silently.
@@ -29,6 +29,11 @@ Only open bugs:
 ```json
 {"status": "todo", "kind": "bug"}
 ```
+
+Only tickets touching both the CLI and config:
+```json
+{"labels": ["cli", "config"]}
+```
 """
 
 [conversation.tools.ticket_list.style]
@@ -47,3 +52,13 @@ type = "string"
 required = false
 enum = ["bug", "feature", "chore"]
 summary = "Only tickets of this kind."
+
+[conversation.tools.ticket_list.parameters.labels]
+type = "array"
+required = false
+summary = "Only tickets carrying every one of these labels."
+
+# The accepted values live in `labels.toml`, generated from
+# `docs/ticket/.labels.json` by `just ticket-labels-sync`.
+[conversation.tools.ticket_list.parameters.labels.items]
+type = "string"
