@@ -160,7 +160,10 @@ enum = ["projects/jp", "task", "idea"]
 The override rules are:
 
 - `type` may be omitted.
-  If set, it must match the MCP schema.
+  If set, it must declare the same type set as the MCP schema.
+  Order does not matter, and a single-element array is equivalent to the bare
+  string, so `["null", "string"]`, `["string", "null"]`, and `"string"` are
+  interchangeable.
 - `required = true` may make an optional server parameter required.
 - `required = false` cannot make a server-required parameter optional.
 - An unset `enum` inherits the server enum.
@@ -246,16 +249,21 @@ Validation rejects:
 - `items` on a non-array type.
 - `properties` on a non-object type.
 - Duplicate or type-incompatible enum values.
-- Defaults that do not satisfy the parameter, item, or property schema.
+- Defaults that the parameter, item, or property schema rejects, including a
+  default outside an `enum`.
 - MCP type overrides that disagree with the server.
 
 Errors include the tool and parameter path:
 
 ```text
-Invalid schema at `tools.bear_note_create.parameters.tags.enum`: enum value
-"projects/jp" has type string, but the schema requires array; use
-`tools.bear_note_create.parameters.tags.items.enum` to constrain array elements
+Invalid schema at `conversation.tools.bear_note_create.parameters.tags.enum`:
+enum value "projects/jp" has type string, but the schema requires array; use
+`conversation.tools.bear_note_create.parameters.tags.items.enum` to constrain
+array elements
 ```
+
+The path is a full configuration key, so it can be pasted into a TOML table
+header or a `--cfg` assignment.
 
 This validation happens before the provider request, so a bad schema does not
 become an HTTP error from the model provider.
@@ -279,5 +287,8 @@ Configurations need attention when they rely on one of these forms:
   constrain individual elements.
 - `enum = []` on an MCP parameter.
   This explicitly removes the inherited enum; omit the setting to inherit it.
+- A narrowed `enum` on a parameter whose inherited `default` falls outside the
+  narrowed set.
+  Override `default` as well, or widen the `enum` to include it.
 
 [configuration loading and ordering rules]: ../configuration.md

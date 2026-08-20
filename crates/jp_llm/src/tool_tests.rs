@@ -170,9 +170,10 @@ async fn local_tool_rejects_scalar_enum_on_array_parameter() {
 
     assert_eq!(
         error.to_string(),
-        "Invalid schema at `tools.bear_note_create.parameters.tags.enum`: enum value \
+        "Invalid schema at `conversation.tools.bear_note_create.parameters.tags.enum`: enum value \
          \"projects/jp\" has type string, but the schema requires array; use \
-         `tools.bear_note_create.parameters.tags.items.enum` to constrain array elements"
+         `conversation.tools.bear_note_create.parameters.tags.items.enum` to constrain array \
+         elements"
     );
 }
 
@@ -1230,6 +1231,123 @@ mod merge_mcp_param {
         );
     }
 
+    /// Narrowing an inherited enum while inheriting the server's `default` is
+    /// the realistic way to end up with a default the enum forbids.
+    #[test]
+    fn default_outside_a_narrowed_enum_is_rejected() {
+        let opts = json!({
+            "type": "string",
+            "enum": ["all", "open", "closed"],
+            "default": "all"
+        });
+        let override_cfg = ToolParameterConfig {
+            enumeration: Some(vec![Value::from("open"), Value::from("closed")]),
+            ..cfg("string")
+        };
+
+        let error = merge_mcp_param("state", &opts, Some(&override_cfg), false).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "Invalid schema at `parameters.state.default`: default value \"all\" is not allowed \
+             by the enum"
+        );
+    }
+
+    #[test]
+    fn default_outside_a_property_enum_is_rejected() {
+        let opts = json!({
+            "type": "object",
+            "default": { "mode": "fast" },
+            "properties": {
+                "mode": { "type": "string", "enum": ["safe"] }
+            }
+        });
+
+        let error = merge_mcp_param("target", &opts, None, false).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "Invalid schema at `parameters.target.default.mode`: default value \"fast\" is not \
+             allowed by the enum"
+        );
+    }
+
+    /// JSON Schema type arrays are unordered, so restating an inherited union
+    /// in a different order describes the same type set.
+    #[test]
+    fn override_may_reorder_an_inherited_union() {
+        let opts = json!({ "type": ["string", "null"] });
+        let override_cfg = ToolParameterConfig {
+            kind: Some(OneOrManyTypes::Many(vec![
+                "null".to_owned(),
+                "string".to_owned(),
+            ])),
+            ..cfg("string")
+        };
+
+        let merged = merge_mcp_param("content", &opts, Some(&override_cfg), false).unwrap();
+
+        assert_eq!(
+            merged.kind,
+            OneOrManyTypes::Many(vec!["string".to_owned(), "null".to_owned()])
+        );
+    }
+
+    #[test]
+    fn override_may_restate_a_scalar_type_as_a_single_element_array() {
+        let opts = json!({ "type": "string" });
+        let override_cfg = ToolParameterConfig {
+            kind: Some(OneOrManyTypes::Many(vec!["string".to_owned()])),
+            ..cfg("string")
+        };
+
+        let merged = merge_mcp_param("name", &opts, Some(&override_cfg), false).unwrap();
+
+        assert_eq!(merged.kind, OneOrManyTypes::One("string".to_owned()));
+    }
+
+    /// The resolved schema keeps the server's type declaration, so a malformed
+    /// override type list has to be reported against the override itself.
+    #[test]
+    fn duplicate_type_in_an_override_is_rejected() {
+        let opts = json!({ "type": "string" });
+        let override_cfg = ToolParameterConfig {
+            kind: Some(OneOrManyTypes::Many(vec![
+                "string".to_owned(),
+                "string".to_owned(),
+            ])),
+            ..cfg("string")
+        };
+
+        let error = merge_mcp_param("name", &opts, Some(&override_cfg), false).unwrap_err();
+
+        assert_eq!(
+            error.to_string(),
+            "Invalid schema at `parameters.name.type`: type values must be unique; duplicate type \
+             `string`"
+        );
+    }
+
+    /// A known fidelity gap: `anyOf` variants that declare no JSON type (such
+    /// as a `$ref` to a `$defs` entry) are dropped, so `Option<Struct>`
+    /// resolves to null-only.
+    /// The drop is logged; resolving the reference needs the tool's root schema
+    /// and is tracked separately.
+    #[test]
+    fn optional_reference_variant_narrows_to_null() {
+        let opts = json!({
+            "anyOf": [
+                { "$ref": "#/$defs/Options" },
+                { "type": "null" }
+            ]
+        });
+
+        let merged = merge_mcp_param("options", &opts, None, false).unwrap();
+
+        assert_eq!(merged.kind, OneOrManyTypes::Many(vec!["null".to_owned()]));
+    }
+
     #[test]
     fn default_values_must_match_nested_item_schema() {
         let opts = json!({
@@ -1308,7 +1426,7 @@ mod merge_mcp_param {
         };
 
         let error = merge_mcp_parameter(
-            "tools.bear_note_create.parameters.tags",
+            "conversation.tools.bear_note_create.parameters.tags",
             &source,
             Some(&override_config),
             false,
@@ -1317,9 +1435,10 @@ mod merge_mcp_param {
 
         assert_eq!(
             error.to_string(),
-            "Invalid schema at `tools.bear_note_create.parameters.tags.enum`: enum value \
-             \"projects/jp\" has type string, but the schema requires array; use \
-             `tools.bear_note_create.parameters.tags.items.enum` to constrain array elements"
+            "Invalid schema at `conversation.tools.bear_note_create.parameters.tags.enum`: enum \
+             value \"projects/jp\" has type string, but the schema requires array; use \
+             `conversation.tools.bear_note_create.parameters.tags.items.enum` to constrain array \
+             elements"
         );
     }
 

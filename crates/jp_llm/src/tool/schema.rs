@@ -147,7 +147,7 @@ pub(super) fn validate_parameter_schema(
         }
 
         if parameter_accepts_value(value, &config.kind) {
-            validate_nested_schema_value(
+            validate_value_against_schema(
                 &format!("{path}.enum[{index}]"),
                 value,
                 config,
@@ -172,23 +172,37 @@ pub(super) fn validate_parameter_schema(
     }
 
     if let Some(default) = &config.default {
-        if !parameter_accepts_value(default, &config.kind) {
-            return Err(ToolError::InvalidSchema {
-                path: format!("{path}.default"),
-                message: format!(
-                    "default value {default} has type {}, but the schema requires {}",
-                    value_type(default),
-                    format_types(&config.kind),
-                ),
-            });
-        }
-        validate_nested_schema_value(&format!("{path}.default"), default, config, "default value")?;
+        validate_value_against_schema(
+            &format!("{path}.default"),
+            default,
+            config,
+            "default value",
+        )?;
     }
 
     Ok(())
 }
 
-fn validate_types(path: &str, types: &OneOrManyTypes) -> Result<(), ToolError> {
+/// Whether two type declarations describe the same set of JSON types.
+///
+/// JSON Schema type arrays are unordered, and a single-element array means the
+/// same thing as a bare string, so `["null", "string"]`, `["string", "null"]`
+/// and `"string"` all compare equal.
+pub(super) fn types_match(left: &OneOrManyTypes, right: &OneOrManyTypes) -> bool {
+    fn normalize(types: &OneOrManyTypes) -> Vec<&str> {
+        let mut types = match types {
+            OneOrManyTypes::One(type_) => vec![type_.as_str()],
+            OneOrManyTypes::Many(types) => types.iter().map(String::as_str).collect(),
+        };
+        types.sort_unstable();
+        types.dedup();
+        types
+    }
+
+    normalize(left) == normalize(right)
+}
+
+pub(super) fn validate_types(path: &str, types: &OneOrManyTypes) -> Result<(), ToolError> {
     let types = match types {
         OneOrManyTypes::One(type_) => slice::from_ref(type_),
         OneOrManyTypes::Many(types) if types.is_empty() => {
@@ -221,32 +235,39 @@ fn validate_types(path: &str, types: &OneOrManyTypes) -> Result<(), ToolError> {
     Ok(())
 }
 
-fn validate_nested_schema_value(
+/// Validate a schema-declared value against the schema node it appears in.
+///
+/// Applies the node's type and `enum`, then recurses into array elements and
+/// object properties so nested constraints are enforced at every depth.
+/// `subject` names what is being checked (`default value`, `enum value`) for
+/// the error message.
+fn validate_value_against_schema(
     path: &str,
     value: &Value,
     schema: &ToolParameterSchema,
     subject: &str,
 ) -> Result<(), ToolError> {
+    if !parameter_accepts_value(value, &schema.kind) {
+        return Err(ToolError::InvalidSchema {
+            path: path.to_owned(),
+            message: format!(
+                "{subject} {value} has type {}, but the schema requires {}",
+                value_type(value),
+                format_types(&schema.kind)
+            ),
+        });
+    }
+
+    if !schema.enumeration.is_empty() && !schema.enumeration.contains(value) {
+        return Err(ToolError::InvalidSchema {
+            path: path.to_owned(),
+            message: format!("{subject} {value} is not allowed by the enum"),
+        });
+    }
+
     if let (Value::Array(values), Some(items)) = (value, schema.items.as_deref()) {
         for (index, value) in values.iter().enumerate() {
-            let item_path = format!("{path}[{index}]");
-            if !parameter_accepts_value(value, &items.kind) {
-                return Err(ToolError::InvalidSchema {
-                    path: item_path,
-                    message: format!(
-                        "{subject} {value} has type {}, but the schema requires {}",
-                        value_type(value),
-                        format_types(&items.kind)
-                    ),
-                });
-            }
-            if !items.enumeration.is_empty() && !items.enumeration.contains(value) {
-                return Err(ToolError::InvalidSchema {
-                    path: item_path,
-                    message: format!("{subject} {value} is not allowed by the item enum"),
-                });
-            }
-            validate_nested_schema_value(&item_path, value, items, subject)?;
+            validate_value_against_schema(&format!("{path}[{index}]"), value, items, subject)?;
         }
     }
 
@@ -261,17 +282,7 @@ fn validate_nested_schema_value(
                 }
                 continue;
             };
-            if !parameter_accepts_value(value, &property.kind) {
-                return Err(ToolError::InvalidSchema {
-                    path: format!("{path}.{name}"),
-                    message: format!(
-                        "{subject} {value} has type {}, but the schema requires {}",
-                        value_type(value),
-                        format_types(&property.kind)
-                    ),
-                });
-            }
-            validate_nested_schema_value(&format!("{path}.{name}"), value, property, subject)?;
+            validate_value_against_schema(&format!("{path}.{name}"), value, property, subject)?;
         }
     }
 

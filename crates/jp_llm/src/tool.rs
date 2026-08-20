@@ -23,7 +23,9 @@ use jp_mcp::{
 use jp_tool::{Action, Outcome, Question};
 use minijinja::{Environment, ErrorKind as MinijinjaErrorKind, value::ValueKind};
 pub use schema::ToolParameterSchema;
-use schema::{format_types, parameter_accepts_value, validate_parameter_schema};
+use schema::{
+    format_types, parameter_accepts_value, types_match, validate_parameter_schema, validate_types,
+};
 use serde_json::{Map, Value, json};
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, BufReader},
@@ -1178,7 +1180,7 @@ async fn resolve_tool(
                 .iter()
                 .map(|(parameter_name, parameter)| {
                     resolve_config_parameter(
-                        &format!("tools.{name}.parameters.{parameter_name}"),
+                        &format!("conversation.tools.{name}.parameters.{parameter_name}"),
                         parameter,
                     )
                     .map(|schema| (parameter_name.clone(), schema))
@@ -1197,7 +1199,7 @@ async fn resolve_tool(
 
     for (parameter_name, parameter) in &definition.parameters {
         validate_parameter_schema(
-            &format!("tools.{name}.parameters.{parameter_name}"),
+            &format!("conversation.tools.{name}.parameters.{parameter_name}"),
             parameter,
         )?;
     }
@@ -1252,7 +1254,7 @@ async fn resolve_mcp_tool(
         let override_cfg = user_overrides.get(param_name.as_str());
         let required_in_mcp = required_properties.iter().any(|p| *p == param_name);
         let param = merge_mcp_parameter(
-            &format!("tools.{name}.parameters.{param_name}"),
+            &format!("conversation.tools.{name}.parameters.{param_name}"),
             opts,
             override_cfg,
             required_in_mcp,
@@ -1404,8 +1406,15 @@ fn merge_mcp_schema_node(
 ) -> Result<ToolParameterSchema, ToolError> {
     let source_kind = parse_schema_kind(path, source)?;
     let override_kind = override_config.and_then(|config| config.kind.as_ref());
+
+    // The resolved schema keeps the server's type declaration, so a malformed
+    // override type list would otherwise never be reported.
+    if let Some(override_kind) = override_kind {
+        validate_types(path, override_kind)?;
+    }
+
     let kind = match (source_kind, override_kind) {
-        (Some(source), Some(config)) if &source != config => {
+        (Some(source), Some(config)) if !types_match(&source, config) => {
             return Err(ToolError::InvalidSchema {
                 path: format!("{path}.type"),
                 message: format!(
@@ -1564,9 +1573,8 @@ fn parse_schema_kind(path: &str, schema: &Value) -> Result<Option<OneOrManyTypes
         };
     }
 
-    let types = schema
-        .get("anyOf")
-        .and_then(Value::as_array)
+    let variants = schema.get("anyOf").and_then(Value::as_array);
+    let types = variants
         .into_iter()
         .flatten()
         .filter_map(|variant| variant.get("type").and_then(Value::as_str))
@@ -1574,6 +1582,19 @@ fn parse_schema_kind(path: &str, schema: &Value) -> Result<Option<OneOrManyTypes
         .collect::<Vec<_>>();
     if types.is_empty() {
         return Ok(None);
+    }
+
+    // A variant carrying no plain `type` (a `$ref` into `$defs`, say) cannot be
+    // represented, so the resolved type set is narrower than the server's
+    // contract. Rejecting instead would fail every query that enables the tool,
+    // so surface it and continue.
+    if variants.is_some_and(|variants| variants.len() > types.len()) {
+        warn!(
+            path,
+            resolved = ?types,
+            "Ignoring `anyOf` variants that declare no JSON type; the schema sent to the \
+             provider is narrower than the MCP server's."
+        );
     }
 
     Ok(Some(OneOrManyTypes::Many(types)))
