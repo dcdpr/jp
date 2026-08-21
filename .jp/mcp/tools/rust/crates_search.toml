@@ -31,6 +31,4 @@ inline_results = "off"
 parameters = "function_call"
 
 [conversation.tools.rust_crates_search.parameters.query]
-type = "string"
-required = true
 summary = "Search query."

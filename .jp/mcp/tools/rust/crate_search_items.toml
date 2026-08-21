@@ -37,18 +37,12 @@ inline_results = "off"
 parameters = "function_call"
 
 [conversation.tools.rust_crate_search_items.parameters.crate_name]
-type = "string"
-required = true
 summary = "Exact name of the crate."
 
 [conversation.tools.rust_crate_search_items.parameters.crate_version]
-type = "string"
-default = "latest"
 summary = "Semver-compatible version, or `latest` for the most recent release."
 
 [conversation.tools.rust_crate_search_items.parameters.query]
-type = "string"
-required = true
 summary = "Partial-match query against item names and paths."
 
 [conversation.tools.rust_crate_search_items.parameters.kinds]
