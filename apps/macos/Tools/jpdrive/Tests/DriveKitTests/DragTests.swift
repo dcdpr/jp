@@ -141,18 +141,69 @@ struct DragTests {
         #expect(root.flag(kAXFrontmostAttribute) == true)
     }
 
-    /// A tree that is not a running application has nothing to activate, and a
-    /// gesture against one is still worth posting: every other assertion in this
-    /// file depends on that.
-    @Test("drags even when the application cannot be brought forward")
-    func dragsWithoutActivating() throws {
+    /// An application that will not come forward cannot be dragged in: the events
+    /// go to whatever owns those screen coordinates, which is the application the
+    /// person at the keyboard is using. Refusing is the only honest outcome, and
+    /// posting anyway is what this pins shut.
+    @Test("refuses to drag when the application cannot be brought forward")
+    func refusesToDragWithoutActivating() throws {
         let root = app()
         root.writeStatus = .cannotComplete
         let poster = FakePoster()
 
-        _ = try Act.run(step(from: (0, 0), to: (1, 1), steps: 2), in: root, poster: poster)
+        let error = try #require(throws: DriveError.self) {
+            try Act.run(step(from: (0, 0), to: (1, 1), steps: 2), in: root, poster: poster)
+        }
 
-        #expect(poster.drags.first?.count == 3)
+        #expect(error.kind == .writeFailed)
+        #expect(poster.drags.isEmpty, "nothing may be posted at a background application")
+    }
+
+    /// An offset is a fraction of the element's frame. Read as a percentage — a
+    /// plausible misreading — `100` aims 80,000 points past an 800pt window, and
+    /// the gesture is posted into global screen space, so it lands on whatever is
+    /// there instead.
+    @Test(
+        "refuses an offset that is not a fraction of the frame",
+        arguments: [100.0, -0.5, 1.5, Double.nan, Double.infinity]
+    )
+    func refusesAnOffsetOutsideTheFrame(dx: Double) throws {
+        let poster = FakePoster()
+
+        let error = try #require(throws: DriveError.self) {
+            try Act.run(step(from: (dx, 0.5), to: (0.5, 0.5)), in: app(), poster: poster)
+        }
+
+        #expect(error.kind == .badUsage)
+        #expect(poster.drags.isEmpty, "nothing may be posted at a coordinate off the element")
+    }
+
+    /// The far endpoint is checked too, and before anything is posted: a drag that
+    /// pressed on the element and released over another application would be worse
+    /// than one that never started.
+    @Test("refuses an out-of-frame destination before posting")
+    func refusesAnOutOfFrameDestination() throws {
+        let poster = FakePoster()
+
+        let error = try #require(throws: DriveError.self) {
+            try Act.run(step(from: (0.5, 0.5), to: (42, 0.5)), in: app(), poster: poster)
+        }
+
+        #expect(error.kind == .badUsage)
+        #expect(poster.drags.isEmpty)
+    }
+
+    /// A count nobody meant should still produce a gesture rather than an error,
+    /// but not one that posts for minutes or cannot allocate its route at all.
+    @Test("clamps a step count above the cap")
+    func clampsAnEnormousStepCount() throws {
+        let poster = FakePoster()
+
+        let result = try Act.run(
+            step(from: (0, 0), to: (1, 1), steps: 100_000_000), in: app(), poster: poster)
+
+        #expect(result.moves == 1000)
+        #expect(poster.drags.first?.count == 1001)
     }
 
     @Test("fails on an element with no frame to measure")

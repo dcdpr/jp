@@ -32,6 +32,13 @@ struct TreeNode: Encodable, Equatable {
     /// the last two are the easiest to mistake for an element having no children at
     /// all.
     let elidedChildren: Int?
+
+    /// Set when the accessibility API refused to read this element.
+    ///
+    /// Absent otherwise. An element that could not be read reports no identifier,
+    /// no label and no children, which is how a bare container reports too — so
+    /// without this a gap in the walk reads as a plain element.
+    let unreadable: Bool?
 }
 
 /// What to walk, and what to keep.
@@ -124,6 +131,7 @@ enum Tree {
         let text = reading.text
 
         let identifier = text[1]
+
         let matches =
             options.identifierPrefix.map { identifier?.hasPrefix($0) ?? false } ?? false
         if matches {
@@ -177,7 +185,8 @@ enum Tree {
             children: children,
             elidedChildren: available.count > children.count
                 ? available.count - children.count
-                : nil
+                : nil,
+            unreadable: reading.failed ? true : nil
         )
     }
 }

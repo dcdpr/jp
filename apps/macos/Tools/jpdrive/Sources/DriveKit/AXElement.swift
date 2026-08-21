@@ -110,12 +110,17 @@ struct AXElement {
         return value
     }
 
-    /// Read several attributes in one round-trip.
+    /// Read several attributes in one round-trip, or `nil` when the call fails.
     ///
     /// Results are positional and the same count as `names`. An attribute that
     /// could not be read arrives as CoreFoundation's null or as an `AXValue`
     /// boxing the error, both of which ``text(_:)`` reports rather than discards.
-    func values(_ names: [String]) -> [CFTypeRef?] {
+    ///
+    /// A `nil` return is the whole call failing, which a target that is busy or
+    /// exiting answers with. Reporting that as a row of absent attributes would
+    /// make an element nothing could be read from look exactly like one that
+    /// reports nothing.
+    func values(_ names: [String]) -> [CFTypeRef?]? {
         guard !names.isEmpty else { return [] }
 
         var raw: CFArray?
@@ -130,7 +135,7 @@ struct AXElement {
             let values = raw as? [CFTypeRef],
             values.count == names.count
         else {
-            return Array(repeating: nil, count: names.count)
+            return nil
         }
 
         return values
@@ -162,7 +167,13 @@ extension AXElement: Element {
     /// Children come back in the same batch as everything else: asking for them
     /// separately would add a hop per element, and every walk asks for them.
     func read(_ names: [String]) -> Reading<AXElement> {
-        let values = self.values(names + [kAXChildrenAttribute])
+        guard let values = self.values(names + [kAXChildrenAttribute]) else {
+            return Reading(
+                text: Array(repeating: nil, count: names.count),
+                children: [],
+                failed: true
+            )
+        }
 
         let children = (values.last.flatMap { $0 } as? [AXUIElement] ?? [])
             .map { AXElement(element: $0) }
@@ -171,6 +182,24 @@ extension AXElement: Element {
             text: values.dropLast().map(Self.optionalText),
             children: children
         )
+    }
+
+    /// Enumerate the element's attributes and read them all.
+    ///
+    /// Two round-trips: one to learn the names, one to read them. Only a dump
+    /// pays that, which is why it is not folded into ``read(_:)``.
+    func reportedAttributes(settable: Bool) -> [Attribute]? {
+        let names = self.names().sorted()
+        guard !names.isEmpty else { return [] }
+        guard let values = values(names) else { return nil }
+
+        return zip(names, values).map { name, value in
+            Attribute(
+                name: name,
+                value: value.map(Self.text) ?? "<null>",
+                settable: settable ? isSettable(name) : nil
+            )
+        }
     }
 
     /// Read a boolean attribute.

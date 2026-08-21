@@ -27,14 +27,18 @@ struct WindowIDReport: Encodable, Equatable {
     /// The application's capturable windows, front to back.
     let windows: [CaptureWindow]
 
-    /// Windows the application has that are not on the active Space.
+    /// Windows the application has that the screen is not currently showing.
     ///
-    /// Reported separately because the two look identical from the outside and
-    /// mean opposite things. A window on another desktop is absent from every
-    /// on-screen enumeration and from the accessibility tree, so an app that has
-    /// one and nothing else is indistinguishable from an app with no window at
-    /// all — except by asking for windows on every Space, which is this list.
-    let otherSpaces: [CaptureWindow]
+    /// Reported separately because such a window is absent from every on-screen
+    /// enumeration and from the accessibility tree, so an app that has one and
+    /// nothing else is indistinguishable from an app with no window at all —
+    /// except by asking for every window regardless, which is this list.
+    ///
+    /// Says nothing about *why* it is not showing. Minimized, hidden, and on
+    /// another Space all land here, and the window server's list carries no flag
+    /// separating them. `jpdrive windows` reads `AXMinimized` from the
+    /// accessibility tree, which distinguishes the first of the three.
+    let offScreen: [CaptureWindow]
 }
 
 /// Resolves an application's window-server identifiers.
@@ -68,8 +72,9 @@ enum WindowIDs {
                 kCGNullWindowID
             ) as? [[String: Any]] ?? []
 
-        // Every Space, not just the active one. The difference between the two
-        // lists is what says a window exists somewhere the screen cannot show it.
+        // Every window, not just the ones on screen. The difference between the
+        // two lists is what says a window exists somewhere the screen is not
+        // showing it.
         let everywhere =
             CGWindowListCopyWindowInfo(
                 [.excludeDesktopElements],
@@ -86,7 +91,7 @@ enum WindowIDs {
         return WindowIDReport(
             screenRecording: CGPreflightScreenCaptureAccess(),
             windows: here,
-            otherSpaces: all.filter { !shown.contains($0.id) }
+            offScreen: all.filter { !shown.contains($0.id) }
         )
     }
 

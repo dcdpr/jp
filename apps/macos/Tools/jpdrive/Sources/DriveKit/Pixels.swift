@@ -99,7 +99,20 @@ enum Pixels {
             )
         }
 
+        // Checked against the image rather than against `to`, which is clamped
+        // below: a `--from` past the edge would otherwise be reported as being
+        // past a `--to` the caller never wrote.
         let from = max(options.from ?? 0, 0)
+        guard from < extent else {
+            throw DriveError(
+                kind: .badUsage,
+                message:
+                    "--from \(from) is outside the image, which is "
+                    + "\(bitmap.width)x\(bitmap.height) pixels",
+                hint: "a scan along a \(options.axis.rawValue) runs from 0 to \(extent - 1)"
+            )
+        }
+
         let to = min(options.to ?? extent - 1, extent - 1)
 
         guard from <= to else {
@@ -239,14 +252,35 @@ private struct Bitmap {
     /// The buffer runs in the same direction: a bitmap context's first row is the
     /// top of what was drawn into it, so a screenshot's rows and this buffer's rows
     /// are the same rows in the same order.
+    ///
+    /// Colour components are divided back out by alpha. The buffer holds them
+    /// premultiplied, which is the only 8-bit RGBA layout a bitmap context
+    /// accepts, and a window capture carries real partial alpha at its rounded
+    /// corners and antialiased edges. Read straight out, a half-transparent red
+    /// reports as a dark red — a colour that was never on screen, in the same
+    /// spelling as one that was.
     func pixel(x: Int, y: Int) -> Pixel {
         let offset = (y * width + x) * 4
+        let alpha = bytes[offset + 3]
 
         return Pixel(
-            red: bytes[offset],
-            green: bytes[offset + 1],
-            blue: bytes[offset + 2],
-            alpha: bytes[offset + 3]
+            red: straight(bytes[offset], alpha),
+            green: straight(bytes[offset + 1], alpha),
+            blue: straight(bytes[offset + 2], alpha),
+            alpha: alpha
         )
+    }
+
+    /// One premultiplied component, divided back out by `alpha`.
+    ///
+    /// A fully transparent pixel carries no colour to recover — every component
+    /// is zero whatever it was before — so it reports as zero rather than as a
+    /// division nobody can perform.
+    private func straight(_ component: UInt8, _ alpha: UInt8) -> UInt8 {
+        guard alpha != 0, alpha != 255 else { return component }
+
+        let recovered = (Double(component) / Double(alpha) * 255).rounded()
+
+        return UInt8(min(recovered, 255))
     }
 }

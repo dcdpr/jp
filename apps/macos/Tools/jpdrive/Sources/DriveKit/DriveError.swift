@@ -48,6 +48,10 @@ struct DriveError: Error, Encodable {
         /// The application reports no element of the requested kind.
         case notFound = "not_found"
 
+        /// The accessibility API refused to read part of the tree, so what it
+        /// holds is unknown rather than known to be absent.
+        case readFailed = "read_failed"
+
         /// The result could not be encoded as JSON.
         case encodingFailed = "encoding_failed"
     }

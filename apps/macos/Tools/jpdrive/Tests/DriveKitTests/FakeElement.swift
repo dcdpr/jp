@@ -26,6 +26,14 @@ final class FakeElement: Element {
     /// What `setFlag` should answer, for exercising a refused write.
     var writeStatus: AXError = .success
 
+    /// Make every read of this element fail as a whole.
+    ///
+    /// What the accessibility API answers for an element whose application is
+    /// busy or exiting. Distinct from an element that simply reports nothing:
+    /// that is the confusion the `failed` flag exists to prevent, so a fake has
+    /// to be able to produce both.
+    var readFails = false
+
     /// Accept writes and discard them.
     ///
     /// The accessibility API lets a target answer `success` and then do nothing,
@@ -75,7 +83,28 @@ final class FakeElement: Element {
     func read(_ names: [String]) -> Reading<FakeElement> {
         reads += 1
         onRead?(self)
+
+        guard !readFails else {
+            return Reading(
+                text: Array(repeating: nil, count: names.count),
+                children: [],
+                failed: true
+            )
+        }
+
         return Reading(text: names.map { attributes[$0] }, children: children)
+    }
+
+    func reportedAttributes(settable: Bool) -> [Attribute]? {
+        guard !readFails else { return nil }
+
+        return attributes.keys.sorted().map { name in
+            Attribute(
+                name: name,
+                value: attributes[name] ?? "<null>",
+                settable: settable ? isSettable(name) : nil
+            )
+        }
     }
 
     func isSettable(_ name: String) -> Bool {

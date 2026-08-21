@@ -1,37 +1,15 @@
 import ApplicationServices
 import Foundation
 
-/// One accessibility attribute, as reported name and rendered value.
-///
-/// A list of pairs rather than a dictionary, so attribute names reach the JSON
-/// exactly as the accessibility API spells them. `JSONEncoder`'s snake-case key
-/// strategy rewrites dictionary keys, which would turn `AXIdentifier` into
-/// `ax_identifier` and make the dump a poor record of what the app reports.
-struct DumpAttribute: Encodable {
-    let name: String
-    let value: String
-
-    /// Whether the accessibility API reports this attribute as writable, when
-    /// settability was asked for.
-    ///
-    /// This decides how the driver changes state. Writing `AXSelected` on a row is
-    /// deterministic; synthesizing a click at a screen coordinate depends on the
-    /// window being frontmost and unobscured.
-    ///
-    /// Absent unless requested: answering it costs one round-trip per attribute,
-    /// which doubles the cost of a walk.
-    let settable: Bool?
-}
-
 /// One element of an application's accessibility tree, with everything it reports.
-struct DumpNode: Encodable {
+struct DumpNode: Encodable, Equatable {
     /// `AXRole`, lifted out of the attributes because it is what a reader scans
     /// for.
     let role: String
 
     /// Every attribute the element reports, minus the two that only lead back into
     /// the tree, sorted by name.
-    let attributes: [DumpAttribute]
+    let attributes: [Attribute]
 
     /// Actions the element accepts, such as `AXPress`.
     let actions: [String]
@@ -44,6 +22,14 @@ struct DumpNode: Encodable {
     /// repeats one row shape a thousand times, so the count is the useful part and
     /// the repetition is not.
     let elidedChildren: Int?
+
+    /// Set when the accessibility API refused to read this element.
+    ///
+    /// Absent otherwise. Without it an element that could not be read reports no
+    /// attributes and no children, which is exactly how an element that has
+    /// neither reports — and a reader has no way to tell a gap in the walk from
+    /// a leaf.
+    let unreadable: Bool?
 }
 
 /// Walks an application's accessibility tree and reports everything it finds.
@@ -90,30 +76,31 @@ enum Dump {
         kAXParentAttribute,
     ]
 
-    private static func node(_ element: AXElement, depth: Int, options: DumpOptions) -> DumpNode
-    {
-        let names =
-            element.names()
-            .filter { !structuralAttributes.contains($0) }
-            .sorted()
+    static func node<E: Element>(_ element: E, depth: Int, options: DumpOptions) -> DumpNode {
+        let reported = element.reportedAttributes(settable: options.settable)
+        let attributes = (reported ?? [])
+            .filter { !structuralAttributes.contains($0.name) }
 
-        let attributes = zip(names, element.values(names)).map { name, value in
-            DumpAttribute(
-                name: name,
-                value: value.map(AXElement.text) ?? "<null>",
-                settable: options.settable ? element.isSettable(name) : nil
-            )
-        }
-
-        let all = depth < options.maxDepth ? element.children : []
-        let walked = options.maxSiblings > 0 ? Array(all.prefix(options.maxSiblings)) : all
+        // Every child the element has, whether or not this walk descends into it.
+        // Counted before the depth cap is applied, because a node stopped at the
+        // cap is otherwise indistinguishable from a leaf.
+        let reading = element.read([])
+        let available = reading.children
+        let descend = depth < options.maxDepth ? available : []
+        let walked =
+            options.maxSiblings > 0
+            ? Array(descend.prefix(options.maxSiblings))
+            : descend
+        let elided = available.count - walked.count
+        let unreadable = reported == nil || reading.failed
 
         return DumpNode(
             role: attributes.first { $0.name == kAXRoleAttribute }?.value ?? "<none>",
             attributes: attributes,
             actions: element.actions,
             children: walked.map { node($0, depth: depth + 1, options: options) },
-            elidedChildren: all.count > walked.count ? all.count - walked.count : nil
+            elidedChildren: elided > 0 ? elided : nil,
+            unreadable: unreadable ? true : nil
         )
     }
 }

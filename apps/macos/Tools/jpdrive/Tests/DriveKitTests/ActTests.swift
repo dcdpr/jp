@@ -49,12 +49,46 @@ struct ActTests {
     }
 
     @Test("select reports the identifier it could not find")
-    func reportsAMissingIdentifier() {
+    func reportsAMissingIdentifier() throws {
         let root = FakeElement.sidebar(rowCount: 3)
 
-        #expect(throws: DriveError.self) {
+        let error = try #require(throws: DriveError.self) {
             try Act.run(.select(.init(identifier: "sidebar.row.nope")), in: root)
         }
+
+        #expect(error.kind == .identifierNotFound)
+    }
+
+    /// A search that could not read part of the tree has not established that the
+    /// element is absent — it may sit under the branch that failed. Reporting a
+    /// clean miss invites the caller to change an identifier that was right, so
+    /// the two answers have to be different.
+    @Test("a miss with an unreadable branch is not reported as a clean miss")
+    func distinguishesAGapFromAMiss() throws {
+        let broken = FakeElement(role: "AXGroup")
+        broken.readFails = true
+        let root = FakeElement(role: "AXApplication", children: [broken])
+
+        let error = try #require(throws: DriveError.self) {
+            try Act.run(.select(.init(identifier: "sidebar.row.0")), in: root)
+        }
+
+        #expect(error.kind == .readFailed)
+        #expect(error.message.contains("could not be read"))
+    }
+
+    /// The other half of the pair: a tree that read cleanly throughout still
+    /// reports a plain miss, so the flag above cannot be firing on everything.
+    @Test("a miss in a fully readable tree stays a clean miss")
+    func aReadableTreeReportsACleanMiss() throws {
+        let readable = FakeElement(role: "AXGroup")
+        let root = FakeElement(role: "AXApplication", children: [readable])
+
+        let error = try #require(throws: DriveError.self) {
+            try Act.run(.select(.init(identifier: "sidebar.row.0")), in: root)
+        }
+
+        #expect(error.kind == .identifierNotFound)
     }
 
     /// An element nothing in its chain can select is a failure, not a fallback onto

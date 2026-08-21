@@ -101,6 +101,28 @@ struct SystemEventPoster: EventPoster {
     }
 }
 
+/// One attribute, as reported name and rendered value.
+///
+/// A list of these rather than a dictionary, so attribute names reach the JSON
+/// exactly as the accessibility API spells them. `JSONEncoder`'s snake-case key
+/// strategy rewrites dictionary keys, which would turn `AXIdentifier` into
+/// `ax_identifier` and make a dump a poor record of what the app reports.
+struct Attribute: Encodable, Equatable {
+    let name: String
+    let value: String
+
+    /// Whether the accessibility API reports this attribute as writable, when
+    /// settability was asked for.
+    ///
+    /// This decides how the driver changes state. Writing `AXSelected` on a row is
+    /// deterministic; synthesizing a click at a screen coordinate depends on the
+    /// window being frontmost and unobscured.
+    ///
+    /// Absent unless requested: answering it costs one round-trip per attribute,
+    /// which doubles the cost of a walk.
+    let settable: Bool?
+}
+
 /// Attribute text and children, read together.
 ///
 /// The pair exists because reading them separately costs an extra round-trip per
@@ -111,6 +133,21 @@ struct Reading<E> {
     let text: [String?]
 
     let children: [E]
+
+    /// Whether the call that produced this failed as a whole.
+    ///
+    /// Distinct from a `nil` in ``text``, which says the element reports no value
+    /// for that one attribute. This says the accessibility API refused the read,
+    /// so every entry is `nil` and ``children`` is empty because nothing could be
+    /// asked — not because the element has none. A target that is busy or exiting
+    /// answers that way, and the two are indistinguishable without this.
+    let failed: Bool
+
+    init(text: [String?], children: [E], failed: Bool = false) {
+        self.text = text
+        self.children = children
+        self.failed = failed
+    }
 }
 
 /// One element of an accessibility tree, as the driver's traversal needs it.
@@ -129,6 +166,16 @@ protocol Element {
     ///
     /// Implementations batch: this is one round-trip in the real one.
     func read(_ names: [String]) -> Reading<Self>
+
+    /// Every attribute the element reports, rendered and sorted by name.
+    ///
+    /// Separate from ``read(_:)``, which asks for a list of names known in
+    /// advance. A dump asks for whatever the element happens to have, which costs
+    /// an extra round-trip to enumerate and is why only a dump does it.
+    ///
+    /// `nil` when the read failed as a whole, which is not the same as an element
+    /// that reports no attributes.
+    func reportedAttributes(settable: Bool) -> [Attribute]?
 
     /// Actions the element accepts, such as `AXPress`.
     ///

@@ -228,4 +228,72 @@ struct PixelsTests {
 
         #expect(report.runs.first?.color == "#DBDBDB")
     }
+
+    /// A window capture carries real partial alpha at its rounded corners and
+    /// antialiased edges, and the bitmap behind it is premultiplied — the only
+    /// 8-bit RGBA layout a context accepts. Read straight out, a half-transparent
+    /// red reports as a dark red: a colour that was never on screen, spelled the
+    /// same way as one that was.
+    ///
+    /// Round-tripped through a PNG rather than asserted on a hand-built `Pixel`,
+    /// because the premultiplication happens in the decode path and a test that
+    /// constructs the pixel itself never reaches it.
+    @Test("recovers the colour behind a partially transparent pixel")
+    func unpremultipliesPartialAlpha() throws {
+        // Left: `#FF0000` at half alpha, stored premultiplied as 128,0,0,128.
+        // Right: fully transparent, which carries no colour to recover.
+        let bytes: [UInt8] = [128, 0, 0, 128, 0, 0, 0, 0]
+
+        let space = try #require(CGColorSpace(name: CGColorSpace.sRGB))
+        let provider = try #require(CGDataProvider(data: Data(bytes) as CFData))
+        let image = try #require(
+            CGImage(
+                width: 2,
+                height: 1,
+                bitsPerComponent: 8,
+                bitsPerPixel: 32,
+                bytesPerRow: 8,
+                space: space,
+                bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue),
+                provider: provider,
+                decode: nil,
+                shouldInterpolate: false,
+                intent: .defaultIntent
+            ))
+
+        let path = NSTemporaryDirectory() + "/jpdrive-alpha-\(UUID().uuidString).png"
+        defer { try? FileManager.default.removeItem(atPath: path) }
+
+        let url = URL(fileURLWithPath: path) as CFURL
+        let destination = try #require(
+            CGImageDestinationCreateWithURL(url, UTType.png.identifier as CFString, 1, nil))
+        CGImageDestinationAddImage(destination, image, nil)
+        #expect(CGImageDestinationFinalize(destination))
+
+        let report = try Pixels.read(
+            PixelOptions(image: path, axis: .row, at: 0, from: nil, to: nil))
+
+        #expect(
+            report.runs == [
+                PixelRun(start: 0, count: 1, color: "#FF000080"),
+                PixelRun(start: 1, count: 1, color: "#00000000"),
+            ]
+        )
+    }
+
+    /// A `--from` past the edge used to be reported as being past a `--to` the
+    /// caller never wrote, because `to` is clamped to the image before the two
+    /// are compared. The message has to name the bound that was actually wrong.
+    @Test("refuses a start offset outside the image")
+    func refusesAStartOutsideTheImage() throws {
+        try withImage(rows: [["#FFFFFF", "#FFFFFF"]]) { path in
+            let error = try #require(throws: DriveError.self) {
+                try Pixels.read(
+                    PixelOptions(image: path, axis: .row, at: 0, from: 150, to: nil))
+            }
+
+            #expect(error.kind == .badUsage)
+            #expect(error.message.contains("--from 150 is outside the image"))
+        }
+    }
 }

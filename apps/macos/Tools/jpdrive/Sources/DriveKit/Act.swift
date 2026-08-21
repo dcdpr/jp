@@ -459,7 +459,7 @@ enum Act {
             return try menu(target, in: root, within: activation)
 
         case .click(let target):
-            return try click(target, in: root, poster: poster)
+            return try click(target, in: root, poster: poster, activation: activation)
 
         case .resize(let target):
             return try resize(target, in: root)
@@ -474,6 +474,16 @@ enum Act {
 
     /// How long a drag pauses between moves when it does not say.
     private static let defaultDragPause = Duration.milliseconds(8)
+
+    /// The most moves a drag will post.
+    ///
+    /// Clamped rather than rejected, for the same reason the count is clamped
+    /// upwards from zero: a caller computing it from a distance should get a
+    /// gesture, not an error. The cap is what keeps an implausible count from
+    /// becoming a run that posts for minutes, or one whose route cannot be
+    /// allocated at all — either of which ends the process without the JSON
+    /// document every call promises.
+    private static let maxDragSteps = 1000
 
     /// Drag the pointer from one point on an element to another.
     private static func drag<E: Element>(
@@ -502,7 +512,10 @@ enum Act {
             )
         }
 
-        let steps = max(target.steps ?? defaultDragSteps, 1)
+        try check(target.from, named: "from")
+        try check(target.to, named: "to")
+
+        let steps = min(max(target.steps ?? defaultDragSteps, 1), maxDragSteps)
         let pause = target.pauseMs.map { Duration.milliseconds($0) } ?? defaultDragPause
 
         let start = point(target.from, in: origin, size)
@@ -527,7 +540,7 @@ enum Act {
         // The cost is that a gesture takes focus. Nothing here can give it back:
         // this process handles one step and exits, so the restore belongs to
         // whatever drives the whole list.
-        activate(root, within: activation)
+        try front(root, within: activation)
         raiseWindow(in: path)
 
         guard poster.drag(through: route, pausing: pause) else {
@@ -546,6 +559,26 @@ enum Act {
             point: "\(start.x),\(start.y) -> \(end.x),\(end.y)",
             moves: route.count - 1
         )
+    }
+
+    /// Check that an offset names a point on the element.
+    ///
+    /// A value outside `0...1` resolves to a screen coordinate outside the
+    /// element's frame, and the gesture is posted into global screen space, so
+    /// the press or release lands on whatever occupies that point instead —
+    /// another application's window, or the desktop. Reading `dx` as a
+    /// percentage rather than a fraction is the mistake this catches, and it
+    /// resolves a long way outside: `100` on an 800pt window aims 80,000 points
+    /// to the right of it.
+    private static func check(_ offset: Step.Offset, named name: String) throws(DriveError) {
+        for (axis, value) in [("dx", offset.dx), ("dy", offset.dy)]
+        where !value.isFinite || value < 0 || value > 1 {
+            throw DriveError(
+                kind: .badUsage,
+                message: "\(name).\(axis) is \(value), which is not a fraction of the frame",
+                hint: "0 is the near edge of the element and 1 the far one, so 0.5 is halfway"
+            )
+        }
     }
 
     /// One fractional offset as a screen coordinate inside a frame.
@@ -619,7 +652,8 @@ enum Act {
     private static func click<E: Element>(
         _ target: Step.Target,
         in root: E,
-        poster: any EventPoster
+        poster: any EventPoster,
+        activation: Duration
     ) throws(DriveError) -> StepResult {
         let path = try find(target.identifier, from: root)
         guard let element = path.last else {
@@ -640,9 +674,13 @@ enum Act {
             )
         }
 
-        // Raised first, because the click lands on whatever is at that coordinate
-        // rather than on the element that named it. A window behind another one
-        // would otherwise have its click swallowed by the window in front.
+        // Brought forward, and then raised, and both are needed — the same pair
+        // `drag` performs, for the same reason. `AXRaise` orders a window within
+        // its own application; ordering *between* applications follows
+        // activation. A driver invoked from a terminal leaves that terminal
+        // frontmost, so raising alone posts the click into the terminal while
+        // reporting the element it aimed at.
+        try front(root, within: activation)
         raiseWindow(in: path)
 
         guard poster.click(at: point) else {
@@ -659,21 +697,6 @@ enum Act {
             role: element.read([kAXRoleAttribute]).text[0] ?? "<none>",
             point: "\(point.x),\(point.y)"
         )
-    }
-
-    /// Bring the application forward, ignoring a refusal.
-    ///
-    /// Best effort, unlike ``front(_:within:)``, which fails a menu step that
-    /// cannot activate: there the activation *is* the step, because AppKit
-    /// disables every item acting on the front window until the application is
-    /// frontmost. A pointer gesture only needs to be on top of the z-order, and a
-    /// tree that is not a running application — a test's — has nothing to
-    /// activate and a gesture against it is still worth posting.
-    private static func activate<E: Element>(_ root: E, within timeout: Duration) {
-        guard root.flag(kAXFrontmostAttribute) != true else { return }
-        guard root.setFlag(kAXFrontmostAttribute, true) == .success else { return }
-
-        _ = poll(untilTrue: { root.flag(kAXFrontmostAttribute) == true }, within: timeout)
     }
 
     /// Bring the window holding the addressed element to the front, if it has one.
@@ -953,7 +976,13 @@ enum Act {
     /// Bring the application forward, and wait until it reports that it is.
     ///
     /// Writing `AXFrontmost` is a request. The window server grants it a moment
-    /// later, and the menu validation that depends on it later still.
+    /// later, and whatever depends on it later still.
+    ///
+    /// Failing rather than carrying on is the point. Every caller does something
+    /// that only means what it says once the application is in front: a menu item
+    /// acting on the front window is disabled until then, and a synthesized
+    /// pointer event goes to whoever owns the screen coordinate, which is the
+    /// application the person at the keyboard is using.
     private static func front<E: Element>(
         _ root: E, within timeout: Duration
     ) throws(DriveError) {
@@ -964,7 +993,7 @@ enum Act {
             throw DriveError(
                 kind: .writeFailed,
                 message: "bringing the application forward answered \(status.name)",
-                hint: "a menu item that acts on the front window is disabled until it is"
+                hint: "the step cannot be trusted to reach the app while it is behind another"
             )
         }
 
@@ -1193,10 +1222,15 @@ enum Act {
         -> [E]
     {
         var stack = [[root]]
+        var unreadable = 0
 
         while let path = stack.popLast() {
             guard let element = path.last else { continue }
             let reading = element.read(searchBatch)
+
+            if reading.failed {
+                unreadable += 1
+            }
 
             if reading.text[0] == identifier {
                 return path
@@ -1207,6 +1241,20 @@ enum Act {
             for child in reading.children.reversed() {
                 stack.append(path + [child])
             }
+        }
+
+        // A miss with a gap in it is not a miss. The element may sit under one of
+        // the branches that could not be read, and reporting a clean
+        // `identifier_not_found` invites the caller to change an identifier that
+        // was right all along.
+        guard unreadable == 0 else {
+            throw DriveError(
+                kind: .readFailed,
+                message:
+                    "\(identifier) was not found, and \(unreadable) element(s) could not be "
+                    + "read",
+                hint: "the application may be busy or exiting; the identifier may exist"
+            )
         }
 
         throw DriveError(

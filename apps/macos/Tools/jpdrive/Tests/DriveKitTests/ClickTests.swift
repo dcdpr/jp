@@ -41,6 +41,36 @@ struct ClickTests {
         #expect(result.point == "120.0,340.0")
     }
 
+    /// `AXRaise` orders a window within its own application; ordering *between*
+    /// applications follows activation. The driver is invoked from a terminal, so
+    /// without this the terminal stays frontmost and the click lands there while
+    /// the result names the element it aimed at.
+    @Test("brings the application forward before clicking")
+    func activatesTheApplication() throws {
+        let root = app()
+
+        _ = try Act.run(
+            .click(.init(identifier: "toolbar.open")), in: root, poster: FakePoster())
+
+        #expect(root.flag(kAXFrontmostAttribute) == true)
+    }
+
+    /// Posting into another application's window is worse than not clicking, so a
+    /// refused activation stops the step rather than aiming anyway.
+    @Test("refuses to click when the application cannot be brought forward")
+    func refusesToClickWithoutActivating() throws {
+        let root = app()
+        root.writeStatus = .cannotComplete
+        let poster = FakePoster()
+
+        let error = try #require(throws: DriveError.self) {
+            try Act.run(.click(.init(identifier: "toolbar.open")), in: root, poster: poster)
+        }
+
+        #expect(error.kind == .writeFailed)
+        #expect(poster.clicks.isEmpty, "nothing may be posted at a background application")
+    }
+
     /// The event goes to whatever occupies the coordinate, so a window behind
     /// another one would have its click swallowed. Raising is what makes the
     /// coordinate mean the element that named it.

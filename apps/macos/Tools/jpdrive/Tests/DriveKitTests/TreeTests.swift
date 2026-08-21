@@ -148,6 +148,25 @@ struct TreeTests {
         #expect(with.frame == "0.0,0.0 100.0x100.0")
     }
 
+    /// An element the accessibility API refused reports no identifier, no label
+    /// and no children — which is how a bare container reports too. Without the
+    /// marker a gap in the walk reads as a plain element that is really there.
+    @Test("an element that could not be read is marked")
+    func marksAnUnreadableElement() throws {
+        let broken = FakeElement(role: "AXGroup", identifier: "gone")
+        broken.readFails = true
+        let root = FakeElement(role: "AXApplication", children: [broken])
+
+        let tree = try #require(Tree.walk(from: root, options: options()))
+
+        #expect(tree.unreadable == nil)
+
+        let child = try #require(tree.children.first)
+        #expect(child.unreadable == true)
+        #expect(child.identifier == nil)
+        #expect(child.role == "<none>")
+    }
+
     /// An attribute the element does not report must arrive as absent, not as the
     /// text of whatever error the accessibility API answered with.
     @Test("absent attributes are absent, not error text")
