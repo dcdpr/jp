@@ -195,12 +195,17 @@ struct DragTests {
 
     /// A count nobody meant should still produce a gesture rather than an error,
     /// but not one that posts for minutes or cannot allocate its route at all.
+    ///
+    /// Any value above the cap proves it, so this one is small enough that the
+    /// test survives its own failure: with the clamp reverted, a count in the
+    /// millions allocates its whole route before the assertion runs and takes the
+    /// runner down instead of going red.
     @Test("clamps a step count above the cap")
     func clampsAnEnormousStepCount() throws {
         let poster = FakePoster()
 
         let result = try Act.run(
-            step(from: (0, 0), to: (1, 1), steps: 100_000_000), in: app(), poster: poster)
+            step(from: (0, 0), to: (1, 1), steps: 5000), in: app(), poster: poster)
 
         #expect(result.moves == 1000)
         #expect(poster.drags.first?.count == 1001)
