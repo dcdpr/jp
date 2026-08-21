@@ -21,7 +21,7 @@ fn test_cargo_test_success() {
     let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;
     let runner = MockProcessRunner::success(stdout);
 
-    let result = cargo_test_impl(&ctx.root, None, None, false, false, &runner)
+    let result = cargo_test_impl(&ctx.root, "-W warnings", None, None, false, false, &runner)
         .unwrap()
         .into_content()
         .unwrap();
@@ -43,7 +43,7 @@ fn test_cargo_test_with_failure() {
     let stdout = r#"{"type":"test","event":"failed","name":"my_crate$tests::my_test","stdout":"assertion failed"}"#;
     let runner = MockProcessRunner::success(stdout);
 
-    let result = cargo_test_impl(&ctx.root, None, None, false, false, &runner)
+    let result = cargo_test_impl(&ctx.root, "-W warnings", None, None, false, false, &runner)
         .unwrap()
         .into_content()
         .unwrap();
@@ -82,7 +82,7 @@ fn no_tests_ran_error_is_bounded() {
         .expect_any()
         .returns_error(&stderr);
 
-    let error = cargo_test_impl(&ctx.root, None, None, false, false, &runner)
+    let error = cargo_test_impl(&ctx.root, "-W warnings", None, None, false, false, &runner)
         .expect_err("a run with zero tests is an error")
         .to_string();
 
@@ -125,7 +125,7 @@ fn failure_output_is_bounded_across_the_whole_run() {
         .join("\n");
     let runner = MockProcessRunner::success(stdout);
 
-    let content = cargo_test_impl(&ctx.root, None, None, false, false, &runner)
+    let content = cargo_test_impl(&ctx.root, "-W warnings", None, None, false, false, &runner)
         .unwrap()
         .unwrap_content();
 
@@ -174,7 +174,7 @@ fn failure_blocks_are_bounded_when_captured_output_is_empty() {
         .join("\n");
     let runner = MockProcessRunner::success(stdout);
 
-    let content = cargo_test_impl(&ctx.root, None, None, false, false, &runner)
+    let content = cargo_test_impl(&ctx.root, "-W warnings", None, None, false, false, &runner)
         .unwrap()
         .unwrap_content();
 
@@ -235,6 +235,46 @@ impl ProcessRunner for EnvCapturingRunner {
     }
 }
 
+/// `cargo test` was the one compiling tool that never set `RUSTFLAGS`, so it
+/// inherited `rustflags` from `.cargo/config.toml` while its siblings overrode
+/// them.
+/// That both thrashed a shared target directory and, in one workspace, applied
+/// a flag that broke proc-macro crates outright.
+#[test]
+fn test_rustflags_reaches_cargo() {
+    let dir = tempdir().unwrap();
+    let ctx = Context {
+        root: dir.path().to_owned(),
+        action: Action::Run,
+        access: None,
+        workspace_id: "test".into(),
+        conversation_id: "test".into(),
+    };
+
+    let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;
+    let runner: EnvCapturingRunner = MockProcessRunner::success(stdout).into();
+    let _result = cargo_test_impl(
+        &ctx.root,
+        "-W warnings -Zthreads=0",
+        None,
+        None,
+        false,
+        false,
+        &runner,
+    )
+    .unwrap();
+
+    assert_eq!(
+        runner
+            .captured_env()
+            .iter()
+            .find(|(k, _)| k == "RUSTFLAGS")
+            .map(|(_, v)| v.as_str()),
+        Some("-W warnings -Zthreads=0"),
+        "the merged flags must reach cargo, or `.cargo/config.toml` silently wins",
+    );
+}
+
 #[test]
 fn test_backtrace_disabled_by_default() {
     let dir = tempdir().unwrap();
@@ -248,7 +288,8 @@ fn test_backtrace_disabled_by_default() {
 
     let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;
     let runner: EnvCapturingRunner = MockProcessRunner::success(stdout).into();
-    let _result = cargo_test_impl(&ctx.root, None, None, false, false, &runner).unwrap();
+    let _result =
+        cargo_test_impl(&ctx.root, "-W warnings", None, None, false, false, &runner).unwrap();
 
     assert_eq!(
         runner
@@ -273,7 +314,8 @@ fn test_checksum_freshness_disabled_by_default() {
 
     let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;
     let runner: EnvCapturingRunner = MockProcessRunner::success(stdout).into();
-    let _result = cargo_test_impl(&ctx.root, None, None, false, false, &runner).unwrap();
+    let _result =
+        cargo_test_impl(&ctx.root, "-W warnings", None, None, false, false, &runner).unwrap();
 
     assert!(
         !runner
@@ -297,7 +339,8 @@ fn test_checksum_freshness_enabled() {
 
     let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;
     let runner: EnvCapturingRunner = MockProcessRunner::success(stdout).into();
-    let _result = cargo_test_impl(&ctx.root, None, None, false, true, &runner).unwrap();
+    let _result =
+        cargo_test_impl(&ctx.root, "-W warnings", None, None, false, true, &runner).unwrap();
 
     assert_eq!(
         runner
@@ -322,7 +365,8 @@ fn test_backtrace_enabled() {
 
     let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;
     let runner: EnvCapturingRunner = MockProcessRunner::success(stdout).into();
-    let _result = cargo_test_impl(&ctx.root, None, None, true, false, &runner).unwrap();
+    let _result =
+        cargo_test_impl(&ctx.root, "-W warnings", None, None, true, false, &runner).unwrap();
 
     assert_eq!(
         runner

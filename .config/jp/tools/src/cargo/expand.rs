@@ -15,15 +15,24 @@ const MAX_EXPANDED_BYTES: usize = 100_000;
 
 pub(crate) async fn cargo_expand(
     root: &Utf8Path,
+    rustflags: &str,
     item: String,
     package: Option<String>,
     checksum_freshness: bool,
 ) -> ToolResult {
-    cargo_expand_impl(root, &item, package, checksum_freshness, &DuctProcessRunner)
+    cargo_expand_impl(
+        root,
+        rustflags,
+        &item,
+        package,
+        checksum_freshness,
+        &DuctProcessRunner,
+    )
 }
 
 fn cargo_expand_impl<R: ProcessRunner>(
     root: &Utf8Path,
+    rustflags: &str,
     item: &str,
     package: Option<String>,
     checksum_freshness: bool,
@@ -36,7 +45,7 @@ fn cargo_expand_impl<R: ProcessRunner>(
     }
     args.push(item);
 
-    let mut env = vec![("RUST_BACKTRACE", "1")];
+    let mut env = vec![("RUST_BACKTRACE", "1"), ("RUSTFLAGS", rustflags)];
     if checksum_freshness {
         // Use content checksums instead of file mtimes for cargo's freshness
         // checks, so that sibling checkouts (git worktrees) sharing a target

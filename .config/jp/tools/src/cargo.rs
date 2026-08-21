@@ -1,3 +1,5 @@
+use std::time::{Duration, Instant};
+
 use camino::{Utf8Path, Utf8PathBuf};
 use jp_tool::{AccessPolicy, Capability, Outcome};
 use serde_json::Value;
@@ -5,7 +7,7 @@ use serde_json::Value;
 use crate::{
     Context, Tool,
     fs::utils::{authorize, resolve_workspace_path},
-    util::{ToolResult, error, unknown_tool},
+    util::{OneOrMany, ToolResult, error, unknown_tool},
 };
 
 mod check;
@@ -65,14 +67,39 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
         Err(message) => return error(message),
     };
 
+    // Flags to append to `RUSTFLAGS`, set via `options.rustflags`. Malformed
+    // values are refused for the same reason as `root`: silently ignoring them
+    // would compile with flags the caller believes are in effect.
+    let rustflags = match t.options.get("rustflags") {
+        None | Some(Value::Null) => rustflags(&[]),
+        Some(value) => match serde_json::from_value::<OneOrMany<String>>(value.clone()) {
+            Ok(flags) => rustflags(&flags.into_vec()),
+            Err(_) => {
+                return error(format!(
+                    "The `rustflags` tool option must be a string or an array of strings, got \
+                     `{value}`."
+                ));
+            }
+        },
+    };
+
+    let started = Instant::now();
     let outcome = match subcommand {
-        "check" => cargo_check(&root, t.opt("package")?, checksum_freshness).await,
+        "check" => cargo_check(&root, &rustflags, t.opt("package")?, checksum_freshness).await,
         "expand" => {
-            cargo_expand(&root, t.req("item")?, t.opt("package")?, checksum_freshness).await
+            cargo_expand(
+                &root,
+                &rustflags,
+                t.req("item")?,
+                t.opt("package")?,
+                checksum_freshness,
+            )
+            .await
         }
         "test" => {
             cargo_test(
                 &root,
+                &rustflags,
                 t.opt("package")?,
                 t.opt("testname")?,
                 t.opt("backtrace")?,
@@ -80,17 +107,84 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
             )
             .await
         }
-        "format" => cargo_format(&root, t.opt("package")?).await,
+        "format" => cargo_format(&root, &rustflags, t.opt("package")?).await,
         "install_tools" => cargo_install_tools(&root).await,
         "update" => cargo_update(&root, t.req("packages")?).await,
         _ => return unknown_tool(t),
     };
+
+    let outcome = note_duration(outcome, started.elapsed());
 
     if root == ctx.root {
         return outcome;
     }
 
     note_root(outcome, &root)
+}
+
+/// Append how long the cargo invocation took.
+///
+/// Wall-clock duration is the whole signal when tuning compile times, and a
+/// caller reading only the tool's text cannot otherwise tell a warm cache from
+/// a full rebuild — the two are indistinguishable when both end in "Check
+/// succeeded".
+/// Failures are timed too: a three-second failure and a three-minute one call
+/// for different responses.
+fn note_duration(outcome: ToolResult, elapsed: Duration) -> ToolResult {
+    let note = format!("(took {})", format_duration(elapsed));
+
+    match outcome {
+        Ok(Outcome::Success { content }) => Ok(Outcome::Success {
+            content: format!("{content}\n\n{note}"),
+        }),
+        Ok(Outcome::Error {
+            message,
+            trace,
+            transient,
+        }) => Ok(Outcome::Error {
+            message: format!("{message}\n\n{note}"),
+            trace,
+            transient,
+        }),
+        Err(error) => Err(format!("{error}\n\n{note}").into()),
+        other => other,
+    }
+}
+
+/// Render a duration at a precision that matches how it will be read.
+///
+/// Sub-minute builds are compared against each other, where a tenth of a second
+/// distinguishes a warm cache from a small rebuild; past a minute nobody cares
+/// about the fraction.
+fn format_duration(elapsed: Duration) -> String {
+    let seconds = elapsed.as_secs();
+
+    if seconds >= 60 {
+        return format!("{}m {}s", seconds / 60, seconds % 60);
+    }
+
+    format!("{:.1}s", elapsed.as_secs_f64())
+}
+
+/// Warnings are reported, not fatal: these tools surface diagnostics rather
+/// than failing on them, and CI runs its own `-D warnings` pass.
+const BASE_RUSTFLAGS: &str = "-W warnings";
+
+/// Build the `RUSTFLAGS` value, appending any configured flags to the base.
+///
+/// Setting `RUSTFLAGS` at all overrides `rustflags` from `.cargo/config.toml`
+/// wholesale, so a workspace that relies on those (a linker choice, extra `-Z`
+/// flags) has to restate them through `options.rustflags`.
+///
+/// Every compiling cargo tool sets the variable, so they agree on the flag set
+/// and a shared target directory stays warm when alternating between them.
+/// Configured flags come last, so they win over the base.
+fn rustflags(extra: &[String]) -> String {
+    if extra.is_empty() {
+        return BASE_RUSTFLAGS.to_owned();
+    }
+
+    format!("{BASE_RUSTFLAGS} {}", extra.join(" "))
 }
 
 /// Capabilities a cargo subcommand needs on the directory it runs in.
