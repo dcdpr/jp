@@ -21,12 +21,20 @@ extension UISuite {
     @Suite("PointerCursor")
     @MainActor
     struct PointerCursorTests {
+        /// How long to let the window server settle before reading the cursor for
+        /// the baseline.
+        ///
+        /// Shorter than the usual timeout because the baseline is a negative: a
+        /// healthy run spends the whole of it confirming that nothing happened.
+        private static let baselineSettle: TimeInterval = 1
+
         /// The pointer becomes the horizontal-resize cursor over the strip that
         /// resizes the sidebar.
         ///
-        /// Dragging that strip works, and the view asks for the right cursor over
-        /// the right area, and the pointer still does not change — the request is
-        /// made and not delivered. Until this passes, that is unfixed.
+        /// This was believed unfixed — the view asking for a cursor it never got.
+        /// It was not: the baseline below could never be met, so the run always
+        /// stopped before reaching the assertion, and nobody had seen the result
+        /// it was reporting. `pointerStyle(.columnResize)` delivers.
         @Test("shows the horizontal-resize cursor over the pane divider")
         func showsResizeCursorOverTheDivider() {
             let fixture = try? ConversationFixtures.make()
@@ -44,25 +52,32 @@ extension UISuite {
             // The baseline, and it is not optional. `NSCursor.currentSystem` reads
             // the cursor for the whole machine, so a column-resize cursor left
             // showing by anything at all would pass the assertion below without
-            // this app having done a thing. Establishing the arrow first turns "it
-            // is the right cursor" into "it changed to the right cursor".
+            // this app having done a thing.
+            //
+            // Asked as "not already the resize cursor" rather than "is the arrow",
+            // because the arrow cannot be recognised: `NSCursor.arrow.image` does
+            // not match the bytes the system reports while showing it, so
+            // `waitForCursor(.arrow)` never returns true and the baseline could
+            // never be met. See `cursorIs`.
             //
             // The conversation list rather than the transcript: the transcript does
             // not exist until something is selected, and hovering a missing element
             // fails without stopping the test — which is how an earlier version of
             // this passed with no baseline at all.
             driven.sidebar.hover()
-            let arrowFirst = driven.waitForCursor(.arrow)
+            let alreadyResizing = driven.waitForCursor(
+                .columnResize,
+                timeout: Self.baselineSettle
+            )
 
             #expect(
-                arrowFirst,
+                !alreadyResizing,
                 """
-                over the conversation list the pointer was \(driven.describeCursor()) \
-                rather than the arrow, so this run cannot say whether the divider \
-                changed anything.
+                the column-resize cursor was already showing over the conversation \
+                list, so this run cannot say whether the divider changed anything.
                 """
             )
-            guard arrowFirst else { return }
+            guard !alreadyResizing else { return }
 
             driven.divider.hover()
 
@@ -75,8 +90,7 @@ extension UISuite {
                 changed,
                 """
                 the pointer over the pane divider did not become the column-resize \
-                cursor. It stayed \(driven.describeCursor()). The strip drags \
-                correctly, so the gesture reaches it and the pointer does not.
+                cursor. It stayed \(driven.describeCursor()).
                 """
             )
         }

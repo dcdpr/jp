@@ -16,10 +16,9 @@ extension UISuite {
 
         /// How far the drag moves the window's right edge, in points.
         ///
-        /// Outwards. A window opened fresh sits at its minimum width, because the
-        /// scene names no default size and SwiftUI takes the smallest its content
-        /// allows — so a drag inwards has nowhere to go, moves the pointer, resizes
-        /// nothing, and delivers no frames at all.
+        /// Outwards, which is always possible: every launch pins the window to
+        /// ``AppUnderTest/windowFrame`` at the left of the screen, so there is room
+        /// to the right of it whatever the last run did.
         private static let dragBy: CGFloat = 220
 
         /// The whole point: text re-wraps on every frame of a window drag, not
@@ -100,16 +99,18 @@ extension UISuite {
 
         /// Drag the window's right edge outwards, once.
         ///
-        /// One direction and no attempt to put the window back. A coordinate is
+        /// One gesture, and no attempt to put the window back. A coordinate is
         /// resolved against its element's frame at the moment it is *used*, not
         /// when it is made, so a second gesture written against the same two
         /// coordinates re-resolves both against the window the first one just
-        /// narrowed: the return drag starts inside the window body and pulls a
+        /// moved: the return drag starts inside the window body and pulls a
         /// stretch of empty transcript instead of the edge.
         ///
-        /// Nothing needs the width restored. This suite launches its own app and
-        /// terminates it, and the assertion is about the frames during the drag
-        /// rather than the size it ended on.
+        /// Nothing needs the width restored, and nothing depends on where the last
+        /// run left it: every launch pins the frame. Before that, the runs walked
+        /// the window rightwards until it met the screen, after which this drag
+        /// moved the pointer, resized nothing, delivered no frames, and failed with
+        /// "the app traced no window drag".
         ///
         /// The window is raised by the click that preceded this, so the edge is
         /// where the tree says it is.

@@ -50,9 +50,11 @@ enum Quiescence {
     /// gained an argument, or that returns something other than `void`, would
     /// be called with the wrong frame and go wrong somewhere unrelated. `v` is
     /// void, `@0:8` the receiver and selector every method takes, and each `B`
-    /// a `_Bool` argument. `B` rather than `c` also pins this to a machine
-    /// where `BOOL` is `_Bool` — the Swift `Bool` the blocks below are written
-    /// with matches that and not the `signed char` an Intel Mac would want.
+    /// a `_Bool` argument.
+    ///
+    /// `B` rather than `c` is not an architecture assumption: these parameters
+    /// are `_Bool`, not `BOOL`, so they encode as `B` under x86_64 as well.
+    /// Verified by reading the encoding out of the x86_64 slice under Rosetta.
     private static func install() -> String? {
         guard let process: AnyClass = NSClassFromString(className) else {
             return "XCTest no longer has a class named \(className)."

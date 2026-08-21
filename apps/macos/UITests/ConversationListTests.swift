@@ -79,6 +79,21 @@ extension UISuite {
             driven.filter.click()
             driven.filter.typeText("Release")
 
+            // The suite shares one app, and every test after this one addresses
+            // a row by identifier. A filter left set hides most of them, so a
+            // failure here would fail the rest of the suite for a reason that
+            // has nothing to do with what they check — and the guard below is
+            // exactly the path a filtering regression takes.
+            //
+            // Cleared by keyboard rather than through the button, because the
+            // button is the other half of what this test is checking. Costs a
+            // few hundred milliseconds on the passing path, which is worth it.
+            defer {
+                driven.filter.click()
+                driven.app.typeKey("a", modifierFlags: .command)
+                driven.app.typeKey(.delete, modifierFlags: [])
+            }
+
             guard driven.expectDisappears(hidden, "the Reading list row, once filtered")
             else { return }
 
@@ -168,7 +183,7 @@ extension UISuite {
             driven.row(ConversationFixtures.readingList).rightClick()
             driven.chooseContextMenuItem("Copy Link")
 
-            #expect(fixture.copiedText() == ConversationFixtures.readingList.uri)
+            driven.expectCopied(ConversationFixtures.readingList.uri, to: fixture)
         }
 
         /// Edit ▸ Copy Link acts on the sidebar selection, so it is greyed out
@@ -192,14 +207,21 @@ extension UISuite {
                 driven.expectDisappears(driven.transcript, "the transcript, after Escape")
             else { return }
 
+            // Presence and enablement asserted separately. `menuItemIsEnabled`
+            // is false for an item that is absent as well as one that is greyed
+            // out, so on its own it would pass a regression that leaves the item
+            // out entirely while nothing is selected and inserts it once
+            // something is — the copy below would then succeed and the whole
+            // test would agree.
             let edit = driven.openMenu("Edit")
+            #expect(driven.menuItemExists("Copy Link", in: edit))
             #expect(driven.menuItemIsEnabled("Copy Link", in: edit) == false)
             driven.closeMenu()
 
             driven.row(ConversationFixtures.configPipeline).click()
             driven.chooseMenuItem("Copy Link", in: "Edit")
 
-            #expect(fixture.copiedText() == ConversationFixtures.configPipeline.uri)
+            driven.expectCopied(ConversationFixtures.configPipeline.uri, to: fixture)
         }
 
         /// The window holds its two panes itself rather than in a

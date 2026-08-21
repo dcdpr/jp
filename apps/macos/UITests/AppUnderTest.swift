@@ -86,6 +86,20 @@ struct AppUnderTest {
     /// covers slower work rather than raising it here.
     static let timeout: TimeInterval = 1
 
+    /// The frame every launched app starts at, as `<width>x<height>`.
+    ///
+    /// Small enough to leave room on any screen worth running tests on, for a
+    /// test that drags the window wider. Large enough to show a conversation.
+    static let windowFrame = "1000x700"
+
+    /// The variable the app reads that frame from.
+    ///
+    /// Spelled out rather than referenced: a UI test bundle drives the app from
+    /// another process and cannot import it. `FixedWindowFrameTests` in the unit
+    /// tests pins the app's own constant to this string, so renaming one without
+    /// the other fails there.
+    static let windowFrameKey = "JP_WINDOW_FRAME"
+
     /// Launch against `fixture` and wait until the conversation list is on
     /// screen.
     ///
@@ -107,10 +121,28 @@ struct AppUnderTest {
         }
 
         let app = XCUIApplication()
-        app.launchEnvironment = fixture.environment
+
+        // The menu titles AppKit supplies — Edit, View, Window, Enter Full
+        // Screen, Merge All Windows — are localized, and this suite addresses
+        // them by their English names. Unpinned, they are whatever the machine
+        // running the tests prefers, and every menu test fails on a Mac set to
+        // another language.
+        app.launchArguments = ["-AppleLanguages", "(en)", "-AppleLocale", "en_US"]
+
+        var environment = fixture.environment
         if !keepingWindowState {
-            app.launchArguments = ["-ApplePersistenceIgnoreState", "YES"]
+            app.launchArguments += ["-ApplePersistenceIgnoreState", "YES"]
+
+            // Saved state and autosaved window frames are two mechanisms, and the
+            // launch argument above only disables the first. Without this the
+            // window opens at whatever size the previous run left it, so a suite
+            // that resizes hands the next one a different starting point — and one
+            // that grows the window eventually hands it a window against the edge
+            // of the screen with nowhere left to grow.
+            environment[Self.windowFrameKey] = Self.windowFrame
         }
+
+        app.launchEnvironment = environment
         app.launch()
 
         let driven = AppUnderTest(app: app)
@@ -512,6 +544,44 @@ struct AppUnderTest {
         let shot = capture(description)
         record(
             "\(description) never went away within \(timeout)s. On screen: tmp/uitests/\(shot)",
+            sourceLocation: sourceLocation
+        )
+        return false
+    }
+
+    /// Wait until `fixture`'s pasteboard holds `text`.
+    ///
+    /// Polled rather than read once. The quiescence waits are off, so a
+    /// synthesized click returns before the app has finished handling it —
+    /// measured at 71ms of app work after `click()` had already come back — and
+    /// reading the pasteboard on the next statement races that work.
+    ///
+    /// Slept between reads, unlike the element waits: a pasteboard read is cheap
+    /// enough to spin thousands of times a second, and the loop would compete
+    /// with the app for the core it is waiting on.
+    @discardableResult
+    func expectCopied(
+        _ text: String,
+        to fixture: WorkspaceFixture,
+        timeout: TimeInterval = AppUnderTest.timeout,
+        sourceLocation: SourceLocation = #_sourceLocation
+    ) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        var last: String?
+
+        repeat {
+            last = fixture.copiedText()
+            if last == text {
+                return true
+            }
+            Thread.sleep(forTimeInterval: 0.01)
+        } while Date() < deadline
+
+        record(
+            """
+            the pasteboard never held \(text.debugDescription) within \(timeout)s. \
+            It held \(last.map { $0.debugDescription } ?? "nothing").
+            """,
             sourceLocation: sourceLocation
         )
         return false
