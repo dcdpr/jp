@@ -223,7 +223,13 @@ expression: v
       "type": "tool_call_request",
       "id": "run_me_2",
       "name": "run_me",
-      "arguments": {}
+      "arguments": {
+        "bar": [
+          "Zm9v",
+          "YmFy"
+        ],
+        "foo": "cmFuZG9tX3N0cmluZ18xMjM0NQ=="
+      }
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
@@ -235,7 +241,7 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "It looks like the tool executed successfully and returned `working!`. Since I wasn't able to see the specific output of the tool, could you provide more details or let me know what kind of task you'd like it to perform? For example, if you want to run a mathematical calculation, analyze data, or interact with an API, please specify the arguments or context you need."
+      "message": "The tool has been executed successfully with the arguments `{\"bar\": [\"foo\", \"bar\"], \"foo\": \"random_string_12345\"}`. \n\nLet me know if you'd like to run another iteration or try something else! 😊"
     }
   ]
 }

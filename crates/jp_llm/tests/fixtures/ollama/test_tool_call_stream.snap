@@ -11,23 +11,23 @@ expression: v
                     ToolCallRequest {
                         id: "run_me_2",
                         name: "run_me",
-                        arguments: {},
+                        arguments: {
+                            "bar": Array [
+                                String("foo"),
+                            ],
+                            "foo": String("foo"),
+                        },
                     },
                 ),
                 metadata: {},
             },
         ),
-        Finished(
-            Completed,
-        ),
-    ],
-    [
         Flushed(
             ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "The tool ran successfully! It output: `working!`. \n\nIs there a specific task or calculation you'd like me to try next? 😊",
+                        message: "I will use default parameters to run the tool. I'll select 'foo' from the allowed options for both arguments, with one as a string and one as an array containing that same option.",
                     },
                 ),
                 metadata: {},
@@ -37,4 +37,5 @@ expression: v
             Completed,
         ),
     ],
+    [],
 ]

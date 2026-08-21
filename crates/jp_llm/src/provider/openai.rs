@@ -4,7 +4,6 @@ use async_trait::async_trait;
 use base64::Engine as _;
 use chrono::NaiveDate;
 use futures::{StreamExt as _, TryStreamExt as _, stream};
-use indexmap::IndexMap;
 use jp_attachment::AttachmentContent;
 use jp_config::{
     assistant::tool_choice::ToolChoice,
@@ -39,7 +38,7 @@ use crate::{
     provider::trace_to_tmpfile,
     query::ChatQuery,
     stream::with_tool_call_keepalive,
-    tool::{ToolDefinition, ToolParameterSchema},
+    tool::ToolDefinition,
 };
 
 static PROVIDER: ProviderId = ProviderId::Openai;
@@ -1638,8 +1637,8 @@ impl TryFrom<&OpenaiConfig> for Openai {
 ///    otherwise refuse.
 /// 2. The Python SDK doesn't inject nullability — Pydantic emits the `anyOf:
 ///    [..., null]` form upstream.
-///    Our function-calling pipeline goes through `ToolParameterSchema` which
-///    encodes optionality as `required: bool`, so we have to bridge that here.
+///    A tool schema states optionality through its `required` list, so the
+///    nullable form has to be produced here.
 ///
 /// See: <https://platform.openai.com/docs/guides/structured-outputs>
 fn ensure_strict_schema(schema: &mut Value) {
@@ -1784,47 +1783,34 @@ fn convert_tool_choice(choice: ToolChoice) -> types::ToolChoice {
     }
 }
 
-pub(crate) fn parameters_with_strict_mode(
-    parameters: IndexMap<String, ToolParameterSchema>,
-    strict: bool,
-) -> Map<String, Value> {
-    let required = parameters
-        .iter()
-        .filter(|(_, cfg)| strict || cfg.required)
-        .map(|(k, _)| k.clone())
-        .collect::<Vec<_>>();
+/// Adapt a tool's parameters schema to what the API accepts.
+///
+/// The document arrives as its source declared it, `$defs` and references
+/// included, both of which OpenAI supports natively.
+/// In strict mode [`ensure_strict_schema`] then applies the subset's
+/// requirements across the whole document: every object closed, every property
+/// required, and the ones that were optional emulated with a nullable union.
+///
+/// See: <https://platform.openai.com/docs/guides/function-calling#strict-mode>
+pub(crate) fn parameters_with_strict_mode(parameters: &Value, strict: bool) -> Map<String, Value> {
+    let mut document = parameters.as_object().cloned().unwrap_or_default();
 
-    let properties = parameters
-        .into_iter()
-        .map(|(k, cfg)| {
-            let needs_null = strict && !cfg.required;
+    document.insert("type".to_owned(), "object".into());
+    document
+        .entry("properties")
+        .or_insert_with(|| Value::Object(Map::new()));
+    document
+        .entry("required")
+        .or_insert_with(|| Value::Array(vec![]));
+    document.insert("additionalProperties".to_owned(), (!strict).into());
 
-            let mut schema = cfg.to_json_schema();
+    if !strict {
+        return document;
+    }
 
-            if needs_null {
-                make_schema_nullable(&mut schema);
-            }
-
-            // If `strict` mode is enabled, the schema for each parameter
-            // must satisfy: `additionalProperties: false` on every
-            // object, all fields in `required`, and optional fields
-            // emulated via nullability.
-            //
-            // See: <https://platform.openai.com/docs/guides/function-calling#strict-mode>
-            if strict {
-                ensure_strict_schema(&mut schema);
-            }
-
-            (k, schema)
-        })
-        .collect::<Map<_, _>>();
-
-    Map::from_iter([
-        ("type".to_owned(), "object".into()),
-        ("properties".to_owned(), properties.into()),
-        ("additionalProperties".to_owned(), (!strict).into()),
-        ("required".to_owned(), required.into()),
-    ])
+    let mut document = Value::Object(document);
+    ensure_strict_schema(&mut document);
+    document.as_object().cloned().unwrap_or_default()
 }
 
 /// Check whether a JSON schema `type` value includes `"object"`.
@@ -1933,7 +1919,7 @@ fn convert_tools(tools: Vec<ToolDefinition>) -> Vec<types::Tool> {
             name: tool.name,
             strict: true,
             description: tool.docs.schema_description().map(str::to_owned),
-            parameters: parameters_with_strict_mode(tool.parameters, true).into(),
+            parameters: parameters_with_strict_mode(&tool.parameters, true).into(),
         })
         .collect()
 }

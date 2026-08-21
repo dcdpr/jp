@@ -121,7 +121,8 @@ items.type = "string"
 ## MCP Parameter Overrides
 
 MCP configuration is an overlay on the server schema.
-Fields left unset inherit from the server.
+The server's schema is the source of truth: JP keeps it as written and applies
+only the fields configuration sets, so anything left unset is inherited.
 
 For example, suppose an MCP server defines `tags` as an array of strings.
 JP can restrict the allowed tags without repeating either type:
@@ -171,10 +172,43 @@ The override rules are:
 - `items` and `properties` merge recursively, so a nested override does not
   replace the rest of the inherited shape.
 
-Some MCP schemas use a `$ref` without exposing a directly usable type at that
-node.
-If JP reports that an item schema does not declare a supported type, set
-`items.type` to the matching server type alongside the override.
+### Referenced Types
+
+Servers usually send named types by reference.
+An enum parameter arrives as `{"$ref": "#/$defs/EntryType"}`, with the
+definition in a `$defs` block at the root of the tool's schema, and an optional
+nested struct arrives as `anyOf` with a `$ref` branch and a `null` branch.
+
+The schema reaches the model provider as the server wrote it, references
+included.
+JP reads through same-document pointers when it validates and when it checks
+arguments, so a referenced enum constrains values exactly as an inline one
+would, and nothing has to be restated in configuration.
+
+An override may narrow a referenced parameter without expanding it.
+Setting `items.enum` on an array whose item type is a reference adds the enum
+next to the reference and leaves the definition alone.
+
+A reference JP cannot resolve, meaning anything that does not point into the
+tool's own document, leaves that node without a usable type.
+Describe the parameter in configuration when that happens.
+
+### Provider Differences
+
+Providers accept different subsets of JSON Schema, and each one adapts the
+schema itself.
+OpenAI, Google, Anthropic, Cerebras, OpenRouter, and llama.cpp all accept
+references and definitions.
+Ollama does not, so its schemas are expanded before the request is sent.
+It also ignores keywords outside a small set, keeping `type`, `description`,
+`enum`, `items`, `anyOf`, `properties` and `required`, so constraints such as
+`default` or `pattern` do not reach a model served through it.
+
+Recursive types, where a definition refers to itself, are forwarded as written.
+Anthropic and Cerebras reject them, and the error comes from the API rather than
+from JP, so no configuration change is needed if they add support later.
+Expanding one for Ollama is not possible either, so its innermost reference is
+left in place.
 
 ## Enum Scope
 
@@ -268,6 +302,16 @@ header or a `--cfg` assignment.
 This validation happens before the provider request, so a bad schema does not
 become an HTTP error from the model provider.
 
+A tool whose schema fails validation is dropped from the request and the rest of
+the query proceeds, the same way a tool backed by an unavailable MCP server is
+dropped.
+The reason is logged at warning level, which the terminal does not show by
+default, so run with `-v` when a tool you expect is missing.
+
+Naming that tool with `--tool` is the exception.
+Asking for a tool explicitly and receiving a request without it is worse than an
+error, so JP fails the query instead.
+
 ## Compatibility Notes
 
 Existing scalar parameters and complete local schemas keep the same syntax.
@@ -287,6 +331,10 @@ Configurations need attention when they rely on one of these forms:
   constrain individual elements.
 - `enum = []` on an MCP parameter.
   This explicitly removes the inherited enum; omit the setting to inherit it.
+- An override that exists only to restate a referenced type, such as an
+  `items.type` added because JP could not read `$defs`.
+  Referenced types now resolve on their own, and dropping the override lets the
+  server's allowed values through as a real `enum`.
 - A narrowed `enum` on a parameter whose inherited `default` falls outside the
   narrowed set.
   Override `default` as well, or widen the `enum` to include it.

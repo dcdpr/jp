@@ -237,14 +237,16 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "reasoning": "The user is asking me to run a tool with whatever arguments I want. Looking at the available tools, there's only one tool called \"run_me\" which takes no parameters according to its schema. This seems like a simple tool that doesn't require any specific arguments.\n\nLet me call this tool without any parameters since it has no required parameters and the user said \"whatever arguments you want\" - I'll just use none since none are available/needed."
+      "reasoning": "I need to call a tool from my list of options based on the user request, which says \"Please run the tool\". I have one function called 'run_me' with these parameters:\n\n- bar (required): Can be string or array, but restricted to enum values [\"foo\", \"bar\"] - this is somewhat confusing since it can only take those two values\n- foo (optional): String type\n\nSince the user wants me to run a tool and I should use arguments if needed, let me call 'run_me' with bar=\"foo\" as an argument. This satisfies the requirement of calling at least one tool while using valid parameters according to the schema."
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
       "id": "run_me_2",
       "name": "run_me",
-      "arguments": {}
+      "arguments": {
+        "bar": "Zm9v"
+      }
     },
     {
       "type": "config_delta",
@@ -269,7 +271,7 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "The tool has executed successfully with `working!`. Let me know if you'd like to try different arguments or explore specific functionalities! 🛠️"
+      "message": "The tool executed successfully with the arguments provided. Let me know if you need to run it again or adjust any parameters!"
     }
   ]
 }

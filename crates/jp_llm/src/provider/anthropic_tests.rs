@@ -1,12 +1,9 @@
 use std::time::Duration;
 
 use indexmap::IndexMap;
-use jp_config::{
-    conversation::tool::OneOrManyTypes,
-    model::{
-        id::ModelIdConfig,
-        parameters::{PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningEffort},
-    },
+use jp_config::model::{
+    id::ModelIdConfig,
+    parameters::{PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningEffort},
 };
 use jp_conversation::{event::ChatRequest, thread::Thread};
 use jp_test::{
@@ -17,10 +14,7 @@ use serde_json::Map;
 use test_log::test;
 
 use super::*;
-use crate::{
-    test::{TestRequest, run_test},
-    tool::ToolParameterSchema,
-};
+use crate::test::{TestRequest, run_test};
 
 const MAGIC_STRING: &str = "ANTHROPIC_MAGIC_STRING_TRIGGER_REDACTED_THINKING_46C9A13E193C177646C7398A98432ECCCE4C1253D5E2D82641AC0E52CC2876CB";
 
@@ -200,17 +194,14 @@ async fn test_fable_5_forced_tool_soft_forces() -> Result {
         .model(id)
         .model_details(details)
         .enable_reasoning()
-        .tool("run_me", vec![("foo", ToolParameterSchema {
-            kind: OneOrManyTypes::One("string".into()),
-            default: Some("foo".into()),
-            required: false,
-            summary: None,
-            description: None,
-            examples: None,
-            enumeration: vec![],
-            items: None,
-            properties: IndexMap::default(),
-        })])
+        .tool(
+            "run_me",
+            json!({
+                "type": "object",
+                "properties": { "foo": { "type": "string", "default": "foo" } },
+                "required": []
+            }),
+        )
         .tool_choice_fn("run_me")
         .chat_request("Please run the tool, providing whatever arguments you want.");
 
@@ -1236,7 +1227,7 @@ fn test_forced_tool_with_reasoning_returns_fallback() {
         tools: vec![ToolDefinition {
             name: "my_tool".into(),
             docs: ToolDocs::default(),
-            parameters: IndexMap::new(),
+            parameters: json!({ "type": "object", "properties": {} }),
         }],
         tool_choice: ToolChoice::Function("my_tool".into()),
     };
@@ -1308,7 +1299,7 @@ fn test_forced_tool_thinking_always_on_uses_escalating_nudge() {
         tools: vec![ToolDefinition {
             name: "my_tool".into(),
             docs: ToolDocs::default(),
-            parameters: IndexMap::new(),
+            parameters: json!({ "type": "object", "properties": {} }),
         }],
         tool_choice: ToolChoice::Function("my_tool".into()),
     };
@@ -1392,7 +1383,7 @@ fn test_forced_tool_thinking_always_on_reasoning_off_still_soft_forces() {
         tools: vec![ToolDefinition {
             name: "my_tool".into(),
             docs: ToolDocs::default(),
-            parameters: IndexMap::new(),
+            parameters: json!({ "type": "object", "properties": {} }),
         }],
         tool_choice: ToolChoice::Function("my_tool".into()),
     };
@@ -1451,12 +1442,12 @@ fn test_forced_tool_function_multi_tool_preserves_name() {
             ToolDefinition {
                 name: "read_file".into(),
                 docs: ToolDocs::default(),
-                parameters: IndexMap::new(),
+                parameters: json!({ "type": "object", "properties": {} }),
             },
             ToolDefinition {
                 name: "commit".into(),
                 docs: ToolDocs::default(),
-                parameters: IndexMap::new(),
+                parameters: json!({ "type": "object", "properties": {} }),
             },
         ],
         tool_choice: ToolChoice::Function("commit".into()),
@@ -1524,7 +1515,7 @@ fn test_forced_tool_without_reasoning_no_fallback() {
         tools: vec![ToolDefinition {
             name: "my_tool".into(),
             docs: ToolDocs::default(),
-            parameters: IndexMap::new(),
+            parameters: json!({ "type": "object", "properties": {} }),
         }],
         tool_choice: ToolChoice::Required,
     };

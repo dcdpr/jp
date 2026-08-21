@@ -9,7 +9,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Structured {
-                        data: String("Conversation: Requesting a Title Generation"),
+                        data: String("Here are a few suitable titles, depending on the context of our interaction:\n\n1.  **Getting Started** (Simple and direct)\n2.  **Introduction to Our Chat** (Friendly approach)\n3.  **First Steps Together** (Collaborative tone)\n4.  **Exploring Topics with You** (Inviting exploration)\n5.  **Hello, I'm Ready for Questions!** (Action-oriented)\n\nLet me know if you'd like something more creative or tailored to a specific theme!"),
                     },
                 ),
                 metadata: {},

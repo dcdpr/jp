@@ -22,7 +22,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 ArgumentChunk(
-                    "{\"command\":\"ls -la /home\"}",
+                    "{\"bar\":\"foo\"}",
                 ),
             ),
             metadata: {},
@@ -54,14 +54,7 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " command",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " has",
+                " tool",
             ),
             metadata: {},
         },
@@ -82,14 +75,126 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                ".",
+                " with",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " Would",
+                " the",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " argument",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " `",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "bar",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "=\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "foo",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "`.",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " It",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " returned",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " \"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "working",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "!\".",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " Is",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " there",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " anything",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " specific",
             ),
             metadata: {},
         },
@@ -97,6 +202,13 @@ expression: v
             index: 1,
             part: Message(
                 " you",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "'d",
             ),
             metadata: {},
         },
@@ -111,6 +223,48 @@ expression: v
             index: 1,
             part: Message(
                 " to",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " do",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " next",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                ",",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " or",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " should",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " we",
             ),
             metadata: {},
         },
@@ -138,49 +292,21 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " command",
+                " set",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " or",
+                " of",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " have",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " me",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " run",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " something",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " else",
+                " arguments",
             ),
             metadata: {},
         },

@@ -9,7 +9,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "The user is asking me to run a tool, but they haven't specified which tool or what arguments I should use. Looking at the available tools, there's only one called \"run_me\" with no parameters defined (both type and properties are empty strings/null).\n\nSince there's only one tool available (\"run_me\") and it has no required parameters, I can call it without any arguments. The user said \"providing whatever arguments you want\" which suggests I have flexibility, but since this tool doesn't take any parameters anyway, I'll just call it with no arguments.",
+                        reasoning: "The user wants me to run a tool but hasn't specified what parameters they want to use. Looking at the available tools, I see there's only one called \"run_me\" which has these parameters:\n\n- `bar`: required parameter of type [\"string\", array] with enum values [\"foo\"] - this seems like it can be either string or array\n- `foo`: optional parameter that is a string type\n\nSince the user said to provide whatever arguments I want, but there's a requirement for at least one argument (the \"bar\" parameter), and looking at the constraints:\n- bar must have enum value of \"foo\" if it's using those values\n- foo can be any string\n\nI should call run_me with some valid parameters. Let me make sure I meet the required constraint that bar is provided, so either as a string or array but containing appropriate values based on what seems to be expected (likely just [\"foo\"] since that's in the enum).\n\nLet me provide reasonable arguments - I'll use \"bar\" as an array with \"foo\" value and maybe include some foo parameter too.",
                     },
                 ),
                 metadata: {},
@@ -22,7 +22,13 @@ expression: v
                     ToolCallRequest {
                         id: "run_me_2",
                         name: "run_me",
-                        arguments: {},
+                        arguments: {
+                            "foo": String("test_value"),
+                            "bar": Array [
+                                String("foo"),
+                                String("bar"),
+                            ],
+                        },
                     },
                 ),
                 metadata: {},
@@ -38,7 +44,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "The tool executed successfully! It returned a \"working!\" status. Let me know if you'd like to try a specific function, pass certain arguments, or explore what's available. 😊",
+                        message: "The tool executed successfully with the provided arguments. It processed `foo: \"test_value\"` and `bar: [\"foo\", \"bar\"]`, returning a confirmation message indicating everything is working as expected. Let me know if you'd like to explore further or adjust parameters! 🛠\u{fe0f}",
                     },
                 ),
                 metadata: {},

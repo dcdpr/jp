@@ -765,7 +765,7 @@ fn create_request(
         .into_iter()
         .map(|tool| Tool::Function {
             function: ToolFunction {
-                parameters: parameters_with_strict_mode(tool.parameters, true),
+                parameters: parameters_with_strict_mode(&tool.parameters, true),
                 name: tool.name,
                 description: tool.docs.schema_description().map(str::to_owned),
                 strict: true,

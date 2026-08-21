@@ -491,7 +491,7 @@ fn estimate_fixed_overhead_chars(
             chars += desc.len();
         }
         // Parameter schemas are serialized as JSON by providers.
-        chars += serde_json::to_string(&tool.to_parameters_schema()).map_or(0, |s| s.len());
+        chars += serde_json::to_string(&tool.parameters).map_or(0, |s| s.len());
     }
 
     chars

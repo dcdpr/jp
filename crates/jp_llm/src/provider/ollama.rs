@@ -35,7 +35,7 @@ use crate::{
     event::{Event, FinishReason},
     model::ReasoningDetails,
     query::ChatQuery,
-    tool::ToolDefinition,
+    tool::{ToolDefinition, json_schema},
 };
 
 static PROVIDER: ProviderId = ProviderId::Ollama;
@@ -408,14 +408,28 @@ impl TryFrom<&OllamaConfig> for Ollama {
     }
 }
 
+/// Convert tool definitions to Ollama's tool format.
+///
+/// Ollama decodes tool parameters into a fixed structure rather than accepting
+/// JSON Schema: a property may carry `type`, `description`, `enum`, `items`,
+/// `anyOf`, `properties` and `required`, and every other keyword is dropped as
+/// the request is read.
+/// `$ref` is among the dropped keys, so a property that kept its reference
+/// would reach the model with no type at all.
+/// References are expanded here instead.
 fn convert_tools(tools: Vec<ToolDefinition>) -> Result<Vec<ToolInfo>> {
     tools
         .into_iter()
         .map(|tool| {
+            let parameters = json_schema::inline(&tool.parameters)
+                .as_object()
+                .cloned()
+                .unwrap_or_default();
+
             Ok(ToolInfo {
                 tool_type: ToolType::Function,
                 function: ToolFunctionInfo {
-                    parameters: tool.to_parameters_map().into(),
+                    parameters: parameters.into(),
                     name: tool.name,
                     description: tool
                         .docs

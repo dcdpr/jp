@@ -2,7 +2,7 @@
 
 pub mod builtin;
 pub mod executor;
-mod schema;
+pub mod json_schema;
 
 use std::{ffi::OsStr, process::Stdio, sync::Arc};
 
@@ -10,9 +10,7 @@ pub use builtin::BuiltinTool;
 use camino::Utf8Path;
 use indexmap::IndexMap;
 use jp_config::{
-    conversation::tool::{
-        CommandConfig, OneOrManyTypes, ToolConfigWithDefaults, ToolParameterConfig, ToolSource,
-    },
+    conversation::tool::{CommandConfig, ToolConfigWithDefaults, ToolSource},
     types::command::shell_command_line,
 };
 use jp_conversation::event::ToolCallResponse;
@@ -21,11 +19,8 @@ use jp_mcp::{
     id::{McpServerId, McpToolId},
 };
 use jp_tool::{Action, Outcome, Question};
+use json_schema::{Node, merge_description};
 use minijinja::{Environment, ErrorKind as MinijinjaErrorKind, value::ValueKind};
-pub use schema::ToolParameterSchema;
-use schema::{
-    format_types, parameter_accepts_value, types_match, validate_parameter_schema, validate_types,
-};
 use serde_json::{Map, Value, json};
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, BufReader},
@@ -607,7 +602,12 @@ pub struct InvocationContext {
 pub struct ToolDefinition {
     pub name: String,
     pub docs: ToolDocs,
-    pub parameters: IndexMap<String, ToolParameterSchema>,
+
+    /// JSON Schema for the tool's arguments, as its source declared it, with
+    /// configuration overrides applied.
+    ///
+    /// Adapting this to what a given API accepts belongs to that provider.
+    pub parameters: Value,
 }
 
 impl ToolDefinition {
@@ -616,7 +616,7 @@ impl ToolDefinition {
     /// Strings stay unchanged when the schema accepts strings or their contents
     /// do not parse to a declared type.
     pub fn coerce_arguments(&self, arguments: &mut Map<String, Value>) {
-        coerce_parameter_types(arguments, &self.parameters);
+        coerce_arguments_to_schema(arguments, &self.parameters);
     }
 
     /// Execute the tool without any interactive prompts.
@@ -894,32 +894,10 @@ impl ToolDefinition {
         })
     }
 
-    /// Return a map of parameter names to JSON schemas.
-    #[must_use]
-    pub fn to_parameters_map(&self) -> Map<String, Value> {
-        self.parameters
-            .clone()
-            .into_iter()
-            .map(|(k, v)| (k, v.to_json_schema()))
-            .collect()
-    }
-
-    /// Return a JSON schema for the parameters of the tool.
+    /// Return the JSON Schema for the tool's parameters.
     #[must_use]
     pub fn to_parameters_schema(&self) -> Value {
-        let required = self
-            .parameters
-            .iter()
-            .filter(|(_, cfg)| cfg.required)
-            .map(|(k, _)| k.clone())
-            .collect::<Vec<_>>();
-
-        json!({
-            "type": "object",
-            "properties": self.to_parameters_map(),
-            "additionalProperties": false,
-            "required": required,
-        })
+        self.parameters.clone()
     }
 }
 
@@ -991,38 +969,36 @@ pub(crate) fn split_description(text: &str) -> (String, Option<String>) {
     (text.to_owned(), None)
 }
 
-fn coerce_parameter_types(
-    arguments: &mut Map<String, Value>,
-    parameters: &IndexMap<String, ToolParameterSchema>,
-) {
-    for (name, config) in parameters {
-        let Some(value) = arguments.get_mut(name) else {
-            continue;
-        };
+/// Coerce JSON-encoded argument strings to the types the schema declares.
+fn coerce_arguments_to_schema(arguments: &mut Map<String, Value>, schema: &Value) {
+    coerce_object(arguments, &Node::root(schema));
+}
 
-        coerce_parameter_value(value, config);
+fn coerce_object(arguments: &mut Map<String, Value>, node: &Node<'_>) {
+    for (name, property) in node.properties() {
+        if let Some(value) = arguments.get_mut(&name) {
+            coerce_value(value, &property);
+        }
     }
 }
 
-fn coerce_parameter_value(value: &mut Value, config: &ToolParameterSchema) {
+fn coerce_value(value: &mut Value, node: &Node<'_>) {
     if let Value::String(raw) = value
-        && !config.kind.has_type("string")
-        && let Ok(parsed) = serde_json::from_str(raw)
-        && parameter_accepts_value(&parsed, &config.kind)
+        && !node.types().iter().any(|type_| type_ == "string")
+        && let Ok(parsed) = serde_json::from_str::<Value>(raw)
+        && node.accepts(&parsed)
     {
         *value = parsed;
     }
 
     match value {
-        Value::Object(arguments) if !config.properties.is_empty() => {
-            coerce_parameter_types(arguments, &config.properties);
-        }
+        Value::Object(arguments) => coerce_object(arguments, node),
         Value::Array(values) => {
-            let Some(items) = config.items.as_deref() else {
+            let Some(items) = node.items() else {
                 return;
             };
             for value in values {
-                coerce_parameter_value(value, items);
+                coerce_value(value, &items);
             }
         }
         _ => {}
@@ -1036,33 +1012,35 @@ fn coerce_parameter_value(value: &mut Value, config: &ToolParameterSchema) {
 /// This function patches the arguments map before validation so that such
 /// omissions don't cause spurious "missing argument" errors and unnecessary LLM
 /// retries.
-fn apply_parameter_defaults(
-    arguments: &mut Map<String, Value>,
-    parameters: &IndexMap<String, ToolParameterSchema>,
-) {
-    for (name, cfg) in parameters {
-        if !arguments.contains_key(name) {
-            if let Some(default) = &cfg.default {
-                arguments.insert(name.clone(), default.clone());
+fn apply_parameter_defaults(arguments: &mut Map<String, Value>, schema: &Value) {
+    apply_defaults_to(arguments, &Node::root(schema));
+}
+
+fn apply_defaults_to(arguments: &mut Map<String, Value>, node: &Node<'_>) {
+    for (name, property) in node.properties() {
+        if !arguments.contains_key(&name) {
+            if let Some(default) = property.default() {
+                let default = default.clone();
+                arguments.insert(name, default);
             }
             continue;
         }
 
         // Recurse into object fields.
-        if let Some(obj) = arguments.get_mut(name).and_then(Value::as_object_mut)
-            && !cfg.properties.is_empty()
+        if property.has_properties()
+            && let Some(object) = arguments.get_mut(&name).and_then(Value::as_object_mut)
         {
-            apply_parameter_defaults(obj, &cfg.properties);
+            apply_defaults_to(object, &property);
         }
 
         // Recurse into array elements.
-        if let Some(items) = &cfg.items
-            && !items.properties.is_empty()
-            && let Some(arr) = arguments.get_mut(name).and_then(Value::as_array_mut)
+        if let Some(items) = property.items()
+            && items.has_properties()
+            && let Some(values) = arguments.get_mut(&name).and_then(Value::as_array_mut)
         {
-            for elem in arr.iter_mut() {
-                if let Some(obj) = elem.as_object_mut() {
-                    apply_parameter_defaults(obj, &items.properties);
+            for value in values.iter_mut() {
+                if let Some(object) = value.as_object_mut() {
+                    apply_defaults_to(object, &items);
                 }
             }
         }
@@ -1071,47 +1049,52 @@ fn apply_parameter_defaults(
 
 fn validate_tool_arguments(
     arguments: &Map<String, Value>,
-    parameters: &IndexMap<String, ToolParameterSchema>,
+    schema: &Value,
 ) -> Result<(), ToolError> {
+    validate_arguments_against(arguments, &Node::root(schema))
+}
+
+fn validate_arguments_against(
+    arguments: &Map<String, Value>,
+    node: &Node<'_>,
+) -> Result<(), ToolError> {
+    let properties = node.properties();
+
     let unknown = arguments
         .keys()
-        .filter(|k| !parameters.contains_key(*k))
+        .filter(|name| !properties.iter().any(|(known, _)| known == *name))
         .cloned()
         .collect::<Vec<_>>();
 
-    let mut missing = vec![];
-    for (name, cfg) in parameters {
-        if cfg.required && !arguments.contains_key(name) {
-            missing.push(name.to_owned());
-        }
-    }
+    let missing = properties
+        .iter()
+        .filter(|(name, _)| node.is_required(name) && !arguments.contains_key(name))
+        .map(|(name, _)| name.clone())
+        .collect::<Vec<_>>();
 
     if !missing.is_empty() || !unknown.is_empty() {
         return Err(ToolError::Arguments { missing, unknown });
     }
 
     // Recurse into nested structures.
-    for (name, cfg) in parameters {
-        let Some(value) = arguments.get(name) else {
+    for (name, property) in properties {
+        let Some(value) = arguments.get(&name) else {
             continue;
         };
 
-        // Object parameters with properties: validate the object fields.
-        if let Some(obj) = value.as_object()
-            && !cfg.properties.is_empty()
+        if let Some(object) = value.as_object()
+            && property.has_properties()
         {
-            validate_tool_arguments(obj, &cfg.properties)?;
+            validate_arguments_against(object, &property)?;
         }
 
-        // Array parameters with items that have properties: validate each
-        // element.
-        if let Some(items) = &cfg.items
-            && !items.properties.is_empty()
-            && let Some(arr) = value.as_array()
+        if let Some(items) = property.items()
+            && items.has_properties()
+            && let Some(values) = value.as_array()
         {
-            for element in arr {
-                if let Some(obj) = element.as_object() {
-                    validate_tool_arguments(obj, &items.properties)?;
+            for value in values {
+                if let Some(object) = value.as_object() {
+                    validate_arguments_against(object, &items)?;
                 }
             }
         }
@@ -1159,7 +1142,22 @@ pub async fn tool_definitions(
             }
         }
 
-        let definition = resolve_tool(name, &config, mcp_client).await?;
+        // A tool JP cannot describe to the provider is dropped rather than
+        // failing the query, matching the unavailable-server case above. A tool
+        // the caller named explicitly is the exception: silently omitting it
+        // would leave `tool_choice` pointing at a tool the provider never saw.
+        let definition = match resolve_tool(name, &config, mcp_client).await {
+            Ok(definition) => definition,
+            Err(error) if !forced => {
+                warn!(
+                    tool = name,
+                    %error,
+                    "Skipping tool: its parameter schema could not be resolved."
+                );
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
         definitions.push(definition);
     }
 
@@ -1172,37 +1170,19 @@ async fn resolve_tool(
     config: &ToolConfigWithDefaults,
     mcp_client: &jp_mcp::Client,
 ) -> Result<ToolDefinition, ToolError> {
+    let path = format!("conversation.tools.{name}.parameters");
     let definition = match config.source() {
-        ToolSource::Local { .. } | ToolSource::Builtin { .. } => {
-            let docs = ToolDocs::from_config(config);
-            let parameters = config
-                .parameters()
-                .iter()
-                .map(|(parameter_name, parameter)| {
-                    resolve_config_parameter(
-                        &format!("conversation.tools.{name}.parameters.{parameter_name}"),
-                        parameter,
-                    )
-                    .map(|schema| (parameter_name.clone(), schema))
-                })
-                .collect::<Result<_, _>>()?;
-            ToolDefinition {
-                name: name.to_owned(),
-                docs,
-                parameters,
-            }
-        }
+        ToolSource::Local { .. } | ToolSource::Builtin { .. } => ToolDefinition {
+            name: name.to_owned(),
+            docs: ToolDocs::from_config(config),
+            parameters: json_schema::from_config(&path, config.parameters())?,
+        },
         ToolSource::Mcp { server, tool } => {
             resolve_mcp_tool(server, name, tool.as_deref(), config, mcp_client).await?
         }
     };
 
-    for (parameter_name, parameter) in &definition.parameters {
-        validate_parameter_schema(
-            &format!("conversation.tools.{name}.parameters.{parameter_name}"),
-            parameter,
-        )?;
-    }
+    json_schema::validate(&path, &definition.parameters)?;
 
     Ok(definition)
 }
@@ -1234,33 +1214,14 @@ async fn resolve_mcp_tool(
         mcp_tool.description.as_deref(),
     );
 
-    // Build parameters from MCP schema + user overrides.
-    let schema = mcp_tool.input_schema.as_ref().clone();
-    let required_properties: Vec<&str> = schema
-        .get("required")
-        .and_then(|v| v.as_array())
-        .into_iter()
-        .flatten()
-        .filter_map(|v| v.as_str())
-        .collect();
-
-    let mut params = IndexMap::new();
-    for (param_name, opts) in schema
-        .get("properties")
-        .and_then(|v| v.as_object())
-        .into_iter()
-        .flatten()
-    {
-        let override_cfg = user_overrides.get(param_name.as_str());
-        let required_in_mcp = required_properties.iter().any(|p| *p == param_name);
-        let param = merge_mcp_parameter(
-            &format!("conversation.tools.{name}.parameters.{param_name}"),
-            opts,
-            override_cfg,
-            required_in_mcp,
-        )?;
-        params.insert(param_name.to_owned(), param);
-    }
+    // The server's document is the source of truth; configuration may narrow
+    // it, and nothing else touches it.
+    let source = Value::Object(mcp_tool.input_schema.as_ref().clone());
+    let parameters = json_schema::with_overrides(
+        &format!("conversation.tools.{name}.parameters"),
+        &source,
+        user_overrides,
+    )?;
 
     // Build docs with auto-split heuristic.
     let has_user_summary = config.summary().is_some();
@@ -1281,10 +1242,11 @@ async fn resolve_mcp_tool(
     let examples = config.examples().map(str::to_owned);
 
     // Per-parameter docs: auto-split MCP descriptions when user didn't override.
-    let param_docs = params
-        .iter()
-        .filter_map(|(pname, pcfg)| {
-            let user_override = user_overrides.get(pname);
+    let param_docs = Node::root(&parameters)
+        .properties()
+        .into_iter()
+        .filter_map(|(pname, pnode)| {
+            let user_override = user_overrides.get(&pname);
             let has_user_param_summary = user_override.and_then(|o| o.summary.as_ref()).is_some();
 
             let (summary, desc) = if has_user_param_summary {
@@ -1296,7 +1258,7 @@ async fn resolve_mcp_tool(
                     .and_then(|o| o.description.as_deref())
                     .map(str::to_owned);
                 (summary, desc)
-            } else if let Some(resolved) = &pcfg.description {
+            } else if let Some(resolved) = pnode.description() {
                 let (s, d) = split_description(resolved);
                 (Some(s), d)
             } else {
@@ -1311,7 +1273,7 @@ async fn resolve_mcp_tool(
                 return None;
             }
 
-            Some((pname.to_owned(), ParameterDocs {
+            Some((pname, ParameterDocs {
                 summary,
                 description: desc,
                 examples: ex,
@@ -1329,292 +1291,8 @@ async fn resolve_mcp_tool(
     Ok(ToolDefinition {
         name: name.to_owned(),
         docs,
-        parameters: params,
+        parameters,
     })
-}
-
-fn resolve_config_parameter(
-    path: &str,
-    config: &ToolParameterConfig,
-) -> Result<ToolParameterSchema, ToolError> {
-    let kind = config
-        .kind
-        .clone()
-        .ok_or_else(|| ToolError::InvalidSchema {
-            path: format!("{path}.type"),
-            message: "local and built-in tool parameters must declare a type".to_owned(),
-        })?;
-    let items = config
-        .items
-        .as_deref()
-        .map(|items| resolve_config_parameter(&format!("{path}.items"), items))
-        .transpose()?
-        .map(Box::new);
-    let properties = config
-        .properties
-        .iter()
-        .map(|(name, property)| {
-            resolve_config_parameter(&format!("{path}.properties.{name}"), property)
-                .map(|schema| (name.clone(), schema))
-        })
-        .collect::<Result<_, _>>()?;
-
-    Ok(ToolParameterSchema {
-        kind,
-        default: config.default.clone(),
-        required: config.required.unwrap_or(false),
-        summary: config.summary.clone(),
-        description: config.description.clone(),
-        examples: config.examples.clone(),
-        enumeration: config.enumeration.clone().unwrap_or_default(),
-        items,
-        properties,
-    })
-}
-
-#[cfg(test)]
-fn merge_mcp_param(
-    name: &str,
-    source: &Value,
-    override_config: Option<&ToolParameterConfig>,
-    required_in_mcp: bool,
-) -> Result<ToolParameterSchema, ToolError> {
-    merge_mcp_parameter(
-        &format!("parameters.{name}"),
-        source,
-        override_config,
-        required_in_mcp,
-    )
-}
-
-fn merge_mcp_parameter(
-    path: &str,
-    source: &Value,
-    override_config: Option<&ToolParameterConfig>,
-    required_in_mcp: bool,
-) -> Result<ToolParameterSchema, ToolError> {
-    let schema = merge_mcp_schema_node(path, source, override_config, required_in_mcp)?;
-    validate_parameter_schema(path, &schema)?;
-    Ok(schema)
-}
-
-fn merge_mcp_schema_node(
-    path: &str,
-    source: &Value,
-    override_config: Option<&ToolParameterConfig>,
-    required_in_mcp: bool,
-) -> Result<ToolParameterSchema, ToolError> {
-    let source_kind = parse_schema_kind(path, source)?;
-    let override_kind = override_config.and_then(|config| config.kind.as_ref());
-
-    // The resolved schema keeps the server's type declaration, so a malformed
-    // override type list would otherwise never be reported.
-    if let Some(override_kind) = override_kind {
-        validate_types(path, override_kind)?;
-    }
-
-    let kind = match (source_kind, override_kind) {
-        (Some(source), Some(config)) if !types_match(&source, config) => {
-            return Err(ToolError::InvalidSchema {
-                path: format!("{path}.type"),
-                message: format!(
-                    "MCP declares {}, but the configuration declares {}",
-                    format_types(&source),
-                    format_types(config)
-                ),
-            });
-        }
-        (Some(source), _) => source,
-        (None, Some(config)) => config.clone(),
-        (None, None) => {
-            return Err(ToolError::InvalidSchema {
-                path: format!("{path}.type"),
-                message: "schema does not declare a supported type".to_owned(),
-            });
-        }
-    };
-
-    let default = override_config
-        .and_then(|config| config.default.clone())
-        .or_else(|| source.get("default").cloned());
-    let description = merge_description(
-        override_config.and_then(|config| config.description.clone()),
-        source.get("description").and_then(Value::as_str),
-    );
-    let enumeration =
-        if let Some(enumeration) = override_config.and_then(|config| config.enumeration.clone()) {
-            enumeration
-        } else {
-            parse_schema_enum(path, source)?
-        };
-    let required = required_in_mcp
-        || override_config
-            .and_then(|config| config.required)
-            .unwrap_or(false);
-
-    let items = merge_mcp_items(path, source, override_config)?;
-    let properties = merge_mcp_properties(path, source, override_config)?;
-
-    Ok(ToolParameterSchema {
-        kind,
-        default,
-        required,
-        summary: override_config.and_then(|config| config.summary.clone()),
-        description,
-        examples: override_config.and_then(|config| config.examples.clone()),
-        enumeration,
-        items,
-        properties,
-    })
-}
-
-fn merge_mcp_items(
-    path: &str,
-    source: &Value,
-    override_config: Option<&ToolParameterConfig>,
-) -> Result<Option<Box<ToolParameterSchema>>, ToolError> {
-    match (
-        source.get("items"),
-        override_config.and_then(|config| config.items.as_deref()),
-    ) {
-        (Some(source_items), override_items) => merge_mcp_schema_node(
-            &format!("{path}.items"),
-            source_items,
-            override_items,
-            false,
-        )
-        .map(Box::new)
-        .map(Some),
-        (None, Some(override_items)) => {
-            resolve_config_parameter(&format!("{path}.items"), override_items)
-                .map(Box::new)
-                .map(Some)
-        }
-        (None, None) => Ok(None),
-    }
-}
-
-fn merge_mcp_properties(
-    path: &str,
-    source: &Value,
-    override_config: Option<&ToolParameterConfig>,
-) -> Result<IndexMap<String, ToolParameterSchema>, ToolError> {
-    let source_required = source
-        .get("required")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .collect::<Vec<_>>();
-    let mut properties = IndexMap::new();
-
-    if let Some(source_properties) = source.get("properties").and_then(Value::as_object) {
-        for (name, source_property) in source_properties {
-            let override_property = override_config.and_then(|config| config.properties.get(name));
-            let required = source_required.iter().any(|required| required == name);
-            let property = merge_mcp_schema_node(
-                &format!("{path}.properties.{name}"),
-                source_property,
-                override_property,
-                required,
-            )?;
-            properties.insert(name.clone(), property);
-        }
-    }
-
-    if let Some(override_config) = override_config {
-        for (name, override_property) in &override_config.properties {
-            if properties.contains_key(name) {
-                continue;
-            }
-            let property =
-                resolve_config_parameter(&format!("{path}.properties.{name}"), override_property)?;
-            properties.insert(name.clone(), property);
-        }
-    }
-
-    Ok(properties)
-}
-
-fn parse_schema_enum(path: &str, schema: &Value) -> Result<Vec<Value>, ToolError> {
-    match schema.get("enum") {
-        Some(Value::Array(values)) => Ok(values.clone()),
-        Some(_) => Err(ToolError::InvalidSchema {
-            path: format!("{path}.enum"),
-            message: "enum must be an array".to_owned(),
-        }),
-        None => Ok(Vec::new()),
-    }
-}
-
-fn parse_schema_kind(path: &str, schema: &Value) -> Result<Option<OneOrManyTypes>, ToolError> {
-    if let Some(type_) = schema.get("type") {
-        return match type_ {
-            Value::String(type_) => Ok(Some(OneOrManyTypes::One(type_.clone()))),
-            Value::Array(types) => {
-                let types = types
-                    .iter()
-                    .map(|type_| {
-                        type_
-                            .as_str()
-                            .map(str::to_owned)
-                            .ok_or_else(|| ToolError::InvalidSchema {
-                                path: format!("{path}.type"),
-                                message: "type arrays may contain only strings".to_owned(),
-                            })
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(Some(OneOrManyTypes::Many(types)))
-            }
-            _ => Err(ToolError::InvalidSchema {
-                path: format!("{path}.type"),
-                message: "type must be a string or an array of strings".to_owned(),
-            }),
-        };
-    }
-
-    let variants = schema.get("anyOf").and_then(Value::as_array);
-    let types = variants
-        .into_iter()
-        .flatten()
-        .filter_map(|variant| variant.get("type").and_then(Value::as_str))
-        .map(str::to_owned)
-        .collect::<Vec<_>>();
-    if types.is_empty() {
-        return Ok(None);
-    }
-
-    // A variant carrying no plain `type` (a `$ref` into `$defs`, say) cannot be
-    // represented, so the resolved type set is narrower than the server's
-    // contract. Rejecting instead would fail every query that enables the tool,
-    // so surface it and continue.
-    if variants.is_some_and(|variants| variants.len() > types.len()) {
-        warn!(
-            path,
-            resolved = ?types,
-            "Ignoring `anyOf` variants that declare no JSON type; the schema sent to the \
-             provider is narrower than the MCP server's."
-        );
-    }
-
-    Ok(Some(OneOrManyTypes::Many(types)))
-}
-
-/// Merge a user-provided description with an MCP server description.
-///
-/// If the user provided a description containing `{{description}}`, the MCP
-/// description is substituted in.
-/// If the user provided a description without the template, it takes
-/// precedence.
-/// If no user description exists, the MCP description is used as-is.
-fn merge_description(user: Option<String>, mcp: Option<&str>) -> Option<String> {
-    match (user, mcp) {
-        (None, Some(mcp)) => Some(mcp.to_owned()),
-        // TODO: should use `minijinja` instead of raw string replacement.
-        (Some(desc), Some(mcp)) => Some(desc.replace("{{description}}", mcp)),
-        (Some(desc), None) => Some(desc),
-        (None, None) => None,
-    }
 }
 
 #[cfg(test)]

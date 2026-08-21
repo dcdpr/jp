@@ -456,7 +456,7 @@ fn overhead_tool_definitions() {
             summary: Some("Search files.".to_string()),
             ..Default::default()
         },
-        parameters: IndexMap::new(),
+        parameters: serde_json::json!({ "type": "object", "properties": {} }),
     };
     let result = estimate_fixed_overhead_chars(None, &[], &[], &[tool]);
     // name + description + serialized schema
@@ -472,7 +472,7 @@ fn overhead_combines_all_sources() {
     let tool = ToolDefinition {
         name: "t".to_string(),
         docs: ToolDocs::default(),
-        parameters: IndexMap::new(),
+        parameters: serde_json::json!({ "type": "object", "properties": {} }),
     };
 
     let combined = estimate_fixed_overhead_chars(

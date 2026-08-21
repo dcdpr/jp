@@ -52,10 +52,4 @@ required = true
 summary = "Partial-match query against item names and paths."
 
 [conversation.tools.rust_crate_search_items.parameters.kinds]
-type = "array"
-summary = """\
-Filter by item kind. Allowed values: Constant, Derive, Enum, Function, Macro, \
-Method, Module, Struct, Trait, Type, Variant, Attribute. Omit for all kinds.\
-"""
-[conversation.tools.rust_crate_search_items.parameters.kinds.items]
-type = "string"
+summary = "Filter by item kind. Omit for all kinds."
