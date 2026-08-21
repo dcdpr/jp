@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-08-18
-- **Extends**: [RFD 042](../042-tool-options.md)
+- **Extends**: [RFD 042]
 
 ## Summary
 
@@ -75,8 +75,8 @@ default = "crates/some-project"
 ### Scope: top-level parameters only
 
 `ToolParameterConfig` doubles as a recursive JSON Schema node — `properties`
-describes an object's fields, `items` an array's elements — so adding a field to
-it adds that field everywhere in the tree.
+describes an object's fields, `items` an array's elements — so adding a field
+to it adds that field everywhere in the tree.
 
 `enabled` is honoured only on entries directly under `parameters`.
 Setting it on a nested `properties` entry or inside `items` is a **config
@@ -151,9 +151,9 @@ go.
 That would be a larger, unrelated behavioural change:
 
 - **MCP servers would start receiving arguments they never received.** JSON
-  Schema treats `default` as an annotation, explicitly *not* a value to
-  populate on the caller's behalf, and a server may distinguish an absent field
-  from an explicitly-supplied one even where the values coincide.
+  Schema treats `default` as an annotation, explicitly *not* a value to populate
+  on the caller's behalf, and a server may distinguish an absent field from an
+  explicitly-supplied one even where the values coincide.
   Injecting into an MCP call changes the wire format for every MCP tool that has
   a configured default.
 - **Builtin tools would start rejecting arguments** that reach their executors
@@ -171,9 +171,9 @@ produces byte-identical behaviour on every path.
 Hiding a parameter says nothing about whether the tool needs a value for it.
 The two are separate axes and both combinations are meaningful:
 
-|                    | `enabled = true`     | `enabled = false`                                    |
-| ------------------ | -------------------- | ---------------------------------------------------- |
-| `required = false` | Model may supply it  | Tool falls back to its own default                   |
+|                    | `enabled = true`     | `enabled = false`                                          |
+| ------------------ | -------------------- | ---------------------------------------------------------- |
+| `required = false` | Model may supply it  | Tool falls back to its own default                         |
 | `required = true`  | Model must supply it | `default` is mandatory; the config is rejected without one |
 
 `required` describes the schema the model is held to; `enabled` describes
@@ -181,8 +181,8 @@ whether the model sees that schema at all.
 Disabled plus required is coherent: the value is mandatory *and* not the model's
 to choose.
 
-Two rules make that concrete, and both are needed — without them the combination
-is merely undefined.
+Two rules make that concrete, and both are needed — without them the
+combination is merely undefined.
 
 **Validation runs against the enabled set.** A disabled parameter is not
 required of the model, because the model cannot see it.
@@ -226,9 +226,9 @@ For MCP and builtin tools, where nothing injects today, the visibility check
 carries the disabled parameter's default and nothing else; their handling of
 *enabled* parameters is untouched.
 
-**Injection behaviour is unchanged for enabled parameters, on every source.**
-An earlier draft of this RFD proposed restricting injection to disabled
-parameters; that would have been a breaking change.
+**Injection behaviour is unchanged for enabled parameters, on every source.** An
+earlier draft of this RFD proposed restricting injection to disabled parameters;
+that would have been a breaking change.
 An enabled, required parameter with a default that the model omits succeeds
 today and must continue to — turning it into a failed tool call would persist
 that failure into the conversation and feed it back to the model on the next
@@ -244,9 +244,9 @@ a parameter this feature exists to hide.
 Preprocessing therefore produces a second, **effective** map, and everything
 that acts on or reports the call uses that one:
 
-| Map       | Contents                              | Used for                                                        |
-| --------- | ------------------------------------- | --------------------------------------------------------------- |
-| Stored    | Exactly what the model emitted        | The conversation stream; replay to providers as history          |
+| Map       | Contents                                 | Used for                                                               |
+| --------- | ---------------------------------------- | ---------------------------------------------------------------------- |
+| Stored    | Exactly what the model emitted           | The conversation stream; replay to providers as history                |
 | Effective | Stored, plus disabled-parameter defaults | Permission prompts, argument formatting, rendering, tracing, execution |
 
 **The ordering is the point.** Preprocessing happens when the executor is
@@ -255,8 +255,7 @@ tool.
 
 Today injection happens inside `execute_local`, well after the approval prompt
 is rendered from `request.arguments`.
-For an enabled parameter with a default that is an occasional cosmetic
-mismatch.
+For an enabled parameter with a default that is an occasional cosmetic mismatch.
 For a disabled one it is systematic: a disabled parameter is *always* absent
 from the model's output, so its configured value would *always* be missing from
 the prompt.
@@ -336,18 +335,19 @@ fixed for a conversation.
 Rejected as the general answer because it cannot express "the model may choose
 this here", which is the actual gap.
 
-**Reversing [RFD 042].** This RFD proposes what RFD 042 considered and
-rejected, so the reversal needs stating rather than assuming.
+**Reversing [RFD 042].** This RFD proposes what RFD 042 considered and rejected,
+so the reversal needs stating rather than assuming.
 RFD 042's Alternatives dismissed "hidden parameters that the LLM doesn't see but
 the tool reads" on two grounds, and the intervening design answers both:
 
 - *"The LLM might hallucinate values for these hidden parameters."* It may, and
-  the call is now rejected. The source-independent check (see above) makes that
-  true for every tool source, which is precisely what closes 042's objection.
+  the call is now rejected.
+  The source-independent check (see above) makes that true for every tool
+  source, which is precisely what closes 042's objection.
 - *"Validation might reject tool calls that omit them."* It does not.
   `apply_parameter_defaults` fills the value in before validation runs, so an
-  omitted-but-defaulted parameter is not a failure. That machinery post-dates
-  RFD 042.
+  omitted-but-defaulted parameter is not a failure.
+  That machinery post-dates RFD 042.
 
 What survives from 042 is its central distinction, and this RFD keeps it: a
 setting the model should never choose is an option, not a hidden parameter.
@@ -448,8 +448,8 @@ arguments, and the wire format for every tool source are identical to today.
 
 ## References
 
-- `crates/jp_config/src/conversation/tool.rs` — `ToolParameterConfig`, including
-  its recursive `properties` and `items`.
+- `crates/jp_config/src/conversation/tool.rs` — `ToolParameterConfig`,
+  including its recursive `properties` and `items`.
 - `crates/jp_llm/src/tool.rs` — `apply_parameter_defaults`,
   `validate_tool_arguments`, and the three `execute_*` paths that do not
   currently share them.
@@ -480,5 +480,5 @@ arguments, and the wire format for every tool source are identical to today.
 [RFD 056]: ../056-group-configuration-defaults.md
 [RFD 057]: ../057-group-configuration-overrides.md
 [RFD 060]: ../060-config-explain.md
-[RFD D10]: D10-unified-tool-execution-model.md
 [RFD 081]: ../081-decompose-tool-enable-into-state-and-allow_toggle.md
+[RFD D10]: D10-unified-tool-execution-model.md
