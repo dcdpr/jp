@@ -278,14 +278,14 @@ when:
                   "array"
                 ],
                 "enum": [
-                  "foo",
-                  [
+                  "foo"
+                ],
+                "items": {
+                  "type": "string",
+                  "enum": [
                     "foo",
                     "bar"
                   ]
-                ],
-                "items": {
-                  "type": "string"
                 }
               }
             },

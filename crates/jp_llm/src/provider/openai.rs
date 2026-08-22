@@ -4,11 +4,9 @@ use async_trait::async_trait;
 use base64::Engine as _;
 use chrono::NaiveDate;
 use futures::{StreamExt as _, TryStreamExt as _, stream};
-use indexmap::{IndexMap, IndexSet};
 use jp_attachment::AttachmentContent;
 use jp_config::{
     assistant::tool_choice::ToolChoice,
-    conversation::tool::{OneOrManyTypes, ToolParameterConfig},
     model::{
         id::{Name, ProviderId},
         parameters::{CustomReasoningConfig, ReasoningConfig, ReasoningEffort},
@@ -1639,8 +1637,8 @@ impl TryFrom<&OpenaiConfig> for Openai {
 ///    otherwise refuse.
 /// 2. The Python SDK doesn't inject nullability — Pydantic emits the `anyOf:
 ///    [..., null]` form upstream.
-///    Our function-calling pipeline goes through `ToolParameterConfig` which
-///    encodes optionality as `required: bool`, so we have to bridge that here.
+///    A tool schema states optionality through its `required` list, so the
+///    nullable form has to be produced here.
 ///
 /// See: <https://platform.openai.com/docs/guides/structured-outputs>
 fn ensure_strict_schema(schema: &mut Value) {
@@ -1785,48 +1783,34 @@ fn convert_tool_choice(choice: ToolChoice) -> types::ToolChoice {
     }
 }
 
-pub(crate) fn parameters_with_strict_mode(
-    parameters: IndexMap<String, ToolParameterConfig>,
-    strict: bool,
-) -> Map<String, Value> {
-    let required = parameters
-        .iter()
-        .filter(|(_, cfg)| strict || cfg.required)
-        .map(|(k, _)| k.clone())
-        .collect::<Vec<_>>();
+/// Adapt a tool's parameters schema to what the API accepts.
+///
+/// The document arrives as its source declared it, `$defs` and references
+/// included, both of which OpenAI supports natively.
+/// In strict mode [`ensure_strict_schema`] then applies the subset's
+/// requirements across the whole document: every object closed, every property
+/// required, and the ones that were optional emulated with a nullable union.
+///
+/// See: <https://platform.openai.com/docs/guides/function-calling#strict-mode>
+pub(crate) fn parameters_with_strict_mode(parameters: &Value, strict: bool) -> Map<String, Value> {
+    let mut document = parameters.as_object().cloned().unwrap_or_default();
 
-    let properties = parameters
-        .into_iter()
-        .map(|(k, mut cfg)| {
-            sanitize_parameter(&mut cfg);
-            let needs_null = strict && !cfg.required;
+    document.insert("type".to_owned(), "object".into());
+    document
+        .entry("properties")
+        .or_insert_with(|| Value::Object(Map::new()));
+    document
+        .entry("required")
+        .or_insert_with(|| Value::Array(vec![]));
+    document.insert("additionalProperties".to_owned(), (!strict).into());
 
-            let mut schema = cfg.to_json_schema();
+    if !strict {
+        return document;
+    }
 
-            if needs_null {
-                make_schema_nullable(&mut schema);
-            }
-
-            // If `strict` mode is enabled, the schema for each parameter
-            // must satisfy: `additionalProperties: false` on every
-            // object, all fields in `required`, and optional fields
-            // emulated via nullability.
-            //
-            // See: <https://platform.openai.com/docs/guides/function-calling#strict-mode>
-            if strict {
-                ensure_strict_schema(&mut schema);
-            }
-
-            (k, schema)
-        })
-        .collect::<Map<_, _>>();
-
-    Map::from_iter([
-        ("type".to_owned(), "object".into()),
-        ("properties".to_owned(), properties.into()),
-        ("additionalProperties".to_owned(), (!strict).into()),
-        ("required".to_owned(), required.into()),
-    ])
+    let mut document = Value::Object(document);
+    ensure_strict_schema(&mut document);
+    document.as_object().cloned().unwrap_or_default()
 }
 
 /// Check whether a JSON schema `type` value includes `"object"`.
@@ -1928,77 +1912,6 @@ fn make_schema_nullable(schema: &mut Value) {
     );
 }
 
-/// Sanitizes the parameter shape to fit Openai's limitations. specifically
-/// moving array-based enums into the 'items' configuration.
-fn sanitize_parameter(config: &mut ToolParameterConfig) {
-    if let Some(items) = &mut config.items {
-        sanitize_parameter(items);
-    }
-
-    let allows_array = match &config.kind {
-        OneOrManyTypes::One(t) => t == "array",
-        OneOrManyTypes::Many(types) => types.iter().any(|t| t == "array"),
-    };
-
-    if !allows_array || !config.enumeration.iter().any(Value::is_array) {
-        return;
-    }
-
-    let (arrays, other): (Vec<Value>, Vec<Value>) =
-        config.enumeration.drain(..).partition(Value::is_array);
-
-    config.enumeration = other;
-
-    // Flatten [["foo", "bar"], ["baz"]] -> ["foo", "bar", "baz"]
-    let items: Vec<Value> = arrays
-        .into_iter()
-        .flat_map(|v| match v {
-            Value::Array(v) => v,
-            _ => vec![],
-        })
-        .collect();
-
-    let items_config = config.items.get_or_insert_with(|| {
-        let mut inferred_types: IndexSet<_> = items
-            .iter()
-            .map(|v| match v {
-                Value::String(_) => "string",
-                Value::Number(n) if n.is_i64() || n.is_u64() => "integer",
-                Value::Number(_) => "number",
-                Value::Bool(_) => "boolean",
-                Value::Null => "null",
-                Value::Object(_) => "object",
-                Value::Array(_) => "array",
-            })
-            .map(str::to_owned)
-            .collect();
-
-        // Construct the correct kind
-        let kind = if inferred_types.len() == 1
-            && let Some(first) = inferred_types.pop()
-        {
-            OneOrManyTypes::One(first)
-        } else {
-            OneOrManyTypes::Many(inferred_types.into_iter().collect())
-        };
-
-        Box::new(ToolParameterConfig {
-            kind,
-            default: None,
-            required: false,
-            summary: None,
-            description: None,
-            examples: None,
-            enumeration: vec![],
-            items: None,
-            properties: IndexMap::default(),
-        })
-    });
-
-    // Append the flattened values to the items enum
-    items_config.enumeration.extend(items);
-}
-
 fn convert_tools(tools: Vec<ToolDefinition>) -> Vec<types::Tool> {
     tools
         .into_iter()
@@ -2006,7 +1919,7 @@ fn convert_tools(tools: Vec<ToolDefinition>) -> Vec<types::Tool> {
             name: tool.name,
             strict: true,
             description: tool.docs.schema_description().map(str::to_owned),
-            parameters: parameters_with_strict_mode(tool.parameters, true).into(),
+            parameters: parameters_with_strict_mode(&tool.parameters, true).into(),
         })
         .collect()
 }

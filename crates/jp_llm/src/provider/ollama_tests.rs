@@ -1,4 +1,63 @@
+use serde_json::json;
+
 use super::*;
+use crate::tool::ToolDocs;
+
+/// Ollama drops `$ref` while decoding a tool's parameters, so a referenced type
+/// has to arrive expanded or the model sees a property with no type.
+#[test]
+fn tool_references_are_expanded() {
+    let tools = vec![ToolDefinition {
+        name: "crate_search_items".to_owned(),
+        docs: ToolDocs::default(),
+        parameters: json!({
+            "type": "object",
+            "properties": {
+                "kinds": { "type": "array", "items": { "$ref": "#/$defs/EntryType" } }
+            },
+            "required": ["kinds"],
+            "$defs": { "EntryType": { "type": "string", "enum": ["Enum", "Method"] } }
+        }),
+    }];
+
+    let converted = convert_tools(tools).expect("tools convert");
+    let parameters = serde_json::to_value(&converted[0].function.parameters).expect("serializes");
+
+    assert_eq!(
+        parameters,
+        json!({
+            "type": "object",
+            "properties": {
+                "kinds": {
+                    "type": "array",
+                    "items": { "type": "string", "enum": ["Enum", "Method"] }
+                }
+            },
+            "required": ["kinds"]
+        })
+    );
+}
+
+/// The whole document is sent, not just its properties: Ollama reads `type` and
+/// `required` from the same object.
+#[test]
+fn tool_parameters_keep_the_schema_document() {
+    let tools = vec![ToolDefinition {
+        name: "read_file".to_owned(),
+        docs: ToolDocs::default(),
+        parameters: json!({
+            "type": "object",
+            "properties": { "path": { "type": "string" } },
+            "required": ["path"]
+        }),
+    }];
+
+    let converted = convert_tools(tools).expect("tools convert");
+    let parameters = serde_json::to_value(&converted[0].function.parameters).expect("serializes");
+
+    assert_eq!(parameters["type"], json!("object"));
+    assert_eq!(parameters["required"], json!(["path"]));
+}
 
 /// Build a query whose only config is an explicit reasoning setting.
 fn reasoning_query(

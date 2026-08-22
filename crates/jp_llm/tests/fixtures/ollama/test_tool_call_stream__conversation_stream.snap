@@ -223,19 +223,17 @@ expression: v
       "type": "tool_call_request",
       "id": "run_me_2",
       "name": "run_me",
-      "arguments": {}
-    },
-    {
-      "timestamp": "2020-01-01 00:00:00.0",
-      "type": "tool_call_response",
-      "id": "run_me_2",
-      "content": "d29ya2luZyE=",
-      "is_error": false
+      "arguments": {
+        "bar": [
+          "Zm9v"
+        ],
+        "foo": "Zm9v"
+      }
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "The tool ran successfully! It output: `working!`. \n\nIs there a specific task or calculation you'd like me to try next? 😊"
+      "message": "I will use default parameters to run the tool. I'll select 'foo' from the allowed options for both arguments, with one as a string and one as an array containing that same option."
     }
   ]
 }

@@ -1,12 +1,9 @@
 use std::sync::Arc;
 
-use indexmap::IndexMap;
-use jp_config::{
-    assistant::tool_choice::ToolChoice,
-    conversation::tool::{OneOrManyTypes, ToolParameterConfig},
-};
+use jp_config::assistant::tool_choice::ToolChoice;
 use jp_conversation::event::ChatRequest;
 use jp_test::{Result, function_name};
+use serde_json::json;
 
 use super::*;
 use crate::test::{TestRequest, fixture_attachment, run_test, test_model_details};
@@ -44,40 +41,21 @@ fn tool_call_base(provider: ProviderId) -> TestRequest {
         .event(ChatRequest::from(
             "Please run the tool, providing whatever arguments you want.",
         ))
-        .tool("run_me", vec![
-            ("foo", ToolParameterConfig {
-                kind: OneOrManyTypes::One("string".into()),
-                default: Some("foo".into()),
-                required: false,
-                summary: None,
-                description: None,
-                examples: None,
-                enumeration: vec![],
-                items: None,
-                properties: IndexMap::default(),
+        .tool(
+            "run_me",
+            json!({
+                "type": "object",
+                "properties": {
+                    "foo": { "type": "string", "default": "foo" },
+                    "bar": {
+                        "type": ["string", "array"],
+                        "enum": ["foo"],
+                        "items": { "type": "string", "enum": ["foo", "bar"] }
+                    }
+                },
+                "required": ["bar"]
             }),
-            ("bar", ToolParameterConfig {
-                kind: OneOrManyTypes::Many(vec!["string".into(), "array".into()]),
-                default: None,
-                required: true,
-                summary: None,
-                description: None,
-                examples: None,
-                enumeration: vec!["foo".into(), vec!["foo", "bar"].into()],
-                items: Some(Box::new(ToolParameterConfig {
-                    kind: OneOrManyTypes::One("string".into()),
-                    default: None,
-                    required: false,
-                    summary: None,
-                    description: None,
-                    examples: None,
-                    enumeration: vec![],
-                    items: None,
-                    properties: IndexMap::default(),
-                })),
-                properties: IndexMap::default(),
-            }),
-        ])
+        )
 }
 
 async fn tool_call_stream(provider: ProviderId, test_name: &str) -> Result {

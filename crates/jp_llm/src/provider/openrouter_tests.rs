@@ -1,9 +1,7 @@
-use std::iter;
-
-use indexmap::IndexMap;
-use jp_config::{conversation::tool::ToolParameterConfig, providers::llm::LlmProviderConfig};
+use jp_config::providers::llm::LlmProviderConfig;
 use jp_conversation::event::{ToolCallRequest, ToolCallResponse};
 use jp_test::{Result, function_name};
+use serde_json::json;
 
 use super::*;
 use crate::{model::ReasoningDetails, test::TestRequest};
@@ -64,14 +62,8 @@ async fn test_anthropic_opus_5_parallel_tool_round_trip() -> Result {
             .model(model_id)
             .model_details(model)
             .enable_reasoning()
-            .tool(
-                "list_items",
-                iter::empty::<(&'static str, ToolParameterConfig)>(),
-            )
-            .tool(
-                "search_items",
-                iter::empty::<(&'static str, ToolParameterConfig)>(),
-            )
+            .tool_without_parameters("list_items")
+            .tool_without_parameters("search_items")
             .chat_request(
                 "Call both list_items and search_items in parallel. Do not answer with text \
                  before calling both tools.",
@@ -106,17 +98,14 @@ async fn test_anthropic_opus_5_parallel_tool_round_trip() -> Result {
 #[test]
 fn request_preserves_integer_tool_parameter_type() -> Result {
     let request = TestRequest::chat(ProviderId::Openrouter)
-        .tool("fs_read_file", [("start_line", ToolParameterConfig {
-            kind: "integer".to_owned().into(),
-            required: false,
-            default: None,
-            summary: None,
-            description: None,
-            examples: None,
-            enumeration: vec![],
-            items: None,
-            properties: IndexMap::new(),
-        })])
+        .tool(
+            "fs_read_file",
+            json!({
+                "type": "object",
+                "properties": { "start_line": { "type": "integer" } },
+                "required": []
+            }),
+        )
         .chat_request("Read README.md");
     let TestRequest::Chat { model, query, .. } = request else {
         unreachable!();
@@ -202,10 +191,7 @@ fn forced_tool_request(
 ) -> (request::ChatCompletion, Option<ForcedToolFallback>) {
     let request = TestRequest::chat(ProviderId::Openrouter)
         .tool_choice_fn("edit_file")
-        .tool(
-            "edit_file",
-            iter::empty::<(&'static str, ToolParameterConfig)>(),
-        )
+        .tool_without_parameters("edit_file")
         .chat_request("Edit the file");
     let request = if enable_reasoning {
         request.enable_reasoning()

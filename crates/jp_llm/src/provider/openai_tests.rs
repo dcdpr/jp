@@ -125,42 +125,26 @@ mod make_schema_nullable {
 }
 
 mod parameters_with_strict_mode {
-    use indexmap::IndexMap;
-    use jp_config::conversation::tool::{OneOrManyTypes, ToolParameterConfig};
     use serde_json::json;
 
     use super::super::parameters_with_strict_mode;
-
-    fn cfg(kind: &str) -> ToolParameterConfig {
-        ToolParameterConfig {
-            kind: OneOrManyTypes::One(kind.to_owned()),
-            default: None,
-            required: false,
-            summary: None,
-            description: None,
-            examples: None,
-            enumeration: vec![],
-            items: None,
-            properties: IndexMap::default(),
-        }
-    }
 
     /// Regression for the `crate_search_items.kinds` schema rejected by
     /// OpenAI's strict validator with "array schema missing items" when the
     /// parameter is encoded as `{type: ["array", "null"], items: ...}`.
     #[test]
     fn nullable_array_parameter_renders_as_anyof() {
-        let mut params = IndexMap::new();
-        params.insert("crate_name".to_owned(), ToolParameterConfig {
-            required: true,
-            ..cfg("string")
-        });
-        params.insert("kinds".to_owned(), ToolParameterConfig {
-            items: Some(Box::new(cfg("string"))),
-            ..cfg("array")
-        });
-
-        let schema = parameters_with_strict_mode(params, true);
+        let schema = parameters_with_strict_mode(
+            &json!({
+                "type": "object",
+                "properties": {
+                    "crate_name": { "type": "string" },
+                    "kinds": { "type": "array", "items": { "type": "string" } }
+                },
+                "required": ["crate_name"]
+            }),
+            true,
+        );
 
         let kinds = &schema["properties"]["kinds"];
         assert!(
@@ -180,10 +164,14 @@ mod parameters_with_strict_mode {
 
     #[test]
     fn nullable_primitive_parameter_keeps_type_array_form() {
-        let mut params = IndexMap::new();
-        params.insert("label".to_owned(), cfg("string"));
-
-        let schema = parameters_with_strict_mode(params, true);
+        let schema = parameters_with_strict_mode(
+            &json!({
+                "type": "object",
+                "properties": { "label": { "type": "string" } },
+                "required": []
+            }),
+            true,
+        );
 
         assert_eq!(
             schema["properties"]["label"]["type"],
@@ -193,19 +181,77 @@ mod parameters_with_strict_mode {
 
     #[test]
     fn required_array_parameter_is_not_wrapped() {
-        let mut params = IndexMap::new();
-        params.insert("paths".to_owned(), ToolParameterConfig {
-            required: true,
-            items: Some(Box::new(cfg("string"))),
-            ..cfg("array")
-        });
-
-        let schema = parameters_with_strict_mode(params, true);
+        let schema = parameters_with_strict_mode(
+            &json!({
+                "type": "object",
+                "properties": {
+                    "paths": { "type": "array", "items": { "type": "string" } }
+                },
+                "required": ["paths"]
+            }),
+            true,
+        );
 
         let paths = &schema["properties"]["paths"];
         assert_eq!(paths["type"], json!("array"));
         assert_eq!(paths["items"], json!({ "type": "string" }));
         assert!(paths.get("anyOf").is_none());
+    }
+
+    #[test]
+    fn array_enum_keeps_complete_array_values() {
+        let schema = parameters_with_strict_mode(
+            &json!({
+                "type": "object",
+                "properties": {
+                    "tags": {
+                        "type": "array",
+                        "enum": [["projects/jp"], ["task", "idea"]],
+                        "items": { "type": "string" }
+                    }
+                },
+                "required": ["tags"]
+            }),
+            true,
+        );
+
+        assert_eq!(
+            schema["properties"]["tags"],
+            json!({
+                "type": "array",
+                "enum": [["projects/jp"], ["task", "idea"]],
+                "items": { "type": "string" }
+            })
+        );
+    }
+
+    /// References and their definitions are supported natively, so they reach
+    /// the API intact.
+    #[test]
+    fn references_and_definitions_are_preserved() {
+        let schema = parameters_with_strict_mode(
+            &json!({
+                "type": "object",
+                "properties": { "kinds": {
+                    "type": "array",
+                    "items": { "$ref": "#/$defs/EntryType" }
+                } },
+                "required": ["kinds"],
+                "$defs": {
+                    "EntryType": { "type": "string", "enum": ["Enum", "Method"] }
+                }
+            }),
+            true,
+        );
+
+        assert_eq!(
+            schema["properties"]["kinds"]["items"],
+            json!({ "$ref": "#/$defs/EntryType" })
+        );
+        assert_eq!(
+            schema["$defs"]["EntryType"],
+            json!({ "type": "string", "enum": ["Enum", "Method"] })
+        );
     }
 }
 

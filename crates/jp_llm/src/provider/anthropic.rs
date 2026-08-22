@@ -2064,24 +2064,15 @@ fn convert_tools(
                 description: tool.docs.schema_description().map(str::to_owned),
                 strict: strict.then_some(true),
                 input_schema: {
-                    let required = tool
-                        .parameters
-                        .iter()
-                        .filter(|(_, cfg)| cfg.required)
-                        .map(|(key, _)| key.clone())
-                        .collect();
-
-                    let properties = tool
-                        .parameters
-                        .into_iter()
-                        .map(|(key, cfg)| (key, cfg.to_json_schema()))
-                        .collect();
-
-                    types::ToolInputSchema {
-                        kind: types::ToolInputSchemaKind::Object,
-                        properties,
-                        required,
-                        additional_properties: strict.then_some(false),
+                    // The document arrives as its source declared it. `$ref`
+                    // and `$defs` are supported, so they pass through; strict
+                    // mode additionally requires the closed-object subset,
+                    // which `transform_schema` produces.
+                    let document = tool.parameters.as_object().cloned().unwrap_or_default();
+                    if strict {
+                        transform_schema(document).into()
+                    } else {
+                        document.into()
                     }
                 },
                 cache_control: None,

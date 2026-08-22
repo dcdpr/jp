@@ -22,6 +22,4 @@ inline_results = "off"
 parameters = "function_call"
 
 [conversation.tools.rust_crate_versions.parameters.crate_name]
-type = "string"
-required = true
 summary = "Exact name of the crate."
