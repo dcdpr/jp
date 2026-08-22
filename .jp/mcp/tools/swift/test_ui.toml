@@ -1,0 +1,33 @@
+[conversation.tools.swift_test_ui]
+enable = false
+run = "unattended"
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "Run named UI tests against the macOS app. Each one drives the app through the screen, so a run takes over the display and cannot be used while the machine is busy. Names are required and there is no way to ask for the whole bundle: run the two or three you are working on, and leave the full suite to CI (`just test-app-ui`). The run stops at the first failure and closes the app it left behind; set `CI=1` to let it finish and report everything. Builds the library and regenerates the Xcode project first, so no setup step is needed. A failure reports what the tests recorded and copies their screenshots into `tmp/uitests/`."
+
+examples = """
+```json
+{"tests": ["UISuite/ConversationListTests/clickSelects()"]}
+```
+Runs one test. This is the red-green loop: about six seconds.
+
+```json
+{"tests": ["UISuite/ConversationListTests/clickSelects()", "UISuite/ConversationListTests/arrowKeysMoveSelection()"]}
+```
+Runs two, in one launch of `xcodebuild`.
+
+```json
+{"tests": ["UISuite/ConversationListTests"]}
+```
+Runs a whole suite. Costs a launch of the app per test in it, so reach for
+this when finishing a section rather than while iterating.
+"""
+
+[conversation.tools.swift_test_ui.style]
+inline_results = "full"
+results_file_link = "off"
+parameters = "function_call"
+
+[conversation.tools.swift_test_ui.parameters.tests]
+summary = "The suites or tests to run, as `SuiteName` or `SuiteName/testName()`. Required, and at least one. A nested suite is named by its whole type path (`UISuite/ConversationListTests`), and a swift-testing function keeps its trailing `()`. A name matching nothing fails the run rather than being passed over, so a typo is reported instead of quietly shrinking the run. Pass an empty list to be told what there is, asked of the built bundle."
+type = "array"
