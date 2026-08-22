@@ -140,6 +140,10 @@ struct WorkspaceWindow: View {
         // to the scene, because the scene's `defaultSize` applies to a window
         // opened fresh and not to one restored into a saved frame.
         .frame(minWidth: Self.minimumWindowWidth, minHeight: Self.minimumWindowHeight)
+        // Inert unless `JP_WINDOW_FRAME` is set, which only a test does. Frame
+        // autosave outlives `-ApplePersistenceIgnoreState`, so without this a
+        // suite inherits the window size its last run left behind.
+        .fixedWindowFrame()
         // Carried but not displayed: the window has no title bar to show it in.
         // It is still what the Window menu lists the window under, and what an
         // external driver addresses it by.

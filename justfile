@@ -131,6 +131,9 @@ build-changelog: (_install "jilu@" + jilu_version)
 # Build the static library and C header that the macOS app links against, and
 # stage both where the Xcode project expects them.
 #
+# Universal. The app declares no `ARCHS`, so Xcode builds it for
+# `ARCHS_STANDARD` — arm64 and x86_64 — and a Release build links both slices.
+#
 # Xcode runs this from a build phase, so `just` stays the single entry point for
 # building the Rust side rather than Xcode growing a competing one.
 #
@@ -153,29 +156,38 @@ build-ffi PROFILE="debug": (_install "cbindgen@" + cbindgen_version)
         build_profile="{{PROFILE}}"
     fi
 
-    # Ask cargo which file it wrote rather than reconstructing the path. A
-    # configured build target (`[build] target` in `.cargo/config.toml`, or
-    # `CARGO_BUILD_TARGET`) inserts the triple into it, and `cargo metadata`
-    # reports only the outer target directory. The directory is redirectable
-    # too: sibling git worktrees here share one outside the checkout entirely.
-    #
-    # `json-render-diagnostics` and not `json`: the latter would send compiler
-    # errors down the pipe into `jq` instead of to the terminal.
-    #
-    # Deliberately not `{{quiet_flag}}`: a staticlib links the whole dependency
-    # graph, so a cold build runs long enough that silence reads as a hang.
-    # Cargo's status lines go to stderr and the JSON to stdout, so letting them
-    # through costs the pipe nothing.
-    lib=$(cargo build --package jp_ffi --profile "$build_profile" \
-            --message-format=json-render-diagnostics |
-        jq -r 'select(.reason == "compiler-artifact" and .target.name == "jp_ffi")
-               | .filenames[] | select(endswith(".a"))' |
-        tail -n 1)
+    # Both slices, every time. A host-only library satisfies the Debug build on
+    # the machine that produced it and nothing else, so the gap stays invisible
+    # until somebody cuts a release or runs the UI suite under Rosetta — at
+    # which point it is a link error a long way from its cause.
+    slices=""
+    for target in aarch64-apple-darwin x86_64-apple-darwin; do
+        rustup target add "$target" >/dev/null
 
-    if [ -z "$lib" ] || [ ! -f "$lib" ]; then
-        echo "cargo did not produce a jp_ffi static library" >&2
-        exit 1
-    fi
+        # Ask cargo which file it wrote rather than reconstructing the path. The
+        # target directory is redirectable: sibling git worktrees here share one
+        # outside the checkout entirely.
+        #
+        # `json-render-diagnostics` and not `json`: the latter would send
+        # compiler errors down the pipe into `jq` instead of to the terminal.
+        #
+        # Deliberately not `{{quiet_flag}}`: a staticlib links the whole
+        # dependency graph, so a cold build runs long enough that silence reads
+        # as a hang. Cargo's status lines go to stderr and the JSON to stdout,
+        # so letting them through costs the pipe nothing.
+        slice=$(cargo build --package jp_ffi --profile "$build_profile" \
+                --target "$target" --message-format=json-render-diagnostics |
+            jq -r 'select(.reason == "compiler-artifact" and .target.name == "jp_ffi")
+                   | .filenames[] | select(endswith(".a"))' |
+            tail -n 1)
+
+        if [ -z "$slice" ] || [ ! -f "$slice" ]; then
+            echo "cargo did not produce a jp_ffi static library for $target" >&2
+            exit 1
+        fi
+
+        slices="$slices $slice"
+    done
 
     # Stage into a fixed, checkout-local directory. Xcode's search paths are
     # static build settings, so they need one location that does not move with
@@ -183,15 +195,15 @@ build-ffi PROFILE="debug": (_install "cbindgen@" + cbindgen_version)
     out="apps/macos/.build/{{PROFILE}}"
     mkdir -p "$out/include"
 
-    # A debug staticlib bundles every dependency, so skip the copy when the
-    # staged one is already current.
-    if [ ! -f "$out/libjp_ffi.a" ] || [ "$lib" -nt "$out/libjp_ffi.a" ]; then
-        cp "$lib" "$out/libjp_ffi.a"
+    # A debug staticlib bundles every dependency, so joining the slices is worth
+    # skipping when what is staged is already newer than both of them.
+    if [ ! -f "$out/libjp_ffi.a" ] || [ -n "$(find $slices -newer "$out/libjp_ffi.a")" ]; then
+        lipo -create -output "$out/libjp_ffi.a" $slices
     fi
 
     cbindgen --config crates/jp_ffi/cbindgen.toml --crate jp_ffi --output "$out/include/jp_ffi.h"
 
-    echo "library: $out/libjp_ffi.a" >&2
+    echo "library: $out/libjp_ffi.a ($(lipo -archs "$out/libjp_ffi.a"))" >&2
     echo "header:  $out/include/jp_ffi.h" >&2
 
 # Build the `jpdrive` accessibility driver that the `debug_app_*` tools shell out
@@ -356,6 +368,59 @@ open-app: build-app
 test-app: gen-app (build-ffi "debug")
     xcodebuild test -project apps/macos/JP.xcodeproj -scheme JP \
         -destination platform=macOS -only-testing:JPTests -quiet
+
+# Run every one of the macOS app's UI tests.
+#
+# Takes over the screen for the length of the run. This is the CI job; while
+# writing a test, run it by name through the `swift_test_ui` tool instead, which
+# stops at the first failure.
+#
+# Every test runs here even after one fails, which is what `CI` means to that
+# tool and what a run nobody is watching should do.
+#
+# The result bundle is written into the checkout rather than left in derived
+# data, so a failing run leaves its evidence somewhere a reader or a CI artifact
+# step can reach without deriving a container path. `swift_test_ui` writes to
+# the same place for the same reason.
+[group('test')]
+[macos]
+test-app-ui: gen-app (build-ffi "debug")
+    #!/usr/bin/env sh
+    set -eu
+
+    # Not tidying up: `xcodebuild` refuses to write over an existing bundle, so
+    # without this the second run in a checkout fails before it starts.
+    rm -rf tmp/uitests/run.xcresult
+    mkdir -p tmp/uitests
+
+    # Captured rather than propagated, so the bundle is still reported on the
+    # failing run — which is the only run anybody opens it for.
+    status=0
+    CI=1 xcodebuild test -project apps/macos/JP.xcodeproj -scheme JP \
+        -destination platform=macOS -only-testing:JPUITests \
+        -resultBundlePath tmp/uitests/run.xcresult -quiet || status=$?
+
+    if [ -d tmp/uitests/run.xcresult ]; then
+        echo "result bundle: tmp/uitests/run.xcresult" >&2
+    fi
+
+    exit $status
+
+# Format the macOS app's Swift sources.
+[group('fmt')]
+[macos]
+fmt-app:
+    swift format --in-place --recursive --parallel \
+        apps/macos/Sources apps/macos/Tests apps/macos/UITests \
+        apps/macos/Tools/jpdrive/Sources apps/macos/Tools/jpdrive/Tests
+
+# Check Swift formatting and lints without rewriting anything.
+[group('check')]
+[macos]
+lint-app:
+    swift format lint --strict --recursive --parallel \
+        apps/macos/Sources apps/macos/Tests apps/macos/UITests \
+        apps/macos/Tools/jpdrive/Sources apps/macos/Tools/jpdrive/Tests
 
 [group('profile')]
 [positional-arguments]

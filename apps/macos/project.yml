@@ -135,12 +135,34 @@ targets:
         TEST_HOST: $(BUILT_PRODUCTS_DIR)/JP.app/Contents/MacOS/JP
         BUNDLE_LOADER: $(TEST_HOST)
 
+  # The regression half of `QA.md`: the app is launched, acted on, and read back
+  # through its accessibility tree, which is what reaches menu enablement, the
+  # pasteboard, and terminate-and-relaunch.
+  #
+  # A UI test runs in its own process, so `@testable import JP` is not available
+  # here and must not be reached for. Anything that can be checked in-process
+  # belongs in JPTests, where it runs in milliseconds.
+  JPUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: UITests
+    dependencies:
+      - target: JP
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: computer.jp.jean-pierre.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        # Which app `XCUIApplication()` addresses when constructed without one.
+        TEST_TARGET_NAME: JP
+
 schemes:
   JP:
     build:
       targets:
         JP: all
         JPTests: [test]
+        JPUITests: [test]
     run:
       config: Debug
       # The workspace to open. Phase 2 has no file chooser, so the path comes
@@ -156,3 +178,4 @@ schemes:
       gatherCoverageData: false
       targets:
         - JPTests
+        - JPUITests
