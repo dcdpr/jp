@@ -87,8 +87,8 @@ pub(crate) fn event_scope(kind: &EventKind) -> Option<ConcreteScope> {
 
 /// Extract all searchable text lines from an event.
 ///
-/// Lines may be borrowed from the event or owned (tool call arguments are
-/// serialized on demand).
+/// Lines may be borrowed from the event or owned (tool call arguments and
+/// structured responses are serialized on demand).
 pub(crate) fn event_lines(kind: &EventKind) -> Vec<Cow<'_, str>> {
     match kind {
         EventKind::ChatRequest(req) => req.content.lines().map(Cow::Borrowed).collect(),
@@ -98,12 +98,17 @@ pub(crate) fn event_lines(kind: &EventKind) -> Vec<Cow<'_, str>> {
         EventKind::ChatResponse(ChatResponse::Reasoning { reasoning }) => {
             reasoning.lines().map(Cow::Borrowed).collect()
         }
-        EventKind::ChatResponse(ChatResponse::Structured { data }) => data
-            .as_str()
-            .iter()
-            .flat_map(|text| text.lines())
-            .map(Cow::Borrowed)
-            .collect(),
+        EventKind::ChatResponse(ChatResponse::Structured { data }) => match data.as_str() {
+            // A response whose JSON failed to parse is kept as a raw string.
+            // Searching it verbatim avoids re-quoting and escaping it.
+            Some(text) => text.lines().map(Cow::Borrowed).collect(),
+            // Anything else was parsed into a `Value` before it was persisted,
+            // so its text has to be rebuilt. Pretty-printed for the same reason
+            // tool call arguments are.
+            None => serde_json::to_string_pretty(data)
+                .map(|json| json.lines().map(|line| Cow::Owned(line.to_owned())).collect())
+                .unwrap_or_default(),
+        },
         EventKind::ToolCallRequest(req) => {
             let mut out: Vec<Cow<'_, str>> = req.name.lines().map(Cow::Borrowed).collect();
             if !req.arguments.is_empty() {
