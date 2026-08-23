@@ -5,7 +5,10 @@ use chrono::{TimeZone as _, Utc};
 use jp_config::AppConfig;
 use jp_conversation::{
     Conversation, ConversationEvent, ConversationId, EventKind,
-    event::{ChatRequest, ChatResponse, ToolCallResponse},
+    event::{
+        ChatRequest, ChatResponse, InquiryQuestion, InquiryRequest, InquirySource, ToolCallRequest,
+        ToolCallResponse,
+    },
 };
 use jp_printer::{OutputFormat, Printer};
 use jp_workspace::Workspace;
@@ -137,9 +140,9 @@ fn a_poisoned_matcher_stops_matching() {
 
 // --- filter_ids -------------------------------------------------------------
 //
-// `filter_ids` uses fixed scopes (title + chat) and smart-case matching, and
-// returns matching IDs without building hit metadata. These tests pin the
-// scope set and the smart-case rule.
+// `filter_ids` searches every scope with smart-case matching, and returns
+// matching IDs without building hit metadata. These tests pin the scope set and
+// the smart-case rule.
 
 /// The matching IDs, for a pattern expected to compile.
 fn matching(ctx: &Ctx, ids: &[ConversationId], pattern: &str) -> Vec<ConversationId> {
@@ -201,9 +204,7 @@ fn filter_ids_matches_title() {
 }
 
 #[test]
-fn filter_ids_ignores_tool_call_response() {
-    // Tool call results sit outside the chat-style scope set. A match in
-    // tool output should NOT pull the conversation into the picker.
+fn filter_ids_matches_tool_call_response() {
     let id = make_id(20_500);
     let ctx = setup_ctx_with_events(vec![(id, vec![ConversationEvent::new(
         ToolCallResponse {
@@ -213,7 +214,44 @@ fn filter_ids_ignores_tool_call_response() {
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
     )])]);
 
-    assert!(matching(&ctx, &[id], "secret-keyword").is_empty());
+    assert_eq!(matching(&ctx, &[id], "secret-keyword"), vec![id]);
+}
+
+#[test]
+fn filter_ids_matches_tool_call_request_arguments() {
+    // Arguments are serialized on demand rather than stored as text, so this
+    // pins the one scope whose searchable content doesn't already exist as a
+    // string in the event.
+    let id = make_id(20_510);
+    let mut arguments = serde_json::Map::new();
+    arguments.insert(
+        "pattern".to_owned(),
+        serde_json::Value::String("integer_literal_enum_has_integer_type".to_owned()),
+    );
+    let ctx = setup_ctx_with_events(vec![(id, vec![ConversationEvent::new(
+        ToolCallRequest::new("tc1".into(), "fs_grep_files".into(), arguments),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+    )])]);
+
+    assert_eq!(
+        matching(&ctx, &[id], "integer_literal_enum_has_integer_type"),
+        vec![id]
+    );
+}
+
+#[test]
+fn filter_ids_matches_inquiry_question() {
+    let id = make_id(20_520);
+    let ctx = setup_ctx_with_events(vec![(id, vec![ConversationEvent::new(
+        InquiryRequest::new(
+            "iq1",
+            InquirySource::Assistant,
+            InquiryQuestion::text("Which migration strategy should I use?".to_owned()),
+        ),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+    )])]);
+
+    assert_eq!(matching(&ctx, &[id], "migration strategy"), vec![id]);
 }
 
 #[test]
