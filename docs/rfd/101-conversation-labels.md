@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-19
-- **Extended by**: [RFD 103][RFD 103-2]
+- **Extended by**: [RFD 103]
 
 ## Summary
 
@@ -323,8 +323,8 @@ pub struct ConversationConfig {
 
 #[serde(untagged)]
 pub enum LabelConfig {
-    /// Shorthand: `foo = "bar"` — a static label value with default
-    /// `apply_on` and `run`.
+    /// Shorthand: `foo = "bar"` — a static label value with default `apply_on`
+    /// and `run`.
     Static(String),
 
     /// Full form: `foo = { value, apply_on, run }`.
@@ -332,19 +332,22 @@ pub enum LabelConfig {
 }
 
 pub struct LabelObject {
-    /// The label's value: a literal string, or a command whose stdout
-    /// produces the value at resolution time.
+    /// The label's value: a literal string, or a command whose stdout produces
+    /// the value at resolution time.
     #[setting(default = "")]
     pub value: LabelValue,
 
-    /// When this label is auto-applied. Independent of CLI / alias use.
+    /// When this label is auto-applied.
+    /// Independent of CLI / alias use.
     #[setting(default)]
     pub apply_on: ApplyOn,
 
-    /// Confirmation policy for command-shaped values. Ignored for
-    /// `Static` values. Defaults to `Ask`. A label-specific enum;
-    /// conceptually similar to plugin `RunPolicy` (see [RFD 077]),
-    /// not shared with tool `RunMode` (which has different variants).
+    /// Confirmation policy for command-shaped values.
+    /// Ignored for `Static` values.
+    /// Defaults to `Ask`.
+    /// A label-specific enum; conceptually similar to plugin `RunPolicy` (see
+    /// [RFD 077]), not shared with tool `RunMode` (which has different
+    /// variants).
     #[setting(default)]
     pub run: LabelRunMode,
 }
@@ -361,14 +364,16 @@ pub enum LabelValue {
 
 #[derive(Default)]
 pub struct ApplyOn {
-    /// Resolve and apply when a new conversation is created
-    /// (`jp q --new`). Default: `true`.
+    /// Resolve and apply when a new conversation is created (`jp q --new`).
+    /// Default: `true`.
     #[setting(default = true)]
     pub new: bool,
 
-    /// Re-resolve and apply when an existing conversation is forked
-    /// (`jp c fork`). Default: `false`. When `false`, the source
-    /// conversation's existing value (if any) is inherited verbatim.
+    /// Re-resolve and apply when an existing conversation is forked (`jp c
+    /// fork`).
+    /// Default: `false`.
+    /// When `false`, the source conversation's existing value (if any) is
+    /// inherited verbatim.
     #[setting(default)]
     pub fork: bool,
 }
@@ -800,7 +805,6 @@ Mergeable independently of Phase 1, but depends on it.
 [RFD 031]: 031-durable-conversation-storage-with-workspace-projection.md
 [RFD 040]: 040-hidden-conversations-and-tool-context.md
 [RFD 077]: 077-plugin-configuration-and-trust-policy.md
-[RFD 103]: drafts/103-multi-value-conversation-labels.md
-[RFD 103-2]: 103-multi-value-conversation-labels.md
+[RFD 103]: 103-multi-value-conversation-labels.md
 [cmd-cfg]: ../architecture/ubiquitous-language.md#commandconfig
 [tools]: ../../crates/jp_config/src/conversation/tool.rs
