@@ -692,6 +692,10 @@ fn union_to_json(types: &[SchemaType]) -> serde_json::Value {
     }
 }
 
+// The type is redundant next to `const` for validation: both forms accept the
+// same documents. It is emitted anyway because a consumer that dispatches on
+// `type` skips a node without one, and at least one provider rejects such a
+// node outright.
 fn literal_schema(value: &serde_json::Value) -> serde_json::Value {
     json!({
         "type": literal_type(value),
