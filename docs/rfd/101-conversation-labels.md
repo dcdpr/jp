@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-19
+- **Extended by**: [RFD 103][RFD 103-2]
 
 ## Summary
 
@@ -78,6 +79,13 @@ conversation's effective config.
 **Setting labels at creation.** `jp q` and `jp c fork` carry a `--label` flag,
 because their argument slot is already taken by the query text and the source
 conversation:
+
+> [!TIP]
+> [RFD 103] removes `--label` and `--reset-labels` from both commands, leaving
+> `jp c label` as the only way to mutate labels.
+> Under a set-valued model the flag has to mean either "add to" or "replace",
+> and nothing reads labels during a turn, so the two-command form loses nothing
+> but a keystroke.
 
 ```sh
 jp q --new --label=team=platform --label=branch=main
@@ -270,6 +278,12 @@ metadata/config drift is left untouched.
 There is no back-propagation from metadata to config.
 
 ### Data model
+
+> [!TIP]
+> [RFD 103] replaces this with a set of values per key, so `crate=jp_config` and
+> `crate=jp_llm` can coexist.
+> Single-valued labels become the one-element case, and value order is
+> preserved.
 
 ```rust
 // jp_conversation::Conversation
@@ -786,5 +800,7 @@ Mergeable independently of Phase 1, but depends on it.
 [RFD 031]: 031-durable-conversation-storage-with-workspace-projection.md
 [RFD 040]: 040-hidden-conversations-and-tool-context.md
 [RFD 077]: 077-plugin-configuration-and-trust-policy.md
+[RFD 103]: drafts/103-multi-value-conversation-labels.md
+[RFD 103-2]: 103-multi-value-conversation-labels.md
 [cmd-cfg]: ../architecture/ubiquitous-language.md#commandconfig
 [tools]: ../../crates/jp_config/src/conversation/tool.rs
