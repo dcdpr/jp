@@ -1,12 +1,14 @@
 use camino::{Utf8Path, Utf8PathBuf};
 use grep_printer::StandardBuilder;
-use grep_regex::RegexMatcher;
 use grep_searcher::{BinaryDetection, SearcherBuilder};
 use ignore::gitignore::Gitignore;
 use jp_tool::AccessPolicy;
+use matcher::FancyMatcher;
 
 use super::fs_list_files;
 use crate::{Error, util::OneOrMany};
+
+mod matcher;
 
 pub(crate) async fn fs_grep_files(
     root: &Utf8Path,
@@ -45,7 +47,7 @@ pub(crate) async fn fs_grep_files(
         pattern = format!("{pattern}|{pat}");
     }
 
-    let matcher = RegexMatcher::new(&pattern)?;
+    let matcher = FancyMatcher::new(&pattern)?;
 
     let mut printer = StandardBuilder::new()
         .max_columns(Some(1000))

@@ -121,8 +121,11 @@ fn a_poisoned_matcher_stops_matching() {
     assert!(matcher.failure().is_none());
 
     // Nested quantifiers over a long same-character run blow the backtrack
-    // limit and poison the matcher.
-    assert!(!matcher.is_match(&"a".repeat(64)));
+    // limit and poison the matcher. The leading `b` is what puts the engine on
+    // that path at all: with the pattern's required literal absent from the
+    // line, the search is decided without ever entering the backtracking VM.
+    // Here the `b` is present but unreachable, since no match can end at it.
+    assert!(!matcher.is_match(&format!("b{}", "a".repeat(4000))));
     assert!(matcher.failure().is_some());
 
     assert!(
