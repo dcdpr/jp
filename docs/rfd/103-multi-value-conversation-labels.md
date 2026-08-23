@@ -1,13 +1,3 @@
-<!--
-  This template is a starting point, not a constraint. Delete sections that
-  don't apply, add sections that do, or restructure entirely. The only
-  requirement is the metadata header (Status, Authors, Date).
-
-  Use HTML comments like this one for draft-time notes and review markers.
-  They do not appear in the rendered output and can be removed when the RFD
-  advances to Discussion status.
--->
-
 # RFD 103: Multi-Value Conversation Labels
 
 - **Status**: Discussion
@@ -197,7 +187,17 @@ A value is read as either a scalar or an array, so conversations written before
 this RFD load unchanged, and is always written as an array:
 
 ```json
-{ "labels": { "branch": ["main"], "crate": ["jp_config", "jp_llm"] } }
+{
+  "labels": {
+    "branch": [
+      "main"
+    ],
+    "crate": [
+      "jp_config",
+      "jp_llm"
+    ]
+  }
+}
 ```
 
 Accepting two shapes and emitting one means no migration step.
@@ -208,7 +208,13 @@ Accepting two shapes and emitting one means no migration step.
 The JSON form carries the set:
 
 ```json
-{ "key": "crate", "values": ["jp_config", "jp_llm"] }
+{
+  "key": "crate",
+  "values": [
+    "jp_config",
+    "jp_llm"
+  ]
+}
 ```
 
 This replaces the `{"key", "value"}` shape from [RFD 101].
