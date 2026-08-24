@@ -32,6 +32,7 @@ jobs:
       fmt: ${{ steps.filter.outputs.fmt }}
       fmt-comments: ${{ steps.filter.outputs.fmt-comments }}
       fmt-markdown: ${{ steps.filter.outputs.fmt-markdown }}
+      typecheck-js: ${{ steps.filter.outputs.typecheck-js }}
       test: ${{ steps.filter.outputs.test }}
       docs: ${{ steps.filter.outputs.docs }}
       coverage: ${{ steps.filter.outputs.coverage }}
@@ -76,6 +77,7 @@ jobs:
           cargo='(^|/)Cargo\.toml$|^Cargo\.lock$|^rust-toolchain\.toml$'
           rust='\.rs$'
           markdown='\.md$|\.markdown$'
+          javascript='\.js$|(^|/)tsconfig\.json$'
           snapshots='\.snap$|^\.config/insta\.yaml$'
           source="$rust|$cargo|$workflow|$justfile"
 
@@ -83,6 +85,7 @@ jobs:
           set_task fmt "$rust|^\.rustfmt\.toml$|$workflow|$justfile"
           set_task fmt-comments "$rust|$workflow|$justfile"
           set_task fmt-markdown "$markdown|$workflow|$justfile"
+          set_task typecheck-js "$javascript|$workflow|$justfile"
           set_task test "$source|$snapshots"
           set_task docs "$source"
           set_task coverage "$source|$snapshots"
@@ -96,7 +99,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest]
-        task: [lint, fmt, fmt-comments, fmt-markdown, test, docs, coverage, deny, insta, shear, vet]
+        task: [lint, fmt, fmt-comments, fmt-markdown, typecheck-js, test, docs, coverage, deny, insta, shear, vet]
         include:
           - task: test
             os: windows-latest
@@ -125,6 +128,7 @@ jobs:
           FMT: ${{ needs.changes.outputs.fmt }}
           FMT_COMMENTS: ${{ needs.changes.outputs.fmt-comments }}
           FMT_MARKDOWN: ${{ needs.changes.outputs.fmt-markdown }}
+          TYPECHECK_JS: ${{ needs.changes.outputs.typecheck-js }}
           TEST: ${{ needs.changes.outputs.test }}
           DOCS: ${{ needs.changes.outputs.docs }}
           COVERAGE: ${{ needs.changes.outputs.coverage }}
@@ -140,6 +144,7 @@ jobs:
             fmt) run="$FMT" ;;
             fmt-comments) run="$FMT_COMMENTS" ;;
             fmt-markdown) run="$FMT_MARKDOWN" ;;
+            typecheck-js) run="$TYPECHECK_JS" ;;
             test) run="$TEST" ;;
             docs) run="$DOCS" ;;
             coverage) run="$COVERAGE" ;;
@@ -197,6 +202,8 @@ jobs:
         if: ${{ steps.task.outputs.run == 'true' && matrix.task == 'test' }}
         shell: bash
         run: cargo metadata --locked --format-version 1 > /dev/null
+      - if: ${{ steps.task.outputs.run == 'true' && matrix.task == 'typecheck-js' }}
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
       - if: ${{ steps.task.outputs.run == 'true' }}
         run: just ${{ matrix.task }}-ci ${{ matrix.scope }}
       - if: ${{ matrix.task == 'coverage' && steps.task.outputs.run == 'true' }}
