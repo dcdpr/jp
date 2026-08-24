@@ -16,6 +16,10 @@
 //!   Declining the confirmation prompt is the exception: the user has just said
 //!   no, so the label is dropped and the command continues.
 //!
+//! A rule marked `optional` opts out of both reports: whatever it can't
+//! produce, it drops without a message and without failing the command.
+//! The detail still reaches the trace at debug level.
+//!
 //! Declining and cancelling are different answers.
 //! An explicit `n` drops the one label; a prompt error (Ctrl-C, Esc, a closed
 //! terminal) aborts the surrounding command, because the user asked to stop.
@@ -29,7 +33,7 @@ use jp_config::{
 use jp_inquire::{InlineOption, prompt::PromptBackend};
 use jp_printer::Printer;
 use tokio::process::Command;
-use tracing::warn;
+use tracing::{debug, warn};
 
 use crate::error::{Error, Result};
 
@@ -79,9 +83,9 @@ impl<'a> Resolver<'a> {
     ///
     /// # Errors
     ///
-    /// Returns an error when a rule needs confirmation and there is no terminal
-    /// to ask on, or when the confirmation prompt is cancelled or the prompt
-    /// backend fails.
+    /// Returns an error when a rule that is not `optional` needs confirmation
+    /// and there is no terminal to ask on, or when the confirmation prompt is
+    /// cancelled or the prompt backend fails.
     /// Every other failure drops that one label and leaves the rest intact.
     pub(crate) async fn automatic(
         &self,
@@ -108,7 +112,7 @@ impl<'a> Resolver<'a> {
                 }
                 LabelValueRef::Command(cmd) => {
                     let cmd = cmd.clone().command();
-                    match self.approve(key, &cmd, rule.run())? {
+                    match self.approve(key, &cmd, rule.run(), rule.optional())? {
                         Approval::Approved => pending.push((key.clone(), cmd)),
                         Approval::Declined => {}
                     }
@@ -120,6 +124,11 @@ impl<'a> Resolver<'a> {
             match output {
                 Ok(values) => {
                     resolved.insert(key, values);
+                }
+                // An optional rule asked not to be told about its failures, so
+                // the detail goes to the trace and nowhere else.
+                Err(error) if self.is_optional(&key) => {
+                    debug!(label = %key, %error, "Skipping optional label.");
                 }
                 Err(error) => {
                     self.report_skipped(&key, &error);
@@ -133,13 +142,15 @@ impl<'a> Resolver<'a> {
     /// Resolve the rule named `key`, ignoring its `apply_on` policy.
     ///
     /// Returns the values the rule produces, which may be none.
-    /// Returns `Ok(None)` when the user declines the confirmation prompt.
+    /// Returns `Ok(None)` when the user declines the confirmation prompt, and
+    /// when an `optional` rule can't be produced.
     ///
     /// # Errors
     ///
-    /// Returns an error when no rule is configured under `key`, when the rule
-    /// is `run = "deny"`, when there is no terminal to confirm on, or when the
-    /// command fails.
+    /// Returns an error when no rule is configured under `key`, or when the
+    /// rule is `run = "deny"`.
+    /// A rule that is not `optional` also errors when there is no terminal to
+    /// confirm on, or when its command fails.
     pub(crate) async fn alias(&self, key: &str) -> Result<Option<(String, Vec<String>)>> {
         let rule = self.rules.get(key).ok_or_else(|| {
             Error::Label(format!(
@@ -163,16 +174,22 @@ impl<'a> Resolver<'a> {
             )));
         }
 
-        match self.approve(key, &cmd, rule.run())? {
+        match self.approve(key, &cmd, rule.run(), rule.optional())? {
             Approval::Declined => {
-                self.printer
-                    .eprintln(format!("⚠ Skipping label '{key}': command not run."));
+                if !rule.optional() {
+                    self.printer
+                        .eprintln(format!("⚠ Skipping label '{key}': command not run."));
+                }
                 Ok(None)
             }
-            Approval::Approved => run_command(&cmd, self.root)
-                .await
-                .map(|values| Some((key.to_owned(), values)))
-                .map_err(|error| Error::Label(format!("label ':{key}' failed: {error}"))),
+            Approval::Approved => match run_command(&cmd, self.root).await {
+                Ok(values) => Ok(Some((key.to_owned(), values))),
+                Err(error) if rule.optional() => {
+                    debug!(label = key, %error, "Skipping optional label.");
+                    Ok(None)
+                }
+                Err(error) => Err(Error::Label(format!("label ':{key}' failed: {error}"))),
+            },
         }
     }
 
@@ -186,10 +203,19 @@ impl<'a> Resolver<'a> {
     /// Returns an error when confirmation is required and no terminal is
     /// available, since neither running nor skipping is a safe assumption, and
     /// when the prompt is cancelled (Ctrl-C, Esc) or the backend fails.
-    fn approve(&self, key: &str, cmd: &CommandConfig, run: LabelRunMode) -> Result<Approval> {
+    fn approve(
+        &self,
+        key: &str,
+        cmd: &CommandConfig,
+        run: LabelRunMode,
+        optional: bool,
+    ) -> Result<Approval> {
         match run {
             LabelRunMode::Unattended => Ok(Approval::Approved),
             LabelRunMode::Deny => Ok(Approval::Declined),
+            // An unanswerable prompt is one of the ways an optional rule can't
+            // be produced, which is exactly what it asked to have skipped.
+            LabelRunMode::Ask if !self.is_tty && optional => Ok(Approval::Declined),
             LabelRunMode::Ask if !self.is_tty => Err(Error::Label(format!(
                 "label '{key}' needs confirmation to run `{cmd}`, but there is no terminal to ask \
                  on; set `conversation.labels.{key}.run` to \"unattended\" or \"deny\""
@@ -215,6 +241,14 @@ impl<'a> Resolver<'a> {
                 }
             }
         }
+    }
+
+    /// Whether the rule under `key` is marked optional.
+    ///
+    /// A key naming no rule is not optional, which cannot happen for the keys
+    /// [`Self::automatic`] takes from the rules it was built with.
+    fn is_optional(&self, key: &str) -> bool {
+        self.rules.get(key).is_some_and(LabelConfig::optional)
     }
 
     /// Report a label that was dropped rather than applied.

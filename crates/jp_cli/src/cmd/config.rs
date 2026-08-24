@@ -1,4 +1,4 @@
-use camino::{FromPathBufError, Utf8Path, Utf8PathBuf};
+use camino::Utf8Path;
 use jp_config::fs::{ConfigFile, ConfigLoader, ConfigLoaderError, user_global_config_dir};
 use jp_workspace::ConversationHandle;
 
@@ -92,10 +92,10 @@ impl Target {
             loader.recurse_up = true;
             loader.recurse_stop_at = Some(ctx.workspace.root().to_path_buf());
 
-            let current_dir = Utf8PathBuf::try_from(std::env::current_dir()?)
-                .map_err(FromPathBufError::into_io_error)?;
-
-            loader.load(current_dir).map(Some)
+            // The same directory the `.jp.toml` chain is *read* from, so a
+            // from-anywhere run writes the file it would load, and the
+            // recurse-up walk stays anchored at the workspace root above it.
+            loader.load(ctx.exec.config_cwd()).map(Some)
         } else {
             ctx.storage_path().map(|p| loader.load(p)).transpose()
         }

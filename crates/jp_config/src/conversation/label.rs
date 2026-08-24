@@ -24,6 +24,11 @@
 //! apply_on = { new = true, fork = true }
 //! ```
 //!
+//! A rule that fails to resolve is reported and skipped, and naming it as an
+//! alias is an error.
+//! `optional = true` silences both, for a label that only applies where it can
+//! be produced.
+//!
 //! A label key starts with an ASCII letter, followed by any number of letters,
 //! digits, underscores, and hyphens.
 //!
@@ -144,6 +149,15 @@ impl LabelConfig {
             Self::Object(object) => object.run,
         }
     }
+
+    /// Whether a failure to produce this label is silently ignored.
+    #[must_use]
+    pub const fn optional(&self) -> bool {
+        match self {
+            Self::Static(_) | Self::List(_) => false,
+            Self::Object(object) => object.optional,
+        }
+    }
 }
 
 /// A borrowed view of a label's value rule, flattening the shorthand and full
@@ -194,6 +208,20 @@ pub struct LabelObject {
     #[setting(default)]
     #[serde(default)]
     pub run: LabelRunMode,
+
+    /// Whether to skip the label without a message when it can't be produced.
+    ///
+    /// Defaults to `false`, where a failing rule prints a warning, and naming
+    /// it with `--label=:key` fails the command.
+    /// Set to `true` for a label that only applies in some checkouts: a command
+    /// that exits non-zero, or one that can't be confirmed because there is no
+    /// terminal, then drops the label and nothing is printed.
+    ///
+    /// Naming a `run = "deny"` rule with `--label=:key` still fails, because
+    /// that rule can never produce a value.
+    #[setting(default)]
+    #[serde(default)]
+    pub optional: bool,
 }
 
 /// How a label's value is produced.
@@ -383,6 +411,7 @@ impl AssignKeyValue for PartialLabelObject {
             _ if kv.p("value") => self.value.assign(kv)?,
             _ if kv.p("apply_on") => self.apply_on.assign(kv)?,
             "run" => self.run = kv.try_some_from_str()?,
+            "optional" => self.optional = kv.try_some_bool()?,
             _ => return missing_key(&kv),
         }
 
@@ -396,6 +425,7 @@ impl PartialConfigDelta for PartialLabelObject {
             value: self.value.delta(next.value),
             apply_on: self.apply_on.delta(next.apply_on),
             run: delta_opt(self.run.as_ref(), next.run),
+            optional: delta_opt(self.optional.as_ref(), next.optional),
         }
     }
 }
@@ -406,6 +436,7 @@ impl FillDefaults for PartialLabelObject {
             value: self.value,
             apply_on: self.apply_on.fill_from(defaults.apply_on),
             run: self.run.or(defaults.run),
+            optional: self.optional.or(defaults.optional),
         }
     }
 }
@@ -418,6 +449,7 @@ impl ToPartial for LabelObject {
             value: self.value.to_partial(),
             apply_on: self.apply_on.to_partial(),
             run: partial_opt(&self.run, defaults.run),
+            optional: partial_opt(&self.optional, defaults.optional),
         }
     }
 }

@@ -93,6 +93,26 @@ fn object_form_deserializes() {
     assert_eq!(config.run(), LabelRunMode::Unattended);
 }
 
+/// A rule is required unless it says otherwise, so an unmarked rule reports its
+/// failures.
+#[test]
+fn rules_are_required_by_default() {
+    for json in [r#""platform""#, r#"["a"]"#, r#"{"value":"x"}"#] {
+        let config: LabelConfig = serde_json::from_str(json).unwrap();
+
+        assert!(!config.optional(), "got: {json}");
+    }
+}
+
+#[test]
+fn optional_deserializes() {
+    let json = r#"{"value":{"cmd":"git branch --show-current"},"optional":true}"#;
+
+    let config: LabelConfig = serde_json::from_str(json).unwrap();
+
+    assert!(config.optional());
+}
+
 #[test]
 fn command_shorthand_value_deserializes() {
     let json = r#"{"value":{"cmd":"git rev-parse --abbrev-ref HEAD"},"run":"unattended"}"#;

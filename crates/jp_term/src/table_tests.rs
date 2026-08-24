@@ -155,9 +155,10 @@ fn list_item_text_and_json_forms_can_differ() {
         "cmd (Desc): cmd://x",
         serde_json::json!({ "scheme": "cmd", "url": "cmd://x" }),
     );
-    let rows = Details::Fields(vec![DetailRow::list("Attachments", vec![item])]);
+    let rows = Details::Fields(vec![DetailRow::list("Attachments", vec![item.clone()])]);
 
-    // Pretty uses the text form.
+    // Pretty uses the text form; the structured form rides along for callers
+    // assembling machine-readable payloads.
     assert!(
         details(None, rows.clone()).contains("1. cmd (Desc): cmd://x"),
         "text form should drive the pretty view"

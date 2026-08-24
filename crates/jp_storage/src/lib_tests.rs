@@ -373,11 +373,9 @@ fn with_user_storage_uses_workspace_id_path() {
     assert!(user_dir.is_dir(), "user storage lives at <user_root>/<id>");
     assert_eq!(storage.user_storage_path(), Some(user_dir.as_path()));
 
-    let link = user_dir.join("storage");
-    assert!(link.is_symlink(), "user dir holds a `storage` symlink");
-    assert_eq!(
-        fs::read_link(&link).unwrap().as_path(),
-        workspace.as_std_path()
+    assert!(
+        !user_dir.join("storage").is_symlink(),
+        "no legacy `storage` symlink is created"
     );
 }
 
@@ -397,7 +395,7 @@ fn reuses_existing_slugged_user_dir_in_place() {
     #[cfg(unix)]
     std::os::unix::fs::symlink(tmp.path().join("old-workspace"), existing.join("storage")).unwrap();
 
-    // No slug given: the silo is still located by ID suffix and reused as-is,
+    // No slug given: the directory is still located by ID suffix and reused as-is,
     // never renamed to a bare `<id>` directory.
     let storage = Storage::new(workspace.clone())
         .unwrap()
@@ -431,8 +429,8 @@ fn reuses_existing_slugged_user_dir_in_place() {
         assert!(link.is_symlink());
         assert_eq!(
             fs::read_link(&link).unwrap().as_path(),
-            workspace.as_std_path(),
-            "symlink re-pointed at the current workspace"
+            tmp.path().join("old-workspace").as_std_path(),
+            "the legacy symlink is left untouched"
         );
     }
 }
@@ -443,7 +441,7 @@ fn merges_sibling_user_dirs_keeping_newest_conversation() {
     let workspace = tmp.path().join("workspace");
     let user_root = tmp.path().join("user");
 
-    // The same conversation lives in two silos; the `feature-abc` copy is newer
+    // The same conversation lives in two user-workspace directories; the `feature-abc` copy is newer
     // and must win the merge.
     let id = ConversationId::try_from_deciseconds_str("17636257526").unwrap();
     let old = write_conv_dir(
@@ -459,7 +457,7 @@ fn merges_sibling_user_dirs_keeping_newest_conversation() {
     );
     set_mtime(&new.join(EVENTS_FILE), 2_000);
 
-    // The slug selects `feature-abc` as the surviving silo; `main-abc` is
+    // The slug selects `feature-abc` as the surviving directory; `main-abc` is
     // folded in and removed.
     let storage = Storage::new(workspace)
         .unwrap()
@@ -493,12 +491,15 @@ fn creates_slug_prefixed_dir_for_new_workspace() {
         .unwrap();
 
     let dir = user_root.join("my-project-abc");
-    assert!(dir.is_dir(), "a new silo is named <slug>-<id>");
+    assert!(
+        dir.is_dir(),
+        "a new user-workspace directory is named <slug>-<id>"
+    );
     assert_eq!(storage.user_storage_path(), Some(dir.as_path()));
 }
 
 #[test]
-fn second_clone_reuses_silo_despite_different_slug() {
+fn second_clone_reuses_user_workspace_dir_despite_different_slug() {
     let tmp = tempdir().unwrap();
     let user_root = tmp.path().join("user");
 
@@ -506,11 +507,11 @@ fn second_clone_reuses_silo_despite_different_slug() {
         .unwrap()
         .with_user_storage(&user_root, Some("clone-a"), "abc")
         .unwrap();
-    let silo = user_root.join("clone-a-abc");
-    assert_eq!(first.user_storage_path(), Some(silo.as_path()));
+    let dir = user_root.join("clone-a-abc");
+    assert_eq!(first.user_storage_path(), Some(dir.as_path()));
 
     // A second clone of the same workspace, in a directory with a different
-    // name, reuses the silo created by the first clone rather than minting a
+    // name, reuses the directory created by the first clone rather than minting a
     // `clone-b-abc` of its own.
     let second = Storage::new(tmp.path().join("clone-b"))
         .unwrap()
@@ -518,14 +519,14 @@ fn second_clone_reuses_silo_despite_different_slug() {
         .unwrap();
     assert_eq!(
         second.user_storage_path(),
-        Some(silo.as_path()),
-        "the existing silo is reused, not renamed"
+        Some(dir.as_path()),
+        "the existing directory is reused, not renamed"
     );
     assert!(!user_root.join("clone-b-abc").exists());
 }
 
 #[test]
-fn picks_most_recently_modified_silo_without_slug_match() {
+fn picks_most_recently_modified_dir_without_slug_match() {
     let tmp = tempdir().unwrap();
     let workspace = tmp.path().join("workspace");
     let user_root = tmp.path().join("user");
@@ -540,7 +541,7 @@ fn picks_most_recently_modified_silo_without_slug_match() {
     fs::write(feature.join("marker"), "b").unwrap();
     set_mtime(&feature.join("marker"), 2_000);
 
-    // The slug matches neither silo, so the most recently modified one wins.
+    // The slug matches neither directory, so the most recently modified one wins.
     let storage = Storage::new(workspace)
         .unwrap()
         .with_user_storage(&user_root, Some("unrelated"), "abc")
