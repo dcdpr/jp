@@ -30,6 +30,7 @@ Ok(
                             discard_when_merged: Some(
                                 true,
                             ),
+                            dedup: None,
                         },
                     ),
                 ),

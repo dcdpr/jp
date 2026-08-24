@@ -210,8 +210,6 @@ fn comment_preview_renders_the_block_under_the_ticket_it_lands_on() {
         STAMP,
     )));
 
-    // The rule spans the text column, which the blockquote's `> ` narrows by
-    // two: 78 characters, not the full 80.
     assert_eq!(
         out,
         concat!(
