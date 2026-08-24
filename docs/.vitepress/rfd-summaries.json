@@ -12,7 +12,7 @@
     "summary": "Buffer segments streaming markdown blocks; TerminalRenderer applies ANSI-aware terminal formatting; comrak chosen over pulldown-cmark."
   },
   "005-first-class-inquiry-events.md": {
-    "hash": "bd19573644d77d9c4d14b7b9c8feae87c997320977d53846fb717a7b69d6397f",
+    "hash": "6e06d81559aa0ca48fffd041ea70d2f74c8e3a59d3a9d3b9adba1e19361226ca",
     "summary": "Record inquiry events in conversation stream with centralized filtering to keep them hidden from LLM providers."
   },
   "006-turn-scoped-mutations.md": {
@@ -116,7 +116,7 @@
     "summary": "Make JP scriptable with concise schema DSL and inferred clean JSON output when piping or with --schema flag."
   },
   "030-schema-dsl.md": {
-    "hash": "d8f041473711fa0ec15010002e56e1ef8e8f65c1b55481601e6efdffc4d70f2e",
+    "hash": "97d9fe44330e60174d9045dfba09869ee1f005af585df97f79163a947cdd7ff6",
     "summary": "JP's concise DSL syntax for defining JSON Schema objects via command-line flags with types, descriptions, and nested structures."
   },
   "031-durable-conversation-storage-with-workspace-projection.md": {
@@ -324,11 +324,11 @@
     "summary": "Split tool enable into state and allow_toggle to fix directive bugs and eliminate variant proliferation."
   },
   "082-unified-inquiry-event-recording.md": {
-    "hash": "57e2a66512d7ec922bb83f8078a81177a884797ae41ec6609f8f1e75e6fb842a",
+    "hash": "b2d476597db461a7970e469876845c6709c532b2e24ab624015500eb9bd7175f",
     "summary": "Unify inquiry event recording across all routing paths; add cancellation/redaction variants; track attempts per turn."
   },
   "083-built-in-ask_user-tool-for-assistant-initiated-inquiries.md": {
-    "hash": "11b0999e4212efd2f5ecbed7549921df06764b620d2c53475066e926e8292e99",
+    "hash": "c98f03d892b251f8b2c47ea359945c6db61a5138677650ee6d150cbfa4e02701",
     "summary": "Built-in tool for assistant to ask typed questions mid-turn with human-only enforcement and optional answer persistence."
   },
   "084-configurable-markdown-element-coloring.md": {
@@ -392,7 +392,7 @@
     "summary": "Request-response linking via persistent event IDs detects answer scope under structural edits."
   },
   "101-conversation-labels.md": {
-    "hash": "8942119ffa726cd4f1b14a34dfc0cb46c34fdb4b7286276bdc238c2235fe1bfc",
+    "hash": "7be4cc00cbd33cb5cd8a4b96ce9f8838a7e6e059f3032c65fa640fce355f1e7a",
     "summary": "Conversations gain configurable key-value labels—static, command-backed, or CLI-set—managed through `jp c label` and used to filter by context like VCS branches."
   },
   "100-in-repo-ticket-tracking.md": {
@@ -406,5 +406,9 @@
   "099-native-macos-app-for-browsing-conversations.md": {
     "hash": "4955066abb71a8a098675aa3f9a628aca2ec16511d94cc6da35bcf320a39addc",
     "summary": "Native macOS app for browsing JP conversations via FFI, with public Workspace::open API extracted from CLI."
+  },
+  "103-multi-value-conversation-labels.md": {
+    "hash": "1c9a52e7756e2b35badcb201f11f4bf625421849532602355980ebdbef7c65ca",
+    "summary": "Multi-valued labels replacing single-valued ones; add/set/rm verbs, set-membership filtering, config list-values, removes --label from query/fork."
   }
 }

@@ -97,7 +97,6 @@ type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 #[config(rename_all = "snake_case")]
 pub struct AppConfig {
     /// Inherit from a local ancestor or global configuration file.
-    #[setting(optional)]
     pub inherit: bool,
 
     /// Directories to search for additional configuration files.
@@ -109,7 +108,7 @@ pub struct AppConfig {
     ///
     /// For example, to load `.jp/agents/dev.toml`, add `.jp/agents` to this
     /// list and run `jp query --cfg dev`.
-    #[setting(optional, merge = schematic::merge::append_vec, transform = util::vec_dedup)]
+    #[setting(merge = internal::merge::append_vec_dedup)]
     pub config_load_paths: Vec<RelativePathBuf>,
 
     /// Extends the configuration from the given files.

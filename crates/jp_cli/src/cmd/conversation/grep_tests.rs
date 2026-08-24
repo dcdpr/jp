@@ -1324,6 +1324,28 @@ fn tool_results_are_searched() {
 }
 
 #[test]
+fn scope_structured_searches_serialized_json() {
+    let id = make_id(9500);
+    let (mut ctx, out) = setup(vec![(
+        id,
+        turn(vec![ConversationEvent::new(
+            ChatResponse::structured(json!({ "name": "Alice" })),
+            ts(),
+        )]),
+    )]);
+
+    let grep = Grep {
+        scopes: vec![Scope::Structured],
+        ..grep("Alice")
+    };
+    // The persisted value is a JSON object, so the searchable text is the
+    // pretty-printed serialization rather than the value itself.
+    assert_eq!(run(grep, &mut ctx, &out), [format!(
+        "{id}:1:structured:m:  \"name\": \"Alice\""
+    )]);
+}
+
+#[test]
 fn expand_scopes_empty_is_all() {
     assert_eq!(expand_scopes(&[]).len(), ConcreteScope::ALL.len());
 }

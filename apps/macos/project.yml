@@ -1,0 +1,181 @@
+name: JP
+
+options:
+  bundleIdPrefix: computer.jp
+  createIntermediateGroups: true
+  # The oldest macOS to support, and so the newest SwiftUI available: raise this
+  # before reaching for an API that needs a later release.
+  deploymentTarget:
+    macOS: "15.7"
+
+# Applied to every target. The Rust side denies warnings and runs in the
+# strictest mode its toolchain offers; these settings hold Swift to the same bar.
+settings:
+  base:
+    # Names the language mode, not the toolchain: `6.0` is the newest value the
+    # setting accepts, and a 6.3 toolchain still contributes its own compiler and
+    # SDK. Turns on complete concurrency checking, data-race safety, and the
+    # Swift 6 breaking changes.
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+
+    # A warning that never fails a build is a warning nobody fixes.
+    SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
+    GCC_TREAT_WARNINGS_AS_ERRORS: YES
+
+    RUN_CLANG_STATIC_ANALYZER: YES
+    CLANG_STATIC_ANALYZER_MODE: deep
+
+    # `ExistentialAny` requires existentials to be spelled `any P`, so a witness
+    # table lookup is visible at the use site rather than inferred.
+    OTHER_SWIFT_FLAGS: -enable-upcoming-feature ExistentialAny
+
+    # The pre-build script shells out to cargo, which writes outside the derived
+    # data directory. Script sandboxing (on by default since Xcode 15) denies
+    # that and fails the phase.
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+
+    # Both targets need to resolve `jp_ffi.h`, not just the one that names it as
+    # a bridging header: `@testable import JP` loads the app's swiftmodule, which
+    # re-reads the bridging header through the importing target's search paths.
+    #
+    # `just build-ffi` stages the library and header here. It is not cargo's
+    # target directory, which is redirectable and can sit outside the checkout;
+    # these paths have to be static, so the build stages into a fixed one.
+    HEADER_SEARCH_PATHS:
+      - $(SRCROOT)/.build/$(CARGO_PROFILE)/include
+
+  # Xcode's configuration names are capitalized; cargo's profile directories are
+  # not. Set per-project because the header search path above interpolates it.
+  configs:
+    Debug:
+      CARGO_PROFILE: debug
+      # Set explicitly rather than relying on a generator default, because a
+      # test seam is gated on it: `DebugState.pasteboard` reads an environment
+      # variable only under `#if DEBUG`, and a Debug build that quietly lost
+      # this flag would compile that read out and leave the UI tests copying
+      # into the developer's clipboard.
+      SWIFT_ACTIVE_COMPILATION_CONDITIONS: DEBUG
+      # A Debug build otherwise leaves its debug info scattered across the
+      # object files, and `xct2cli` symbolicates a trace from a dSYM bundle.
+      # Costs a dsymutil pass on every link.
+      DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
+      # Xcode otherwise splits a Debug build into a launcher stub at
+      # `JP.app/Contents/MacOS/JP` and a `JP.debug.dylib` holding the actual
+      # code. A profiler pointed at the bundle's executable then reads a stub
+      # whose UUID matches nothing in the trace, and every frame in our own
+      # code comes back as a bare address. Off, so the binary carrying the
+      # code is the binary being profiled.
+      ENABLE_DEBUG_DYLIB: NO
+    Release:
+      CARGO_PROFILE: release
+
+targets:
+  JP:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources
+    settings:
+      base:
+        PRODUCT_NAME: JP
+        PRODUCT_BUNDLE_IDENTIFIER: computer.jp.jean-pierre
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        GENERATE_INFOPLIST_FILE: YES
+
+        # Swift reaches the C entry points through this header.
+        SWIFT_OBJC_BRIDGING_HEADER: Sources/Bridging/JPFFI-Bridging-Header.h
+
+        # Only the app links the library. The test bundle is loaded into the app
+        # process, so its symbols resolve through the host.
+        LIBRARY_SEARCH_PATHS:
+          - $(SRCROOT)/.build/$(CARGO_PROFILE)
+        OTHER_LDFLAGS:
+          - -ljp_ffi
+          # Rust's `iana-time-zone`, reached through `chrono`, resolves the local
+          # time zone through CoreFoundation.
+          - -framework
+          - CoreFoundation
+
+        # Ad-hoc signing keeps a local run from needing a development team. The
+        # app is not sandboxed, so it can read a workspace anywhere on disk.
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "-"
+
+    preBuildScripts:
+      - name: Build jp_ffi
+        # Cargo decides what needs rebuilding. Letting Xcode skip the phase on
+        # its own output timestamps would leave a stale library linked after a
+        # Rust change.
+        #
+        # This keeps a build started from Xcode's UI honest, but it is not the
+        # only guard: Xcode scans the bridging header while planning the build,
+        # which happens before any script phase runs, so the header must already
+        # exist. `just build-app` and the `swift_*` tools build it up front.
+        basedOnDependencyAnalysis: false
+        script: |
+          set -eu
+          cd "$SRCROOT/../.."
+          just build-ffi "$CARGO_PROFILE"
+
+  JPTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests
+    dependencies:
+      - target: JP
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: computer.jp.jean-pierre.tests
+        GENERATE_INFOPLIST_FILE: YES
+        # The tests exercise types internal to the app, so they run hosted by the
+        # app bundle rather than standalone.
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/JP.app/Contents/MacOS/JP
+        BUNDLE_LOADER: $(TEST_HOST)
+
+  # The regression half of `QA.md`: the app is launched, acted on, and read back
+  # through its accessibility tree, which is what reaches menu enablement, the
+  # pasteboard, and terminate-and-relaunch.
+  #
+  # A UI test runs in its own process, so `@testable import JP` is not available
+  # here and must not be reached for. Anything that can be checked in-process
+  # belongs in JPTests, where it runs in milliseconds.
+  JPUITests:
+    type: bundle.ui-testing
+    platform: macOS
+    sources:
+      - path: UITests
+    dependencies:
+      - target: JP
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: computer.jp.jean-pierre.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        # Which app `XCUIApplication()` addresses when constructed without one.
+        TEST_TARGET_NAME: JP
+
+schemes:
+  JP:
+    build:
+      targets:
+        JP: all
+        JPTests: [test]
+        JPUITests: [test]
+    run:
+      config: Debug
+      # The workspace to open. Phase 2 has no file chooser, so the path comes
+      # from here.
+      environmentVariables:
+        JP_WORKSPACE: ""
+    test:
+      config: Debug
+      # Coverage is off deliberately. It puts `-profile-generate` into the build,
+      # which instruments every function and drops a `default.profraw` beside the
+      # binary on each run — a cost paid on every `just run-app` for data nothing
+      # currently reads. Turn it back on alongside something that reports it.
+      gatherCoverageData: false
+      targets:
+        - JPTests
+        - JPUITests
