@@ -1081,7 +1081,7 @@ fn open_errors_when_no_store_exists_above_dir() {
     fs::create_dir_all(&dir).unwrap();
 
     assert_eq!(
-        Workspace::open_with_storage_dir(&dir, ".jp-no-such-store").unwrap_err(),
+        Workspace::open_inner(&dir, ".jp-no-such-store", Access::ReadWrite).unwrap_err(),
         Error::WorkspaceNotFound(dir)
     );
 }

@@ -33,6 +33,7 @@ fn setup_ctx_with_conversations(
     let workspace = Workspace::in_memory(tmp.path());
     let (printer, _, _) = Printer::memory(OutputFormat::TextPretty);
     let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
         workspace,
         None,
         Runtime::new().unwrap(),

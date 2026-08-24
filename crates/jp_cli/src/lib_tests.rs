@@ -858,3 +858,7 @@ fn resolve_config_applies_the_compact_model_flag() {
         "openai/gpt-5"
     );
 }
+
+// Workspace-root selection by ID moved into the bootstrap step (RFD 087
+// phase 2/3); its behavior is covered by `bootstrap_tests` and
+// `cmd::workspace::target` tests.
