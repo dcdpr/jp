@@ -54,7 +54,8 @@ pub(crate) struct Ls {
 
     /// Only show conversations carrying this label.
     ///
-    /// `key=value` matches the exact value, a bare `key` matches any value.
+    /// `key=value` matches when the key holds that value, a bare `key` matches
+    /// any value.
     /// Repeat the flag to require several; every selector must match.
     #[arg(long = "label", value_name = "KEY[=VALUE]")]
     labels: Vec<LabelSelector>,

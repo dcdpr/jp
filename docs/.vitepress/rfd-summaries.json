@@ -392,7 +392,7 @@
     "summary": "Request-response linking via persistent event IDs detects answer scope under structural edits."
   },
   "101-conversation-labels.md": {
-    "hash": "8942119ffa726cd4f1b14a34dfc0cb46c34fdb4b7286276bdc238c2235fe1bfc",
+    "hash": "7be4cc00cbd33cb5cd8a4b96ce9f8838a7e6e059f3032c65fa640fce355f1e7a",
     "summary": "Conversations gain configurable key-value labels—static, command-backed, or CLI-set—managed through `jp c label` and used to filter by context like VCS branches."
   },
   "100-in-repo-ticket-tracking.md": {
@@ -406,5 +406,9 @@
   "099-native-macos-app-for-browsing-conversations.md": {
     "hash": "4955066abb71a8a098675aa3f9a628aca2ec16511d94cc6da35bcf320a39addc",
     "summary": "Native macOS app for browsing JP conversations via FFI, with public Workspace::open API extracted from CLI."
+  },
+  "103-multi-value-conversation-labels.md": {
+    "hash": "1c9a52e7756e2b35badcb201f11f4bf625421849532602355980ebdbef7c65ca",
+    "summary": "Multi-valued labels replacing single-valued ones; add/set/rm verbs, set-membership filtering, config list-values, removes --label from query/fork."
   }
 }

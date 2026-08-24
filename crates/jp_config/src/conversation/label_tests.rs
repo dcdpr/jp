@@ -1,5 +1,13 @@
 use super::*;
 
+/// The literal values a rule resolves to, for readable assertions.
+fn values(config: &LabelConfig) -> Vec<&str> {
+    match config.value() {
+        LabelValueRef::Values(values) => values.iter().map(String::as_str).collect(),
+        LabelValueRef::Command(_) => panic!("expected literal values"),
+    }
+}
+
 #[test]
 fn valid_keys_are_accepted() {
     for key in ["a", "branch", "team-name", "team_name", "v2", "A-1_b"] {
@@ -28,7 +36,21 @@ fn invalid_keys_are_rejected() {
 fn static_shorthand_deserializes() {
     let config: LabelConfig = serde_json::from_str(r#""platform""#).unwrap();
 
-    assert_eq!(config.value(), LabelValueRef::Static("platform"));
+    assert_eq!(values(&config), ["platform"]);
+    assert_eq!(config.apply_on(), ApplyOn {
+        new: true,
+        fork: false
+    });
+    assert_eq!(config.run(), LabelRunMode::Ask);
+}
+
+/// A list is shorthand for `value`, the way a bare string already is, so it
+/// takes the same defaults.
+#[test]
+fn list_shorthand_deserializes() {
+    let config: LabelConfig = serde_json::from_str(r#"["jp_config","jp_llm"]"#).unwrap();
+
+    assert_eq!(values(&config), ["jp_config", "jp_llm"]);
     assert_eq!(config.apply_on(), ApplyOn {
         new: true,
         fork: false
@@ -37,12 +59,33 @@ fn static_shorthand_deserializes() {
 }
 
 #[test]
+fn list_value_deserializes() {
+    let json = r#"{"value":["jp_config","jp_llm"],"apply_on":{"fork":true}}"#;
+
+    let config: LabelConfig = serde_json::from_str(json).unwrap();
+
+    assert_eq!(values(&config), ["jp_config", "jp_llm"]);
+    assert!(config.apply_on().fork);
+}
+
+/// An empty list is a rule that produces no label, which is how a rule is
+/// turned off without deleting it.
+#[test]
+fn an_empty_list_resolves_to_no_values() {
+    for json in [r"[]", r#"{"value":[]}"#] {
+        let config: LabelConfig = serde_json::from_str(json).unwrap();
+
+        assert!(values(&config).is_empty(), "got: {json}");
+    }
+}
+
+#[test]
 fn object_form_deserializes() {
     let json = r#"{"value":"review","apply_on":{"new":false,"fork":true},"run":"unattended"}"#;
 
     let config: LabelConfig = serde_json::from_str(json).unwrap();
 
-    assert_eq!(config.value(), LabelValueRef::Static("review"));
+    assert_eq!(values(&config), ["review"]);
     assert_eq!(config.apply_on(), ApplyOn {
         new: false,
         fork: true
