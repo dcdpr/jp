@@ -26,6 +26,9 @@ This has caused real bugs:
 - Fork with `--from`/`--until` can produce streams that start with assistant
   responses, causing provider API errors (Anthropic rejects streams where the
   first message isn't from the user).
+  (Fork's range flags are now `--from`/`--to` and resolve to whole turns, so
+  this particular shape no longer arises from range filtering; the invariant the
+  builder API enforces still matters for every other caller.)
 - Streams without `TurnStart` markers break `--last` (which counts turn
   boundaries).
 - `sanitize()` exists specifically to repair these invariant violations after

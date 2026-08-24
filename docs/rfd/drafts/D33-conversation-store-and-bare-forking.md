@@ -195,11 +195,11 @@ config show`).
 
 ### Fork with event filtering instead of `--no-turns`
 
-Instead of `--no-turns`, add `--from=start --until=0` or similar to copy config
+Instead of `--no-turns`, add `--from=start --to=0` or similar to copy config
 with an empty event range.
 
-Rejected because the existing `--from`/`--until` flags operate on turn
-boundaries within the event stream.
+Rejected because the existing `--from`/`--to` flags operate on turn boundaries
+within the event stream.
 "Zero events" is a degenerate case that deserves its own flag with clear
 semantics rather than being expressed as an edge case of range filtering.
 

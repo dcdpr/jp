@@ -1224,7 +1224,7 @@ fn test_retain_removing_within_turn_event_drops_compactions() {
 }
 
 #[test]
-fn test_retain_first_turns_drops_compactions() {
+fn test_retain_turns_drops_compactions() {
     let mut stream = ConversationStream::new_test();
     for t in 0..6 {
         stream.start_turn(format!("turn {t}"));
@@ -1233,7 +1233,7 @@ fn test_retain_first_turns_drops_compactions() {
     // summary text covers turns the fork no longer has.
     stream.add_compaction(make_compaction(0, 5));
 
-    stream.retain_first_turns(2);
+    stream.retain_turns(|index| index < 2);
 
     assert_eq!(stream.turn_count(), 2);
     assert_eq!(
@@ -1254,7 +1254,7 @@ fn test_retain_keeps_compactions_entirely_before_removal() {
 
     // `--first 4` drops turns 4-5; turns 0-1 are untouched and not renumbered,
     // so the overlay over them keeps valid anchors and survives.
-    stream.retain_first_turns(4);
+    stream.retain_turns(|index| index < 4);
 
     assert_eq!(stream.turn_count(), 4);
     let compactions: Vec<_> = stream.compactions().collect();
@@ -1267,7 +1267,7 @@ fn test_retain_keeps_compactions_entirely_before_removal() {
 }
 
 #[test]
-fn test_retain_first_and_last_keeps_leading_block_compaction() {
+fn test_retain_turns_two_windows_keeps_leading_block_compaction() {
     let mut stream = ConversationStream::new_test();
     for t in 0..8 {
         stream.start_turn(format!("turn {t}"));
@@ -1277,7 +1277,7 @@ fn test_retain_first_and_last_keeps_leading_block_compaction() {
     stream.add_compaction(make_compaction(3, 6));
 
     // Keep first 3 and last 2 turns, dropping the middle (turns 3-5).
-    stream.retain_first_and_last_turns(3, 2);
+    stream.retain_turns(|index| !(3..6).contains(&index));
 
     let compactions: Vec<_> = stream.compactions().collect();
     assert_eq!(
