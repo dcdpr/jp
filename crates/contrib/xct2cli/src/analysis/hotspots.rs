@@ -58,7 +58,7 @@ pub struct Hotspot {
 /// Where `HotspotsBuilder` should get its slide from.
 #[derive(Debug, Clone, Default)]
 pub enum SlideMode {
-    /// Recover from kdebug DBG_DYLD events when a binary is provided.
+    /// Recover from kdebug DBG\_DYLD events when a binary is provided.
     #[default]
     Auto,
     /// Use the explicit slide.

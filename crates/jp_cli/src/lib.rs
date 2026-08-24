@@ -214,7 +214,8 @@ struct Globals {
     ///
     /// Examples: --log=tool::stderr=trace Show stderr output from local tools.
     /// --log=mcp::stderr=debug Show stderr from MCP servers.
-    /// --log='jp_llm=trace,plugin=off' Trace jp_llm internals, silence plugins.
+    /// --log='jp\_llm=trace,plugin=off' Trace jp\_llm internals, silence
+    /// plugins.
     ///
     /// Composes with `-v`: verbosity sets the baseline for jp's own modules;
     /// `--log` adds or overrides specific targets.

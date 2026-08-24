@@ -218,7 +218,7 @@ impl BinaryInfo {
     }
 
     /// Heuristic enumeration of plausible page-aligned ASLR slides.
-    /// Provided as a fallback for traces with no kdebug DBG_DYLD events.
+    /// Provided as a fallback for traces with no kdebug DBG\_DYLD events.
     /// Ranking is heuristic; multiple slides will look equally valid for short
     /// traces or stripped binaries.
     pub fn enumerate_slides(
