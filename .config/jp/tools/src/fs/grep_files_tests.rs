@@ -319,6 +319,107 @@ async fn suppressed_path_is_reported_so_the_caller_can_ask_the_user() {
     );
 }
 
+/// Search a single-file workspace, returning the tool's rendered output.
+///
+/// The pattern semantics below are the contract the tool exposes to callers;
+/// they must hold for whichever regex engine backs the search.
+async fn grep_one_file(content: &[u8], pattern: &str) -> String {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(root.join("a.txt"), content).unwrap();
+
+    fs_grep_files(
+        root,
+        None,
+        pattern.to_owned(),
+        None,
+        None,
+        None,
+        &Gitignore::empty(),
+    )
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn caret_and_dollar_anchor_per_line() {
+    let matches = grep_one_file(b"alpha\nbeta\nalphabet\n", "^alpha$").await;
+
+    assert_eq!(matches, "a.txt:1:alpha\n");
+}
+
+#[tokio::test]
+async fn dot_does_not_match_across_lines() {
+    let matches = grep_one_file(b"a\nb\n", "a.b").await;
+
+    assert_eq!(
+        matches,
+        "No matches found. Broaden your search to see more."
+    );
+}
+
+#[tokio::test]
+async fn word_boundaries_hold_and_matching_is_case_sensitive() {
+    let matches = grep_one_file(b"foo\nfoobar\nFOO\n", r"\bfoo\b").await;
+
+    assert_eq!(matches, "a.txt:1:foo\n");
+}
+
+#[tokio::test]
+async fn repeated_match_on_one_line_prints_the_line_once() {
+    let matches = grep_one_file(b"foo bar foo\n", "foo").await;
+
+    assert_eq!(matches, "a.txt:1:foo bar foo\n");
+}
+
+#[tokio::test]
+async fn a_zero_width_pattern_matches_an_empty_line() {
+    let matches = grep_one_file(b"alpha\n\nbeta\n", "^$").await;
+
+    assert_eq!(matches, "a.txt:2:\n");
+}
+
+#[tokio::test]
+async fn a_line_that_is_not_utf8_does_not_abort_the_search() {
+    // Latin-1 bytes in a text file are not binary (no NUL), so the search runs
+    // on. Only the matched line reaches the output, which keeps the final
+    // UTF-8 decode of the printer buffer intact.
+    let matches = grep_one_file(b"caf\xe9 latte\nneedle here\n", "needle").await;
+
+    assert_eq!(matches, "a.txt:2:needle here\n");
+}
+
+#[tokio::test]
+async fn negative_lookahead_excludes_a_match() {
+    let matches = grep_one_file(b"foo bar\nfoo baz\n", "foo (?!bar)").await;
+
+    assert_eq!(matches, "a.txt:2:foo baz\n");
+}
+
+#[tokio::test]
+async fn lookbehind_sees_text_before_the_match() {
+    let matches = grep_one_file(b"let needle\nfn needle\n", "(?<=let )needle").await;
+
+    assert_eq!(matches, "a.txt:1:let needle\n");
+}
+
+#[tokio::test]
+async fn backreference_matches_a_repeated_group() {
+    let matches = grep_one_file(b"hello hello\nhello world\n", r"(\w+) \1").await;
+
+    assert_eq!(matches, "a.txt:1:hello hello\n");
+}
+
+#[tokio::test]
+async fn a_backreference_survives_the_trailing_quote_recovery() {
+    // The stray trailing quote is a typo the tool recovers from. The recovery
+    // must not renumber the pattern's capture groups, or the backreference ends
+    // up pointing at a group that never participates and nothing matches.
+    let matches = grep_one_file(b"hello hello\nhello world\n", r#"(\w+) \1""#).await;
+
+    assert_eq!(matches, "a.txt:1:hello hello\n");
+}
+
 #[tokio::test]
 #[test_log::test]
 async fn test_grep_files() {
