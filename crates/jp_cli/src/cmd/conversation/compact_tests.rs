@@ -2,8 +2,12 @@ use std::time::Duration;
 
 use clap::Parser as _;
 use jp_config::{
-    AppConfig,
-    conversation::compaction::{CompactionRuleConfig, ReasoningMode, RuleBound, ToolCallsMode},
+    AppConfig, PartialAppConfig,
+    conversation::compaction::{
+        CompactionConfig, CompactionRuleConfig, PartialCompactionRuleConfig, PartialSummaryConfig,
+        ReasoningMode, RuleBound, ToolCallsMode,
+    },
+    model::{PartialModelConfig, id::PartialModelIdOrAliasConfig},
 };
 use jp_conversation::{
     Compaction, ConversationStream, RangeBound, ReasoningPolicy, ToolCallPolicy,
@@ -13,9 +17,10 @@ use jp_printer::Printer;
 use serde_json::{Map, Value};
 
 use super::{
-    Bound, Compact, TimelineSegment, build_compaction_events, existing_segments,
-    segments_for_compactions, timeline_lines,
+    Bound, Compact, IntoPartialAppConfig as _, TimelineSegment, build_compaction_events,
+    existing_segments, resolve_reset_index, segments_for_compactions, timeline_lines,
 };
+use crate::cmd::{conversation_id::ConversationIds as _, target::ConversationTarget};
 
 /// Parse a `Compact` from `jp conversation compact <args>` for flag tests.
 fn parse_compact(args: &[&str]) -> Compact {
@@ -50,6 +55,137 @@ fn keep_last_only_does_not_inject_a_policyless_rule() {
     assert_eq!(
         rules, cfg.conversation.compaction.rules,
         "range-only flags must leave the active rules untouched"
+    );
+}
+
+#[test]
+fn model_flag_targets_the_assistant_model() {
+    // `--model` rides the same `assistant.model.id` path as `jp query --model`,
+    // so the pipeline resolves the alias. The summarizer picks it up through its
+    // fallback: an unset `summary.model` means "use the assistant model".
+    let compact = parse_compact(&["--summarize", "--model", "gpt"]);
+    let mut partial = PartialAppConfig::new_test();
+    partial = compact.apply_cli_config(None, partial, None).unwrap();
+
+    assert_eq!(
+        partial.assistant.model.id,
+        PartialModelIdOrAliasConfig::Alias("gpt".to_owned())
+    );
+}
+
+#[test]
+fn model_alias_reaches_a_configured_summary_model_through_the_pipeline() {
+    // The whole path in one go: `--model gpt` -> `apply_cli_config` -> the
+    // config pipeline (which resolves the alias) -> `effective_rules`. Asserting
+    // the exact requested model catches a broken CLI-config hop, a missed alias
+    // resolution, or a missed redirect, none of which the narrower tests below
+    // can distinguish on their own.
+    let mut partial = PartialAppConfig::new_test();
+    partial.providers.llm.aliases.insert(
+        "gpt".to_owned(),
+        PartialModelIdOrAliasConfig::from("openai/gpt-5"),
+    );
+    partial.conversation.compaction.rules = vec![PartialCompactionRuleConfig {
+        summary: Some(PartialSummaryConfig {
+            model: Some(PartialModelConfig {
+                id: "anthropic/claude-configured".into(),
+                ..PartialModelConfig::default()
+            }),
+            ..PartialSummaryConfig::default()
+        }),
+        ..PartialCompactionRuleConfig::default()
+    }]
+    .into();
+
+    // No `--summarize`: a policy flag would replace the configured rule with an
+    // ad-hoc one, and the configured `summary.model` is what this exercises.
+    let compact = parse_compact(&["--model", "gpt"]);
+    let partial = compact.apply_cli_config(None, partial, None).unwrap();
+    let cfg = jp_config::util::build(partial).unwrap();
+
+    let rules = compact.effective_rules(&cfg).unwrap();
+    let summary = rules[0].summary.as_ref().expect("configured summary rule");
+
+    assert_eq!(
+        summary.model.as_ref().unwrap().id.resolved().to_string(),
+        "openai/gpt-5"
+    );
+}
+
+#[test]
+fn model_flag_overrides_a_configured_summary_model() {
+    // A rule with its own `summary.model` outranks the assistant model in the
+    // summarizer, which would make `--model` a silent no-op.
+    let mut cfg = AppConfig::new_test();
+    cfg.conversation.compaction.rules =
+        CompactionConfig::finalize_rules(vec![PartialCompactionRuleConfig {
+            summary: Some(PartialSummaryConfig {
+                model: Some(PartialModelConfig {
+                    id: "anthropic/claude-configured".into(),
+                    ..PartialModelConfig::default()
+                }),
+                instructions: Some("keep it short".to_owned()),
+                ..PartialSummaryConfig::default()
+            }),
+            ..PartialCompactionRuleConfig::default()
+        }])
+        .unwrap();
+
+    let compact = parse_compact(&["--model", "openai/gpt-5"]);
+    let rules = compact.effective_rules(&cfg).unwrap();
+
+    let summary = rules[0].summary.as_ref().expect("configured summary rule");
+    assert_eq!(
+        summary.model.as_ref().unwrap().id,
+        cfg.assistant.model.id,
+        "a configured summary model must be redirected to the assistant model"
+    );
+    // Only the model ID moves; the rest of the summary config survives.
+    assert_eq!(summary.instructions.as_deref(), Some("keep it short"));
+}
+
+#[test]
+fn without_the_model_flag_a_configured_summary_model_is_kept() {
+    let mut cfg = AppConfig::new_test();
+    cfg.conversation.compaction.rules =
+        CompactionConfig::finalize_rules(vec![PartialCompactionRuleConfig {
+            summary: Some(PartialSummaryConfig {
+                model: Some(PartialModelConfig {
+                    id: "anthropic/claude-configured".into(),
+                    ..PartialModelConfig::default()
+                }),
+                ..PartialSummaryConfig::default()
+            }),
+            ..PartialCompactionRuleConfig::default()
+        }])
+        .unwrap();
+
+    let compact = parse_compact(&[]);
+    let rules = compact.effective_rules(&cfg).unwrap();
+
+    assert_eq!(
+        rules[0]
+            .summary
+            .as_ref()
+            .unwrap()
+            .model
+            .as_ref()
+            .unwrap()
+            .id
+            .to_string(),
+        "anthropic/claude-configured"
+    );
+}
+
+#[test]
+fn model_flag_leaves_summaryless_rules_untouched() {
+    let compact = parse_compact(&["--reasoning", "--model", "openai/gpt-5"]);
+    let cfg = AppConfig::new_test();
+    let rules = compact.effective_rules(&cfg).unwrap();
+
+    assert!(
+        rules[0].summary.is_none(),
+        "--model must not turn a mechanical rule into a summary rule"
     );
 }
 
@@ -95,6 +231,54 @@ fn reset_conflicts_with_selection_flags() {
 
     // `--reset --dry-run` stays valid: it previews the removal.
     assert!(TestCli::try_parse_from(["compact", "--reset", "--dry-run"]).is_ok());
+}
+
+#[test]
+fn reset_takes_an_optional_compaction_index() {
+    #[derive(clap::Parser)]
+    struct TestCli {
+        #[command(flatten)]
+        compact: Compact,
+    }
+
+    assert_eq!(parse_compact(&["--reset"]).reset, Some(None));
+    assert_eq!(parse_compact(&["--reset=2"]).reset, Some(Some(2)));
+    assert_eq!(parse_compact(&[]).reset, None);
+
+    // The index requires `=`, so a bare `--reset` followed by a conversation
+    // target still targets the conversation instead of swallowing it as the
+    // index.
+    let compact = parse_compact(&["--reset", "recent"]);
+    assert_eq!(compact.reset, Some(None));
+    assert_eq!(compact.target.ids(), [ConversationTarget::Recent]);
+
+    // Indices are 1-based, so `0` names nothing.
+    assert!(TestCli::try_parse_from(["compact", "--reset=0"]).is_err());
+    assert!(TestCli::try_parse_from(["compact", "--reset=x"]).is_err());
+}
+
+#[test]
+fn reset_index_addresses_compactions_in_stream_order() {
+    let mut stream = ConversationStream::new_test();
+    for t in 0..6 {
+        stream.start_turn(format!("turn {t}"));
+    }
+    stream.add_compaction(Compaction::new(0, 1));
+    stream.add_compaction(Compaction::new(2, 4));
+
+    // The label carries 1-based turn numbers, matching `jp conversation show`.
+    assert_eq!(
+        resolve_reset_index(&stream, 1),
+        Ok((0, "turns 1..2".to_owned()))
+    );
+    assert_eq!(
+        resolve_reset_index(&stream, 2),
+        Ok((1, "turns 3..5".to_owned()))
+    );
+    assert_eq!(
+        resolve_reset_index(&stream, 3),
+        Err("compaction 3 out of range (conversation has 2 compaction event(s))".to_owned())
+    );
 }
 
 fn runtime() -> tokio::runtime::Runtime {
@@ -319,6 +503,108 @@ fn config_rule_strip_requests_blanks_args_through_projection() {
             assert!(!req.arguments.is_empty(), "turn {t} args untouched");
         }
     }
+}
+
+#[test]
+fn keep_first_composes_with_first() {
+    // `--keep-first M --first N` compacts the first N turns minus the
+    // preserved prefix: `--keep-first 1 --first 16` compacts turns 2..16
+    // (indices 1..=15).
+    let mut stream = ConversationStream::new_test();
+    for t in 0..20 {
+        stream.start_turn(format!("turn {t}"));
+    }
+
+    let compact = parse_compact(&["--keep-first", "1", "--first", "16", "-r"]);
+    let cfg = AppConfig::new_test();
+    let rules = compact.effective_rules(&cfg).unwrap();
+    let from = compact.resolve_from(&stream);
+    let to = compact.resolve_to(&stream);
+
+    let compactions = runtime()
+        .block_on(build_compaction_events(
+            &stream,
+            &cfg,
+            &rules,
+            from,
+            to,
+            Some(&Printer::sink()),
+        ))
+        .unwrap();
+
+    assert_eq!(compactions.len(), 1);
+    assert_eq!((compactions[0].from_turn, compactions[0].to_turn), (1, 15));
+}
+
+#[test]
+fn keep_last_composes_with_last() {
+    // `--keep-last M --last N` compacts the last N turns minus the preserved
+    // suffix: over 20 turns, `--keep-last 2 --last 16` compacts turns 5..18
+    // (indices 4..=17), leaving the final 2 untouched.
+    let mut stream = ConversationStream::new_test();
+    for t in 0..20 {
+        stream.start_turn(format!("turn {t}"));
+    }
+
+    let compact = parse_compact(&["--keep-last", "2", "--last", "16", "-r"]);
+    let cfg = AppConfig::new_test();
+    let rules = compact.effective_rules(&cfg).unwrap();
+    let from = compact.resolve_from(&stream);
+    let to = compact.resolve_to(&stream);
+
+    let compactions = runtime()
+        .block_on(build_compaction_events(
+            &stream,
+            &cfg,
+            &rules,
+            from,
+            to,
+            Some(&Printer::sink()),
+        ))
+        .unwrap();
+
+    assert_eq!(compactions.len(), 1);
+    assert_eq!((compactions[0].from_turn, compactions[0].to_turn), (4, 17));
+}
+
+#[test]
+fn keep_first_greater_than_first_is_rejected() {
+    // A preserved prefix larger than the selection is nonsensical and must be
+    // an error rather than a silent no-op.
+    let err = parse_compact(&["--keep-first", "17", "--first", "16"])
+        .validate()
+        .unwrap_err();
+    assert_eq!(
+        err,
+        "--keep-first 17 is greater than --first 16: nothing would remain to compact"
+    );
+
+    // Equal values select nothing, which is empty but not nonsensical.
+    assert!(
+        parse_compact(&["--keep-first", "16", "--first", "16"])
+            .validate()
+            .is_ok()
+    );
+}
+
+#[test]
+fn keep_last_greater_than_last_is_rejected() {
+    // A preserved suffix larger than the selection is nonsensical and must be
+    // an error rather than a silent no-op.
+    let err = parse_compact(&["--keep-last", "17", "--last", "16"])
+        .validate()
+        .unwrap_err();
+    assert_eq!(
+        err,
+        "--keep-last 17 is greater than --last 16: nothing would remain to compact"
+    );
+
+    // Equal values select nothing, which is empty but not nonsensical.
+    assert!(
+        parse_compact(&["--keep-last", "16", "--last", "16"])
+            .validate()
+            .is_ok()
+    );
 }
 
 #[test]

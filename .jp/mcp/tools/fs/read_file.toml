@@ -1,6 +1,17 @@
 [conversation.tools.fs_read_file]
 enable = false
 run = "unattended"
+
+# Paths this tool may read but never returns. Reading them is a separate
+# question, governed by `access.fs` — `.git` in particular stays readable, since
+# that is how the write tools check for uncommitted work.
+#
+# Shorter than the list/grep tools on purpose. Those carry `**/target/` because
+# bulk enumeration of build output floods a response; an exact path with a line
+# range cannot, and issue #626 asks that build logs stay retrievable when someone
+# knows the file they want. Disclosure blocks like `.git/` belong on every tool
+# that returns contents; flood blocks belong only where flooding is possible.
+options.suppress = [".git/"]
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
 summary = "Read the contents of a file in the project's local filesystem."

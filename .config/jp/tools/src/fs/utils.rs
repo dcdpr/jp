@@ -2,12 +2,84 @@ use std::{io, path::PathBuf};
 
 use camino::{Utf8Component, Utf8Path, Utf8PathBuf};
 use clean_path::Clean as _;
+use ignore::gitignore::{Gitignore, GitignoreBuilder};
 use jp_tool::{AccessPolicy, Capability};
 
 use crate::{
     Error,
     util::runner::{DuctProcessRunner, ProcessOutput, ProcessRunner},
 };
+
+/// Matcher for the `suppress` tool option: paths a tool may read but must not
+/// return.
+///
+/// Suppression is about disclosure, not reach.
+/// A suppressed path stays readable to the tool process — which is what lets
+/// `fs_modify_file` run `git status` against a suppressed `.git` to check for
+/// uncommitted work — and is kept out of what the tool hands back.
+/// Reach is [`AccessPolicy`]'s question.
+///
+/// Patterns use `.ignore` syntax, so `**/target/` matches at any depth, and are
+/// matched against workspace-relative paths.
+/// An empty list suppresses nothing, which is the default: what counts as noise
+/// or as sensitive is a property of the project, not of a directory's name.
+///
+/// Patterns should name real locations rather than symlinks pointing at them.
+/// A path is matched in both its canonical and its as-written form, so naming a
+/// link does close that spelling — but only that one, and any other route to
+/// the same target stays open.
+///
+/// # Errors
+///
+/// Returns an error naming the offending pattern if one cannot be parsed as a
+/// glob.
+/// A disclosure control that quietly drops the rule it could not read is worse
+/// than one that refuses to start.
+pub fn suppress_matcher(root: &Utf8Path, patterns: &[String]) -> Result<Gitignore, String> {
+    let mut builder = GitignoreBuilder::new(root);
+    for pattern in patterns {
+        builder
+            .add_line(None, pattern)
+            .map_err(|error| format!("Invalid `suppress` pattern '{pattern}': {error}"))?;
+    }
+    builder
+        .build()
+        .map_err(|error| format!("Could not compile the `suppress` patterns: {error}"))
+}
+
+/// Whether `suppress` keeps `relative` out of a tool's results.
+///
+/// Parents are matched too, so a pattern naming a directory also covers the
+/// files inside it — otherwise suppression is one path component away from
+/// being bypassed.
+///
+/// The path is matched as a directory whatever it is on disk.
+/// A pattern written `secrets/` is meant to cover that name, and wrongly
+/// suppressing a file that happens to share it costs far less than returning a
+/// directory's contents.
+///
+/// Pass [`ResolvedPath::relative`] and [`ResolvedPath::lexical`] so a pattern
+/// matches whether it names the real location or the symlink a request arrived
+/// through.
+pub fn is_suppressed(suppress: &Gitignore, forms: &[&Utf8Path]) -> bool {
+    forms
+        .iter()
+        .any(|form| suppress.matched_path_or_any_parents(form, true).is_ignore())
+}
+
+/// Report that a path was suppressed from a tool's results.
+///
+/// Reporting an empty result as though the path had been examined is what makes
+/// a search read as evidence of absence.
+/// The tool will not return this content however it is asked, so the way
+/// forward is the user: naming that here is what lets the reader ask for the
+/// contents instead of concluding they do not exist.
+pub fn suppressed_note(path: &str) -> String {
+    format!(
+        "'{path}' is suppressed from this tool's results. If you need it, ask the user to provide \
+         it."
+    )
+}
 
 /// Enforce an access-policy capability on a resolved workspace-relative path.
 ///
@@ -21,8 +93,12 @@ use crate::{
 ///
 /// A `None` policy (or an unrestricted one) permits everything.
 /// A restricted policy permits only what a matching rule grants; on denial the
-/// configured grant paths are listed so the user can see what the tool is
-/// allowed to do.
+/// paths that do grant the capability are listed, so the reader can see where
+/// it may go instead.
+///
+/// The refusal names the user as the way forward.
+/// Only the policy can open the path, and the policy is the user's to change —
+/// without that, a denial reads as a dead end.
 pub fn authorize(
     access: Option<&AccessPolicy>,
     capability: Capability,
@@ -34,11 +110,15 @@ pub fn authorize(
     if policy.permits(capability, relative) {
         return Ok(());
     }
-    let grants: Vec<&str> = policy.grant_paths().map(Utf8Path::as_str).collect();
+    let granting: Vec<&str> = policy
+        .granting_paths(capability)
+        .map(Utf8Path::as_str)
+        .collect();
+    let capability = capability.as_str();
     Err(format!(
-        "Access denied: cannot {} '{relative}'. Granted paths: [{}].",
-        capability.as_str(),
-        grants.join(", ")
+        "Access denied: cannot {capability} '{relative}'. Paths granting {capability}: [{}]. If \
+         required, ask the user for explicit access.",
+        granting.join(", ")
     ))
 }
 
@@ -191,6 +271,15 @@ pub struct ResolvedPath {
 
     /// Path relative to the canonical workspace root.
     pub relative: Utf8PathBuf,
+
+    /// The caller's own spelling, lexically normalized and workspace-relative.
+    ///
+    /// Equal to `relative` unless the request arrived through an in-workspace
+    /// symlink, in which case this keeps the link name and `relative` holds the
+    /// target's real location.
+    /// Rules match on `relative`; this exists for checks that should also honor
+    /// the name the caller used.
+    pub lexical: Utf8PathBuf,
 }
 
 /// Resolve a user-supplied path against the workspace root, following symlinks
@@ -236,7 +325,11 @@ pub fn resolve_workspace_path(
 
     let relative = workspace_relative(&absolute, &canonical_root, &cleaned);
 
-    Ok(ResolvedPath { absolute, relative })
+    Ok(ResolvedPath {
+        absolute,
+        relative,
+        lexical: cleaned,
+    })
 }
 
 /// Resolve a user-supplied path as a directory entry, canonicalizing only the
@@ -289,33 +382,11 @@ pub fn resolve_workspace_entry(
 
     let relative = workspace_relative(&absolute, &canonical_root, &cleaned);
 
-    Ok(ResolvedPath { absolute, relative })
-}
-
-/// Clean a user-supplied path against the workspace root.
-///
-/// Returns the lexically-normalized, workspace-relative form, preserving the
-/// caller's input shape — symlinks in existing ancestors are *checked* for
-/// escape but not *followed* in the returned path.
-///
-/// Performs the same input validation as [`resolve_workspace_path`], but
-/// doesn't canonicalize the result.
-/// Use this when output paths should match what the user supplied (read/search
-/// tools).
-pub fn clean_workspace_path(
-    root: &Utf8Path,
-    path: &str,
-    access: Option<&AccessPolicy>,
-) -> Result<Utf8PathBuf, String> {
-    let ValidatedInput {
-        cleaned,
-        canonical_root,
-    } = validate_workspace_input(root, path)?;
-
-    let candidate = root.join(&cleaned);
-    check_ancestor_in_root(&candidate, &canonical_root, access, &cleaned)?;
-
-    Ok(cleaned)
+    Ok(ResolvedPath {
+        absolute,
+        relative,
+        lexical: cleaned,
+    })
 }
 
 /// Output of [`validate_workspace_input`]: the cleaned form plus the

@@ -12,17 +12,14 @@ env:
   JUST_COLOR: always
   JUST_EXPLAIN: true
   JUST_VERBOSE: 4
-# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
 permissions:
   contents: read
-  pages: write
-  id-token: write
-# Allow only one concurrent deployment, skipping runs queued between the run
-# in-progress and latest queued. However, do NOT cancel in-progress runs as we
-# want to allow these production deployments to complete.
+# Supersede in-flight runs for the same ref. Deployments serialize separately,
+# on the `deploy` job, so a pull request build never sits in a queue shared with
+# every other branch, where it would be cancelled before reporting its status.
 concurrency:
-  group: pages
-  cancel-in-progress: false
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
 # Confine `run` steps to the `docs` directory.
 defaults:
   run:
@@ -30,8 +27,50 @@ defaults:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # `configure-pages` reads the Pages configuration to derive the site URL.
+      pages: read
     steps:
-      - uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+      - uses: actions/checkout@0c366fd6a839edf440554fa01a7085ccba70ac98 # v6
+        with:
+          fetch-depth: 0 # Not needed if Vitepress' lastUpdated is not enabled
+      # `build` is a required status check, so the job always runs and decides
+      # for itself whether there is work to do. A `paths:` filter on the trigger
+      # would leave the check unreported, and a pull request without site
+      # changes could never satisfy it.
+      - name: Decide whether to build the site
+        id: task
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: |
+          set -euo pipefail
+
+          # Pushes to `main` and to tags feed the deployment, which needs the
+          # artifact regardless of what changed.
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # The site is assembled from `docs/`, by recipes in the justfile, by
+          # this workflow. The change log is generated from git tags, which a
+          # pull request cannot move.
+          sources='^docs/|^justfile$|^\.github/workflows/docs\.yml$'
+
+          # Via a file rather than a pipe: `grep -q` exits on the first match,
+          # and the resulting SIGPIPE would trip `pipefail`, turning a match
+          # into a skip.
+          git diff --name-only HEAD^1 HEAD > "$RUNNER_TEMP/changed-files.txt"
+
+          if grep -Eq "$sources" "$RUNNER_TEMP/changed-files.txt"; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping the site build because no site sources changed."
+          fi
+      - if: ${{ steps.task.outputs.run == 'true' }}
+        uses: actions/cache/restore@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         id: cache
         with:
           path: |
@@ -39,27 +78,35 @@ jobs:
             ~/.cargo/bin/
             ~/.cargo/.crates.toml
             ~/.cargo/.crates2.json
-          key: toolchain-site
-      - uses: extractions/setup-just@e33e0265a09d6d736e2ee1e0eb685ef1de4669ff # v2
-      - uses: actions/checkout@09d2acae674a48949e3602304ab46fd20ae0c42f # v4
-        with:
-          fetch-depth: 0 # Not needed if Vitepress' lastUpdated is not enabled
-      - uses: Swatinem/rust-cache@7e1e2d0a10862b34e5df481373b2b0f295d1a2ef # v2
+          key: toolchain-site-${{ hashFiles('rust-toolchain.toml', 'justfile') }}
+          # Prefix match, so a toolchain or tool-version bump falls back to the
+          # previous entry instead of reinstalling every binary from source.
+          restore-keys: |
+            toolchain-site-
+      - if: ${{ steps.task.outputs.run == 'true' }}
+        uses: extractions/setup-just@f8a3cce218d9f83db3a2ecd90e41ac3de6cdfd9b # v3
+      - if: ${{ steps.task.outputs.run == 'true' }}
+        uses: Swatinem/rust-cache@7e1e2d0a10862b34e5df481373b2b0f295d1a2ef # v2
         with:
           cache-bin: false
           cache-workspace-crates: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-      - uses: actions/configure-pages@d5606572c479bee637007364c6b4800ac4fc8573 # v5
-      - run: corepack enable
-      - run: just build-changelog > change-log.md
+      - if: ${{ steps.task.outputs.run == 'true' }}
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+      - if: ${{ steps.task.outputs.run == 'true' }}
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6
+      - if: ${{ steps.task.outputs.run == 'true' }}
+        run: corepack enable
+      - if: ${{ steps.task.outputs.run == 'true' }}
+        run: just build-changelog > change-log.md
       # Fetch the plugin registry before the build so VitePress copies it from
       # the public directory into the deployed site (served at /plugins.json).
-      - if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') }}
+      - if: ${{ steps.task.outputs.run == 'true' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
         run: just plugin-registry-fetch
-      - run: just build-docs
-      - if: ${{ github.ref == 'refs/heads/main' }}
-        uses: actions/cache/save@5a3ec84eff668545956fd18022155c47e93e2684 # v4
+      - if: ${{ steps.task.outputs.run == 'true' }}
+        run: just build-docs
+      - if: ${{ steps.task.outputs.run == 'true' && github.ref == 'refs/heads/main' && steps.cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5
         with:
           path: |
             ~/.rustup
@@ -67,17 +114,27 @@ jobs:
             ~/.cargo/.crates.toml
             ~/.cargo/.crates2.json
           key: ${{ steps.cache.outputs.cache-primary-key }}
-      - if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') }}
-        uses: actions/upload-pages-artifact@2d163be3ddce01512f3eea7ac5b7023b5d643ce1 # v3
+      - if: ${{ steps.task.outputs.run == 'true' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         with:
           path: docs/.vitepress/dist
+          # Dotfiles in the build output are part of the site.
+          include-hidden-files: true
   deploy:
     if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') }}
     needs: build
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    # One deployment at a time. Runs queued behind the in-flight one are skipped
+    # rather than cancelling a production deploy midway.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     environment:
       name: documentation
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5

@@ -9,7 +9,7 @@ use jp_conversation::{
     event::{ChatRequest, ChatResponse},
 };
 use jp_llm::{StreamError, event::Event};
-use jp_printer::{OutputFormat, Printer};
+use jp_printer::{OutputFormat, Printer, SharedBuffer};
 use jp_workspace::{ConversationLock, Workspace};
 
 use super::*;
@@ -21,6 +21,7 @@ fn make_retry_state(max_retries: u32) -> StreamRetryState {
         base_backoff_ms: 1, // 1ms for fast tests
         max_backoff_secs: 1,
         stream_idle_timeout_secs: 120,
+        max_response_bytes: 1_048_576,
         cache: CachePolicy::default(),
     };
     StreamRetryState::new(config, false)
@@ -37,10 +38,26 @@ fn make_turn_coordinator() -> TurnCoordinator {
     )
 }
 
+/// Create a coordinator that shares its printer with the caller, so a test can
+/// read what the renderer wrote.
+fn make_turn_coordinator_with_output() -> (TurnCoordinator, Arc<Printer>, SharedBuffer) {
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let coordinator = TurnCoordinator::new(
+        Arc::clone(&printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
+
+    (coordinator, printer, out)
+}
+
 /// Create a workspace with a single conversation and return a test lock.
 fn make_test_lock() -> (Workspace, ConversationLock) {
     let config = Arc::new(AppConfig::new_test());
-    let mut workspace = Workspace::new(camino::Utf8PathBuf::new());
+    let mut workspace = Workspace::in_memory(camino::Utf8PathBuf::new());
     let id = workspace.create_conversation(Conversation::default(), config);
     let handle = workspace.acquire_conversation(&id).unwrap();
     let lock = workspace.test_lock(handle);
@@ -85,6 +102,7 @@ fn backoff_uses_retry_after_when_present() {
         base_backoff_ms: 1,
         max_backoff_secs: 120,
         stream_idle_timeout_secs: 120,
+        max_response_bytes: 1_048_576,
         cache: CachePolicy::default(),
     };
     let state = StreamRetryState::new(config, false);
@@ -330,6 +348,45 @@ async fn retry_without_partial_content_still_works() {
     );
 }
 
+/// A fatal error ends the response, so the gap the interrupted reasoning block
+/// owes closes its region: the reasoning background must stop before it, not
+/// leave a shaded strip under the error message.
+#[tokio::test]
+async fn fatal_error_after_reasoning_leaves_the_gap_unshaded() {
+    let (mut turn_coordinator, printer, out) = make_turn_coordinator_with_output();
+    let mut retry_state = make_retry_state(3);
+    let (_ws, lock) = make_test_lock();
+    let conv = lock.as_mut();
+    conv.update_events(|stream| {
+        turn_coordinator.start_turn(stream, ChatRequest::from("test"));
+    });
+
+    conv.update_events(|stream| {
+        turn_coordinator.handle_event(stream, Event::reasoning(0, "Thinking.\n\n"));
+    });
+
+    let router = detached_router();
+    let result = handle_stream_error(
+        StreamError::other("auth failure"),
+        &mut retry_state,
+        &mut turn_coordinator,
+        &conv,
+        &printer,
+        &router,
+    )
+    .await;
+
+    assert!(matches!(result, StreamErrorOutcome::Fatal(_)));
+
+    printer.flush();
+    assert_eq!(
+        out.lock().clone(),
+        "\n── \u{1b}[1mjp\u{1b}[0m \
+         ──────────────────────────────────────────────────────────────────────────\n\n\u{1b}[48;\
+         5;236mThinking.\u{1b}[48;5;236m\u{1b}[K\u{1b}[0m\n\n"
+    );
+}
+
 #[tokio::test]
 async fn interrupt_during_backoff_cuts_wait_short() {
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
@@ -341,6 +398,7 @@ async fn interrupt_during_backoff_cuts_wait_short() {
         base_backoff_ms: 1,
         max_backoff_secs: 120,
         stream_idle_timeout_secs: 120,
+        max_response_bytes: 1_048_576,
         cache: CachePolicy::default(),
     };
     let mut retry_state = StreamRetryState::new(config, false);

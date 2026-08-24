@@ -129,24 +129,47 @@ impl TurnView {
         self.assistant_header_rendered = false;
     }
 
-    /// Render a chat response chunk (or full event), emitting the assistant
-    /// role header first if it hasn't been emitted yet for this turn.
+    /// Render a complete chat response, closing its response item.
+    ///
+    /// Use this when `resp` holds an entire response (replaying a stored
+    /// event); use [`render_chat_response_chunk`] for a fragment of one still
+    /// streaming in.
+    ///
+    /// [`render_chat_response_chunk`]: Self::render_chat_response_chunk
+    pub fn render_chat_response(&mut self, resp: &ChatResponse) {
+        self.render_chat_response_chunk(resp);
+        self.end_chat_response();
+    }
+
+    /// Render a fragment of a chat response that is still streaming in,
+    /// emitting the assistant role header first if it hasn't been emitted yet
+    /// for this turn.
+    ///
+    /// Consecutive text-bearing responses of the same kind form one markdown
+    /// region; the separation between them comes from separators in the
+    /// content, not from the response boundary.
+    /// Call [`end_chat_response`] when the provider closes the item, so that a
+    /// structured response's `json` fence is terminated.
     ///
     /// Dispatches structured responses to the structured renderer and
     /// everything else (messages, reasoning) to the chat renderer.
     /// A non-structured response after structured content closes the open
     /// `json` fence first; a structured response after non-structured content
     /// flushes the chat buffer first.
-    pub fn render_chat_response(&mut self, resp: &ChatResponse) {
+    ///
+    /// [`end_chat_response`]: Self::end_chat_response
+    pub fn render_chat_response_chunk(&mut self, resp: &ChatResponse) {
         self.ensure_assistant_header();
 
         // Visible assistant content supplies its own spacing, so a preceding
         // tool block no longer owes a separator before the next tool call.
-        // Reasoning that doesn't supply its own separation (Hidden renders
-        // nothing; Timer erases its line; Progress leaves an unterminated
-        // `reasoning...` line) must not clear that debt.
+        // Reasoning that renders nothing must not clear that debt: the display
+        // mode may swallow it, and a whitespace-only chunk puts nothing on
+        // screen even in a rendering mode.
         let clears_debt = match resp {
-            ChatResponse::Reasoning { .. } => self.chat.reasoning_supplies_separation(),
+            ChatResponse::Reasoning { reasoning } => {
+                self.chat.reasoning_supplies_separation(reasoning)
+            }
             _ => true,
         };
         if clears_debt {
@@ -160,6 +183,26 @@ impl TurnView {
             self.structured.flush();
             self.chat.render_response(resp);
         }
+    }
+
+    /// Close the response item the provider just finished.
+    ///
+    /// A structured response is a discrete JSON value whose framing cannot be
+    /// expressed inside the value itself, so its `json` fence is terminated
+    /// here: two consecutive structured responses render as two fences rather
+    /// than one fence holding both values.
+    ///
+    /// Text-bearing responses (messages, reasoning) are left open.
+    /// Consecutive ones of the same kind form a single markdown region, and
+    /// their segmentation travels in the content as blank lines, put there by
+    /// the provider that knows where one segment ends.
+    ///
+    /// Only streaming callers need this: [`render_chat_response`] already ends
+    /// the item of the complete response it renders.
+    ///
+    /// [`render_chat_response`]: Self::render_chat_response
+    pub fn end_chat_response(&mut self) {
+        self.structured.flush();
     }
 
     /// Resolve the tool-call boundary, returning the background the tool's
@@ -205,6 +248,17 @@ impl TurnView {
         self.structured.flush();
     }
 
+    /// Flush pending output at a streaming-cycle boundary the same response
+    /// continues across.
+    ///
+    /// The chat renderer keeps its content region open, leaving a separator
+    /// owed by reasoning pending: nothing persistent renders between the two
+    /// cycles, so the continuation's first content decides the gap's shading.
+    pub fn flush_for_continuation(&mut self) {
+        self.chat.flush_for_continuation();
+        self.structured.flush();
+    }
+
     /// Signal to the printer that the current streaming cycle has ended.
     ///
     /// Forwards to the chat renderer, which switches the printer's
@@ -217,8 +271,8 @@ impl TurnView {
 
     /// Reset internal renderer state, discarding partial buffers.
     ///
-    /// Used when a streaming cycle is interrupted and a new one begins (e.g.
-    /// interrupt-with-prefill).
+    /// Used when a streaming cycle is interrupted and a continuation request
+    /// begins.
     /// Preserves the existing `assistant_header_rendered` flag: if a header was
     /// already on the terminal before the interrupt, the continuation is part
     /// of the same assistant turn and must not re-emit it; if no header had
@@ -226,6 +280,17 @@ impl TurnView {
     /// flag stays `false` and the next assistant event will emit one.
     pub fn reset_for_continuation(&mut self) {
         self.chat.reset();
+        self.structured.reset();
+    }
+
+    /// Reset internal renderer state at a stream-retry boundary, keeping the
+    /// chat renderer's content region open.
+    ///
+    /// A retry resends the request without rendering anything persistent in
+    /// between, so the reasoning region and the separator it owes span the
+    /// boundary and the continuation's first content resolves the gap.
+    pub fn reset_for_stream_retry(&mut self) {
+        self.chat.reset_preserving_region();
         self.structured.reset();
     }
 

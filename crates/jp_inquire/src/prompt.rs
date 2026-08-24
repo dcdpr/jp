@@ -55,6 +55,9 @@ pub trait PromptBackend: Send + Sync {
         default: Option<usize>,
         writer: &mut dyn Write,
     ) -> Result<String, InquireError>;
+
+    /// Display a single-line no-echo input prompt for a secret value.
+    fn password(&self, message: &str, writer: &mut dyn Write) -> Result<String, InquireError>;
 }
 
 /// Blanket impl for references, enabling `&dyn PromptBackend` to work.
@@ -97,6 +100,10 @@ impl<P: PromptBackend + ?Sized> PromptBackend for &P {
         writer: &mut dyn Write,
     ) -> Result<String, InquireError> {
         (*self).select(message, options, default, writer)
+    }
+
+    fn password(&self, message: &str, writer: &mut dyn Write) -> Result<String, InquireError> {
+        (*self).password(message, writer)
     }
 }
 
@@ -166,6 +173,12 @@ impl PromptBackend for TerminalPromptBackend {
         }
         prompt.prompt_with_writer(writer)
     }
+
+    fn password(&self, message: &str, writer: &mut dyn Write) -> Result<String, InquireError> {
+        inquire::Password::new(message)
+            .without_confirmation()
+            .prompt_with_writer(writer)
+    }
 }
 
 /// Mock prompt backend for testing.
@@ -180,6 +193,7 @@ pub struct MockPromptBackend {
     reply_outcomes: Mutex<VecDeque<ReplyOutcome>>,
     text_responses: Mutex<VecDeque<String>>,
     select_responses: Mutex<VecDeque<String>>,
+    password_responses: Mutex<VecDeque<String>>,
 }
 
 impl MockPromptBackend {
@@ -221,6 +235,15 @@ impl MockPromptBackend {
         responses: impl IntoIterator<Item = impl Into<String>>,
     ) -> Self {
         *self.select_responses.lock() = responses.into_iter().map(Into::into).collect();
+        self
+    }
+
+    #[must_use]
+    pub fn with_password_responses(
+        self,
+        responses: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        *self.password_responses.lock() = responses.into_iter().map(Into::into).collect();
         self
     }
 }
@@ -273,6 +296,13 @@ impl PromptBackend for MockPromptBackend {
         _writer: &mut dyn Write,
     ) -> Result<String, InquireError> {
         self.select_responses
+            .lock()
+            .pop_front()
+            .ok_or(InquireError::OperationCanceled)
+    }
+
+    fn password(&self, _message: &str, _writer: &mut dyn Write) -> Result<String, InquireError> {
+        self.password_responses
             .lock()
             .pop_front()
             .ok_or(InquireError::OperationCanceled)

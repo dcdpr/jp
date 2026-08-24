@@ -88,3 +88,69 @@ fn aggregate_by_symbol_sums_duplicates() {
     let agg = thread.aggregate_by_symbol();
     assert_eq!(agg, vec![("foo".into(), 17), ("bar".into(), 5)]);
 }
+
+/// Tree:
+///
+/// ```text
+/// A (depth 0, 100)
+/// ├─ B (depth 1, 60)
+/// │  └─ C (depth 2, 40)
+/// └─ D (depth 1, 30)
+/// ```
+///
+/// A keeps 10 (both children subtracted), B keeps 20, C and D are leaves.
+/// C must not be subtracted from A: only immediate children count.
+#[test]
+fn self_samples_subtracts_only_immediate_children() {
+    let thread = Thread {
+        header: "Thread_test".into(),
+        frames: vec![
+            Frame {
+                depth: 0,
+                samples: 100,
+                symbol: "A".into(),
+            },
+            Frame {
+                depth: 1,
+                samples: 60,
+                symbol: "B".into(),
+            },
+            Frame {
+                depth: 2,
+                samples: 40,
+                symbol: "C".into(),
+            },
+            Frame {
+                depth: 1,
+                samples: 30,
+                symbol: "D".into(),
+            },
+        ],
+    };
+
+    assert_eq!(thread.self_samples(), vec![10, 20, 40, 30]);
+}
+
+#[test]
+fn self_samples_leaves_skipped_depths_unattributed() {
+    // A depth jump means the parser lost a frame. Charging the orphan's samples
+    // to the nearest ancestor would understate that ancestor's own self time,
+    // so the orphan stays unattributed instead.
+    let thread = Thread {
+        header: "Thread_test".into(),
+        frames: vec![
+            Frame {
+                depth: 0,
+                samples: 100,
+                symbol: "A".into(),
+            },
+            Frame {
+                depth: 2,
+                samples: 40,
+                symbol: "orphan".into(),
+            },
+        ],
+    };
+
+    assert_eq!(thread.self_samples(), vec![100, 40]);
+}

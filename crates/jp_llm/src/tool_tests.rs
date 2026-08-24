@@ -1,4 +1,22 @@
+use async_trait::async_trait;
+use jp_config::{
+    AppConfig, Config as _,
+    conversation::tool::{PartialToolConfig, ToolConfig},
+};
+use jp_tool::Outcome;
+
 use super::*;
+
+struct EchoArguments;
+
+#[async_trait]
+impl BuiltinTool for EchoArguments {
+    async fn execute(&self, arguments: &Value, _answers: &IndexMap<String, Value>) -> Outcome {
+        Outcome::Success {
+            content: arguments.to_string(),
+        }
+    }
+}
 
 #[test]
 fn test_execution_outcome_completed_success_into_response() {
@@ -26,7 +44,7 @@ fn test_execution_outcome_completed_error_into_response() {
 
 #[test]
 fn test_execution_outcome_needs_input_into_response() {
-    let question = Question::text("q1", "What is your name?");
+    let question = Question::text("q1", "What is your name?").unwrap();
 
     let outcome = ExecutionOutcome::NeedsInput {
         id: "call_789".to_string(),
@@ -66,7 +84,7 @@ fn test_execution_outcome_id() {
 
     let needs_input = ExecutionOutcome::NeedsInput {
         id: "id2".to_string(),
-        question: Question::text("q", "?"),
+        question: Question::text("q", "?").unwrap(),
     };
     assert_eq!(needs_input.id(), "id2");
 
@@ -96,7 +114,7 @@ fn test_execution_outcome_helper_methods() {
 
     let needs_input = ExecutionOutcome::NeedsInput {
         id: "3".to_string(),
-        question: Question::boolean("q", "?"),
+        question: Question::boolean("q", "?").unwrap(),
     };
     assert!(!needs_input.is_success());
     assert!(needs_input.needs_input());
@@ -108,6 +126,46 @@ fn test_execution_outcome_helper_methods() {
     assert!(!cancelled.is_success());
     assert!(!cancelled.needs_input());
     assert!(cancelled.is_cancelled());
+}
+
+#[test]
+fn parse_command_output_valid_needs_input() {
+    let stdout = br#"{"type":"needs_input","question":{"id":"confirm","text":"?","pre_amble":null,"answer_type":{"type":"boolean"},"default":null}}"#;
+    assert!(matches!(
+        parse_command_output(stdout, b"", true),
+        CommandResult::NeedsInput(_)
+    ));
+}
+
+#[test]
+fn parse_command_output_dotted_question_id_is_invalid_inquiry() {
+    let stdout = br#"{"type":"needs_input","question":{"id":"a.b","text":"?","pre_amble":null,"answer_type":{"type":"boolean"},"default":null}}"#;
+    let result = parse_command_output(stdout, b"", true);
+    assert!(matches!(
+        result,
+        CommandResult::InvalidInquiry { ref question_id } if question_id == "a.b"
+    ));
+    // Renders as a tool-level error, not raw text.
+    assert!(result.into_tool_result("t").is_err());
+}
+
+#[test]
+fn parse_command_output_empty_question_id_is_invalid_inquiry() {
+    let stdout = br#"{"type":"needs_input","question":{"id":"","text":"?","pre_amble":null,"answer_type":{"type":"boolean"},"default":null}}"#;
+    let result = parse_command_output(stdout, b"", true);
+    assert!(matches!(
+        result,
+        CommandResult::InvalidInquiry { ref question_id } if question_id.is_empty()
+    ));
+    assert!(result.into_tool_result("t").is_err());
+}
+
+#[test]
+fn parse_command_output_non_outcome_is_raw() {
+    assert!(matches!(
+        parse_command_output(b"plain text", b"", true),
+        CommandResult::RawOutput { .. }
+    ));
 }
 
 /// Build a minimal `ToolParameterConfig` for use in validation tests.
@@ -123,6 +181,98 @@ fn param(kind: &str, required: bool) -> ToolParameterConfig {
         items: None,
         properties: IndexMap::default(),
     }
+}
+
+#[test]
+fn coerces_json_strings_to_declared_parameter_types() {
+    let parameters = IndexMap::from_iter([
+        ("path".to_owned(), param("string", true)),
+        ("start_line".to_owned(), param("integer", false)),
+        ("enabled".to_owned(), param("boolean", false)),
+        ("string_or_integer".to_owned(), ToolParameterConfig {
+            kind: vec!["string".to_owned(), "integer".to_owned()].into(),
+            ..param("string", false)
+        }),
+        ("patterns".to_owned(), ToolParameterConfig {
+            kind: "array".to_owned().into(),
+            items: Some(Box::new(ToolParameterConfig {
+                kind: "object".to_owned().into(),
+                properties: IndexMap::from_iter([("count".to_owned(), param("integer", true))]),
+                ..param("object", false)
+            })),
+            ..param("array", false)
+        }),
+    ]);
+    let mut arguments = json!({
+        "path": "README.md",
+        "start_line": "1",
+        "enabled": "true",
+        "string_or_integer": "3",
+        "patterns": "[{\"count\":\"2\"}]"
+    })
+    .as_object()
+    .cloned()
+    .unwrap();
+
+    ToolDefinition {
+        name: "test".to_owned(),
+        docs: ToolDocs::default(),
+        parameters,
+    }
+    .coerce_arguments(&mut arguments);
+
+    assert_eq!(
+        Value::Object(arguments),
+        json!({
+            "path": "README.md",
+            "start_line": 1,
+            "enabled": true,
+            "string_or_integer": "3",
+            "patterns": [{"count": 2}]
+        })
+    );
+}
+
+#[tokio::test]
+async fn execute_coerces_json_strings_before_calling_tool() {
+    let partial: PartialToolConfig = serde_json::from_value(json!({
+        "source": "builtin",
+    }))
+    .unwrap();
+    let tool = ToolConfig::from_partial(partial, vec![]).unwrap();
+    let mut app = AppConfig::new_test();
+    app.conversation
+        .tools
+        .insert("echo_arguments".to_owned(), tool);
+    let config = app.conversation.tools.get("echo_arguments").unwrap();
+    let definition = ToolDefinition {
+        name: "echo_arguments".to_owned(),
+        docs: ToolDocs::default(),
+        parameters: IndexMap::from_iter([("start_line".to_owned(), param("integer", false))]),
+    };
+    let builtins = builtin::BuiltinExecutors::new().register("echo_arguments", EchoArguments);
+
+    let outcome = definition
+        .execute(
+            "call_1".to_owned(),
+            json!({"start_line": "1"}),
+            &IndexMap::new(),
+            &config,
+            &jp_mcp::Client::new(IndexMap::new()),
+            Utf8Path::new("/tmp"),
+            CancellationToken::new(),
+            &builtins,
+            None,
+            &InvocationContext::default(),
+        )
+        .await
+        .unwrap();
+
+    let ExecutionOutcome::Completed { id, result } = outcome else {
+        panic!("expected completed tool call");
+    };
+    assert_eq!(id, "call_1");
+    assert_eq!(result, Ok(r#"{"start_line":1}"#.to_owned()));
 }
 
 #[test]

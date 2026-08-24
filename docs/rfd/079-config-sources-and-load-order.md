@@ -18,7 +18,7 @@ config pipeline.
 ## File extensions
 
 All config file paths in this guide use `{ext}` as shorthand for the list of
-supported extensions:
+extensions JP probes for:
 
 - `toml`
 - `json`
@@ -29,6 +29,11 @@ supported extensions:
 Extensions are tried in that order at each location.
 The first existing file wins.
 If no file exists at a given source, that source contributes nothing.
+
+One caveat on `json5`: it is probed but cannot be parsed, because the loader
+registers TOML, JSON/JSONC, and YAML formats only.
+A `config.json5` file is found and then fails with `NoMatchingFormat`, and
+because `json5` is probed before `yaml` it also shadows a `config.yaml` sibling.
 
 ## Implicit loading
 
@@ -117,10 +122,11 @@ Extends is **recursive** — each extended file's own `extends` directives are
 resolved when it's loaded.
 A chain can go many layers deep.
 
-The default `extends` value is the glob `config.d/**/*`, which auto-loads any
-files dropped into a sibling `config.d/` directory.
-This lets users split config into many small files without editing the main
-config's `extends` list.
+The `extends` field has a schema default of `config.d/**/*`, but that default is
+not applied while files are being loaded: the loader reads each file's `extends`
+list through `load_partial`, which does not inject `#[setting(default)]` values.
+A file that omits `extends` therefore extends nothing, and a sibling `config.d/`
+directory is traversed only when the glob is declared explicitly.
 
 Failure behavior:
 

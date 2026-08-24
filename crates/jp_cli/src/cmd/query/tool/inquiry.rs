@@ -40,14 +40,15 @@ use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
-/// Create an inquiry ID for a tool call question.
+/// Create the stream-correlation inquiry ID for a tool-call question.
 ///
-/// Format: `<tool_call_id>.<question_id>` — unique per question within a tool
-/// call.
+/// Format: `<tool_call_id>.<question_id>.<attempt>`, unique per attempt within
+/// the turn (`attempt` is the 1-indexed per-`(tool_call_id, question_id)`
+/// counter from `TurnState`).
 /// The tool name is not included because it's already stored in the
 /// `InquirySource` of the `InquiryRequest` event.
-pub fn tool_call_inquiry_id(tool_call_id: &str, question_id: &str) -> String {
-    format!("{tool_call_id}.{question_id}")
+pub fn tool_call_inquiry_id(tool_call_id: &str, question_id: &str, attempt: usize) -> String {
+    format!("{tool_call_id}.{question_id}.{attempt}")
 }
 
 /// Create a JSON schema for a structured inquiry.
@@ -62,7 +63,7 @@ pub fn create_inquiry_schema(question: &Question) -> Map<String, Value> {
             "type": "string",
             "enum": options
         }),
-        AnswerType::Text => json!({
+        AnswerType::Text | AnswerType::Secret => json!({
             "type": "string"
         }),
     };
@@ -145,6 +146,10 @@ pub struct InquiryConfig {
     pub model: ModelDetails,
     pub system_prompt: Option<String>,
     pub sections: Vec<SectionConfig>,
+
+    /// Output ceiling for the inquiry request, from
+    /// `assistant.request.max_response_bytes`.
+    pub max_response_bytes: u32,
 }
 
 /// Resolves inquiries by making structured output calls to an LLM provider.
@@ -188,7 +193,10 @@ impl LlmInquiryBackend {
     }
 
     /// Look up the effective config for this tool/question pair.
-    fn config_for(&self, tool_name: &str, question_id: &str) -> &InquiryConfig {
+    ///
+    /// Returns the per-question override when one exists, otherwise the default
+    /// built from the global inquiry config merged with the parent assistant.
+    pub(crate) fn config_for(&self, tool_name: &str, question_id: &str) -> &InquiryConfig {
         self.overrides
             .get(&(tool_name.to_owned(), question_id.to_owned()))
             .unwrap_or(&self.default_config)
@@ -206,7 +214,7 @@ impl InquiryBackend for LlmInquiryBackend {
         question: &Question,
         cancellation_token: CancellationToken,
     ) -> Result<Value, InquiryError> {
-        let config = self.config_for(tool_name, &question.id);
+        let config = self.config_for(tool_name, question.id.as_str());
 
         info!(
             inquiry_id,
@@ -282,7 +290,8 @@ impl InquiryBackend for LlmInquiryBackend {
             tool_choice: ToolChoice::None,
         };
 
-        let retry_config = RetryConfig::default();
+        let retry_config =
+            RetryConfig::default().with_max_response_bytes(config.max_response_bytes);
         let llm_events = tokio::select! {
             biased;
             () = cancellation_token.cancelled() => {
@@ -332,12 +341,16 @@ impl InquiryBackend for LlmInquiryBackend {
             "Structured inquiry completed",
         );
 
+        // A literal `null` answer is rejected here rather than recorded: it is
+        // never a meaningful answer, and `InquiryResponse::answered` refuses
+        // null values.
         structured_data
             .get_mut("answer")
             .map(Value::take)
+            .filter(|answer| !answer.is_null())
             .ok_or_else(|| {
                 let reason = format!(
-                    "missing 'answer' field in structured response: {}",
+                    "missing or null 'answer' field in structured response: {}",
                     serde_json::to_string(&structured_data)
                         .unwrap_or_else(|_| "<unparsable>".into())
                 );

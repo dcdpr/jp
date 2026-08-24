@@ -15,8 +15,8 @@ use serde_json::{Map, Value};
 pub use self::{
     chat::{ChatRequest, ChatResponse},
     inquiry::{
-        InquiryAnswerType, InquiryId, InquiryQuestion, InquiryRequest, InquiryResponse,
-        InquirySource, SelectOption,
+        CancellationReason, InquiryAnswerType, InquiryId, InquiryQuestion, InquiryRequest,
+        InquiryResponse, InquirySource, SelectOption,
     },
     tool_call::{ToolCallRequest, ToolCallResponse},
     turn::TurnStart,
@@ -418,6 +418,25 @@ impl EventKind {
         "inquiry_response",
     ];
 
+    /// The `type` tag this variant serializes as.
+    ///
+    /// The serde spelling rather than the Rust name, because this is what a
+    /// reader outside Rust sees on the wire and switches on.
+    /// [`Self::as_str`] gives the Rust name, for a message addressed to
+    /// somebody reading this code.
+    #[must_use]
+    pub const fn type_tag(&self) -> &'static str {
+        match self {
+            Self::TurnStart(_) => "turn_start",
+            Self::ChatRequest(_) => "chat_request",
+            Self::ChatResponse(_) => "chat_response",
+            Self::ToolCallRequest(_) => "tool_call_request",
+            Self::ToolCallResponse(_) => "tool_call_response",
+            Self::InquiryRequest(_) => "inquiry_request",
+            Self::InquiryResponse(_) => "inquiry_response",
+        }
+    }
+
     /// Returns the name of the event kind.
     #[must_use]
     pub const fn as_str(&self) -> &str {
@@ -534,3 +553,7 @@ impl From<TurnStart> for ConversationEvent {
         Self::now(turn_start)
     }
 }
+
+#[cfg(test)]
+#[path = "event_tests.rs"]
+mod tests;

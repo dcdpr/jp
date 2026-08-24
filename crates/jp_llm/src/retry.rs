@@ -6,7 +6,12 @@ use futures::TryStreamExt as _;
 use tracing::{debug, warn};
 
 use crate::{
-    Provider, StreamError, error::Result, event::Event, model::ModelDetails, query::ChatQuery,
+    Provider, StreamError,
+    error::Result,
+    event::Event,
+    model::ModelDetails,
+    query::ChatQuery,
+    stream::{output_limit_bytes, with_output_limit},
 };
 
 /// Configuration for resilient stream retries.
@@ -20,6 +25,11 @@ pub struct RetryConfig {
 
     /// Maximum backoff delay in seconds.
     pub max_backoff_secs: u64,
+
+    /// Abort a response after it generates more than this many bytes.
+    ///
+    /// `0` disables the ceiling.
+    pub max_response_bytes: u32,
 }
 
 impl Default for RetryConfig {
@@ -28,7 +38,23 @@ impl Default for RetryConfig {
             max_retries: 3,
             base_backoff_ms: 1000,
             max_backoff_secs: 30,
+            max_response_bytes: 1_048_576,
         }
+    }
+}
+
+impl RetryConfig {
+    /// Apply the user's configured output ceiling, leaving the retry and
+    /// backoff settings at their defaults.
+    ///
+    /// The retry settings are deliberately not taken from the same config
+    /// block: they are tuned for a query the user is watching, and a collect
+    /// call that inherited a large `max_retries` would keep an unattended
+    /// request alive far longer than the caller expects.
+    #[must_use]
+    pub fn with_max_response_bytes(mut self, max_response_bytes: u32) -> Self {
+        self.max_response_bytes = max_response_bytes;
+        self
     }
 }
 
@@ -52,6 +78,14 @@ pub async fn collect_with_retry(
         let stream = provider
             .chat_completion_stream(model, query.clone())
             .await?;
+
+        // Bound a runaway response. These collect-style requests run with no
+        // terminal attached (title generation, summarization, tool inquiries),
+        // so nobody is watching to interrupt one that never stops.
+        let stream = match output_limit_bytes(config.max_response_bytes) {
+            Some(max) => with_output_limit(stream, max),
+            None => stream,
+        };
 
         let error = match stream.try_collect::<Vec<Event>>().await {
             // Contract: a well-formed stream ends with `Event::Finished`. A

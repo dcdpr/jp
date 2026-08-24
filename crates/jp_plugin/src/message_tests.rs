@@ -252,3 +252,43 @@ fn plugin_read_config_with_path() {
     let parsed: PluginToHost = from_str(&json).unwrap();
     assert_eq!(msg, parsed);
 }
+
+/// A summary with fixed timestamps, so the expected JSON below is a literal.
+fn pinned_summary(pinned_at: Option<&str>) -> ConversationSummary {
+    ConversationSummary {
+        id: "123".to_owned(),
+        title: None,
+        last_activated_at: "2024-09-02T12:30:00Z".parse().unwrap(),
+        pinned_at: pinned_at.map(|at| at.parse().unwrap()),
+        events_count: 0,
+    }
+}
+
+#[test]
+fn conversation_summary_emits_pinned_at_when_set() {
+    assert_eq!(
+        serde_json::to_string(&pinned_summary(Some("2024-09-03T08:00:00Z"))).unwrap(),
+        r#"{"id":"123","title":null,"last_activated_at":"2024-09-02T12:30:00Z","pinned_at":"2024-09-03T08:00:00Z","events_count":0}"#
+    );
+}
+
+#[test]
+fn conversation_summary_omits_pinned_at_when_unset() {
+    assert_eq!(
+        serde_json::to_string(&pinned_summary(None)).unwrap(),
+        r#"{"id":"123","title":null,"last_activated_at":"2024-09-02T12:30:00Z","events_count":0}"#
+    );
+}
+
+/// A host built before `pinned_at` existed sends no such key, and a plugin
+/// built after it has to keep reading those messages.
+#[test]
+fn conversation_summary_defaults_pinned_at_when_absent() {
+    let json =
+        r#"{"id":"123","title":null,"last_activated_at":"2024-09-02T12:30:00Z","events_count":0}"#;
+
+    assert_eq!(
+        from_str::<ConversationSummary>(json).unwrap(),
+        pinned_summary(None)
+    );
+}

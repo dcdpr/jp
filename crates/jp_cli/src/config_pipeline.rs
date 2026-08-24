@@ -117,7 +117,7 @@ fn resolve_cfg_args(
                 //
                 // 1. User-global:    $XDG_CONFIG_HOME/jp/config/
                 // 2. Workspace:      <workspace_root>/
-                // 3. User-workspace: $XDG_DATA_HOME/jp/workspace/<id>/config/
+                // 3. User-workspace: $XDG_DATA_HOME/jp/workspace/<name>-<id>/config/
                 let mut roots: Vec<Utf8PathBuf> = Vec::new();
 
                 if let Some(global_dir) = user_global_config_dir(home.as_deref()) {

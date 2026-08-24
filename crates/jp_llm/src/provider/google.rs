@@ -12,7 +12,7 @@ use jp_config::{
     assistant::tool_choice::ToolChoice,
     model::{
         id::{ModelIdConfig, Name, ProviderId},
-        parameters::ReasoningEffort,
+        parameters::{ReasoningConfig, ReasoningEffort},
     },
     providers::llm::google::GoogleConfig,
 };
@@ -22,14 +22,14 @@ use jp_conversation::{
     thread::{ThreadParts, text_attachments_to_xml},
 };
 use serde_json::{Map, Value};
-use tracing::{debug, trace};
+use tracing::{debug, trace, warn};
 
 use super::{EventStream, Provider, trace_to_tmpfile};
 use crate::{
     StreamErrorKind,
     error::{Error, Result, StreamError, looks_like_quota_error},
     event::{Event, EventMatcher, EventPatch, FinishReason, PatchAction},
-    model::{ModelDeprecation, ModelDetails, ReasoningDetails},
+    model::{ModelDeprecation, ModelDetails, ReasoningDetails, ReasoningMode},
     query::ChatQuery,
     tool::ToolDefinition,
 };
@@ -104,17 +104,26 @@ fn call(
         tokio::pin!(stream);
         while let Some(event) = stream.next().await {
             // Google rejects requests with stale thought signatures as a
-            // 400 "Corrupted thought signature." Emit a patch to strip the
-            // oldest one and ask the caller to retry.
+            // 400 "Corrupted thought signature." Emit a patch to strip one from
+            // the current turn and ask the caller to retry.
             if let Err(ref err) = event
                 && is_corrupted_thought_signature(err)
             {
-                tracing::warn!("Corrupted thought signature, requesting retry.");
                 if let Some(patches) = build_thought_signature_patch(&request) {
+                    tracing::warn!(
+                        "Corrupted thought signature, patching history and retrying: {err}"
+                    );
                     yield Ok(Event::Patch(patches));
                     yield Ok(Event::Finished(FinishReason::Retry));
                     return;
                 }
+
+                // Nothing in the current turn can be stripped, so the error is
+                // reported instead of answered with an ineffective retry.
+                tracing::warn!(
+                    "Corrupted thought signature, but the current turn carries none to strip: \
+                     {err}"
+                );
             }
 
             for event in map_response(event?, &mut state, is_structured).map_err(|e| StreamError::other(e.to_string()))? {
@@ -237,16 +246,15 @@ fn create_request(
                         .max(details.min_tokens());
                     Some(tokens)
                 },
-                thinking_level: match details {
-                    ReasoningDetails::Leveled {
-                        none: _,
+                thinking_level: match details.mode() {
+                    Some(ReasoningMode::Leveled {
                         xlow,
                         low,
                         medium,
                         high,
                         xhigh: _,
                         max: _,
-                    } => {
+                    }) => {
                         let level = config
                             .effort
                             .abs_to_rel(max_output_tokens.map(i32::cast_unsigned))
@@ -260,14 +268,38 @@ fn create_request(
                             ReasoningEffort::Medium if medium => Some(types::ThinkingLevel::Medium),
                             ReasoningEffort::High if high => Some(types::ThinkingLevel::High),
 
-                            // Any other level is unsupported and treated as
-                            // high (since the documentation specifies this is
-                            // the default).
-                            _ => Some(types::ThinkingLevel::High),
+                            // Any other level is unsupported and clamps to high
+                            // (the documented default). Warn rather than clamp
+                            // silently, so a setting that could not be honoured
+                            // as asked is visible.
+                            _ => {
+                                warn!(
+                                    id = %model.id,
+                                    requested = ?level,
+                                    "Model does not support the requested reasoning effort; \
+                                     clamping to `high`."
+                                );
+
+                                Some(types::ThinkingLevel::High)
+                            }
                         }
                     }
                     _ => None,
                 },
+            })
+        } else if !details.can_disable() {
+            // Reasoning is off, but this model rejects an explicit disable. Ask
+            // for the least thinking it accepts and withhold the thoughts: a
+            // leveled model takes its lowest level, a budgetted one its minimum
+            // budget. Sending `thinking_budget: 0` here would both disable a
+            // model that cannot be disabled and use the budget form for a
+            // level-based one.
+            Some(types::ThinkingConfig {
+                include_thoughts: false,
+                thinking_budget: (details.min_tokens() > 0).then(|| details.min_tokens()),
+                thinking_level: details
+                    .lowest_effort()
+                    .and_then(|effort| effort_to_thinking_level(effort, max_output_tokens)),
             })
         } else if details.min_tokens() > 0 {
             // Model requires a minimum thinking budget — can't fully disable.
@@ -284,6 +316,49 @@ fn create_request(
                 thinking_level: None,
             })
         }
+    } else if let (None, Some(config)) = (model.reasoning, reasoning) {
+        // Reasoning support is unknown, meaning a model newer than this binary,
+        // and the caller asked for reasoning.
+        //
+        // Request thoughts: sending no thinking config lets Gemini think while
+        // withholding them, billing reasoning tokens that never reach the
+        // transcript. Pass the effort through as a level rather than dropping
+        // it, which would silently ignore the caller's setting. Every
+        // budget-era model is in the table above, so a model that reaches here
+        // postdates the level/budget split and takes levels.
+        debug!(
+            id = %model.id,
+            inferred = true,
+            "No reasoning capability reported; inferring leveled thinking."
+        );
+
+        Some(types::ThinkingConfig {
+            include_thoughts: true,
+            thinking_budget: None,
+            thinking_level: effort_to_thinking_level(config.effort, max_output_tokens),
+        })
+    } else if model.reasoning.is_none()
+        && matches!(parameters.reasoning, Some(ReasoningConfig::Off))
+    {
+        // Support is unknown and the caller explicitly turned reasoning off, so
+        // send the documented disable and let the endpoint be the judge. Sending
+        // nothing would take a provider default that, on modern models, thinks
+        // and bills for reasoning the caller asked not to have. A rejected
+        // disable is a visible error; silently billing is not.
+        //
+        // The endpoint matters here: a custom `base_url` may serve a model that
+        // accepts a zero budget even where the canonical API would not.
+        debug!(
+            id = %model.id,
+            inferred = true,
+            "No reasoning capability reported; attempting the requested disable."
+        );
+
+        Some(types::ThinkingConfig {
+            include_thoughts: false,
+            thinking_budget: Some(0),
+            thinking_level: None,
+        })
     } else {
         None
     };
@@ -389,7 +464,19 @@ fn create_request(
 
 /// Map a Gemini model to a `ModelDetails`.
 ///
+/// A model absent from this table still gets its limits from the API, so an
+/// entry is only needed for the reasoning ladder, which the API does not
+/// report.
+///
+/// Note that `/v1beta/models` lists models that `generateContent` no longer
+/// serves, so being listed is not evidence a model is callable.
+/// A documented shutdown date is the *earliest* a model might be retired rather
+/// than the date it was, so a date in the past does not mean the id is gone.
+/// Ids confirmed to return 404 are removed; the rest keep their documented
+/// date.
+///
 /// See: <https://ai.google.dev/gemini-api/docs/models> See:
+/// <https://ai.google.dev/gemini-api/docs/deprecations> See:
 /// <https://ai.google.dev/gemini-api/docs/thinking#levels-budgets>
 #[expect(clippy::too_many_lines)]
 fn map_model(model: types::Model) -> ModelDetails {
@@ -401,19 +488,24 @@ fn map_model(model: types::Model) -> ModelDetails {
         return ModelDetails::empty((PROVIDER, "unknown").try_into().unwrap());
     };
 
-    match name {
+    // Whether the API reports the model as able to think at all. It does not
+    // report effort levels, so any ladder still comes from the table below.
+    let thinks = model.thinking;
+
+    let mut details = match name {
         "gemini-pro-latest" | "gemini-3.1-pro-preview" | "gemini-3.1-pro-preview-customtools" => {
             ModelDetails {
                 id,
                 display_name,
                 context_window,
                 max_output_tokens,
-                reasoning: Some(ReasoningDetails::leveled(
-                    false, false, true, true, true, false, false,
-                )),
+                reasoning: Some(
+                    ReasoningDetails::leveled(false, true, true, true, false, false).always_on(),
+                ),
                 knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
                 deprecated: Some(ModelDeprecation::Active),
                 structured_output: None,
+                prefill: None,
                 features: vec![],
             }
         }
@@ -422,12 +514,16 @@ fn map_model(model: types::Model) -> ModelDetails {
             display_name,
             context_window,
             max_output_tokens,
-            reasoning: Some(ReasoningDetails::leveled(
-                false, false, true, false, true, false, false,
-            )),
+            reasoning: Some(
+                ReasoningDetails::leveled(false, true, false, true, false, false).always_on(),
+            ),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::Active),
+            deprecated: Some(ModelDeprecation::deprecated(
+                &"recommended replacement: gemini-3.1-pro-preview",
+                Some(NaiveDate::from_ymd_opt(2026, 3, 9).unwrap()),
+            )),
             structured_output: None,
+            prefill: None,
             features: vec![],
         },
         "gemini-flash-latest" | "gemini-3-flash-preview" => ModelDetails {
@@ -435,14 +531,24 @@ fn map_model(model: types::Model) -> ModelDetails {
             display_name,
             context_window,
             max_output_tokens,
-            reasoning: Some(ReasoningDetails::leveled(
-                false, true, true, true, true, false, false,
-            )),
+            reasoning: Some(
+                ReasoningDetails::leveled(true, true, true, true, false, false).always_on(),
+            ),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
+            prefill: None,
             features: vec![],
         },
+        // Closed to new users rather than retired: `generateContent` answers 404
+        // "no longer available to new users" for a key that never had access,
+        // while existing users are served until the announced shutdown. Note that
+        // a bare 404 cannot distinguish this from a retired model; only the error
+        // body can.
+        //
+        // The entry earns its place because this is a budget-era model. Without
+        // it the catch-all infers a thinking *level*, which this generation does
+        // not accept.
         "gemini-2.5-flash" => ModelDetails {
             id,
             display_name,
@@ -451,15 +557,14 @@ fn map_model(model: types::Model) -> ModelDetails {
             reasoning: Some(ReasoningDetails::budgetted(0, Some(24576))),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
             deprecated: Some(ModelDeprecation::deprecated(
-                &"recommended replacement: gemini-3-flash-preview",
-                Some(NaiveDate::from_ymd_opt(2026, 6, 17).unwrap()),
+                &"recommended replacement: gemini-3.6-flash",
+                Some(NaiveDate::from_ymd_opt(2026, 10, 16).unwrap()),
             )),
             structured_output: None,
+            prefill: None,
             features: vec![],
         },
-        "gemini-flash-lite-latest"
-        | "gemini-2.5-flash-lite"
-        | "gemini-2.5-flash-lite-preview-09-2025" => ModelDetails {
+        "gemini-flash-lite-latest" | "gemini-2.5-flash-lite" => ModelDetails {
             id,
             display_name,
             context_window,
@@ -467,10 +572,11 @@ fn map_model(model: types::Model) -> ModelDetails {
             reasoning: Some(ReasoningDetails::budgetted(512, Some(24576))),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
             deprecated: Some(ModelDeprecation::deprecated(
-                &"recommended replacement: unknown",
-                Some(NaiveDate::from_ymd_opt(2026, 7, 22).unwrap()),
+                &"recommended replacement: gemini-3.1-flash-lite",
+                Some(NaiveDate::from_ymd_opt(2026, 10, 16).unwrap()),
             )),
             structured_output: None,
+            prefill: None,
             features: vec![],
         },
         "gemini-2.5-pro" => ModelDetails {
@@ -481,38 +587,11 @@ fn map_model(model: types::Model) -> ModelDetails {
             reasoning: Some(ReasoningDetails::budgetted(512, Some(24576))),
             knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
             deprecated: Some(ModelDeprecation::deprecated(
-                &"recommended replacement: gemini-3-pro-preview",
-                Some(NaiveDate::from_ymd_opt(2026, 6, 17).unwrap()),
+                &"recommended replacement: gemini-3.1-pro-preview",
+                Some(NaiveDate::from_ymd_opt(2026, 10, 16).unwrap()),
             )),
             structured_output: None,
-            features: vec![],
-        },
-        "gemini-2.0-flash" | "gemini-2.0-flash-001" => ModelDetails {
-            id,
-            display_name,
-            context_window,
-            max_output_tokens,
-            reasoning: Some(ReasoningDetails::budgetted(0, Some(24576))),
-            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 8, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::deprecated(
-                &"recommended replacement: gemini-2.5-flash",
-                Some(NaiveDate::from_ymd_opt(2026, 6, 1).unwrap()),
-            )),
-            structured_output: None,
-            features: vec![],
-        },
-        "gemini-2.0-flash-lite" | "gemini-2.0-flash-lite-001" => ModelDetails {
-            id,
-            display_name,
-            context_window,
-            max_output_tokens,
-            reasoning: Some(ReasoningDetails::unsupported()),
-            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2024, 8, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::deprecated(
-                &"recommended replacement: gemini-2.5-flash-lite",
-                Some(NaiveDate::from_ymd_opt(2026, 6, 1).unwrap()),
-            )),
-            structured_output: None,
+            prefill: None,
             features: vec![],
         },
         id => {
@@ -536,9 +615,61 @@ fn map_model(model: types::Model) -> ModelDetails {
                 knowledge_cutoff: None,
                 deprecated: None,
                 structured_output: None,
+                prefill: None,
                 features: vec![],
             }
         }
+    };
+
+    details.reasoning = apply_thinking_support(details.reasoning, thinks);
+
+    details
+}
+
+/// Map a reasoning effort onto the nearest thinking level, without consulting a
+/// ladder.
+///
+/// Returns `None` for `Auto`, leaving the choice to the model.
+/// Callers that know the model's ladder should resolve against it first; this
+/// is the fallback for an effort that has to be expressed as a level
+/// regardless.
+fn effort_to_thinking_level(
+    effort: ReasoningEffort,
+    max_output_tokens: Option<i32>,
+) -> Option<types::ThinkingLevel> {
+    let effort = effort
+        .abs_to_rel(max_output_tokens.map(i32::cast_unsigned))
+        .unwrap_or(ReasoningEffort::Auto);
+
+    match effort {
+        ReasoningEffort::Auto => None,
+        ReasoningEffort::None | ReasoningEffort::Xlow => Some(types::ThinkingLevel::Minimal),
+        ReasoningEffort::Low => Some(types::ThinkingLevel::Low),
+        ReasoningEffort::Medium => Some(types::ThinkingLevel::Medium),
+        ReasoningEffort::High | ReasoningEffort::XHigh | ReasoningEffort::Max => {
+            Some(types::ThinkingLevel::High)
+        }
+        // `abs_to_rel` has already converted any absolute budget.
+        ReasoningEffort::Absolute(_) => Some(types::ThinkingLevel::High),
+    }
+}
+
+/// Reconcile the table's reasoning entry with the API's answer on whether the
+/// model thinks at all.
+///
+/// The API is authoritative here: sending a thinking budget to a model that
+/// does not think configures a mode it does not have.
+/// It does not report effort levels though, so a thinking model with no table
+/// entry stays `None`, leaving the ladder unknown so the request still asks for
+/// its thoughts.
+fn apply_thinking_support(
+    reasoning: Option<ReasoningDetails>,
+    thinks: bool,
+) -> Option<ReasoningDetails> {
+    if thinks {
+        reasoning
+    } else {
+        Some(ReasoningDetails::unsupported())
     }
 }
 
@@ -1070,15 +1201,27 @@ fn is_corrupted_thought_signature(err: &StreamError) -> bool {
     err.kind == StreamErrorKind::Other && err.message().contains("Corrupted thought signature")
 }
 
-/// Build a patch to remove the oldest `google_thought_signature` from the
-/// conversation.
-/// Google's error doesn't identify which block is bad, so we degrade one at a
-/// time starting from the oldest.
+/// Build a patch to remove one `google_thought_signature` from the current
+/// turn.
+///
+/// Google validates thought signatures only within the current turn, so a
+/// signature from an earlier turn is never the one it rejected; stripping one
+/// would degrade the conversation without changing the outcome.
+/// The search is therefore scoped to the current turn, and the error is
+/// reported unchanged when that turn holds no strippable signature.
+///
+/// Google's error doesn't say which signature is bad, so within the turn they
+/// are degraded one per round.
+/// A turn holds a handful of steps, which bounds the walk.
+///
+/// See
+/// <https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/thought-signatures>.
 fn build_thought_signature_patch(
     request: &types::GenerateContentRequest,
 ) -> Option<Vec<EventPatch>> {
     let sig = request
         .contents
+        .get(current_turn_start(&request.contents)..)?
         .iter()
         .flat_map(|content| &content.parts)
         .filter_map(|part| part.thought_signature.as_ref())
@@ -1091,6 +1234,32 @@ fn build_thought_signature_patch(
         },
         action: PatchAction::RemoveMetadata(THOUGHT_SIGNATURE_KEY.to_owned()),
     }])
+}
+
+/// Index of the content that begins the current turn.
+///
+/// Google defines a turn as beginning at the most recent user message that is
+/// not a function response, so a tool-use loop of any length is one turn: its
+/// function responses are user messages but do not start a new one.
+///
+/// Returns `0` when no such message exists.
+fn current_turn_start(contents: &[types::Content]) -> usize {
+    contents
+        .iter()
+        .rposition(|content| {
+            matches!(content.role, Some(types::Role::User))
+                && !is_function_response_content(content)
+        })
+        .unwrap_or(0)
+}
+
+/// Returns `true` if every part of the content is a function response.
+fn is_function_response_content(content: &types::Content) -> bool {
+    !content.parts.is_empty()
+        && content
+            .parts
+            .iter()
+            .all(|part| matches!(part.data, types::ContentData::FunctionResponse(_)))
 }
 
 #[cfg(test)]

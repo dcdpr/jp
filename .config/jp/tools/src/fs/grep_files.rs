@@ -1,7 +1,8 @@
 use camino::{Utf8Path, Utf8PathBuf};
 use grep_printer::StandardBuilder;
 use grep_regex::RegexMatcher;
-use grep_searcher::SearcherBuilder;
+use grep_searcher::{BinaryDetection, SearcherBuilder};
+use ignore::gitignore::Gitignore;
 use jp_tool::AccessPolicy;
 
 use super::fs_list_files;
@@ -14,6 +15,7 @@ pub(crate) async fn fs_grep_files(
     context: Option<usize>,
     paths: Option<OneOrMany<String>>,
     extensions: Option<OneOrMany<String>>,
+    suppress: &Gitignore,
 ) -> std::result::Result<String, Error> {
     // Resolve the file set via `fs_list_files`, which always walks from the
     // workspace root. Anchoring the walk there is what makes the root
@@ -27,8 +29,10 @@ pub(crate) async fn fs_grep_files(
     // nothing, and `""`/`.` mean the workspace root. Escape attempts surface
     // as a hard error from the shared path validation. The access policy is
     // threaded through so an approved external mount can be searched.
-    let files: Vec<Utf8PathBuf> = fs_list_files(root, access, paths.clone(), extensions.clone())
-        .await?
+    let listing = fs_list_files(root, access, paths.clone(), extensions.clone(), suppress).await?;
+
+    let notes = listing.notes();
+    let files: Vec<Utf8PathBuf> = listing
         .into_files()
         .into_iter()
         .map(Utf8PathBuf::from)
@@ -53,6 +57,11 @@ pub(crate) async fn fs_grep_files(
         .before_context(context.unwrap_or(0))
         .after_context(context.unwrap_or(0))
         .max_matches(Some(100))
+        // Stop reading a file once a NUL byte appears, as ripgrep does. Without
+        // this the searcher prints raw bytes from object files and archives,
+        // and the UTF-8 decode below then fails the *whole* search rather than
+        // the one file that caused it.
+        .binary_detection(BinaryDetection::quit(0))
         .build();
 
     for file in files {
@@ -63,11 +72,19 @@ pub(crate) async fn fs_grep_files(
     let matches = String::from_utf8(printer.into_inner().into_inner())?;
 
     let lines = matches.lines().count();
-    if matches.is_empty() {
-        Ok("No matches found. Broaden your search to see more.".to_owned())
+    let body = if matches.is_empty() {
+        // A search whose requested paths were skipped finds nothing for a
+        // completely different reason than a search that came up empty, and the
+        // notes below say which happened.
+        if notes.is_empty() {
+            "No matches found. Broaden your search to see more.".to_owned()
+        } else {
+            "No matches found in the paths that were searched.".to_owned()
+        }
     } else if lines > 200 && context.is_some() {
-        Box::pin(fs_grep_files(
-            root, access, pattern, None, paths, extensions,
+        // The inner call reproduces the notes, so they are not appended twice.
+        return Box::pin(fs_grep_files(
+            root, access, pattern, None, paths, extensions, suppress,
         ))
         .await
         .map(|v| {
@@ -75,16 +92,36 @@ pub(crate) async fn fs_grep_files(
                 "{v}\n[Hidden contextual lines due to excessive number of lines returned. Narrow \
                  down your search to see more.]"
             )
-        })
+        });
     } else if lines > 100 {
-        Ok(indoc::formatdoc! {"
+        indoc::formatdoc! {"
             {}
 
             [Showing 100/{lines} lines of matches... Narrow down your search to see more.]
-        ", matches.lines().take(100).collect::<Vec<_>>().join("\n"),})
+        ", matches.lines().take(100).collect::<Vec<_>>().join("\n"),}
     } else {
-        Ok(matches)
+        matches
+    };
+
+    Ok(append_notes(body, &notes))
+}
+
+/// Append the listing's skip notes to a search result.
+///
+/// Without them, a search whose requested paths were skipped reports the same
+/// empty result as a search that genuinely found nothing.
+fn append_notes(body: String, notes: &[String]) -> String {
+    if notes.is_empty() {
+        return body;
     }
+
+    let notes = notes
+        .iter()
+        .map(|note| format!("Note: {note}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    format!("{body}\n\n{notes}")
 }
 
 #[cfg(test)]

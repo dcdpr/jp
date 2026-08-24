@@ -27,10 +27,12 @@ In disagreements between code and docs, the code is authoritative.
     - [EditorBackend](#editorbackend)
     - [InlineReply](#inlinereply)
     - [Inquiry](#inquiry)
+    - [Match](#match)
     - [Persona](#persona)
     - [Pinned Conversation](#pinned-conversation)
     - [Provider](#provider)
     - [RFD](#rfd)
+    - [Search Hit](#search-hit)
     - [Signal Router](#signal-router)
     - [Thread](#thread)
     - [Tool Call](#tool-call)
@@ -131,6 +133,18 @@ Carried as `InquiryRequest` and `InquiryResponse` events within a conversation.
 Used for mid-turn clarification that should not appear in the main chat stream
 or be sent to the LLM provider as context.
 
+### Match
+
+A [Search Hit](#search-hit) whose line actually contains the pattern, as opposed
+to one included only for surrounding context.
+Recorded as `is_match` on the hit, along with the byte ranges of the matched
+substrings.
+
+Matches are the unit every count in `jp conversation grep` uses: the figure in a
+heading, the `--output count` value, and the `--max-matches` cap.
+
+**Not the same as.** A Search Hit, which also covers context lines.
+
 ### Pinned Conversation
 
 A conversation the user has marked as important, so it stays prominent and is
@@ -160,6 +174,21 @@ Each RFD captures design rationale for a significant change.
 Numeric-prefixed RFDs (`001-`, `002-`, …) are the accepted series; `D`-prefixed
 RFDs (`D01-`, `D02-`, …) are drafts or abandoned proposals.
 The process itself is defined in [RFD-001].
+
+### Search Hit
+
+One line of conversation content emitted by a search, together with the
+coordinate that locates it: the conversation, the turn it came from, and which
+part of the conversation it was found in (its scope — title, user, assistant,
+reasoning, tool call, and so on).
+Implemented as `Hit` in `jp_cli::cmd::conversation::grep`.
+
+A hit is either a [Match](#match) or a context line pulled in by `--context`;
+both are hits.
+
+**Not the same as.** A Match (a hit whose line contains the pattern), a
+Conversation Event (one hit is a single line from within an event, and one event
+can yield many hits).
 
 ### Signal Router
 

@@ -356,6 +356,247 @@ fn test_default_background_column_fill_with_indent() {
 }
 
 #[test]
+fn paragraph_column_fill_counts_a_tab_to_the_next_tab_stop() {
+    // Comrak keeps tabs inside paragraph text, and the writer forwards them, so
+    // the cursor lands on the next multiple of 8 while the fill is computed from
+    // the writer's own column. Measuring the tab as the zero width
+    // `UnicodeWidthChar` reports for it puts this line at 2 instead of 9, so the
+    // pad runs 7 columns past the target.
+    let opts = TerminalOptions {
+        default_background: Some(DefaultBackground {
+            param: "48;5;236".into(),
+            fill: BackgroundFill::Column(16),
+        }),
+        ..Default::default()
+    };
+
+    let rendered = Formatter::with_width(0)
+        .format_terminal_with("a\tb\n", &opts)
+        .unwrap();
+
+    let plain = strip_ansi_for_test(&rendered);
+    let first_line = plain.lines().next().expect("at least one line");
+
+    assert_eq!(
+        first_line, "a\tb       ",
+        "the tab lands on column 8, so `b` ends at 9 and 7 columns remain"
+    );
+}
+
+#[test]
+fn wrapped_paragraph_column_fill_counts_a_tab_to_the_next_tab_stop() {
+    // The wrap path measures the emitted line separately from `column`, both at
+    // the break point and for the continuation line, so it needs the same
+    // cursor-aware measurement.
+    let opts = TerminalOptions {
+        default_background: Some(DefaultBackground {
+            param: "48;5;236".into(),
+            fill: BackgroundFill::Column(20),
+        }),
+        ..Default::default()
+    };
+
+    let rendered = Formatter::with_width(12)
+        .format_terminal_with("aa\tbb cccc dddd\n", &opts)
+        .unwrap();
+
+    let plain = strip_ansi_for_test(&rendered);
+    for line in plain.lines() {
+        let columns = ansi::advance_column(0, line);
+        assert_eq!(
+            columns, 20,
+            "every wrapped line should be shaded to column 20: {line:?}\nfull output:\n{plain:?}"
+        );
+    }
+}
+
+#[test]
+fn line_fill_is_the_single_interpretation_of_the_fill_mode() {
+    assert_eq!(line_fill(BackgroundFill::Content, 0), "");
+    assert_eq!(line_fill(BackgroundFill::Terminal, 0), "\x1b[K");
+    assert_eq!(line_fill(BackgroundFill::Column(4), 1), "   ");
+    // A line already at or past the column gets nothing, never a negative pad.
+    assert_eq!(line_fill(BackgroundFill::Column(4), 4), "");
+    assert_eq!(line_fill(BackgroundFill::Column(4), 9), "");
+}
+
+#[test]
+fn code_block_lines_are_padded_under_a_column_fill() {
+    // `apply_line_background` renders code fences and highlighted code-block
+    // lines, so a reasoning region containing tool output reaches the fill
+    // through here. It used to honour only `Terminal`, leaving `Column` regions
+    // unfilled — the case a host that drops `\x1b[K` depends on.
+    let bg = DefaultBackground {
+        param: "48;5;236".into(),
+        fill: BackgroundFill::Column(6),
+    };
+
+    let rendered = apply_line_background("ab\ncd\n", Some(&bg), 0);
+    let lines: Vec<&str> = rendered.split('\n').collect();
+    assert!(
+        lines[0].ends_with("ab    \x1b[0m"),
+        "first line should pad to column 6: {:?}",
+        lines[0]
+    );
+    assert!(
+        lines[1].ends_with("cd    \x1b[0m"),
+        "second line should pad to column 6: {:?}",
+        lines[1]
+    );
+}
+
+#[test]
+fn code_block_column_fill_measures_visible_width_only() {
+    // The content arrives syntax-highlighted, so its escapes must not be
+    // counted against the fill column.
+    let bg = DefaultBackground {
+        param: "48;5;236".into(),
+        fill: BackgroundFill::Column(6),
+    };
+
+    let rendered = apply_line_background("a\x1b[31mb\x1b[39m\n", Some(&bg), 0);
+    assert!(
+        rendered.contains("\x1b[39m    \x1b[0m"),
+        "two visible columns should leave a four-space pad: {rendered:?}"
+    );
+}
+
+#[test]
+fn code_block_column_fill_counts_a_tab_to_the_next_tab_stop() {
+    // A terminal, and a host laying out its own pane, moves a tab to the next
+    // multiple of 8. Measuring it as the single column `UnicodeWidthStr` reports
+    // puts this line at 3 instead of 9, so the pad would be 13 and the line
+    // would end 6 columns past the target, wrapping or clipping.
+    let bg = DefaultBackground {
+        param: "48;5;236".into(),
+        fill: BackgroundFill::Column(16),
+    };
+
+    let rendered = apply_line_background("a\tb\n", Some(&bg), 0);
+    assert_eq!(
+        rendered, "\x1b[48;5;236ma\tb       \x1b[0m\n\x1b[48;5;236m",
+        "`a` then a tab lands on column 8, so `b` ends at 9 and 7 columns remain"
+    );
+}
+
+#[test]
+fn code_block_column_fill_accounts_for_the_indent_the_caller_adds() {
+    // A code block inside a list item is indented after the background is
+    // applied. Filling to the target without counting that indent produces a
+    // line of `indent + target` columns, which wraps in a terminal and is
+    // clipped in a fixed-width pane.
+    let bg = DefaultBackground {
+        param: "48;5;236".into(),
+        fill: BackgroundFill::Column(6),
+    };
+
+    let rendered = apply_line_background("ab\n", Some(&bg), 3);
+    assert_eq!(
+        rendered, "\x1b[48;5;236mab \x1b[0m\n\x1b[48;5;236m",
+        "three indent columns plus two of content leave a single space"
+    );
+}
+
+#[test]
+fn code_block_column_fill_drops_a_crlf_carriage_return() {
+    // A Windows code line reaches the fill as `"ab\r"`. Left in place, the `\r`
+    // puts the cursor back at column 0 and the pad overwrites the content,
+    // rendering a blank shaded row. The newline terminates the line anyway.
+    let bg = DefaultBackground {
+        param: "48;5;236".into(),
+        fill: BackgroundFill::Column(6),
+    };
+
+    let rendered = apply_line_background("ab\r\n", Some(&bg), 0);
+    assert_eq!(
+        rendered, "\x1b[48;5;236mab    \x1b[0m\n\x1b[48;5;236m",
+        "the pad should extend the content, not overwrite it"
+    );
+}
+
+#[test]
+fn code_block_erase_fill_drops_a_crlf_carriage_return() {
+    // Same hazard for the erase: after a `\r` the cursor is at column 0, so
+    // `\x1b[K` would wipe the line it was meant to shade.
+    let bg = DefaultBackground {
+        param: "48;5;236".into(),
+        fill: BackgroundFill::Terminal,
+    };
+
+    let rendered = apply_line_background("ab\r\n", Some(&bg), 0);
+    assert_eq!(
+        rendered, "\x1b[48;5;236mab\x1b[K\x1b[0m\n\x1b[48;5;236m",
+        "the erase should run from the end of the content"
+    );
+}
+
+#[test]
+fn code_block_fill_reasserts_a_background_the_line_reset() {
+    // Highlighted lines end with `\x1b[0m`, and tool output carries whatever
+    // escapes it likes, so the pad would otherwise run under the terminal
+    // default instead of the region background.
+    let bg = DefaultBackground {
+        param: "48;5;236".into(),
+        fill: BackgroundFill::Column(6),
+    };
+
+    let rendered = apply_line_background("ab\x1b[0m\n", Some(&bg), 0);
+    assert_eq!(
+        rendered,
+        "\x1b[48;5;236mab\x1b[0m\x1b[48;5;236m    \x1b[0m\n\x1b[48;5;236m"
+    );
+}
+
+#[test]
+fn code_block_erase_fill_reasserts_a_background_the_line_reset() {
+    // Same hazard for the erase: `\x1b[K` fills with the active background, so
+    // after a reset it would erase to the terminal default.
+    let bg = DefaultBackground {
+        param: "48;5;236".into(),
+        fill: BackgroundFill::Terminal,
+    };
+
+    let rendered = apply_line_background("ab\x1b[0m\n", Some(&bg), 0);
+    assert_eq!(
+        rendered,
+        "\x1b[48;5;236mab\x1b[0m\x1b[48;5;236m\x1b[K\x1b[0m\n\x1b[48;5;236m"
+    );
+}
+
+#[test]
+fn code_block_fill_leaves_a_surviving_background_alone() {
+    // A line that only changes its foreground still has the region background
+    // active, so the fill needs no extra escape.
+    let bg = DefaultBackground {
+        param: "48;5;236".into(),
+        fill: BackgroundFill::Column(6),
+    };
+
+    let rendered = apply_line_background("ab\x1b[39m\n", Some(&bg), 0);
+    assert_eq!(
+        rendered,
+        "\x1b[48;5;236mab\x1b[39m    \x1b[0m\n\x1b[48;5;236m"
+    );
+}
+
+#[test]
+fn code_block_trailing_segment_is_not_padded() {
+    // `split('\n')` yields an empty trailing segment after a final newline.
+    // It is not a line and must not be filled, or every block would gain a
+    // stray shaded row.
+    let bg = DefaultBackground {
+        param: "48;5;236".into(),
+        fill: BackgroundFill::Column(6),
+    };
+
+    let rendered = apply_line_background("ab\n", Some(&bg), 0);
+    assert!(
+        rendered.ends_with("\x1b[0m\n\x1b[48;5;236m"),
+        "trailing segment should carry no pad: {rendered:?}"
+    );
+}
+
+#[test]
 fn test_default_background_terminal_fill_with_indent() {
     // Same as above for `BackgroundFill::Terminal` (erase-to-EOL).
     // The erase escape should appear after content (so the bg fills to
@@ -1074,8 +1315,8 @@ fn test_thematic_break_markdown_style() {
 
 #[test]
 fn test_thematic_break_line_style_uses_configured_width() {
-    // HrStyle::Line should produce a line of `─` characters using
-    // the configured wrap width when no terminal_width is set.
+    // HrStyle::Line produces a line of `─` characters spanning the configured
+    // wrap width, so it lines up with the prose around it.
     let mut formatter = Formatter::with_width(40);
     formatter.hr_style = HrStyle::Line;
 
@@ -1088,24 +1329,102 @@ fn test_thematic_break_line_style_uses_configured_width() {
 }
 
 #[test]
-fn test_thematic_break_line_style_uses_terminal_width() {
-    // When terminal_width is set, it takes precedence over the
-    // configured wrap width.
+fn test_thematic_break_line_style_ignores_terminal_width() {
+    // A rule tracks the text column, not the terminal: a 120-column rule above
+    // 40-column prose reads as a different element entirely.
     let mut formatter = Formatter::with_width(40).terminal_width(120);
     formatter.hr_style = HrStyle::Line;
 
     let actual = formatter.format_terminal("above\n\n---\n\nbelow").unwrap();
-    let line: String = "─".repeat(120);
     assert!(
-        actual.contains(&line),
-        "Expected 120-char unicode line.\nActual: {actual:?}"
+        actual.contains(&"─".repeat(40)) && !actual.contains(&"─".repeat(41)),
+        "Expected a 40-char unicode line.\nActual: {actual:?}"
     );
-    // Should NOT contain a 40-char line (unless it's a substring, but
-    // we check exact length by verifying no extra `─` beyond 120).
+}
+
+#[test]
+fn test_thematic_break_line_style_fits_inside_a_blockquote() {
+    // A blockquote's `> ` narrows the text column by two. A rule that ignored
+    // the prefix would overflow the line and wrap.
+    let mut formatter = Formatter::with_width(40);
+    formatter.hr_style = HrStyle::Line;
+
+    let actual = formatter
+        .format_terminal("> above\n>\n> ---\n>\n> below")
+        .unwrap();
     assert!(
-        !actual.contains(&"─".repeat(121)),
-        "Line should not exceed terminal width.\nActual: {actual:?}"
+        actual.contains(&"─".repeat(38)) && !actual.contains(&"─".repeat(39)),
+        "Expected a 38-char unicode line inside the quote.\nActual: {actual:?}"
     );
+}
+
+#[test]
+fn test_table_is_fitted_to_the_terminal_width() {
+    // A table is laid out, not wrapped, so it has to fit the terminal on its
+    // own: `wrap_width` being wider than the terminal must not let it overflow.
+    let formatter = Formatter::with_width(80).terminal_width(30);
+    let input = "| Alpha heading | Beta heading |\n| --- | --- |\n| first cell content | second \
+                 cell content |";
+
+    let actual = formatter.format_terminal(input).unwrap();
+
+    // Wrapped rows continue on a line opening with `┆` rather than `|`.
+    let rows: Vec<&str> = actual
+        .lines()
+        .filter(|l| l.starts_with('|') || l.starts_with('┆'))
+        .collect();
+    assert!(rows.len() > 3, "expected wrapped rows:\n{actual}");
+    for row in rows {
+        assert_eq!(
+            row.chars().count(),
+            30,
+            "row should fit 30 columns: {row:?}"
+        );
+    }
+}
+
+#[test]
+fn test_table_keeps_natural_width_without_a_terminal_width() {
+    // Piped output has no terminal to fit, so the column cap alone applies.
+    let formatter = Formatter::with_width(80).table_max_column_width(0);
+    let input = "| Alpha heading | Beta heading |\n| --- | --- |\n| first cell content | second \
+                 cell content |";
+
+    let actual = formatter.format_terminal(input).unwrap();
+
+    let widest = actual
+        .lines()
+        .filter(|l| l.starts_with('|'))
+        .map(|l| l.chars().count())
+        .max()
+        .expect("should have rows");
+    // "| first cell content | second cell content |"
+    assert_eq!(widest, 44, "table should keep its natural width:\n{actual}");
+}
+
+#[test]
+fn test_nested_table_collapses_when_the_prefix_eats_the_terminal() {
+    // Three levels of blockquote prefix (`> > > `) consume all six columns the
+    // terminal has, leaving nothing for the table. That is a known-empty
+    // budget, not an unknown one, so the columns collapse to the minimum
+    // instead of springing back to their natural width.
+    let formatter = Formatter::with_width(80).terminal_width(6);
+    let input = "> > > | Alpha heading | Beta heading |\n> > > | --- | --- |\n> > > | first cell \
+                 content | second cell content |";
+
+    let actual = formatter.format_terminal(input).unwrap();
+
+    let plain = strip_ansi_for_test(&actual);
+    let rows: Vec<&str> = plain.lines().filter(|l| l.contains('|')).collect();
+    assert!(rows.len() > 3, "expected wrapped rows:\n{plain}");
+    for row in rows {
+        // `> > > ` plus `| xxx | xxx |` at the three-column minimum.
+        assert_eq!(
+            row.chars().count(),
+            19,
+            "row should use the minimum layout: {row:?}"
+        );
+    }
 }
 
 /// Regression: the terminal renderer used to emit `<!-- end list -->` between

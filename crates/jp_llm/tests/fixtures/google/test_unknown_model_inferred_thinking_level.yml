@@ -1,0 +1,43 @@
+when:
+  path: "/v1beta/models/gemini-3.5-flash:streamGenerateContent"
+  method: POST
+  query_param:
+    - name: alt
+      value: sse
+  json_body_str: >-
+    {
+      "contents": [
+        {
+          "parts": [
+            {
+              "text": "What is 2 + 2?"
+            }
+          ],
+          "role": "user"
+        }
+      ],
+      "toolConfig": {
+        "functionCallingConfig": {
+          "mode": "NONE",
+          "allowedFunctionNames": []
+        }
+      },
+      "generationConfig": {
+        "maxOutputTokens": 65536,
+        "thinkingConfig": {
+          "includeThoughts": true,
+          "thinkingBudget": null,
+          "thinkingLevel": "HIGH"
+        }
+      }
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream
+  body: |+
+    data: {"candidates": [{"content": {"parts": [{"text": "2 + 2 = 4"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 9,"candidatesTokenCount": 7,"totalTokenCount": 100,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 9}],"thoughtsTokenCount": 84,"serviceTier": "standard"},"modelVersion": "gemini-3.5-flash","responseId": "-FJnas3SHvajnsEPqYL2-Qk"}
+    
+    data: {"candidates": [{"content": {"parts": [{"text": "","thoughtSignature": "Ev4CCvsCARFNMg9v9mOv88BZRhDs2naUKK2c+caQ4hP0EowWdlVNQdCfPmubwfLbMTt0M2hVPvKYtgR9ESi6vtrtcMcjiFE3VVwJjAy+nizX0TkpIPiGKlDkm4f+thi3/LEjky1ihoTWR9Y4hHLzU4Fun5eTqxRxZjsOQOcCw2CpAoJK7EgHOiBsW4uYXRa4S0wZ9qfZjMbTgMoyptGtxjYvZRcJ4iM2F84TsFuRrFRzp3TSKCaRKybusR0v5vgzDG22C0hFUp7rsFIFEKx6xdAK8F3qHHt2jYvmhS3ILWQLMkBaQWH5RE0eEShUBxnP2uQqfq8CFZY3AwuUow73RKlvQ/XBJsz1vYFILMolxlRh6d0M22MV6f0bmI1hG1Nj/3q4CPOoRJr8Igtgq8/7S4jgRt3OJNFSI+OsdsDLOWzgDLESJJ8m38+fzLxvYZHoQbCjEg+98kK78i1qn0KgDp3aB79AqjfsDd8CEvfBNL8duDac3BgL8u4K4B+t4xY5Vw=="}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 9,"candidatesTokenCount": 7,"totalTokenCount": 100,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 9}],"thoughtsTokenCount": 84,"serviceTier": "standard"},"modelVersion": "gemini-3.5-flash","responseId": "-FJnas3SHvajnsEPqYL2-Qk"}
+    
