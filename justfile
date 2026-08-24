@@ -3532,6 +3532,17 @@ fmt-comments-ci: _install-comfort _install_ci_matchers
 fmt-markdown-ci: _install-comfort _install_ci_matchers
     comfort --check --workspace --language markdown --format-markdown --reference-links --prune-reference-links
 
+# Type-check the web UI's scripts on CI.
+#
+# The scripts are served exactly as written, so nothing is compiled: `checkJs`
+# reads the JSDoc annotations and the DOM types and emits no output.
+#
+# The version tracks `docs/package.json`, which is the other place this project
+# pins TypeScript.
+[group('ci')]
+typecheck-js-ci:
+    npx --yes --package=typescript@5 -- tsc --project crates/plugins/command/serve-web/tsconfig.json
+
 # Test the code on CI.
 #
 # `SCOPE` selects the crates to test: `workspace` covers every member, `jp-only`
