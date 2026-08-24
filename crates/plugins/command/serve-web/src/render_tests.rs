@@ -244,6 +244,34 @@ fn markdown_html_is_escaped() {
 }
 
 #[test]
+fn markdown_table_is_wrapped_in_a_scroll_container() {
+    let html = markdown_to_html("| a | b |\n| - | - |\n| 1 | 2 |");
+
+    let expected = "<div class=\"table-scroll\"><table>\n<thead>\n<tr>\n<th>a</th>\n<th>b</th>\n</\
+                    tr>\n</thead>\n<tbody>\n<tr>\n<td>1</td>\n<td>2</td>\n</tr>\n</tbody>\n</\
+                    table></div>\n";
+    assert_eq!(html, expected);
+}
+
+#[test]
+fn markdown_aligned_table_is_wrapped() {
+    // Alignment lands on the cells, so the opening tag stays a bare `<table>` and
+    // the string replacement still finds it.
+    let html = markdown_to_html("| a | b |\n| :- | -: |\n| 1 | 2 |");
+
+    let expected =
+        "<div class=\"table-scroll\"><table>\n<thead>\n<tr>\n<th align=\"left\">a</th>\n<th \
+         align=\"right\">b</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td align=\"left\">1</td>\n<td \
+         align=\"right\">2</td>\n</tr>\n</tbody>\n</table></div>\n";
+    assert_eq!(html, expected);
+}
+
+#[test]
+fn markdown_without_a_table_is_not_wrapped() {
+    assert_eq!(markdown_to_html("hi"), "<p>hi</p>\n");
+}
+
+#[test]
 fn truncate_multibyte_is_boundary_safe() {
     // 4 bytes each; 3 chars = 12 bytes, over the 10-byte budget.
     let s = "😀😀😀";

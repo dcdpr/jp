@@ -12,6 +12,10 @@
     --reasoning-bg: #fffbeb;
     --tool-bg: #f0fdf4;
     --code-bg: #f4f4f5;
+    /* The background a scrollable block sits on, so it can mask its own edge
+       shadows. Overridden by each surface that holds rendered markdown. */
+    --surface: #ffffff;
+    --edge-shadow: rgba(0, 0, 0, 0.3);
     --radius: 8px;
     --max-width: 800px;
 }
@@ -29,6 +33,10 @@
         --reasoning-bg: #2d2305;
         --tool-bg: #0d2818;
         --code-bg: #1e2228;
+        --surface: #0d1117;
+        /* Deeper than the light-mode value: the surfaces it falls on are already
+           dark, so it takes more black to read as a shadow. */
+        --edge-shadow: rgba(0, 0, 0, 0.55);
     }
 }
 
@@ -1159,10 +1167,12 @@ html.ready .loading-veil {
 
 .message.user {
     background: var(--user-bg);
+    --surface: var(--user-bg);
 }
 
 .message.assistant {
     background: var(--assistant-bg);
+    --surface: var(--assistant-bg);
 }
 
 /* Submitted, not yet in the transcript. Dimmed so it reads as provisional
@@ -1187,6 +1197,7 @@ html.ready .loading-veil {
 .reasoning {
     margin-bottom: 16px;
     background: var(--reasoning-bg);
+    --surface: var(--reasoning-bg);
     border-radius: var(--radius);
     padding: 0;
 }
@@ -1259,11 +1270,37 @@ code {
     border-radius: 3px;
 }
 
-/* Tables */
+/* Tables
+
+   The wrapper is the scroll container, so a table wider than the column scrolls
+   on its own. Left to overflow, it reaches `.conversation-detail`, whose
+   `overflow-y: auto` also makes the horizontal axis scrollable, and the whole
+   transcript slides sideways. */
+.table-scroll {
+    overflow-x: auto;
+    /* Swiping past either end of the table stops there, rather than chaining to
+       the transcript behind it or to the browser's back gesture. */
+    overscroll-behavior-x: contain;
+    margin: 16px 0;
+
+    /* A shadow on whichever side still has table beyond it, because iOS shows no
+       resting scrollbar and a cut that lands on a column border looks like the
+       end of the table.
+
+       Four layers: two covers painted in the surface colour that scroll with the
+       table, and two shadows that stay with the box. Reaching an end parks that
+       end's cover over its shadow and hides it, which is what makes the pair
+       mean "there is more this way" rather than "this box scrolls". */
+    background:
+        linear-gradient(to right, var(--surface) 30%, transparent) left / 24px 100% no-repeat local,
+        linear-gradient(to left, var(--surface) 30%, transparent) right / 24px 100% no-repeat local,
+        radial-gradient(farthest-side at left, var(--edge-shadow), transparent) left / 12px 100% no-repeat scroll,
+        radial-gradient(farthest-side at right, var(--edge-shadow), transparent) right / 12px 100% no-repeat scroll;
+}
+
 table {
     border-collapse: collapse;
     width: 100%;
-    margin: 16px 0;
     font-size: 0.875rem;
 }
 
