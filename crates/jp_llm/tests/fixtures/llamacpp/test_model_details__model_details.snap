@@ -17,6 +17,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
 ]

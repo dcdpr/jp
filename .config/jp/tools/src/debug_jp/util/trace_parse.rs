@@ -7,6 +7,10 @@
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
+/// Text-format marker jp writes to stderr, right before exit, when `JP_DEBUG=1`
+/// and the output format is human-readable text.
+pub(crate) const TRACE_PATH_PREFIX: &str = "Full trace log written to: ";
+
 /// Severity, ordered so `level >= Level::Info` is meaningful.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Level {
@@ -65,6 +69,35 @@ pub(crate) struct TraceEvent {
 /// Parse every line in `text`, skipping blanks and unparseable lines.
 pub(crate) fn parse_lines(text: &str) -> Vec<TraceEvent> {
     text.lines().filter_map(parse_line).collect()
+}
+
+/// Extract the trace log path jp writes to stderr right before exit.
+///
+/// jp emits `Full trace log written to: <path>` when the output format is text,
+/// or a `{"trace_log": "<path>"}` JSON object when the format is JSON or
+/// JSON-pretty.
+/// This checks each stderr line for either shape.
+pub(crate) fn extract_trace_path(stderr: &str) -> Option<String> {
+    stderr.lines().find_map(parse_trace_path_line)
+}
+
+/// True for the stderr line jp emits to announce the trace log path, in either
+/// the text or JSON marker format.
+pub(crate) fn is_trace_path_marker_line(line: &str) -> bool {
+    parse_trace_path_line(line).is_some()
+}
+
+fn parse_trace_path_line(line: &str) -> Option<String> {
+    if let Some(path) = line.strip_prefix(TRACE_PATH_PREFIX) {
+        return Some(path.trim().to_owned());
+    }
+    match serde_json::from_str::<Value>(line).ok()? {
+        Value::Object(obj) => match obj.get("trace_log")? {
+            Value::String(path) => Some(path.clone()),
+            _ => None,
+        },
+        _ => None,
+    }
 }
 
 fn parse_line(line: &str) -> Option<TraceEvent> {

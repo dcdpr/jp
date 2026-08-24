@@ -138,9 +138,7 @@ expression: v
             metadata: {},
         },
         Finished(
-            Other(
-                String("tool_calls"),
-            ),
+            Completed,
         ),
     ],
     [

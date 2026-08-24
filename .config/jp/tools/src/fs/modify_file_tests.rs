@@ -27,6 +27,7 @@ fn pat(old: &str, new: &str) -> Vec<Pattern> {
         old: old.to_owned(),
         new: new.to_owned(),
         paths: None,
+        regex: None,
     }]
 }
 
@@ -139,6 +140,7 @@ mod validate_paths {
             old: "a".to_owned(),
             new: "b".to_owned(),
             paths: Some(OneOrMany::One("src/lib.rs".to_owned())),
+            regex: None,
         }];
         assert!(validate_paths(None, &patterns).is_ok());
     }
@@ -150,11 +152,13 @@ mod validate_paths {
                 old: "a".to_owned(),
                 new: "b".to_owned(),
                 paths: Some(OneOrMany::One("src/lib.rs".to_owned())),
+                regex: None,
             },
             Pattern {
                 old: "c".to_owned(),
                 new: "d".to_owned(),
                 paths: None,
+                regex: None,
             },
         ];
         let result = validate_paths(None, &patterns);
@@ -170,6 +174,7 @@ mod validate_paths {
             old: "a".to_owned(),
             new: "b".to_owned(),
             paths: Some(OneOrMany::Many(vec![])),
+            regex: None,
         }];
         let result = validate_paths(None, &patterns);
         assert!(result.is_err());
@@ -283,6 +288,7 @@ mod apply_patterns_content {
             let c = Content(current.clone());
             let result = if regex {
                 c.replace_regexp(&pattern.old, &pattern.new, true, true)
+                    .map(|r| r.content)
             } else {
                 c.replace_literal(&pattern.old, &pattern.new, true, true)
             };
@@ -290,10 +296,13 @@ mod apply_patterns_content {
             match result {
                 Ok(after) => {
                     current = after;
-                    outcomes.push(PatternOutcome::Applied);
+                    outcomes.push(PatternOutcome::applied());
                 }
-                Err(_) => {
+                Err(ReplaceError::NotFound) => {
                     outcomes.push(PatternOutcome::NotFound);
+                }
+                Err(ReplaceError::Invalid(msg)) => {
+                    outcomes.push(PatternOutcome::Invalid(msg));
                 }
             }
         }
@@ -317,42 +326,42 @@ mod apply_patterns_content {
                 old: "hello world",
                 new: "hello universe",
                 expected: "hello universe\n",
-                outcome: PatternOutcome::Applied,
+                outcome: PatternOutcome::applied(),
             }),
             ("delete_content", TestCase {
                 content: "hello world\n",
                 old: "hello world",
                 new: "",
                 expected: "\n",
-                outcome: PatternOutcome::Applied,
+                outcome: PatternOutcome::applied(),
             }),
             ("replace_with_multiple_lines", TestCase {
                 content: "hello world\n",
                 old: "hello world",
                 new: "hello\nworld\n",
                 expected: "hello\nworld\n\n",
-                outcome: PatternOutcome::Applied,
+                outcome: PatternOutcome::applied(),
             }),
             ("replace_without_trailing_newline", TestCase {
                 content: "hello world\nhello universe",
                 old: "hello world",
                 new: "hello there",
                 expected: "hello there\nhello universe",
-                outcome: PatternOutcome::Applied,
+                outcome: PatternOutcome::applied(),
             }),
             ("replace_subset_of_line", TestCase {
                 content: "hello world how are you doing?",
                 old: "world",
                 new: "universe",
                 expected: "hello universe how are you doing?",
-                outcome: PatternOutcome::Applied,
+                outcome: PatternOutcome::applied(),
             }),
             ("replace_across_multiple_lines", TestCase {
                 content: "hello world\nhow are you doing?",
                 old: "world\nhow",
                 new: "universe\nwhat",
                 expected: "hello universe\nwhat are you doing?",
-                outcome: PatternOutcome::Applied,
+                outcome: PatternOutcome::applied(),
             }),
             ("pattern_not_found", TestCase {
                 content: "hello world how are you doing?",
@@ -377,19 +386,21 @@ mod apply_patterns_content {
                 old: "bbb".to_owned(),
                 new: "xxx".to_owned(),
                 paths: None,
+                regex: None,
             },
             Pattern {
                 old: "xxx ccc".to_owned(),
                 new: "yyy".to_owned(),
                 paths: None,
+                regex: None,
             },
         ];
 
         let (result, outcomes) = apply("aaa bbb ccc", &patterns, false);
         assert_eq!(result, "aaa yyy");
         assert_eq!(outcomes, vec![
-            PatternOutcome::Applied,
-            PatternOutcome::Applied,
+            PatternOutcome::applied(),
+            PatternOutcome::applied(),
         ]);
     }
 
@@ -400,11 +411,13 @@ mod apply_patterns_content {
                 old: "missing".to_owned(),
                 new: "x".to_owned(),
                 paths: None,
+                regex: None,
             },
             Pattern {
                 old: "world".to_owned(),
                 new: "earth".to_owned(),
                 paths: None,
+                regex: None,
             },
         ];
 
@@ -412,7 +425,7 @@ mod apply_patterns_content {
         assert_eq!(result, "hello earth");
         assert_eq!(outcomes, vec![
             PatternOutcome::NotFound,
-            PatternOutcome::Applied,
+            PatternOutcome::applied(),
         ]);
     }
 
@@ -513,8 +526,169 @@ mod format_pattern_report {
     use super::*;
 
     #[test]
+    fn test_regex_report_names_what_the_engine_bound() {
+        // The bug this reporting exists to surface: a quantified class that
+        // contains the delimiter following it runs past the intended boundary.
+        // `[a-z-]+` before `-` swallows `user-line`, so a scope-then-text
+        // pattern silently captures part of the text as the scope.
+        //
+        // The diff shows the wrong *result*; only this report shows the wrong
+        // *binding*, which is what tells the author their pattern is at fault
+        // rather than their replacement.
+        let content = "{id}-1-user-before\n{id}-1-user-line-two\n";
+        let patterns = vec![Pattern {
+            old: r"\{id\}-(\d+)-([a-z-]+)-".to_owned(),
+            new: "{id}:$1:$2:c:".to_owned(),
+            paths: None,
+            regex: Some(true),
+        }];
+
+        let matches = regex_matches(content, &patterns[0]);
+        assert_eq!(
+            matches,
+            vec![
+                MatchTally {
+                    text: "{id}-1-user-".to_owned(),
+                    count: 1,
+                },
+                MatchTally {
+                    text: "{id}-1-user-line-".to_owned(),
+                    count: 1,
+                },
+            ],
+            "the over-captured binding must be listed, not just the intended one"
+        );
+
+        let report = format_pattern_report(&patterns, &[PatternOutcome::Applied { matches }]);
+        assert!(
+            report.contains(r#""{id}-1-user-line-""#),
+            "report must name the over-capture: {report}"
+        );
+    }
+
+    #[test]
+    fn test_repeated_match_is_tallied_once_with_a_count() {
+        let content = "a1 a2 a3";
+        let pattern = Pattern {
+            old: r"a\d".to_owned(),
+            new: "b".to_owned(),
+            paths: None,
+            regex: Some(true),
+        };
+
+        // Three distinct bindings, so three entries rather than one ×3.
+        assert_eq!(regex_matches(content, &pattern).len(), 3);
+
+        // Identical bindings collapse into one entry carrying the count.
+        let pattern = Pattern {
+            old: "a".to_owned(),
+            new: "b".to_owned(),
+            paths: None,
+            regex: Some(true),
+        };
+        assert_eq!(regex_matches(content, &pattern), vec![MatchTally {
+            text: "a".to_owned(),
+            count: 3,
+        }]);
+    }
+
+    #[test]
+    fn test_literal_patterns_report_no_matches() {
+        // A literal pattern matches itself, so listing it would be noise.
+        let content = "hello world";
+        let replacement = Content(content.to_owned())
+            .replace_literal("world", "there", true, true)
+            .unwrap();
+        assert_eq!(replacement, "hello there");
+
+        let patterns = pat("world", "there");
+        let report = format_pattern_report(&patterns, &[PatternOutcome::applied()]);
+        assert_eq!(report, "", "a lone literal success stays silent");
+    }
+
+    #[test]
+    fn test_multiline_matches_stay_distinguishable() {
+        // A match crossing a newline is the case the report must not flatten:
+        // both blocks start with `BEGIN`, and only what follows tells the author
+        // which one the quantifier ran into.
+        let content = "BEGIN\nsafe\nEND BEGIN\nunsafe\nEND";
+        let patterns = vec![Pattern {
+            old: r"BEGIN[\s\S]*?END".to_owned(),
+            new: "X".to_owned(),
+            paths: None,
+            regex: Some(true),
+        }];
+
+        let matches = regex_matches(content, &patterns[0]);
+        assert_eq!(matches, vec![
+            MatchTally {
+                text: "BEGIN\nsafe\nEND".to_owned(),
+                count: 1,
+            },
+            MatchTally {
+                text: "BEGIN\nunsafe\nEND".to_owned(),
+                count: 1,
+            },
+        ]);
+
+        let report = format_pattern_report(&patterns, &[PatternOutcome::Applied { matches }]);
+        assert_eq!(
+            report,
+            concat!(
+                r"Pattern #1 `BEGIN[\s\S]*?END` matched:",
+                "\n  ",
+                r#""BEGIN\nsafe\nEND""#,
+                "\n  ",
+                r#""BEGIN\nunsafe\nEND""#,
+            )
+        );
+    }
+
+    #[test]
+    fn test_long_match_keeps_both_ends_and_its_size() {
+        // An over-running quantifier shows its damage at the end of the match,
+        // so the tail survives truncation and the size disambiguates matches
+        // sharing a head.
+        let content = "0123456789".repeat(7);
+        let patterns = vec![Pattern {
+            old: r"\d+".to_owned(),
+            new: "X".to_owned(),
+            paths: None,
+            regex: Some(true),
+        }];
+
+        let matches = regex_matches(&content, &patterns[0]);
+        let report = format_pattern_report(&patterns, &[PatternOutcome::Applied { matches }]);
+        assert_eq!(
+            report,
+            "Pattern #1 `\\d+` matched:\n  \"0123456789012345678901234567890123456789\" … \
+             \"4567890123456789\" (70 chars)"
+        );
+    }
+
+    #[test]
+    fn test_many_occurrences_of_one_binding_cost_one_entry() {
+        // Occurrences are counted, not collected: ten thousand hits on a single
+        // binding hold one entry rather than ten thousand strings.
+        let replacement = Content("x".repeat(10_000))
+            .replace_regexp("x", "y", true, true)
+            .expect("pattern applies");
+
+        assert_eq!(replacement.matched.len(), 1);
+        assert_eq!(replacement.matched.get("x"), Some(&10_000));
+    }
+
+    /// The tallied bindings a regex pattern produces against `content`.
+    fn regex_matches(content: &str, pattern: &Pattern) -> Vec<MatchTally> {
+        let replacement = Content(content.to_owned())
+            .replace_regexp(&pattern.old, &pattern.new, true, true)
+            .expect("pattern applies");
+        tally_matches(replacement.matched)
+    }
+
+    #[test]
     fn test_single_success_is_empty() {
-        let outcomes = vec![PatternOutcome::Applied];
+        let outcomes = vec![PatternOutcome::applied()];
         assert_eq!(format_pattern_report(&pat("a", "b"), &outcomes), "");
     }
 
@@ -525,14 +699,16 @@ mod format_pattern_report {
                 old: "a".to_owned(),
                 new: "b".to_owned(),
                 paths: None,
+                regex: None,
             },
             Pattern {
                 old: "c".to_owned(),
                 new: "d".to_owned(),
                 paths: None,
+                regex: None,
             },
         ];
-        let outcomes = vec![PatternOutcome::Applied, PatternOutcome::Applied];
+        let outcomes = vec![PatternOutcome::applied(), PatternOutcome::applied()];
         assert_eq!(
             format_pattern_report(&patterns, &outcomes),
             "2/2 patterns applied."
@@ -546,18 +722,51 @@ mod format_pattern_report {
                 old: "a".to_owned(),
                 new: "b".to_owned(),
                 paths: None,
+                regex: None,
             },
             Pattern {
                 old: "missing_pattern".to_owned(),
                 new: "d".to_owned(),
                 paths: None,
+                regex: None,
             },
         ];
-        let outcomes = vec![PatternOutcome::Applied, PatternOutcome::NotFound];
+        let outcomes = vec![PatternOutcome::applied(), PatternOutcome::NotFound];
         let report = format_pattern_report(&patterns, &outcomes);
         assert!(report.contains("1/2 patterns applied."), "report: {report}");
         assert!(report.contains("#2:"), "report: {report}");
         assert!(report.contains("missing_pattern"), "report: {report}");
+    }
+
+    #[test]
+    fn test_invalid_pattern() {
+        let patterns = vec![
+            Pattern {
+                old: "fn stream(".to_owned(),
+                new: "fn run(".to_owned(),
+                paths: None,
+                regex: None,
+            },
+            Pattern {
+                old: "a".to_owned(),
+                new: "b".to_owned(),
+                paths: None,
+                regex: None,
+            },
+        ];
+        let outcomes = vec![
+            PatternOutcome::Invalid("unclosed group".to_owned()),
+            PatternOutcome::applied(),
+        ];
+        let report = format_pattern_report(&patterns, &outcomes);
+        assert!(report.contains("1/2 patterns applied."), "report: {report}");
+        assert!(
+            report.contains("Invalid regex patterns:"),
+            "report: {report}"
+        );
+        assert!(report.contains("#1:"), "report: {report}");
+        assert!(report.contains("unclosed group"), "report: {report}");
+        assert!(!report.contains("Patterns not found:"), "report: {report}");
     }
 }
 
@@ -597,7 +806,7 @@ mod find_blocked_regex_patterns {
     fn test_detects_known_patterns() {
         for pattern in BLOCKED_REGEX_PATTERNS {
             let patterns = pat(pattern, "replacement");
-            let blocked = find_blocked_regex_patterns(&patterns);
+            let blocked = find_blocked_regex_patterns(&patterns, true);
             assert_eq!(blocked, Some(vec![*pattern]), "expected blocked: {pattern}");
         }
     }
@@ -605,7 +814,7 @@ mod find_blocked_regex_patterns {
     #[test]
     fn test_allows_specific_regex() {
         assert_eq!(
-            find_blocked_regex_patterns(&pat(r"fn\s+\w+", "replacement")),
+            find_blocked_regex_patterns(&pat(r"fn\s+\w+", "replacement"), true),
             None
         );
     }
@@ -613,8 +822,30 @@ mod find_blocked_regex_patterns {
     #[test]
     fn test_trims_whitespace() {
         assert_eq!(
-            find_blocked_regex_patterns(&pat("  .*  ", "replacement")),
+            find_blocked_regex_patterns(&pat("  .*  ", "replacement"), true),
             Some(vec![".*"])
+        );
+    }
+
+    #[test]
+    fn test_respects_per_pattern_flag() {
+        // Literal call, pattern opts into regex: blocked.
+        let mut patterns = pat(".*", "replacement");
+        patterns[0].regex = Some(true);
+        assert_eq!(
+            find_blocked_regex_patterns(&patterns, false),
+            Some(vec![".*"])
+        );
+
+        // Regex call, pattern opts out: `.*` is a literal, not blocked.
+        let mut patterns = pat(".*", "replacement");
+        patterns[0].regex = Some(false);
+        assert_eq!(find_blocked_regex_patterns(&patterns, true), None);
+
+        // Literal call, no per-pattern flag: not blocked.
+        assert_eq!(
+            find_blocked_regex_patterns(&pat(".*", "replacement"), false),
+            None
         );
     }
 }
@@ -670,7 +901,7 @@ mod content {
             new: &'static str,
             case_sensitive: bool,
             use_regex: bool,
-            expected: Result<&'static str, &'static str>,
+            expected: Result<&'static str, ReplaceError>,
         }
 
         let cases = [
@@ -680,7 +911,7 @@ mod content {
                 new: "hi",
                 case_sensitive: true,
                 use_regex: false,
-                expected: Err("Cannot find pattern"),
+                expected: Err(ReplaceError::NotFound),
             }),
             ("literal_case_insensitive", TestCase {
                 content: "Hello World",
@@ -696,7 +927,7 @@ mod content {
                 new: "hi",
                 case_sensitive: true,
                 use_regex: true,
-                expected: Ok("Hello World"),
+                expected: Err(ReplaceError::NotFound),
             }),
             ("regexp_case_insensitive", TestCase {
                 content: "Hello World",
@@ -712,6 +943,7 @@ mod content {
             let c = Content(tc.content.to_owned());
             let result = if tc.use_regex {
                 c.replace_regexp(tc.old, tc.new, false, tc.case_sensitive)
+                    .map(|r| r.content)
             } else {
                 c.replace_literal(tc.old, tc.new, false, tc.case_sensitive)
             };
@@ -720,8 +952,8 @@ mod content {
                 (Ok(actual), Ok(expected)) => {
                     assert_eq!(actual, expected, "test case: {name}");
                 }
-                (Err(actual), Err(substr)) => {
-                    assert!(actual.to_string().contains(substr), "test case: {name}");
+                (Err(actual), Err(expected)) => {
+                    assert_eq!(actual, expected, "test case: {name}");
                 }
                 _ => panic!("{name}: expected {:?}, got {result:?}", tc.expected),
             }
@@ -778,11 +1010,47 @@ mod content {
             let c = Content(tc.content.to_owned());
             let result = if tc.use_regex {
                 c.replace_regexp(tc.old, tc.new, tc.replace_all, true)
+                    .map(|r| r.content)
             } else {
                 c.replace_literal(tc.old, tc.new, tc.replace_all, true)
             };
             assert_eq!(result.unwrap(), tc.expected, "test case: {name}");
         }
+    }
+
+    /// Regression: a regex that compiles but matches nothing must fail with
+    /// `NotFound`, not silently return the input unchanged.
+    #[test]
+    fn test_regexp_no_match_is_not_found() {
+        let c = Content("hello world".to_owned());
+        assert_eq!(
+            c.replace_regexp("goodbye", "x", true, true)
+                .map(|r| r.content),
+            Err(ReplaceError::NotFound)
+        );
+    }
+
+    /// Parens in regex mode are capture groups, not literal characters: the
+    /// pattern matches text without the parens, so it does not match source
+    /// that contains them.
+    #[test]
+    fn test_regexp_parens_are_groups_not_literals() {
+        let c = Content("stream(event_source).await".to_owned());
+        assert_eq!(
+            c.replace_regexp("stream(event_source).await", "x", true, true)
+                .map(|r| r.content),
+            Err(ReplaceError::NotFound)
+        );
+    }
+
+    #[test]
+    fn test_regexp_invalid_pattern_is_invalid() {
+        let c = Content("hello world".to_owned());
+        assert_matches!(
+            c.replace_regexp("fn stream(", "x", true, true)
+                .map(|r| r.content),
+            Err(ReplaceError::Invalid(_))
+        );
     }
 }
 
@@ -827,6 +1095,64 @@ mod fs_modify_file {
                 assert!(content.contains("File modified successfully:"), "{name}: {content}");
             });
         }
+    }
+
+    /// Regression: a regex that compiles but matches nothing must be counted as
+    /// not found, not as applied.
+    #[test]
+    fn test_regex_no_match_reported_as_not_found() {
+        let patterns = vec![
+            Pattern {
+                old: "hello".to_owned(),
+                new: "hi".to_owned(),
+                paths: None,
+                regex: None,
+            },
+            // Compiles fine, but matches nothing in the file.
+            Pattern {
+                old: r"missing(text)".to_owned(),
+                new: "x$1".to_owned(),
+                paths: None,
+                regex: None,
+            },
+        ];
+
+        let (outcome, after) = run_modify("hello world\n", &patterns, true);
+        assert_eq!(after, "hi world\n");
+        assert_matches!(outcome, Outcome::Success { content } => {
+            assert!(content.contains("1/2 patterns applied."), "content: {content}");
+            assert!(content.contains("Patterns not found:"), "content: {content}");
+            assert!(content.contains("#2:"), "content: {content}");
+        });
+    }
+
+    /// Invalid regexes are skipped and reported; valid patterns still apply.
+    #[test]
+    fn test_invalid_regex_reported_but_others_apply() {
+        let patterns = vec![
+            // Unbalanced paren: does not compile as a regex.
+            Pattern {
+                old: "fn stream(".to_owned(),
+                new: "fn run(".to_owned(),
+                paths: None,
+                regex: None,
+            },
+            Pattern {
+                old: "hello".to_owned(),
+                new: "hi".to_owned(),
+                paths: None,
+                regex: None,
+            },
+        ];
+
+        let (outcome, after) = run_modify("hello world\n", &patterns, true);
+        assert_eq!(after, "hi world\n");
+        assert_matches!(outcome, Outcome::Success { content } => {
+            assert!(content.contains("1/2 patterns applied."), "content: {content}");
+            assert!(content.contains("Invalid regex patterns:"), "content: {content}");
+            assert!(content.contains("#1:"), "content: {content}");
+            assert!(!content.contains("Patterns not found:"), "content: {content}");
+        });
     }
 
     #[test]
@@ -917,6 +1243,7 @@ mod fs_modify_file {
                     old: old.to_string(),
                     new: new.to_string(),
                     paths: None,
+                    regex: None,
                 })
                 .collect();
 
@@ -1174,6 +1501,7 @@ mod per_pattern_paths {
                 "a.txt".to_owned(),
                 "b.txt".to_owned(),
             ])),
+            regex: None,
         }];
 
         let result = fs_modify_file_impl(
@@ -1215,12 +1543,14 @@ mod per_pattern_paths {
                 old: "aaa".to_owned(),
                 new: "xxx".to_owned(),
                 paths: None,
+                regex: None,
             },
             // Uses its own path
             Pattern {
                 old: "ccc".to_owned(),
                 new: "yyy".to_owned(),
                 paths: Some(OneOrMany::One("other.txt".to_owned())),
+                regex: None,
             },
         ];
 
@@ -1258,12 +1588,14 @@ mod per_pattern_paths {
                 old: "bbb".to_owned(),
                 new: "xxx".to_owned(),
                 paths: Some(OneOrMany::One("f.txt".to_owned())),
+                regex: None,
             },
             // This pattern depends on the first one having been applied.
             Pattern {
                 old: "xxx ccc".to_owned(),
                 new: "yyy".to_owned(),
                 paths: Some(OneOrMany::One("f.txt".to_owned())),
+                regex: None,
             },
         ];
 
@@ -1298,12 +1630,14 @@ mod per_pattern_paths {
                 old: "hello".to_owned(),
                 new: "hi".to_owned(),
                 paths: Some(OneOrMany::One("a.txt".to_owned())),
+                regex: None,
             },
             // "nonexistent" is not in b.txt
             Pattern {
                 old: "nonexistent".to_owned(),
                 new: "x".to_owned(),
                 paths: Some(OneOrMany::One("b.txt".to_owned())),
+                regex: None,
             },
         ];
 
@@ -1343,6 +1677,7 @@ mod per_pattern_paths {
                 "a.txt".to_owned(),
                 "b.txt".to_owned(),
             ])),
+            regex: None,
         }];
 
         let result = fs_modify_file_impl(
@@ -1372,6 +1707,7 @@ mod per_pattern_paths {
             old: "hello".to_owned(),
             new: "goodbye".to_owned(),
             paths: Some(OneOrMany::One("nonexistent.txt".to_owned())),
+            regex: None,
         }];
 
         let result = fs_modify_file_impl(
@@ -1389,6 +1725,63 @@ mod per_pattern_paths {
 
         assert_matches!(result, Outcome::Error { message, .. } => {
             assert!(message.contains("does not exist"), "message: {message}");
+        });
+    }
+}
+
+mod per_pattern_regex {
+    use super::*;
+
+    /// A pattern can opt into regex mode while the call default is literal.
+    #[test]
+    fn test_regex_override_on_literal_call() {
+        let patterns = vec![
+            // Literal: parens match literally.
+            Pattern {
+                old: "stream()".to_owned(),
+                new: "run()".to_owned(),
+                paths: None,
+                regex: None,
+            },
+            // Regex override: capture group.
+            Pattern {
+                old: r"(\w+) world".to_owned(),
+                new: "$1 universe".to_owned(),
+                paths: None,
+                regex: Some(true),
+            },
+        ];
+
+        let (outcome, after) = run_modify("stream()\nhello world\n", &patterns, false);
+        assert_eq!(after, "run()\nhello universe\n");
+        assert_matches!(outcome, Outcome::Success { content } => {
+            assert!(content.contains("2/2 patterns applied."), "content: {content}");
+        });
+    }
+
+    /// A pattern can opt out of regex mode while the call default is regex.
+    #[test]
+    fn test_literal_override_on_regex_call() {
+        let patterns = vec![
+            Pattern {
+                old: r"(\w+) world".to_owned(),
+                new: "$1 universe".to_owned(),
+                paths: None,
+                regex: None,
+            },
+            // Literal override: parens match literally.
+            Pattern {
+                old: "stream()".to_owned(),
+                new: "run()".to_owned(),
+                paths: None,
+                regex: Some(false),
+            },
+        ];
+
+        let (outcome, after) = run_modify("stream()\nhello world\n", &patterns, true);
+        assert_eq!(after, "run()\nhello universe\n");
+        assert_matches!(outcome, Outcome::Success { content } => {
+            assert!(content.contains("2/2 patterns applied."), "content: {content}");
         });
     }
 }

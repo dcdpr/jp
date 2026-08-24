@@ -2,6 +2,7 @@
 
 use jp_config::{
     AppConfig, PartialAppConfig, ToPartial as _, conversation::compaction::SummaryConfig,
+    model::id::ModelIdConfig,
 };
 use jp_conversation::{
     ConversationEvent, ConversationStream,
@@ -9,13 +10,16 @@ use jp_conversation::{
     thread::ThreadBuilder,
 };
 use jp_llm::{
-    event::Event,
+    Provider,
+    event::{Event, EventPatch, FinishReason, apply_patches},
     event_builder::EventBuilder,
+    model::ModelDetails,
     provider,
     retry::{RetryConfig, collect_with_retry},
 };
+use tracing::debug;
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 
 const DEFAULT_INSTRUCTIONS: &str = "\
 Summarize the preceding conversation for continuity. The summary will replace the original \
@@ -69,11 +73,6 @@ pub async fn generate_summary(
         .and_then(|c| c.instructions.as_deref())
         .unwrap_or(DEFAULT_INSTRUCTIONS);
 
-    let thread = ThreadBuilder::default()
-        .with_events(stream.clone())
-        .with_system_prompt(instructions.to_owned())
-        .build()?;
-
     // Extra context is supplementary guidance for this one summary, so it rides
     // on the user turn rather than replacing the (cache-friendly) system prompt.
     let context = summary_cfg
@@ -87,29 +86,124 @@ pub async fn generate_summary(
         None => "Summarize the conversation above.".to_owned(),
     };
 
-    let mut thread_events = thread.events.clone();
-    thread_events.start_turn(ChatRequest::from(user_message));
-
-    let query = jp_llm::query::ChatQuery {
-        thread: jp_conversation::thread::Thread {
-            events: thread_events,
-            ..thread
-        },
-        tools: vec![],
-        tool_choice: jp_config::assistant::tool_choice::ToolChoice::default(),
-    };
-
     let provider = provider::get_provider(model_id.provider, &app_cfg.providers.llm)?;
     let model_details = provider.model_details(&model_id.name).await?;
 
-    let retry_config = RetryConfig::default();
-    let llm_events =
-        collect_with_retry(provider.as_ref(), &model_details, query, &retry_config).await?;
+    summarize_stream(
+        provider.as_ref(),
+        &model_details,
+        &model_id,
+        stream,
+        instructions,
+        &user_message,
+        app_cfg.assistant.request.max_response_bytes,
+    )
+    .await
+}
 
-    // Collect the response text.
+/// Request a summary of `stream`, honouring provider rebuild requests.
+///
+/// A provider that answers with [`FinishReason::Retry`] supplies patches that
+/// make the request acceptable; each round applies them to `stream` and
+/// resends.
+/// Providers degrade a bounded subset of bad events per round (see Anthropic's
+/// `build_thinking_patches` and Google's `build_thought_signature_patch`), so a
+/// stream carrying several bad events legitimately needs several rounds.
+///
+/// The loop terminates because every round requires at least one applied patch,
+/// and the only action available (`RemoveMetadata`) strictly shrinks a finite
+/// set of metadata entries.
+/// A round that changes nothing ends it.
+async fn summarize_stream(
+    provider: &dyn Provider,
+    model_details: &ModelDetails,
+    model_id: &ModelIdConfig,
+    mut stream: ConversationStream,
+    instructions: &str,
+    user_message: &str,
+    max_response_bytes: u32,
+) -> Result<String> {
+    let retry_config = RetryConfig::default().with_max_response_bytes(max_response_bytes);
+
+    loop {
+        let thread = ThreadBuilder::default()
+            .with_events(stream.clone())
+            .with_system_prompt(instructions.to_owned())
+            .build()?;
+
+        let mut thread_events = thread.events.clone();
+        thread_events.start_turn(ChatRequest::from(user_message.to_owned()));
+
+        let query = jp_llm::query::ChatQuery {
+            thread: jp_conversation::thread::Thread {
+                events: thread_events,
+                ..thread
+            },
+            tools: vec![],
+            tool_choice: jp_config::assistant::tool_choice::ToolChoice::default(),
+        };
+
+        let llm_events = collect_with_retry(provider, model_details, query, &retry_config).await?;
+
+        let patches = match summarize_events(llm_events) {
+            StreamOutcome::Summary(summary) => return Ok(summary),
+            StreamOutcome::Unusable(reason) => {
+                return Err(Error::Summarize {
+                    model: model_id.to_string(),
+                    reason,
+                });
+            }
+            StreamOutcome::Retry(patches) => patches,
+        };
+
+        // The patches target events in the local range stream, so applying them
+        // here leaves the stored conversation untouched: repairing the user's
+        // history is the query loop's job, not a side effect of summarizing.
+        let applied = apply_patches(&mut stream, &patches);
+        if applied == 0 {
+            return Err(Error::Summarize {
+                model: model_id.to_string(),
+                reason: "the provider asked to rebuild the request but sent no fix that changed \
+                         it, so resending would fail the same way"
+                    .to_owned(),
+            });
+        }
+
+        debug!(
+            applied,
+            "Provider requested a rebuild; patched the summarizer stream and resending."
+        );
+    }
+}
+
+/// What one completed summarizer stream yielded.
+#[derive(Debug, PartialEq)]
+enum StreamOutcome {
+    /// Usable summary text.
+    Summary(String),
+
+    /// The provider wants the request rebuilt and sent again, after applying
+    /// these patches to the events it was built from.
+    Retry(Vec<EventPatch>),
+
+    /// Nothing usable came back; the string explains why.
+    Unusable(String),
+}
+
+/// Reduce one summarizer stream to its outcome.
+///
+/// Only a stream that both finishes with [`FinishReason::Completed`] and
+/// carries message text yields a summary.
+/// Every other terminal reason is unusable even when text was streamed first: a
+/// truncated or declined response would otherwise be stored as the summary and
+/// replace the turns it was meant to stand in for, silently dropping whatever
+/// the model never got to.
+fn summarize_events(events: Vec<Event>) -> StreamOutcome {
     let mut builder = EventBuilder::new();
     let mut flushed = Vec::new();
-    for event in llm_events {
+    let mut patches = Vec::new();
+    let mut finish = None;
+    for event in events {
         match event {
             Event::Part {
                 index,
@@ -121,10 +215,20 @@ pub async fn generate_summary(
             Event::Flush { index, metadata } => {
                 flushed.extend(builder.handle_flush(index, metadata));
             }
-            Event::Finished(_) => flushed.extend(builder.drain()),
-            // `Patch` is applied upstream; `KeepAlive` is a liveness signal.
-            Event::Patch(_) | Event::KeepAlive => {}
+            Event::Finished(reason) => {
+                flushed.extend(builder.drain());
+                finish = Some(reason);
+            }
+            // Providers emit patches alongside `FinishReason::Retry`; nothing
+            // else consumes them on this path, so keep them for the rebuild.
+            Event::Patch(mut p) => patches.append(&mut p),
+            // `KeepAlive` is a liveness signal.
+            Event::KeepAlive => {}
         }
+    }
+
+    if let Some(FinishReason::Retry) = finish {
+        return StreamOutcome::Retry(patches);
     }
 
     let summary = flushed
@@ -136,13 +240,43 @@ pub async fn generate_summary(
         })
         .collect::<String>();
 
-    if summary.is_empty() {
-        return Err(crate::error::Error::Compaction(
-            "Summarizer returned an empty response".into(),
-        ));
+    if matches!(finish, Some(FinishReason::Completed)) && !summary.is_empty() {
+        return StreamOutcome::Summary(summary);
     }
 
-    Ok(summary)
+    StreamOutcome::Unusable(failure_reason(finish.as_ref()))
+}
+
+/// Explain why a summarization attempt produced no usable summary.
+///
+/// `finish` is the stream's terminal reason, or `None` when the stream ended
+/// without one.
+fn failure_reason(finish: Option<&FinishReason>) -> String {
+    match finish {
+        Some(FinishReason::Refused {
+            category,
+            explanation,
+        }) => {
+            let category = category
+                .as_deref()
+                .map_or_else(String::new, |c| format!(" ({c})"));
+            let explanation = explanation
+                .as_deref()
+                .map_or_else(String::new, |e| format!(": {e}"));
+            format!("the model declined to summarize this conversation{category}{explanation}")
+        }
+        Some(FinishReason::MaxTokens) => "the model hit its max output token limit, so any \
+                                          summary it produced would be truncated"
+            .to_owned(),
+        Some(FinishReason::Other(value)) => {
+            let detail = value
+                .as_str()
+                .map_or_else(|| value.to_string(), str::to_owned);
+            format!("the model stopped early ({detail}), so any summary it produced is incomplete")
+        }
+        Some(FinishReason::Retry) => "the provider asked to rebuild the request".to_owned(),
+        Some(FinishReason::Completed) | None => "the model returned an empty response".to_owned(),
+    }
 }
 
 /// Collect all events in the inclusive turn range `[range_from, range_to]`.

@@ -4,6 +4,7 @@ pub mod code;
 pub mod inline_code;
 pub mod lock_wait;
 pub mod markdown;
+pub mod mcp_startup;
 pub mod reasoning;
 pub mod streaming;
 pub mod tool_call;
@@ -24,6 +25,7 @@ use crate::{
         inline_code::{InlineCodeConfig, PartialInlineCodeConfig},
         lock_wait::{LockWaitConfig, PartialLockWaitConfig},
         markdown::{MarkdownConfig, PartialMarkdownConfig},
+        mcp_startup::{McpStartupConfig, PartialMcpStartupConfig},
         reasoning::{PartialReasoningConfig, ReasoningConfig},
         streaming::{PartialStreamingConfig, StreamingConfig},
         tool_call::{PartialToolCallConfig, ToolCallConfig},
@@ -52,6 +54,13 @@ pub struct StyleConfig {
     /// Configures how markdown content is rendered in the terminal.
     #[setting(nested)]
     pub markdown: MarkdownConfig,
+
+    /// MCP server startup indicator.
+    ///
+    /// Configures the timer shown while waiting for MCP servers that are still
+    /// starting when a query needs them.
+    #[setting(nested)]
+    pub mcp_startup: McpStartupConfig,
 
     /// Reasoning content style.
     ///
@@ -93,6 +102,7 @@ impl AssignKeyValue for PartialStyleConfig {
             _ if kv.p("code") => self.code.assign(kv)?,
             _ if kv.p("inline_code") => self.inline_code.assign(kv)?,
             _ if kv.p("markdown") => self.markdown.assign(kv)?,
+            _ if kv.p("mcp_startup") => self.mcp_startup.assign(kv)?,
             _ if kv.p("reasoning") => self.reasoning.assign(kv)?,
             _ if kv.p("lock_wait") => self.lock_wait.assign(kv)?,
             _ if kv.p("streaming") => self.streaming.assign(kv)?,
@@ -111,6 +121,7 @@ impl PartialConfigDelta for PartialStyleConfig {
             code: self.code.delta(next.code),
             inline_code: self.inline_code.delta(next.inline_code),
             markdown: self.markdown.delta(next.markdown),
+            mcp_startup: self.mcp_startup.delta(next.mcp_startup),
             reasoning: self.reasoning.delta(next.reasoning),
             lock_wait: self.lock_wait.delta(next.lock_wait),
             streaming: self.streaming.delta(next.streaming),
@@ -126,6 +137,7 @@ impl FillDefaults for PartialStyleConfig {
             code: self.code.fill_from(defaults.code),
             inline_code: self.inline_code.fill_from(defaults.inline_code),
             markdown: self.markdown.fill_from(defaults.markdown),
+            mcp_startup: self.mcp_startup.fill_from(defaults.mcp_startup),
             reasoning: self.reasoning.fill_from(defaults.reasoning),
             lock_wait: self.lock_wait.fill_from(defaults.lock_wait),
             streaming: self.streaming.fill_from(defaults.streaming),
@@ -141,6 +153,7 @@ impl ToPartial for StyleConfig {
             code: self.code.to_partial(),
             inline_code: self.inline_code.to_partial(),
             markdown: self.markdown.to_partial(),
+            mcp_startup: self.mcp_startup.to_partial(),
             reasoning: self.reasoning.to_partial(),
             lock_wait: self.lock_wait.to_partial(),
             streaming: self.streaming.to_partial(),

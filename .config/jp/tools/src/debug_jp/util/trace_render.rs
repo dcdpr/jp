@@ -30,7 +30,10 @@ use std::{fmt::Write as _, time::Duration};
 
 use serde_json::Value;
 
-use crate::debug_jp::util::{launch::LaunchResult, trace_parse::TraceEvent};
+use crate::debug_jp::util::{
+    launch::LaunchResult,
+    trace_parse::{self, TraceEvent},
+};
 
 /// Hard ceiling on target column padding.
 /// Targets longer than this are printed at full width, breaking alignment for
@@ -257,13 +260,13 @@ fn write_multi_footer(out: &mut String, runs: &[CommandRun<'_>]) {
     }
 }
 
-/// Drop the `Full trace log written to: <path>` line jp emits when `JP_DEBUG=1`
-/// is set.
+/// Drop the stderr line jp emits to announce the trace log path (text marker or
+/// `trace_log` JSON field, depending on `--format`).
 /// The path is already in the footer.
 fn strip_trace_path_marker(stderr: &str) -> String {
     stderr
         .lines()
-        .filter(|line| !line.starts_with("Full trace log written to: "))
+        .filter(|line| !trace_parse::is_trace_path_marker_line(line))
         .collect::<Vec<_>>()
         .join("\n")
 }

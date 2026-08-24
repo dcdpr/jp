@@ -156,6 +156,18 @@ impl ConversationLock {
         self.events.read()
     }
 
+    /// Read the conversation event stream through a callback.
+    ///
+    /// Read-only counterpart of [`ConversationMut::update_events`]: the shared
+    /// guard is scoped to the callback (so it cannot be held across `.await`
+    /// points) and nothing is marked dirty, so no persist is triggered.
+    /// Use this instead of `as_mut().update_events(..)` whenever the callback
+    /// only needs to *read* the stream.
+    pub fn with_events<R>(&self, f: impl FnOnce(&ConversationStream) -> R) -> R {
+        let guard = self.events.read();
+        f(&guard)
+    }
+
     /// Create a short-lived mutable scope.
     /// Persists on drop.
     ///
@@ -250,6 +262,16 @@ impl ConversationMut {
     /// the guard first.
     pub fn events(&self) -> RwLockReadGuard<'_, ConversationStream> {
         self.events.read()
+    }
+
+    /// Read the conversation event stream through a callback.
+    ///
+    /// Read-only counterpart of [`Self::update_events`]: the shared guard is
+    /// scoped to the callback and the dirty flag is untouched, so no persist is
+    /// triggered on drop.
+    pub fn with_events<R>(&self, f: impl FnOnce(&ConversationStream) -> R) -> R {
+        let guard = self.events.read();
+        f(&guard)
     }
 
     /// Mutate conversation metadata through a callback.

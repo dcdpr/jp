@@ -25,6 +25,51 @@ fn test_app_config_fields() {
     insta::assert_debug_snapshot!(AppConfig::fields());
 }
 
+/// Setting one field in the inquiry request block must not silently zero the
+/// rest of it.
+///
+/// `AssistantOverrideConfig::request` is a resolved `Option<RequestConfig>`, so
+/// the conversion has no per-field presence to preserve: every field the user
+/// did not set resolves to Rust's `Default` rather than the schematic default.
+/// This test pins that behavior so a reader of the resolution code knows the
+/// zeros are an artifact, not a user's choice.
+#[test]
+fn inquiry_request_override_zeroes_unset_fields() {
+    use crate::assistant::request::CachePolicy;
+
+    let mut partial = PartialAppConfig::new_test();
+    partial.assistant.request.max_response_bytes = Some(500_000);
+
+    // Only a sibling field is set in the inquiry block.
+    partial.conversation.inquiry.assistant.request =
+        Some(crate::assistant::request::PartialRequestConfig {
+            cache: Some(CachePolicy::Off),
+            ..Default::default()
+        });
+
+    let config = AppConfig::from_partial_with_defaults(partial).expect("valid config");
+
+    let request = config
+        .conversation
+        .inquiry
+        .assistant
+        .request
+        .expect("the inquiry request block is set");
+
+    assert_eq!(request.cache, CachePolicy::Off, "the set field survives");
+    assert_eq!(
+        request.max_response_bytes, 0,
+        "an unset field resolves to Rust's Default, not the schematic default"
+    );
+    assert_eq!(
+        request.max_retries, 0,
+        "the same applies to every other field in the block"
+    );
+
+    // The parent keeps its own value; nothing merged into it.
+    assert_eq!(config.assistant.request.max_response_bytes, 500_000);
+}
+
 #[test]
 fn test_ensure_no_missing_assignments() {
     // Some fields cannot be assigned via CLI.

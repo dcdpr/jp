@@ -2,3 +2,4 @@
 
 pub mod osc;
 pub mod table;
+pub mod width;

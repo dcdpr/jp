@@ -72,6 +72,12 @@ impl StreamError {
         Self::new(StreamErrorKind::Transient, message)
     }
 
+    /// Create an output-limit error.
+    #[must_use]
+    pub fn output_limit(message: impl Into<String>) -> Self {
+        Self::new(StreamErrorKind::OutputLimit, message)
+    }
+
     /// Returns the human-readable error message (without the source chain).
     #[must_use]
     pub fn message(&self) -> &str {
@@ -288,6 +294,10 @@ pub enum StreamErrorKind {
     /// This is not retryable — the user needs to top up or change plans.
     InsufficientQuota,
 
+    /// The response exceeded the configured output byte ceiling.
+    /// This is not retryable because a retry regenerates the same runaway.
+    OutputLimit,
+
     /// Other errors that are not categorized.
     /// These may or may not be retryable depending on the specific error.
     Other,
@@ -303,6 +313,7 @@ impl StreamErrorKind {
             Self::RateLimit => "Rate limited",
             Self::Transient => "Server error",
             Self::InsufficientQuota => "Insufficient API quota",
+            Self::OutputLimit => "Output limit exceeded",
             Self::Other => "Stream Error",
         }
     }

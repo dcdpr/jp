@@ -14,7 +14,8 @@
 //! jp's own graceful shutdown, which flushes the trace log and the dhat heap
 //! profile.
 //! A wedged process is force-killed as a backstop (`SIGKILL` on Unix, job
-//! termination on Windows), which loses those artifacts.
+//! termination on Windows), which loses artifacts that require a clean exit
+//! (e.g. the dhat heap profile).
 //! How the process ended is reported in [`LaunchResult::termination`].
 
 use std::{
@@ -102,8 +103,8 @@ pub(crate) enum Termination {
     Graceful,
     /// Ignored the graceful-shutdown request and was force-killed (`SIGKILL` on
     /// Unix, job termination on Windows).
-    /// Artifacts that depend on a clean shutdown (trace log, heap profile) may
-    /// be missing.
+    /// Artifacts that depend on a clean shutdown (e.g. the dhat heap profile)
+    /// may be missing; incrementally written ones (the trace log) are partial.
     Forced,
 }
 

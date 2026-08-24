@@ -22,6 +22,38 @@ use test_log::test;
 
 use super::*;
 
+#[test]
+fn a_piped_successful_run_never_announces_its_trace_log() {
+    // Two uninvited lines on stderr corrupt any program that owns the screen,
+    // and in `jp … | fzf` stderr *is* the terminal. `JP_DEBUG` is pinned on
+    // here because it's the only reason a non-failing run would print at all.
+    assert!(!should_report_trace_log(
+        RunOutcome::AsExpected,
+        false,
+        true
+    ));
+}
+
+#[test]
+fn a_successful_run_on_a_terminal_announces_its_trace_log_only_under_jp_debug() {
+    assert!(should_report_trace_log(RunOutcome::AsExpected, true, true));
+    assert!(!should_report_trace_log(
+        RunOutcome::AsExpected,
+        true,
+        false
+    ));
+}
+
+#[test]
+fn a_failed_run_announces_its_trace_log_even_when_piped() {
+    // Diagnosing a failure beats keeping the pipeline clean, so neither the tty
+    // nor `JP_DEBUG` has a say. A command that exits non-zero to report a
+    // result (`grep` finding nothing) is `AsExpected`, not `Failed`, and takes
+    // the rules above instead.
+    assert!(should_report_trace_log(RunOutcome::Failed, false, false));
+    assert!(should_report_trace_log(RunOutcome::Failed, true, false));
+}
+
 fn write_config(path: &camino::Utf8Path, content: &str) {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).unwrap();
@@ -65,6 +97,30 @@ fn build_cfg(
 }
 
 #[test]
+fn tracing_guard_persist_returns_explicit_log_file_path() {
+    // `--log-file <path>`: the file lives wherever the caller put it; persist
+    // just hands the path back.
+    let guard = TracingGuard {
+        sink: Some(TraceSink::Path(Utf8PathBuf::from("/tmp/x.jsonl"))),
+    };
+    assert_eq!(guard.persist(), Some(Utf8PathBuf::from("/tmp/x.jsonl")));
+}
+
+#[test]
+fn tracing_guard_persist_keeps_temp_file_on_disk() {
+    // Without `--log-file`, persist disarms the temp file's delete-on-drop
+    // and returns its path.
+    let file = NamedUtf8TempFile::new().unwrap();
+    let guard = TracingGuard {
+        sink: Some(TraceSink::Temp(file)),
+    };
+
+    let path = guard.persist().unwrap();
+    assert!(path.exists());
+    fs::remove_file(path).unwrap();
+}
+
+#[test]
 fn test_cli() {
     Cli::command().debug_assert();
 }
@@ -73,7 +129,7 @@ fn test_cli() {
 fn test_load_cli_cfg_args_workspace_root() {
     let tmp = tempdir().unwrap();
     let root = tmp.path();
-    let workspace = Workspace::new(root);
+    let workspace = Workspace::in_memory(root);
 
     write_config(
         &root.join(".jp/config/skill/web.toml"),
@@ -118,7 +174,7 @@ fn test_load_cli_cfg_args_merges_global_and_workspace() {
 
     unsafe { std::env::set_var("JP_GLOBAL_CONFIG_DIR", global_dir.as_str()) };
 
-    let workspace = Workspace::new(&ws_root);
+    let workspace = Workspace::in_memory(&ws_root);
 
     write_config(
         &global_dir.join("config/.jp/config/skill/web.toml"),
@@ -152,7 +208,7 @@ fn test_load_cli_cfg_args_workspace_overrides_global() {
 
     unsafe { std::env::set_var("JP_GLOBAL_CONFIG_DIR", global_dir.as_str()) };
 
-    let workspace = Workspace::new(&ws_root);
+    let workspace = Workspace::in_memory(&ws_root);
 
     write_config(
         &global_dir.join("config/.jp/config/skill/web.toml"),
@@ -176,7 +232,7 @@ fn test_load_cli_cfg_args_workspace_overrides_global() {
 fn test_load_cli_cfg_args_missing_file_reports_searched_paths() {
     let tmp = tempdir().unwrap();
     let root = tmp.path();
-    let workspace = Workspace::new(root);
+    let workspace = Workspace::in_memory(root);
 
     let partial = partial_with_load_paths(&[".jp/config"]);
     let overrides = vec![KeyValueOrPath::Path(Utf8PathBuf::from("skill/missing"))];
@@ -200,7 +256,7 @@ fn test_load_cli_cfg_args_missing_file_reports_searched_paths() {
 fn test_load_cli_cfg_args_first_load_path_wins_within_root() {
     let tmp = tempdir().unwrap();
     let root = tmp.path();
-    let workspace = Workspace::new(root);
+    let workspace = Workspace::in_memory(root);
 
     write_config(
         &root.join("first/skill/web.toml"),
@@ -317,7 +373,7 @@ fn test_load_cli_cfg_args_global_only_when_workspace_has_no_match() {
 
     unsafe { std::env::set_var("JP_GLOBAL_CONFIG_DIR", global_dir.as_str()) };
 
-    let workspace = Workspace::new(&ws_root);
+    let workspace = Workspace::in_memory(&ws_root);
 
     write_config(
         &global_dir.join("config/.jp/config/skill/web.toml"),
@@ -348,13 +404,14 @@ fn query_model_override_persists_config_delta_through_run_inner() {
 
     unsafe { env::set_var("JP_GLOBAL_CONFIG_DIR", global_dir.as_str()) };
     unsafe { env::set_var("JP_USER_DATA_DIR", user_data.as_str()) };
+    unsafe { env::set_var("JP_TEST_DUMMY_OPENAI_API_KEY", "dummy") };
     unsafe { env::remove_var("JP_EDITOR") };
     unsafe { env::remove_var("VISUAL") };
     unsafe { env::remove_var("EDITOR") };
     env::set_current_dir(root).unwrap();
 
     let fs_backend = Arc::new(FsStorageBackend::new(&storage).unwrap());
-    let mut workspace = Workspace::new(root).with_backend(fs_backend.clone());
+    let mut workspace = Workspace::in_memory(root).with_backend(fs_backend.clone());
     let conversation_id = make_id(1000);
     let base_config = Arc::new(config_with_model(ProviderId::Anthropic, "opus"));
 
@@ -379,6 +436,20 @@ fn query_model_override_persists_config_delta_through_run_inner() {
         &conversation_id.to_string(),
         "--model",
         "openai/gpt-4o",
+        // An inline query so the request builds without an editor and the
+        // failure happens at the LLM stage: the CLI config delta is only
+        // recorded once a non-empty request exists, so a query aborted
+        // before that point (e.g. by the credential preflight) deliberately
+        // leaves no config event behind.
+        "hello",
+        // Pass the credential preflight with a dummy key, then fail at the
+        // request stage against an unroutable loopback address so the test
+        // never touches the network, even on machines where a real
+        // `OPENAI_API_KEY` is set.
+        "--cfg",
+        "providers.llm.openai.api_key_env=JP_TEST_DUMMY_OPENAI_API_KEY",
+        "--cfg",
+        "providers.llm.openai.base_url=http://127.0.0.1:9",
     ]);
 
     let result = run_inner(cli, OutputFormat::TextPretty);
@@ -415,6 +486,7 @@ fn query_model_override_persists_config_delta_through_run_inner() {
     env::set_current_dir(previous_cwd).unwrap();
     unsafe { env::remove_var("JP_GLOBAL_CONFIG_DIR") };
     unsafe { env::remove_var("JP_USER_DATA_DIR") };
+    unsafe { env::remove_var("JP_TEST_DUMMY_OPENAI_API_KEY") };
 
     match previous_jp_editor {
         Some(value) => unsafe { env::set_var("JP_EDITOR", value) },
@@ -447,12 +519,13 @@ fn query_model_override_persists_config_delta_through_session_targeting() {
     unsafe { env::set_var("JP_GLOBAL_CONFIG_DIR", global_dir.as_str()) };
     unsafe { env::set_var("JP_USER_DATA_DIR", user_data.as_str()) };
     unsafe { env::set_var("JP_SESSION", "jp-cli-test-session") };
+    unsafe { env::set_var("JP_TEST_DUMMY_OPENAI_API_KEY", "dummy") };
     unsafe { env::remove_var("JP_EDITOR") };
     unsafe { env::remove_var("VISUAL") };
     unsafe { env::remove_var("EDITOR") };
     env::set_current_dir(root).unwrap();
 
-    let mut workspace = Workspace::new(root);
+    let mut workspace = Workspace::in_memory(root);
     let user_root = user_data_dir().unwrap().join("workspace");
     let fs_backend = Arc::new(
         FsStorageBackend::new(&storage)
@@ -493,6 +566,15 @@ fn query_model_override_persists_config_delta_through_session_targeting() {
         "query",
         "--model",
         "openai/gpt-4o",
+        // See the run_inner variant above: an inline query moves the failure
+        // past the turn-start commit point so the delta is persisted, and
+        // the dummy key plus unroutable base URL make the LLM stage fail
+        // without touching the network.
+        "hello",
+        "--cfg",
+        "providers.llm.openai.api_key_env=JP_TEST_DUMMY_OPENAI_API_KEY",
+        "--cfg",
+        "providers.llm.openai.base_url=http://127.0.0.1:9",
     ]);
 
     let result = run_inner(cli, OutputFormat::TextPretty);
@@ -529,6 +611,7 @@ fn query_model_override_persists_config_delta_through_session_targeting() {
     env::set_current_dir(previous_cwd).unwrap();
     unsafe { env::remove_var("JP_GLOBAL_CONFIG_DIR") };
     unsafe { env::remove_var("JP_USER_DATA_DIR") };
+    unsafe { env::remove_var("JP_TEST_DUMMY_OPENAI_API_KEY") };
 
     match previous_jp_session {
         Some(value) => unsafe { env::set_var("JP_SESSION", value) },
@@ -557,7 +640,7 @@ fn resolve_config_consumes_default_id() {
     let tmp = tempdir().unwrap();
     let root = tmp.path();
 
-    let mut workspace = Workspace::new(root);
+    let mut workspace = Workspace::in_memory(root);
     workspace.load_conversation_index();
 
     // Inject default_id into the base partial — no filesystem needed.
@@ -579,6 +662,62 @@ fn resolve_config_consumes_default_id() {
         config.conversation.default_id.is_none(),
         "default_id should be consumed by resolve_config, got: {:?}",
         config.conversation.default_id,
+    );
+}
+
+/// `jp conversation compact --model` has to travel `Commands` -\>
+/// `Conversation` -\> `Compact` to reach the config.
+/// A missing delegation arm anywhere on that chain makes the flag a silent
+/// no-op, which no test on `Compact` alone can catch.
+#[test]
+fn resolve_config_applies_the_compact_model_flag() {
+    use jp_config::model::id::PartialModelIdOrAliasConfig;
+
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    let storage = root.join(".jp");
+
+    let fs_backend = Arc::new(FsStorageBackend::new(&storage).unwrap());
+    let mut workspace = Workspace::in_memory(root).with_backend(fs_backend);
+    let conversation_id = make_id(3000);
+    workspace
+        .create_and_lock_conversation_with_id(
+            conversation_id,
+            Conversation::default(),
+            Arc::new(config_with_model(ProviderId::Anthropic, "opus")),
+            None,
+        )
+        .unwrap();
+
+    let mut base = PartialAppConfig::new_test();
+    base.providers.llm.aliases.insert(
+        "gpt".to_owned(),
+        PartialModelIdOrAliasConfig::from("openai/gpt-5"),
+    );
+
+    // `compact` takes the conversation as a positional argument.
+    let cli = Cli::try_parse_from([
+        "jp",
+        "conversation",
+        "compact",
+        &conversation_id.to_string(),
+        "--model",
+        "gpt",
+    ])
+    .unwrap();
+    let (config, _handles, _start_new, _config_reset) = resolve_config(
+        &cli.command,
+        || Ok(base),
+        &cli.globals.config,
+        &mut workspace,
+        None,
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(
+        config.assistant.model.id.resolved().to_string(),
+        "openai/gpt-5"
     );
 }
 
@@ -622,7 +761,7 @@ fn resolve_config_reset_skips_broken_conversation_config() {
     use jp_conversation::stream::ResetDelta;
 
     let tmp = tempdir().unwrap();
-    let mut workspace = Workspace::new(tmp.path());
+    let mut workspace = Workspace::in_memory(tmp.path());
     workspace.load_conversation_index();
 
     let base_config = Arc::new(config_with_model(ProviderId::Anthropic, "base-model"));
@@ -691,7 +830,7 @@ fn resolve_config_reset_workspace_layer_contains_resolved_model_ids() {
     use jp_config::model::id::PartialModelIdOrAliasConfig;
 
     let tmp = tempdir().unwrap();
-    let mut workspace = Workspace::new(tmp.path());
+    let mut workspace = Workspace::in_memory(tmp.path());
     workspace.load_conversation_index();
 
     // The workspace config defines an alias and references it.
@@ -748,7 +887,7 @@ fn resolve_config_reset_post_layer_contains_resolved_model_ids() {
     use jp_config::model::id::PartialModelIdOrAliasConfig;
 
     let tmp = tempdir().unwrap();
-    let mut workspace = Workspace::new(tmp.path());
+    let mut workspace = Workspace::in_memory(tmp.path());
     workspace.load_conversation_index();
 
     let cli = Cli::try_parse_from(["jp", "conversation", "ls"]).unwrap();

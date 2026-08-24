@@ -1,18 +1,20 @@
 use std::collections::BTreeSet;
 
-use jp_tool::Context;
+use camino::Utf8Path;
 
+use super::MAX_DIAGNOSTIC_BYTES;
 use crate::util::{
     ToolResult, error,
     runner::{DuctProcessRunner, ProcessOutput, ProcessRunner},
+    truncate,
 };
 
-pub(crate) async fn cargo_format(ctx: &Context, package: Option<String>) -> ToolResult {
-    cargo_format_impl(ctx, package.as_deref(), &DuctProcessRunner)
+pub(crate) async fn cargo_format(root: &Utf8Path, package: Option<String>) -> ToolResult {
+    cargo_format_impl(root, package.as_deref(), &DuctProcessRunner)
 }
 
 fn cargo_format_impl<R: ProcessRunner>(
-    ctx: &Context,
+    root: &Utf8Path,
     package: Option<&str>,
     runner: &R,
 ) -> ToolResult {
@@ -32,13 +34,16 @@ fn cargo_format_impl<R: ProcessRunner>(
             "--color=never",
             "--files-with-diff",
         ],
-        &ctx.root,
+        root,
         // Prevent warnings from being treated as errors, e.g. on CI.
         &[("RUSTFLAGS", "-W warnings")],
     )?;
 
     if !cargo_status.is_success() {
-        return error(format!("cargo fmt failed: {cargo_stderr}"));
+        return error(format!(
+            "cargo fmt failed: {}",
+            truncate(&cargo_stderr, MAX_DIAGNOSTIC_BYTES)
+        ));
     }
 
     // 2. Run comfort to reflow doc-comment paragraphs. The doc-comment
@@ -68,16 +73,19 @@ fn cargo_format_impl<R: ProcessRunner>(
         stderr: comfort_stderr,
         status: comfort_status,
         stdout: comfort_stdout,
-    } = runner.run_with_env("comfort", &comfort_args, &ctx.root, &[])?;
+    } = runner.run_with_env("comfort", &comfort_args, root, &[])?;
 
     if !comfort_status.is_success() {
-        return error(format!("comfort failed: {comfort_stderr}"));
+        return error(format!(
+            "comfort failed: {}",
+            truncate(&comfort_stderr, MAX_DIAGNOSTIC_BYTES)
+        ));
     }
 
     // 3. Merge the two file lists into a deduplicated, sorted set, then
     //    strip the workspace-root prefix for a tidy report.
     let strip_root = |line: &str| -> String {
-        line.trim_start_matches(ctx.root.as_str())
+        line.trim_start_matches(root.as_str())
             .trim_start_matches('/')
             .to_owned()
     };
@@ -94,7 +102,11 @@ fn cargo_format_impl<R: ProcessRunner>(
         Ok("No files to format.".into())
     } else {
         let listing = files.into_iter().collect::<Vec<_>>().join("\n- ");
-        Ok(format!("Formatted files:\n- {listing}").into())
+        Ok(format!(
+            "Formatted files:\n- {}",
+            truncate(&listing, MAX_DIAGNOSTIC_BYTES)
+        )
+        .into())
     }
 }
 

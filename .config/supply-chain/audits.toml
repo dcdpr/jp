@@ -36,6 +36,11 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.50.0 -> 0.52.0"
 
+[[audits.cpp_demangle]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.2.14 -> 0.3.5"
+
 [[audits.datetime_literal]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
@@ -241,6 +246,11 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.103.10 -> 0.103.12"
 
+[[audits.ruzstd]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "0.8.3"
+
 [[audits.schemars]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
@@ -365,6 +375,12 @@ delta = "2.4.2 -> 8.6.0"
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.6.3 -> 0.5.5"
+
+[[trusted.addr2line]]
+criteria = "safe-to-deploy"
+user-id = 4415 # Philip Craig (philipc)
+start = "2019-05-01"
+end = "2027-08-19"
 
 [[trusted.aho-corasick]]
 criteria = "safe-to-deploy"
@@ -528,6 +544,12 @@ user-id = 2699 # Alex Kladov (matklad)
 start = "2021-01-16"
 end = "2027-04-03"
 
+[[trusted.cpp_demangle]]
+criteria = "safe-to-deploy"
+user-id = 696 # Nick Fitzgerald (fitzgen)
+start = "2019-07-30"
+end = "2027-08-19"
+
 [[trusted.dtoa]]
 criteria = "safe-to-deploy"
 user-id = 3618 # David Tolnay (dtolnay)
@@ -575,6 +597,12 @@ criteria = "safe-to-deploy"
 user-id = 980 # Sebastian Thiel (Byron)
 start = "2023-08-15"
 end = "2027-02-21"
+
+[[trusted.gimli]]
+criteria = "safe-to-deploy"
+user-id = 4415 # Philip Craig (philipc)
+start = "2019-04-25"
+end = "2027-08-19"
 
 [[trusted.globset]]
 criteria = "safe-to-deploy"
@@ -684,6 +712,12 @@ user-id = 6743 # Ed Page (epage)
 start = "2024-05-02"
 end = "2027-02-13"
 
+[[trusted.jetscii]]
+criteria = "safe-to-deploy"
+user-id = 1060 # Jake Goulding (shepmaster)
+start = "2019-06-10"
+end = "2027-08-19"
+
 [[trusted.js-sys]]
 criteria = "safe-to-deploy"
 user-id = 1 # Alex Crichton (alexcrichton)
@@ -767,6 +801,12 @@ criteria = "safe-to-deploy"
 user-id = 539 # Josh Stone (cuviper)
 start = "2019-06-10"
 end = "2027-02-13"
+
+[[trusted.object]]
+criteria = "safe-to-deploy"
+user-id = 4415 # Philip Craig (philipc)
+start = "2019-04-26"
+end = "2027-08-19"
 
 [[trusted.once_cell]]
 criteria = "safe-to-deploy"
@@ -1086,11 +1126,17 @@ user-id = 10
 start = "2019-04-27"
 end = "2027-02-13"
 
+[[trusted.twox-hash]]
+criteria = "safe-to-deploy"
+user-id = 1060 # Jake Goulding (shepmaster)
+start = "2019-04-12"
+end = "2027-08-19"
+
 [[trusted.typed-arena]]
 criteria = "safe-to-deploy"
 user-id = 696 # Nick Fitzgerald (fitzgen)
 start = "2019-08-02"
-end = "2027-02-13"
+end = "2027-08-19"
 
 [[trusted.typeid]]
 criteria = "safe-to-deploy"

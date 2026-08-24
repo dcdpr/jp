@@ -27,14 +27,15 @@ use jp_conversation::{
 };
 use jp_inquire::prompt::PromptBackend;
 use jp_llm::{
-    Provider,
+    Error as LlmError, Provider,
     error::StreamError,
-    event::{Event, EventPart, ToolCallPart},
+    event::{Event, EventPart, FinishReason, ToolCallPart},
     model::ModelDetails,
+    output_limit_bytes,
     provider::get_provider,
     query::ChatQuery,
     tool::{InvocationContext, ToolDefinition, executor::Executor},
-    with_idle_timeout,
+    with_idle_timeout, with_output_limit,
 };
 use jp_printer::{ErrChannel, Printer};
 use jp_workspace::{ConversationLock, ConversationMut};
@@ -43,12 +44,15 @@ use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, info, warn};
 
 use super::{
-    build_sections, build_thread,
+    PendingStreamTrim, build_sections, build_thread,
     interrupt::{
         LoopAction, StreamingInterruptResult, handle_llm_event, handle_streaming_interrupt,
         reply_edit_mode,
     },
-    stream::{StreamErrorOutcome, StreamRetryState, handle_stream_error},
+    stream::{
+        ResponseBoundary, StreamErrorOutcome, StreamRetryState, commit_partial_response,
+        handle_stream_error,
+    },
     tool::{
         PendingEntry, PendingTools, ToolCallDecision, ToolCallState, ToolCoordinator, ToolPrompter,
         ToolRenderer, build_execution_plan,
@@ -191,6 +195,7 @@ pub(super) async fn run_turn_loop(
     mut tool_coordinator: ToolCoordinator,
     chat_request: ChatRequest,
     invocation: InvocationContext,
+    pending_trim: PendingStreamTrim,
 ) -> Result<(), Error> {
     // The turn-level interrupt handler (RFD 045) is the outermost handler
     // scope within the turn: it owns the gaps between phases (persistence,
@@ -205,6 +210,7 @@ pub(super) async fn run_turn_loop(
         0 => None,
         secs => Some(Duration::from_secs(u64::from(secs))),
     };
+    let output_limit = output_limit_bytes(cfg.assistant.request.max_response_bytes);
     let mut turn_coordinator = TurnCoordinator::new(
         printer.clone(),
         cfg.style.clone(),
@@ -270,7 +276,13 @@ pub(super) async fn run_turn_loop(
 
         match turn_coordinator.current_phase() {
             TurnPhase::Idle => {
+                // The turn-start commit point: any replay trim deferred while
+                // building the request (see [`PendingStreamTrim`]) is applied
+                // in the same `update_events` scope that appends the new
+                // request, so the durable stream never persists the removal
+                // without its replacement.
                 lock.as_mut().update_events(|stream| {
+                    pending_trim.apply(stream);
                     turn_coordinator.start_turn(stream, chat_request.clone());
                 });
             }
@@ -333,6 +345,14 @@ pub(super) async fn run_turn_loop(
                 }
                 let raw_stream = match idle_timeout {
                     Some(idle) => with_idle_timeout(raw_stream, idle),
+                    None => raw_stream,
+                };
+                // Wrapped outside the provider stream, so the bytes of every
+                // chained continuation accumulate against a single ceiling
+                // rather than resetting per link. Bytes the provider discards
+                // while merging those links are billed but never seen here.
+                let raw_stream = match output_limit {
+                    Some(max) => with_output_limit(raw_stream, max),
                     None => raw_stream,
                 };
                 let llm_stream = StreamSource::Llm(
@@ -475,9 +495,10 @@ pub(super) async fn run_turn_loop(
                                             });
                                             match action {
                                                 // With a dead stream, "continue"
-                                                // prepares a prefill continuation
-                                                // and breaks for a fresh request;
-                                                // a keep-polling Continue cannot
+                                                // commits partial output as
+                                                // continuation context and breaks
+                                                // for a fresh request; a
+                                                // keep-polling Continue cannot
                                                 // occur here.
                                                 StreamingInterruptResult::Continue
                                                 | StreamingInterruptResult::Break => break,
@@ -494,11 +515,29 @@ pub(super) async fn run_turn_loop(
                                 }
                             };
 
-                            // Reset the retry counter on the first successful
+                            // Reset the retry counters on the first successful
                             // event in this cycle. This ensures that partially
                             // successful streams (rate-limited mid-response)
                             // don't permanently consume the retry budget.
-                            if !received_provider_event {
+                            //
+                            // Only a content part or a non-repair terminal event
+                            // counts. A repair cycle is made of patches,
+                            // keep-alives, part-less flushes and the rebuild
+                            // request itself; counting any of them clears the
+                            // rebuild budget on every rebuilt request, so its cap
+                            // could never be reached. `reset` also drops the
+                            // pending patch record, which a rebuild request needs
+                            // intact to be authorized at all.
+                            //
+                            // A content-bearing flush is always preceded by a
+                            // `Part` for the same index, which already reset, so
+                            // excluding `Flush` here loses nothing.
+                            let advances_cycle = match &event {
+                                Event::Part { .. } => true,
+                                Event::Finished(reason) => *reason != FinishReason::Retry,
+                                Event::Flush { .. } | Event::Patch(_) | Event::KeepAlive => false,
+                            };
+                            if !received_provider_event && advances_cycle {
                                 received_provider_event = true;
                                 stream_retry.clear_line(&printer);
                                 stream_retry.reset();
@@ -539,11 +578,41 @@ pub(super) async fn run_turn_loop(
                             // from a misbehaving provider commits nothing and
                             // so cannot drive a double dispatch.
                             let (action, committed) = conv.update_events(|stream| {
-                                handle_llm_event(event, &mut turn_coordinator, stream)
+                                handle_llm_event(
+                                    event,
+                                    &mut turn_coordinator,
+                                    stream,
+                                    &mut stream_retry,
+                                )
                             });
                             match action {
                                 LoopAction::Continue => {}
                                 LoopAction::Break => break,
+                                // The repair cannot or should not continue.
+                                // Persist what was streamed and surface the dead
+                                // end, which the refusal describes.
+                                LoopAction::RebuildRefused(refusal) => {
+                                    // A repair cycle renders nothing, so no event
+                                    // reached the clear above. Retire any retry
+                                    // line before the commit below flushes
+                                    // buffered output, which would otherwise land
+                                    // after the parked cursor.
+                                    stream_retry.clear_line(&printer);
+                                    commit_partial_response(
+                                        &mut turn_coordinator,
+                                        &conv,
+                                        &printer,
+                                        ResponseBoundary::Final,
+                                    );
+                                    if let Err(err) = conv.flush() {
+                                        warn!("Failed to persist before abort: {err}");
+                                    }
+
+                                    return Err(LlmError::Stream(StreamError::other(
+                                        refusal.to_string(),
+                                    ))
+                                    .into());
+                                }
                             }
 
                             // On a flushed tool-call request: clear the temp
@@ -822,6 +891,26 @@ async fn build_inquiry_backend(
         .clone()
         .or_else(|| cfg.assistant.system_prompt.clone());
 
+    // Same fallback for the output ceiling: an inquiry can be held to a tighter
+    // (or looser) ceiling than the parent assistant.
+    //
+    // `AssistantOverrideConfig::request` is a resolved `RequestConfig`, so a
+    // block where the user set only a sibling field (say `cache`) arrives here
+    // with every other field at Rust's `Default` rather than its schematic
+    // default. A `0` therefore cannot be distinguished from "unset", and reading
+    // it as the ceiling's disable sentinel would silently drop the runaway guard
+    // for every inquiry. Treat it as "inherit" instead, matching the block's
+    // documented unset-means-inherit rule. A per-question override carries real
+    // `Option`s, so `0` still disables the ceiling there.
+    let default_max_response_bytes = inquiry_override
+        .request
+        .as_ref()
+        .map_or(0, |request| request.max_response_bytes);
+    let default_max_response_bytes = match default_max_response_bytes {
+        0 => cfg.assistant.request.max_response_bytes,
+        bytes => bytes,
+    };
+
     // Track providers we've already constructed to avoid duplicates.
     let mut providers: IndexMap<ProviderId, Arc<dyn Provider>> = IndexMap::new();
 
@@ -869,6 +958,7 @@ async fn build_inquiry_backend(
             model: inquiry_model,
             system_prompt: default_system_prompt,
             sections: sections.clone(),
+            max_response_bytes: default_max_response_bytes,
         }
     } else {
         providers.insert(model.id.provider, Arc::clone(&provider));
@@ -878,6 +968,7 @@ async fn build_inquiry_backend(
             model: model.clone(),
             system_prompt: default_system_prompt,
             sections: sections.clone(),
+            max_response_bytes: default_max_response_bytes,
         }
     };
 
@@ -967,11 +1058,20 @@ async fn build_inquiry_overrides(
                 .map(|s| s.to_string())
                 .or_else(|| default_config.system_prompt.clone());
 
+            // Output ceiling follows the same order. `default_config` already
+            // carries the global-inquiry-or-parent value, so an unset
+            // per-question ceiling inherits it.
+            let max_response_bytes = per_q
+                .request
+                .max_response_bytes
+                .unwrap_or(default_config.max_response_bytes);
+
             overrides.insert((tool_name.to_owned(), question_id.clone()), InquiryConfig {
                 provider: inq_provider,
                 model: inq_model,
                 system_prompt,
                 sections: default_config.sections.clone(),
+                max_response_bytes,
             });
         }
     }

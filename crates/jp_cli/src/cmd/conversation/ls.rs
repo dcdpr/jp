@@ -3,13 +3,19 @@ use comfy_table::{Cell, CellAlignment, Row};
 use crossterm::style::{Color, Stylize as _};
 use jp_conversation::{Conversation, ConversationId};
 use jp_storage::backend::StoragePresence;
-use jp_term::{osc::hyperlink, table::list};
+use jp_term::{
+    osc::hyperlink,
+    table::list,
+    width::{display_width, max_line_width, truncate_to_width},
+};
 use jp_workspace::ConversationHandle;
-use strip_ansi_escapes::strip_str;
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::{
-    cmd::{ConversationLoadRequest, Output, conversation_id::PositionalIds},
+    cmd::{
+        ConversationLoadRequest, Output,
+        conversation_id::PositionalIds,
+        label::{self, LabelSelector},
+    },
     ctx::Ctx,
     output::print_table,
 };
@@ -42,9 +48,16 @@ pub(crate) struct Ls {
     #[arg(long)]
     local: bool,
 
-    /// Show archived conversations instead of active ones.
+    /// Show archived conversations instead of live ones.
     #[arg(long)]
     archived: bool,
+
+    /// Only show conversations carrying this label.
+    ///
+    /// `key=value` matches the exact value, a bare `key` matches any value.
+    /// Repeat the flag to require several; every selector must match.
+    #[arg(long = "label", value_name = "KEY[=VALUE]")]
+    labels: Vec<LabelSelector>,
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
@@ -127,8 +140,10 @@ impl Ls {
                 id,
             };
 
-        let matches_filters = |id: &ConversationId, local: bool| -> bool {
-            filter_ids.as_ref().is_none_or(|f| f.contains(id)) && (!self.local || local)
+        let matches_filters = |id: &ConversationId, c: &Conversation, local: bool| -> bool {
+            filter_ids.as_ref().is_none_or(|f| f.contains(id))
+                && (!self.local || local)
+                && label::matches(&c.labels, &self.labels)
         };
 
         // `local` is derived from storage presence: a conversation is shown as
@@ -140,7 +155,7 @@ impl Ls {
                 .filter_map(|(id, c, presence)| {
                     let local = presence == StoragePresence::UserLocalOnly;
                     let external = presence == StoragePresence::WorkspaceOnly;
-                    matches_filters(&id, local).then(|| to_details(id, &c, local, external))
+                    matches_filters(&id, &c, local).then(|| to_details(id, &c, local, external))
                 })
                 .collect()
         } else {
@@ -150,7 +165,7 @@ impl Ls {
                     let presence = workspace.conversation_presence(id);
                     let local = presence == Some(StoragePresence::UserLocalOnly);
                     let external = presence == Some(StoragePresence::WorkspaceOnly);
-                    matches_filters(id, local).then(|| to_details(*id, &c, local, external))
+                    matches_filters(id, &c, local).then(|| to_details(*id, &c, local, external))
                 })
                 .collect()
         };
@@ -462,43 +477,6 @@ fn title_column_width(conversations: &[Details]) -> usize {
         .max()
         .unwrap_or(0)
         .max(TITLE_HEADER.len())
-}
-
-/// Truncate `s` to at most `max_width` display columns, appending '…' when
-/// cut.
-fn truncate_to_width(s: &str, max_width: usize) -> String {
-    if display_width(s) <= max_width {
-        return s.to_string();
-    }
-    if max_width == 0 {
-        return String::new();
-    }
-
-    // Reserve one column for the ellipsis.
-    let budget = max_width - 1;
-    let mut width = 0;
-    let mut out = String::new();
-    for ch in s.chars() {
-        let w = UnicodeWidthChar::width(ch).unwrap_or(0);
-        if width + w > budget {
-            break;
-        }
-        width += w;
-        out.push(ch);
-    }
-    out.push('…');
-    out
-}
-
-/// Widest line in `rendered`, by display width (ANSI styling and OSC hyperlinks
-/// stripped first).
-fn max_line_width(rendered: &str) -> usize {
-    rendered.lines().map(display_width).max().unwrap_or(0)
-}
-
-/// Display width of `s` with ANSI styling and OSC hyperlinks removed.
-fn display_width(s: &str) -> usize {
-    UnicodeWidthStr::width(strip_str(s).as_str())
 }
 
 #[cfg(test)]

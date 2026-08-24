@@ -29,12 +29,15 @@ audit-as-crates-io = false
 audit-as-crates-io = true
 
 [policy.gemini_client_rs]
-audit-as-crates-io = true
+audit-as-crates-io = false
 
 [policy.httpmock]
 audit-as-crates-io = true
 
 [policy.inquire]
+audit-as-crates-io = false
+
+[policy.ollama-rs]
 audit-as-crates-io = false
 
 [policy.openai_responses]
@@ -57,10 +60,6 @@ audit-as-crates-io = false
 
 [policy.schematic_types]
 audit-as-crates-io = false
-
-[[exemptions.addr2line]]
-version = "0.24.2"
-criteria = "safe-to-deploy"
 
 [[exemptions.ahash]]
 version = "0.8.12"
@@ -294,10 +293,6 @@ criteria = "safe-to-deploy"
 version = "0.3.31"
 criteria = "safe-to-deploy"
 
-[[exemptions.gemini_client_rs]]
-version = "0.6.2@git:3e5bcf51ecbfc67cc50231b573e05c8047576ebd"
-criteria = "safe-to-deploy"
-
 [[exemptions.generic-array]]
 version = "0.14.7"
 criteria = "safe-to-deploy"
@@ -340,10 +335,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.iri-string]]
 version = "0.7.8"
-criteria = "safe-to-deploy"
-
-[[exemptions.jetscii]]
-version = "0.5.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.json-strip-comments]]
@@ -396,14 +387,6 @@ criteria = "safe-to-deploy"
 
 [[exemptions.mio]]
 version = "1.0.4"
-criteria = "safe-to-deploy"
-
-[[exemptions.object]]
-version = "0.36.7"
-criteria = "safe-to-deploy"
-
-[[exemptions.ollama-rs]]
-version = "0.3.3"
 criteria = "safe-to-deploy"
 
 [[exemptions.os_pipe]]

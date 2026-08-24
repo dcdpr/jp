@@ -13,7 +13,7 @@ use std::{collections::HashSet, fs};
 use camino::Utf8Path;
 use chrono::{DateTime, Utc};
 use jp_conversation::ConversationId;
-use jp_storage::backend::{ConversationFilter, FsStorageBackend};
+use jp_storage::backend::{ConversationFilter, FsStorageBackend, LockBackend};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tracing::{debug, warn};
@@ -66,16 +66,6 @@ impl SessionMapping {
         }
     }
 
-    /// The currently active conversation for this session, if any.
-    pub fn active_conversation_id(&self) -> Option<ConversationId> {
-        self.history.first().map(|e| e.id)
-    }
-
-    /// The previously active conversation (the one before the current).
-    pub fn previous_conversation_id(&self) -> Option<ConversationId> {
-        self.history.get(1).map(|e| e.id)
-    }
-
     /// Record that a conversation was activated in this session.
     ///
     /// If the conversation was already in the history, it is moved to the front
@@ -94,25 +84,82 @@ impl Workspace {
     /// Get the active conversation ID for the given session.
     ///
     /// Returns `None` if no session mapping exists, the session is unknown, or
-    /// the referenced conversation no longer exists in the workspace index.
+    /// the session's history holds no conversation that still resolves.
+    /// See `resolvable_history` for which entries count.
     #[must_use]
     pub fn session_active_conversation(&self, session: &Session) -> Option<ConversationId> {
-        self.load_session_mapping(session)
-            .and_then(|m| m.active_conversation_id())
-            .filter(|id| self.state.conversations.contains_key(id))
+        let mapping = self.load_session_mapping(session)?;
+        self.resolvable_history(&mapping, |id| self.state.conversations.contains_key(id))
+            .first()
+            .copied()
     }
 
     /// Get the previous conversation ID for the given session.
     ///
     /// This is the conversation that was active before the current one, similar
     /// to `cd -` in a shell.
-    /// Returns `None` if the referenced conversation no longer exists in the
-    /// workspace index.
+    /// Returns `None` if the session's history holds fewer than two
+    /// conversations that still resolve.
+    /// See `resolvable_history` for which entries count.
     #[must_use]
     pub fn session_previous_conversation(&self, session: &Session) -> Option<ConversationId> {
-        self.load_session_mapping(session)
-            .and_then(|m| m.previous_conversation_id())
-            .filter(|id| self.state.conversations.contains_key(id))
+        let mapping = self.load_session_mapping(session)?;
+        self.resolvable_history(&mapping, |id| self.state.conversations.contains_key(id))
+            .get(1)
+            .copied()
+    }
+
+    /// The session's history reduced to conversations that still resolve, most
+    /// recent first.
+    ///
+    /// `is_live` reports whether a conversation is present in the live
+    /// partition.
+    /// Pass the workspace index to answer what this process can open; pass a
+    /// set scanned from the backing store to also see conversations another
+    /// process created since that index was loaded.
+    ///
+    /// An entry whose conversation is neither live nor archived is skipped.
+    /// Such an entry means the conversation was created but never persisted (a
+    /// `--no-persist` run) or was deleted, and treating it as the session's
+    /// active conversation would detach the session from the conversation it
+    /// was actually working on.
+    ///
+    /// The walk stops at an archived entry, leaving the session without an
+    /// active conversation.
+    /// Archiving is a deliberate act on a specific conversation, so the session
+    /// waits for the user to choose a new target rather than silently reaching
+    /// further back into its history.
+    fn resolvable_history(
+        &self,
+        mapping: &SessionMapping,
+        is_live: impl Fn(&ConversationId) -> bool,
+    ) -> Vec<ConversationId> {
+        let mut ids = Vec::new();
+        let mut archived = None;
+
+        for entry in &mapping.history {
+            if is_live(&entry.id) {
+                ids.push(entry.id);
+                continue;
+            }
+
+            // Read the archive lazily: the scan is I/O, and every entry is
+            // live on the common path.
+            let archived = archived.get_or_insert_with(|| self.archived_conversation_ids());
+            if archived.contains(&entry.id) {
+                break;
+            }
+        }
+
+        ids
+    }
+
+    /// Conversation IDs in the archive partition, read from the backing store.
+    fn archived_conversation_ids(&self) -> HashSet<ConversationId> {
+        self.loader
+            .load_conversation_ids(ConversationFilter { archived: true })
+            .into_iter()
+            .collect()
     }
 
     /// Get all conversation IDs from the session's history.
@@ -134,15 +181,36 @@ impl Workspace {
     }
 
     /// Returns the active conversation ID from every session mapping.
+    ///
+    /// Entries resolve by the same rule as [`session_active_conversation`],
+    /// against conversations scanned from the backing store rather than the
+    /// workspace index.
+    /// The answer therefore covers every session on the machine, including one
+    /// working on a conversation another process created moments ago.
+    ///
+    /// [`session_active_conversation`]: Self::session_active_conversation
     #[must_use]
     pub fn all_active_conversation_ids(&self) -> Vec<ConversationId> {
+        // The index loaded at startup cannot answer for other sessions: a
+        // conversation another process created since is missing from it, and a
+        // caller protecting these ids would leave that conversation
+        // unprotected. An `expires_at` conversation stays on disk only while it
+        // appears here, so the omission deletes it.
+        let live: HashSet<_> = self
+            .loader
+            .load_conversation_ids(ConversationFilter::default())
+            .into_iter()
+            .collect();
+
         self.sessions
             .list_session_keys()
             .into_iter()
             .filter_map(|key| {
                 let value = self.sessions.load_session(&key).ok()??;
                 let mapping = mapping_from_value(value, &key)?;
-                mapping.active_conversation_id()
+                self.resolvable_history(&mapping, |id| live.contains(id))
+                    .first()
+                    .copied()
             })
             .collect()
     }
@@ -235,6 +303,16 @@ impl Workspace {
             drop(fs::remove_file(&path));
         }
 
+        // Session maintenance rewrites files through the session backend but
+        // deletes them with direct filesystem calls. A backend that discards
+        // writes would report a successful migration and then remove the only
+        // remaining copy, so a run that cannot write session state does not
+        // maintain it either.
+        if self.sessions.is_read_only() {
+            debug!("Skipping session mapping cleanup: session storage is read-only.");
+            return;
+        }
+
         // Remove stale session mappings.
         //
         // Re-scan conversation IDs from disk instead of using the in-memory
@@ -242,22 +320,48 @@ impl Workspace {
         // was loaded at startup; using the stale snapshot would incorrectly
         // mark their sessions as having "no live conversations" and delete
         // them.
-        let conversation_ids: HashSet<_> = self
+        //
+        // Archived conversations count too: archiving is reversible, so
+        // dropping the entry would lose the session's place in a conversation
+        // the user can restore.
+        let mut conversation_ids: HashSet<_> = self
             .loader
             .load_conversation_ids(ConversationFilter::default())
             .into_iter()
             .collect();
+        conversation_ids.extend(self.archived_conversation_ids());
+
+        // A concurrent archive or unarchive moves a conversation between the
+        // two partitions and can land between the scans above, leaving it in
+        // neither. Re-reading the live partition catches a move in either
+        // direction, because a conversation missed at its source is already at
+        // its destination by the time the destination is read.
+        conversation_ids.extend(
+            self.loader
+                .load_conversation_ids(ConversationFilter::default()),
+        );
 
         // Use filesystem-specific file listing for path-based removal.
         for path in fs.list_session_files() {
-            self.cleanup_session_file(&path, &conversation_ids);
+            self.cleanup_session_file(fs, &path, &conversation_ids);
         }
     }
 
     /// Evaluate a single session mapping file: remove it if stale, prune dead
     /// history entries, and migrate a legacy bare-value filename to its
     /// source-prefixed key.
-    fn cleanup_session_file(&self, path: &Utf8Path, conversation_ids: &HashSet<ConversationId>) {
+    ///
+    /// Lock state is read from `fs` rather than the workspace's lock backend.
+    /// The two differ when the workspace runs without persistence, where the
+    /// lock backend reports nothing locked — deciding another process's
+    /// session is stale on that basis would delete a mapping whose
+    /// conversations are only mid-write.
+    fn cleanup_session_file(
+        &self,
+        fs: &FsStorageBackend,
+        path: &Utf8Path,
+        conversation_ids: &HashSet<ConversationId>,
+    ) {
         let session_key = path.file_stem().unwrap_or_default();
         let Ok(Some(value)) = self.sessions.load_session(session_key) else {
             return;
@@ -291,7 +395,7 @@ impl Workspace {
             Liveness::Unknown => {
                 let has_live = mapping.history.iter().any(|entry| {
                     conversation_ids.contains(&entry.id)
-                        || self.locker.lock_info(&entry.id.to_string()).is_some()
+                        || fs.lock_info(&entry.id.to_string()).is_some()
                 });
 
                 if !has_live {
@@ -340,7 +444,7 @@ impl Workspace {
                 // Not on disk — check if another process holds the lock. If
                 // locked, keep the entry (mid-persist). If unlocked (or no lock
                 // file), the conversation is genuinely gone.
-                self.locker.lock_info(&entry.id.to_string()).is_some()
+                fs.lock_info(&entry.id.to_string()).is_some()
             })
             .cloned()
             .collect();

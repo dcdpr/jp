@@ -41,6 +41,7 @@ PartialAppConfig {
             base_backoff_ms: None,
             max_backoff_secs: None,
             stream_idle_timeout_secs: None,
+            max_response_bytes: None,
             cache: None,
         },
     },
@@ -80,6 +81,9 @@ PartialAppConfig {
         attachments: Vec(
             [],
         ),
+        labels: Map(
+            {},
+        ),
         inquiry: PartialInquiryConfig {
             assistant: PartialAssistantOverrideConfig {
                 system_prompt: None,
@@ -105,8 +109,14 @@ PartialAppConfig {
         markdown: PartialMarkdownConfig {
             wrap_width: None,
             table_max_column_width: None,
+            table_continuation_edge: None,
             theme: None,
             hr_style: None,
+        },
+        mcp_startup: PartialMcpStartupConfig {
+            show: None,
+            delay_secs: None,
+            interval_ms: None,
         },
         reasoning: PartialReasoningConfig {
             display: None,

@@ -1,0 +1,30 @@
+[conversation.tools.rfd_renumber]
+enable = false
+run = "ask"
+source = "local"
+command = "just rfd-renumber {{tool.arguments.nnn}} {{tool.arguments.mmm | default('')}}"
+description = """Renumber an RFD (draft or published) to a new id, updating every \
+cross-reference: the file name, the document heading, `RFD <old>` mentions and \
+link targets across all RFDs, and the priority board. The target id must stay \
+in the same id-space (drafts move to another draft slot, published RFDs to \
+another permanent number; moving between spaces is `rfd_promote`'s job). \
+References outside `docs/rfd/` (code comments, other docs) are reported but \
+not rewritten. Renumbering a published RFD changes its site URL and requires \
+`just rfd-summaries` afterwards."""
+
+[conversation.tools.rfd_renumber.style]
+inline_results = "full"
+results_file_link = "off"
+parameters = "function_call"
+
+[conversation.tools.rfd_renumber.parameters.nnn]
+description = "ID of the RFD to renumber. Permanent number (95, 095) or draft ID (D24)."
+required = true
+type = "string"
+
+[conversation.tools.rfd_renumber.parameters.mmm]
+description = """Target id, in the same id-space as `nnn` (e.g. 097, or D07 for a \
+draft). If omitted, the next available id is used; pass it explicitly when the \
+next number is taken on another branch."""
+required = false
+type = "string"

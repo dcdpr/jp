@@ -93,6 +93,9 @@ Ok(
                     stream_idle_timeout_secs: Some(
                         60,
                     ),
+                    max_response_bytes: Some(
+                        1048576,
+                    ),
                     cache: None,
                 },
             },
@@ -164,6 +167,9 @@ Ok(
                         discard_when_merged: true,
                     },
                 ),
+                labels: Map(
+                    {},
+                ),
                 inquiry: PartialInquiryConfig {
                     assistant: PartialAssistantOverrideConfig {
                         system_prompt: None,
@@ -201,10 +207,24 @@ Ok(
                     table_max_column_width: Some(
                         40,
                     ),
+                    table_continuation_edge: Some(
+                        true,
+                    ),
                     theme: Some(
                         "gruvbox-dark",
                     ),
                     hr_style: None,
+                },
+                mcp_startup: PartialMcpStartupConfig {
+                    show: Some(
+                        true,
+                    ),
+                    delay_secs: Some(
+                        4,
+                    ),
+                    interval_ms: Some(
+                        100,
+                    ),
                 },
                 reasoning: PartialReasoningConfig {
                     display: None,

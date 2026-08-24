@@ -66,7 +66,7 @@ pub trait PersistBackend: Send + Sync + Debug {
 
     /// Move a conversation to the archive partition.
     ///
-    /// The conversation directory is moved from the active partition into an
+    /// The conversation directory is moved from the live partition into an
     /// archive area.
     /// Archived conversations are excluded from normal index scans and only
     /// visible through [`LoadBackend::load_conversation_ids`] with
@@ -75,6 +75,6 @@ pub trait PersistBackend: Send + Sync + Debug {
     /// [`LoadBackend::load_conversation_ids`]: super::LoadBackend::load_conversation_ids
     fn archive(&self, id: &ConversationId) -> Result<()>;
 
-    /// Restore a conversation from the archive partition to the active one.
+    /// Restore a conversation from the archive partition to the live one.
     fn unarchive(&self, id: &ConversationId) -> Result<()>;
 }

@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
+use assert_matches::assert_matches;
 use chrono::{DateTime, Utc};
+use clap::Parser as _;
 use indexmap::IndexMap;
 use jp_config::{
     AppConfig, PartialAppConfig, ToPartial,
@@ -18,14 +20,19 @@ use jp_llm::{
     provider::mock::MockProvider,
     tool::{InvocationContext, builtin::BuiltinExecutors, executor::ExecutorSource},
 };
-use jp_printer::{OutputFormat, Printer};
-use jp_workspace::{ConversationHandle, Workspace};
+use jp_printer::{OutputFormat, Printer, SharedBuffer};
+use jp_term::width::display_width;
+use jp_workspace::{
+    ConversationHandle, Workspace,
+    session::{Session, SessionId, SessionSource},
+};
 use relative_path::RelativePathBuf;
 use serde_json::Value;
+use tokio::runtime::Runtime;
 
 use super::*;
 use crate::{
-    KeyValueOrPath,
+    Globals, KeyValueOrPath,
     cmd::target::{ConversationTarget, PickerFilter},
     config_pipeline::ConfigPipeline,
     signals::testing::detached_router,
@@ -72,6 +79,14 @@ fn effective(partial: &PartialAppConfig, name: &str) -> Enable {
         .clone()
         .unwrap_or_default()
         .effective(&defaults)
+}
+
+/// Query input carrying `text` as the inline query, with `--quote` unset.
+fn inline_query(text: &str) -> QueryInput {
+    QueryInput {
+        query: Some(vec![text.to_owned()]),
+        ..Default::default()
+    }
 }
 
 /// Helper to build directives from a list.
@@ -166,6 +181,7 @@ async fn run_mock_turn(
         tool::ToolCoordinator::new(cfg.conversation.tools.clone(), empty_executor_source()),
         ChatRequest::from(prompt),
         InvocationContext::default(),
+        PendingStreamTrim::default(),
     )
     .await
     .unwrap();
@@ -667,7 +683,7 @@ fn query_model_override_is_persisted_as_config_delta() {
     let base_config = Arc::new(config_with_model(ProviderId::Anthropic, "base-model"));
     let conversation_id = make_id(1000);
 
-    let mut workspace = Workspace::new("/tmp/test");
+    let mut workspace = Workspace::in_memory("/tmp/test");
     workspace.create_conversation_with_id(
         conversation_id,
         Conversation::default(),
@@ -725,7 +741,7 @@ fn query_cfg_sourced_compaction_persists_as_config_delta() {
     let base_config = Arc::new(config_with_model(ProviderId::Anthropic, "base-model"));
     let conversation_id = make_id(2000);
 
-    let mut workspace = Workspace::new("/tmp/test");
+    let mut workspace = Workspace::in_memory("/tmp/test");
     workspace.create_conversation_with_id(
         conversation_id,
         Conversation::default(),
@@ -771,7 +787,7 @@ fn cfg_reset_none_appends_reset_then_post_apply() {
     let base_config = Arc::new(config_with_model(ProviderId::Anthropic, "base-model"));
     let conversation_id = make_id(3000);
 
-    let mut workspace = Workspace::new("/tmp/test");
+    let mut workspace = Workspace::in_memory("/tmp/test");
     workspace.create_conversation_with_id(
         conversation_id,
         Conversation::default(),
@@ -816,7 +832,7 @@ fn cfg_reset_workspace_appends_reset_then_workspace_apply() {
     let base_config = Arc::new(config_with_model(ProviderId::Anthropic, "base-model"));
     let conversation_id = make_id(3001);
 
-    let mut workspace = Workspace::new("/tmp/test");
+    let mut workspace = Workspace::in_memory("/tmp/test");
     workspace.create_conversation_with_id(
         conversation_id,
         Conversation::default(),
@@ -860,7 +876,7 @@ fn cfg_reset_none_without_post_leaves_unresolvable_config() {
     let base_config = Arc::new(config_with_model(ProviderId::Anthropic, "base-model"));
     let conversation_id = make_id(3002);
 
-    let mut workspace = Workspace::new("/tmp/test");
+    let mut workspace = Workspace::in_memory("/tmp/test");
     workspace.create_conversation_with_id(
         conversation_id,
         Conversation::default(),
@@ -938,11 +954,11 @@ async fn query_sequence_new_cfg_profile_then_model_override_persists_for_plain_q
         .into(),
     );
 
-    let mut workspace = Workspace::new(root);
+    let mut workspace = Workspace::in_memory(root);
 
     let query1 = Query {
         new_conversation: true,
-        query: Some(vec!["is this thing on?".to_owned()]),
+        input: inline_query("is this thing on?"),
         ..Default::default()
     };
     let cfg1 = build_query_config(
@@ -973,7 +989,7 @@ async fn query_sequence_new_cfg_profile_then_model_override_persists_for_plain_q
     let handle2 = workspace.acquire_conversation(&conversation_id).unwrap();
     let query2 = Query {
         model: Some("gpt".to_owned()),
-        query: Some(vec!["are you there?".to_owned()]),
+        input: inline_query("are you there?"),
         ..Default::default()
     };
     let cfg2 = build_query_config(&workspace, base.clone(), &[], &query2, Some(&handle2));
@@ -989,7 +1005,7 @@ async fn query_sequence_new_cfg_profile_then_model_override_persists_for_plain_q
 
     let handle3 = workspace.acquire_conversation(&conversation_id).unwrap();
     let query3 = Query {
-        query: Some(vec!["plain query".to_owned()]),
+        input: inline_query("plain query"),
         ..Default::default()
     };
     let cfg3 = build_query_config(&workspace, base, &[], &query3, Some(&handle3));
@@ -1082,7 +1098,7 @@ fn apply_title_override_no_title_clears_existing_title() {
     // conversation inherits the source's title via
     // `fork_conversation`, and `--no-title` is supposed to leave
     // the run with no title at all.
-    let mut workspace = Workspace::new("/tmp/test");
+    let mut workspace = Workspace::in_memory("/tmp/test");
     let lock = lock_with_title(&mut workspace, make_id(1000), Some("inherited"));
 
     apply_title_override(&lock, None, true);
@@ -1095,7 +1111,7 @@ fn apply_title_override_no_title_clears_resumed_title() {
     // `--no-title` is symmetric with `--title T`: both write the
     // user's intent into `metadata.title`, regardless of whether
     // the conversation is new, forked, or resumed.
-    let mut workspace = Workspace::new("/tmp/test");
+    let mut workspace = Workspace::in_memory("/tmp/test");
     let lock = lock_with_title(&mut workspace, make_id(1001), Some("existing"));
 
     apply_title_override(&lock, None, true);
@@ -1105,7 +1121,7 @@ fn apply_title_override_no_title_clears_resumed_title() {
 
 #[test]
 fn apply_title_override_title_overwrites_existing_title() {
-    let mut workspace = Workspace::new("/tmp/test");
+    let mut workspace = Workspace::in_memory("/tmp/test");
     let lock = lock_with_title(&mut workspace, make_id(1002), Some("old"));
 
     apply_title_override(&lock, Some("new"), false);
@@ -1115,7 +1131,7 @@ fn apply_title_override_title_overwrites_existing_title() {
 
 #[test]
 fn apply_title_override_neither_flag_is_noop() {
-    let mut workspace = Workspace::new("/tmp/test");
+    let mut workspace = Workspace::in_memory("/tmp/test");
     let lock = lock_with_title(&mut workspace, make_id(1003), Some("keep"));
 
     apply_title_override(&lock, None, false);
@@ -1151,12 +1167,16 @@ fn no_title_does_not_persist_into_partial_config() {
 }
 
 #[test]
-fn echo_request_when_from_editor_or_replay() {
+fn echo_request_unless_inline() {
     // Editor-composed query: the editor took over the screen, so echo.
-    assert!(Query::default().should_echo_request(true));
+    assert!(Query::default().should_echo_request(QuerySource::Editor));
 
     // Plain inline query, no editor: the user already sees their input.
-    assert!(!Query::default().should_echo_request(false));
+    assert!(!Query::default().should_echo_request(QuerySource::Inline));
+
+    // Synthesized query (`--no-edit` without a query): the user never typed
+    // or saw the resulting message, so it must be echoed.
+    assert!(Query::default().should_echo_request(QuerySource::Synthesized));
 
     // Replay without an editor: the message comes from history and isn't
     // otherwise visible on the terminal, so it must be echoed.
@@ -1164,7 +1184,127 @@ fn echo_request_when_from_editor_or_replay() {
         replay: true,
         ..Default::default()
     };
-    assert!(replay.should_echo_request(false));
+    assert!(replay.should_echo_request(QuerySource::Inline));
+}
+
+#[test]
+fn edit_message_synthesizes_when_no_edit_without_query() {
+    let config = AppConfig::new_test();
+    let root = Utf8Path::new("/tmp");
+    let query = Query {
+        no_edit: true,
+        ..Default::default()
+    };
+
+    // Empty request and empty stream: a default "continue" message is
+    // synthesized, so the caller must echo it.
+    let mut request = ChatRequest::default();
+    let stream = ConversationStream::new_test();
+    let mut pending_trim = PendingStreamTrim::default();
+    let (source, partial) = query
+        .edit_message(
+            &mut request,
+            &stream,
+            &mut pending_trim,
+            false,
+            &config,
+            root,
+        )
+        .unwrap();
+    assert_eq!(source, QuerySource::Synthesized);
+    assert_eq!(request.content, "continue");
+    assert!(partial.is_empty());
+
+    // Empty request with the stream's trailing event being a chat request:
+    // that request is peeked and re-sent verbatim, also synthesized.
+    let mut request = ChatRequest::default();
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("earlier text");
+    let mut pending_trim = PendingStreamTrim::default();
+    let (source, _) = query
+        .edit_message(
+            &mut request,
+            &stream,
+            &mut pending_trim,
+            false,
+            &config,
+            root,
+        )
+        .unwrap();
+    assert_eq!(source, QuerySource::Synthesized);
+    assert_eq!(request.content, "earlier text");
+    // The trailing request is not popped here; its removal is deferred to the
+    // turn-start commit point via `pending_trim`, so the stream is untouched.
+    assert!(pending_trim.pop_request);
+    assert!(stream.pop_if(ConversationEvent::is_chat_request).is_some());
+}
+
+#[test]
+fn edit_message_quote_without_editor_is_synthesized() {
+    // `--quote --no-edit`: `build_conversation` seeds the request with the
+    // quoted assistant message before `edit_message` runs, so the request is
+    // non-empty here even though the user never typed or saw the final text.
+    // It must be classified as synthesized (and therefore echoed), not
+    // inline.
+    let config = AppConfig::new_test();
+    let query = Query {
+        input: QueryInput {
+            quote: Some(true),
+            ..Default::default()
+        },
+        no_edit: true,
+        ..Default::default()
+    };
+
+    let mut request = ChatRequest::from(" >  quoted reply");
+    let stream = ConversationStream::new_test();
+    let mut pending_trim = PendingStreamTrim::default();
+    let (source, partial) = query
+        .edit_message(
+            &mut request,
+            &stream,
+            &mut pending_trim,
+            false,
+            &config,
+            Utf8Path::new("/tmp"),
+        )
+        .unwrap();
+    assert_eq!(source, QuerySource::Synthesized);
+    // The seeded content is sent as-is.
+    assert_eq!(request.content, " >  quoted reply");
+    assert!(partial.is_empty());
+}
+
+#[test]
+fn edit_message_skips_editor_when_no_edit_with_piped_stdin() {
+    // Regression: `--no-edit` must skip the editor even when piped stdin
+    // content makes the request non-empty. Previously the explicit override
+    // was only checked when the request was still empty, so `--no-edit` was
+    // silently ignored whenever stdin was piped without a query argument.
+    let config = AppConfig::new_test();
+    let root = Utf8Path::new("/tmp");
+    let query = Query {
+        no_edit: true,
+        ..Default::default()
+    };
+
+    let mut request = ChatRequest::from("hi");
+    let stream = ConversationStream::new_test();
+    let mut pending_trim = PendingStreamTrim::default();
+    let (source, partial) = query
+        .edit_message(
+            &mut request,
+            &stream,
+            &mut pending_trim,
+            true,
+            &config,
+            root,
+        )
+        .unwrap();
+
+    assert_eq!(source, QuerySource::Inline);
+    assert_eq!(request.content, "hi");
+    assert!(partial.is_empty());
 }
 
 #[test]
@@ -1201,6 +1341,179 @@ fn picker_new_item_gated_by_bare_id_flag() {
         ..Default::default()
     };
     assert!(!bare_id.allows_new_from_picker());
+}
+
+/// The query words a parse produced, for comparison against a static slice.
+fn query_words(query: &Query) -> &[String] {
+    query.input.query.as_deref().unwrap_or_default()
+}
+
+#[test]
+fn bare_quote_uses_the_blockquote_prefix() {
+    let query = parse_query(&["--quote"]).unwrap();
+    assert_eq!(query.input.quote, Some(true));
+    assert!(query_words(&query).is_empty());
+}
+
+#[test]
+fn quote_true_is_the_same_as_a_bare_quote() {
+    let query = parse_query(&["--quote=true"]).unwrap();
+    assert_eq!(query.input.quote, Some(true));
+    assert!(query_words(&query).is_empty());
+}
+
+#[test]
+fn quote_false_still_quotes_but_drops_the_prefix() {
+    let query = parse_query(&["--quote=false"]).unwrap();
+    assert_eq!(query.input.quote, Some(false));
+    assert!(query_words(&query).is_empty());
+}
+
+#[test]
+fn quote_is_absent_when_not_given() {
+    let query = parse_query(&[]).unwrap();
+    assert_eq!(query.input.quote, None);
+}
+
+#[test]
+fn quote_takes_an_unattached_bool() {
+    let query = parse_query(&["--quote", "false"]).unwrap();
+    assert_eq!(query.input.quote, Some(false));
+    assert!(query_words(&query).is_empty());
+
+    let query = parse_query(&["--quote", "true"]).unwrap();
+    assert_eq!(query.input.quote, Some(true));
+    assert!(query_words(&query).is_empty());
+}
+
+#[test]
+fn quote_takes_an_unattached_bool_ahead_of_the_query() {
+    let query = parse_query(&["--quote", "false", "and", "now?"]).unwrap();
+    assert_eq!(query.input.quote, Some(false));
+    assert_eq!(query_words(&query), ["and".to_owned(), "now?".to_owned()]);
+}
+
+#[test]
+fn quote_does_not_swallow_a_following_flag() {
+    let query = parse_query(&["--quote", "--model", "foo"]).unwrap();
+    assert_eq!(query.input.quote, Some(true));
+    assert_eq!(query.model.as_deref(), Some("foo"));
+}
+
+#[test]
+fn quote_does_not_swallow_the_positional_query() {
+    let query = parse_query(&["--quote", "what about X?"]).unwrap();
+    assert_eq!(query.input.quote, Some(true));
+    assert_eq!(query_words(&query), ["what about X?".to_owned()]);
+}
+
+#[test]
+fn quote_only_takes_the_word_directly_after_it() {
+    // `false` is the query here: it sits before the flag, so it was never
+    // offered as the flag's value.
+    let query = parse_query(&["false", "--quote"]).unwrap();
+    assert_eq!(query.input.quote, Some(true));
+    assert_eq!(query_words(&query), ["false".to_owned()]);
+
+    // Same when another flag sits between the two.
+    let query = parse_query(&["--quote", "--model", "foo", "false"]).unwrap();
+    assert_eq!(query.input.quote, Some(true));
+    assert_eq!(query_words(&query), ["false".to_owned()]);
+}
+
+#[test]
+fn a_double_dash_shields_a_bool_from_quote() {
+    let query = parse_query(&["--quote", "--", "false"]).unwrap();
+    assert_eq!(query.input.quote, Some(true));
+    assert_eq!(query_words(&query), ["false".to_owned()]);
+}
+
+#[test]
+fn words_before_and_after_a_double_dash_form_one_query() {
+    let query = parse_query(&["why", "--", "--model", "foo"]).unwrap();
+    assert_eq!(query.input.quote, None);
+    assert_eq!(query_words(&query), [
+        "why".to_owned(),
+        "--model".to_owned(),
+        "foo".to_owned()
+    ]);
+}
+
+#[test]
+fn quote_with_an_attached_value_leaves_a_following_bool_in_the_query() {
+    // `--quote=false` has its value already, so the `true` after it is query
+    // text. Without the attached/bare distinction both forms would look
+    // identical here, since clap records the same index for either.
+    let query = parse_query(&["--quote=false", "true"]).unwrap();
+    assert_eq!(query.input.quote, Some(false));
+    assert_eq!(query_words(&query), ["true".to_owned()]);
+}
+
+#[test]
+fn quote_rejects_an_attached_non_boolean_value() {
+    assert!(parse_query(&["--quote=foo"]).is_err());
+}
+
+/// A stream whose last assistant message is a two-line reply.
+fn stream_with_assistant_reply() -> ConversationStream {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("question");
+    stream
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::message("line one\nline two"))
+        .build()
+        .unwrap();
+    stream
+}
+
+#[test]
+fn quote_false_seeds_the_message_verbatim() {
+    let mut request = ChatRequest::default();
+    assert!(seed_quoted_reply(
+        &mut request,
+        &stream_with_assistant_reply(),
+        false
+    ));
+
+    // The trailing blank line separates the seed from the reply the user is
+    // about to type below it.
+    assert_eq!(request.content, "line one\nline two\n\n");
+}
+
+#[test]
+fn quote_true_seeds_the_message_as_a_blockquote() {
+    let mut request = ChatRequest::default();
+    assert!(seed_quoted_reply(
+        &mut request,
+        &stream_with_assistant_reply(),
+        true
+    ));
+
+    assert_eq!(request.content, "> line one\n> line two\n\n");
+}
+
+#[test]
+fn quote_seeds_above_an_already_composed_request() {
+    let mut request = ChatRequest::from("and what about X?");
+    assert!(seed_quoted_reply(
+        &mut request,
+        &stream_with_assistant_reply(),
+        false
+    ));
+
+    assert_eq!(request.content, "line one\nline two\n\nand what about X?");
+}
+
+#[test]
+fn quote_leaves_the_request_untouched_without_an_assistant_message() {
+    let mut request = ChatRequest::from("only my words");
+    assert!(!seed_quoted_reply(
+        &mut request,
+        &ConversationStream::new_test(),
+        true
+    ));
+
+    assert_eq!(request.content, "only my words");
 }
 
 #[test]
@@ -1277,4 +1590,641 @@ fn last_assistant_message_returns_none_when_only_reasoning_present() {
         .unwrap();
 
     assert_eq!(last_assistant_message(&stream), None);
+}
+
+/// Count the `TurnStart` events in a stream.
+fn turn_start_count(stream: &ConversationStream) -> usize {
+    stream.iter().filter(|e| e.event.is_turn_start()).count()
+}
+
+/// Assert that no `TurnStart` is immediately followed by another `TurnStart`
+/// (an empty middle turn).
+fn assert_no_adjacent_turn_starts(stream: &ConversationStream) {
+    let mut previous_was_turn_start = false;
+    for e in stream.iter() {
+        assert!(
+            !(previous_was_turn_start && e.event.is_turn_start()),
+            "stream contains adjacent TurnStart events (empty middle turn)"
+        );
+        previous_was_turn_start = e.event.is_turn_start();
+    }
+}
+
+#[test]
+fn pending_trim_replay_removes_stale_turn_start() {
+    // Multi-turn conversation: the stale `TurnStart` sits *after* the first
+    // `ChatRequest`, where `sanitize`'s `normalize_turn_starts` would not
+    // collapse it.
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("first question");
+    stream
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::message("first answer"))
+        .build()
+        .unwrap();
+    stream.start_turn("second question");
+
+    let trim = PendingStreamTrim {
+        replay_turn: true,
+        pop_request: false,
+    };
+    trim.apply(&mut stream);
+
+    // The replayed request re-enters the stream as a fresh turn.
+    stream.start_turn("second question, revised");
+
+    assert_eq!(
+        turn_start_count(&stream),
+        2,
+        "replay must replace the trimmed turn, not open an extra one"
+    );
+    assert_no_adjacent_turn_starts(&stream);
+}
+
+#[test]
+fn pending_trim_pop_request_removes_stale_turn_start() {
+    // Bare `--no-edit` replay: the last turn holds only its request.
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("first question");
+    stream
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::message("first answer"))
+        .build()
+        .unwrap();
+    stream.start_turn("replayed question");
+
+    let trim = PendingStreamTrim {
+        replay_turn: false,
+        pop_request: true,
+    };
+    trim.apply(&mut stream);
+
+    stream.start_turn("replayed question");
+
+    assert_eq!(
+        turn_start_count(&stream),
+        2,
+        "pop_request must replace the trimmed turn, not open an extra one"
+    );
+    assert_no_adjacent_turn_starts(&stream);
+}
+
+#[test]
+fn pending_trim_default_is_noop() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("question");
+    let before = stream.len();
+
+    PendingStreamTrim::default().apply(&mut stream);
+
+    assert_eq!(
+        stream.len(),
+        before,
+        "a default PendingStreamTrim must not mutate the stream"
+    );
+}
+
+#[test]
+fn mcp_startup_status_single_server() {
+    assert_eq!(
+        mcp_startup_status(&[McpServerId::new("bookworm")]),
+        "MCP server bookworm"
+    );
+}
+
+#[test]
+fn mcp_startup_status_multiple_servers() {
+    assert_eq!(
+        mcp_startup_status(&[McpServerId::new("bookworm"), McpServerId::new("grizzly")]),
+        "2 MCP servers (bookworm, grizzly)"
+    );
+}
+
+/// Timer settings that render immediately, so tests don't wait out a delay.
+fn immediate_mcp_startup_config() -> McpStartupConfig {
+    McpStartupConfig {
+        show: true,
+        delay_secs: 0,
+        interval_ms: 10,
+    }
+}
+
+#[tokio::test]
+async fn await_mcp_servers_drains_all_startups() {
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+
+    let mut joins = tokio::task::JoinSet::new();
+    joins.spawn(async { Ok(McpServerId::new("bookworm")) });
+    joins.spawn(async { Ok(McpServerId::new("grizzly")) });
+    let startup = StartupSet {
+        joins,
+        pending: vec![McpServerId::new("bookworm"), McpServerId::new("grizzly")],
+    };
+
+    await_mcp_servers(
+        startup,
+        immediate_mcp_startup_config(),
+        Arc::new(printer),
+        false,
+        None,
+    )
+    .await
+    .expect("all startups succeed");
+}
+
+#[tokio::test]
+async fn await_mcp_servers_propagates_startup_error() {
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+
+    let mut joins = tokio::task::JoinSet::new();
+    joins.spawn(async { Err(jp_mcp::Error::UnknownServer(McpServerId::new("bookworm"))) });
+    let startup = StartupSet {
+        joins,
+        pending: vec![McpServerId::new("bookworm")],
+    };
+
+    let error = await_mcp_servers(
+        startup,
+        immediate_mcp_startup_config(),
+        Arc::new(printer),
+        false,
+        None,
+    )
+    .await
+    .expect_err("a failed required server must fail the wait");
+
+    assert_eq!(error.message.as_deref(), Some("MCP error"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn await_mcp_servers_shows_and_clears_timer_line() {
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+
+    // Hold the startup window open until the test releases it, so the timer
+    // is guaranteed to tick while the server is still "starting".
+    let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+    let mut joins = tokio::task::JoinSet::new();
+    joins.spawn(async move {
+        release_rx.await.ok();
+        Ok(McpServerId::new("bookworm"))
+    });
+    let startup = StartupSet {
+        joins,
+        pending: vec![McpServerId::new("bookworm")],
+    };
+
+    let wait = tokio::spawn(await_mcp_servers(
+        startup,
+        immediate_mcp_startup_config(),
+        printer.clone(),
+        true,
+        None,
+    ));
+
+    // Let a few ticks land before releasing the startup.
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    release_tx.send(()).expect("wait task is still running");
+    wait.await
+        .expect("task did not panic")
+        .expect("startup succeeds");
+    printer.flush();
+
+    let chrome = err.lock();
+    assert!(
+        chrome.contains("⏱ Starting MCP server bookworm…"),
+        "timer line should name the pending server.\nChrome:\n{chrome}"
+    );
+    assert!(
+        chrome.ends_with("\r\x1b[K"),
+        "finishing the wait must leave the line cleared.\nChrome:\n{chrome}"
+    );
+}
+
+/// Poll `err` until `needle` appears, failing after a hard timeout.
+///
+/// Synchronizes on the rendered output instead of a fixed sleep: the timer
+/// writes frames from its own task, so tests wait for the frame to land rather
+/// than guessing how long that takes.
+async fn wait_for_frame(err: &SharedBuffer, needle: &str) {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while !err.lock().contains(needle) {
+            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("frame {needle:?} never rendered"));
+}
+
+/// Drives the aggregate redraw: two servers start, one finishes while the other
+/// is still pending, then the second finishes.
+/// The line must go from both names, to the survivor alone, to cleared.
+#[tokio::test(flavor = "multi_thread")]
+async fn await_mcp_servers_redraws_as_servers_finish() {
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+
+    // Two independently-released tasks: releasing `bookworm` first makes
+    // `grizzly` the deterministic survivor of the mid-drain redraw.
+    let (bookworm_tx, bookworm_rx) = tokio::sync::oneshot::channel::<()>();
+    let (grizzly_tx, grizzly_rx) = tokio::sync::oneshot::channel::<()>();
+    let mut joins = tokio::task::JoinSet::new();
+    joins.spawn(async move {
+        bookworm_rx.await.ok();
+        Ok(McpServerId::new("bookworm"))
+    });
+    joins.spawn(async move {
+        grizzly_rx.await.ok();
+        Ok(McpServerId::new("grizzly"))
+    });
+    let startup = StartupSet {
+        joins,
+        pending: vec![McpServerId::new("bookworm"), McpServerId::new("grizzly")],
+    };
+
+    let wait = tokio::spawn(await_mcp_servers(
+        startup,
+        immediate_mcp_startup_config(),
+        printer.clone(),
+        true,
+        None,
+    ));
+
+    // Advance on the rendered frames, not the clock: wait until each frame is
+    // actually in the buffer before releasing the next server, so a slow timer
+    // task can't make the release outrun the redraw it's supposed to observe.
+    wait_for_frame(&err, "2 MCP servers (bookworm, grizzly)").await;
+    bookworm_tx.send(()).expect("wait task is still running");
+    wait_for_frame(&err, "MCP server grizzly…").await;
+    grizzly_tx.send(()).expect("wait task is still running");
+    wait.await
+        .expect("task did not panic")
+        .expect("all startups succeed");
+    printer.flush();
+
+    let chrome = err.lock();
+    let both = chrome
+        .find("2 MCP servers (bookworm, grizzly)")
+        .expect("the aggregate two-server frame must render first");
+    let survivor = chrome
+        .find("MCP server grizzly…")
+        .expect("the survivor-only frame must render after bookworm finishes");
+    assert!(
+        both < survivor,
+        "the two-server frame must precede the survivor-only frame.\nChrome:\n{chrome}"
+    );
+    assert!(
+        !chrome.contains("MCP server bookworm…"),
+        "bookworm was never the sole pending server; it must not render alone.\nChrome:\n{chrome}"
+    );
+    assert!(
+        chrome.ends_with("\r\x1b[K"),
+        "finishing the wait must leave the line cleared.\nChrome:\n{chrome}"
+    );
+}
+
+#[test]
+fn mcp_startup_line_renders_full_when_it_fits() {
+    assert_eq!(
+        mcp_startup_line(4.2, Some("MCP server bookworm"), Some(80)),
+        "\r\x1b[K⏱ Starting MCP server bookworm… 4.2s"
+    );
+    // Unknown width leaves the line unbounded.
+    assert_eq!(
+        mcp_startup_line(4.2, Some("MCP server bookworm"), None),
+        "\r\x1b[K⏱ Starting MCP server bookworm… 4.2s"
+    );
+}
+
+// A long server list forced to truncate must keep the elapsed-time suffix: the
+// whole point of the line is the moving timer, so truncation has to fall on the
+// server list, not the `Ns` tail. Testing the pure formatter at a fixed `secs`
+// pins the invariant without depending on when the timer task first ticks.
+#[test]
+fn mcp_startup_line_truncation_preserves_timer_suffix() {
+    let long = "MCP server bookworm-with-a-very-long-descriptive-server-name";
+    let line = mcp_startup_line(12.3, Some(long), Some(30));
+
+    assert!(line.ends_with(" 12.3s"), "suffix must survive: {line:?}");
+    assert!(line.contains('…'), "server list must truncate: {line:?}");
+    // The visible text (control prefix stripped) must fit the declared width.
+    let visible = line.strip_prefix("\r\x1b[K").expect("control prefix");
+    assert!(display_width(visible) <= 30, "must fit width: {line:?}");
+}
+
+// A terminal too narrow for even the prefix and suffix still keeps a moving
+// timer rather than a static stub.
+#[test]
+fn mcp_startup_line_ultra_narrow_keeps_bounded_timer() {
+    let line = mcp_startup_line(7.0, Some("MCP server bookworm"), Some(6));
+
+    let visible = line.strip_prefix("\r\x1b[K").expect("control prefix");
+    assert!(display_width(visible) <= 6, "must fit width: {line:?}");
+    assert!(visible.contains("7.0s"), "timer must survive: {line:?}");
+}
+
+#[test]
+fn arg_file_path_recognizes_sigil() {
+    assert_eq!(arg_file_path("@notes.md"), Some("notes.md"));
+    assert_eq!(arg_file_path("@~/notes.md"), Some("~/notes.md"));
+    assert_eq!(arg_file_path("notes.md"), None);
+    assert_eq!(arg_file_path(""), None);
+}
+
+// A bare `@` is ordinary prose, not a reference to the empty path. Reading it
+// as a path is what made `jp q ... drop the @ entirely ...` fail.
+#[test]
+fn arg_file_path_ignores_bare_sigil() {
+    assert_eq!(arg_file_path("@"), None);
+    assert_eq!(arg_file_path("@ "), None);
+    assert_eq!(arg_file_path("@\t"), None);
+}
+
+#[test]
+fn query_file_path_only_for_single_value_query() {
+    let one = ["@notes.md".to_owned()];
+    assert_eq!(query_file_path(&one), Some("notes.md"));
+
+    let trailing = ["hello".to_owned(), "@notes.md".to_owned()];
+    assert_eq!(query_file_path(&trailing), None);
+
+    let leading = ["@notes.md".to_owned(), "extra".to_owned()];
+    assert_eq!(query_file_path(&leading), None);
+
+    let plain = ["hello".to_owned()];
+    assert_eq!(query_file_path(&plain), None);
+
+    assert_eq!(query_file_path(&[]), None);
+}
+
+#[test]
+fn read_arg_file_returns_file_contents() {
+    let dir = camino_tempfile::tempdir().unwrap();
+    let path = dir.path().join("notes.md");
+    std::fs::write(&path, "# Notes\n\nbody\n").unwrap();
+
+    assert_eq!(read_arg_file(path.as_str()).unwrap(), "# Notes\n\nbody\n");
+}
+
+/// Host for [`Query`]'s arguments, so tests can drive the real clap parser
+/// rather than constructing a [`Query`] the CLI could never produce.
+#[derive(clap::Parser)]
+struct QueryArgs {
+    #[command(flatten)]
+    query: Query,
+}
+
+/// Parse `jp query <args>`, always with `--no-edit` so no editor opens.
+fn parse_query(args: &[&str]) -> std::result::Result<Query, clap::Error> {
+    let argv = ["query", "--no-edit"]
+        .into_iter()
+        .chain(args.iter().copied());
+
+    QueryArgs::try_parse_from(argv).map(|parsed| parsed.query)
+}
+
+/// Build the request for `args`, with no piped stdin and an empty stream.
+///
+/// Runs the same two steps `run` does: resolve the query, then compose it.
+fn built_request(args: &[&str]) -> String {
+    built_request_against(args, &ConversationStream::new_test())
+}
+
+/// Build the request for `args` against `stream`, with no piped stdin.
+fn built_request_against(args: &[&str], stream: &ConversationStream) -> String {
+    let query = parse_query(args).unwrap();
+    let resolved = query.resolve_query().unwrap();
+
+    query
+        .build_conversation(
+            "",
+            resolved.as_deref(),
+            stream,
+            &AppConfig::new_test(),
+            Utf8Path::new("/tmp"),
+        )
+        .unwrap()
+        .chat_request
+        .expect("non-empty request")
+        .content
+}
+
+#[test]
+fn build_conversation_seeds_a_verbatim_quote_above_the_query() {
+    let built = built_request_against(
+        &["--quote=false", "and", "what", "about", "X?"],
+        &stream_with_assistant_reply(),
+    );
+
+    assert_eq!(built, "line one\nline two\n\nand what about X?");
+}
+
+#[test]
+fn build_conversation_seeds_a_blockquoted_quote_above_the_query() {
+    let built = built_request_against(
+        &["--quote", "and", "what", "about", "X?"],
+        &stream_with_assistant_reply(),
+    );
+
+    assert_eq!(built, "> line one\n> line two\n\nand what about X?");
+}
+
+#[test]
+fn build_conversation_reads_single_at_path_query() {
+    let dir = camino_tempfile::tempdir().unwrap();
+    let path = dir.path().join("notes.md");
+    std::fs::write(&path, "# Notes\n\nbody\n").unwrap();
+
+    assert_eq!(
+        built_request(&[format!("@{path}").as_str()]),
+        "# Notes\n\nbody\n"
+    );
+}
+
+// A bare `@` is the whole query: there is no path after the sigil, so it is
+// text. Reading it as the empty path is what aborted the query.
+#[test]
+fn build_conversation_keeps_lone_bare_sigil() {
+    assert_eq!(built_request(&["@"]), "@");
+}
+
+// The reported failure: a bare `@` mid-sentence was read as the empty path and
+// aborted the query before it was ever sent.
+#[test]
+fn build_conversation_keeps_bare_sigil_in_prose() {
+    assert_eq!(
+        built_request(&["we", "should", "drop", "the", "@", "entirely"]),
+        "we should drop the @ entirely"
+    );
+}
+
+// An `@path` that names a real file is still ordinary text when it is one word
+// of a longer query: only a single-value query reads from disk.
+#[test]
+fn build_conversation_keeps_at_path_word_in_multi_word_query() {
+    let dir = camino_tempfile::tempdir().unwrap();
+    let path = dir.path().join("notes.md");
+    std::fs::write(&path, "file contents").unwrap();
+
+    assert_eq!(
+        built_request(&["see", format!("@{path}").as_str()]),
+        format!("see @{path}")
+    );
+    // Leading position too: it is the value count that decides, not where the
+    // sigil sits.
+    assert_eq!(
+        built_request(&[format!("@{path}").as_str(), "is", "stale"]),
+        format!("@{path} is stale")
+    );
+}
+
+#[test]
+fn build_conversation_prepends_query_to_piped_stdin() {
+    let built = parse_query(&["look", "at", "this"])
+        .unwrap()
+        .build_conversation(
+            "piped payload",
+            Some("look at this"),
+            &ConversationStream::new_test(),
+            &AppConfig::new_test(),
+            Utf8Path::new("/tmp"),
+        )
+        .unwrap();
+
+    assert_eq!(
+        built.chat_request.unwrap().content,
+        "look at this\n\npiped payload"
+    );
+}
+
+// A query naming an unreadable file must fail before any conversation or
+// session state is touched. The read used to happen after the conversation was
+// created and recorded as the session's active one, so a typo'd path left an
+// empty conversation behind that the next query silently targeted.
+#[test]
+fn run_missing_at_path_query_leaves_conversation_and_session_untouched() {
+    let dir = camino_tempfile::tempdir().unwrap();
+    let missing = dir.path().join("missing.md");
+
+    let session = Session {
+        id: SessionId::new("jp-cli-query-test").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let mut ctx = Ctx::new(
+        Workspace::in_memory("/tmp/jp-cli-query-test"),
+        None,
+        Runtime::new().unwrap(),
+        Globals::default(),
+        AppConfig::new_test(),
+        Some(session.clone()),
+        printer,
+    );
+
+    let query = parse_query(&["--new", &format!("@{missing}")]).unwrap();
+    let result = Runtime::new()
+        .unwrap()
+        .block_on(query.run(&mut ctx, None, false));
+
+    let Err(error) = result else {
+        panic!("a query naming a missing file must fail");
+    };
+    // Pin that it failed on the unreadable path, not on something the test
+    // environment happens to be missing further down `run`.
+    assert_eq!(
+        error
+            .metadata
+            .iter()
+            .find(|(key, _)| key == "path")
+            .map(|(_, value)| value),
+        Some(&Value::from(missing.as_str())),
+    );
+
+    assert_eq!(ctx.workspace.conversations().count(), 0);
+    assert_eq!(ctx.workspace.session_active_conversation(&session), None);
+}
+
+// A `--label=:name` naming a rule that isn't configured must fail before any
+// other flag has written anything: alias expansion runs ahead of `--mount`'s
+// symlinks and `--title`'s metadata write, so a typo'd alias leaves the
+// conversation exactly as it was.
+#[test]
+fn run_failing_alias_leaves_the_title_untouched() {
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let mut workspace = Workspace::in_memory("/tmp/jp-cli-query-label-test");
+    let id = make_id(4242);
+    workspace.create_conversation_with_id(
+        id,
+        Conversation {
+            title: Some("original".to_owned()),
+            ..Default::default()
+        },
+        Arc::new(AppConfig::new_test()),
+    );
+
+    let mut ctx = Ctx::new(
+        workspace,
+        None,
+        Runtime::new().unwrap(),
+        Globals::default(),
+        AppConfig::new_test(),
+        None,
+        printer,
+    );
+
+    let handle = ctx.workspace.acquire_conversation(&id).unwrap();
+    let query = parse_query(&["--title", "changed", "--label=:missing", "hello"]).unwrap();
+    let result = Runtime::new()
+        .unwrap()
+        .block_on(query.run(&mut ctx, Some(handle), false));
+
+    let Err(error) = result else {
+        panic!("a query naming an unknown label alias must fail");
+    };
+    // Pin that it failed on the alias, not on something else further down
+    // `run` that the test environment happens to be missing.
+    assert!(
+        error.to_string().contains("unknown label alias")
+            || error.metadata.iter().any(|(_, value)| value
+                .as_str()
+                .is_some_and(|v| v.contains("unknown label alias"))),
+        "got: {error:?}"
+    );
+
+    let handle = ctx.workspace.acquire_conversation(&id).unwrap();
+    assert_eq!(
+        ctx.workspace.metadata(&handle).unwrap().title.as_deref(),
+        Some("original"),
+        "the title must not have been rewritten before the alias failed"
+    );
+}
+
+#[test]
+fn resolve_query_missing_at_path_errors() {
+    let dir = camino_tempfile::tempdir().unwrap();
+    let path = dir.path().join("missing.md");
+    let query = parse_query(&[&format!("@{path}")]).unwrap();
+
+    let Err(error) = query.resolve_query() else {
+        panic!("a query naming a missing file must fail, not be sent verbatim");
+    };
+    assert_matches!(&error, Error::ArgFile { path: p, .. } if p == path.as_str());
+}
+
+#[test]
+fn read_arg_file_error_names_the_path() {
+    let dir = camino_tempfile::tempdir().unwrap();
+    let path = dir.path().join("missing.md");
+
+    let error = read_arg_file(path.as_str()).unwrap_err();
+
+    assert_matches!(&error, Error::ArgFile { path: p, .. } if p == path.as_str());
+    // The OS-supplied cause differs per platform, so pin the part we own: the
+    // path is in the message clap renders, which is what "IO error" dropped.
+    assert!(
+        error
+            .to_string()
+            .starts_with(&format!("cannot read '{path}': ")),
+        "unexpected message: {error}"
+    );
 }

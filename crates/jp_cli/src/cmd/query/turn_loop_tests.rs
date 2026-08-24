@@ -16,7 +16,11 @@ use futures::{StreamExt as _, stream};
 use indexmap::IndexMap;
 use inquire::InquireError;
 use jp_config::{
-    AppConfig,
+    AppConfig, PartialAppConfig,
+    assistant::{
+        PartialAssistantConfig,
+        request::{CachePolicy, PartialRequestConfig, RequestConfig},
+    },
     conversation::tool::{
         CommandConfigOrString, QuestionConfig, QuestionTarget, RunMode, ToolConfig, ToolSource,
         style::{DisplayStyleConfig, ErrorStyleConfig, InlineResults, LinkStyle, ParametersStyle},
@@ -25,8 +29,11 @@ use jp_config::{
     model::id::{self, ProviderId},
 };
 use jp_conversation::{
-    Conversation,
-    event::{ChatRequest, ChatResponse, InquirySource, ToolCallRequest, TurnStart},
+    Conversation, ConversationEvent,
+    event::{
+        CancellationReason, ChatRequest, ChatResponse, InquiryResponse, InquirySource,
+        ToolCallRequest, TurnStart,
+    },
 };
 use jp_inquire::{
     InlineOption, ReplyEditMode, ReplyOutcome,
@@ -35,7 +42,7 @@ use jp_inquire::{
 use jp_llm::{
     Error as LlmError, EventStream, Provider,
     error::StreamError,
-    event::{Event, FinishReason},
+    event::{Event, EventMatcher, EventPatch, FinishReason, PatchAction},
     model::ModelDetails,
     provider::mock::MockProvider,
     query::ChatQuery,
@@ -58,7 +65,10 @@ use tokio_util::sync::CancellationToken;
 
 use super::*;
 use crate::{
-    cmd::query::tool::{ToolCoordinator, executor::TerminalExecutorSource},
+    cmd::query::{
+        stream::retry::MAX_CONSECUTIVE_REBUILDS,
+        tool::{ToolCoordinator, executor::TerminalExecutorSource},
+    },
     signals::testing::{detached_router, test_router},
 };
 
@@ -190,6 +200,49 @@ impl Provider for AlwaysPrematureProvider {
     }
 }
 
+/// A provider that streams content without end, counting calls so a test can
+/// assert the response was not re-requested.
+///
+/// After its parts the stream stays pending forever and it never sends a
+/// terminal `Finished`, so the output ceiling is the only thing that can end
+/// it.
+/// A test built on this fixture hangs if the ceiling never fires, rather than
+/// falling through to the retry path and passing for the wrong reason.
+#[derive(Debug, Default)]
+struct RunawayProvider {
+    calls: AtomicUsize,
+}
+
+#[async_trait]
+impl Provider for RunawayProvider {
+    async fn model_details(&self, name: &id::Name) -> Result<ModelDetails, LlmError> {
+        Ok(ModelDetails::empty(id::ModelIdConfig {
+            provider: ProviderId::Test,
+            name: name.clone(),
+        }))
+    }
+
+    async fn models(&self) -> Result<Vec<ModelDetails>, LlmError> {
+        Ok(vec![])
+    }
+
+    async fn chat_completion_stream(
+        &self,
+        _model: &ModelDetails,
+        _query: ChatQuery,
+    ) -> Result<EventStream, LlmError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+
+        // 7 bytes, then 40 bytes per part.
+        let mut events = vec![Event::message(0, "runaway")];
+        events.extend(std::iter::repeat_with(|| Event::message(0, "0123456789".repeat(4))).take(9));
+
+        Ok(Box::pin(
+            stream::iter(events.into_iter().map(Ok)).chain(stream::pending()),
+        ))
+    }
+}
+
 /// A provider whose stream yields the given events and then stays pending
 /// forever, simulating an in-flight response that only an interrupt can stop.
 #[derive(Debug)]
@@ -276,7 +329,7 @@ async fn test_interrupt_stop_during_streaming_persists_content() {
 
         let config = AppConfig::new_test();
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
@@ -337,6 +390,7 @@ async fn test_interrupt_stop_during_streaming_persists_content() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -376,7 +430,7 @@ async fn test_streaming_interrupt_menu_cancel_escalates() {
 
         let config = AppConfig::new_test();
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
@@ -438,6 +492,7 @@ async fn test_streaming_interrupt_menu_cancel_escalates() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -482,7 +537,7 @@ async fn test_normal_completion_persists_content() {
 
     let config = AppConfig::new_test();
     let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-    let mut workspace = Workspace::new(root).with_backend(fs.clone());
+    let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
     let lock = workspace
         .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
@@ -520,6 +575,7 @@ async fn test_normal_completion_persists_content() {
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
         InvocationContext::default(),
+        PendingStreamTrim::default(),
     )
     .await
     .unwrap();
@@ -563,7 +619,7 @@ async fn premature_stream_end_without_finished_returns_error() {
     config.assistant.request.max_retries = 0;
 
     let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-    let mut workspace = Workspace::new(root).with_backend(fs.clone());
+    let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
     let lock = workspace
         .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
@@ -604,6 +660,7 @@ async fn premature_stream_end_without_finished_returns_error() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             ChatRequest::from("hi"),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         ),
     )
     .await
@@ -629,7 +686,7 @@ async fn premature_stream_end_exhausts_retry_budget() {
     config.assistant.request.base_backoff_ms = 0;
 
     let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-    let mut workspace = Workspace::new(root).with_backend(fs.clone());
+    let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
     let lock = workspace
         .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
@@ -666,6 +723,7 @@ async fn premature_stream_end_exhausts_retry_budget() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             ChatRequest::from("hi"),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         ),
     )
     .await
@@ -681,6 +739,94 @@ async fn premature_stream_end_exhausts_retry_budget() {
         provider.calls.load(Ordering::SeqCst),
         3,
         "provider should be called once per attempt across the retry budget"
+    );
+}
+
+/// A response that runs past `assistant.request.max_response_bytes` ends the
+/// turn with an error, is not re-requested, and keeps the content streamed
+/// before the ceiling was reached.
+#[tokio::test]
+async fn output_ceiling_ends_turn_without_re_requesting() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    let storage = root.join(".jp");
+
+    let mut config = AppConfig::new_test();
+    config.assistant.request.max_response_bytes = 64;
+    // A retry budget is left in place so the call-count assertion below has
+    // something to catch: were the ceiling classified as retryable, the loop
+    // would re-request the response instead of ending the turn.
+    config.assistant.request.max_retries = 5;
+    config.assistant.request.base_backoff_ms = 0;
+    // The fixture never goes idle-silent before the ceiling fires, but an
+    // enabled idle timeout would give the loop a second way out; disable it so
+    // only the ceiling can end this turn.
+    config.assistant.request.stream_idle_timeout_secs = 0;
+
+    let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+    let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+        .unwrap();
+    let conv_id = lock.id();
+
+    let provider = Arc::new(RunawayProvider::default());
+    let dyn_provider: Arc<dyn Provider> = provider.clone();
+    let model = dyn_provider
+        .model_details(&"test-model".parse().unwrap())
+        .await
+        .unwrap();
+
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let mcp_client = jp_mcp::Client::default();
+    let router = detached_router();
+
+    let result = timeout(
+        Duration::from_secs(5),
+        run_turn_loop(
+            dyn_provider,
+            &model,
+            &config,
+            &router,
+            &mcp_client,
+            root,
+            false,
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &[],
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
+            ChatRequest::from("hi"),
+            InvocationContext::default(),
+            PendingStreamTrim::default(),
+        ),
+    )
+    .await
+    .expect("the output ceiling should end the turn, not hang it");
+
+    let Err(Error::Llm(jp_llm::Error::Stream(error))) = result else {
+        panic!("expected a stream error from the output ceiling, got: {result:?}");
+    };
+    assert_eq!(error.kind, jp_llm::StreamErrorKind::OutputLimit);
+
+    assert_eq!(
+        provider.calls.load(Ordering::SeqCst),
+        1,
+        "a response that breached the ceiling must not be re-requested"
+    );
+
+    // Option 1 of the ceiling design: the turn ends, but content the user
+    // already saw stays in the conversation.
+    let content = fs
+        .read_test_events_raw(&conv_id)
+        .expect("events should be persisted");
+    assert!(
+        content.contains("runaway"),
+        "content streamed before the ceiling must be persisted.\nFile contents:\n{content}"
     );
 }
 
@@ -702,7 +848,7 @@ async fn orphan_tool_call_is_sanitized_before_provider_request() {
 
     let config = AppConfig::new_test();
     let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-    let mut workspace = Workspace::new(root).with_backend(fs.clone());
+    let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
     let lock = workspace
         .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
@@ -760,6 +906,7 @@ async fn orphan_tool_call_is_sanitized_before_provider_request() {
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         ChatRequest::from("new query"),
         InvocationContext::default(),
+        PendingStreamTrim::default(),
     )
     .await
     .unwrap();
@@ -801,7 +948,7 @@ async fn test_tool_call_cycle_completes_with_followup() {
 
     let config = AppConfig::new_test();
     let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-    let mut workspace = Workspace::new(root).with_backend(fs.clone());
+    let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
     let lock = workspace
         .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
@@ -843,6 +990,7 @@ async fn test_tool_call_cycle_completes_with_followup() {
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
         InvocationContext::default(),
+        PendingStreamTrim::default(),
     )
     .await;
 
@@ -1017,6 +1165,12 @@ impl PromptBackend for DelayedPromptBackend {
         std::thread::sleep(self.delay);
         self.inner.select(message, options, default, writer)
     }
+
+    fn password(&self, message: &str, writer: &mut dyn Write) -> Result<String, InquireError> {
+        self.started.notify_one();
+        std::thread::sleep(self.delay);
+        self.inner.password(message, writer)
+    }
 }
 
 /// Tests the escalation flow:
@@ -1058,7 +1212,7 @@ async fn test_tool_interrupt_menu_cancel_escalates() {
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -1125,6 +1279,7 @@ async fn test_tool_interrupt_menu_cancel_escalates() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -1205,7 +1360,7 @@ async fn test_tool_stop_on_interrupt_commits_responses_without_follow_up() {
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -1273,6 +1428,7 @@ async fn test_tool_stop_on_interrupt_commits_responses_without_follow_up() {
                 .with_interrupt(config.interrupt.tool_call.clone()),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -1346,7 +1502,7 @@ async fn test_interrupt_during_tool_prompt_completes_turn_early() {
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -1384,7 +1540,7 @@ async fn test_interrupt_during_tool_prompt_completes_turn_early() {
             Box::new(InquiryMockExecutor::new(
                 &req.id,
                 &req.name,
-                vec![Question::boolean("confirm", "Proceed?")],
+                vec![Question::boolean("confirm", "Proceed?").unwrap()],
                 "question tool output",
             ))
         });
@@ -1414,6 +1570,7 @@ async fn test_interrupt_during_tool_prompt_completes_turn_early() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -1462,7 +1619,7 @@ async fn test_multiple_tool_calls_in_sequence() {
 
     let config = AppConfig::new_test();
     let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-    let mut workspace = Workspace::new(root).with_backend(fs.clone());
+    let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
     let lock = workspace
         .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
@@ -1524,6 +1681,7 @@ async fn test_multiple_tool_calls_in_sequence() {
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
         InvocationContext::default(),
+        PendingStreamTrim::default(),
     )
     .await;
 
@@ -1571,7 +1729,7 @@ async fn test_empty_tool_response_continues_cycle() {
 
     let config = AppConfig::new_test();
     let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-    let mut workspace = Workspace::new(root).with_backend(fs.clone());
+    let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
     let lock = workspace
         .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
@@ -1613,6 +1771,7 @@ async fn test_empty_tool_response_continues_cycle() {
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
         InvocationContext::default(),
+        PendingStreamTrim::default(),
     )
     .await;
 
@@ -1679,7 +1838,7 @@ async fn test_tool_restart_on_interrupt() {
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -1757,6 +1916,7 @@ async fn test_tool_restart_on_interrupt() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -1833,7 +1993,7 @@ async fn test_merged_stream_exits_after_tool_response() {
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -1877,6 +2037,7 @@ async fn test_merged_stream_exits_after_tool_response() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -1944,7 +2105,7 @@ async fn test_tool_call_with_run_mode_ask_approves() {
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -2003,6 +2164,7 @@ async fn test_tool_call_with_run_mode_ask_approves() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -2086,7 +2248,7 @@ async fn test_tool_call_with_run_mode_ask_skips() {
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -2144,6 +2306,7 @@ async fn test_tool_call_with_run_mode_ask_skips() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -2235,7 +2398,7 @@ async fn test_tool_call_with_run_mode_unattended() {
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -2289,6 +2452,7 @@ async fn test_tool_call_with_run_mode_unattended() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -2372,7 +2536,7 @@ async fn test_tool_call_with_run_mode_skip() {
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -2435,6 +2599,7 @@ async fn test_tool_call_with_run_mode_skip() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -2546,7 +2711,7 @@ async fn test_multiple_tools_with_different_run_modes() {
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -2637,6 +2802,7 @@ async fn test_multiple_tools_with_different_run_modes() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -2732,7 +2898,7 @@ async fn test_tool_call_returns_error() {
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -2784,6 +2950,7 @@ async fn test_tool_call_returns_error() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -2973,7 +3140,7 @@ async fn test_waiting_indicator_shows_during_delay() {
         config.style.streaming.progress.interval_ms = 100;
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -3013,6 +3180,7 @@ async fn test_waiting_indicator_shows_during_delay() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await
         .unwrap();
@@ -3062,7 +3230,7 @@ async fn test_waiting_indicator_survives_keep_alive_and_shows_status() {
         config.style.streaming.progress.interval_ms = 50;
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -3112,6 +3280,7 @@ async fn test_waiting_indicator_survives_keep_alive_and_shows_status() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await
         .unwrap();
@@ -3170,7 +3339,7 @@ async fn test_waiting_indicator_cleared_before_retry_notice() {
         config.assistant.request.base_backoff_ms = 1;
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -3225,6 +3394,7 @@ async fn test_waiting_indicator_cleared_before_retry_notice() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await
         .unwrap();
@@ -3270,7 +3440,7 @@ async fn test_waiting_indicator_not_shown_when_disabled() {
         config.style.streaming.progress.show = false;
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -3309,6 +3479,7 @@ async fn test_waiting_indicator_not_shown_when_disabled() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await
         .unwrap();
@@ -3345,7 +3516,7 @@ async fn test_waiting_indicator_not_shown_for_non_tty() {
         config.style.streaming.progress.delay_secs = 0;
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -3384,6 +3555,7 @@ async fn test_waiting_indicator_not_shown_for_non_tty() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await
         .unwrap();
@@ -3426,7 +3598,7 @@ async fn test_multi_part_tool_call_shows_preparing_spinner() {
         config.style.tool_call.preparing.interval_ms = 50;
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -3562,6 +3734,7 @@ async fn test_multi_part_tool_call_shows_preparing_spinner() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -3612,7 +3785,7 @@ async fn test_turn_start_event_is_emitted() {
 
     let config = AppConfig::new_test();
     let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-    let mut workspace = Workspace::new(root).with_backend(fs.clone());
+    let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
     let lock = workspace
         .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
@@ -3648,6 +3821,7 @@ async fn test_turn_start_event_is_emitted() {
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
         InvocationContext::default(),
+        PendingStreamTrim::default(),
     )
     .await
     .unwrap();
@@ -3672,7 +3846,7 @@ async fn test_turn_start_index_increments_across_turns() {
 
     let config = AppConfig::new_test();
     let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-    let mut workspace = Workspace::new(root).with_backend(fs.clone());
+    let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
     let lock = workspace
         .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
@@ -3710,6 +3884,7 @@ async fn test_turn_start_index_increments_across_turns() {
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
         InvocationContext::default(),
+        PendingStreamTrim::default(),
     )
     .await
     .unwrap();
@@ -3744,6 +3919,7 @@ async fn test_turn_start_index_increments_across_turns() {
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
         InvocationContext::default(),
+        PendingStreamTrim::default(),
     )
     .await
     .unwrap();
@@ -3774,7 +3950,7 @@ async fn test_markdown_flushed_before_tool_header() {
         config.style.tool_call.preparing.show = false;
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -3837,6 +4013,7 @@ async fn test_markdown_flushed_before_tool_header() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await
         .unwrap();
@@ -3937,7 +4114,7 @@ async fn test_parallel_tool_calls_rendered_atomically() {
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -4020,6 +4197,7 @@ async fn test_parallel_tool_calls_rendered_atomically() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await
         .unwrap();
@@ -4108,7 +4286,7 @@ async fn test_single_tool_call_rendered_with_args() {
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -4178,6 +4356,7 @@ async fn test_single_tool_call_rendered_with_args() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await
         .unwrap();
@@ -4259,11 +4438,12 @@ impl Executor for InquiryMockExecutor {
         _cancellation_token: tokio_util::sync::CancellationToken,
     ) -> ExecutorResult {
         for q in &self.questions {
-            if !answers.contains_key(&q.id) {
+            if !answers.contains_key(q.id.as_str()) {
                 return ExecutorResult::NeedsInput {
                     tool_id: self.tool_id.clone(),
                     tool_name: self.tool_name.clone(),
                     question: q.clone(),
+                    source: InquirySource::tool(self.tool_name.clone()),
                     accumulated_answers: answers.clone(),
                 };
             }
@@ -4358,6 +4538,135 @@ fn inquiry_mock_model() -> ModelDetails {
     })
 }
 
+/// The global inquiry override for the output ceiling wins over the parent
+/// assistant's value.
+///
+/// `conversation.inquiry.assistant.request.max_response_bytes` is a public key,
+/// so reading the parent value here would silently ignore it.
+#[tokio::test]
+async fn inquiry_ceiling_honors_the_global_inquiry_override() {
+    let mut config = AppConfig::new_test();
+    config.assistant.request.max_response_bytes = 999_999;
+    config.conversation.inquiry.assistant.request = Some(RequestConfig {
+        max_response_bytes: 4096,
+        ..config.assistant.request
+    });
+
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider::new(vec![]));
+    let model = inquiry_mock_model();
+
+    let backend = build_inquiry_backend(&config, vec![], model, provider, vec![])
+        .await
+        .expect("the inquiry backend builds");
+
+    assert_eq!(
+        backend
+            .config_for("any_tool", "any_question")
+            .max_response_bytes,
+        4096,
+        "the global inquiry override must win over the parent assistant"
+    );
+}
+
+/// A partially-set inquiry request block must not disable the ceiling.
+///
+/// Built through the real loading path rather than by hand: because
+/// `AssistantOverrideConfig::request` is a resolved struct, setting only a
+/// sibling field leaves `max_response_bytes` at `0`, which is the ceiling's
+/// disable sentinel.
+/// Reading it verbatim would silently drop the runaway guard for every inquiry.
+#[tokio::test]
+async fn inquiry_ceiling_survives_a_sibling_only_request_override() {
+    let mut partial = PartialAppConfig::new_test();
+    partial.assistant.request.max_response_bytes = Some(500_000);
+
+    partial.conversation.inquiry.assistant.request = Some(PartialRequestConfig {
+        cache: Some(CachePolicy::Off),
+        ..PartialRequestConfig::default()
+    });
+
+    let config = AppConfig::from_partial_with_defaults(partial).expect("valid config");
+
+    // The resolution the guard has to cope with: the block is present, and its
+    // ceiling field is a zero the user never asked for.
+    assert_eq!(
+        config
+            .conversation
+            .inquiry
+            .assistant
+            .request
+            .expect("the block is set")
+            .max_response_bytes,
+        0
+    );
+
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider::new(vec![]));
+    let model = inquiry_mock_model();
+
+    let backend = build_inquiry_backend(&config, vec![], model, provider, vec![])
+        .await
+        .expect("the inquiry backend builds");
+
+    assert_eq!(
+        backend
+            .config_for("any_tool", "any_question")
+            .max_response_bytes,
+        500_000,
+        "an unset inquiry ceiling must inherit the parent, not disable the guard"
+    );
+}
+
+/// A per-question ceiling wins over the global inquiry override, which in turn
+/// wins over the parent assistant (RFD 034's resolution order).
+#[tokio::test]
+async fn inquiry_ceiling_honors_the_per_question_override() {
+    let mut config = AppConfig::new_test();
+    config.assistant.request.max_response_bytes = 999_999;
+    config.conversation.inquiry.assistant.request = Some(RequestConfig {
+        max_response_bytes: 4096,
+        ..config.assistant.request
+    });
+
+    let mut per_question = PartialAssistantConfig::default();
+    per_question.request.max_response_bytes = Some(512);
+
+    let mut tool = inquiry_tool_config(&["confirm"]);
+    tool.questions
+        .insert("confirm".to_string(), QuestionConfig {
+            target: QuestionTarget::Assistant(Box::new(per_question)),
+            answer: None,
+        });
+    config
+        .conversation
+        .tools
+        .insert("inquiry_tool".to_string(), tool);
+
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider::new(vec![]));
+    let model = inquiry_mock_model();
+
+    let backend = build_inquiry_backend(&config, vec![], model, provider, vec![])
+        .await
+        .expect("the inquiry backend builds");
+
+    assert_eq!(
+        backend
+            .config_for("inquiry_tool", "confirm")
+            .max_response_bytes,
+        512,
+        "the per-question override must win over the global inquiry value"
+    );
+
+    // A question without its own ceiling still inherits the global inquiry
+    // value, not the parent assistant's.
+    assert_eq!(
+        backend
+            .config_for("inquiry_tool", "other")
+            .max_response_bytes,
+        4096,
+        "an unset per-question ceiling falls back to the global inquiry value"
+    );
+}
+
 /// Tool has one boolean question with `QuestionTarget::Assistant`.
 /// Flow: LLM tool call → `NeedsInput` → inquiry → answer → tool completes.
 #[tokio::test]
@@ -4376,7 +4685,7 @@ async fn test_tool_with_single_inquiry() {
         );
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -4411,7 +4720,7 @@ async fn test_tool_with_single_inquiry() {
             Box::new(InquiryMockExecutor::new(
                 &req.id,
                 &req.name,
-                vec![Question::boolean("confirm", "Create backup?")],
+                vec![Question::boolean("confirm", "Create backup?").unwrap()],
                 "inquiry tool output",
             ))
         });
@@ -4434,6 +4743,7 @@ async fn test_tool_with_single_inquiry() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -4483,7 +4793,658 @@ async fn test_tool_with_single_inquiry() {
             .filter_map(|e| e.event.into_inquiry_response())
             .collect();
         assert_eq!(res.len(), 1, "Should have one inquiry response");
-        assert_eq!(res[0].answer, json!(true));
+        assert_eq!(res[0].answer(), Some(&json!(true)));
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out");
+}
+
+/// A `Secret` question with no interactive terminal fails the tool and records
+/// `Cancelled(no_prompt_backend)` (RFD 082 routing guard).
+#[tokio::test]
+async fn test_secret_question_without_tty_fails_tool() {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let mut config = AppConfig::new_test();
+        config.conversation.tools.defaults.run = RunMode::Unattended;
+        // Register the tool without a question config: the question targets
+        // the user by default, and without a TTY it would fall back to the
+        // inquiry backend — which the secret guard refuses.
+        config
+            .conversation
+            .tools
+            .insert("secret_tool".to_string(), inquiry_tool_config(&[]));
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+
+        let chat_request = ChatRequest::from("Use the tool");
+        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+            responses: vec![
+                single_tool_call_events("call_sec", "secret_tool"),
+                final_message_events("Understood."),
+            ],
+            call_index: AtomicUsize::new(0),
+            model: inquiry_mock_model(),
+        });
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let mcp_client = jp_mcp::Client::default();
+        let router = detached_router();
+
+        let executor_source = TestExecutorSource::new().with_executor("secret_tool", |req| {
+            Box::new(InquiryMockExecutor::new(
+                &req.id,
+                &req.name,
+                vec![Question::secret("passphrase", "Enter passphrase").unwrap()],
+                "secret tool output",
+            ))
+        });
+        let tool_defs = executor_source.tool_definitions();
+
+        let result = run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &router,
+            &mcp_client,
+            root,
+            false,
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &tool_defs,
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
+            chat_request,
+            InvocationContext::default(),
+            PendingStreamTrim::default(),
+        )
+        .await;
+
+        assert!(result.is_ok(), "Turn loop should complete: {result:?}");
+
+        let events = lock.events().clone();
+
+        // The tool fails with a tool-level error.
+        let tool_responses: Vec<_> = events
+            .clone()
+            .into_iter()
+            .filter_map(|e| e.event.into_tool_call_response())
+            .collect();
+        assert_eq!(tool_responses.len(), 1);
+        let error = tool_responses[0].result.as_ref().unwrap_err();
+        assert!(error.contains("secret value"), "unexpected error: {error}");
+
+        // The recorded inquiry pair closes as Cancelled(no_prompt_backend).
+        let req: Vec<_> = events
+            .clone()
+            .into_iter()
+            .filter_map(|e| e.event.into_inquiry_request())
+            .collect();
+        assert_eq!(req.len(), 1, "Should have one inquiry request");
+        let res: Vec<_> = events
+            .into_iter()
+            .filter_map(|e| e.event.into_inquiry_response())
+            .collect();
+        assert_eq!(res.len(), 1, "Should have one inquiry response");
+        assert!(matches!(&res[0], InquiryResponse::Cancelled {
+            reason: CancellationReason::NoPromptBackend,
+            ..
+        }));
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out");
+}
+
+/// A `Secret` question whose target is the assistant is refused and records
+/// `Cancelled(assistant_routing_denied)` (RFD 082 routing guard).
+#[tokio::test]
+async fn test_secret_question_with_assistant_target_fails_tool() {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let mut config = AppConfig::new_test();
+        config.conversation.tools.defaults.run = RunMode::Unattended;
+        // Route the secret question to the assistant — the guard refuses.
+        config.conversation.tools.insert(
+            "secret_tool".to_string(),
+            inquiry_tool_config(&["passphrase"]),
+        );
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+
+        let chat_request = ChatRequest::from("Use the tool");
+        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+            responses: vec![
+                single_tool_call_events("call_sec", "secret_tool"),
+                final_message_events("Understood."),
+            ],
+            call_index: AtomicUsize::new(0),
+            model: inquiry_mock_model(),
+        });
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let mcp_client = jp_mcp::Client::default();
+        let router = detached_router();
+
+        let executor_source = TestExecutorSource::new().with_executor("secret_tool", |req| {
+            Box::new(InquiryMockExecutor::new(
+                &req.id,
+                &req.name,
+                vec![Question::secret("passphrase", "Enter passphrase").unwrap()],
+                "secret tool output",
+            ))
+        });
+        let tool_defs = executor_source.tool_definitions();
+
+        let result = run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &router,
+            &mcp_client,
+            root,
+            false,
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &tool_defs,
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
+            chat_request,
+            InvocationContext::default(),
+            PendingStreamTrim::default(),
+        )
+        .await;
+
+        assert!(result.is_ok(), "Turn loop should complete: {result:?}");
+
+        let events = lock.events().clone();
+
+        let tool_responses: Vec<_> = events
+            .clone()
+            .into_iter()
+            .filter_map(|e| e.event.into_tool_call_response())
+            .collect();
+        assert_eq!(tool_responses.len(), 1);
+        assert!(tool_responses[0].result.is_err());
+
+        let res: Vec<_> = events
+            .into_iter()
+            .filter_map(|e| e.event.into_inquiry_response())
+            .collect();
+        assert_eq!(res.len(), 1, "Should have one inquiry response");
+        assert!(matches!(&res[0], InquiryResponse::Cancelled {
+            reason: CancellationReason::AssistantRoutingDenied,
+            ..
+        }));
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out");
+}
+
+/// A `Secret` question answered at the prompter delivers the answer to the tool
+/// in-memory while the persisted response is `Redacted` (RFD 082).
+#[tokio::test]
+async fn test_secret_prompter_answer_is_redacted() {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let mut config = AppConfig::new_test();
+        config.conversation.tools.defaults.run = RunMode::Unattended;
+        // Register the tool without a question config: the question targets
+        // the user and the TTY prompter answers it via the no-echo password
+        // path.
+        config
+            .conversation
+            .tools
+            .insert("secret_tool".to_string(), inquiry_tool_config(&[]));
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+
+        let chat_request = ChatRequest::from("Use the tool");
+        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+            responses: vec![
+                single_tool_call_events("call_sec", "secret_tool"),
+                final_message_events("Secret used."),
+            ],
+            call_index: AtomicUsize::new(0),
+            model: inquiry_mock_model(),
+        });
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let mcp_client = jp_mcp::Client::default();
+        let router = detached_router();
+
+        let executor_source = TestExecutorSource::new().with_executor("secret_tool", |req| {
+            Box::new(InquiryMockExecutor::new(
+                &req.id,
+                &req.name,
+                vec![Question::secret("passphrase", "Enter passphrase").unwrap()],
+                "secret tool output",
+            ))
+        });
+        let tool_defs = executor_source.tool_definitions();
+
+        let result = run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &router,
+            &mcp_client,
+            root,
+            true,
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &tool_defs,
+            printer.clone(),
+            Arc::new(MockPromptBackend::new().with_password_responses(["s3cret"])),
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
+            chat_request,
+            InvocationContext::default(),
+            PendingStreamTrim::default(),
+        )
+        .await;
+
+        assert!(result.is_ok(), "Turn loop should complete: {result:?}");
+
+        let events = lock.events().clone();
+
+        // The answer reached the tool in-memory: it completed successfully.
+        let tool_responses: Vec<_> = events
+            .clone()
+            .into_iter()
+            .filter_map(|e| e.event.into_tool_call_response())
+            .collect();
+        assert_eq!(tool_responses.len(), 1);
+        assert_eq!(tool_responses[0].content(), "secret tool output");
+
+        // The persisted response is redacted and carries no answer value.
+        let res: Vec<_> = events
+            .into_iter()
+            .filter_map(|e| e.event.into_inquiry_response())
+            .collect();
+        assert_eq!(res.len(), 1, "Should have one inquiry response");
+        assert!(matches!(&res[0], InquiryResponse::Redacted { .. }));
+        assert_eq!(res[0].answer(), None);
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out");
+}
+
+/// A `Secret` question with a configured static answer delivers the value to
+/// the tool in-memory while recording `Redacted` instead of `Answered`.
+#[tokio::test]
+async fn test_secret_static_answer_is_redacted() {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let mut config = AppConfig::new_test();
+        config.conversation.tools.defaults.run = RunMode::Unattended;
+        let mut tool_config = inquiry_tool_config(&[]);
+        tool_config
+            .questions
+            .insert("passphrase".to_string(), QuestionConfig {
+                target: QuestionTarget::User,
+                answer: Some(json!("s3cret")),
+            });
+        config
+            .conversation
+            .tools
+            .insert("secret_tool".to_string(), tool_config);
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+
+        let chat_request = ChatRequest::from("Use the tool");
+        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+            responses: vec![
+                single_tool_call_events("call_sec", "secret_tool"),
+                final_message_events("Secret used."),
+            ],
+            call_index: AtomicUsize::new(0),
+            model: inquiry_mock_model(),
+        });
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let mcp_client = jp_mcp::Client::default();
+        let router = detached_router();
+
+        let executor_source = TestExecutorSource::new().with_executor("secret_tool", |req| {
+            Box::new(InquiryMockExecutor::new(
+                &req.id,
+                &req.name,
+                vec![Question::secret("passphrase", "Enter passphrase").unwrap()],
+                "secret tool output",
+            ))
+        });
+        let tool_defs = executor_source.tool_definitions();
+
+        let result = run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &router,
+            &mcp_client,
+            root,
+            false,
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &tool_defs,
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
+            chat_request,
+            InvocationContext::default(),
+            PendingStreamTrim::default(),
+        )
+        .await;
+
+        assert!(result.is_ok(), "Turn loop should complete: {result:?}");
+
+        let events = lock.events().clone();
+
+        // The static answer reached the tool in-memory.
+        let tool_responses: Vec<_> = events
+            .clone()
+            .into_iter()
+            .filter_map(|e| e.event.into_tool_call_response())
+            .collect();
+        assert_eq!(tool_responses.len(), 1);
+        assert_eq!(tool_responses[0].content(), "secret tool output");
+
+        // The persisted response is redacted, not `Answered` with the value.
+        let res: Vec<_> = events
+            .into_iter()
+            .filter_map(|e| e.event.into_inquiry_response())
+            .collect();
+        assert_eq!(res.len(), 1, "Should have one inquiry response");
+        assert!(matches!(&res[0], InquiryResponse::Redacted { .. }));
+        assert_eq!(res[0].answer(), None);
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out");
+}
+
+/// A non-secret question with a configured static answer records a full
+/// `InquiryRequest`/`InquiryResponse::Answered` pair carrying the configured
+/// value (RFD 082: static answers are recorded, not pre-seeded).
+#[tokio::test]
+async fn test_static_answer_records_answered_inquiry() {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let mut config = AppConfig::new_test();
+        config.conversation.tools.defaults.run = RunMode::Unattended;
+        let mut tool_config = inquiry_tool_config(&[]);
+        tool_config
+            .questions
+            .insert("confirm".to_string(), QuestionConfig {
+                target: QuestionTarget::User,
+                answer: Some(json!(true)),
+            });
+        config
+            .conversation
+            .tools
+            .insert("static_tool".to_string(), tool_config);
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+
+        let chat_request = ChatRequest::from("Use the tool");
+        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+            responses: vec![
+                single_tool_call_events("call_static", "static_tool"),
+                final_message_events("Done."),
+            ],
+            call_index: AtomicUsize::new(0),
+            model: inquiry_mock_model(),
+        });
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let mcp_client = jp_mcp::Client::default();
+        let router = detached_router();
+
+        let executor_source = TestExecutorSource::new().with_executor("static_tool", |req| {
+            Box::new(InquiryMockExecutor::new(
+                &req.id,
+                &req.name,
+                vec![Question::boolean("confirm", "Proceed?").unwrap()],
+                "static tool output",
+            ))
+        });
+        let tool_defs = executor_source.tool_definitions();
+
+        let result = run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &router,
+            &mcp_client,
+            root,
+            false,
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &tool_defs,
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
+            chat_request,
+            InvocationContext::default(),
+            PendingStreamTrim::default(),
+        )
+        .await;
+
+        assert!(result.is_ok(), "Turn loop should complete: {result:?}");
+
+        let events = lock.events().clone();
+
+        // The static answer reached the tool and it completed successfully.
+        let tool_responses: Vec<_> = events
+            .clone()
+            .into_iter()
+            .filter_map(|e| e.event.into_tool_call_response())
+            .collect();
+        assert_eq!(tool_responses.len(), 1);
+        assert_eq!(tool_responses[0].content(), "static tool output");
+
+        // The round-trip is recorded as a request/response pair, with the
+        // response carrying the configured value.
+        let req: Vec<_> = events
+            .clone()
+            .into_iter()
+            .filter_map(|e| e.event.into_inquiry_request())
+            .collect();
+        assert_eq!(req.len(), 1, "Should have one inquiry request");
+        let res: Vec<_> = events
+            .into_iter()
+            .filter_map(|e| e.event.into_inquiry_response())
+            .collect();
+        assert_eq!(res.len(), 1, "Should have one inquiry response");
+        assert!(matches!(&res[0], InquiryResponse::Answered { .. }));
+        assert_eq!(res[0].answer(), Some(&json!(true)));
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out");
+}
+
+/// A "remember for this turn" prompter answer is reused for a later tool call
+/// in the same turn, and the cache hit still records a fresh
+/// `InquiryRequest`/`InquiryResponse::Answered` pair (RFD 082).
+#[tokio::test]
+async fn test_remembered_answer_cache_hit_records_new_inquiry_pair() {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let mut config = AppConfig::new_test();
+        config.conversation.tools.defaults.run = RunMode::Unattended;
+        // No question config: the question targets the user and is answered
+        // at the interactive prompter.
+        config
+            .conversation
+            .tools
+            .insert("cached_tool".to_string(), inquiry_tool_config(&[]));
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+
+        let chat_request = ChatRequest::from("Use the tool twice");
+        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+            responses: vec![
+                single_tool_call_events("call_a", "cached_tool"),
+                single_tool_call_events("call_b", "cached_tool"),
+                final_message_events("Done."),
+            ],
+            call_index: AtomicUsize::new(0),
+            model: inquiry_mock_model(),
+        });
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let mcp_client = jp_mcp::Client::default();
+        let router = detached_router();
+
+        let executor_source = TestExecutorSource::new().with_executor("cached_tool", |req| {
+            Box::new(InquiryMockExecutor::new(
+                &req.id,
+                &req.name,
+                vec![Question::boolean("confirm", "Proceed?").unwrap()],
+                "cached tool output",
+            ))
+        });
+        let tool_defs = executor_source.tool_definitions();
+
+        // A single queued 'Y' ("yes, and remember for this turn"): the second
+        // call must be satisfied from the turn cache, because another prompt
+        // would find the queue empty and cancel.
+        let prompt_backend = Arc::new(MockPromptBackend::new().with_inline_responses(['Y']));
+
+        let result = run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &router,
+            &mcp_client,
+            root,
+            true,
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &tool_defs,
+            printer.clone(),
+            prompt_backend,
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
+            chat_request,
+            InvocationContext::default(),
+            PendingStreamTrim::default(),
+        )
+        .await;
+
+        assert!(result.is_ok(), "Turn loop should complete: {result:?}");
+
+        let events = lock.events().clone();
+
+        // Both tool calls completed with the answer.
+        let tool_responses: Vec<_> = events
+            .clone()
+            .into_iter()
+            .filter_map(|e| e.event.into_tool_call_response())
+            .collect();
+        assert_eq!(tool_responses.len(), 2);
+        assert_eq!(tool_responses[0].content(), "cached tool output");
+        assert_eq!(tool_responses[1].content(), "cached tool output");
+
+        // Each round-trip records its own pair; the cache hit records
+        // `Answered`, not nothing.
+        let req: Vec<_> = events
+            .clone()
+            .into_iter()
+            .filter_map(|e| e.event.into_inquiry_request())
+            .collect();
+        assert_eq!(req.len(), 2, "Should have two inquiry requests");
+        let res: Vec<_> = events
+            .into_iter()
+            .filter_map(|e| e.event.into_inquiry_response())
+            .collect();
+        assert_eq!(res.len(), 2, "Should have two inquiry responses");
+        for r in &res {
+            assert!(matches!(r, InquiryResponse::Answered { .. }));
+            assert_eq!(r.answer(), Some(&json!(true)));
+        }
     }))
     .await;
 
@@ -4508,7 +5469,7 @@ async fn test_tool_with_multiple_inquiries() {
         );
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -4546,8 +5507,8 @@ async fn test_tool_with_multiple_inquiries() {
                 &req.id,
                 &req.name,
                 vec![
-                    Question::boolean("confirm", "Proceed?"),
-                    Question::text("reason", "Why?"),
+                    Question::boolean("confirm", "Proceed?").unwrap(),
+                    Question::text("reason", "Why?").unwrap(),
                 ],
                 "both questions answered",
             ))
@@ -4571,6 +5532,7 @@ async fn test_tool_with_multiple_inquiries() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -4652,7 +5614,7 @@ async fn test_parallel_tools_one_with_inquiry() {
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -4696,7 +5658,7 @@ async fn test_parallel_tools_one_with_inquiry() {
                 Box::new(InquiryMockExecutor::new(
                     &req.id,
                     &req.name,
-                    vec![Question::boolean("confirm", "Proceed?")],
+                    vec![Question::boolean("confirm", "Proceed?").unwrap()],
                     "inquiry completed",
                 ))
             })
@@ -4722,6 +5684,7 @@ async fn test_parallel_tools_one_with_inquiry() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -4782,7 +5745,7 @@ async fn test_parallel_tools_both_with_inquiries() {
             .insert("tool_b".to_string(), inquiry_tool_config(&["confirm_b"]));
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -4828,7 +5791,7 @@ async fn test_parallel_tools_both_with_inquiries() {
                 Box::new(InquiryMockExecutor::new(
                     &req.id,
                     &req.name,
-                    vec![Question::boolean("confirm_a", "Proceed A?")],
+                    vec![Question::boolean("confirm_a", "Proceed A?").unwrap()],
                     "tool_a done",
                 ))
             })
@@ -4836,7 +5799,7 @@ async fn test_parallel_tools_both_with_inquiries() {
                 Box::new(InquiryMockExecutor::new(
                     &req.id,
                     &req.name,
-                    vec![Question::boolean("confirm_b", "Proceed B?")],
+                    vec![Question::boolean("confirm_b", "Proceed B?").unwrap()],
                     "tool_b done",
                 ))
             });
@@ -4859,6 +5822,7 @@ async fn test_parallel_tools_both_with_inquiries() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -4962,7 +5926,7 @@ async fn test_retry_counter_resets_on_successful_event() {
         config.assistant.request.max_backoff_secs = 1;
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -5008,6 +5972,7 @@ async fn test_retry_counter_resets_on_successful_event() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request,
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -5081,7 +6046,7 @@ async fn test_unavailable_tool_before_approved_does_not_panic() {
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -5146,6 +6111,7 @@ async fn test_unavailable_tool_before_approved_does_not_panic() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -5197,7 +6163,7 @@ async fn test_inquiry_failure_marks_tool_as_error() {
         );
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -5232,7 +6198,7 @@ async fn test_inquiry_failure_marks_tool_as_error() {
             Box::new(InquiryMockExecutor::new(
                 &req.id,
                 &req.name,
-                vec![Question::boolean("confirm", "Confirm?")],
+                vec![Question::boolean("confirm", "Confirm?").unwrap()],
                 "should not reach this",
             ))
         });
@@ -5255,6 +6221,7 @@ async fn test_inquiry_failure_marks_tool_as_error() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await;
 
@@ -5403,7 +6370,7 @@ async fn test_live_header_uses_configured_model_id_not_provider_returned() {
         let config = AppConfig::new_test();
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -5447,6 +6414,7 @@ async fn test_live_header_uses_configured_model_id_not_provider_returned() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request,
             InvocationContext::default(),
+            PendingStreamTrim::default(),
         )
         .await
         .unwrap();
@@ -5506,7 +6474,7 @@ async fn reasoning_before_a_tool_call_shades_the_tool_chrome() {
         });
 
     let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-    let mut workspace = Workspace::new(root).with_backend(fs.clone());
+    let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
     let lock = workspace
         .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
         .unwrap();
@@ -5561,6 +6529,7 @@ async fn reasoning_before_a_tool_call_shades_the_tool_chrome() {
         ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
         ChatRequest::from("use the tool"),
         InvocationContext::default(),
+        PendingStreamTrim::default(),
     )
     .await
     .unwrap();
@@ -5576,5 +6545,306 @@ async fn reasoning_before_a_tool_call_shades_the_tool_chrome() {
             .windows(b"Calling tool".len())
             .any(|w| w == b"Calling tool"),
         "the shaded header text should still be present.\nChrome:\n{chrome:?}"
+    );
+}
+
+/// Metadata key a provider repair patch targets in the rebuild tests.
+fn rebuild_patch_key(round: u32) -> String {
+    format!("stale_signature_{round}")
+}
+
+const REBUILD_PATCH_VALUE: &str = "stale";
+
+/// One repair cycle: strip the metadata for `round`, then ask for a rebuild.
+///
+/// This is the shape a provider repair actually takes.
+/// The rejection is a request-validation error, so nothing streams before it.
+///
+/// The leading flush has no buffered part behind it, so it commits nothing.
+/// It is here because a cycle that renders nothing must not count as progress:
+/// if it did, the rebuild budget would reset on every rebuilt request and the
+/// cap could never be reached.
+fn repair_cycle(round: u32) -> Vec<Event> {
+    vec![
+        Event::flush(0),
+        Event::Patch(vec![EventPatch {
+            matcher: EventMatcher::MetadataValue {
+                key: rebuild_patch_key(round),
+                value: REBUILD_PATCH_VALUE.to_owned(),
+            },
+            action: PatchAction::RemoveMetadata(rebuild_patch_key(round)),
+        }]),
+        Event::Finished(FinishReason::Retry),
+    ]
+}
+
+/// Seed one assistant event carrying a distinct patchable key per round, so
+/// every repair cycle has something of its own to remove and therefore makes
+/// real progress.
+fn seed_patchable_metadata(lock: &jp_workspace::ConversationLock, rounds: u32) {
+    lock.as_mut().update_events(|stream| {
+        // A complete prior turn: an incomplete trailing turn would be trimmed
+        // when the loop starts its own.
+        stream.start_turn(ChatRequest::from("earlier question"));
+
+        let mut event = ConversationEvent::now(ChatResponse::reasoning("thinking"));
+        for round in 0..rounds {
+            event
+                .metadata
+                .insert(rebuild_patch_key(round), REBUILD_PATCH_VALUE.into());
+        }
+
+        stream
+            .current_turn_mut()
+            .add_event(event)
+            .build()
+            .expect("valid stream");
+    });
+}
+
+/// A provider that keeps patching and asking for a rebuild is stopped by the
+/// consecutive-rebuild cap.
+///
+/// Every cycle here makes genuine progress, so the progress guard never fires
+/// and the cap is the only thing that can end the turn.
+/// The mock is scripted with exactly one cycle more than the cap allows: if the
+/// cap regresses, the loop asks for a further batch and the mock panics rather
+/// than looping silently.
+#[tokio::test]
+async fn test_rebuild_cap_stops_a_provider_that_keeps_requesting_rebuilds() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    let storage = root.join(".jp");
+
+    let config = AppConfig::new_test();
+    let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+    let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+        .unwrap();
+
+    let rounds = MAX_CONSECUTIVE_REBUILDS + 1;
+    seed_patchable_metadata(&lock, rounds);
+
+    let batches = (0..rounds).map(repair_cycle).collect();
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider::with_batches(batches));
+    let model = provider
+        .model_details(&"test-model".parse().unwrap())
+        .await
+        .unwrap();
+
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let mcp_client = jp_mcp::Client::default();
+    let (router, _signals) = test_router();
+    let router = Arc::new(router);
+
+    let result = run_turn_loop(
+        Arc::clone(&provider),
+        &model,
+        &config,
+        &router,
+        &mcp_client,
+        root,
+        false,
+        &[],
+        &lock,
+        ToolChoice::Auto,
+        &[],
+        printer.clone(),
+        Arc::new(MockPromptBackend::new()),
+        ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
+        ChatRequest::from("repair this"),
+        InvocationContext::default(),
+        PendingStreamTrim::default(),
+    )
+    .await;
+
+    let error = result.expect_err("the turn must abort once the rebuild cap is reached");
+    // The outer error only renders "LLM error"; the refusal is in the source.
+    let message = format!("{error:?}");
+    assert!(
+        message.contains("times in a row"),
+        "the abort should name the rebuild cap.\nError:\n{message}"
+    );
+}
+
+/// A refused rebuild ends the turn, so a retry line left by an earlier cycle
+/// has to be retired first.
+///
+/// A repair cycle renders nothing, so no event reaches the clear on the success
+/// path, and the final error would otherwise be written onto the notification.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_refused_rebuild_clears_the_retry_line() {
+    let test_result = Box::pin(timeout(Duration::from_secs(10), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let mut config = AppConfig::new_test();
+        // The waiting indicator writes its own erase sequences, which would
+        // blur what this test asserts.
+        config.style.streaming.progress.show = false;
+        // Keep the retry backoff out of the test's runtime.
+        config.assistant.request.base_backoff_ms = 1;
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+
+        // First cycle: a retryable error, which writes the retry notification and
+        // leaves the cursor parked at the end of it.
+        // Second cycle: a patch matching no event, so the rebuild that follows is
+        // refused for lack of progress and the turn aborts.
+        let provider: Arc<dyn Provider> = Arc::new(PacedMockProvider::new(Duration::ZERO, vec![
+            vec![(
+                Duration::ZERO,
+                Err(StreamError::transient("simulated hiccup")),
+            )],
+            vec![
+                (
+                    Duration::ZERO,
+                    Ok(Event::Patch(vec![EventPatch {
+                        matcher: EventMatcher::MetadataValue {
+                            key: "absent_key".into(),
+                            value: "absent_value".into(),
+                        },
+                        action: PatchAction::RemoveMetadata("absent_key".into()),
+                    }])),
+                ),
+                (Duration::ZERO, Ok(Event::Finished(FinishReason::Retry))),
+            ],
+        ]));
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let mcp_client = jp_mcp::Client::default();
+        let router = detached_router();
+
+        let result = run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &router,
+            &mcp_client,
+            root,
+            true, // is_tty
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &[],
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
+            ChatRequest::from("answer this"),
+            InvocationContext::default(),
+            PendingStreamTrim::default(),
+        )
+        .await;
+
+        assert!(
+            result.is_err(),
+            "a rebuild without progress must abort the turn"
+        );
+
+        printer.flush();
+
+        let chrome = err.lock();
+        assert!(
+            chrome.contains("retrying (1/"),
+            "the first cycle should have written a retry notice.\nChrome:\n{chrome}"
+        );
+        // The notice writes its own `\r\x1b[K` prefix, so occurrences cannot be
+        // counted. What distinguishes a retired line is that the erase is the
+        // last thing written, leaving the terminal clean for the final error.
+        assert!(
+            chrome.ends_with("\r\x1b[K"),
+            "the retry line must be retired before the turn aborts.\nChrome:\n{chrome:?}"
+        );
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out");
+}
+
+/// Content streamed before a refused rebuild survives the abort.
+///
+/// A part sits in the coordinator's event builder until a flush or terminal
+/// event reaches it, and the rebuild request is intercepted before the
+/// coordinator sees it, so persisting the conversation alone would drop text
+/// the user already saw.
+#[tokio::test]
+async fn test_refused_rebuild_persists_streamed_content() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    let storage = root.join(".jp");
+
+    let config = AppConfig::new_test();
+    let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+    let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+        .unwrap();
+    let conv_id = lock.id();
+
+    // No patch precedes the rebuild request, so it is refused for lack of
+    // progress while a streamed part is still unflushed.
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider::with_batches(vec![vec![
+        Event::message(0, "partial answer"),
+        Event::Finished(FinishReason::Retry),
+    ]]));
+    let model = provider
+        .model_details(&"test-model".parse().unwrap())
+        .await
+        .unwrap();
+
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let mcp_client = jp_mcp::Client::default();
+    let (router, _signals) = test_router();
+    let router = Arc::new(router);
+
+    let result = run_turn_loop(
+        Arc::clone(&provider),
+        &model,
+        &config,
+        &router,
+        &mcp_client,
+        root,
+        false,
+        &[],
+        &lock,
+        ToolChoice::Auto,
+        &[],
+        printer.clone(),
+        Arc::new(MockPromptBackend::new()),
+        ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
+        ChatRequest::from("answer this"),
+        InvocationContext::default(),
+        PendingStreamTrim::default(),
+    )
+    .await;
+
+    assert!(
+        result.is_err(),
+        "a rebuild without a preceding patch must abort the turn"
+    );
+
+    let content = fs
+        .read_test_events_raw(&conv_id)
+        .expect("events should be persisted");
+
+    assert!(
+        content.contains("partial answer"),
+        "streamed content must survive the abort.\nFile contents:\n{content}"
     );
 }
