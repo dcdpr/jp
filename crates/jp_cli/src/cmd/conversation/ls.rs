@@ -11,7 +11,11 @@ use jp_term::{
 use jp_workspace::ConversationHandle;
 
 use crate::{
-    cmd::{ConversationLoadRequest, Output, conversation_id::PositionalIds},
+    cmd::{
+        ConversationLoadRequest, Output,
+        conversation_id::PositionalIds,
+        label::{self, LabelSelector},
+    },
     ctx::Ctx,
     output::print_table,
 };
@@ -47,6 +51,13 @@ pub(crate) struct Ls {
     /// Show archived conversations instead of live ones.
     #[arg(long)]
     archived: bool,
+
+    /// Only show conversations carrying this label.
+    ///
+    /// `key=value` matches the exact value, a bare `key` matches any value.
+    /// Repeat the flag to require several; every selector must match.
+    #[arg(long = "label", value_name = "KEY[=VALUE]")]
+    labels: Vec<LabelSelector>,
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
@@ -129,8 +140,10 @@ impl Ls {
                 id,
             };
 
-        let matches_filters = |id: &ConversationId, local: bool| -> bool {
-            filter_ids.as_ref().is_none_or(|f| f.contains(id)) && (!self.local || local)
+        let matches_filters = |id: &ConversationId, c: &Conversation, local: bool| -> bool {
+            filter_ids.as_ref().is_none_or(|f| f.contains(id))
+                && (!self.local || local)
+                && label::matches(&c.labels, &self.labels)
         };
 
         // `local` is derived from storage presence: a conversation is shown as
@@ -142,7 +155,7 @@ impl Ls {
                 .filter_map(|(id, c, presence)| {
                     let local = presence == StoragePresence::UserLocalOnly;
                     let external = presence == StoragePresence::WorkspaceOnly;
-                    matches_filters(&id, local).then(|| to_details(id, &c, local, external))
+                    matches_filters(&id, &c, local).then(|| to_details(id, &c, local, external))
                 })
                 .collect()
         } else {
@@ -152,7 +165,7 @@ impl Ls {
                     let presence = workspace.conversation_presence(id);
                     let local = presence == Some(StoragePresence::UserLocalOnly);
                     let external = presence == Some(StoragePresence::WorkspaceOnly);
-                    matches_filters(id, local).then(|| to_details(*id, &c, local, external))
+                    matches_filters(id, &c, local).then(|| to_details(*id, &c, local, external))
                 })
                 .collect()
         };

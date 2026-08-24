@@ -192,12 +192,16 @@ Quoted strings, numbers, `true`, `false`, and `null` in the type position define
 literal (constant) values:
 
 ```
-kind "fixed"                   → {"const": "fixed"}
-version 1                      → {"const": 1}
-ratio 0.5                      → {"const": 0.5}
-answer true                    → {"const": true}
-cleared null                   → {"const": null}
+kind "fixed"                   → {"type": "string", "const": "fixed"}
+version 1                      → {"type": "integer", "const": 1}
+ratio 0.5                      → {"type": "number", "const": 0.5}
+answer true                    → {"type": "boolean", "const": true}
+cleared null                   → {"type": "null", "const": null}
 ```
+
+A literal carries both its type and its value.
+`{"type": "integer", "const": 1}` and `{"const": 1}` accept the same documents;
+the first also says what kind of value it is.
 
 Strings must be quoted in the type position to distinguish them from type
 keywords.
@@ -206,18 +210,18 @@ keywords.
 ### Unions
 
 The pipe `|` creates union types.
-When all variants are literals, the output uses `enum` (widely supported by LLM
-providers in strict mode).
-When the union mixes literals and types, the output uses `anyOf`.
+When every variant is a literal and the literals share a type, the output is a
+typed `enum`; integer and float literals together widen to `number`.
+Every other union is an `anyOf`.
 
-**All literals — `enum`:**
+**All literals of one type — typed `enum`:**
 
 ```
 status "active"|"inactive"|"archived"
 ```
 
 ```json
-{"enum": ["active", "inactive", "archived"]}
+{"type": "string", "enum": ["active", "inactive", "archived"]}
 ```
 
 **Mixed types — `anyOf`:**
@@ -227,17 +231,23 @@ value "special"|int
 ```
 
 ```json
-{"anyOf": [{"const": "special"}, {"type": "integer"}]}
+{"anyOf": [{"type": "string", "const": "special"}, {"type": "integer"}]}
 ```
 
-**Mixed literals (different JSON types) — `enum`:**
+**Mixed literal types — `anyOf`:**
 
 ```
 value "foo"|"bar"|42
 ```
 
 ```json
-{"enum": ["foo", "bar", 42]}
+{
+  "anyOf": [
+    {"type": "string", "const": "foo"},
+    {"type": "string", "const": "bar"},
+    {"type": "integer", "const": 42}
+  ]
+}
 ```
 
 Inside arrays, `|` defines which item types the array accepts:
@@ -257,7 +267,7 @@ tags ["foo"|"bar"|"baz"]
 ```
 
 ```json
-{"type": "array", "items": {"enum": ["foo", "bar", "baz"]}}
+{"type": "array", "items": {"type": "string", "enum": ["foo", "bar", "baz"]}}
 ```
 
 At the field level, `|` creates a union of the entire type:
@@ -392,7 +402,7 @@ This produces:
       "properties": {
         "name": {"type": "string"},
         "age": {"type": "integer"},
-        "role": {"enum": ["engineer", "manager", "designer"]},
+        "role": {"type": "string", "enum": ["engineer", "manager", "designer"]},
         "misc": {"type": "array", "items": {}, "description": "whatever you want"},
         "nested": {
           "type": "object",

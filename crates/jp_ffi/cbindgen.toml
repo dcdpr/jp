@@ -1,0 +1,12 @@
+autogen_warning = "// Generated from the `jp_ffi` crate. Do not edit; run `just build-ffi`."
+language = "C"
+pragma_once = true
+cpp_compat = true
+documentation = true
+documentation_style = "doxy"
+usize_is_size_t = true
+
+[parse]
+# Only `jp_ffi` declares C entry points. Its dependencies are ordinary Rust
+# crates, and parsing them would cost build time to find nothing.
+parse_deps = false

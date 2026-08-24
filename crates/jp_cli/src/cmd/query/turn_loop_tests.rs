@@ -329,7 +329,7 @@ async fn test_interrupt_stop_during_streaming_persists_content() {
 
         let config = AppConfig::new_test();
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
@@ -430,7 +430,7 @@ async fn test_streaming_interrupt_menu_cancel_escalates() {
 
         let config = AppConfig::new_test();
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
@@ -537,7 +537,7 @@ async fn test_normal_completion_persists_content() {
 
     let config = AppConfig::new_test();
     let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-    let mut workspace = Workspace::new(root).with_backend(fs.clone());
+    let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
     let lock = workspace
         .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
@@ -619,7 +619,7 @@ async fn premature_stream_end_without_finished_returns_error() {
     config.assistant.request.max_retries = 0;
 
     let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-    let mut workspace = Workspace::new(root).with_backend(fs.clone());
+    let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
     let lock = workspace
         .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
@@ -686,7 +686,7 @@ async fn premature_stream_end_exhausts_retry_budget() {
     config.assistant.request.base_backoff_ms = 0;
 
     let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-    let mut workspace = Workspace::new(root).with_backend(fs.clone());
+    let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
     let lock = workspace
         .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
@@ -764,7 +764,7 @@ async fn output_ceiling_ends_turn_without_re_requesting() {
     config.assistant.request.stream_idle_timeout_secs = 0;
 
     let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-    let mut workspace = Workspace::new(root).with_backend(fs.clone());
+    let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
     let lock = workspace
         .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
@@ -848,7 +848,7 @@ async fn orphan_tool_call_is_sanitized_before_provider_request() {
 
     let config = AppConfig::new_test();
     let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-    let mut workspace = Workspace::new(root).with_backend(fs.clone());
+    let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
     let lock = workspace
         .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
@@ -948,7 +948,7 @@ async fn test_tool_call_cycle_completes_with_followup() {
 
     let config = AppConfig::new_test();
     let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-    let mut workspace = Workspace::new(root).with_backend(fs.clone());
+    let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
     let lock = workspace
         .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
@@ -1212,7 +1212,7 @@ async fn test_tool_interrupt_menu_cancel_escalates() {
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -1360,7 +1360,7 @@ async fn test_tool_stop_on_interrupt_commits_responses_without_follow_up() {
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -1502,7 +1502,7 @@ async fn test_interrupt_during_tool_prompt_completes_turn_early() {
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -1619,7 +1619,7 @@ async fn test_multiple_tool_calls_in_sequence() {
 
     let config = AppConfig::new_test();
     let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-    let mut workspace = Workspace::new(root).with_backend(fs.clone());
+    let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
     let lock = workspace
         .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
@@ -1729,7 +1729,7 @@ async fn test_empty_tool_response_continues_cycle() {
 
     let config = AppConfig::new_test();
     let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-    let mut workspace = Workspace::new(root).with_backend(fs.clone());
+    let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
     let lock = workspace
         .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
@@ -1838,7 +1838,7 @@ async fn test_tool_restart_on_interrupt() {
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -1993,7 +1993,7 @@ async fn test_merged_stream_exits_after_tool_response() {
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -2105,7 +2105,7 @@ async fn test_tool_call_with_run_mode_ask_approves() {
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -2248,7 +2248,7 @@ async fn test_tool_call_with_run_mode_ask_skips() {
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -2398,7 +2398,7 @@ async fn test_tool_call_with_run_mode_unattended() {
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -2536,7 +2536,7 @@ async fn test_tool_call_with_run_mode_skip() {
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -2711,7 +2711,7 @@ async fn test_multiple_tools_with_different_run_modes() {
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -2898,7 +2898,7 @@ async fn test_tool_call_returns_error() {
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -3140,7 +3140,7 @@ async fn test_waiting_indicator_shows_during_delay() {
         config.style.streaming.progress.interval_ms = 100;
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -3230,7 +3230,7 @@ async fn test_waiting_indicator_survives_keep_alive_and_shows_status() {
         config.style.streaming.progress.interval_ms = 50;
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -3339,7 +3339,7 @@ async fn test_waiting_indicator_cleared_before_retry_notice() {
         config.assistant.request.base_backoff_ms = 1;
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -3440,7 +3440,7 @@ async fn test_waiting_indicator_not_shown_when_disabled() {
         config.style.streaming.progress.show = false;
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -3516,7 +3516,7 @@ async fn test_waiting_indicator_not_shown_for_non_tty() {
         config.style.streaming.progress.delay_secs = 0;
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -3598,7 +3598,7 @@ async fn test_multi_part_tool_call_shows_preparing_spinner() {
         config.style.tool_call.preparing.interval_ms = 50;
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -3785,7 +3785,7 @@ async fn test_turn_start_event_is_emitted() {
 
     let config = AppConfig::new_test();
     let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-    let mut workspace = Workspace::new(root).with_backend(fs.clone());
+    let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
     let lock = workspace
         .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
@@ -3846,7 +3846,7 @@ async fn test_turn_start_index_increments_across_turns() {
 
     let config = AppConfig::new_test();
     let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-    let mut workspace = Workspace::new(root).with_backend(fs.clone());
+    let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
     let lock = workspace
         .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
@@ -3950,7 +3950,7 @@ async fn test_markdown_flushed_before_tool_header() {
         config.style.tool_call.preparing.show = false;
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -4114,7 +4114,7 @@ async fn test_parallel_tool_calls_rendered_atomically() {
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -4286,7 +4286,7 @@ async fn test_single_tool_call_rendered_with_args() {
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -4685,7 +4685,7 @@ async fn test_tool_with_single_inquiry() {
         );
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -5469,7 +5469,7 @@ async fn test_tool_with_multiple_inquiries() {
         );
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -5614,7 +5614,7 @@ async fn test_parallel_tools_one_with_inquiry() {
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -5745,7 +5745,7 @@ async fn test_parallel_tools_both_with_inquiries() {
             .insert("tool_b".to_string(), inquiry_tool_config(&["confirm_b"]));
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -5926,7 +5926,7 @@ async fn test_retry_counter_resets_on_successful_event() {
         config.assistant.request.max_backoff_secs = 1;
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -6046,7 +6046,7 @@ async fn test_unavailable_tool_before_approved_does_not_panic() {
             });
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -6163,7 +6163,7 @@ async fn test_inquiry_failure_marks_tool_as_error() {
         );
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -6370,7 +6370,7 @@ async fn test_live_header_uses_configured_model_id_not_provider_returned() {
         let config = AppConfig::new_test();
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -6474,7 +6474,7 @@ async fn reasoning_before_a_tool_call_shades_the_tool_chrome() {
         });
 
     let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-    let mut workspace = Workspace::new(root).with_backend(fs.clone());
+    let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
     let lock = workspace
         .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
         .unwrap();
@@ -6618,7 +6618,7 @@ async fn test_rebuild_cap_stops_a_provider_that_keeps_requesting_rebuilds() {
 
     let config = AppConfig::new_test();
     let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-    let mut workspace = Workspace::new(root).with_backend(fs.clone());
+    let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
     let lock = workspace
         .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
@@ -6690,7 +6690,7 @@ async fn test_refused_rebuild_clears_the_retry_line() {
         config.assistant.request.base_backoff_ms = 1;
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
@@ -6789,7 +6789,7 @@ async fn test_refused_rebuild_persists_streamed_content() {
 
     let config = AppConfig::new_test();
     let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-    let mut workspace = Workspace::new(root).with_backend(fs.clone());
+    let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
 
     let lock = workspace
         .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)

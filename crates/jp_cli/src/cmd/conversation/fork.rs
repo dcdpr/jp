@@ -1,12 +1,21 @@
 use std::sync::Arc;
 
 use jp_conversation::{ConversationStream, Error as ConversationError};
+use jp_inquire::prompt::TerminalPromptBackend;
 use jp_storage::backend::Projection;
 use jp_workspace::{ConversationHandle, ConversationLock};
 use tracing::debug;
 
 use crate::{
-    cmd::{ConversationLoadRequest, Output, conversation_id::PositionalIds, time::TimeThreshold},
+    cmd::{
+        ConversationLoadRequest, Output,
+        conversation_id::PositionalIds,
+        label::{
+            self, LabelDirectives,
+            resolve::{Resolver, Trigger},
+        },
+        time::TimeThreshold,
+    },
     ctx::Ctx,
 };
 
@@ -71,6 +80,12 @@ pub(crate) struct Fork {
     /// Set a custom title for the forked conversation.
     #[arg(long, short)]
     title: Option<String>,
+
+    /// Set labels on the forked conversation.
+    ///
+    /// Applied on top of the labels inherited from the source conversation.
+    #[command(flatten)]
+    labels: LabelDirectives<false, true>,
 }
 
 impl Fork {
@@ -122,7 +137,8 @@ impl Fork {
                     (None, Some(l)) => events.retain_last_turns(l),
                     (Some(f), Some(l)) => events.retain_first_and_last_turns(f, l),
                 }
-            })?;
+            })
+            .await?;
 
             if self.compact.should_compact() {
                 let cfg = ctx.config();
@@ -154,6 +170,14 @@ impl Fork {
                 });
             }
 
+            if !self.labels.is_empty() {
+                let directives = self.labels.resolved();
+                let missing = lock
+                    .as_mut()
+                    .update_metadata(|m| label::apply(&mut m.labels, &directives));
+                label::report_missing(&ctx.printer, lock.id(), &missing.missing);
+            }
+
             if self.activate
                 && let Some(session) = &ctx.session
                 && let Err(error) =
@@ -169,16 +193,36 @@ impl Fork {
 }
 
 /// Fork a conversation and return the new conversation's lock.
-pub(crate) fn fork_conversation(
+///
+/// The fork inherits the source's labels, then every `apply_on.fork` rule is
+/// re-resolved over them.
+/// Resolution happens *before* the fork is created, so a rule that needs
+/// confirmation and finds no terminal to ask on fails without leaving an
+/// unreported conversation behind.
+pub(crate) async fn fork_conversation(
     ctx: &mut Ctx,
     source: &ConversationHandle,
     mut filter: impl FnMut(&mut ConversationStream),
 ) -> crate::Result<ConversationLock> {
     let now = ctx.now();
 
+    // Resolved up front: everything below this line writes to disk.
+    let config = ctx.config();
+    let prompts = TerminalPromptBackend;
+    let resolved = Resolver::new(
+        &config.conversation.labels,
+        ctx.workspace.root(),
+        ctx.term.is_tty,
+        &ctx.printer,
+        &prompts,
+    )
+    .automatic(Trigger::Fork)
+    .await?;
+
     let mut new_conversation = ctx.workspace.metadata(source)?.clone();
     new_conversation.last_activated_at = now;
     new_conversation.expires_at = None;
+    new_conversation.labels.extend(resolved);
 
     let mut new_events = ctx.workspace.events(source)?.clone().with_created_at(now);
 

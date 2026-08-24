@@ -25,7 +25,7 @@ fn test_session() -> Session {
 
 /// Build a workspace with a conversation that the session has activated.
 fn workspace_with_active_conversation(id: ConversationId) -> (Workspace, Session) {
-    let mut ws = Workspace::new("/tmp/jp-cli-archive-test");
+    let mut ws = Workspace::in_memory("/tmp/jp-cli-archive-test");
     ws.create_conversation_with_id(id, Conversation::default(), Arc::new(AppConfig::new_test()));
 
     let session = test_session();
@@ -206,7 +206,7 @@ fn make_conversation(last_activated_secs: i64) -> Conversation {
 }
 
 fn workspace_with(conversations: &[(ConversationId, Conversation)]) -> Workspace {
-    let mut ws = Workspace::new("/tmp/jp-cli-archive-resolve-test");
+    let mut ws = Workspace::in_memory("/tmp/jp-cli-archive-resolve-test");
     let config = Arc::new(AppConfig::new_test());
     for (id, conv) in conversations {
         ws.create_conversation_with_id(*id, conv.clone(), config.clone());

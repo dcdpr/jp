@@ -87,8 +87,8 @@ pub(crate) fn event_scope(kind: &EventKind) -> Option<ConcreteScope> {
 
 /// Extract all searchable text lines from an event.
 ///
-/// Lines may be borrowed from the event or owned (tool call arguments are
-/// serialized on demand).
+/// Lines may be borrowed from the event or owned (tool call arguments and
+/// structured responses are serialized on demand).
 pub(crate) fn event_lines(kind: &EventKind) -> Vec<Cow<'_, str>> {
     match kind {
         EventKind::ChatRequest(req) => req.content.lines().map(Cow::Borrowed).collect(),
@@ -98,12 +98,21 @@ pub(crate) fn event_lines(kind: &EventKind) -> Vec<Cow<'_, str>> {
         EventKind::ChatResponse(ChatResponse::Reasoning { reasoning }) => {
             reasoning.lines().map(Cow::Borrowed).collect()
         }
-        EventKind::ChatResponse(ChatResponse::Structured { data }) => data
-            .as_str()
-            .iter()
-            .flat_map(|text| text.lines())
-            .map(Cow::Borrowed)
-            .collect(),
+        EventKind::ChatResponse(ChatResponse::Structured { data }) => match data.as_str() {
+            // A response whose JSON failed to parse is kept as a raw string.
+            // Searching it verbatim avoids re-quoting and escaping it.
+            Some(text) => text.lines().map(Cow::Borrowed).collect(),
+            // Anything else was parsed into a `Value` before it was persisted,
+            // so its text has to be rebuilt. Pretty-printed for the same reason
+            // tool call arguments are.
+            None => serde_json::to_string_pretty(data)
+                .map(|json| {
+                    json.lines()
+                        .map(|line| Cow::Owned(line.to_owned()))
+                        .collect()
+                })
+                .unwrap_or_default(),
+        },
         EventKind::ToolCallRequest(req) => {
             let mut out: Vec<Cow<'_, str>> = req.name.lines().map(Cow::Borrowed).collect();
             if !req.arguments.is_empty() {
@@ -319,17 +328,13 @@ impl Matcher {
     }
 }
 
-/// Filter conversation IDs to those whose title or chat content contains
-/// `pattern` as a literal.
+/// Filter conversation IDs to those containing `pattern` as a literal.
 ///
 /// Smart-case: case-insensitive unless `pattern` contains an uppercase
 /// character.
-/// Searched scopes: title, user, assistant, reasoning, and structured.
-/// Deliberately narrower than `conversation grep`, which also reads tool calls,
-/// tool results, and inquiries: this backs `conversation use --grep`, whose job
-/// is finding a conversation by what was *said* in it.
-/// The scope set is fixed because the flag has no way to express one; reach for
-/// `conversation grep` to search tool traffic, then pass the ID back to `use`.
+/// Every searchable scope is read: title, chat text, reasoning, structured
+/// output, tool call names and arguments, tool results, and inquiry questions.
+/// That is the same set `conversation grep` searches by default.
 /// Runs in parallel via rayon and short-circuits on the first match per
 /// conversation.
 ///
@@ -350,7 +355,7 @@ pub(crate) fn filter_ids(
         .collect())
 }
 
-/// Whether the conversation's title or chat content matches.
+/// Whether any of the conversation's searchable text matches.
 fn id_matches(ctx: &Ctx, id: ConversationId, matcher: &Matcher) -> bool {
     let Ok(handle) = ctx.workspace.acquire_conversation(&id) else {
         return false;
@@ -371,18 +376,6 @@ fn id_matches(ctx: &Ctx, id: ConversationId, matcher: &Matcher) -> bool {
     };
 
     for event in events.iter() {
-        let Some(scope) = event_scope(&event.event.kind) else {
-            continue;
-        };
-        if !matches!(
-            scope,
-            ConcreteScope::User
-                | ConcreteScope::Assistant
-                | ConcreteScope::Reasoning
-                | ConcreteScope::Structured
-        ) {
-            continue;
-        }
         for line in event_lines(&event.event.kind) {
             if matcher.is_match(&line) {
                 return true;

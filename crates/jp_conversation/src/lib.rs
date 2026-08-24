@@ -43,7 +43,7 @@ pub use compaction::{
 pub use conversation::{Conversation, ConversationId};
 pub use error::Error;
 pub use event::{ConversationEvent, EventKind};
-pub use storage::decode_event_value;
+pub use storage::{decode_event_value, rfc3339};
 pub use stream::{ConversationStream, IterTurns, StreamError, Turn, TurnMut};
 
 /// A wrapper around `DateTime<Utc>` that implements `Debug` to match `time`'s

@@ -88,7 +88,7 @@ use jp_conversation::{
     event::{ChatRequest, ChatResponse},
     thread::{Thread, ThreadBuilder},
 };
-use jp_inquire::prompt::TerminalPromptBackend;
+use jp_inquire::prompt::{PromptBackend, TerminalPromptBackend};
 use jp_llm::{
     ToolError, provider,
     tool::{
@@ -124,6 +124,10 @@ use crate::{
     cmd::{
         self,
         conversation::fork,
+        label::{
+            self, LabelDirectives,
+            resolve::{Resolver, Trigger},
+        },
         lock::{LockRequest, acquire_lock},
     },
     ctx::IntoPartialAppConfig,
@@ -290,6 +294,13 @@ pub(crate) struct Query {
     #[arg(long = "no-title", conflicts_with = "title")]
     no_title: bool,
 
+    /// Set labels on the conversation.
+    ///
+    /// Applied to the resolved conversation (new, forked, or resumed) before
+    /// the turn runs.
+    #[command(flatten)]
+    labels: LabelDirectives<true, false>,
+
     /// The tool to use.
     ///
     /// If a value is provided, the tool matching the value will be used.
@@ -346,6 +357,19 @@ impl Query {
         // 2. picker "start new": `start_new` is set, create a fresh conversation.
         // 3. --fork/--id/session: resolve an existing conversation, lock it.
         // 4. Lock contention: user picks "new" or "fork" from the prompt.
+        // `--label=:name` is accepted here, so resolve aliases against this
+        // conversation's config, which `resolve_config` has already layered.
+        //
+        // Resolved before `acquire_lock`, because that call may create or fork
+        // a conversation and persist it: an unknown alias failing afterwards
+        // would leave one behind that the user was never told about.
+        let prompts = TerminalPromptBackend;
+        let directives = if self.labels.is_empty() {
+            label::Resolved::default()
+        } else {
+            label::expand_aliases(&self.labels, &label_resolver(ctx, &cfg, &prompts)).await?
+        };
+
         let lock = self.acquire_lock(ctx, handle, start_new).await?;
 
         // Create symlinks and seed approvals for any `--mount` flags before the
@@ -356,6 +380,13 @@ impl Query {
         // resolved conversation may be new, freshly forked (which clones the
         // source's metadata, including any title), or resumed.
         apply_title_override(&lock, self.title.as_deref(), self.no_title);
+
+        if !directives.is_empty() {
+            let missing = lock
+                .as_mut()
+                .update_metadata(|m| label::apply(&mut m.labels, &directives));
+            label::report_missing(&ctx.printer, lock.id(), &missing.missing);
+        }
 
         // Record this conversation as the session's active conversation.
         if let Some(session) = &ctx.session
@@ -774,17 +805,28 @@ impl Query {
     }
 
     /// Create a new conversation and return an exclusive lock.
-    fn create_new_conversation(&self, ctx: &mut Ctx) -> Result<ConversationLock> {
+    async fn create_new_conversation(&self, ctx: &mut Ctx) -> Result<ConversationLock> {
         let cfg = ctx.config();
-        let ws = &mut ctx.workspace;
 
+        // Resolved before the conversation exists so a rule that needs
+        // confirmation, and finds no terminal to ask on, aborts without leaving
+        // a half-labelled conversation behind.
+        let prompts = TerminalPromptBackend;
+        let labels = label_resolver(ctx, &cfg, &prompts)
+            .automatic(Trigger::New)
+            .await?;
+
+        let ws = &mut ctx.workspace;
         let projection = if self.is_local(&cfg.conversation) {
             Projection::LocalOnly
         } else {
             Projection::Projected
         };
         let lock = ws.create_and_lock_conversation_with_projection(
-            Conversation::default(),
+            Conversation {
+                labels,
+                ..Conversation::default()
+            },
             cfg.clone(),
             ctx.session.as_ref(),
             projection,
@@ -1069,7 +1111,7 @@ impl Query {
     ) -> Result<ConversationLock> {
         // Handle --new: create a fresh conversation.
         if self.is_new() {
-            return self.create_new_conversation(ctx);
+            return self.create_new_conversation(ctx).await;
         }
 
         // Handle the picker's "start a new conversation" choice. It carries no
@@ -1079,14 +1121,14 @@ impl Query {
             if !self.allows_new_from_picker() {
                 return Err(Error::NewConflictsWithTarget);
             }
-            return self.create_new_conversation(ctx);
+            return self.create_new_conversation(ctx).await;
         }
 
         let handle = handle.ok_or(Error::NoConversationTarget)?;
 
         // Handle --fork: fork the conversation before locking.
         if let Some(fork_turns) = &self.fork {
-            return fork_conversation(ctx, &handle, *fork_turns);
+            return fork_conversation(ctx, &handle, *fork_turns).await;
         }
 
         let req = LockRequest::from_ctx(handle, ctx)
@@ -1095,8 +1137,8 @@ impl Query {
 
         match acquire_lock(req).await? {
             LockOutcome::Acquired(lock) => Ok(lock),
-            LockOutcome::NewConversation => self.create_new_conversation(ctx),
-            LockOutcome::ForkConversation(handle) => fork_conversation(ctx, &handle, None),
+            LockOutcome::NewConversation => self.create_new_conversation(ctx).await,
+            LockOutcome::ForkConversation(handle) => fork_conversation(ctx, &handle, None).await,
         }
     }
 }
@@ -1578,7 +1620,7 @@ impl clap::Args for ToolDirectives {
 }
 
 /// Fork a conversation and return the new conversation's lock.
-fn fork_conversation(
+async fn fork_conversation(
     ctx: &mut Ctx,
     source: &ConversationHandle,
     fork_turns: Option<usize>,
@@ -1588,6 +1630,25 @@ fn fork_conversation(
             events.retain_last_turns(n);
         }
     })
+    .await
+}
+
+/// Build a label resolver for this run.
+///
+/// Commands run at the workspace root so a rule produces the same value
+/// wherever in the tree the user invoked JP from.
+fn label_resolver<'a>(
+    ctx: &'a Ctx,
+    cfg: &'a AppConfig,
+    prompts: &'a dyn PromptBackend,
+) -> Resolver<'a> {
+    Resolver::new(
+        &cfg.conversation.labels,
+        ctx.workspace.root(),
+        ctx.term.is_tty,
+        &ctx.printer,
+        prompts,
+    )
 }
 
 /// Where the outgoing chat request's content came from.
@@ -1713,6 +1774,7 @@ impl IntoPartialAppConfig for Query {
             compact: _,
             title: _,
             no_title: _,
+            labels: _,
             mount,
         } = &self;
 

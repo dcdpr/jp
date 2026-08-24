@@ -40,6 +40,30 @@ async fn grep_with_restricted_policy_skips_ungranted_files() {
     );
 }
 
+#[tokio::test]
+async fn grep_skips_binary_files() {
+    let ws = tempdir().unwrap();
+    std::fs::write(ws.path().join("lib.rs"), "needle in source").unwrap();
+    // An archive or object file: NUL bytes early, and the pattern present in a
+    // symbol name. Searching it would emit undecodable bytes.
+    std::fs::write(ws.path().join("libjp.a"), b"!<arch>\x00\x01needle\xff\xfe").unwrap();
+
+    let matches = fs_grep_files(
+        ws.path(),
+        None,
+        "needle".to_owned(),
+        None,
+        None,
+        None,
+        &Gitignore::empty(),
+    )
+    .await
+    .unwrap();
+
+    assert!(matches.contains("lib.rs"), "got: {matches}");
+    assert!(!matches.contains("libjp.a"), "binary searched: {matches}");
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn greps_files_under_approved_external_mount() {

@@ -6,6 +6,12 @@ use serde_json::json;
 
 use super::*;
 
+const DATE: &str = "2026-08-05";
+const STAMP: &str = "2026-08-05T14:03:11Z";
+
+/// A ticket id the tests can name, since allocation draws unpredictable ones.
+const FIXED_ID: &str = "T-02wt0kx";
+
 /// The directory holding this module's tool declarations.
 fn declarations() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../.jp/mcp/tools/ticket")
@@ -31,9 +37,19 @@ fn advertised(file: &str, tool: &str, parameter: &str) -> Vec<String> {
 /// Drive a tool through the public `run` entry point, exercising argument
 /// parsing and dispatch.
 fn run_tool(dir: &Utf8TempDir, name: &str, args: Value) -> ToolResult {
+    dispatch(dir, Action::Run, name, args)
+}
+
+/// Drive a tool through the argument-formatting path JP takes before asking for
+/// approval.
+fn preview_tool(dir: &Utf8TempDir, name: &str, args: Value) -> ToolResult {
+    dispatch(dir, Action::FormatArguments, name, args)
+}
+
+fn dispatch(dir: &Utf8TempDir, action: Action, name: &str, args: Value) -> ToolResult {
     let ctx = Context {
         root: dir.path().to_path_buf(),
-        action: Action::Run,
+        action,
         access: None,
         workspace_id: "test".into(),
         conversation_id: "test".into(),
@@ -58,6 +74,12 @@ fn content(result: ToolResult) -> String {
     }
 }
 
+/// A preview as a terminal shows it, with the ANSI styling removed.
+fn strip_ansi(rendered: String) -> String {
+    let bytes = strip_ansi_escapes::strip(rendered);
+    String::from_utf8(bytes).expect("valid utf-8 after stripping ANSI")
+}
+
 fn error_message(result: ToolResult) -> String {
     match result.expect("tool result") {
         Outcome::Error { message, .. } => message,
@@ -77,20 +99,285 @@ fn create_ticket(dir: &Utf8TempDir, title: &str) -> String {
     ))
 }
 
+/// File a ticket under [`FIXED_ID`], bypassing allocation so the test can
+/// assert against the id it will read back.
+fn write_ticket(dir: &Utf8TempDir, title: &str) -> TicketId {
+    let id: TicketId = FIXED_ID.parse().unwrap();
+    let tickets = dir.path().join(store::DEFAULT_DIR);
+    std::fs::create_dir_all(&tickets).unwrap();
+    std::fs::write(
+        tickets.join(format!("{}slug.md", id.file_prefix())),
+        render::ticket(title, Kind::Bug, HANDLE, DATE, None, "Something is wrong."),
+    )
+    .unwrap();
+
+    id
+}
+
+/// Ids are generated, so tests follow the ones that were handed out.
+fn ids(dir: &Utf8TempDir) -> Vec<TicketId> {
+    store::list(&dir.path().join(store::DEFAULT_DIR))
+        .unwrap()
+        .into_iter()
+        .filter_map(|entry| entry.ticket.as_ref().ok().map(|_| entry.id))
+        .collect()
+}
+
 #[test]
 fn create_reports_the_id_and_a_workspace_relative_path() {
     let dir = Utf8TempDir::new().unwrap();
 
     let out = create_ticket(&dir, "Tool call header misaligned");
 
+    let id = ids(&dir)[0];
+    let path = format!(
+        "docs/ticket/{}tool-call-header-misaligned.md",
+        id.file_prefix()
+    );
+    assert_eq!(out, format!("Created {id} at {path}"));
+    assert!(dir.path().join(&path).exists());
+}
+
+#[test]
+fn create_preview_renders_the_file_that_will_be_written() {
+    let out = strip_ansi(preview_create(
+        Kind::Bug,
+        "Tool call header misaligned",
+        Some("045"),
+        Some("The header renders one column left of the body."),
+        DATE,
+    ));
+
+    // The preview is quoted, so the rail shows where the ticket ends and the
+    // conversation resumes. Written line by line because the blank lines carry
+    // a trailing space that an editor would trim out of a block literal.
     assert_eq!(
         out,
-        "Created T0001 at docs/ticket/0001-tool-call-header-misaligned.md"
+        concat!(
+            "> # Tool call header misaligned\n",
+            "> \n",
+            "> - **Status**: Todo\n",
+            "> - **Kind**: Bug\n",
+            "> - **Authors**: jp\n",
+            "> - **Date**: 2026-08-05\n",
+            "> - **Implements**: 045\n",
+            "> \n",
+            "> The header renders one column left of the body.\n",
+        )
     );
-    assert!(
+}
+
+/// A preview leaves the board exactly as it found it: no file, and no id drawn
+/// that the ticket it previews won't carry.
+#[test]
+fn create_preview_writes_nothing() {
+    let dir = Utf8TempDir::new().unwrap();
+    create_ticket(&dir, "Tool call header misaligned");
+
+    let out = strip_ansi(content(preview_tool(
+        &dir,
+        "ticket_create",
+        json!({
+            "kind": "chore",
+            "title": "Bump the deny list"
+        }),
+    )));
+
+    assert!(out.starts_with("> # Bump the deny list\n"), "{out}");
+    assert_eq!(ids(&dir).len(), 1, "the preview filed a ticket");
+
+    create_ticket(&dir, "Bump the deny list");
+    assert_eq!(ids(&dir).len(), 2);
+}
+
+#[test]
+fn comment_preview_renders_the_block_under_the_ticket_it_lands_on() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = write_ticket(&dir, "Tool call header misaligned");
+    // The reply target has to exist, or the preview rejects the call.
+    run_tool(
+        &dir,
+        "ticket_comment",
+        json!({ "id": FIXED_ID, "body": "Reproduced at 72 columns." }),
+    )
+    .unwrap();
+
+    let out = strip_ansi(content(preview_comment(
+        dir.path(),
+        id,
+        Some(1),
+        "The wrap calculation is off.",
+        STAMP,
+    )));
+
+    assert_eq!(
+        out,
+        concat!(
+            "> # T-02wt0kx: Tool call header misaligned\n",
+            "> \n",
+            "> ────────────────────────────────────────────────────────────────────────────────\n",
+            "> \n",
+            "> - **From**: jp\n",
+            "> - **Date**: 2026-08-05T14:03:11Z\n",
+            "> - **Re**: #1\n",
+            "> \n",
+            "> The wrap calculation is off.\n",
+        )
+    );
+}
+
+/// A call that cannot land is answered before the user is asked about it: the
+/// preview fails, and JP turns that into a tool failure ahead of the approval
+/// prompt so the assistant can correct the id.
+#[test]
+fn comment_preview_rejects_a_missing_ticket() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let out = error_message(preview_comment(
+        dir.path(),
+        FIXED_ID.parse().unwrap(),
+        None,
+        "Reproduced at 72 columns.",
+        STAMP,
+    ));
+
+    assert_eq!(out, "No T-02wt0kx.");
+}
+
+/// The preview knows the comment count, which the assistant cannot see, so a
+/// reply to a comment that isn't there fails here rather than at the write.
+#[test]
+fn comment_preview_rejects_a_missing_reply_target() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = write_ticket(&dir, "Tool call header misaligned");
+
+    let out = error_message(preview_comment(
+        dir.path(),
+        id,
+        Some(3),
+        "The wrap calculation is off.",
+        STAMP,
+    ));
+
+    assert_eq!(out, "No comment #3 on T-02wt0kx.");
+}
+
+/// Two files claiming one id is a different problem from a missing ticket, and
+/// points at a different fix.
+#[test]
+fn comment_preview_reports_a_duplicated_id() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = write_ticket(&dir, "Tool call header misaligned");
+    std::fs::write(
         dir.path()
-            .join("docs/ticket/0001-tool-call-header-misaligned.md")
-            .exists()
+            .join(store::DEFAULT_DIR)
+            .join(format!("{}other.md", id.file_prefix())),
+        render::ticket("Other", Kind::Bug, HANDLE, DATE, None, "Something else."),
+    )
+    .unwrap();
+
+    let error =
+        preview_comment(dir.path(), id, None, "Reproduced at 72 columns.", STAMP).unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("is claimed by more than one file: "),
+        "{error}"
+    );
+}
+
+/// A hand-edited ticket that lost a metadata field still takes a comment: the
+/// append never reads the header, so the preview must not demand one either.
+#[test]
+fn comment_preview_tolerates_a_malformed_header() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id: TicketId = FIXED_ID.parse().unwrap();
+    let tickets = dir.path().join(store::DEFAULT_DIR);
+    std::fs::create_dir_all(&tickets).unwrap();
+    std::fs::write(
+        tickets.join(format!("{}slug.md", id.file_prefix())),
+        "# Tool call header misaligned\n\n- **Status**: Todo\n- **Kind**: Bug\n- **Date**: \
+         2026-08-05\n\nSomething is wrong.\n",
+    )
+    .unwrap();
+
+    let out = strip_ansi(content(preview_comment(
+        dir.path(),
+        id,
+        None,
+        "Reproduced at 72 columns.",
+        STAMP,
+    )));
+
+    assert_eq!(
+        out.lines().next(),
+        Some("> # T-02wt0kx: Tool call header misaligned")
+    );
+
+    // The write the preview promised really does land.
+    assert_eq!(
+        content(run_tool(
+            &dir,
+            "ticket_comment",
+            json!({ "id": FIXED_ID, "body": "Reproduced at 72 columns." })
+        )),
+        "Added T-02wt0kx#1"
+    );
+}
+
+/// Arguments execution rejects are rejected by the preview too, so the
+/// assistant is corrected before the call reaches the user.
+#[test]
+fn preview_rejects_the_arguments_execution_would_reject() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    assert_eq!(
+        error_message(preview_tool(
+            &dir,
+            "ticket_create",
+            json!({ "kind": "chore", "title": "   " })
+        )),
+        "`title` must not be empty."
+    );
+    assert_eq!(
+        error_message(preview_tool(
+            &dir,
+            "ticket_comment",
+            json!({ "id": FIXED_ID, "body": "  \n " })
+        )),
+        "`body` must not be empty."
+    );
+}
+
+/// Markdown in this repository is laid out by `comfort`, and a body arrives
+/// from the model as one long line per paragraph.
+#[test]
+fn create_reflows_the_body_with_comfort() {
+    let dir = Utf8TempDir::new().unwrap();
+    run_tool(
+        &dir,
+        "ticket_create",
+        json!({
+            "kind": "bug",
+            "title": "Wrapping is wrong",
+            "body": "The first sentence. The second one, which the model wrote on the same line."
+        }),
+    )
+    .unwrap();
+
+    let id = ids(&dir)[0];
+    let source = std::fs::read_to_string(dir.path().join(format!(
+        "docs/ticket/{}wrapping-is-wrong.md",
+        id.file_prefix()
+    )))
+    .unwrap();
+
+    assert!(
+        source.ends_with(
+            "\nThe first sentence.\nThe second one, which the model wrote on the same line.\n"
+        ),
+        "{source}"
     );
 }
 
@@ -131,11 +418,13 @@ fn comments_are_attributed_to_the_assistant_and_numbered() {
     let dir = Utf8TempDir::new().unwrap();
     create_ticket(&dir, "Tool call header misaligned");
 
+    let id = ids(&dir)[0];
+
     let first = content(run_tool(
         &dir,
         "ticket_comment",
         json!({
-            "id": 1,
+            "id": id.as_str(),
             "body": "Reproduced at 72 columns."
         }),
     ));
@@ -143,20 +432,57 @@ fn comments_are_attributed_to_the_assistant_and_numbered() {
         &dir,
         "ticket_comment",
         json!({
-            "id": "T0001",
+            "id": id.to_string(),
             "re": 1,
             "body": "The wrap calculation is off."
         }),
     ));
 
-    assert_eq!(first, "Added T0001#1");
-    assert_eq!(second, "Added T0001#2");
+    assert_eq!(first, format!("Added {id}#1"));
+    assert_eq!(second, format!("Added {id}#2"));
 
-    let shown = content(run_tool(&dir, "ticket_show", json!({ "id": "1" })));
-    assert!(shown.contains("### T0001#1 — jp at "), "{shown}");
+    let shown = content(run_tool(
+        &dir,
+        "ticket_show",
+        json!({ "id": id.to_string() }),
+    ));
+    assert!(shown.contains(&format!("### {id}#1 — jp at ")), "{shown}");
     assert!(
-        shown.contains("### T0001#2 — jp at ") && shown.contains("replying to T0001#1"),
+        shown.contains(&format!("### {id}#2 — jp at "))
+            && shown.contains(&format!("replying to {id}#1")),
         "{shown}"
+    );
+}
+
+/// A comment body is reflowed for the same reason a description is: the file it
+/// lands in is one CI checks.
+#[test]
+fn comment_reflows_the_body_with_comfort() {
+    let dir = Utf8TempDir::new().unwrap();
+    create_ticket(&dir, "Wrapping is wrong");
+    let id = ids(&dir)[0];
+
+    run_tool(
+        &dir,
+        "ticket_comment",
+        json!({
+            "id": id.to_string(),
+            "body": "The first sentence. The second one, which the model wrote on the same line."
+        }),
+    )
+    .unwrap();
+
+    let source = std::fs::read_to_string(dir.path().join(format!(
+        "docs/ticket/{}wrapping-is-wrong.md",
+        id.file_prefix()
+    )))
+    .unwrap();
+
+    assert!(
+        source.ends_with(
+            "\nThe first sentence.\nThe second one, which the model wrote on the same line.\n"
+        ),
+        "{source}"
     );
 }
 
@@ -165,17 +491,19 @@ fn a_reply_to_a_missing_comment_is_reported_to_the_model() {
     let dir = Utf8TempDir::new().unwrap();
     create_ticket(&dir, "Tool call header misaligned");
 
+    let id = ids(&dir)[0];
+
     let out = error_message(run_tool(
         &dir,
         "ticket_comment",
         json!({
-            "id": 1,
+            "id": id.to_string(),
             "re": 3,
             "body": "Reply."
         }),
     ));
 
-    assert_eq!(out, "No T0001, or no comment #3 on it.");
+    assert_eq!(out, format!("No {id}, or no comment #3 on it."));
 }
 
 #[test]
@@ -184,11 +512,15 @@ fn an_unusable_id_is_reported_to_the_model() {
 
     assert_eq!(
         error_message(run_tool(&dir, "ticket_close", json!({ "id": "nope" }))),
-        "`nope` is not a ticket id (try 42, 042, or T0042)."
+        "`nope` is not a ticket id (try T-02wt0kx)."
     );
     assert_eq!(
         error_message(run_tool(&dir, "ticket_close", json!({ "id": 7 }))),
-        "No T0007."
+        "`7` is not a ticket id."
+    );
+    assert_eq!(
+        error_message(run_tool(&dir, "ticket_close", json!({ "id": "T-zzzzzzz" }))),
+        "No T-zzzzzzz."
     );
 }
 
@@ -197,13 +529,23 @@ fn close_reports_the_transition_once() {
     let dir = Utf8TempDir::new().unwrap();
     create_ticket(&dir, "Tool call header misaligned");
 
+    let id = ids(&dir)[0];
+
     assert_eq!(
-        content(run_tool(&dir, "ticket_close", json!({ "id": 1 }))),
-        "T0001: Todo -> Done"
+        content(run_tool(
+            &dir,
+            "ticket_close",
+            json!({ "id": id.to_string() })
+        )),
+        format!("{id}: Todo -> Done")
     );
     assert_eq!(
-        content(run_tool(&dir, "ticket_close", json!({ "id": 1 }))),
-        "T0001 was already Done."
+        content(run_tool(
+            &dir,
+            "ticket_close",
+            json!({ "id": id.to_string() })
+        )),
+        format!("{id} was already Done.")
     );
 }
 
@@ -212,16 +554,21 @@ fn list_shows_one_line_per_ticket_and_filters() {
     let dir = Utf8TempDir::new().unwrap();
     create_ticket(&dir, "Still open");
     create_ticket(&dir, "Finished");
-    run_tool(&dir, "ticket_close", json!({ "id": 2 })).unwrap();
+    let [open, finished] = ids(&dir)[..] else {
+        panic!("expected two tickets")
+    };
+    run_tool(&dir, "ticket_close", json!({ "id": finished.to_string() })).unwrap();
 
     let all = content(run_tool(&dir, "ticket_list", json!({})));
     assert_eq!(
         all,
-        "T0001  Todo         Bug      Still open\nT0002  Done         Bug      Finished\n"
+        format!(
+            "{open} Todo         Bug      Still open\n{finished} Done         Bug      Finished\n"
+        )
     );
 
     let todo = content(run_tool(&dir, "ticket_list", json!({ "status": "todo" })));
-    assert_eq!(todo, "T0001  Todo         Bug      Still open\n");
+    assert_eq!(todo, format!("{open} Todo         Bug      Still open\n"));
 
     let chores = content(run_tool(&dir, "ticket_list", json!({ "kind": "chore" })));
     assert_eq!(chores, "No tickets match.\n");
@@ -231,17 +578,19 @@ fn list_shows_one_line_per_ticket_and_filters() {
 fn list_names_the_files_it_could_not_read() {
     let dir = Utf8TempDir::new().unwrap();
     create_ticket(&dir, "Readable");
+    let id = ids(&dir)[0];
+    // Sorts after the readable ticket, so listing order is stable.
     std::fs::write(
-        dir.path().join("docs/ticket/0009-mangled.md"),
+        dir.path().join("docs/ticket/zzzzzzz-mangled.md"),
         "no heading here\n",
     )
     .unwrap();
 
     let out = content(run_tool(&dir, "ticket_list", json!({})));
 
-    assert!(out.starts_with("T0001  Todo"), "{out}");
+    assert!(out.starts_with(&format!("{id} Todo")), "{out}");
     assert!(
-        out.contains("- docs/ticket/0009-mangled.md: Ticket does not open with"),
+        out.contains("- docs/ticket/zzzzzzz-mangled.md: Ticket does not open with"),
         "{out}"
     );
 }
@@ -251,14 +600,22 @@ fn show_renders_metadata_and_the_description() {
     let dir = Utf8TempDir::new().unwrap();
     create_ticket(&dir, "Tool call header misaligned");
 
-    let out = content(run_tool(&dir, "ticket_show", json!({ "id": 1 })));
+    let id = ids(&dir)[0];
+    let out = content(run_tool(
+        &dir,
+        "ticket_show",
+        json!({ "id": id.to_string() }),
+    ));
 
     assert!(
-        out.starts_with("# T0001: Tool call header misaligned\n"),
+        out.starts_with(&format!("# {id}: Tool call header misaligned\n")),
         "{out}"
     );
     assert!(
-        out.contains("- **Path**: docs/ticket/0001-tool-call-header-misaligned.md"),
+        out.contains(&format!(
+            "- **Path**: docs/ticket/{}tool-call-header-misaligned.md",
+            id.file_prefix()
+        )),
         "{out}"
     );
     assert!(out.contains("- **Status**: Todo"), "{out}");
@@ -272,18 +629,21 @@ fn show_reports_a_missing_ticket() {
     let dir = Utf8TempDir::new().unwrap();
 
     assert_eq!(
-        error_message(run_tool(&dir, "ticket_show", json!({ "id": 4 }))),
-        "No T0004."
+        error_message(run_tool(&dir, "ticket_show", json!({ "id": "T-zzzzzzz" }))),
+        "No T-zzzzzzz."
     );
 }
 
 #[test]
-fn ids_are_read_from_strings_and_numbers() {
-    assert_eq!(id_arg(&json!("T0042")), Ok(TicketId::new(42)));
-    assert_eq!(id_arg(&json!("042")), Ok(TicketId::new(42)));
-    assert_eq!(id_arg(&json!(42)), Ok(TicketId::new(42)));
-    assert!(id_arg(&json!(0)).is_err());
-    assert!(id_arg(&json!(-1)).is_err());
+fn ids_are_read_from_every_accepted_spelling() {
+    let expected: TicketId = "T-02wt0kx".parse().unwrap();
+
+    assert_eq!(id_arg(&json!("T-02wt0kx")), Ok(expected));
+    assert_eq!(id_arg(&json!("T02wt0kx")), Ok(expected));
+    assert_eq!(id_arg(&json!("02wt0kx")), Ok(expected));
+
+    // Ids carry letters, so a bare number can never be one.
+    assert!(id_arg(&json!(42)).is_err());
     assert!(id_arg(&json!(null)).is_err());
 }
 

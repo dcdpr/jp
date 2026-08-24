@@ -698,8 +698,22 @@ be Append, Prepend, or Replace:
   `crates/jp_config/src/types/string.rs` and `internal/merge/string.rs`).
 - `MergeableVec` (e.g. `assistant.instructions`, `conversation.attachments`, see
   `crates/jp_config/src/types/vec.rs` and `internal/merge/vec.rs`).
-- `MergeableMap` (e.g. `plugins.command`, `providers.mcp`, see
-  `crates/jp_config/src/types/map.rs` and `internal/merge/map.rs`).
+- `MergeableMap` (e.g. `plugins.command`, `providers.mcp`,
+  `conversation.labels`, see `crates/jp_config/src/types/map.rs` and
+  `internal/merge/map.rs`).
+
+The same limitation shows up in the *forward* direction for these types, and
+`conversation.labels` is the case that surfaced it: `PartialConversationConfig::
+delta` collects changed entries into a plain `MergeableMap::Map`, so the
+wrapper's `strategy` is dropped and a key present in the previous state but
+absent from the next produces no entry rather than a removal.
+A layer that replaced the map wholesale (`strategy = "replace"`) therefore
+records a delta that deep-merges on the next fold, and a rule the replacement
+dropped comes back.
+`attachments` (a `MergeableVec`) and `conversation.tools` (a plain `IndexMap`)
+behave the same way.
+This RFD's `unsets` mechanism is what closes it; until then the gap is uniform
+across every container-backed field.
 
 A revert delta that encoded its target value with, say, Append strategy would
 concatenate the target onto the current resolved state rather than replacing it.

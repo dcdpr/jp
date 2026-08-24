@@ -48,9 +48,11 @@ use jp_config::{
     },
 };
 use jp_printer::{OutputFormat, OutputWidth, Printer};
-use jp_storage::backend::{FsStorageBackend, NullLockBackend, NullPersistBackend};
-use jp_term::table::{DetailRow, details, details_markdown};
-use jp_workspace::{Workspace, user_data_dir};
+use jp_storage::backend::{
+    FsStorageBackend, NullLockBackend, NullPersistBackend, ReadOnlySessionBackend,
+};
+use jp_term::table::{DetailRow, Details, details, details_markdown};
+use jp_workspace::{DEFAULT_STORAGE_DIR, Workspace, user_data_dir};
 use relative_path::RelativePath;
 use serde_json::Value;
 use tokio::runtime::{self, Runtime};
@@ -66,8 +68,6 @@ use crate::{
 };
 
 static WORKER_THREADS: AtomicUsize = AtomicUsize::new(0);
-
-const DEFAULT_STORAGE_DIR: &str = ".jp";
 
 #[expect(dead_code)]
 const DEFAULT_VARIABLE_PREFIX: &str = "JP_";
@@ -715,6 +715,7 @@ fn parse_error(error: cmd::Error, format: OutputFormat) -> (u8, String) {
             })
             .collect();
 
+        let rows = Details::Fields(rows);
         let rendered = if format.is_pretty() {
             details(message.as_deref(), rows)
         } else {
@@ -894,6 +895,9 @@ fn load_partial_configs_from_files(
 /// to [`NullPersistBackend`] and the lock backend to [`NullLockBackend`] so
 /// that ephemeral queries never write to disk and never block on lock
 /// contention.
+/// The session backend is wrapped in [`ReadOnlySessionBackend`] for the same
+/// reason: the run still needs to read which conversation the session is on,
+/// but must not record one that it never persisted.
 fn load_workspace(
     workspace: Option<&WorkspaceIdOrPath>,
     persist: bool,
@@ -920,47 +924,25 @@ fn load_workspace(
             .try_into()
             .map_err(FromPathBufError::into_io_error)?,
     };
-    trace!(cwd = %cwd, "Finding workspace.");
+    let mut workspace = Workspace::open(&cwd).map_err(|error| match error {
+        jp_workspace::Error::WorkspaceNotFound(_) => Error::Command(cmd::Error::from(format!(
+            "Could not locate workspace. Use `{}` to create a new workspace.",
+            "jp init".bold().yellow()
+        ))),
+        error => Error::Workspace(error),
+    })?;
 
-    let root = Workspace::find_root(cwd, DEFAULT_STORAGE_DIR).ok_or(cmd::Error::from(format!(
-        "Could not locate workspace. Use `{}` to create a new workspace.",
-        "jp init".bold().yellow()
-    )))?;
-    trace!(root = %root, "Found workspace root.");
-
-    let storage = root.join(DEFAULT_STORAGE_DIR);
-    trace!(storage = %storage, "Initializing workspace storage.");
-
-    let id = jp_workspace::Id::load(&storage)
-        .transpose()
-        .ok()
-        .flatten()
-        .unwrap_or_default();
-
-    trace!(%id, "Loaded unique workspace ID.");
-
-    let fs = FsStorageBackend::new(&storage).map_err(jp_workspace::Error::from)?;
-
-    let user_root = user_data_dir()?.join("workspace");
-    // The workspace directory name slugs a freshly created silo so users can
-    // recognize it; an existing silo is reused by ID regardless of its slug.
-    let slug = root.file_name();
-    let fs = fs
-        .with_user_storage(&user_root, slug, id.to_string())
-        .map_err(jp_workspace::Error::from)?;
-
-    let fs = Arc::new(fs);
-    let mut workspace = Workspace::new_with_id(root, id).with_backend(fs.clone());
+    let fs = workspace.fs_storage().cloned();
     if !persist {
+        let sessions = Arc::new(ReadOnlySessionBackend::new(workspace.sessions().clone()));
         workspace = workspace
             .with_persist(Arc::new(NullPersistBackend))
-            .with_locker(Arc::new(NullLockBackend));
+            .with_locker(Arc::new(NullLockBackend))
+            .with_sessions(sessions);
     }
     info!(workspace = %workspace.root(), "Using existing workspace.");
 
-    workspace.id().store(&storage)?;
-
-    Ok((workspace, Some(fs)))
+    Ok((workspace, fs))
 }
 
 const JP_CRATES: &[&str] = &[
