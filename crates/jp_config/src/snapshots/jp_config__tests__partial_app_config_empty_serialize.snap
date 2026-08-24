@@ -6,6 +6,9 @@ PartialAppConfig {
     inherit: None,
     config_load_paths: None,
     extends: None,
+    loader: PartialLoaderConfig {
+        reset: None,
+    },
     assistant: PartialAssistantConfig {
         name: None,
         system_prompt: None,
