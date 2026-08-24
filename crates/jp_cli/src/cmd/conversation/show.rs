@@ -9,7 +9,7 @@ use crate::{
         attachment_detail_item, compaction_detail_item, conversation::DetailsFmt,
         label_detail_items,
     },
-    output::print_details,
+    output::{print_details, print_json},
 };
 
 #[derive(Debug, clap::Args)]
@@ -62,7 +62,13 @@ impl Show {
                 .with_compactions(compactions)
                 .with_pretty_printing(ctx.printer.pretty_printing_enabled());
 
-            print_details(&ctx.printer, details.title.as_deref(), details.rows());
+            // The two views carry different things: the payload is a stable
+            // snake_case contract, the rows are Title Case prose.
+            if ctx.printer.format().is_json() {
+                print_json(&ctx.printer, &details.json());
+            } else {
+                print_details(&ctx.printer, details.title.as_deref(), details.rows());
+            }
         }
         Ok(())
     }

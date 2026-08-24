@@ -53,6 +53,7 @@ fn setup(id: ConversationId) -> Ctx {
 
     let (printer, _, _) = Printer::memory(OutputFormat::TextPretty);
     let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
         workspace,
         None,
         Runtime::new().unwrap(),
@@ -161,6 +162,7 @@ fn setup_multi(entries: Vec<(ConversationId, Conversation, Vec<ConversationEvent
 
     let (printer, _, _) = Printer::memory(OutputFormat::TextPretty);
     let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
         workspace,
         None,
         Runtime::new().unwrap(),

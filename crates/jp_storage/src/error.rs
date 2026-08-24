@@ -8,9 +8,6 @@ pub enum Error {
     #[error("Path is not a directory: {0}")]
     NotDir(Utf8PathBuf),
 
-    #[error("Path is not a symlink: {0}")]
-    NotSymlink(Utf8PathBuf),
-
     #[error("conversation error")]
     Conversation(#[from] jp_conversation::Error),
 

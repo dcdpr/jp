@@ -967,6 +967,7 @@ fn test_conversation_fork() {
         );
         let workspace = Workspace::in_memory(tmp.path()).with_backend(fs);
         let mut ctx = Ctx::new(
+            crate::bootstrap::ExecutionContext::for_workspace(&workspace),
             workspace,
             None,
             Runtime::new().unwrap(),
@@ -1082,6 +1083,7 @@ fn fork_reresolves_apply_on_fork_rules() {
     );
     let workspace = Workspace::in_memory(tmp.path()).with_backend(fs);
     let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
         workspace,
         None,
         Runtime::new().unwrap(),
@@ -1185,6 +1187,7 @@ fn a_failing_fork_rule_creates_no_conversation() {
     );
     let workspace = Workspace::in_memory(tmp.path()).with_backend(fs);
     let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
         workspace,
         None,
         Runtime::new().unwrap(),
@@ -1250,6 +1253,7 @@ fn a_failure_still_reports_the_forks_already_created() {
     );
     let workspace = Workspace::in_memory(tmp.path()).with_backend(fs);
     let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
         workspace,
         None,
         Runtime::new().unwrap(),
@@ -1334,6 +1338,7 @@ fn fork_targets_correct_source() {
     );
     let workspace = Workspace::in_memory(tmp.path()).with_backend(fs);
     let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
         workspace,
         None,
         Runtime::new().unwrap(),
@@ -1466,6 +1471,7 @@ fn fork_inherits_local_only_projection() {
     );
     let workspace = Workspace::in_memory(tmp.path()).with_backend(fs);
     let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
         workspace,
         None,
         Runtime::new().unwrap(),
@@ -1511,6 +1517,7 @@ fn fork_prints_a_json_array_of_ids() {
     );
     let workspace = Workspace::in_memory(tmp.path()).with_backend(fs);
     let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
         workspace,
         None,
         Runtime::new().unwrap(),
