@@ -16,7 +16,7 @@
     "summary": "Record inquiry events in conversation stream with centralized filtering to keep them hidden from LLM providers."
   },
   "006-turn-scoped-mutations.md": {
-    "hash": "6868fb798f157a665458061f41be6833471569f0a335d44eb12c0bc07805e64b",
+    "hash": "a5f4fd2d6efca102688b41d46ac3168a80bc9e52bfc6c32eb173994094008183",
     "summary": "Restrict stream mutations to turn-scoped accessors, preventing invalid event sequences through compile-time guarantees."
   },
   "007-llamacpp-reasoning.md": {
@@ -84,7 +84,7 @@
     "summary": "Detached conversation execution via background processes and attachment—abandoned, split into RFD 023 and 027."
   },
   "023-resumable-conversation-turns.md": {
-    "hash": "51e4f08b8b9594121c6ded7cd7e40229e9394f4e40519829cd4edf2a5c775cdc",
+    "hash": "61271dd23ac8ff587c9030fdd0d0982a1e0367e186ecd4273b6e5bca039eac41",
     "summary": "Persist tool results incrementally, split incomplete turns from stream, resume with interactive prompt or --continue-turn flag."
   },
   "024-detached-query-execution.md": {
@@ -140,7 +140,7 @@
     "summary": "Extend `--cfg` path resolution to search user-global, workspace, and user-workspace config roots, merging matches."
   },
   "036-conversation-compaction.md": {
-    "hash": "a4bc90faba1ea514edb3b0a9414304a55c4b1c92f47ec516a4385c83596fa4c3",
+    "hash": "eed749e23c5a92222b9741d9895df53bc14092cc5d692e162f4b7537b302b94a",
     "summary": "Composable conversation compaction via mechanical strategies, tool-aware deduplication, LLM summarization, and protocol extensions for declarative compaction hints."
   },
   "037-await-tool-for-stateful-handle-synchronization.md": {
@@ -148,7 +148,7 @@
     "summary": "Introduces `await` built-in tool to synchronize on parallel stateful tool handles with `any`/`all` completion modes."
   },
   "039-conversation-trees.md": {
-    "hash": "7b6dad7a980ab18e0ada448b13caa0f89423fc2b33117cee5b2e1372f51dcbb6",
+    "hash": "75366f5877cf5bfc4d48c2f21f8cd6a51ba78bfa8f67ebc78a233539db9c6c45",
     "summary": "Add parent-child conversation relationships via metadata field, enabling fork lineage and hierarchical organization without nested directories."
   },
   "040-hidden-conversations-and-tool-context.md": {
@@ -192,11 +192,11 @@
     "summary": "Introduces configurable detached prompt policy, `--non-interactive` flag, and `exclusive` question property for non-interactive environments."
   },
   "050-scripting-ergonomics-for-conversation-management.md": {
-    "hash": "1a775369266ab20158c1b77693098649e2f1cf0bc3d035becb3c3c88753bbd76",
+    "hash": "a37bf1a1d4aa1fcccd42b7ab1f669acc6195a01b22859ee04586a57ca5b7bfbd",
     "summary": "Adds scripting ergonomics: shared config structs, `conversation new` command, `--no-activate` flag, and `--root-id` ancestry constraint."
   },
   "051-sub-agent-workflows.md": {
-    "hash": "dfda328626635792c345489714f59ff6d07b4e010c9da37e0b5e028713d689e6",
+    "hash": "75cefb8d7ca2579b9f1371ac230a9205635ed53543e827cb1d38030f9647095b",
     "summary": "Guide for building sub-agent workflows using local tools, config overlays, and conversation trees to delegate scoped tasks cheaply."
   },
   "052-workspace-data-store-sanitization.md": {
@@ -204,7 +204,7 @@
     "summary": "Introduces Workspace::sanitize() method that validates .jp data store, moves corrupt conversations to .trash/ with error explanations, and ensures four invariants before CLI commands run."
   },
   "053-auto-refresh-conversation-titles.md": {
-    "hash": "00f211df950bf5981ba941b21a785f5264fb1770207d97709c1abd52cd7ed0ba",
+    "hash": "3053a4c9a0ec2c42887a2ec80e4602ce25d6e71d7531c5c7b5ced1266e5e6dc0",
     "summary": "Auto-refresh stale conversation titles periodically by re-running LLM generation when accumulated turns exceed a configured threshold."
   },
   "054-split-conversation-config-and-events.md": {
@@ -248,7 +248,7 @@
     "summary": "Extend config wizard with frecency-based field ordering using CLI usage tracking data."
   },
   "064-non-destructive-conversation-compaction.md": {
-    "hash": "04546fb7f0e0b853c24867506721f7f9f6fa0a90903cde85729c80dc26d703bc",
+    "hash": "41a1c7dfc2b427ff0fd0ca2bd62b369e679eca1bf648506d1bd917ac874bf386",
     "summary": "Non-destructive conversation compaction through overlay events that project reduced views without mutating stored data."
   },
   "065-typed-resource-model-for-attachments.md": {
@@ -284,19 +284,19 @@
     "summary": "Introduces `-C` flag to selectively revert previously applied config sources using provenance tracking via claims maps."
   },
   "071-conversation-archiving.md": {
-    "hash": "62504943171f773f43669b93da6a2ec48077ee64e3742b6d63da743777845171",
+    "hash": "610123dc36a3a09bbf3f9b26b9910b7c37bf0e45ae43e0b65e6420b7b94eb69c",
     "summary": "Adds conversation archiving to JP, moving inactive conversations to a hidden partition while preserving them."
   },
   "038-config-reset-keywords.md": {
-    "hash": "9e3ec573727ac4dd94589dd82904fd0b6946eecd2da45bc354d92c71ce698984",
+    "hash": "0492ca03e690477c1a5c63a9beaa1f138c7cc964f4d3c3ccaf968dbed9dd3a73",
     "summary": "UPPERCASE keywords NONE and WORKSPACE reset config state; loader.reset entry setting provides local resets; ConfigDelta becomes enum to persist resets."
   },
   "079-config-sources-and-load-order.md": {
-    "hash": "4f02ce9e5d97a0573d9f408509498177337b9ea0c959a9cb369b5cc77dad5c12",
+    "hash": "f6dc6f90d9a17bd469d82db2b8c4998f43cd8d126e774dc117cc4a9337978321",
     "summary": "JP loads config from four implicit sources plus environment variables, with extends directives and inherit flags controlling precedence."
   },
   "074-eager-loading-with-command-declared-data-requirements.md": {
-    "hash": "02ee9a3d5c2f160e6b4a241c9fba4f23b968cbd09657b0078143efba3d381a37",
+    "hash": "bbf0001f9297d9cc00382c84f310f9fe3a389f3f194b62d1f9d389fbc52bce62",
     "summary": "Commands declare data needs upfront; startup eagerly loads and validates it, enabling infallible access during execution."
   },
   "075-tool-sandbox-and-access-policy.md": {

@@ -197,7 +197,7 @@ Concretely, this affects forks that retain a tail of the stream:
   The fork inherits the source's metadata via clone, so a source with
   `title_generated_at_turn = Some(k)` and `k > N` produces a fork whose
   watermark exceeds its own turn count.
-- `conversation fork --from/--until` similarly drops events.
+- `conversation fork --from/--to` similarly drops events.
 
 **The rule:** any operation that drops `turn_start` events from a stream clamps
 the resulting watermark to `min(watermark, new_turn_count)`.
