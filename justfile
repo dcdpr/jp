@@ -2883,7 +2883,7 @@ ticket-grep +ARGS:
 
 # Locally develop the documentation, with hot-reloading.
 [group('docs')]
-develop-docs *FLAGS="--host --allowedHosts --open": rfd-summaries
+develop-docs *FLAGS="--host --allowedHosts --open": rfd-summaries _install-ticket
     just _docs "dev" {{FLAGS}}
 
 # Open the RFD priority board for drag-and-drop reordering.
