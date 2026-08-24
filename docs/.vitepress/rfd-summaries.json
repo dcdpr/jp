@@ -408,7 +408,7 @@
     "summary": "Native macOS app for browsing JP conversations via FFI, with public Workspace::open API extracted from CLI."
   },
   "103-multi-value-conversation-labels.md": {
-    "hash": "7834002722c0a8f24aa1762e751fcb26faab8a33fdcdc16fea88dac62085bd4c",
+    "hash": "cb5f0eb423ddb6a6673a660b03d623a20869539678b9f2267a0275dae00be6ad",
     "summary": "Labels store sets of values per key with add/set/rm commands, multi-value filters, and configuration support."
   }
 }
