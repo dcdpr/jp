@@ -48,14 +48,14 @@ impl FsStorageBackend {
 
     /// Configure user-local storage for workspace `id` under `root`.
     ///
-    /// The silo is located by ID suffix, so every worktree and clone of a
-    /// workspace shares one directory.
-    /// A new silo is named `<slug>-<id>` (or bare `<id>` when `slug` is absent
+    /// The user-workspace directory is located by ID suffix, so every worktree
+    /// and clone of a workspace shares one directory.
+    /// A new one is named `<slug>-<id>` (or bare `<id>` when `slug` is absent
     /// or empty); `slug` only ever names a new directory and never renames an
     /// existing one.
-    /// Runs a one-time migration on first setup that merges sibling silos and
-    /// imports the workspace's conversations so a durable user-local copy
-    /// exists.
+    /// Runs a one-time migration on first setup that merges sibling
+    /// user-workspace directories and imports the workspace's conversations so
+    /// a durable user-local copy exists.
     pub fn with_user_storage(
         self,
         root: &Utf8Path,
@@ -65,6 +65,19 @@ impl FsStorageBackend {
         Ok(Self {
             storage: self.storage.with_user_storage(root, slug, id)?,
         })
+    }
+
+    /// Attach the *existing* user-workspace directory for workspace `id`.
+    ///
+    /// Read-only counterpart of [`Self::with_user_storage`]: the directory is
+    /// located by the same ID-suffix rule, but nothing is created, merged, or
+    /// imported.
+    /// User storage stays disabled when the workspace has none yet.
+    #[must_use]
+    pub fn with_existing_user_storage(self, root: &Utf8Path, slug: Option<&str>, id: &str) -> Self {
+        Self {
+            storage: self.storage.with_existing_user_storage(root, slug, id),
+        }
     }
 
     /// Returns the path to the storage root directory.

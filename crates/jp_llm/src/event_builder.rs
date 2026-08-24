@@ -205,9 +205,10 @@ impl EventBuilder {
             IndexBuffer::Reasoning { content } => {
                 ConversationEvent::now(ChatResponse::Reasoning { reasoning: content })
             }
-            // Skip whitespace-only messages. These appear when the LLM
-            // emits blank text content blocks (e.g. "\n\n" between
-            // interleaved thinking blocks).
+            // A whitespace-only message carries nothing worth persisting.
+            // Reasoning is kept even when empty, because the metadata attached
+            // below can be the whole point of the event: a thinking signature
+            // or a redacted-thinking payload that later requests need.
             IndexBuffer::Message { content } if content.trim().is_empty() => return None,
             IndexBuffer::Message { content } => {
                 ConversationEvent::now(ChatResponse::Message { message: content })

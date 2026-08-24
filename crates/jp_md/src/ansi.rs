@@ -4,6 +4,14 @@
 //! computation used by both the terminal renderer (`render.rs`) and the table
 //! formatter (`table.rs`).
 
+use unicode_width::UnicodeWidthStr as _;
+
+/// Columns between tab stops.
+///
+/// Terminals, and hosts that lay out their own output area, advance a tab to
+/// the next multiple of this.
+pub const TAB_STOP: usize = 8;
+
 /// SGR: Bold on.
 pub const BOLD_START: &str = "\x1b[1m";
 
@@ -219,6 +227,15 @@ fn consume_color<'a, I: Iterator<Item = &'a str>>(prefix: &str, tokens: &mut I) 
     }
 }
 
+/// Whether `esc` is an SGR sequence (`\x1b[…m`).
+///
+/// SGR is the only family [`AnsiState`] tracks, so this doubles as the test for
+/// whether an escape's effect can be closed with [`RESET`] or re-opened after a
+/// line break.
+pub fn is_sgr(esc: &str) -> bool {
+    esc.starts_with("\x1b[") && esc.ends_with('m')
+}
+
 /// A lexical segment of a string that may contain ANSI escape sequences.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Segment<'a> {
@@ -302,24 +319,61 @@ fn osc_terminator_end(body: &str) -> Option<usize> {
     None
 }
 
-/// Calculate the visual width of a string, ignoring ANSI escape sequences.
+/// The visible text of `s`, with every ANSI escape sequence removed.
 ///
-/// Strips ANSI escape sequences (via the shared [`segments`] scanner), then
-/// delegates to `UnicodeWidthStr::width()` on the contiguous visible text.
-/// Measuring the visible text as a unit is what lets multi-codepoint sequences
-/// (emoji presentation via VS16, ZWJ sequences, script-specific ligatures)
-/// width correctly even when an escape sits between a base character and its
-/// combining mark.
-pub fn visual_width(s: &str) -> usize {
-    use unicode_width::UnicodeWidthStr as _;
-
+/// Joining the text runs (found via the shared [`segments`] scanner) into one
+/// string is what lets multi-codepoint sequences (emoji presentation via VS16,
+/// ZWJ sequences, script-specific ligatures) measure correctly even when an
+/// escape sits between a base character and its combining mark.
+/// Grapheme cluster boundaries are a property of this text, not of the escape
+/// separated runs it was built from, so anything measuring or cutting on
+/// cluster boundaries has to work from here.
+pub fn visible_text(s: &str) -> String {
     let mut plain = String::new();
     for segment in segments(s) {
         if let Segment::Text(text) = segment {
             plain.push_str(text);
         }
     }
-    plain.width()
+    plain
+}
+
+/// Calculate the visual width of a string, ignoring ANSI escape sequences.
+///
+/// A tab counts as a single column.
+/// Use [`advance_column`] where the resulting cursor position matters, since a
+/// tab moves the cursor to the next tab stop instead.
+pub fn visual_width(s: &str) -> usize {
+    visible_text(s).width()
+}
+
+/// The column the cursor sits at after writing `s` from `column`.
+///
+/// ANSI escape sequences contribute nothing, a tab moves to the next multiple
+/// of [`TAB_STOP`], and a carriage return returns to column 0 — the positions
+/// the display actually arrives at, so text padded to a fixed column lands
+/// there instead of overshooting.
+pub fn advance_column(column: usize, s: &str) -> usize {
+    let plain = visible_text(s);
+    let mut column = column;
+    let mut start = 0;
+    for (index, byte) in plain.bytes().enumerate() {
+        match byte {
+            b'\t' => {
+                column += plain[start..index].width();
+                column = (column / TAB_STOP + 1) * TAB_STOP;
+                start = index + 1;
+            }
+            // Everything written before the return is overwritten, so its width
+            // drops out of the calculation entirely.
+            b'\r' => {
+                column = 0;
+                start = index + 1;
+            }
+            _ => {}
+        }
+    }
+    column + plain[start..].width()
 }
 
 #[cfg(test)]

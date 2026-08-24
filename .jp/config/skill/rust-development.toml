@@ -14,6 +14,7 @@ current project. The following tools help you with this:
 - cargo_expand: Expand macros in the project's code.
 - cargo_format: Format the project's code.
 - cargo_update: Update named dependencies in `Cargo.lock`, optionally to a pinned version.
+- cargo_install_tools: Rebuild the binary serving these local tools, after editing `.config/jp/tools`.
 """
 
 [conversation.tools]
@@ -22,6 +23,7 @@ cargo_test = { enable = true, run = "unattended", result = "unattended", style.i
 cargo_expand = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
 cargo_format = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
 cargo_update = { enable = true, result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
+cargo_install_tools = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
 
 [[assistant.instructions]]
 title = "Rust Project Conventions"

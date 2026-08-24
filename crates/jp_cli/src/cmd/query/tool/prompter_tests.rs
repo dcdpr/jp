@@ -418,7 +418,7 @@ fn result_confirmation_cancelled_returns_false() {
 #[test]
 fn question_boolean_uses_inline_select() {
     let prompt = MockPromptBackend::new().with_inline_responses(['y']);
-    let question = jp_tool::Question::boolean("q1", "Proceed?");
+    let question = jp_tool::Question::boolean("q1", "Proceed?").unwrap();
     let result = prompter(prompt).prompt_question(&question).unwrap();
     assert_eq!(result.answer, Value::Bool(true));
     assert_eq!(result.persist_level, jp_tool::PersistLevel::None);
@@ -427,7 +427,7 @@ fn question_boolean_uses_inline_select() {
 #[test]
 fn question_text_uses_backend() {
     let prompt = MockPromptBackend::new().with_text_responses(["user input"]);
-    let question = jp_tool::Question::text("q2", "Input:");
+    let question = jp_tool::Question::text("q2", "Input:").unwrap();
     let result = prompter(prompt).prompt_question(&question).unwrap();
     assert_eq!(result.answer, Value::String("user input".to_string()));
 }
@@ -436,6 +436,7 @@ fn question_text_uses_backend() {
 fn question_select_uses_backend() {
     let prompt = MockPromptBackend::new().with_select_responses(["Option B"]);
     let question = jp_tool::Question::select("q3", "Choose:")
+        .unwrap()
         .with_options(vec!["Option A".to_string(), "Option B".to_string()]);
     let result = prompter(prompt).prompt_question(&question).unwrap();
     assert_eq!(result.answer, Value::String("Option B".to_string()));

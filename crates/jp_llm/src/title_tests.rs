@@ -215,6 +215,7 @@ async fn generate_applies_the_title_model_parameters() {
         model,
         count: 1,
         rejected: vec![],
+        max_response_bytes: 1_048_576,
     })
     .await
     .expect("title generation succeeds");
@@ -296,6 +297,7 @@ async fn title_generate(
         model: model_config("mock"),
         count: 1,
         rejected: vec![],
+        max_response_bytes: 1_048_576,
     })
     .await
     .expect("title generation succeeds")

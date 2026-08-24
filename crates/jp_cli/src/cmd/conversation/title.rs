@@ -200,6 +200,7 @@ async fn generate(
         model,
         count,
         rejected,
+        max_response_bytes: cfg.assistant.request.max_response_bytes,
     })
     .await?;
 

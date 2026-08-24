@@ -97,7 +97,6 @@ type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 #[config(rename_all = "snake_case")]
 pub struct AppConfig {
     /// Inherit from a local ancestor or global configuration file.
-    #[setting(optional)]
     pub inherit: bool,
 
     /// Directories to search for additional configuration files.
@@ -109,18 +108,18 @@ pub struct AppConfig {
     ///
     /// For example, to load `.jp/agents/dev.toml`, add `.jp/agents` to this
     /// list and run `jp query --cfg dev`.
-    #[setting(optional, merge = schematic::merge::append_vec, transform = util::vec_dedup)]
+    #[setting(merge = internal::merge::append_vec_dedup)]
     pub config_load_paths: Vec<RelativePathBuf>,
 
     /// Extends the configuration from the given files.
     ///
-    /// Paths are relative to the current config file.
+    /// Paths are resolved relative to the directory of the file declaring them,
+    /// and may contain glob patterns.
+    /// Resolution is strictly file-relative: neither `config_load_paths` nor
+    /// the other configuration roots searched by `--cfg <name>` are consulted.
     ///
-    /// Files are allowed to be glob patterns, and will be expanded to a list of
-    /// files to extend.
-    ///
-    /// Note that extended files ARE loaded by default, in contrast to
-    /// [`Self::config_load_paths`].
+    /// Extended files are loaded unconditionally, unlike files in
+    /// `config_load_paths`, which load only when requested with `--cfg`.
     #[setting(default = vec!["config.d/**/*".into()], merge = schematic::merge::preserve)]
     pub extends: Vec<ExtendingRelativePath>,
 

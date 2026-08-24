@@ -246,6 +246,9 @@ async fn get(request: RequestBuilder) -> Result<reqwest::Response> {
 fn parse_chunk(chunk: &str) -> Result<response::ChatCompletion> {
     use serde_json::{from_str, to_string_pretty};
 
+    // The raw payload, before deserializing drops anything we don't model.
+    trace!(chunk, "Received payload from OpenRouter API.");
+
     let json_error = match from_str(chunk) {
         Ok(response) => return Ok(response),
         Err(error) => error,

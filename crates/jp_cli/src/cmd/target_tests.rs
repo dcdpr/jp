@@ -1,17 +1,48 @@
 use std::sync::Arc;
 
 use camino::Utf8PathBuf;
+use chrono::{DateTime, TimeZone as _, Utc};
 use jp_config::{AppConfig, conversation::DefaultConversationId};
 use jp_conversation::Conversation;
-use jp_workspace::Workspace;
+use jp_workspace::{
+    Workspace,
+    session::{SessionId, SessionSource},
+};
 
 use super::*;
 
 fn workspace_with_conversation() -> (Workspace, ConversationId) {
-    let mut ws = Workspace::new(Utf8PathBuf::new());
+    let mut ws = Workspace::in_memory(Utf8PathBuf::new());
     let config = Arc::new(AppConfig::new_test());
     let id = ws.create_conversation(Conversation::default(), config);
     (ws, id)
+}
+
+fn make_id(secs: u64) -> ConversationId {
+    ConversationId::try_from(DateTime::<Utc>::UNIX_EPOCH + std::time::Duration::from_secs(secs))
+        .unwrap()
+}
+
+/// A workspace whose session activated `previous` and then `active`, so the two
+/// session-scoped keywords resolve to different conversations.
+fn workspace_with_session_history() -> (Workspace, Session, ConversationId, ConversationId) {
+    let mut ws = Workspace::in_memory(Utf8PathBuf::new());
+    let config = Arc::new(AppConfig::new_test());
+    let previous = make_id(1000);
+    let active = make_id(2000);
+    ws.create_conversation_with_id(previous, Conversation::default(), Arc::clone(&config));
+    ws.create_conversation_with_id(active, Conversation::default(), config);
+
+    let session = Session {
+        id: SessionId::new("jp-cli-target-test").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    let at = Utc.with_ymd_and_hms(2025, 1, 1, 0, 0, 0).unwrap();
+    ws.record_session_activation(&session, previous, at)
+        .unwrap();
+    ws.record_session_activation(&session, active, at).unwrap();
+
+    (ws, session, previous, active)
 }
 
 #[test]
@@ -43,7 +74,7 @@ fn last_created_resolves() {
 
 #[test]
 fn last_activated_empty_workspace_returns_none() {
-    let ws = Workspace::new(Utf8PathBuf::new());
+    let ws = Workspace::in_memory(Utf8PathBuf::new());
     assert_eq!(
         resolve_default_id(DefaultConversationId::LastActivated, &ws, None),
         None
@@ -147,7 +178,7 @@ fn is_archived_returns_true_for_archived_targets() {
 
 #[test]
 fn is_archived_returns_false_for_non_archived_targets() {
-    assert!(!ConversationTarget::Latest.is_archived());
+    assert!(!ConversationTarget::Recent.is_archived());
     assert!(!ConversationTarget::Newest.is_archived());
     assert!(!ConversationTarget::Picker(PickerFilter::default()).is_archived());
 }
@@ -155,14 +186,14 @@ fn is_archived_returns_false_for_non_archived_targets() {
 #[test]
 fn archived_keyword_errors_when_no_archived_conversations() {
     let (ws, _) = workspace_with_conversation();
-    // Active conversations exist, but none are archived.
+    // Live conversations exist, but none are archived.
     let result = ConversationTarget::Archived.resolve(&ws, None);
     assert!(result.is_err());
 }
 
 #[test]
 fn all_archived_empty_returns_error() {
-    let ws = Workspace::new(Utf8PathBuf::new());
+    let ws = Workspace::in_memory(Utf8PathBuf::new());
     let result = ConversationTarget::AllArchived.resolve(&ws, None);
     assert!(result.is_err());
 }
@@ -177,6 +208,114 @@ fn archived_keyword_name() {
         ConversationTarget::AllArchived.keyword_name(),
         Some("+archived")
     );
+}
+
+#[test]
+fn parse_active_keyword() {
+    assert_eq!(
+        ConversationTarget::parse("active"),
+        ConversationTarget::SessionActive
+    );
+    assert_eq!(
+        ConversationTarget::parse("."),
+        ConversationTarget::SessionActive
+    );
+}
+
+#[test]
+fn parse_all_live_keyword() {
+    assert_eq!(
+        ConversationTarget::parse("+live"),
+        ConversationTarget::AllLive
+    );
+    assert_eq!(ConversationTarget::parse("+l"), ConversationTarget::AllLive);
+}
+
+/// Bare `+` is reserved for a future "every conversation, either partition"
+/// keyword, so it must not resolve to the live-only set.
+#[test]
+fn bare_plus_is_not_a_keyword() {
+    assert!(matches!(
+        ConversationTarget::parse("+"),
+        ConversationTarget::Picker(_)
+    ));
+}
+
+#[test]
+fn active_requires_session_and_all_live_does_not() {
+    assert!(ConversationTarget::SessionActive.requires_session());
+    assert!(!ConversationTarget::AllLive.requires_session());
+}
+
+#[test]
+fn active_and_all_live_keyword_names() {
+    assert_eq!(
+        ConversationTarget::SessionActive.keyword_name(),
+        Some("active")
+    );
+    assert_eq!(ConversationTarget::AllLive.keyword_name(), Some("+live"));
+}
+
+#[test]
+fn active_resolves_to_the_head_of_the_session_history() {
+    let (ws, session, previous, active) = workspace_with_session_history();
+
+    assert_eq!(
+        ConversationTarget::SessionActive
+            .resolve(&ws, Some(&session))
+            .unwrap(),
+        vec![active]
+    );
+
+    // `session` / `s` is the entry *behind* the active one. Asserted here so a
+    // change that collapses the two keywords fails loudly.
+    assert_eq!(
+        ConversationTarget::SessionPrevious
+            .resolve(&ws, Some(&session))
+            .unwrap(),
+        vec![previous]
+    );
+}
+
+#[test]
+fn active_without_session_errors() {
+    let (ws, _) = workspace_with_conversation();
+    assert!(
+        ConversationTarget::SessionActive
+            .resolve(&ws, None)
+            .is_err()
+    );
+}
+
+#[test]
+fn active_errors_when_session_has_no_history() {
+    let (ws, _) = workspace_with_conversation();
+    let session = Session {
+        id: SessionId::new("jp-cli-target-test-empty").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    assert!(
+        ConversationTarget::SessionActive
+            .resolve(&ws, Some(&session))
+            .is_err()
+    );
+}
+
+#[test]
+fn all_live_resolves_to_every_live_conversation() {
+    let (ws, session, previous, active) = workspace_with_session_history();
+
+    let mut ids = ConversationTarget::AllLive
+        .resolve(&ws, Some(&session))
+        .unwrap();
+    ids.sort_unstable();
+    assert_eq!(ids, vec![previous, active]);
+}
+
+#[test]
+fn all_live_empty_workspace_errors() {
+    let ws = Workspace::in_memory(Utf8PathBuf::new());
+    assert!(ConversationTarget::AllLive.resolve(&ws, None).is_err());
 }
 
 // --- Picker label formatting ------------------------------------------------

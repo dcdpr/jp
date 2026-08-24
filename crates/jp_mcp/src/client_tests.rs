@@ -18,6 +18,7 @@ fn stdio_config(command: &str, optional: bool) -> McpProviderConfig {
         variables: vec![],
         checksum: None,
         optional,
+        startup_timeout_secs: 60,
     })
 }
 
@@ -102,6 +103,94 @@ fn initialize_error_display_omits_stderr_section_when_empty() {
     );
 }
 
+#[test]
+fn initialize_timeout_display_includes_timeout_command_and_stderr() {
+    let error = Error::InitializeTimeout {
+        cmd: "just serve-bookworm".to_owned(),
+        timeout_secs: 60,
+        stderr: "\nstderr:\n  Compiling bookworm v0.1.0".to_owned(),
+    };
+
+    assert_eq!(
+        error.to_string(),
+        "Server initialization timed out after 60s: just serve-bookworm\nstderr:\n  Compiling \
+         bookworm v0.1.0"
+    );
+}
+
+#[test]
+fn initialize_timeout_display_omits_stderr_section_when_empty() {
+    let error = Error::InitializeTimeout {
+        cmd: "just".to_owned(),
+        timeout_secs: 5,
+        stderr: String::new(),
+    };
+
+    assert_eq!(
+        error.to_string(),
+        "Server initialization timed out after 5s: just"
+    );
+}
+
+// A child that writes to stderr and then hangs without ever speaking MCP
+// forces the startup-timeout path; the resulting error must carry the
+// configured deadline and the captured stderr tail.
+#[cfg(unix)]
+#[tokio::test]
+async fn startup_timeout_attaches_stderr_tail() {
+    let config = McpProviderConfig::Stdio(StdioConfig {
+        command: PathBuf::from("sh"),
+        arguments: vec!["-c".to_owned(), "echo compiling >&2; sleep 30".to_owned()],
+        variables: vec![],
+        checksum: None,
+        optional: false,
+        startup_timeout_secs: 1,
+    });
+
+    let error = Client::create_client(&McpServerId::new("slow"), &config, None)
+        .await
+        .expect_err("a server that never completes the handshake must time out");
+
+    match error {
+        Error::InitializeTimeout {
+            cmd,
+            timeout_secs,
+            stderr,
+        } => {
+            assert_eq!(cmd, "sh -c echo compiling >&2; sleep 30");
+            assert_eq!(timeout_secs, 1);
+            assert_eq!(stderr, "\nstderr:\n  compiling");
+        }
+        other => panic!("expected InitializeTimeout, got: {other:?}"),
+    }
+}
+
+// `startup_timeout_secs = 0` disables the timeout: startup must run through the
+// un-timed serve path. A child that exits immediately without speaking MCP
+// fails that path quickly, so the error is `InitializeError`, never the
+// `InitializeTimeout` that a zero-duration `tokio::time::timeout` would raise.
+#[cfg(unix)]
+#[tokio::test]
+async fn zero_startup_timeout_disables_timeout() {
+    let config = McpProviderConfig::Stdio(StdioConfig {
+        command: PathBuf::from("sh"),
+        arguments: vec!["-c".to_owned(), "exit 0".to_owned()],
+        variables: vec![],
+        checksum: None,
+        optional: false,
+        startup_timeout_secs: 0,
+    });
+
+    let error = Client::create_client(&McpServerId::new("instant"), &config, None)
+        .await
+        .expect_err("a child that exits without a handshake fails initialization");
+
+    assert!(
+        matches!(error, Error::InitializeError { .. }),
+        "zero timeout must take the un-timed serve path, got: {error:?}"
+    );
+}
+
 // Use a binary path that cannot exist on any sane system. This drives
 // `create_client` into a `CannotSpawnProcess` error path without depending on
 // any specific environment behavior.
@@ -116,15 +205,18 @@ async fn optional_server_failure_is_tolerated() {
     let mut client = Client::new(providers);
     let server_id = McpServerId::new(&server_name);
 
-    let mut joins = client
+    let mut startup = client
         .run_services(HashSet::from([server_id.clone()]), Handle::current())
         .await
         .expect("run_services should not fail for optional servers");
 
-    while let Some(joined) = joins.join_next().await {
-        joined
+    assert_eq!(startup.pending, vec![server_id.clone()]);
+
+    while let Some(joined) = startup.joins.join_next().await {
+        let completed = joined
             .expect("task did not panic")
             .expect("optional failure is swallowed inside the task");
+        assert_eq!(completed, server_id);
     }
 
     assert!(
@@ -142,13 +234,15 @@ async fn required_server_failure_propagates() {
     let mut client = Client::new(providers);
     let server_id = McpServerId::new(&server_name);
 
-    let mut joins = client
+    let mut startup = client
         .run_services(HashSet::from([server_id.clone()]), Handle::current())
         .await
         .expect("run_services itself returns Ok; per-task results carry the error");
 
+    assert_eq!(startup.pending, vec![server_id.clone()]);
+
     let mut saw_error = false;
-    while let Some(joined) = joins.join_next().await {
+    while let Some(joined) = startup.joins.join_next().await {
         let task_result = joined.expect("task did not panic");
         if task_result.is_err() {
             saw_error = true;

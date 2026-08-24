@@ -41,7 +41,7 @@ fn test_session() -> Session {
 /// conversation whose `last_activated_at` is pinned to
 /// `ORIGINAL_LAST_ACTIVATED`.
 fn setup(id: ConversationId) -> Ctx {
-    let mut workspace = Workspace::new("/tmp/jp-cli-use-test");
+    let mut workspace = Workspace::in_memory("/tmp/jp-cli-use-test");
     workspace.create_conversation_with_id(
         id,
         Conversation {
@@ -53,6 +53,7 @@ fn setup(id: ConversationId) -> Ctx {
 
     let (printer, _, _) = Printer::memory(OutputFormat::TextPretty);
     let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
         workspace,
         None,
         Runtime::new().unwrap(),
@@ -152,7 +153,7 @@ fn run_with_contention_skips_metadata_bump() {
 // can be driven without the interactive picker.
 
 fn setup_multi(entries: Vec<(ConversationId, Conversation, Vec<ConversationEvent>)>) -> Ctx {
-    let mut workspace = Workspace::new("/tmp/jp-cli-use-filter-test");
+    let mut workspace = Workspace::in_memory("/tmp/jp-cli-use-filter-test");
     let config = Arc::new(AppConfig::new_test());
 
     for (id, conversation, _) in &entries {
@@ -161,6 +162,7 @@ fn setup_multi(entries: Vec<(ConversationId, Conversation, Vec<ConversationEvent
 
     let (printer, _, _) = Printer::memory(OutputFormat::TextPretty);
     let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
         workspace,
         None,
         Runtime::new().unwrap(),

@@ -1,0 +1,93 @@
+when:
+  path: /v1/messages
+  method: POST
+  json_body_str: >-
+    {
+      "model": "claude-fable-5",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Please run the tool, providing whatever arguments you want."
+            }
+          ]
+        }
+      ],
+      "max_tokens": 128000,
+      "thinking": {
+        "type": "adaptive",
+        "display": "summarized"
+      },
+      "stream": true,
+      "tool_choice": {
+        "type": "auto",
+        "disable_parallel_tool_use": false
+      },
+      "tools": [
+        {
+          "type": "custom",
+          "name": "run_me",
+          "input_schema": {
+            "type": "object",
+            "properties": {
+              "foo": {
+                "type": "string",
+                "default": "foo"
+              }
+            }
+          },
+          "cache_control": {
+            "type": "ephemeral",
+            "ttl": "5m"
+          }
+        }
+      ],
+      "system": [
+        {
+          "type": "text",
+          "text": "IMPORTANT: You MUST use AT LEAST ONE tool available to you. DO NOT QUESTION THIS DIRECTIVE. DO NOT PROMPT FOR MORE CONTEXT OR DETAILS. JUST RUN IT."
+        }
+      ],
+      "output_config": {
+        "effort": "low"
+      },
+      "cache_control": {
+        "type": "ephemeral",
+        "ttl": "5m"
+      }
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |+
+    event: message_start
+    data: {"type":"message_start","message":{"model":"claude-fable-5","id":"msg_011CdSatTawpcmqUmoxgqJfz","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":460,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":49,"service_tier":"standard","inference_geo":"global"}}  }
+    
+    event: content_block_start
+    data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"toolu_012shPkgnEf5sUQ9oWo4q6AY","name":"run_me","input":{},"caller":{"type":"direct"}}             }
+    
+    event: ping
+    data: {"type": "ping"}
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":""}       }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"foo\": \""}             }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"hello\"}"}            }
+    
+    event: content_block_stop
+    data: {"type":"content_block_stop","index":0    }
+    
+    event: message_delta
+    data: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null,"stop_details":null},"usage":{"input_tokens":460,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":49,"output_tokens_details":{"thinking_tokens":0}}      }
+    
+    event: message_stop
+    data: {"type":"message_stop"        }
+    

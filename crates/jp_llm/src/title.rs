@@ -56,6 +56,13 @@ pub struct TitleRequest {
 
     /// Titles the user already rejected, which the model must avoid.
     pub rejected: Vec<String>,
+
+    /// Output byte ceiling for the request, from
+    /// `assistant.request.max_response_bytes`.
+    /// A runaway response is cut off past this and surfaced as a non-retryable
+    /// error rather than regenerated.
+    /// `0` disables the ceiling.
+    pub max_response_bytes: u32,
 }
 
 /// Resolve the model that conversation-title generation runs on.
@@ -127,6 +134,7 @@ pub async fn generate(
         model,
         count,
         rejected,
+        max_response_bytes,
     } = request;
 
     let sections = title_instructions(count, &rejected);
@@ -164,7 +172,8 @@ pub async fn generate(
         tool_choice: ToolChoice::default(),
     };
 
-    let events = collect_with_retry(provider, details, query, &RetryConfig::default()).await?;
+    let retry = RetryConfig::default().with_max_response_bytes(max_response_bytes);
+    let events = collect_with_retry(provider, details, query, &retry).await?;
 
     Ok(event_builder::structured_data(events)
         .as_ref()

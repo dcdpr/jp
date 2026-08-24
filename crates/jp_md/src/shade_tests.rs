@@ -11,18 +11,95 @@ fn terminal_bg() -> DefaultBackground {
 }
 
 #[test]
-fn fills_each_line_to_the_edge_and_ends_the_region() {
-    // The background is asserted once and persists across the newline; each
-    // line is erased to the right edge, and the region is closed with `\x1b[49m`.
+fn fills_each_line_to_the_edge_and_closes_before_the_break() {
+    // Each line is erased to the right edge, then the background is closed
+    // before the newline and re-asserted on the next line.
+    //
+    // The close has to precede the break: a terminal scrolling to make room for
+    // the next row fills that row with the background active at the time (the
+    // `bce` capability), so a `\n` written under the region paints a row the
+    // region does not own.
     assert_eq!(
         shade("a\nb\n", &terminal_bg()),
-        "\x1b[48;5;236ma\x1b[K\nb\x1b[K\n\x1b[49m"
+        "\x1b[48;5;236ma\x1b[K\x1b[49m\n\x1b[48;5;236mb\x1b[K\x1b[49m\n"
     );
 }
 
 #[test]
 fn empty_input_produces_no_output() {
     assert_eq!(shade("", &terminal_bg()), "");
+}
+
+/// A background that pads to a fixed column instead of deferring to the
+/// terminal.
+fn column_bg(width: usize) -> DefaultBackground {
+    DefaultBackground {
+        param: "48;5;236".into(),
+        fill: BackgroundFill::Column(width),
+    }
+}
+
+#[test]
+fn column_fill_pads_with_spaces_instead_of_erasing() {
+    // A host that lays out its own sub-window (an `fzf` preview pane) drops
+    // `\x1b[K`, so the fill has to be real characters. Each line is padded from
+    // its own visible width up to the column.
+    assert_eq!(
+        shade("ab\nc\n", &column_bg(4)),
+        "\x1b[48;5;236mab  \x1b[49m\n\x1b[48;5;236mc   \x1b[49m\n"
+    );
+}
+
+#[test]
+fn column_fill_counts_display_width_not_bytes() {
+    // Two double-width characters fill four of the six columns, so two spaces
+    // remain. Counting bytes would have padded nothing (6 bytes >= 6).
+    assert_eq!(
+        shade("日本\n", &column_bg(6)),
+        "\x1b[48;5;236m日本  \x1b[49m\n"
+    );
+}
+
+#[test]
+fn column_fill_ignores_escape_bytes_when_measuring() {
+    // The content's own styling is zero-width: `ab` is still 2 columns, so the
+    // pad is 2, not 2-minus-the-escape-length.
+    let shaded = shade("a\x1b[1mb\x1b[22m\n", &column_bg(4));
+    assert!(
+        shaded.ends_with("  \x1b[49m\n"),
+        "expected a two-space pad, got {shaded:?}"
+    );
+}
+
+#[test]
+fn column_fill_moves_a_tab_to_the_next_tab_stop() {
+    // Tool output is full of tabs. `unicode_width` measures one column each,
+    // while a terminal and an `fzf` pane both move the cursor to the next
+    // multiple of 8, so the plain measurement pads past the target column.
+    assert_eq!(
+        shade("a\tb\n", &column_bg(16)),
+        "\x1b[48;5;236ma\tb       \x1b[49m\n",
+        "the tab lands on column 8, so `b` ends at 9 and 7 columns remain"
+    );
+}
+
+#[test]
+fn column_fill_emits_nothing_once_the_line_reaches_the_column() {
+    // An over-long line gets no padding rather than a negative one.
+    assert_eq!(
+        shade("abcdef\n", &column_bg(4)),
+        "\x1b[48;5;236mabcdef\x1b[49m\n"
+    );
+}
+
+#[test]
+fn content_fill_backs_only_the_text() {
+    // `Content` asserts the background under the text but never extends it.
+    let bg = DefaultBackground {
+        param: "48;5;236".into(),
+        fill: BackgroundFill::Content,
+    };
+    assert_eq!(shade("ab\n", &bg), "\x1b[48;5;236mab\x1b[49m\n");
 }
 
 #[test]
@@ -91,7 +168,7 @@ fn content_fill_mode_omits_the_edge_erase() {
         fill: BackgroundFill::Content,
     };
     let output = shade("a\nb", &content_bg);
-    assert_eq!(output, "\x1b[48;5;236ma\nb\x1b[49m");
+    assert_eq!(output, "\x1b[48;5;236ma\x1b[49m\n\x1b[48;5;236mb\x1b[49m");
     assert!(
         !output.contains("\x1b[K"),
         "content fill must not erase: {output:?}"

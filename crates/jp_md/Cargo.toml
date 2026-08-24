@@ -16,6 +16,7 @@ version.workspace = true
 comrak = { workspace = true }
 syntect = { workspace = true, features = ["regex-fancy", "default-themes", "default-syntaxes"] }
 two-face = { workspace = true, features = ["syntect-fancy"] }
+unicode-segmentation = { workspace = true }
 unicode-width = { workspace = true }
 
 [dev-dependencies]

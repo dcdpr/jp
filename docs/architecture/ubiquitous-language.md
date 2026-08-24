@@ -27,14 +27,17 @@ In disagreements between code and docs, the code is authoritative.
     - [EditorBackend](#editorbackend)
     - [InlineReply](#inlinereply)
     - [Inquiry](#inquiry)
+    - [Match](#match)
     - [Persona](#persona)
     - [Pinned Conversation](#pinned-conversation)
     - [Provider](#provider)
     - [RFD](#rfd)
+    - [Search Hit](#search-hit)
     - [Signal Router](#signal-router)
     - [Thread](#thread)
     - [Tool Call](#tool-call)
     - [Turn](#turn)
+    - [User-Workspace Directory](#user-workspace-directory)
     - [Workspace](#workspace)
     - [Workspace Projection](#workspace-projection)
 
@@ -131,6 +134,18 @@ Carried as `InquiryRequest` and `InquiryResponse` events within a conversation.
 Used for mid-turn clarification that should not appear in the main chat stream
 or be sent to the LLM provider as context.
 
+### Match
+
+A [Search Hit](#search-hit) whose line actually contains the pattern, as opposed
+to one included only for surrounding context.
+Recorded as `is_match` on the hit, along with the byte ranges of the matched
+substrings.
+
+Matches are the unit every count in `jp conversation grep` uses: the figure in a
+heading, the `--output count` value, and the `--max-matches` cap.
+
+**Not the same as.** A Search Hit, which also covers context lines.
+
 ### Pinned Conversation
 
 A conversation the user has marked as important, so it stays prominent and is
@@ -160,6 +175,21 @@ Each RFD captures design rationale for a significant change.
 Numeric-prefixed RFDs (`001-`, `002-`, …) are the accepted series; `D`-prefixed
 RFDs (`D01-`, `D02-`, …) are drafts or abandoned proposals.
 The process itself is defined in [RFD-001].
+
+### Search Hit
+
+One line of conversation content emitted by a search, together with the
+coordinate that locates it: the conversation, the turn it came from, and which
+part of the conversation it was found in (its scope — title, user, assistant,
+reasoning, tool call, and so on).
+Implemented as `Hit` in `jp_cli::cmd::conversation::grep`.
+
+A hit is either a [Match](#match) or a context line pulled in by `--context`;
+both are hits.
+
+**Not the same as.** A Match (a hit whose line contains the pattern), a
+Conversation Event (one hit is a single line from within an event, and one event
+can yield many hits).
 
 ### Signal Router
 
@@ -207,6 +237,20 @@ Implemented as `Turn<'a>` in `jp_conversation::stream::turn_iter`.
 
 A single Conversation contains many Turns, separated by `TurnStart` events.
 
+### User-Workspace Directory
+
+A workspace's per-user data directory,
+`~/.local/share/jp/workspace/<slug>-<id>/`: this user's durable state for one
+workspace — conversations, session mappings, locks, the roots registry, and the
+user-workspace config search root.
+Named for the user-workspace config scope: the *this user × this workspace*
+point in the user-global / workspace / user-workspace scope taxonomy.
+Located by workspace-ID suffix, never by exact name; `<slug>` is cosmetic,
+display-only, and never renamed.
+Implemented by `FsStorageBackend::with_user_storage` in `jp_storage`;
+directory-name parsing lives in `jp_workspace::roots`.
+See [RFD-031] and [RFD-087].
+
 ### Workspace
 
 The top-level project unit, housing conversations, configuration, plugins, and
@@ -229,4 +273,5 @@ See [RFD-031].
 
 [RFD-001]: ../rfd/001-jp-rfd-process.md
 [RFD-031]: ../rfd/031-durable-conversation-storage-with-workspace-projection.md
+[RFD-087]: ../rfd/087-session-scoped-active-workspace.md
 [`shlex::split`]: https://docs.rs/shlex

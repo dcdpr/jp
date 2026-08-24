@@ -20,6 +20,9 @@ pub struct TitleGeneratorTask {
     pub providers: LlmProviderConfig,
     pub events: ConversationStream,
     pub title: Option<String>,
+    /// Output ceiling for the title request, from
+    /// `assistant.request.max_response_bytes`.
+    pub max_response_bytes: u32,
     /// Whether the invoking process is attached to a terminal.
     /// When `false`, the OSC-2 title-update side effect on task sync is
     /// suppressed — the bytes would otherwise leak into a captured pipe.
@@ -47,6 +50,7 @@ impl TitleGeneratorTask {
             providers: config.providers.llm.clone(),
             events,
             title: None,
+            max_response_bytes: config.assistant.request.max_response_bytes,
             is_tty,
         })
     }
@@ -63,6 +67,7 @@ impl TitleGeneratorTask {
             model: self.model.clone(),
             count: 1,
             rejected: vec![],
+            max_response_bytes: self.max_response_bytes,
         })
         .await?;
 

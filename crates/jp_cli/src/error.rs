@@ -74,6 +74,14 @@ pub(crate) enum Error {
         source: Box<jp_llm::Error>,
     },
 
+    /// Reading an `@path` argument value from disk failed.
+    ///
+    /// The path and the underlying cause are both in the message because clap
+    /// renders a value-parser failure through `Display` alone and never walks
+    /// the cause chain.
+    #[error("cannot read '{path}': {source}")]
+    ArgFile { path: String, source: io::Error },
+
     #[error("{0} not found: {1}")]
     NotFound(&'static str, String),
 
@@ -170,6 +178,9 @@ pub(crate) enum Error {
 
     #[error("Compaction error: {0}")]
     Compaction(String),
+
+    #[error("Label error: {0}")]
+    Label(String),
 
     /// The summarizer produced no usable summary.
     ///

@@ -80,7 +80,7 @@ working.
 
 | Class                                            | Action | Rationale                                         |
 | ------------------------------------------------ | ------ | ------------------------------------------------- |
-| Printable text, `\n`, `\t`                       | Keep   | Content.                                          |
+| Printable text, `\n`, `\t`                       | Keep   | Content (`\t` width is open, see Risks).          |
 | SGR (`CSI … m`), except conceal (SGR 8)          | Keep   | Colors/bold are display-only; tools rely on them. |
 | SGR conceal (`CSI 8 m`)                          | Drop   | Hides text from the user.                         |
 | All other CSI (cursor, erase, scroll, DEC modes) | Drop   | Rewrites or hides what the user sees.             |
@@ -172,9 +172,13 @@ Concretely:
    bypass `jp_md` and wrap them.
 4. History re-rendering (`jp conversation print/show`) — covered where it
    reuses the chat renderer; audit for direct prints.
-5. Table and list rendering of conversation-derived strings — `jp conversation
-   ls` prints LLM-generated titles into a table with its own display-width math;
-   embedded control bytes corrupt both the cells and the width computation.
+5. Table, list, and hit rendering of conversation-derived strings — `jp
+   conversation ls` prints LLM-generated titles into a table, and `jp
+   conversation grep` prints matched lines drawn from message, reasoning, and
+   tool-result text.
+   Both lay that text out against a display-width budget computed with
+   `jp_term::width`, so embedded control bytes corrupt the visible output and
+   the width computation at once.
 
 ### OSC embedding hardening
 
@@ -274,6 +278,16 @@ control characters — and ships even when `sanitize = "off"`.
   audit; the design assumes wrapping is mechanical.
 - **Partial sequence at stream end.** `finish()` must decide between dropping
   and visualizing a dangling introducer; proposal: treat as dropped sequence.
+- **Tab width on width-budgeted paths.** `\t` is kept as content, but
+  `jp_term::width` measures it as zero columns while a terminal expands it to
+  the next tab stop, so a tab-bearing line overruns any budget computed from it
+  and soft-wraps.
+  Keeping the character is right — tabs are legitimate in file contents and
+  tool output, and dropping them would silently reflow indented text.
+  The open choice is where to normalize: expand to a fixed tab stop during
+  sanitization, or surface tabs the way `visualize` surfaces dropped sequences.
+  The failure is cosmetic and bounded (ripgrep's `--max-columns` has the same
+  property), so this does not block the steps above.
 
 ## Implementation Plan
 
@@ -289,13 +303,18 @@ control characters — and ships even when `sanitize = "off"`.
    visible-character budget, so control sequences neither consume the truncation
    limit nor get split by the truncator.
 5. **Audit and wire tool-result, history, and table/list rendering** (`jp
-   conversation ls` titles).
+   conversation ls` titles, `jp conversation grep` hits).
    In `jp_cli::render::tool`, `write_chrome` is an output helper, not a trust
    marker: it emits both JP-authored headers and relayed tool-result text.
    Sanitize the untrusted input (`inner_content`, custom-formatter output)
    before it is formatted — code-block highlighting adds trusted styling to
    those bytes ahead of the write — and do not sanitize JP-authored headers,
    separators, temp lines, or assembled `jp_term::osc::hyperlink` chrome.
+   The width-budgeted paths carry step 4's ordering requirement too:
+   `jp_term::width::truncate_to_width` documents an escape-free precondition,
+   since it spends the budget per grapheme cluster and would let escape bytes
+   both consume columns and be split mid-sequence.
+   Sanitize before the truncator, not after.
 6. **Docs**: `docs/configuration.md` entry; note in the security section of the
    README docs; ubiquitous-language entry disambiguating display sanitization
    from storage sanitization ([RFD 052]) and stream repair.

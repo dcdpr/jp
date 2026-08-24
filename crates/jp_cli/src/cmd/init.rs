@@ -13,10 +13,10 @@ use jp_config::{
 };
 use jp_printer::Printer;
 use jp_storage::backend::FsStorageBackend;
-use jp_workspace::Workspace;
+use jp_workspace::{DEFAULT_STORAGE_DIR, Workspace};
 use schematic::ConfigEnum as _;
 
-use crate::{DEFAULT_STORAGE_DIR, cmd::Output, ctx::IntoPartialAppConfig};
+use crate::{cmd::Output, ctx::IntoPartialAppConfig};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Init {
@@ -50,7 +50,7 @@ impl Init {
         let id = jp_workspace::Id::new();
 
         let fs = Arc::new(FsStorageBackend::new(&storage)?);
-        let _workspace = Workspace::new_with_id(root.clone(), id.clone()).with_backend(fs);
+        let _workspace = Workspace::in_memory_with_id(root.clone(), id.clone()).with_backend(fs);
 
         id.store(&storage)?;
 

@@ -1,0 +1,49 @@
+[conversation.tools.ticket_comment]
+enable = false
+source = "local"
+format = "unattended"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "Append a comment to a ticket."
+description = """
+Add a comment to a ticket's discussion, attributed to you (`jp`).
+
+Comments are append-only: they are never removed or reordered, so write what you
+mean. The reply target is a comment's 1-based position, which `ticket_show`
+prints next to each comment (`T-02wt0kx#1`).
+
+Findings, reproductions, and links to the code belong here. A comment that turns
+the ticket into a design argument is a signal the work wants an RFD instead.
+"""
+
+examples = """
+Record a finding:
+```json
+{"id": "T-02wt0kx", "body": "The wrap calculation in `jp_printer` uses the \
+pre-indent width."}
+```
+
+Reply to the first comment:
+```json
+{"id": "T-02wt0kx", "re": 1, "body": "Confirmed at 72 columns, not at 80."}
+```
+"""
+
+[conversation.tools.ticket_comment.style]
+parameters = "just serve-tools {{context}} {{tool}}"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.ticket_comment.parameters.id]
+type = "string"
+required = true
+summary = "The ticket to comment on: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`."
+
+[conversation.tools.ticket_comment.parameters.body]
+type = "string"
+required = true
+summary = "The comment, as markdown."
+
+[conversation.tools.ticket_comment.parameters.re]
+type = "integer"
+required = false
+summary = "1-based position of the comment being replied to, as shown by `ticket_show`."

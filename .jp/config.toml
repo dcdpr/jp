@@ -22,14 +22,19 @@ type = "stdio"
 command = "just"
 arguments = ["serve-bookworm"]
 
+# `jp ticket` is served by a plugin in this repository, installed with
+# `just _install-ticket` and found on $PATH. It is deliberately absent from the
+# published registry, so approve it here rather than on every invocation.
+[plugins.command.ticket]
+run = "unattended"
+
 [providers.llm.aliases]
 # Anthropic aliases
 anthropic = "anthropic/claude-sonnet-5"
 claude = "anthropic/claude-sonnet-5"
 sonnet = "anthropic/claude-sonnet-5"
-opus = "anthropic/claude-opus-4-8"
+opus = "anthropic/claude-opus-5"
 fable = "anthropic/claude-fable-5"
-opus6 = "anthropic/claude-opus-4-6"
 haiku = "anthropic/claude-haiku-4-5"
 zai = "cerebras/zai-glm-4.7"
 # OpenAI aliases
@@ -75,3 +80,24 @@ display = "full"
 
 [conversation.tools.'*']
 run = "ask"
+
+# Record the VCS context a conversation was started in, so it can be found back
+# with `jp c ls --label=branch=<name>`. Re-resolved on fork, because a fork is a
+# new conversation started here and now, not a copy of where the source began.
+[conversation.labels.branch]
+value.cmd = "git branch --show-current"
+apply_on = { new = true, fork = true }
+run = "unattended"
+optional = true
+
+[conversation.labels.commit]
+value.cmd = "git rev-parse --short HEAD"
+apply_on = { new = true, fork = true }
+run = "unattended"
+optional = true
+
+[conversation.labels.worktree]
+value.cmd = { program = 'basename "$(git rev-parse --show-toplevel)"', shell = true }
+apply_on = { new = true, fork = true }
+run = "unattended"
+optional = true

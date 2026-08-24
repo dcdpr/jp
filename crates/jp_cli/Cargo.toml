@@ -66,12 +66,13 @@ duct = { workspace = true }
 fancy-regex = { workspace = true, features = ["std", "unicode"] }
 futures = { workspace = true }
 humantime = { workspace = true }
-indexmap = { workspace = true }
+indexmap = { workspace = true, features = ["serde"] }
 indoc = { workspace = true }
 inquire = { workspace = true, features = ["crossterm"] }
 minijinja = { workspace = true }
 quick-xml = { workspace = true, features = ["serialize"] }
 rayon = { workspace = true }
+regex = { workspace = true, features = ["perf", "std", "unicode"] }
 relative-path = { workspace = true }
 reqwest = { workspace = true }
 schemars = { workspace = true }
@@ -98,7 +99,6 @@ tracing-subscriber = { workspace = true, features = [
     "tracing-log",
     "valuable",
 ] }
-unicode-width = { workspace = true }
 url = { workspace = true }
 which = { workspace = true, features = ["real-sys"] }
 

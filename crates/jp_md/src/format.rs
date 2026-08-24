@@ -1,6 +1,6 @@
 //! Markdown formatting utilities.
 
-use std::{fmt, sync::LazyLock};
+use std::{borrow::Cow, fmt, sync::LazyLock};
 
 use comrak::{
     Arena,
@@ -11,6 +11,7 @@ use syntect::{highlighting::Theme, parsing::SyntaxSet};
 use two_face::syntax;
 
 use crate::{
+    ansi::{self, AnsiState, Segment},
     render::{self, HrOptions, RenderOptions},
     table::TableOptions,
     theme,
@@ -115,6 +116,9 @@ pub struct Formatter {
     /// `0` = unlimited.
     table_max_column_width: usize,
 
+    /// Whether the continuation lines of a wrapped table row are marked.
+    table_continuation_edge: bool,
+
     /// Resolved syntax highlighting theme.
     theme: Theme,
 
@@ -141,6 +145,7 @@ impl fmt::Debug for Formatter {
         f.debug_struct("Formatter")
             .field("width", &self.width)
             .field("table_max_column_width", &self.table_max_column_width)
+            .field("table_continuation_edge", &self.table_continuation_edge)
             .field("theme", &"<syntect::Theme>")
             .field("hr_style", &self.hr_style)
             .field("terminal_width", &self.terminal_width)
@@ -162,6 +167,7 @@ impl Formatter {
         Self {
             width: DEFAULT_WIDTH,
             table_max_column_width: DEFAULT_TABLE_MAX_COL_WIDTH,
+            table_continuation_edge: true,
             theme: theme::resolve(None),
             hr_style: HrStyle::default(),
             terminal_width: None,
@@ -177,6 +183,7 @@ impl Formatter {
         Self {
             width,
             table_max_column_width: DEFAULT_TABLE_MAX_COL_WIDTH,
+            table_continuation_edge: true,
             theme: theme::resolve(None),
             hr_style: HrStyle::default(),
             terminal_width: None,
@@ -188,6 +195,13 @@ impl Formatter {
     #[must_use]
     pub const fn table_max_column_width(mut self, width: usize) -> Self {
         self.table_max_column_width = width;
+        self
+    }
+
+    /// Set whether the continuation lines of a wrapped table row are marked.
+    #[must_use]
+    pub const fn table_continuation_edge(mut self, enabled: bool) -> Self {
+        self.table_continuation_edge = enabled;
         self
     }
 
@@ -285,7 +299,8 @@ impl Formatter {
         let comrak_options = self.parse_options();
         let arena = Arena::new();
         let ast = comrak::parse_document(&arena, text, &comrak_options);
-        let table_options = TableOptions::new(self.table_max_column_width);
+        let table_options = TableOptions::new(self.table_max_column_width)
+            .continuation_edge(self.table_continuation_edge);
         let hr_options = HrOptions {
             style: self.hr_style,
         };
@@ -374,11 +389,16 @@ impl Formatter {
 
     /// Render a single code line with syntax highlighting and optional
     /// background.
+    ///
+    /// `start_column` is the visual column the line's first character sits at,
+    /// so a background that fills to a fixed column stops in the right place.
+    /// Pass `0` for a line rendered at the left margin.
     pub fn render_code_line(
         &self,
         line: &str,
         state: &mut CodeBlockState,
         background: Option<&DefaultBackground>,
+        start_column: usize,
     ) -> String {
         let highlighted = if let Some(saved) = state.highlight.take() {
             let mut hl = self.resume_code_highlighter(saved);
@@ -388,23 +408,40 @@ impl Formatter {
         } else {
             line.to_string()
         };
-        apply_line_background(&highlighted, background)
+        apply_line_background(&highlighted, background, start_column)
     }
 
     /// Apply optional background to a code fence line.
+    ///
+    /// `start_column` is the visual column the fence sits at; see
+    /// [`render_code_line`].
+    ///
+    /// [`render_code_line`]: Self::render_code_line
     #[must_use]
-    pub fn render_code_fence(&self, fence: &str, background: Option<&DefaultBackground>) -> String {
-        apply_line_background(fence, background)
+    pub fn render_code_fence(
+        &self,
+        fence: &str,
+        background: Option<&DefaultBackground>,
+        start_column: usize,
+    ) -> String {
+        apply_line_background(fence, background, start_column)
     }
 
     /// Render a closing code fence with a trailing blank separator line.
+    ///
+    /// `start_column` is the visual column the fence sits at; see
+    /// [`render_code_line`].
+    /// The separator line that follows always starts at column 0.
+    ///
+    /// [`render_code_line`]: Self::render_code_line
     #[must_use]
     pub fn render_closing_fence(
         &self,
         fence: &str,
         background: Option<&DefaultBackground>,
+        start_column: usize,
     ) -> String {
-        let mut out = apply_line_background(fence, background);
+        let mut out = apply_line_background(fence, background, start_column);
         out.push_str(&render_separator(background));
         out
     }
@@ -447,48 +484,128 @@ fn ends_with_tight_list<'a>(root: &'a comrak::nodes::AstNode<'a>) -> bool {
     )
 }
 
+/// The text that extends a background from `column` to the end of the line.
+///
+/// The one place [`BackgroundFill`] is interpreted.
+/// Every writer that maintains a region background consults this so the three
+/// modes cannot drift apart: `Content` adds nothing, `Terminal` defers to the
+/// terminal's erase-to-end-of- line, and `Column` pads with real spaces — the
+/// only form a host that lays out its own sub-window (an `fzf` preview pane)
+/// renders, since it does not implement the erase.
+///
+/// The caller is responsible for having the background active before writing
+/// the result.
+pub(crate) fn line_fill(fill: BackgroundFill, column: usize) -> Cow<'static, str> {
+    match fill {
+        BackgroundFill::Content => Cow::Borrowed(""),
+        BackgroundFill::Terminal => Cow::Borrowed("\x1b[K"),
+        BackgroundFill::Column(target) => match target.saturating_sub(column) {
+            0 => Cow::Borrowed(""),
+            pad => Cow::Owned(" ".repeat(pad)),
+        },
+    }
+}
+
 /// Render an inter-block separator (blank line) with optional background fill.
 /// Used between blocks and after closing code fences.
+///
+/// The separator carries no content and is emitted at the left margin, so a
+/// background that fills to a fixed column fills the whole line.
 #[must_use]
 pub fn render_separator(background: Option<&DefaultBackground>) -> String {
-    match background {
-        Some(bg) if matches!(bg.fill, BackgroundFill::Terminal) => {
-            format!("\x1b[{}m\x1b[K\x1b[49m\n", bg.param)
-        }
-        Some(bg) if let BackgroundFill::Column(width) = bg.fill => {
-            let mut s = format!("\x1b[{}m", bg.param);
-            for _ in 0..width {
-                s.push(' ');
-            }
-            s.push_str("\x1b[49m\n");
-            s
-        }
-        _ => "\n".to_string(),
+    let Some(bg) = background else {
+        return "\n".to_string();
+    };
+
+    // The separator line holds no content, so the fill starts at column 0.
+    let fill = line_fill(bg.fill, 0);
+    if fill.is_empty() {
+        return "\n".to_string();
     }
+
+    format!("\x1b[{}m{fill}\x1b[49m\n", bg.param)
 }
 
 /// Apply an optional default background to content, injecting the background
 /// escape at the start of each line and line-fill before each newline.
+///
+/// `start_column` is the visual column each line's first character sits at.
+/// A caller that indents the result afterwards passes the indent here, so the
+/// fill accounts for columns it does not itself emit.
 #[must_use]
-pub fn apply_line_background(content: &str, background: Option<&DefaultBackground>) -> String {
+pub fn apply_line_background(
+    content: &str,
+    background: Option<&DefaultBackground>,
+    start_column: usize,
+) -> String {
     let Some(bg) = background else {
         return content.to_string();
     };
     let bg_esc = format!("\x1b[{}m", bg.param);
-    let use_erase = matches!(bg.fill, BackgroundFill::Terminal);
 
+    let lines: Vec<&str> = content.split('\n').collect();
     let mut out = String::new();
-    for (i, line) in content.split('\n').enumerate() {
+    for (i, line) in lines.iter().enumerate() {
         if i > 0 {
-            if use_erase {
-                out.push_str("\x1b[K");
-            }
             out.push_str("\x1b[0m\n");
         }
+
+        // Only a line that a newline completes gets a fill; the trailing
+        // segment after the final newline isn't a line.
+        let completes_line = i + 1 < lines.len();
+
+        // A CRLF line's `\r` puts the cursor back at column 0, so a fill written
+        // after it overwrites the content instead of extending it. The newline
+        // below terminates the line on its own.
+        let line = if completes_line {
+            line.strip_suffix('\r').unwrap_or(line)
+        } else {
+            line
+        };
+
         out.push_str(&bg_esc);
         out.push_str(line);
+
+        if !completes_line {
+            continue;
+        }
+
+        // The column is measured per line rather than tracked across the whole
+        // content, because the content arrives already syntax-highlighted and
+        // its escapes must not count toward the column the fill starts from.
+        let fill = line_fill(bg.fill, ansi::advance_column(start_column, line));
+        if fill.is_empty() {
+            continue;
+        }
+
+        // A line that dropped the background leaves the fill running under
+        // whatever the line left active, so re-assert it first.
+        if !background_survives(line, &bg.param) {
+            out.push_str(&bg_esc);
+        }
+        out.push_str(&fill);
     }
     out
+}
+
+/// Whether `line`'s own escapes leave `param` the active background.
+///
+/// The background is asserted before the line, but the line can take it away
+/// again: syntect ends every highlighted line with `\x1b[0m`, and tool output
+/// carries whatever escapes it likes.
+fn background_survives(line: &str, param: &str) -> bool {
+    let mut state = AnsiState {
+        background: Some(param.to_owned()),
+        ..AnsiState::default()
+    };
+
+    for segment in ansi::segments(line) {
+        if let Segment::Escape(esc) = segment {
+            state.update(esc);
+        }
+    }
+
+    state.background.as_deref() == Some(param)
 }
 
 /// Saved state from a [`CodeHighlighter`], allowing it to be suspended and

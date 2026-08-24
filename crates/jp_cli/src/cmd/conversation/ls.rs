@@ -3,13 +3,19 @@ use comfy_table::{Cell, CellAlignment, Row};
 use crossterm::style::{Color, Stylize as _};
 use jp_conversation::{Conversation, ConversationId};
 use jp_storage::backend::StoragePresence;
-use jp_term::{osc::hyperlink, table::list};
+use jp_term::{
+    osc::hyperlink,
+    table::list,
+    width::{display_width, max_line_width, truncate_to_width},
+};
 use jp_workspace::ConversationHandle;
-use strip_ansi_escapes::strip_str;
-use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::{
-    cmd::{ConversationLoadRequest, Output, conversation_id::PositionalIds},
+    cmd::{
+        ConversationLoadRequest, Output,
+        conversation_id::PositionalIds,
+        label::{self, LabelSelector},
+    },
     ctx::Ctx,
     output::print_table,
 };
@@ -42,9 +48,17 @@ pub(crate) struct Ls {
     #[arg(long)]
     local: bool,
 
-    /// Show archived conversations instead of active ones.
+    /// Show archived conversations instead of live ones.
     #[arg(long)]
     archived: bool,
+
+    /// Only show conversations carrying this label.
+    ///
+    /// `key=value` matches when the key holds that value, a bare `key` matches
+    /// any value.
+    /// Repeat the flag to require several; every selector must match.
+    #[arg(long = "label", value_name = "KEY[=VALUE]")]
+    labels: Vec<LabelSelector>,
 }
 
 #[derive(Debug, Clone, Copy, clap::ValueEnum)]
@@ -93,6 +107,37 @@ struct Details {
     external: bool,
 }
 
+/// The stable machine-readable payload: one object per listed conversation.
+///
+/// Keys are a fixed contract, deliberately decoupled from the table's display
+/// columns: column headers, markers, and layout can change freely, these keys
+/// cannot change without breaking consumers.
+/// Absent fields serialize as `null`; titles are never truncated here (only the
+/// pretty table shaves them to fit the terminal); timestamps are RFC 3339 in
+/// UTC.
+fn payload(conversations: &[Details]) -> serde_json::Value {
+    let items: Vec<_> = conversations
+        .iter()
+        .map(|d| {
+            serde_json::json!({
+                "id": d.id.to_string(),
+                "title": d.title,
+                "active": d.active,
+                "pinned_at": d.pinned_at,
+                "archived_at": d.archived_at,
+                "local": d.local,
+                "external": d.external,
+                "events": d.messages,
+                "created_at": d.id.timestamp(),
+                "last_event_at": d.last_event_at,
+                "expires_at": d.expires_at,
+            })
+        })
+        .collect();
+
+    serde_json::Value::Array(items)
+}
+
 impl Ls {
     pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
         ConversationLoadRequest::explicit_or_none(&self.target)
@@ -127,8 +172,10 @@ impl Ls {
                 id,
             };
 
-        let matches_filters = |id: &ConversationId, local: bool| -> bool {
-            filter_ids.as_ref().is_none_or(|f| f.contains(id)) && (!self.local || local)
+        let matches_filters = |id: &ConversationId, c: &Conversation, local: bool| -> bool {
+            filter_ids.as_ref().is_none_or(|f| f.contains(id))
+                && (!self.local || local)
+                && label::matches(&c.labels, &self.labels)
         };
 
         // `local` is derived from storage presence: a conversation is shown as
@@ -140,7 +187,7 @@ impl Ls {
                 .filter_map(|(id, c, presence)| {
                     let local = presence == StoragePresence::UserLocalOnly;
                     let external = presence == StoragePresence::WorkspaceOnly;
-                    matches_filters(&id, local).then(|| to_details(id, &c, local, external))
+                    matches_filters(&id, &c, local).then(|| to_details(id, &c, local, external))
                 })
                 .collect()
         } else {
@@ -150,7 +197,7 @@ impl Ls {
                     let presence = workspace.conversation_presence(id);
                     let local = presence == Some(StoragePresence::UserLocalOnly);
                     let external = presence == Some(StoragePresence::WorkspaceOnly);
-                    matches_filters(id, local).then(|| to_details(*id, &c, local, external))
+                    matches_filters(id, &c, local).then(|| to_details(*id, &c, local, external))
                 })
                 .collect()
         };
@@ -223,7 +270,7 @@ impl Ls {
         let header = build_header_row(columns, marker);
         let rows = self.build_body(ctx, &conversations, columns, title_budget, hidden);
         let footer = rows.len() > 20;
-        print_table(&ctx.printer, header, rows, footer);
+        print_table(&ctx.printer, header, rows, footer, &payload(&conversations));
         Ok(())
     }
 
@@ -462,43 +509,6 @@ fn title_column_width(conversations: &[Details]) -> usize {
         .max()
         .unwrap_or(0)
         .max(TITLE_HEADER.len())
-}
-
-/// Truncate `s` to at most `max_width` display columns, appending '…' when
-/// cut.
-fn truncate_to_width(s: &str, max_width: usize) -> String {
-    if display_width(s) <= max_width {
-        return s.to_string();
-    }
-    if max_width == 0 {
-        return String::new();
-    }
-
-    // Reserve one column for the ellipsis.
-    let budget = max_width - 1;
-    let mut width = 0;
-    let mut out = String::new();
-    for ch in s.chars() {
-        let w = UnicodeWidthChar::width(ch).unwrap_or(0);
-        if width + w > budget {
-            break;
-        }
-        width += w;
-        out.push(ch);
-    }
-    out.push('…');
-    out
-}
-
-/// Widest line in `rendered`, by display width (ANSI styling and OSC hyperlinks
-/// stripped first).
-fn max_line_width(rendered: &str) -> usize {
-    rendered.lines().map(display_width).max().unwrap_or(0)
-}
-
-/// Display width of `s` with ANSI styling and OSC hyperlinks removed.
-fn display_width(s: &str) -> usize {
-    UnicodeWidthStr::width(strip_str(s).as_str())
 }
 
 #[cfg(test)]

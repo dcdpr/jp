@@ -6,6 +6,7 @@ use std::{
 
 use async_stream::stream;
 use futures::{Stream, StreamExt as _};
+use serde_json::{Map, Value};
 use tokio::time::timeout;
 
 use crate::{
@@ -96,6 +97,108 @@ fn with_idle_timeout_at(
         }
     }
     .boxed()
+}
+
+/// Wrap an event stream so a runaway response fails instead of generating
+/// without bound.
+///
+/// Counts the bytes of generated content: assistant messages, reasoning,
+/// structured output, tool-call arguments, the identity of each tool call, and
+/// any retained metadata carried alongside them.
+/// Metadata matters because several providers put generated payload there
+/// rather than in the content field: Anthropic sends redacted thinking as an
+/// empty reasoning part with the data in metadata, and OpenAI attaches
+/// encrypted reasoning content to a flush.
+/// Once the running total passes `max_bytes`, the returned stream yields a
+/// non-retryable [`StreamErrorKind::OutputLimit`] error and ends.
+/// The event that crosses the threshold is forwarded before the error, so
+/// content the provider has already generated is never withheld; the total may
+/// therefore overshoot `max_bytes` by up to the size of one event.
+///
+/// Patches and keep-alives carry nothing generated and do not count.
+///
+/// The count covers bytes delivered downstream, which is not the same as bytes
+/// the provider billed for.
+/// A provider that assembles a response from several requests may discard some
+/// of what it generated before yielding it here: Anthropic's continuation
+/// chaining drops the reasoning of each continuation and trims the overlap
+/// between links.
+/// Those bytes are paid for but never counted, so this ceiling bounds retained
+/// output rather than spend.
+/// The number of continuation requests is bounded separately by the provider.
+///
+/// [`StreamErrorKind::OutputLimit`]: crate::StreamErrorKind::OutputLimit
+#[must_use]
+pub fn with_output_limit(stream: EventStream, max_bytes: u64) -> EventStream {
+    stream! {
+        let mut stream = stream;
+        let mut total: u64 = 0;
+        while let Some(item) = stream.next().await {
+            total = total.saturating_add(content_byte_size(&item));
+            yield item;
+
+            if total > max_bytes {
+                yield Err(StreamError::output_limit(format!(
+                    "response exceeded the {max_bytes} byte output limit after {total} bytes"
+                )));
+                break;
+            }
+        }
+    }
+    .boxed()
+}
+
+/// Translate a configured output ceiling into the argument for
+/// [`with_output_limit`], where `0` means the ceiling is disabled.
+///
+/// Returns `None` when no ceiling applies, in which case the caller leaves the
+/// stream unwrapped.
+#[must_use]
+pub fn output_limit_bytes(configured: u32) -> Option<u64> {
+    match configured {
+        0 => None,
+        bytes => Some(u64::from(bytes)),
+    }
+}
+
+/// Byte size of the generated content carried by a stream item.
+///
+/// A tool call's `id` and `name` are generated response bytes too, so a stream
+/// of nothing but tool-call openings still advances the total.
+/// Metadata counts on both parts and flushes, since a provider may deliver
+/// reasoning payload there with an empty content field.
+///
+/// Errors, patches and keep-alives count as zero.
+fn content_byte_size(item: &Result<Event, StreamError>) -> u64 {
+    let size = match item {
+        Ok(Event::Part { part, metadata, .. }) => {
+            let content = match part {
+                EventPart::Message(text)
+                | EventPart::Reasoning(text)
+                | EventPart::Structured(text) => text.len(),
+                EventPart::ToolCall(ToolCallPart::ArgumentChunk(json)) => json.len(),
+                EventPart::ToolCall(ToolCallPart::Start { id, name }) => id.len() + name.len(),
+            };
+
+            content + metadata_byte_size(metadata)
+        }
+        Ok(Event::Flush { metadata, .. }) => metadata_byte_size(metadata),
+        _ => 0,
+    };
+
+    size as u64
+}
+
+/// Byte size of the retained payload in an event's metadata.
+///
+/// Only string values count: those carry the provider payloads that would
+/// otherwise escape the ceiling (thinking signatures, redacted thinking,
+/// encrypted reasoning content, thought signatures).
+fn metadata_byte_size(metadata: &Map<String, Value>) -> usize {
+    metadata
+        .values()
+        .map(|value| value.as_str().map_or(0, str::len))
+        .sum()
 }
 
 /// Inject a synthetic [`Event::KeepAlive`] every `interval` while a tool call

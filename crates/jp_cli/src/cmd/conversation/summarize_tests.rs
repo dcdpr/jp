@@ -10,7 +10,7 @@ use jp_llm::{
 };
 
 use super::{
-    StreamOutcome, collect_range_events, failure_reason, summarize_events, summarize_stream,
+    Error, StreamOutcome, collect_range_events, failure_reason, summarize_events, summarize_stream,
     window_overflow,
 };
 
@@ -55,6 +55,14 @@ async fn summarize_with(
     batches: Vec<Vec<Event>>,
     stream: ConversationStream,
 ) -> super::Result<String> {
+    summarize_with_ceiling(batches, stream, 1_048_576).await
+}
+
+async fn summarize_with_ceiling(
+    batches: Vec<Vec<Event>>,
+    stream: ConversationStream,
+    max_response_bytes: u32,
+) -> super::Result<String> {
     let provider = MockProvider::with_batches(batches);
     let model_id = test_model_id();
     let model_details = ModelDetails::empty(model_id.clone());
@@ -66,8 +74,37 @@ async fn summarize_with(
         stream,
         "instructions",
         "summarize",
+        max_response_bytes,
     )
     .await
+}
+
+/// A summary request honors the configured ceiling rather than a hardcoded
+/// default, and does not re-request the response after breaching it.
+#[tokio::test]
+async fn summarize_applies_the_configured_output_ceiling() {
+    // One scripted batch is deliberate: `MockProvider` panics on a second
+    // request, so a ceiling misclassified as retryable fails loudly here.
+    // 30 bytes of content against a 25-byte ceiling.
+    let batches = vec![stream_with_text(
+        "012345678901234567890123456789",
+        FinishReason::Completed,
+    )];
+
+    let error = summarize_with_ceiling(batches, range_stream(&["sig"]), 25)
+        .await
+        .expect_err("the summary must stop at the configured ceiling");
+
+    // The default ceiling is 1 MiB; 30 bytes only breaches the configured 25,
+    // so reaching this arm proves the setting was threaded through.
+    assert!(
+        matches!(
+            error,
+            Error::Llm(jp_llm::Error::Stream(ref e))
+                if e.kind == jp_llm::StreamErrorKind::OutputLimit
+        ),
+        "got: {error:?}"
+    );
 }
 
 fn build_stream_with_turns(count: usize) -> ConversationStream {

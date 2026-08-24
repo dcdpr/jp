@@ -1,4 +1,4 @@
-use std::{fs, io::BufReader};
+use std::fs;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use serde::{Serialize, de::DeserializeOwned};
@@ -46,9 +46,12 @@ fn deep_merge_values(base: &mut Value, overlay: Value) {
 }
 
 pub fn read_json<T: DeserializeOwned>(path: &Utf8Path) -> Result<T> {
-    let file = fs::File::open(path)?;
-    let reader = BufReader::new(file);
-    serde_json::from_reader(reader).map_err(Into::into)
+    // Read the whole file, then parse the slice. `serde_json::from_reader` is
+    // markedly slower: its `IoRead` advances a byte at a time through the
+    // reader, so the parser loses the `memchr` scans and zero-copy string
+    // borrows it gets over a contiguous buffer.
+    let bytes = fs::read(path)?;
+    serde_json::from_slice(&bytes).map_err(Into::into)
 }
 
 /// Write a JSON value to a file atomically.

@@ -1,5 +1,5 @@
 use jp_config::{AppConfig, style::typewriter::DelayDuration, types::color::Color};
-use jp_printer::{OutputFormat, SharedBuffer};
+use jp_printer::{OutputFormat, OutputWidth, SharedBuffer};
 
 use super::*;
 
@@ -19,6 +19,114 @@ fn create_renderer() -> (ChatRenderer, SharedBuffer, SharedBuffer) {
     create_renderer_with_config(AppConfig::new_test())
 }
 
+#[test]
+fn wrap_width_is_capped_by_the_available_columns() {
+    // Prose wrapped wider than the output area leaves the host to wrap again on
+    // top of it, which double-wraps in a terminal and silently truncates in a
+    // pane that clips.
+    let mut config = AppConfig::new_test();
+    config.style.markdown.wrap_width = 80;
+
+    assert_eq!(wrap_width(&config.style, Some(30)), 30);
+}
+
+#[test]
+fn wrap_width_keeps_the_configured_preference_on_a_wider_output() {
+    // The configured width is a reading-comfort choice, not a limitation: extra
+    // columns don't widen it.
+    let mut config = AppConfig::new_test();
+    config.style.markdown.wrap_width = 80;
+
+    assert_eq!(wrap_width(&config.style, Some(200)), 80);
+    assert_eq!(wrap_width(&config.style, None), 80);
+}
+
+#[test]
+fn reasoning_fill_defers_to_the_terminal_for_a_measured_width() {
+    // `\x1b[K` follows the real edge, so a window resized part-way through a
+    // response still shades whole lines. Padding to the width sampled at startup
+    // would bake that width into the output.
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let renderer = ChatRenderer::new(
+        Arc::new(printer.with_output_width(OutputWidth::Terminal(40))),
+        config.style,
+    );
+
+    assert_eq!(
+        renderer.reasoning_background().map(|bg| bg.fill),
+        Some(BackgroundFill::Terminal)
+    );
+}
+
+#[test]
+fn reasoning_fill_pads_with_spaces_for_a_declared_width() {
+    // A declared width describes an area some other program lays out, and such a
+    // host does not implement the erase, so the fill has to be real characters.
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let renderer = ChatRenderer::new(
+        Arc::new(printer.with_output_width(OutputWidth::Declared(40))),
+        config.style,
+    );
+
+    assert_eq!(
+        renderer.reasoning_background().map(|bg| bg.fill),
+        Some(BackgroundFill::Column(40))
+    );
+}
+
+#[test]
+fn reasoning_code_block_in_a_list_stays_within_the_declared_width() {
+    // A fenced block inside a list item is indented after its background fill is
+    // applied, so the fill has to account for the indent the renderer adds
+    // afterwards. Padding to the full width first produced `indent + width`
+    // columns, which wraps in a terminal and is clipped in a pane that doesn't.
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let mut renderer = ChatRenderer::new(
+        Arc::new(printer.with_output_width(OutputWidth::Declared(40))),
+        config.style,
+    );
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: indoc::indoc! {"
+            - item
+
+              ```rust
+              let x = 1;
+              ```
+        "}
+        .into(),
+    });
+    renderer.flush();
+    renderer.printer.flush();
+
+    let rendered = strip_ansi(&out.lock());
+    for line in rendered.lines() {
+        assert!(
+            line.chars().count() <= 40,
+            "line runs past the declared width: {line:?}\nfull output:\n{rendered}"
+        );
+    }
+
+    let code = rendered
+        .lines()
+        .find(|line| line.contains("let x = 1;"))
+        .expect("the code line should be rendered");
+    assert_eq!(
+        code.chars().count(),
+        40,
+        "the code line should be shaded across the full declared width: {code:?}"
+    );
+}
+
 /// A table is laid out rather than soft-wrapped, so the renderer has to fit it
 /// to the terminal width the printer reports.
 #[test]
@@ -29,7 +137,7 @@ fn test_table_is_fitted_to_the_printers_terminal_width() {
 
     let (printer, out, _err) = Printer::memory(OutputFormat::Text);
     let mut renderer = ChatRenderer::new(
-        Arc::new(printer.with_terminal_width(Some(30))),
+        Arc::new(printer.with_output_width(OutputWidth::Terminal(30))),
         config.style,
     );
 
@@ -42,7 +150,11 @@ fn test_table_is_fitted_to_the_printers_terminal_width() {
     renderer.printer.flush();
 
     let rendered = strip_ansi(&out.lock());
-    let rows: Vec<&str> = rendered.lines().filter(|l| l.starts_with('|')).collect();
+    // Wrapped rows continue on a line opening with `┆` rather than `|`.
+    let rows: Vec<&str> = rendered
+        .lines()
+        .filter(|l| l.starts_with('|') || l.starts_with('┆'))
+        .collect();
     assert!(rows.len() > 3, "expected wrapped rows:\n{rendered}");
     for row in rows {
         assert_eq!(
@@ -51,6 +163,41 @@ fn test_table_is_fitted_to_the_printers_terminal_width() {
             "row should fit the reported terminal width: {row:?}"
         );
     }
+}
+
+/// The continuation edge is configurable, so the rendered table has to follow
+/// `style.markdown.table_continuation_edge` rather than a hardcoded default.
+#[test]
+fn test_table_continuation_edge_follows_the_config() {
+    let mut config = AppConfig::new_test();
+    config.style.markdown.wrap_width = 80;
+    config.style.markdown.table_max_column_width = 40;
+    config.style.markdown.table_continuation_edge = false;
+
+    let (printer, out, _err) = Printer::memory(OutputFormat::Text);
+    let mut renderer = ChatRenderer::new(
+        Arc::new(printer.with_output_width(OutputWidth::Terminal(30))),
+        config.style,
+    );
+
+    renderer.render_response(&ChatResponse::Message {
+        message: "| Alpha heading | Beta heading |\n| --- | --- |\n| first cell content | second \
+                  cell content |\n\n"
+            .into(),
+    });
+    renderer.flush();
+    renderer.printer.flush();
+
+    // The fourth line means the data row wrapped, so there is a continuation
+    // line for the setting to act on.
+    let rendered = strip_ansi(&out.lock());
+    let rows: Vec<&str> = rendered.lines().filter(|l| l.contains('|')).collect();
+    assert_eq!(rows, vec![
+        "| Alpha headi… | Beta headi… |",
+        "|--------------|-------------|",
+        "| first cell   | second cell |",
+        "| content      | content     |",
+    ]);
 }
 
 #[test]
@@ -335,13 +482,46 @@ fn test_reasoning_buffer_flushed_on_message_transition() {
     assert!(output.contains("Answer"), "Message content should follow");
 }
 
-/// Two consecutive reasoning events are two blocks, not one paragraph
-/// continued.
-/// The first event's text ends mid-paragraph (no trailing newline), so without
-/// a region boundary the markdown buffer joins the next event's opening heading
-/// onto it.
+/// Consecutive reasoning events form one markdown region: text that ends
+/// mid-word in one event and resumes in the next joins into a single word.
+///
+/// This is what a provider relies on when it splits one region of reasoning
+/// across several events — Anthropic interrupts a thinking block with an
+/// opaque `redacted_thinking` block, which reaches the renderer as a reasoning
+/// event holding no text.
 #[test]
-fn test_consecutive_reasoning_events_render_as_separate_blocks() {
+fn test_consecutive_reasoning_events_form_one_region() {
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = None;
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "I can test this directly by ver".into(),
+    });
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: String::new(),
+    });
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "ifying the return value.".into(),
+    });
+    renderer.flush();
+    renderer.printer.flush();
+
+    assert_eq!(
+        strip_ansi(&out.lock()),
+        "I can test this directly by verifying the return value.\n\n"
+    );
+}
+
+/// A provider-supplied blank line splits one reasoning region into two blocks.
+///
+/// This is the channel a provider uses to segment reasoning it delivers as one
+/// continuous text stream: without the blank line, the next part's leading
+/// `**Header**` parses as bold continuing the previous part's last sentence
+/// instead of opening a block of its own.
+#[test]
+fn test_provider_supplied_separator_splits_reasoning_blocks() {
     let mut config = AppConfig::new_test();
     config.style.reasoning.display = ReasoningDisplayConfig::Full;
     config.style.reasoning.background = None;
@@ -350,38 +530,34 @@ fn test_consecutive_reasoning_events_render_as_separate_blocks() {
     renderer.render_response(&ChatResponse::Reasoning {
         reasoning: "First section.".into(),
     });
-    renderer.end_response();
     renderer.render_response(&ChatResponse::Reasoning {
-        reasoning: "Second section.".into(),
+        reasoning: "\n\n".into(),
     });
-    renderer.end_response();
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "**Second section**".into(),
+    });
     renderer.flush();
     renderer.printer.flush();
 
     assert_eq!(
         strip_ansi(&out.lock()),
-        "First section.\n\nSecond section.\n\n"
+        "First section.\n\n**Second section**\n\n"
     );
 }
 
-/// A reasoning-to-reasoning event boundary stays inside the reasoning region:
-/// the gap it creates carries the reasoning background, exactly as the gap
-/// between two paragraphs of a single event does.
+/// The gap between two reasoning blocks stays inside the reasoning region and
+/// carries its background; the gap where reasoning gives way to a message does
+/// not.
 #[test]
-fn test_reasoning_event_boundary_gap_is_shaded() {
+fn test_reasoning_block_gap_is_shaded() {
     let mut config = AppConfig::new_test();
     config.style.reasoning.display = ReasoningDisplayConfig::Full;
     config.style.reasoning.background = Some(Color::Ansi256(236));
     let (mut renderer, out, _err) = create_renderer_with_config(config);
 
     renderer.render_response(&ChatResponse::Reasoning {
-        reasoning: "First section.".into(),
+        reasoning: "First section.\n\nSecond section.".into(),
     });
-    renderer.end_response();
-    renderer.render_response(&ChatResponse::Reasoning {
-        reasoning: "Second section.".into(),
-    });
-    renderer.end_response();
     renderer.render_response(&ChatResponse::Message {
         message: "Answer\n\n".into(),
     });
@@ -392,8 +568,69 @@ fn test_reasoning_event_boundary_gap_is_shaded() {
     assert_eq!(
         output.matches("\x1b[48;5;236m\x1b[K\x1b[49m").count(),
         1,
-        "expected one shaded separator at the event boundary and an unshaded one before the \
-         message, got: {output:?}"
+        "expected one shaded separator between the reasoning blocks and an unshaded one before \
+         the message, got: {output:?}"
+    );
+}
+
+/// A stream error mid-reasoning commits what was streamed and resets the
+/// renderer before the continuation request goes out.
+/// The reasoning region spans that boundary, so the gap the interrupted block
+/// owes stays inside the region and keeps its background.
+#[test]
+fn test_reasoning_gap_across_a_continuation_is_shaded() {
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "First section.\n\n".into(),
+    });
+    renderer.flush_for_continuation();
+    renderer.reset_preserving_region();
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "Second section.\n\n".into(),
+    });
+    renderer.flush();
+    renderer.printer.flush();
+
+    let output = out.lock().clone();
+    assert_eq!(
+        output,
+        "\u{1b}[48;5;236mFirst \
+         section.\u{1b}[48;5;236m\u{1b}[K\u{1b}[0m\n\u{1b}[48;5;236m\u{1b}[K\u{1b}[49m\n\u{1b}[48;\
+         5;236mSecond section.\u{1b}[48;5;236m\u{1b}[K\u{1b}[0m\n\n"
+    );
+}
+
+/// The provider is free to resume an interrupted reasoning block with the
+/// answer instead of more reasoning.
+/// The gap then leaves the reasoning region, so it is unshaded — the same
+/// output the reasoning-to-answer transition produces without a retry in
+/// between.
+#[test]
+fn test_reasoning_gap_across_a_continuation_into_a_message_is_unshaded() {
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = Some(Color::Ansi256(236));
+    let (mut renderer, out, _err) = create_renderer_with_config(config);
+
+    renderer.render_response(&ChatResponse::Reasoning {
+        reasoning: "First section.\n\n".into(),
+    });
+    renderer.flush_for_continuation();
+    renderer.reset_preserving_region();
+    renderer.render_response(&ChatResponse::Message {
+        message: "Answer.\n\n".into(),
+    });
+    renderer.flush();
+    renderer.printer.flush();
+
+    let output = out.lock().clone();
+    assert_eq!(
+        output,
+        "\u{1b}[48;5;236mFirst section.\u{1b}[48;5;236m\u{1b}[K\u{1b}[0m\n\nAnswer.\n\n"
     );
 }
 

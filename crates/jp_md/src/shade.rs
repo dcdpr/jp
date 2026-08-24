@@ -5,6 +5,8 @@
 //! showing from column 0 to the right edge of every visual line — including
 //! lines produced by carriage-return rewrites (`\r`) and `\x1b[K` erases —
 //! while stepping out of the way for any background the content sets itself.
+//! `B` is closed before every line break and re-asserted on the next line, so
+//! no row past the region is painted.
 //! [`shade`] is the buffer-at-a-time convenience built on the same core.
 //!
 //! Unlike the line-oriented [`apply_line_background`], the writer holds its
@@ -17,8 +19,8 @@
 use std::fmt::{self, Write};
 
 use crate::{
-    ansi::{self, AnsiState, Segment},
-    format::{BackgroundFill, DefaultBackground},
+    ansi::{self, AnsiState, Segment, is_sgr},
+    format::{self, BackgroundFill, DefaultBackground},
 };
 
 /// Wraps a writer and maintains a default-background invariant across the byte
@@ -43,11 +45,22 @@ pub struct ShadedWriter<W: Write> {
     /// The region background escape (`\x1b[{param}m`), pre-rendered.
     background_escape: String,
 
-    /// Whether the region fills each line to the right edge with `\x1b[K`.
+    /// How far the region background extends on each completed line.
     ///
-    /// True for [`BackgroundFill::Terminal`] (the reasoning background);
-    /// otherwise the background only backs the content itself.
-    fill_to_edge: bool,
+    /// The full policy, not a boolean: [`BackgroundFill::Terminal`] defers the
+    /// fill to the terminal via `\x1b[K`, while [`BackgroundFill::Column`] pads
+    /// with real spaces — the only form a host that lays out its own
+    /// sub-window (an `fzf` preview pane) renders.
+    fill: BackgroundFill,
+
+    /// Visible column of the write cursor on the current line.
+    ///
+    /// Only meaningful for [`BackgroundFill::Column`], which needs to know how
+    /// far to pad.
+    /// Counted in display columns over escape-free text runs — with tabs
+    /// advancing to the next tab stop, as the display does — and reset by `\n`
+    /// and `\r`.
+    column: usize,
 
     /// The content's currently active attributes, fed only the content's own
     /// escapes — never the writer's injected background.
@@ -56,10 +69,11 @@ pub struct ShadedWriter<W: Write> {
     /// Whether the region background must be (re-)asserted before the next
     /// visible content or content erase.
     ///
-    /// Set at construction and after a content reset/background-clear; cleared
-    /// once `B` is asserted or once the content sets its own background.
-    /// A line boundary does not set it: the terminal keeps `B` across
-    /// `\n`/`\r`, so no re-assert is owed there.
+    /// Set at construction, after a content reset/background-clear, and after a
+    /// line break closes `B`; cleared once `B` is asserted or once the content
+    /// sets its own background.
+    /// A carriage return does not set it: the cursor stays on the same line, so
+    /// nothing new can be painted and no re-assert is owed.
     needs_background: bool,
 
     /// Holds a trailing escape sequence split across a write boundary,
@@ -74,7 +88,8 @@ impl<W: Write> ShadedWriter<W> {
         Self {
             output,
             background_escape: format!("\x1b[{}m", background.param),
-            fill_to_edge: matches!(background.fill, BackgroundFill::Terminal),
+            fill: background.fill,
+            column: 0,
             content: AnsiState::default(),
             needs_background: true,
             pending: String::new(),
@@ -85,6 +100,8 @@ impl<W: Write> ShadedWriter<W> {
     ///
     /// Flushes any escape sequence still buffered from a split write, then
     /// emits `\x1b[49m` so the region background does not leak past the region.
+    /// A region whose last write ended on a line break is already closed and
+    /// emits nothing here.
     /// Call once after the last write.
     ///
     /// # Errors
@@ -142,12 +159,15 @@ impl<W: Write> ShadedWriter<W> {
                 b'\n' => {
                     self.emit_run(&text[start..i])?;
                     self.fill_line()?;
+                    self.close_line()?;
                     self.output.write_str("\n")?;
+                    self.column = 0;
                     start = i + 1;
                 }
                 b'\r' => {
                     self.emit_run(&text[start..i])?;
                     self.output.write_str("\r")?;
+                    self.column = 0;
                     start = i + 1;
                 }
                 _ => {}
@@ -162,16 +182,40 @@ impl<W: Write> ShadedWriter<W> {
             return Ok(());
         }
         self.ensure_background()?;
+        self.column = ansi::advance_column(self.column, run);
         self.output.write_str(run)
     }
 
-    /// Fill the current line to the right edge with the active background,
-    /// ahead of a newline.
+    /// Fill the rest of the current line with the active background, ahead of a
+    /// newline.
     fn fill_line(&mut self) -> fmt::Result {
-        self.ensure_background()?;
-        if self.fill_to_edge {
-            self.output.write_str("\x1b[K")?;
+        let fill = format::line_fill(self.fill, self.column);
+        if fill.is_empty() {
+            return Ok(());
         }
+
+        self.ensure_background()?;
+        self.output.write_str(&fill)
+    }
+
+    /// Close the region background ahead of a line break.
+    ///
+    /// A terminal scrolling to make room for the next row fills that row with
+    /// the background active at the time (the `bce` capability), so a `\n`
+    /// written under `B` paints a row that isn't part of the region — the row
+    /// the next command's output lands on.
+    /// The line's own fill has already been written, so closing here costs
+    /// nothing visually.
+    ///
+    /// Only a background this writer asserted is closed; one the content set
+    /// itself is the content's to carry across the break.
+    fn close_line(&mut self) -> fmt::Result {
+        if self.needs_background || self.content.background.is_some() {
+            return Ok(());
+        }
+
+        self.output.write_str(ansi::BG_END)?;
+        self.needs_background = true;
         Ok(())
     }
 
@@ -226,11 +270,6 @@ pub fn shade(text: &str, background: &DefaultBackground) -> String {
         let _ = writer.finish();
     }
     buffer
-}
-
-/// Whether `esc` is an SGR sequence (`\x1b[…m`).
-fn is_sgr(esc: &str) -> bool {
-    esc.starts_with("\x1b[") && esc.ends_with('m')
 }
 
 /// Whether `esc` is a CSI erase-in-line (`\x1b[K`, `\x1b[2K`, …).
