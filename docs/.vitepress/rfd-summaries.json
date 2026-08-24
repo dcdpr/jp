@@ -116,7 +116,7 @@
     "summary": "Make JP scriptable with concise schema DSL and inferred clean JSON output when piping or with --schema flag."
   },
   "030-schema-dsl.md": {
-    "hash": "d8f041473711fa0ec15010002e56e1ef8e8f65c1b55481601e6efdffc4d70f2e",
+    "hash": "97d9fe44330e60174d9045dfba09869ee1f005af585df97f79163a947cdd7ff6",
     "summary": "JP's concise DSL syntax for defining JSON Schema objects via command-line flags with types, descriptions, and nested structures."
   },
   "031-durable-conversation-storage-with-workspace-projection.md": {
@@ -404,7 +404,7 @@
     "summary": "Replace sequential ticket ids with collision-resistant time-bucketed random ids to enable parallel distributed ticket creation."
   },
   "099-native-macos-app-for-browsing-conversations.md": {
-    "hash": "abd96dc8025eb5c1021bc2077eddf2a1c483ac9833f2dd7eef2b0594b8b75290",
+    "hash": "4955066abb71a8a098675aa3f9a628aca2ec16511d94cc6da35bcf320a39addc",
     "summary": "Native macOS app for browsing JP conversations via FFI, with public Workspace::open API extracted from CLI."
   },
   "103-multi-value-conversation-labels.md": {

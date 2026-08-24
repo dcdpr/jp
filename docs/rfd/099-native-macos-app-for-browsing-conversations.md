@@ -269,11 +269,12 @@ every signature change into a two-repository dance.
 
 - **Writing.** No compose field, no editing, no archiving, no config mutation.
   The app opens conversations and reads them.
-- **Live updates.** A window loads its workspace once and does not refresh.
-  Turns added by a concurrent `jp query` are invisible until the window is
-  reopened.
-  This is v0.1 behavior by decision, not an oversight; the Live Workspace View
-  draft is the mechanism for fixing it properly.
+- **Noticing on its own.** Every read through the boundary re-reads the
+  conversation index first, so a call made after a concurrent `jp query` sees
+  that query's turns and any conversation it started.
+  What the app does not do is notice: nothing watches the store, so the view
+  changes only when something asks it to.
+  The Live Workspace View draft is the mechanism for a workspace that pushes.
 - **Read-only workspace opening.** Opening a workspace creates the user-local
   silo, repairs its symlink, and persists the workspace ID, exactly as `jp` does
   today.

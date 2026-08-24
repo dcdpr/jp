@@ -3,6 +3,7 @@ set fallback
 # see: <https://github.com/cargo-bins/cargo-quickinstall/releases>
 bacon_version        := "3.23.0"
 binstall_version     := "1.20.0"
+cbindgen_version     := "0.29.4"
 deny_version         := "0.19.9"
 expand_version       := "1.0.123"
 insta_version        := "1.48.0"
@@ -126,6 +127,300 @@ stage-and-commit: _install-jp
 [group('build')]
 build-changelog: (_install "jilu@" + jilu_version)
     @jilu
+
+# Build the static library and C header that the macOS app links against, and
+# stage both where the Xcode project expects them.
+#
+# Universal. The app declares no `ARCHS`, so Xcode builds it for
+# `ARCHS_STANDARD` — arm64 and x86_64 — and a Release build links both slices.
+#
+# Xcode runs this from a build phase, so `just` stays the single entry point for
+# building the Rust side rather than Xcode growing a competing one.
+#
+# PROFILE is a cargo profile directory name (`debug`, `release`, ...).
+[group('build')]
+build-ffi PROFILE="debug": (_install "cbindgen@" + cbindgen_version)
+    #!/usr/bin/env sh
+    set -eu
+
+    if ! which jq >/dev/null 2>&1; then
+        echo "jq not found. Install it with: brew install jq" >&2
+        exit 1
+    fi
+
+    # The `dev` profile builds into a `debug` directory, so the profile's name
+    # and its output directory disagree for that one case.
+    if [ "{{PROFILE}}" = "debug" ]; then
+        build_profile="dev"
+    else
+        build_profile="{{PROFILE}}"
+    fi
+
+    # Both slices, every time. A host-only library satisfies the Debug build on
+    # the machine that produced it and nothing else, so the gap stays invisible
+    # until somebody cuts a release or runs the UI suite under Rosetta — at
+    # which point it is a link error a long way from its cause.
+    slices=""
+    for target in aarch64-apple-darwin x86_64-apple-darwin; do
+        rustup target add "$target" >/dev/null
+
+        # Ask cargo which file it wrote rather than reconstructing the path. The
+        # target directory is redirectable: sibling git worktrees here share one
+        # outside the checkout entirely.
+        #
+        # `json-render-diagnostics` and not `json`: the latter would send
+        # compiler errors down the pipe into `jq` instead of to the terminal.
+        #
+        # Deliberately not `{{quiet_flag}}`: a staticlib links the whole
+        # dependency graph, so a cold build runs long enough that silence reads
+        # as a hang. Cargo's status lines go to stderr and the JSON to stdout,
+        # so letting them through costs the pipe nothing.
+        slice=$(cargo build --package jp_ffi --profile "$build_profile" \
+                --target "$target" --message-format=json-render-diagnostics |
+            jq -r 'select(.reason == "compiler-artifact" and .target.name == "jp_ffi")
+                   | .filenames[] | select(endswith(".a"))' |
+            tail -n 1)
+
+        if [ -z "$slice" ] || [ ! -f "$slice" ]; then
+            echo "cargo did not produce a jp_ffi static library for $target" >&2
+            exit 1
+        fi
+
+        slices="$slices $slice"
+    done
+
+    # Stage into a fixed, checkout-local directory. Xcode's search paths are
+    # static build settings, so they need one location that does not move with
+    # the developer's cargo configuration.
+    out="apps/macos/.build/{{PROFILE}}"
+    mkdir -p "$out/include"
+
+    # A debug staticlib bundles every dependency, so joining the slices is worth
+    # skipping when what is staged is already newer than both of them.
+    if [ ! -f "$out/libjp_ffi.a" ] || [ -n "$(find $slices -newer "$out/libjp_ffi.a")" ]; then
+        lipo -create -output "$out/libjp_ffi.a" $slices
+    fi
+
+    cbindgen --config crates/jp_ffi/cbindgen.toml --crate jp_ffi --output "$out/include/jp_ffi.h"
+
+    echo "library: $out/libjp_ffi.a ($(lipo -archs "$out/libjp_ffi.a"))" >&2
+    echo "header:  $out/include/jp_ffi.h" >&2
+
+# Build the `jpdrive` accessibility driver that the `debug_app_*` tools shell out
+# to.
+#
+# A standalone SwiftPM package rather than a target in the app's Xcode project,
+# so the binary lands at a predictable path with no derived-data lookup.
+[group('build')]
+[macos]
+build-drive CONFIG="release":
+    #!/usr/bin/env sh
+    set -eu
+
+    swift build --package-path apps/macos/Tools/jpdrive -c {{CONFIG}}
+
+    bin=$(swift build --package-path apps/macos/Tools/jpdrive -c {{CONFIG}} --show-bin-path)
+    echo "binary: $bin/jpdrive" >&2
+
+# Run the `jpdrive` test suite.
+#
+# Covers the driver's traversal against a fake accessibility tree, so it needs no
+# running app and no accessibility grant.
+[group('test')]
+[macos]
+test-drive *ARGS:
+    swift test --package-path apps/macos/Tools/jpdrive {{ARGS}}
+
+# Report whether this process may read another app's accessibility tree.
+#
+# Run under the terminal, under `just`, and under `serve-tools` to find out
+# whether a TCC grant given to the terminal reaches a tool it started. See
+# `apps/macos/Tools/jpdrive/README.md`.
+#
+# PID is the target application's process id, e.g. `$(pgrep -f JP.app)`.
+[group('debug')]
+[macos]
+drive-doctor PID="": build-drive
+    #!/usr/bin/env sh
+    set -eu
+
+    bin=$(swift build --package-path apps/macos/Tools/jpdrive -c release --show-bin-path)
+
+    if [ -n "{{PID}}" ]; then
+        "$bin/jpdrive" doctor --pid "{{PID}}"
+    else
+        "$bin/jpdrive" doctor
+    fi
+
+# Generate the macOS app's Xcode project from `apps/macos/project.yml`.
+#
+# The project file is generated rather than committed, so `project.yml` stays the
+# reviewable source of truth for targets, build settings, and the Rust build
+# phase.
+[group('build')]
+[macos]
+gen-app:
+    #!/usr/bin/env sh
+    set -eu
+
+    if ! which xcodegen >/dev/null 2>&1; then
+        echo "xcodegen not found. Install it with: brew install xcodegen" >&2
+        exit 1
+    fi
+
+    xcodegen generate --spec apps/macos/project.yml --project apps/macos
+
+# Build the macOS app.
+#
+# The library and its header are built first, not left to the project's own build
+# phase: Xcode scans the bridging header while planning the build, before any
+# script phase runs.
+[group('build')]
+[macos]
+build-app CONFIG="Debug": gen-app
+    #!/usr/bin/env sh
+    set -eu
+
+    if [ "{{CONFIG}}" = "Release" ]; then
+        just build-ffi release
+    else
+        just build-ffi debug
+    fi
+
+    xcodebuild build -project apps/macos/JP.xcodeproj -scheme JP \
+        -configuration {{CONFIG}} -destination platform=macOS -quiet
+
+# Build and launch the macOS app, with its output attached to this terminal.
+#
+# WORKSPACE is the workspace to open, defaulting to this checkout. The app has a
+# File ▸ Open Workspace menu item too; this just saves a step.
+#
+# Runs in the foreground so `tracing` output and crashes are visible, and Ctrl-C
+# quits. Use `open` on the printed bundle path instead to launch it detached.
+[group('build')]
+[macos]
+run-app WORKSPACE=justfile_directory(): build-app
+    #!/usr/bin/env sh
+    set -eu
+
+    if ! which jq >/dev/null 2>&1; then
+        echo "jq not found. Install it with: brew install jq" >&2
+        exit 1
+    fi
+
+    # Ask Xcode where it put the bundle. The derived data directory is keyed by a
+    # hash of the project path, so there is no path to hardcode.
+    app=$(xcodebuild -project apps/macos/JP.xcodeproj -scheme JP -configuration Debug \
+            -showBuildSettings -json |
+        jq -r 'first(.[] | select(.target == "JP") | .buildSettings) |
+               "\(.BUILT_PRODUCTS_DIR)/\(.FULL_PRODUCT_NAME)"')
+
+    if [ ! -d "$app" ]; then
+        echo "Could not locate the built app (looked for '$app')" >&2
+        exit 1
+    fi
+
+    echo "bundle:    $app" >&2
+    echo "workspace: {{WORKSPACE}}" >&2
+
+    JP_WORKSPACE="{{WORKSPACE}}" "$app/Contents/MacOS/JP"
+
+# Build and launch the macOS app through LaunchServices, detached.
+#
+# `run-app` execs the binary inside the bundle directly, which is convenient for
+# watching output but is not how macOS launches an app. Some AppKit behaviour
+# depends on the app being launched and registered normally, so this is the one to
+# reach for when the app misbehaves in ways the code does not explain.
+#
+# Output goes to the system log rather than this terminal, and the workspace comes
+# from the recents list rather than an environment variable.
+[group('build')]
+[macos]
+open-app: build-app
+    #!/usr/bin/env sh
+    set -eu
+
+    if ! which jq >/dev/null 2>&1; then
+        echo "jq not found. Install it with: brew install jq" >&2
+        exit 1
+    fi
+
+    app=$(xcodebuild -project apps/macos/JP.xcodeproj -scheme JP -configuration Debug \
+            -showBuildSettings -json |
+        jq -r 'first(.[] | select(.target == "JP") | .buildSettings) |
+               "\(.BUILT_PRODUCTS_DIR)/\(.FULL_PRODUCT_NAME)"')
+
+    if [ ! -d "$app" ]; then
+        echo "Could not locate the built app (looked for '$app')" >&2
+        exit 1
+    fi
+
+    echo "bundle: $app" >&2
+    open "$app"
+
+# Run the macOS app's unit tests.
+#
+# The UI tests are excluded: they launch the app and drive it through the screen,
+# so they cannot run alongside anything else using the machine. `test-app-ui`
+# runs those.
+[group('test')]
+[macos]
+test-app: gen-app (build-ffi "debug")
+    xcodebuild test -project apps/macos/JP.xcodeproj -scheme JP \
+        -destination platform=macOS -only-testing:JPTests -quiet
+
+# Run every one of the macOS app's UI tests.
+#
+# Takes over the screen for the length of the run. This is the CI job; while
+# writing a test, run it by name through the `swift_test_ui` tool instead, which
+# stops at the first failure.
+#
+# Every test runs here even after one fails, which is what `CI` means to that
+# tool and what a run nobody is watching should do.
+#
+# The result bundle is written into the checkout rather than left in derived
+# data, so a failing run leaves its evidence somewhere a reader or a CI artifact
+# step can reach without deriving a container path. `swift_test_ui` writes to
+# the same place for the same reason.
+[group('test')]
+[macos]
+test-app-ui: gen-app (build-ffi "debug")
+    #!/usr/bin/env sh
+    set -eu
+
+    # Not tidying up: `xcodebuild` refuses to write over an existing bundle, so
+    # without this the second run in a checkout fails before it starts.
+    rm -rf tmp/uitests/run.xcresult
+    mkdir -p tmp/uitests
+
+    # Captured rather than propagated, so the bundle is still reported on the
+    # failing run — which is the only run anybody opens it for.
+    status=0
+    CI=1 xcodebuild test -project apps/macos/JP.xcodeproj -scheme JP \
+        -destination platform=macOS -only-testing:JPUITests \
+        -resultBundlePath tmp/uitests/run.xcresult -quiet || status=$?
+
+    if [ -d tmp/uitests/run.xcresult ]; then
+        echo "result bundle: tmp/uitests/run.xcresult" >&2
+    fi
+
+    exit $status
+
+# Format the macOS app's Swift sources.
+[group('fmt')]
+[macos]
+fmt-app:
+    swift format --in-place --recursive --parallel \
+        apps/macos/Sources apps/macos/Tests apps/macos/UITests \
+        apps/macos/Tools/jpdrive/Sources apps/macos/Tools/jpdrive/Tests
+
+# Check Swift formatting and lints without rewriting anything.
+[group('check')]
+[macos]
+lint-app:
+    swift format lint --strict --recursive --parallel \
+        apps/macos/Sources apps/macos/Tests apps/macos/UITests \
+        apps/macos/Tools/jpdrive/Sources apps/macos/Tools/jpdrive/Tests
 
 [group('profile')]
 [positional-arguments]
@@ -2307,10 +2602,11 @@ plugin-build-local: _install-jp (plugin-build "")
     target=$(rustc -vV | sed -n 's/host: //p')
     dir="$(jp path user-local --plugins=command)"
     mkdir -p "$dir"
-    for manifest in crates/plugins/command/*/Cargo.toml; do
-        [ -f "$manifest" ] || continue
-        id=$(cargo metadata --manifest-path "$manifest" --format-version=1 --no-deps \
-            | jq -r '.packages[0].metadata["jp-registry"].id')
+    # `[package.metadata.jp-registry]` marks a plugin as installable. Plugins
+    # without it are built but not installed here; `cargo install --path` them.
+    ids=$(cargo metadata --no-deps --format-version=1 \
+        | jq -r '.packages[] | select(.metadata["jp-registry"]) | .metadata["jp-registry"].id')
+    for id in $ids; do
         src="target/${target}/release/jp-${id}"
         [ -f "$src" ] || continue
         cp "$src" "${dir}/jp-${id}"

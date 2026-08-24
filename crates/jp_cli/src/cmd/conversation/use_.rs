@@ -26,10 +26,10 @@ pub(crate) struct Use {
     #[command(flatten)]
     target: PositionalIds<true, false>,
 
-    /// Restrict picker candidates to conversations whose title or chat content
-    /// matches.
+    /// Restrict picker candidates to conversations containing the pattern.
     ///
-    /// Substring match.
+    /// Substring match against the title, chat text, reasoning, structured
+    /// output, tool calls, tool results, and inquiry questions.
     /// Case-insensitive unless the pattern contains an uppercase character
     /// (smart-case).
     /// Composable with target keywords (`?`, `?p`, `?s`, `?a`) and with

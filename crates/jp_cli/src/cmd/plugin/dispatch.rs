@@ -284,6 +284,7 @@ fn handle_list_conversations(workspace: &Workspace, req_id: Option<String>) -> H
             id: id.as_deciseconds().to_string(),
             title: meta.title.clone(),
             last_activated_at: meta.last_activated_at,
+            pinned_at: meta.pinned_at,
             events_count: meta.events_count,
         })
         .collect();
