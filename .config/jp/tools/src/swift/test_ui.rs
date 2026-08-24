@@ -18,9 +18,9 @@ use jp_tool::Context;
 use super::{
     PROJECT_PATH, SCHEME, prepare,
     report::{
-        RESULT_BUNDLE, UI_BUNDLE, clear_result_bundle, clear_screenshots, close_leftover_apps,
-        collect_bundle_issues, collect_failures, collect_screenshots, collect_staged_issues,
-        outcome, ui_bundle_filter,
+        RESULT_BUNDLE, UI_BUNDLE, bundle_document, bundle_issues, clear_result_bundle,
+        clear_screenshots, close_leftover_apps, collect_failures, collect_screenshots,
+        collect_staged_issues, executed_tests, outcome, ui_bundle_filter,
     },
 };
 use crate::util::{
@@ -42,7 +42,19 @@ const FAILURE_MARKER: &str = "recorded an issue";
 /// possible.
 /// Same suite, opposite priorities, so the environment decides.
 fn under_ci() -> bool {
-    std::env::var("CI").is_ok_and(|value| !value.is_empty())
+    is_ci(std::env::var("CI").ok().as_deref())
+}
+
+/// Whether `value` — the `CI` variable, or `None` when it is unset — means
+/// CI.
+///
+/// Split out so the rule can be checked without writing to the process
+/// environment.
+/// `set_var` is unsafe because another thread may be reading, and `under_ci` is
+/// reached by every test that runs the tool, so a test that set `CI` would be
+/// racing them.
+fn is_ci(value: Option<&str>) -> bool {
+    value.is_some_and(|value| !value.is_empty())
 }
 
 pub(crate) async fn swift_test_ui(ctx: &Context, tests: Option<Vec<String>>) -> ToolResult {
@@ -64,16 +76,27 @@ fn swift_test_ui_impl<R: ProcessRunner>(
         // Asked of the bundle rather than read off a list someone maintains:
         // a list in a document rots, and the one place that cannot is the
         // bundle itself.
-        match enumerate(ctx, runner) {
-            Ok(names) if !names.is_empty() => {
-                message.push_str("\n\nWhat there is to run:\n\n```\n");
-                message.push_str(&names.join("\n"));
-                message.push_str("\n```\n");
-            }
-            _ => message.push_str(
+        //
+        // Prepared first because enumeration reads the generated Xcode project,
+        // which is gitignored and produced by `prepare`. Reaching enumeration
+        // before it leaves the list unavailable on a fresh checkout, which is
+        // exactly where a caller most needs to be told what there is. A
+        // preparation failure needs no reporting of its own: enumeration then
+        // fails too, and the naming convention below covers both.
+        let names = match prepare(ctx, "debug", runner) {
+            Ok(None) => enumerate(ctx, runner).unwrap_or_default(),
+            _ => Vec::new(),
+        };
+
+        if names.is_empty() {
+            message.push_str(
                 "\n\nA name is a whole type path with a swift-testing function's trailing `()`, \
                  such as `UISuite/ConversationListTests/clickSelects()`.",
-            ),
+            );
+        } else {
+            message.push_str("\n\nWhat there is to run:\n\n```\n");
+            message.push_str(&names.join("\n"));
+            message.push_str("\n```\n");
         }
 
         return error(message);
@@ -97,7 +120,10 @@ fn swift_test_ui_impl<R: ProcessRunner>(
     // failure — and holds the same expectations and comments as plain text. The
     // log the tests keep themselves is last, and needed only for a failure
     // recorded before the runner wrote anything.
-    let reported = collect_bundle_issues(ctx, runner)
+    let document = bundle_document(ctx, runner);
+    let reported = document
+        .as_ref()
+        .and_then(bundle_issues)
         .or_else(|| collect_staged_issues(&ctx.root))
         .unwrap_or_else(collect_failures);
     let detail = reported + &collect_screenshots(&ctx.root);
@@ -111,10 +137,53 @@ fn swift_test_ui_impl<R: ProcessRunner>(
         ));
     }
 
-    match outcome(&output, "JP") {
-        Ok(summary) => Ok(format!("```\n{summary}\n```").into()),
-        Err(message) => error(message + &detail),
+    let summary = match outcome(&output, "JP") {
+        Ok(summary) => summary,
+        Err(message) => return error(message + &detail),
+    };
+
+    // `xcodebuild` unions the `-only-testing` selectors and ignores any that
+    // match nothing, so a run naming one real test and one typo passes with the
+    // typo unmentioned. The bundle is the only record of what actually ran.
+    let executed = document.as_ref().map(executed_tests).unwrap_or_default();
+    let missed = unmatched(tests, &executed);
+    if !missed.is_empty() {
+        return error(format!(
+            "These names matched no test, and `xcodebuild` passed over them rather than \
+             failing:\n\n```\n{}\n```\n\nWhat did run:\n\n```\n{summary}\n```",
+            missed.join("\n")
+        ));
     }
+
+    Ok(format!("```\n{summary}\n```").into())
+}
+
+/// The requested names that nothing in `executed` answers to.
+///
+/// A name is either a whole test (`Suite/test()`) or a suite standing for
+/// everything beneath it, so a name is matched by an identifier that equals it
+/// or continues it after a `/`.
+///
+/// Empty when `executed` is, which is deliberate: an unreadable bundle means
+/// the question cannot be answered, and answering "none of them ran" would fail
+/// a suite that passed.
+fn unmatched(requested: &[String], executed: &[String]) -> Vec<String> {
+    if executed.is_empty() {
+        return Vec::new();
+    }
+
+    requested
+        .iter()
+        .filter(|name| {
+            !executed.iter().any(|id| {
+                id == *name
+                    || id
+                        .strip_prefix(name.as_str())
+                        .is_some_and(|rest| rest.starts_with('/'))
+            })
+        })
+        .cloned()
+        .collect()
 }
 
 /// Every test in the UI bundle, as `xcodebuild` reports them.
@@ -198,8 +267,12 @@ fn collect_identifiers(value: &serde_json::Value, into: &mut Vec<String>) {
 /// Run the named tests, stopping at the first failure unless under CI.
 ///
 /// One `-only-testing` argument each, which `xcodebuild` unions.
-/// A name matching nothing fails the whole run rather than being passed over,
-/// so a typo is reported instead of quietly narrowing the run to the rest.
+///
+/// `xcodebuild` passes over a name matching nothing: it runs whichever
+/// selectors do match and exits zero, so a call naming one real test and one
+/// typo would report the real one as a pass and say nothing about the typo.
+/// The caller compares the result bundle's executed tests against what was
+/// asked for, the bundle being the only record of which it is.
 ///
 /// Stopped from out here because nothing inside can do it. swift-testing has no
 /// cancellation, and a test that exits its own process makes `xcodebuild`

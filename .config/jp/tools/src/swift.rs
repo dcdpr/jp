@@ -94,15 +94,30 @@ fn prepare<R: ProcessRunner>(
         )));
     }
 
-    let project = runner.run(
+    let project = match runner.run(
         "xcodegen",
         &["generate", "--spec", PROJECT_SPEC, "--project", PROJECT_DIR],
         &ctx.root,
-    )?;
+    ) {
+        Ok(project) => project,
+
+        // A binary that is not installed fails to spawn rather than running and
+        // exiting non-zero, so it never reaches the branch below. The runner's
+        // `unchecked` suppresses a bad exit status, not a failure to start.
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(Some(
+                "`xcodegen` is not installed. The Xcode project is generated from \
+                 `apps/macos/project.yml` rather than committed, so it is needed to build the app \
+                 at all. Install it with `brew install xcodegen`."
+                    .to_owned(),
+            ));
+        }
+
+        Err(error) => return Err(error),
+    };
     if !project.status.is_success() {
         return Ok(Some(format!(
-            "Generating `{PROJECT_PATH}` failed:\n\n```\n{}\n```\n\nIf xcodegen is not installed, \
-             install it with `brew install xcodegen`.",
+            "Generating `{PROJECT_PATH}` failed:\n\n```\n{}\n```",
             report(&project, "xcodegen")
         )));
     }

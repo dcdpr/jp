@@ -163,15 +163,39 @@ fn stops_when_the_library_fails_to_build() {
 
 /// xcodegen is the one tool here that is not part of the Swift toolchain, so
 /// its absence gets an install hint.
+///
+/// A binary that is not installed fails to *spawn*.
+/// Modelling it as a command that ran and exited non-zero tests the wrong
+/// branch entirely, and passes while the real case reaches an unhandled
+/// `io::Error` carrying no hint.
 #[test]
 fn points_at_homebrew_when_xcodegen_is_missing() {
     let runner = MockProcessRunner::builder()
         .expect("just")
         .returns_success("")
         .expect("xcodegen")
-        .returns_error("command not found: xcodegen");
+        .fails_to_spawn();
 
     let message = error_message(swift_check_impl(&ctx(), None, &runner).unwrap());
 
     assert!(message.contains("brew install xcodegen"), "got: {message}");
+}
+
+/// xcodegen present but refusing the manifest is a different failure, and the
+/// install hint would be wrong: it is already installed.
+#[test]
+fn reports_what_xcodegen_said_when_it_ran_and_failed() {
+    let runner = MockProcessRunner::builder()
+        .expect("just")
+        .returns_success("")
+        .expect("xcodegen")
+        .returns_error("Spec parsing error: unknown target JPUITests");
+
+    let message = error_message(swift_check_impl(&ctx(), None, &runner).unwrap());
+
+    assert!(
+        message.contains("unknown target JPUITests"),
+        "got: {message}"
+    );
+    assert!(!message.contains("brew install"), "got: {message}");
 }

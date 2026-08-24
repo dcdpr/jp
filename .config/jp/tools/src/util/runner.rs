@@ -362,7 +362,16 @@ use std::{
 struct Expectation {
     program: String,
     args: Option<Vec<String>>,
-    output: ProcessOutput,
+
+    /// What running the command does: what it printed, or the kind of error
+    /// spawning it produced.
+    ///
+    /// A binary that is not installed fails to spawn, which is a different
+    /// outcome from one that ran and exited non-zero and reaches different code
+    /// in the caller.
+    /// `ErrorKind` rather than `io::Error` because an expectation is stored and
+    /// `io::Error` is not `Clone`.
+    result: Result<ProcessOutput, std::io::ErrorKind>,
 }
 
 #[cfg(test)]
@@ -474,10 +483,29 @@ impl ExpectationBuilder {
 
     /// Set the output to return.
     pub fn returns(self, output: ProcessOutput) -> MockProcessRunner {
+        self.returns_result(Ok(output))
+    }
+
+    /// Fail to spawn the command, as a binary that is not installed does.
+    ///
+    /// Distinct from [`returns_error`], which models a command that ran and
+    /// exited non-zero.
+    /// A caller that handles the two differently cannot be tested with the
+    /// other one.
+    ///
+    /// [`returns_error`]: Self::returns_error
+    pub fn fails_to_spawn(self) -> MockProcessRunner {
+        self.returns_result(Err(std::io::ErrorKind::NotFound))
+    }
+
+    fn returns_result(
+        self,
+        result: Result<ProcessOutput, std::io::ErrorKind>,
+    ) -> MockProcessRunner {
         self.expectations.lock().unwrap().push_back(Expectation {
             program: self.program,
             args: self.args,
-            output,
+            result,
         });
 
         MockProcessRunner {
@@ -540,7 +568,7 @@ impl ProcessRunner for MockProcessRunner {
             }
         }
 
-        Ok(expectation.output)
+        expectation.result.map_err(std::io::Error::from)
     }
 }
 

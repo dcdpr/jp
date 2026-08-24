@@ -65,14 +65,12 @@ fn runs_each_named_test() {
 /// every UI test, because every one of them launches the app.
 #[test]
 fn refuses_to_run_without_names() {
-    let runner = MockProcessRunner::builder()
-        .expect("xcodebuild")
-        .returns_success(
-            r#"{"values":[{"enabledTests":[
+    let runner = prepared().expect("xcodebuild").returns_success(
+        r#"{"values":[{"enabledTests":[
                 {"identifier":"JPUITests/UISuite/ConversationListTests/labelsRows()"},
                 {"identifier":"JPTests/ConversationRefTests/exportsAsAURI()"}
             ]}]}"#,
-        );
+    );
 
     let message = error_message(swift_test_ui_impl(&ctx(), None, &runner).unwrap());
 
@@ -96,7 +94,7 @@ fn refuses_to_run_without_names() {
 /// caller the naming convention instead of a second failure.
 #[test]
 fn refuses_helpfully_when_enumeration_fails() {
-    let runner = MockProcessRunner::builder()
+    let runner = prepared()
         .expect("xcodebuild")
         .returns_error("unknown option -enumerate-tests");
 
@@ -111,9 +109,7 @@ fn refuses_helpfully_when_enumeration_fails() {
 /// bundle, the one outcome this tool exists to prevent.
 #[test]
 fn refuses_to_run_with_an_empty_list() {
-    let runner = MockProcessRunner::builder()
-        .expect("xcodebuild")
-        .returns_success("");
+    let runner = prepared().expect("xcodebuild").returns_success("");
 
     let message = error_message(swift_test_ui_impl(&ctx(), Some(&[]), &runner).unwrap());
 
@@ -133,24 +129,76 @@ fn recognizes_the_line_that_stops_a_run() {
 
 /// CI has nobody waiting on it and wants every result from the one run it gets,
 /// so it opts out of stopping.
+///
+/// Checked against the value rather than by setting `CI`: every test that runs
+/// the tool reaches `under_ci`, so writing the variable here would race them.
 #[test]
-fn ci_is_read_from_the_environment() {
-    // SAFETY: this test reads back only what it just wrote, and the tools crate
-    // runs its tests in one process where nothing else touches `CI`.
-    unsafe {
-        std::env::set_var("CI", "1");
-    }
-    assert!(under_ci());
+fn ci_is_the_variable_set_to_something() {
+    assert!(is_ci(Some("1")));
+    assert!(is_ci(Some("true")));
+}
 
-    unsafe {
-        std::env::set_var("CI", "");
-    }
-    assert!(!under_ci(), "an empty value is not being under CI");
+/// The app's own Xcode scheme sets `CI` to an empty string, which must not read
+/// as being under CI.
+#[test]
+fn an_empty_ci_variable_is_not_being_under_ci() {
+    assert!(!is_ci(Some("")));
+}
 
-    unsafe {
-        std::env::remove_var("CI");
-    }
-    assert!(!under_ci());
+#[test]
+fn an_unset_ci_variable_is_not_being_under_ci() {
+    assert!(!is_ci(None));
+}
+
+/// The whole point of the check: `xcodebuild` unions the selectors and ignores
+/// one that matches nothing, so without this a typo alongside a real name is a
+/// passing run that quietly did half the work.
+#[test]
+fn names_the_requested_tests_that_never_ran() {
+    let executed = ["UISuite/ConversationListTests/clickSelects()".to_owned()];
+    let requested = [
+        "UISuite/ConversationListTests/clickSelects()".to_owned(),
+        "UISuite/ConversationListTests/clickSelcts()".to_owned(),
+    ];
+
+    assert_eq!(unmatched(&requested, &executed), vec![
+        "UISuite/ConversationListTests/clickSelcts()".to_owned()
+    ]);
+}
+
+/// A suite stands for everything under it, so naming one is answered by any
+/// test beneath it rather than by an identifier equal to it.
+#[test]
+fn a_suite_is_matched_by_the_tests_inside_it() {
+    let executed = [
+        "UISuite/ConversationListTests/clickSelects()".to_owned(),
+        "UISuite/ConversationListTests/labelsRows()".to_owned(),
+    ];
+
+    assert!(unmatched(&["UISuite/ConversationListTests".to_owned()], &executed).is_empty());
+    assert!(unmatched(&["UISuite".to_owned()], &executed).is_empty());
+}
+
+/// A prefix that stops mid-name is not a suite of that name.
+/// Matching on the bare string would let `ConversationList` answer for
+/// `ConversationListTests`.
+#[test]
+fn a_partial_name_is_not_a_match() {
+    let executed = ["UISuite/ConversationListTests/clickSelects()".to_owned()];
+
+    assert_eq!(
+        unmatched(&["UISuite/ConversationList".to_owned()], &executed),
+        vec!["UISuite/ConversationList".to_owned()]
+    );
+}
+
+/// An unreadable bundle cannot answer the question, and answering "none of them
+/// ran" would fail a suite that passed.
+#[test]
+fn nothing_is_unmatched_when_nothing_is_known() {
+    let requested = ["UISuite/ConversationListTests/clickSelects()".to_owned()];
+
+    assert!(unmatched(&requested, &[]).is_empty());
 }
 
 /// A failing run names the screenshots the tests left behind, so what was on

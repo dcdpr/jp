@@ -29,5 +29,5 @@ results_file_link = "off"
 parameters = "function_call"
 
 [conversation.tools.swift_test_ui.parameters.tests]
-summary = "The suites or tests to run, as `SuiteName` or `SuiteName/testName()`. Required, and at least one. A nested suite is named by its whole type path (`UISuite/ConversationListTests`), and a swift-testing function keeps its trailing `()`. A name matching nothing fails the run rather than being passed over, so a typo is reported instead of quietly shrinking the run. Pass an empty list to be told what there is, asked of the built bundle."
+summary = "The suites or tests to run, as `SuiteName` or `SuiteName/testName()`. Required, and at least one. A nested suite is named by its whole type path (`UISuite/ConversationListTests`), and a swift-testing function keeps its trailing `()`. A name matching nothing fails the run rather than being passed over, so a typo is reported instead of quietly shrinking it. Pass an empty list to be told what there is, asked of the built bundle."
 type = "array"

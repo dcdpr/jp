@@ -253,7 +253,7 @@ fn staged_runner_output(bundle: &Utf8Path) -> Vec<Utf8PathBuf> {
     found
 }
 
-/// What the tests reported, read from the result bundle `xcodebuild` wrote.
+/// The result bundle `xcodebuild` wrote, as `xcresulttool` reports it.
 ///
 /// Apple's own reader for Apple's own format, so a failing `#expect`, a
 /// `#require`, an `Issue.record` and an `XCTest` assertion all arrive the same
@@ -262,11 +262,13 @@ fn staged_runner_output(bundle: &Utf8Path) -> Vec<Utf8PathBuf> {
 /// helper the suite must remember to call is a helper a future test will
 /// forget.
 ///
+/// Fetched once and read twice, for what failed and for what ran.
+///
 /// Returns `None` when there is no readable bundle.
 /// A run stopped at its first failure is killed rather than asked to stop, so
 /// the bundle it was part-way through writing may not be finished — which is
 /// why the caller keeps a fallback rather than relying on this alone.
-pub(super) fn collect_bundle_issues<R: ProcessRunner>(ctx: &Context, runner: &R) -> Option<String> {
+pub(super) fn bundle_document<R: ProcessRunner>(ctx: &Context, runner: &R) -> Option<Value> {
     let bundle = ctx.root.join(RESULT_BUNDLE);
     if !bundle.exists() {
         return None;
@@ -288,9 +290,56 @@ pub(super) fn collect_bundle_issues<R: ProcessRunner>(ctx: &Context, runner: &R)
         )
         .ok()?;
 
-    let document: Value = serde_json::from_str(&output.stdout).ok()?;
+    serde_json::from_str(&output.stdout).ok()
+}
+
+/// Every test the bundle records as having run, named the way a caller names
+/// one.
+///
+/// A `Test Case` node's `nodeIdentifier` is its suite path and function —
+/// `UISuite/ConversationListTests/clickSelects()` — which is the selector this
+/// tool takes, minus the bundle prefix it adds itself.
+/// So the two compare directly.
+///
+/// Empty when the document says nothing this recognizes, which the caller must
+/// read as "cannot tell" rather than "nothing ran": `nodeIdentifier` is
+/// optional in the schema, and treating its absence as a test that did not run
+/// would fail a passing suite.
+pub(super) fn executed_tests(document: &Value) -> Vec<String> {
+    let mut found = Vec::new();
+    walk_executed(document, &mut found);
+    found.sort();
+    found.dedup();
+    found
+}
+
+fn walk_executed(value: &Value, found: &mut Vec<String>) {
+    if let Value::Array(items) = value {
+        for item in items {
+            walk_executed(item, found);
+        }
+        return;
+    }
+
+    let Some(object) = value.as_object() else {
+        return;
+    };
+
+    if object.get("nodeType").and_then(Value::as_str) == Some("Test Case")
+        && let Some(id) = object.get("nodeIdentifier").and_then(Value::as_str)
+    {
+        found.push(id.to_owned());
+    }
+
+    for child in object.values() {
+        walk_executed(child, found);
+    }
+}
+
+/// The failures the bundle records, if any.
+pub(super) fn bundle_issues(document: &Value) -> Option<String> {
     let mut failures = Vec::new();
-    walk_failures(&document, &mut Vec::new(), &mut failures);
+    walk_failures(document, &mut Vec::new(), &mut failures);
 
     if failures.is_empty() {
         return None;
@@ -610,3 +659,7 @@ fn is_run_summary(line: &str) -> bool {
     // XCTest: "Executed 20 tests, with 0 failures (0 unexpected) in 0.1 seconds"
     line.contains("Executed ") && !line.contains("Executed 0 tests")
 }
+
+#[cfg(test)]
+#[path = "report_tests.rs"]
+mod tests;
