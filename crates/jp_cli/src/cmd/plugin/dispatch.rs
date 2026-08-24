@@ -47,6 +47,7 @@ use jp_plugin::{
 };
 use jp_printer::{OutputFormat, Printer};
 use jp_storage::backend::{FsStorageBackend, Projection};
+use jp_task::task::TitleGeneratorTask;
 use jp_workspace::{ConversationLock, LockResult, Workspace, session::Session};
 use serde_json::Value;
 use tokio::{sync::mpsc, task::JoinSet};
@@ -55,7 +56,9 @@ use tracing::{debug, error, info, trace, warn};
 use super::registry;
 use crate::{
     Ctx, KeyValueOrPath, cmd,
-    cmd::query::{PendingStreamTrim, TurnInputs, interrupt::reply_edit_mode},
+    cmd::query::{
+        NewTitle, PendingStreamTrim, TurnInputs, interrupt::reply_edit_mode, resolve_new_title,
+    },
     config_pipeline::{build_partial_over, config_search_roots},
     ctx::McpServerScope,
     editor::{draft_query_text, draft_revision, report_editor_failure},
@@ -754,10 +757,16 @@ async fn run_query(
         "Running a delegated query.",
     );
 
+    let chat_request = ChatRequest {
+        content: request.content,
+        author: config.user.name.clone(),
+        ..ChatRequest::default()
+    };
+
     // Swapped around collecting only, because that is the part that reads the
     // context. The turn itself carries the config it was given.
     let host_config = ctx.swap_config(Arc::clone(&config));
-    let prepared = prepare_turn(ctx, config, &lock, request.content).await;
+    let prepared = prepare_turn(ctx, Arc::clone(&config), &lock, chat_request.clone()).await;
     ctx.swap_config(host_config);
 
     let (inputs, stream) = match prepared {
@@ -765,13 +774,21 @@ async fn run_query(
         Err(error) => return failed(error.to_string()),
     };
 
+    let title_task = resolve_title(&config, &lock, &stream, &chat_request);
+
     // Hand the turn to its own task. It owns everything it needs and the lock owns
     // itself, so nothing here is borrowed for the minutes a turn can take, which
     // is what keeps the message loop answering reads while it runs.
     let stdin = Arc::clone(stdin);
 
     turns.spawn(async move {
-        let outcome = inputs.run(&lock, stream, turn_interrupt).await;
+        // Alongside the turn rather than after it: the two are independent
+        // requests, and whoever is looking at a list of conversations wants a
+        // name for this one long before the answer arrives.
+        let (outcome, ()) = tokio::join!(
+            inputs.run(&lock, stream, turn_interrupt),
+            write_generated_title(title_task, &lock),
+        );
 
         // Reported through tracing rather than to the terminal. These are facts
         // about the host, not content: the turn's output belongs to the
@@ -931,7 +948,7 @@ async fn prepare_turn(
     ctx: &mut Ctx,
     config: Arc<AppConfig>,
     lock: &ConversationLock,
-    content: String,
+    chat_request: ChatRequest,
 ) -> Result<(TurnInputs, ConversationStream), cmd::Error> {
     // The client was built from the config this host read at startup. A provider
     // added to the workspace since then is otherwise unknown to it, and starting
@@ -947,12 +964,6 @@ async fn prepare_turn(
     let mcp_servers = ctx
         .configure_active_mcp_servers(forced_tool, McpServerScope::Shared)
         .await?;
-
-    let chat_request = ChatRequest {
-        content,
-        author: config.user.name.clone(),
-        ..ChatRequest::default()
-    };
 
     // The message has moved from draft to request, so the draft is done. Clearing
     // it here rather than from the caller gives it one owner: a client that
@@ -1022,6 +1033,83 @@ async fn prepare_turn(
     .await?;
 
     Ok((inputs, stream))
+}
+
+/// Decide how a conversation nobody has named gets a title from its first
+/// message.
+///
+/// A leading markdown heading is written straight to the conversation.
+/// Anything else needs the model, and comes back as a task for the caller to
+/// run.
+/// Returns `None` when the conversation already has a title, already has
+/// events, or the configuration asks for neither route.
+fn resolve_title(
+    config: &AppConfig,
+    lock: &ConversationLock,
+    stream: &ConversationStream,
+    chat_request: &ChatRequest,
+) -> Option<TitleGeneratorTask> {
+    if lock.metadata().title.is_some() || !stream.is_empty() {
+        return None;
+    }
+
+    match resolve_new_title(
+        config.conversation.title.from_heading,
+        config.conversation.title.generate.auto,
+        &chat_request.content,
+    ) {
+        NewTitle::FromHeading(title) => {
+            debug!(conversation = %lock.id(), "Titling from the prompt's leading heading.");
+            lock.as_mut()
+                .update_metadata(|meta| meta.title = Some(title));
+            None
+        }
+        NewTitle::Generate => {
+            // The title model is configured separately from the assistant's, so
+            // a broken one must not take the turn down with it.
+            let mut events = stream.clone();
+            events.start_turn(chat_request.clone());
+
+            match TitleGeneratorTask::new(lock.id(), events, config, false) {
+                Ok(task) => Some(task),
+                Err(error) => {
+                    warn!(%error, "Skipping title generation.");
+                    None
+                }
+            }
+        }
+        NewTitle::Skip => None,
+    }
+}
+
+/// Run a title task and record what it produced.
+///
+/// Writes through the turn's own lock, so the name is on disk as soon as the
+/// model answers rather than when the turn ends.
+async fn write_generated_title(task: Option<TitleGeneratorTask>, lock: &ConversationLock) {
+    let Some(task) = task else {
+        return;
+    };
+
+    let title = match task.generate().await {
+        Ok(Some(title)) => title,
+        Ok(None) => {
+            warn!(conversation = %lock.id(), "The title model answered without a title.");
+            return;
+        }
+        Err(error) => {
+            warn!(%error, conversation = %lock.id(), "Failed to generate a title.");
+            return;
+        }
+    };
+
+    debug!(conversation = %lock.id(), %title, "Generated a conversation title.");
+
+    let mut conv = lock.as_mut();
+    conv.update_metadata(|meta| meta.title = Some(title));
+    if let Err(error) = conv.flush() {
+        warn!(%error, "Failed to persist the generated title.");
+    }
 }
 
 /// Flatten an error and its sources into one line.

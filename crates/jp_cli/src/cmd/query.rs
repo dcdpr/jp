@@ -1757,7 +1757,7 @@ enum QuerySource {
 /// How a new conversation's title is set from its first prompt, before the turn
 /// runs.
 #[derive(Debug, PartialEq)]
-enum NewTitle {
+pub(crate) enum NewTitle {
     /// Use this text, taken verbatim from a leading markdown heading.
     FromHeading(String),
 
@@ -1774,7 +1774,11 @@ enum NewTitle {
 /// background generation is chosen when `generate_auto` is enabled.
 /// The two flags are independent: disabling generation does not disable
 /// heading-derived titles.
-fn resolve_new_title(from_heading: bool, generate_auto: bool, content: &str) -> NewTitle {
+pub(crate) fn resolve_new_title(
+    from_heading: bool,
+    generate_auto: bool,
+    content: &str,
+) -> NewTitle {
     if from_heading && let Some(title) = jp_md::heading::leading_heading(content) {
         return NewTitle::FromHeading(title);
     }
