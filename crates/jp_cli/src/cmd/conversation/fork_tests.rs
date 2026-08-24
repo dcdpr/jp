@@ -1456,6 +1456,7 @@ fn turn_out_of_range_on_a_later_source_forks_nothing() {
     );
     let workspace = Workspace::in_memory(tmp.path()).with_backend(fs);
     let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
         workspace,
         None,
         Runtime::new().unwrap(),
