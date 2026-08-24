@@ -683,7 +683,7 @@ fn query_model_override_is_persisted_as_config_delta() {
     let base_config = Arc::new(config_with_model(ProviderId::Anthropic, "base-model"));
     let conversation_id = make_id(1000);
 
-    let mut workspace = Workspace::new("/tmp/test");
+    let mut workspace = Workspace::in_memory("/tmp/test");
     workspace.create_conversation_with_id(
         conversation_id,
         Conversation::default(),
@@ -741,7 +741,7 @@ fn query_cfg_sourced_compaction_persists_as_config_delta() {
     let base_config = Arc::new(config_with_model(ProviderId::Anthropic, "base-model"));
     let conversation_id = make_id(2000);
 
-    let mut workspace = Workspace::new("/tmp/test");
+    let mut workspace = Workspace::in_memory("/tmp/test");
     workspace.create_conversation_with_id(
         conversation_id,
         Conversation::default(),
@@ -819,7 +819,7 @@ async fn query_sequence_new_cfg_profile_then_model_override_persists_for_plain_q
         .into(),
     );
 
-    let mut workspace = Workspace::new(root);
+    let mut workspace = Workspace::in_memory(root);
 
     let query1 = Query {
         new_conversation: true,
@@ -963,7 +963,7 @@ fn apply_title_override_no_title_clears_existing_title() {
     // conversation inherits the source's title via
     // `fork_conversation`, and `--no-title` is supposed to leave
     // the run with no title at all.
-    let mut workspace = Workspace::new("/tmp/test");
+    let mut workspace = Workspace::in_memory("/tmp/test");
     let lock = lock_with_title(&mut workspace, make_id(1000), Some("inherited"));
 
     apply_title_override(&lock, None, true);
@@ -976,7 +976,7 @@ fn apply_title_override_no_title_clears_resumed_title() {
     // `--no-title` is symmetric with `--title T`: both write the
     // user's intent into `metadata.title`, regardless of whether
     // the conversation is new, forked, or resumed.
-    let mut workspace = Workspace::new("/tmp/test");
+    let mut workspace = Workspace::in_memory("/tmp/test");
     let lock = lock_with_title(&mut workspace, make_id(1001), Some("existing"));
 
     apply_title_override(&lock, None, true);
@@ -986,7 +986,7 @@ fn apply_title_override_no_title_clears_resumed_title() {
 
 #[test]
 fn apply_title_override_title_overwrites_existing_title() {
-    let mut workspace = Workspace::new("/tmp/test");
+    let mut workspace = Workspace::in_memory("/tmp/test");
     let lock = lock_with_title(&mut workspace, make_id(1002), Some("old"));
 
     apply_title_override(&lock, Some("new"), false);
@@ -996,7 +996,7 @@ fn apply_title_override_title_overwrites_existing_title() {
 
 #[test]
 fn apply_title_override_neither_flag_is_noop() {
-    let mut workspace = Workspace::new("/tmp/test");
+    let mut workspace = Workspace::in_memory("/tmp/test");
     let lock = lock_with_title(&mut workspace, make_id(1003), Some("keep"));
 
     apply_title_override(&lock, None, false);
@@ -1976,7 +1976,7 @@ fn run_missing_at_path_query_leaves_conversation_and_session_untouched() {
         source: SessionSource::env("JP_SESSION"),
     };
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
-    let workspace = Workspace::new("/tmp/jp-cli-query-test");
+    let workspace = Workspace::in_memory("/tmp/jp-cli-query-test");
     let mut ctx = Ctx::new(
         crate::bootstrap::ExecutionContext::for_workspace(&workspace),
         workspace,
@@ -2009,6 +2009,62 @@ fn run_missing_at_path_query_leaves_conversation_and_session_untouched() {
 
     assert_eq!(ctx.workspace.conversations().count(), 0);
     assert_eq!(ctx.workspace.session_active_conversation(&session), None);
+}
+
+// A `--label=:name` naming a rule that isn't configured must fail before any
+// other flag has written anything: alias expansion runs ahead of `--mount`'s
+// symlinks and `--title`'s metadata write, so a typo'd alias leaves the
+// conversation exactly as it was.
+#[test]
+fn run_failing_alias_leaves_the_title_untouched() {
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let mut workspace = Workspace::in_memory("/tmp/jp-cli-query-label-test");
+    let id = make_id(4242);
+    workspace.create_conversation_with_id(
+        id,
+        Conversation {
+            title: Some("original".to_owned()),
+            ..Default::default()
+        },
+        Arc::new(AppConfig::new_test()),
+    );
+
+    let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
+        workspace,
+        None,
+        Runtime::new().unwrap(),
+        Globals::default(),
+        AppConfig::new_test(),
+        None,
+        printer,
+    );
+
+    let handle = ctx.workspace.acquire_conversation(&id).unwrap();
+    let query = parse_query(&["--title", "changed", "--label=:missing", "hello"]).unwrap();
+    let result = Runtime::new()
+        .unwrap()
+        .block_on(query.run(&mut ctx, Some(handle), false));
+
+    let Err(error) = result else {
+        panic!("a query naming an unknown label alias must fail");
+    };
+    // Pin that it failed on the alias, not on something else further down
+    // `run` that the test environment happens to be missing.
+    assert!(
+        error.to_string().contains("unknown label alias")
+            || error.metadata.iter().any(|(_, value)| value
+                .as_str()
+                .is_some_and(|v| v.contains("unknown label alias"))),
+        "got: {error:?}"
+    );
+
+    let handle = ctx.workspace.acquire_conversation(&id).unwrap();
+    assert_eq!(
+        ctx.workspace.metadata(&handle).unwrap().title.as_deref(),
+        Some("original"),
+        "the title must not have been rewritten before the alias failed"
+    );
 }
 
 #[test]

@@ -9,10 +9,17 @@
 //!
 //! [`NoopLockGuard`] is a lock guard that does nothing on drop — used by
 //! `NullLockBackend` and the `test_lock` helper.
+//!
+//! [`ReadOnlySessionBackend`] serves session reads from an inner backend and
+//! discards session writes — used for `--no-persist` so an ephemeral run can
+//! still tell which conversation the session is working on without changing it.
+
+use std::sync::Arc;
 
 use jp_conversation::{Conversation, ConversationId, ConversationStream};
+use serde_json::Value;
 
-use super::{ConversationLockGuard, LockBackend, PersistBackend, Projection};
+use super::{ConversationLockGuard, LockBackend, PersistBackend, Projection, SessionBackend};
 use crate::{error::Result, lock::LockInfo};
 
 /// A [`PersistBackend`] that silently discards all writes.
@@ -74,3 +81,43 @@ impl LockBackend for NullLockBackend {
 pub struct NoopLockGuard;
 
 impl ConversationLockGuard for NoopLockGuard {}
+
+/// A [`SessionBackend`] that reads through to an inner backend and drops every
+/// write.
+///
+/// Reads stay live because resolving "which conversation is this session on" is
+/// a read; recording a *new* active conversation is a write, and a run that
+/// leaves nothing on disk must not leave the session pointing at a conversation
+/// that was never persisted.
+#[derive(Debug)]
+pub struct ReadOnlySessionBackend(Arc<dyn SessionBackend>);
+
+impl ReadOnlySessionBackend {
+    /// Wrap `inner`, serving its reads and discarding its writes.
+    #[must_use]
+    pub fn new(inner: Arc<dyn SessionBackend>) -> Self {
+        Self(inner)
+    }
+}
+
+impl SessionBackend for ReadOnlySessionBackend {
+    fn load_session(&self, session_key: &str) -> Result<Option<Value>> {
+        self.0.load_session(session_key)
+    }
+
+    fn save_session(&self, _session_key: &str, _data: &Value) -> Result<()> {
+        Ok(())
+    }
+
+    fn list_session_keys(&self) -> Vec<String> {
+        self.0.list_session_keys()
+    }
+
+    fn is_read_only(&self) -> bool {
+        true
+    }
+}
+
+#[cfg(test)]
+#[path = "null_tests.rs"]
+mod tests;

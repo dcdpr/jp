@@ -4,15 +4,21 @@
 //! printer's [`OutputFormat`], so commands don't need to branch on the format
 //! themselves.
 //!
-//! Text formats render the display rows; JSON formats emit the explicit `json`
-//! payload the command supplies.
-//! The two are deliberately decoupled: display labels, ordering, and layout can
-//! change freely, while the JSON payload is a stable machine contract with
-//! `snake_case` keys — it is never derived from display text.
+//! A command whose two views carry the same thing lets the JSON be derived from
+//! the display rows: [`Details`] fixes the shape, and each [`DetailItem`]
+//! carries its own structured form.
+//!
+//! When the views diverge, the command supplies the payload instead
+//! ([`print_table`], [`print_details_with_json`], [`print_outcome`]).
+//! That decouples the two: display labels, ordering, and layout can change
+//! freely, while the payload stays a stable machine contract with `snake_case`
+//! keys.
+//!
+//! [`DetailItem`]: jp_term::table::DetailItem
 
 use comfy_table::Row;
 use jp_printer::{OutputFormat, Printer};
-use jp_term::table::{DetailRow, details, details_markdown, list, list_markdown};
+use jp_term::table::{Details, details, details_json, details_markdown, list, list_markdown};
 use serde_json::{Value, to_string, to_string_pretty};
 
 /// Print a list table (header + rows) in the format dictated by the printer.
@@ -37,16 +43,60 @@ pub fn print_table(printer: &Printer, header: Row, rows: Vec<Row>, footer: bool,
 ///
 /// - `TextPretty` → borderless aligned table with optional title
 /// - `Text` → pipe-delimited markdown table with optional title
-/// - `Json` / `JsonPretty` → the explicit `json` payload
-pub fn print_details(printer: &Printer, title: Option<&str>, rows: Vec<DetailRow>, json: &Value) {
+/// - `Json` / `JsonPretty` → JSON object
+pub fn print_details(printer: &Printer, title: Option<&str>, body: Details) {
     let output = match printer.format() {
-        OutputFormat::TextPretty => details(title, rows),
-        OutputFormat::Text => details_markdown(title, rows),
-        OutputFormat::Json => to_string(json).unwrap_or_else(|_| json.to_string()),
-        OutputFormat::JsonPretty => to_string_pretty(json).unwrap_or_else(|_| json.to_string()),
+        OutputFormat::TextPretty => details(title, body),
+        OutputFormat::Text => details_markdown(title, body),
+        OutputFormat::Json => {
+            let json = details_json(title, body);
+            to_string(&json).unwrap_or_else(|_| json.to_string())
+        }
+        OutputFormat::JsonPretty => {
+            let json = details_json(title, body);
+            to_string_pretty(&json).unwrap_or_else(|_| json.to_string())
+        }
     };
 
     printer.println_raw(&output);
+}
+
+/// Print a details view whose JSON form is supplied rather than derived from
+/// the rows.
+///
+/// [`print_details`] derives the JSON from the rows, which is right when both
+/// views carry the same thing.
+/// Supply `json` when they don't: an empty listing reads as "No labels." for a
+/// person and `[]` for a script, and one derived form cannot be both.
+pub fn print_details_with_json(
+    printer: &Printer,
+    title: Option<&str>,
+    body: Details,
+    json: &Value,
+) {
+    if printer.format().is_json() {
+        print_json(printer, json);
+    } else {
+        print_details(printer, title, body);
+    }
+}
+
+/// Print the outcome of an operation in the format dictated by the printer.
+///
+/// - Text formats → the prose `text`
+/// - `Json` / `JsonPretty` → `json`, as one object per call
+///
+/// The two forms are supplied separately because they carry different things: a
+/// sentence names the change for a reader, while the object exposes its parts
+/// for a script.
+/// Passing prose through [`Printer::println`] in a JSON format would wrap it in
+/// a `{"message": "..."}` envelope, leaving the caller to parse English.
+pub fn print_outcome(printer: &Printer, text: &str, json: &Value) {
+    if printer.format().is_json() {
+        print_json(printer, json);
+    } else {
+        printer.println(text);
+    }
 }
 
 /// Print a JSON value in the format dictated by the printer.

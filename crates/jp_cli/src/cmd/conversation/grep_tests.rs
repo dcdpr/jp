@@ -81,7 +81,7 @@ fn setup_conversations_with(
 ) -> (Ctx, SharedBuffer) {
     let tmp = tempdir().unwrap();
     let config = AppConfig::new_test();
-    let workspace = Workspace::new(tmp.path());
+    let workspace = Workspace::in_memory(tmp.path());
     let (printer, out, _err) = Printer::memory(format);
     let printer = printer.with_output_width(width);
     let mut ctx = Ctx::new(
@@ -1309,6 +1309,28 @@ fn tool_results_are_searched() {
 
     assert_eq!(run(grep("secret-keyword"), &mut ctx, &out), [format!(
         "{id}:1:tool-result:m:file content with secret-keyword here"
+    )]);
+}
+
+#[test]
+fn scope_structured_searches_serialized_json() {
+    let id = make_id(9500);
+    let (mut ctx, out) = setup(vec![(
+        id,
+        turn(vec![ConversationEvent::new(
+            ChatResponse::structured(json!({ "name": "Alice" })),
+            ts(),
+        )]),
+    )]);
+
+    let grep = Grep {
+        scopes: vec![Scope::Structured],
+        ..grep("Alice")
+    };
+    // The persisted value is a JSON object, so the searchable text is the
+    // pretty-printed serialization rather than the value itself.
+    assert_eq!(run(grep, &mut ctx, &out), [format!(
+        "{id}:1:structured:m:  \"name\": \"Alice\""
     )]);
 }
 

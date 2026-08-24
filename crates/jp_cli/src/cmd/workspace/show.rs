@@ -5,6 +5,7 @@ use chrono::{DateTime, Utc};
 use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
 use jp_printer::Printer;
+use jp_term::table::Details;
 use jp_workspace::{Id, Workspace, roots, session_store::WorkspaceSelection};
 use tracing::warn;
 
@@ -15,7 +16,7 @@ use crate::{
         workspace::target::{self, ResolvedTarget, TargetEnv, WorkspaceTarget},
     },
     format::workspace::{DetailsFmt, checkout_detail_item},
-    output::print_details,
+    output::print_details_with_json,
 };
 
 /// Show a workspace: identity, checkouts, and how it resolves.
@@ -320,7 +321,12 @@ fn render(
         .with_active_conversation(stats.and_then(|stats| stats.active))
         .with_pretty_printing(pretty);
 
-    print_details(printer, details.title(), details.rows(), &details.json());
+    print_details_with_json(
+        printer,
+        details.title(),
+        Details::Fields(details.rows()),
+        &details.json(),
+    );
 
     // The cwd-vs-active tension, surfaced instead of silently resolved (RFD
     // 087's precedence ladder): a sticky session keeps the active workspace;

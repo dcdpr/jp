@@ -5,7 +5,10 @@ use chrono::{TimeZone as _, Utc};
 use jp_config::AppConfig;
 use jp_conversation::{
     Conversation, ConversationEvent, ConversationId, EventKind,
-    event::{ChatRequest, ChatResponse, ToolCallResponse},
+    event::{
+        ChatRequest, ChatResponse, InquiryQuestion, InquiryRequest, InquirySource, ToolCallRequest,
+        ToolCallResponse,
+    },
 };
 use jp_printer::{OutputFormat, Printer};
 use jp_workspace::Workspace;
@@ -27,7 +30,7 @@ fn setup_ctx_with_conversations(
 ) -> Ctx {
     let tmp = tempdir().unwrap();
     let config = AppConfig::new_test();
-    let workspace = Workspace::new(tmp.path());
+    let workspace = Workspace::in_memory(tmp.path());
     let (printer, _, _) = Printer::memory(OutputFormat::TextPretty);
     let mut ctx = Ctx::new(
         crate::bootstrap::ExecutionContext::for_workspace(&workspace),
@@ -81,6 +84,33 @@ fn event_lines_chat_response_message() {
 fn event_lines_chat_response_reasoning() {
     let kind = EventKind::ChatResponse(ChatResponse::reasoning("thinking..."));
     assert_eq!(collect_lines(&kind), vec!["thinking...".to_string()]);
+}
+
+#[test]
+fn event_lines_chat_response_structured_object() {
+    // A structured response is parsed into a `Value` before it is persisted, so
+    // the searchable text has to be re-serialized. Pretty-printed, matching how
+    // tool call arguments are handled.
+    let kind = EventKind::ChatResponse(ChatResponse::structured(serde_json::json!({
+        "name": "Alice"
+    })));
+
+    assert_eq!(collect_lines(&kind), vec![
+        "{".to_string(),
+        "  \"name\": \"Alice\"".to_string(),
+        "}".to_string(),
+    ]);
+}
+
+#[test]
+fn event_lines_chat_response_structured_string_is_verbatim() {
+    // A response whose JSON failed to parse is preserved as a raw string. It is
+    // searched as-is rather than re-quoted.
+    let kind = EventKind::ChatResponse(ChatResponse::structured(serde_json::Value::String(
+        "not json {".to_owned(),
+    )));
+
+    assert_eq!(collect_lines(&kind), vec!["not json {".to_string()]);
 }
 
 #[test]
@@ -138,9 +168,9 @@ fn a_poisoned_matcher_stops_matching() {
 
 // --- filter_ids -------------------------------------------------------------
 //
-// `filter_ids` uses fixed scopes (title + chat) and smart-case matching, and
-// returns matching IDs without building hit metadata. These tests pin the
-// scope set and the smart-case rule.
+// `filter_ids` searches every scope with smart-case matching, and returns
+// matching IDs without building hit metadata. These tests pin the scope set and
+// the smart-case rule.
 
 /// The matching IDs, for a pattern expected to compile.
 fn matching(ctx: &Ctx, ids: &[ConversationId], pattern: &str) -> Vec<ConversationId> {
@@ -202,9 +232,7 @@ fn filter_ids_matches_title() {
 }
 
 #[test]
-fn filter_ids_ignores_tool_call_response() {
-    // Tool call results sit outside the chat-style scope set. A match in
-    // tool output should NOT pull the conversation into the picker.
+fn filter_ids_matches_tool_call_response() {
     let id = make_id(20_500);
     let ctx = setup_ctx_with_events(vec![(id, vec![ConversationEvent::new(
         ToolCallResponse {
@@ -214,7 +242,55 @@ fn filter_ids_ignores_tool_call_response() {
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
     )])]);
 
-    assert!(matching(&ctx, &[id], "secret-keyword").is_empty());
+    assert_eq!(matching(&ctx, &[id], "secret-keyword"), vec![id]);
+}
+
+#[test]
+fn filter_ids_matches_tool_call_request_arguments() {
+    // Arguments are serialized on demand rather than stored as text, so this
+    // pins the one scope whose searchable content doesn't already exist as a
+    // string in the event.
+    let id = make_id(20_510);
+    let mut arguments = serde_json::Map::new();
+    arguments.insert(
+        "pattern".to_owned(),
+        serde_json::Value::String("integer_literal_enum_has_integer_type".to_owned()),
+    );
+    let ctx = setup_ctx_with_events(vec![(id, vec![ConversationEvent::new(
+        ToolCallRequest::new("tc1".into(), "fs_grep_files".into(), arguments),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+    )])]);
+
+    assert_eq!(
+        matching(&ctx, &[id], "integer_literal_enum_has_integer_type"),
+        vec![id]
+    );
+}
+
+#[test]
+fn filter_ids_matches_structured_object() {
+    let id = make_id(20_530);
+    let ctx = setup_ctx_with_events(vec![(id, vec![ConversationEvent::new(
+        ChatResponse::structured(serde_json::json!({ "name": "Alice" })),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+    )])]);
+
+    assert_eq!(matching(&ctx, &[id], "Alice"), vec![id]);
+}
+
+#[test]
+fn filter_ids_matches_inquiry_question() {
+    let id = make_id(20_520);
+    let ctx = setup_ctx_with_events(vec![(id, vec![ConversationEvent::new(
+        InquiryRequest::new(
+            "iq1",
+            InquirySource::Assistant,
+            InquiryQuestion::text("Which migration strategy should I use?".to_owned()),
+        ),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+    )])]);
+
+    assert_eq!(matching(&ctx, &[id], "migration strategy"), vec![id]);
 }
 
 #[test]

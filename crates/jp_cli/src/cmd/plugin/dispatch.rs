@@ -295,6 +295,7 @@ fn handle_list_conversations(workspace: &Workspace, req_id: Option<String>) -> H
             id: id.as_deciseconds().to_string(),
             title: meta.title.clone(),
             last_activated_at: meta.last_activated_at,
+            pinned_at: meta.pinned_at,
             events_count: meta.events_count,
         })
         .collect();
@@ -427,6 +428,7 @@ fn is_process_alive(pid: u32) -> bool {
     unsafe { libc::kill(libc::pid_t::from(pid.cast_signed()), 0) == 0 }
 }
 
+/// Check if a process is still alive by PID.
 #[cfg(windows)]
 fn is_process_alive(pid: u32) -> bool {
     use windows_sys::Win32::{
@@ -459,6 +461,10 @@ fn kill_child(pid: u32) {
     debug!(pid, "Sent SIGKILL to plugin after grace period.");
 }
 
+/// Terminate a child process by PID.
+///
+/// Used as a last resort when the plugin doesn't exit within the grace period
+/// after receiving `Shutdown`.
 #[cfg(windows)]
 fn kill_child(pid: u32) {
     use windows_sys::Win32::{

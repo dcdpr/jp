@@ -1,6 +1,6 @@
 //! Defines the Conversation structure.
 
-use std::{fmt, str::FromStr};
+use std::{collections::BTreeMap, fmt, str::FromStr};
 
 use chrono::{DateTime, Utc};
 use jp_id::{
@@ -68,6 +68,15 @@ pub struct Conversation {
     )]
     pub expires_at: Option<DateTime<Utc>>,
 
+    /// Key-value annotations attached to the conversation.
+    ///
+    /// Labels are set from the CLI (`--label`) or produced from the
+    /// `conversation.labels` config rules, and are used to find conversations
+    /// by the context they were created in.
+    /// Keys match `[A-Za-z0-9_-]+`; a bare label is stored with an empty value.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub labels: BTreeMap<String, String>,
+
     /// The time of the last event, or `None` if the conversation is empty.
     #[serde(skip)]
     pub last_event_at: Option<DateTime<Utc>>,
@@ -85,6 +94,7 @@ impl Default for Conversation {
             pinned_at: None,
             archived_at: None,
             expires_at: None,
+            labels: BTreeMap::new(),
             last_event_at: None,
             events_count: 0,
         }

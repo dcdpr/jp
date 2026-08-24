@@ -1,5 +1,6 @@
 use comfy_table::{Cell, Row};
 use jp_printer::{OutputFormat, Printer};
+use jp_term::table::DetailRow;
 use serde_json::json;
 
 use super::*;
@@ -97,9 +98,9 @@ fn table_empty_payload() {
 #[test]
 fn details_text_pretty_with_title() {
     let (printer, out, _) = Printer::memory(OutputFormat::TextPretty);
-    let rows = vec![DetailRow::scalar("Key", "Value")];
+    let rows = Details::Fields(vec![DetailRow::scalar("Key", "Value")]);
 
-    print_details(&printer, Some("My Title"), rows, &json!({}));
+    print_details(&printer, Some("My Title"), rows);
     let output = flush_stdout(&printer, &out);
 
     assert!(output.contains("My Title"));
@@ -110,9 +111,9 @@ fn details_text_pretty_with_title() {
 #[test]
 fn details_text_renders_markdown() {
     let (printer, out, _) = Printer::memory(OutputFormat::Text);
-    let rows = vec![DetailRow::scalar("color", "red")];
+    let rows = Details::Fields(vec![DetailRow::scalar("color", "red")]);
 
-    print_details(&printer, None, rows, &json!({}));
+    print_details(&printer, None, rows);
     let output = flush_stdout(&printer, &out);
 
     assert!(output.contains('|'), "expected pipe-delimited output");
@@ -125,10 +126,10 @@ fn details_json_emits_payload_not_rows() {
     let (printer, out, _) = Printer::memory(OutputFormat::Json);
     // Display rows and JSON payload deliberately disagree: display labels are
     // Title Case prose, payload keys are a snake_case contract.
-    let rows = vec![DetailRow::scalar("Version (semver)", "v1.0")];
+    let rows = Details::Fields(vec![DetailRow::scalar("Version (semver)", "v1.0")]);
     let payload = json!({"name": "jp", "version": "1.0"});
 
-    print_details(&printer, Some("info"), rows, &payload);
+    print_details_with_json(&printer, Some("info"), rows, &payload);
     let output = flush_stdout(&printer, &out);
 
     let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
@@ -143,22 +144,22 @@ fn details_json_emits_payload_not_rows() {
 #[test]
 fn details_json_pretty_is_indented() {
     let (printer, out, _) = Printer::memory(OutputFormat::JsonPretty);
-    let rows = vec![DetailRow::scalar("k", "v")];
+    let rows = Details::Fields(vec![DetailRow::scalar("k", "v")]);
 
-    print_details(&printer, None, rows, &json!({"k": "v"}));
+    print_details(&printer, None, rows);
     let output = flush_stdout(&printer, &out);
 
     let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
-    assert_eq!(parsed["k"], "v");
+    assert_eq!(parsed["details"]["k"], "v");
     assert!(output.contains("\n  "), "expected indented JSON");
 }
 
 #[test]
 fn details_title_stays_out_of_json() {
     let (printer, out, _) = Printer::memory(OutputFormat::Json);
-    let rows = vec![DetailRow::scalar("a", "b")];
+    let rows = Details::Fields(vec![DetailRow::scalar("a", "b")]);
 
-    print_details(&printer, Some("Decorative Title"), rows, &json!({"a": "b"}));
+    print_details_with_json(&printer, Some("Decorative Title"), rows, &json!({"a": "b"}));
     let output = flush_stdout(&printer, &out);
 
     // The title is a display concern; the payload alone defines the JSON.

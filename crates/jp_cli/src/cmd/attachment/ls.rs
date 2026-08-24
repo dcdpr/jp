@@ -1,10 +1,6 @@
-use jp_term::table::DetailRow;
+use jp_term::table::{DetailItem, Details};
 
-use crate::{
-    cmd::Output,
-    ctx::Ctx,
-    output::{print_details, print_json},
-};
+use crate::{cmd::Output, ctx::Ctx, output::print_details};
 
 #[derive(Debug, clap::Args)]
 pub(crate) struct Ls {}
@@ -14,33 +10,20 @@ impl Ls {
     pub(crate) fn run(self, ctx: &mut Ctx) -> Output {
         let uris = &ctx.config().conversation.attachments;
 
-        if uris.is_empty() {
-            // Machine-readable formats get an empty payload, not prose.
-            if ctx.printer.format().is_json() {
-                print_json(&ctx.printer, &serde_json::json!([]));
-            } else {
-                ctx.printer.println("No attachments in current context.");
-            }
+        let mut items = vec![];
+        for uri in uris {
+            items.push(DetailItem::plain(uri.to_url()?.to_string()));
+        }
+
+        // The text views swap an empty listing for a sentence; JSON keeps the
+        // array, so a script sees one shape whether or not anything was
+        // attached.
+        if items.is_empty() && !ctx.printer.format().is_json() {
+            ctx.printer.println("No attachments in current context.");
             return Ok(());
         }
 
-        let title = Some("Attachments".to_owned());
-
-        // The JSON payload is a plain array of attachment URLs.
-        let mut rows = vec![];
-        let mut urls = vec![];
-        for uri in uris {
-            let url = uri.to_url()?;
-            urls.push(url.to_string());
-            rows.push(DetailRow::bare(url));
-        }
-
-        print_details(
-            &ctx.printer,
-            title.as_deref(),
-            rows,
-            &serde_json::json!(urls),
-        );
+        print_details(&ctx.printer, Some("Attachments"), Details::Items(items));
         Ok(())
     }
 }

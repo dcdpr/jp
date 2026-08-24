@@ -1,4 +1,4 @@
-# T0002: classify workspace load side effects
+# classify workspace load side effects
 
 - **Status**: Todo
 - **Kind**: Chore

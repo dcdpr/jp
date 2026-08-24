@@ -36,7 +36,7 @@ use clap::{
     builder::{BoolValueParser, TypedValueParser as _},
 };
 use cmd::{Commands, workspace::target::WorkspaceTarget};
-use crossterm::terminal;
+use crossterm::{style::Stylize as _, terminal};
 use ctx::{Ctx, IntoPartialAppConfig};
 use error::{Error, Result};
 use jp_config::{
@@ -49,9 +49,13 @@ use jp_config::{
     },
 };
 use jp_printer::{OutputFormat, OutputWidth, Printer};
-use jp_storage::backend::{FsStorageBackend, NullLockBackend, NullPersistBackend};
-use jp_term::table::{DetailRow, details, details_markdown};
-use jp_workspace::{Workspace, roots, session_store::WorkspaceSessionStore, user_data_dir};
+use jp_storage::backend::{
+    FsStorageBackend, NullLockBackend, NullPersistBackend, ReadOnlySessionBackend,
+};
+use jp_term::table::{DetailRow, Details, details, details_markdown};
+use jp_workspace::{
+    DEFAULT_STORAGE_DIR, Workspace, roots, session_store::WorkspaceSessionStore, user_data_dir,
+};
 use relative_path::RelativePath;
 use serde_json::Value;
 use tokio::runtime::{self, Runtime};
@@ -68,8 +72,6 @@ use crate::{
 };
 
 static WORKER_THREADS: AtomicUsize = AtomicUsize::new(0);
-
-const DEFAULT_STORAGE_DIR: &str = ".jp";
 
 /// The per-user data subdirectory holding one directory per known workspace
 /// (`<slug>-<id>`), each with its roots registry (RFD 087).
@@ -212,8 +214,7 @@ struct Globals {
     ///
     /// Examples: --log=tool::stderr=trace Show stderr output from local tools.
     /// --log=mcp::stderr=debug Show stderr from MCP servers.
-    /// --log='jp\_llm=trace,plugin=off' Trace jp\_llm internals, silence
-    /// plugins.
+    /// --log='jp_llm=trace,plugin=off' Trace jp_llm internals, silence plugins.
     ///
     /// Composes with `-v`: verbosity sets the baseline for jp's own modules;
     /// `--log` adds or overrides specific targets.
@@ -796,6 +797,7 @@ fn parse_error(error: cmd::Error, format: OutputFormat) -> (u8, String) {
             })
             .collect();
 
+        let rows = Details::Fields(rows);
         let rendered = if format.is_pretty() {
             details(message.as_deref(), rows)
         } else {
@@ -1012,77 +1014,61 @@ pub(crate) enum LoadIntent {
 /// to [`NullPersistBackend`] and the lock backend to [`NullLockBackend`] so
 /// that ephemeral queries never write to disk and never block on lock
 /// contention.
+/// The session backend is wrapped in [`ReadOnlySessionBackend`] for the same
+/// reason: the run still needs to read which conversation the session is on,
+/// but must not record one that it never persisted.
 fn load_workspace(
     root: &Utf8Path,
     persist: bool,
     intent: LoadIntent,
 ) -> Result<(Workspace, Option<Arc<FsStorageBackend>>)> {
-    let storage = root.join(DEFAULT_STORAGE_DIR);
-    trace!(storage = %storage, ?intent, "Initializing workspace storage.");
+    trace!(root = %root, ?intent, "Opening workspace.");
 
-    let id = jp_workspace::Id::load(&storage)
-        .transpose()
-        .ok()
-        .flatten()
-        .unwrap_or_default();
+    // The intent picks the access mode: a command that merely reports on a
+    // workspace must not create its user-local storage or repair its stored ID.
+    let mut workspace = match intent {
+        LoadIntent::Run => Workspace::open(root),
+        LoadIntent::Inspect => Workspace::open_read_only(root),
+    }
+    .map_err(|error| match error {
+        jp_workspace::Error::WorkspaceNotFound(_) => Error::Command(cmd::Error::from(format!(
+            "Could not locate workspace. Use `{}` to create a new workspace.",
+            "jp init".bold().yellow()
+        ))),
+        error => Error::Workspace(error),
+    })?;
 
-    trace!(%id, "Loaded unique workspace ID.");
+    let fs = workspace.fs_storage().cloned();
 
-    let fs = FsStorageBackend::new(&storage).map_err(jp_workspace::Error::from)?;
+    if intent == LoadIntent::Run
+        && let Some(dir) = fs.as_ref().and_then(|fs| fs.user_storage_path())
+    {
+        register_checkout(dir, root, workspace.id());
+    }
 
-    // The workspace directory name slugs a freshly created user-workspace
-    // directory so users can recognize it; an existing one is reused by ID
-    // regardless of its slug.
-    let slug = root.file_name();
-    let workspaces_dir = user_data_dir()?.join(USER_WORKSPACES_DIR);
-    let fs = match intent {
-        LoadIntent::Run => register_checkout(fs, &workspaces_dir, root, slug, &id)?,
-        LoadIntent::Inspect => {
-            fs.with_existing_user_storage(&workspaces_dir, slug, &id.to_string())
-        }
-    };
-
-    let fs = Arc::new(fs);
-    let mut workspace = Workspace::new_with_id(root.to_owned(), id).with_backend(fs.clone());
     if !persist {
+        let sessions = Arc::new(ReadOnlySessionBackend::new(workspace.sessions().clone()));
         workspace = workspace
             .with_persist(Arc::new(NullPersistBackend))
-            .with_locker(Arc::new(NullLockBackend));
+            .with_locker(Arc::new(NullLockBackend))
+            .with_sessions(sessions);
     }
     info!(workspace = %workspace.root(), "Using existing workspace.");
 
-    if intent == LoadIntent::Run {
-        workspace.id().store(&storage)?;
-    }
-
-    Ok((workspace, Some(fs)))
+    Ok((workspace, fs))
 }
 
-/// Materialize user-local storage for `root` and announce the checkout.
+/// Announce a checkout in the workspace's roots registry.
 ///
-/// Wires up the workspace's user-workspace directory (running the one-time
-/// setup migration), folds in any pre-registry `storage` symlink, and records
-/// the checkout in the roots registry so `-w <id>` and `jp w ls` can reach it
-/// from anywhere (RFD 087).
-fn register_checkout(
-    fs: FsStorageBackend,
-    workspaces_dir: &Utf8Path,
-    root: &Utf8Path,
-    slug: Option<&str>,
-    id: &jp_workspace::Id,
-) -> Result<FsStorageBackend> {
-    let fs = fs
-        .with_user_storage(workspaces_dir, slug, id.to_string())
-        .map_err(jp_workspace::Error::from)?;
-
-    if let Some(dir) = fs.user_storage_path() {
-        roots::migrate_legacy_symlink(dir, id, DEFAULT_STORAGE_DIR);
-        if let Err(error) = roots::upsert_root(dir, root) {
-            warn!(%error, "Failed to record the checkout in the workspace roots registry.");
-        }
+/// Folds in any pre-registry `storage` symlink and records the checkout so `-w
+/// <id>` and `jp w ls` can reach it from anywhere (RFD 087).
+/// `user_dir` is the workspace's user-workspace directory, which the caller has
+/// already materialized.
+fn register_checkout(user_dir: &Utf8Path, root: &Utf8Path, id: &jp_workspace::Id) {
+    roots::migrate_legacy_symlink(user_dir, id, DEFAULT_STORAGE_DIR);
+    if let Err(error) = roots::upsert_root(user_dir, root) {
+        warn!(%error, "Failed to record the checkout in the workspace roots registry.");
     }
-
-    Ok(fs)
 }
 
 /// Register a checkout without constructing a [`Workspace`].
@@ -1097,9 +1083,14 @@ pub(crate) fn register_workspace_checkout(
     id: &jp_workspace::Id,
 ) -> Result<()> {
     let storage = root.join(DEFAULT_STORAGE_DIR);
-    let fs = FsStorageBackend::new(&storage).map_err(jp_workspace::Error::from)?;
+    let fs = FsStorageBackend::new(&storage)
+        .map_err(jp_workspace::Error::from)?
+        .with_user_storage(workspaces_dir, root.file_name(), id.to_string())
+        .map_err(jp_workspace::Error::from)?;
 
-    register_checkout(fs, workspaces_dir, root, root.file_name(), id)?;
+    if let Some(dir) = fs.user_storage_path() {
+        register_checkout(dir, root, id);
+    }
     Ok(())
 }
 

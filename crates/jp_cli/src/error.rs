@@ -179,6 +179,9 @@ pub(crate) enum Error {
     #[error("Compaction error: {0}")]
     Compaction(String),
 
+    #[error("Label error: {0}")]
+    Label(String),
+
     /// The summarizer produced no usable summary.
     ///
     /// A dedicated variant so the failure names the model that produced

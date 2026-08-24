@@ -47,7 +47,7 @@ fn setup_ctx_with_config(
 ) -> (Ctx, ConversationId, SharedBuffer, SharedBuffer, Runtime) {
     let tmp = tempdir().unwrap();
     let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
-    let workspace = Workspace::new(tmp.path());
+    let workspace = Workspace::in_memory(tmp.path());
     let runtime = Runtime::new().unwrap();
 
     let mut ctx = Ctx::new(

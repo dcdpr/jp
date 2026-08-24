@@ -4,6 +4,7 @@ mod config;
 mod conversation;
 pub(crate) mod conversation_id;
 mod init;
+pub(crate) mod label;
 mod lock;
 pub(crate) mod plugin;
 mod query;
@@ -537,6 +538,7 @@ impl From<crate::error::Error> for Error {
             )]
             .into(),
             Compaction(error) => [("message", "Compaction error".into()), ("error", error)].into(),
+            Label(error) => [("message", "Label error".into()), ("error", error)].into(),
             Summarize { model, reason } => [
                 ("message", "Summarization failed".to_owned()),
                 ("model", model),
@@ -762,6 +764,11 @@ impl From<jp_workspace::Error> for Error {
             ]
             .into(),
             MissingStorage => [("message", "Missing storage directory".into())].into(),
+            WorkspaceNotFound(path) => [
+                ("message", "No workspace found".into()),
+                ("path", path.to_string().into()),
+            ]
+            .into(),
             LockFailed(id) => [(
                 "message",
                 format!("Failed to lock conversation {id}").into(),

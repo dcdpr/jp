@@ -4,7 +4,7 @@ use camino::Utf8Path;
 use chrono::{DateTime, Utc};
 use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
-use jp_term::table::{DetailItem, DetailRow, details};
+use jp_term::table::{DetailItem, DetailRow, Details, details};
 use jp_workspace::Id;
 use serde_json::json;
 
@@ -194,7 +194,7 @@ impl DetailsFmt {
 
 impl fmt::Display for DetailsFmt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", details(self.title(), self.rows()))
+        write!(f, "{}", details(self.title(), Details::Fields(self.rows())))
     }
 }
 

@@ -43,7 +43,7 @@ fn setup(
         .with_user_storage(&user, None, "abc")
         .unwrap();
     let fs = Arc::new(fs);
-    let mut workspace = Workspace::new(tmp.path()).with_backend(fs.clone());
+    let mut workspace = Workspace::in_memory(tmp.path()).with_backend(fs.clone());
     workspace.load_conversation_index();
 
     for &id in conversation_ids {
