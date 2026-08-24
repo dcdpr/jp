@@ -342,6 +342,12 @@ input.addEventListener('keydown', (event) => {
   composer.requestSubmit();
 });
 
+// Escape gives the keyboard back to the page, so the shortcuts below are reachable
+// again without reaching for the mouse.
+input.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') input.blur();
+});
+
 // Which configurations the next message runs under.
 //
 // Kept here rather than on the server: nothing is applied until a message is
@@ -484,13 +490,42 @@ function toMarkdown(node) {
   }
 }
 
+// The tap that reaches the button is the same tap that dismisses the selection,
+// so on a touch screen the handler below runs with nothing selected. The last
+// selection made in the transcript is kept for it to fall back on.
+let lastRange = null;
+
+document.addEventListener('selectionchange', () => {
+  const selection = getSelection();
+  if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+
+  // Only the transcript: quoting the draft back into the draft is never the ask.
+  const range = selection.getRangeAt(0);
+  if (!transcript.contains(range.commonAncestorContainer)) return;
+
+  lastRange = range.cloneRange();
+});
+
 document.getElementById('quote').addEventListener('click', () => {
   const selection = getSelection();
-  if (!selection || selection.isCollapsed) return;
+  const range = selection && !selection.isCollapsed && selection.rangeCount
+    ? selection.getRangeAt(0)
+    : lastRange;
+  if (!range) return;
 
   // The selection as its own tree, so partial elements come back whole rather
   // than as the text between two points.
-  const fragment = selection.getRangeAt(0).cloneContents();
+  //
+  // A remembered range can outlive what it points at, because the poller
+  // replaces blocks as a turn lands.
+  let fragment;
+  try {
+    fragment = range.cloneContents();
+  } catch (error) {
+    lastRange = null;
+    return;
+  }
+
   const markdown = Array.from(fragment.childNodes).map(toMarkdown).join('').trim();
   if (!markdown) return;
 
@@ -502,6 +537,10 @@ document.getElementById('quote').addEventListener('click', () => {
   input.focus();
   input.setSelectionRange(input.value.length, input.value.length);
   saveDraft();
+
+  // Spent: tapping again with nothing selected should do nothing, rather than
+  // quote the same passage twice.
+  lastRange = null;
 });
 
 // Renaming, in place.
@@ -723,6 +762,39 @@ nav.addEventListener('click', (event) => {
 // Deliberately no close-on-outside-click: the menu is for jumping around a
 // conversation, and every jump is a click on the thing being navigated. Closing
 // on those would mean reopening it between each one.
+
+// Single-key shortcuts for the controls around the transcript.
+//
+// The buttons are clicked rather than their handlers called, so a shortcut can
+// never drift from what the control it stands for does — `r` is a no-op without a
+// selection for the same reason the Quote button is.
+//
+// Held back while a field has focus or a dialog is up: those own the keyboard, and
+// a `c` typed into a reply must stay a `c`.
+const typing = () => document.activeElement?.matches?.('textarea, input');
+
+document.addEventListener('keydown', (event) => {
+  if (event.metaKey || event.ctrlKey || event.altKey || event.isComposing) return;
+  if (typing() || document.querySelector('dialog[open]')) return;
+
+  const press = (id) => document.getElementById(id).click();
+
+  switch (event.key) {
+    case 'r': press('quote'); break;
+    case 'c': press('open-config'); break;
+    case 'e': press('expand'); break;
+    case '/': input.focus(); break;
+    case '[': jump('prev'); break;
+    case ']': jump('next'); break;
+    case 'Home': jump('top'); break;
+    case 'End': jump('bottom'); break;
+    default: return;
+  }
+
+  // Only for a key that was handled: `/` would otherwise be typed into the field
+  // it just focused, and Home and End would scroll the document behind the app.
+  event.preventDefault();
+});
 
 // The transcript is the scroller, not the window.
 const atBottom = () =>
