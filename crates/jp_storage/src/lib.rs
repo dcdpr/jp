@@ -604,7 +604,7 @@ fn resolve_user_workspace_dir(
 
 /// The existing user-workspace directory for workspace `id`, when there is one.
 ///
-/// Applies the same ID-suffix location rule as [`Storage::with_user_storage`],
+/// Applies the same ID-suffix location rule as `Storage::with_user_storage`,
 /// and creates nothing: `None` means the workspace has no user-local state yet.
 /// `slug` only breaks ties between several existing directories (a legacy
 /// per-worktree layout), preferring an exact `<slug>-<id>` match.
