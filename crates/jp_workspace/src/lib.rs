@@ -3,14 +3,21 @@
 //! This crate provides data models and storage operations for the JP workspace,
 //! a CLI tool for managing LLM-assisted code conversations with fine-grained
 //! control over context and behavior.
+//!
+//! Session identity, the per-session active-workspace store, and the roots
+//! registry (RFD 087) live in [`session`], [`session_store`], and [`roots`].
+//! The session store is user-global (above any checkout); the roots registry
+//! maps a workspace ID to its live checkouts on disk.
 
 mod conversation_lock;
 mod error;
 mod handle;
 mod id;
+pub mod roots;
 mod sanitize;
 pub mod session;
 pub(crate) mod session_mapping;
+pub mod session_store;
 mod state;
 
 use std::{
@@ -46,6 +53,16 @@ const APPLICATION: &str = "jp";
 /// The directory a workspace stores its data in, relative to the workspace
 /// root.
 pub const DEFAULT_STORAGE_DIR: &str = ".jp";
+
+/// Whether opening a workspace may write to disk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Access {
+    /// Materialize user-local storage and repair the stored workspace ID.
+    ReadWrite,
+
+    /// Wire only what already exists, and write nothing.
+    ReadOnly,
+}
 
 #[derive(Debug)]
 pub struct Workspace {
@@ -156,17 +173,24 @@ impl Workspace {
     /// [`load_conversation_index`]: Self::load_conversation_index
     /// [`sanitize`]: Self::sanitize
     pub fn open(dir: &Utf8Path) -> Result<Self> {
-        Self::open_with_storage_dir(dir, DEFAULT_STORAGE_DIR)
+        Self::open_inner(dir, DEFAULT_STORAGE_DIR, Access::ReadWrite)
     }
 
-    /// Open the workspace containing `dir`, looking for a store named
-    /// `storage_dir`.
+    /// Open the workspace containing `dir` without writing anything to disk.
     ///
-    /// Behaves exactly like [`open`], which uses [`DEFAULT_STORAGE_DIR`].
+    /// User-local storage is wired only when its directory already exists, and
+    /// the stored workspace ID is left untouched, so reading a workspace cannot
+    /// mint state for it.
+    /// Use this to report on a workspace, and [`open`] for the one a command
+    /// runs against.
     ///
     /// [`open`]: Self::open
-    fn open_with_storage_dir(dir: &Utf8Path, storage_dir: &str) -> Result<Self> {
-        trace!(dir = %dir, storage_dir, "Finding workspace.");
+    pub fn open_read_only(dir: &Utf8Path) -> Result<Self> {
+        Self::open_inner(dir, DEFAULT_STORAGE_DIR, Access::ReadOnly)
+    }
+
+    fn open_inner(dir: &Utf8Path, storage_dir: &str, access: Access) -> Result<Self> {
+        trace!(dir = %dir, storage_dir, ?access, "Finding workspace.");
         let root = Self::find_root(dir.to_path_buf(), storage_dir)
             .ok_or_else(|| Error::WorkspaceNotFound(dir.to_path_buf()))?;
         trace!(root = %root, "Found workspace root.");
@@ -182,19 +206,25 @@ impl Workspace {
         trace!(%id, "Loaded unique workspace ID.");
 
         let user_root = user_data_dir()?.join("workspace");
-        // The workspace directory name slugs a freshly created silo so users can
-        // recognize it; an existing silo is reused by ID regardless of its slug.
+        // The workspace directory name slugs a freshly created user-workspace
+        // directory so users can recognize it; an existing one is reused by ID
+        // regardless of its slug.
         let slug = root.file_name();
-        let fs = Arc::new(FsStorageBackend::new(&storage)?.with_user_storage(
-            &user_root,
-            slug,
-            id.to_string(),
-        )?);
+        let backend = FsStorageBackend::new(&storage)?;
+        let backend = match access {
+            Access::ReadWrite => backend.with_user_storage(&user_root, slug, id.to_string())?,
+            Access::ReadOnly => {
+                backend.with_existing_user_storage(&user_root, slug, &id.to_string())
+            }
+        };
+        let fs = Arc::new(backend);
 
         let mut workspace = Self::in_memory_with_id(root, id).with_backend(fs.clone());
         workspace.fs = Some(fs);
 
-        workspace.id().store(&storage)?;
+        if access == Access::ReadWrite {
+            workspace.id().store(&storage)?;
+        }
 
         Ok(workspace)
     }

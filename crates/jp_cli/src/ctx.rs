@@ -15,10 +15,17 @@ use jp_task::TaskHandler;
 use jp_workspace::{Workspace, session::Session};
 use tokio::runtime::{Handle, Runtime};
 
-use crate::{Globals, Result, config_pipeline::ConfigResetEvents, signals::SignalRouter};
+use crate::{
+    Globals, Result, bootstrap::ExecutionContext, config_pipeline::ConfigResetEvents,
+    signals::SignalRouter,
+};
 
 /// Context for the CLI application
 pub(crate) struct Ctx {
+    /// The bootstrap-resolved execution context: launch cwd, selected checkout
+    /// root, and the working directory for spawned children (RFD 087).
+    pub(crate) exec: ExecutionContext,
+
     /// The workspace.
     pub(crate) workspace: Workspace,
 
@@ -90,6 +97,7 @@ pub(crate) struct Term {
 impl Ctx {
     /// Create a new context with the given workspace
     pub(crate) fn new(
+        exec: ExecutionContext,
         workspace: Workspace,
         fs_backend: Option<Arc<FsStorageBackend>>,
         runtime: Runtime,
@@ -101,12 +109,14 @@ impl Ctx {
         let config = config.into();
         let escalation_cooldown =
             Duration::from_secs(config.interrupt.escalation_cooldown_secs.into());
-        let mcp_client = jp_mcp::Client::new(config.providers.mcp.clone());
+        let mcp_client = jp_mcp::Client::new(config.providers.mcp.clone())
+            .with_child_cwd(exec.child_cwd().map(|cwd| cwd.as_std_path().to_path_buf()));
 
         let is_tty = io::stdout().is_terminal();
         let width = printer.output_width().columns();
 
         Self {
+            exec,
             workspace,
             fs_backend,
             config,

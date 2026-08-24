@@ -872,6 +872,16 @@ async fn format_args_custom(
                  '{question_id}')"
             ))
         }
+        CommandResult::MalformedInquiry { detail } => {
+            warn!(
+                command = %cmd,
+                %detail,
+                "Custom parameters formatter returned a malformed inquiry"
+            );
+            Err(format!(
+                "Custom parameters formatter '{cmd}' produced a malformed inquiry: {detail}"
+            ))
+        }
         CommandResult::RawOutput {
             stdout,
             success: true,

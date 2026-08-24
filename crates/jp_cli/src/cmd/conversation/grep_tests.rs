@@ -85,6 +85,7 @@ fn setup_conversations_with(
     let (printer, out, _err) = Printer::memory(format);
     let printer = printer.with_output_width(width);
     let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
         workspace,
         None,
         tokio::runtime::Runtime::new().unwrap(),

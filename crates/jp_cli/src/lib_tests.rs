@@ -917,3 +917,7 @@ fn resolve_config_reset_post_layer_contains_resolved_model_ids() {
         }
     }
 }
+
+// Workspace-root selection by ID moved into the bootstrap step (RFD 087
+// phase 2/3); its behavior is covered by `bootstrap_tests` and
+// `cmd::workspace::target` tests.

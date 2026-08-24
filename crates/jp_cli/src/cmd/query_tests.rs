@@ -2111,8 +2111,10 @@ fn run_missing_at_path_query_leaves_conversation_and_session_untouched() {
         source: SessionSource::env("JP_SESSION"),
     };
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let workspace = Workspace::in_memory("/tmp/jp-cli-query-test");
     let mut ctx = Ctx::new(
-        Workspace::in_memory("/tmp/jp-cli-query-test"),
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
+        workspace,
         None,
         Runtime::new().unwrap(),
         Globals::default(),

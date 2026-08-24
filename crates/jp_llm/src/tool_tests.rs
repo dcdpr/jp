@@ -161,9 +161,50 @@ fn parse_command_output_empty_question_id_is_invalid_inquiry() {
 }
 
 #[test]
+fn parse_command_output_legacy_answer_type_shape_is_malformed_inquiry() {
+    // A stale local-tool binary emits the pre-082 externally-tagged answer
+    // type (`"answer_type":"Boolean"`) instead of the internally-tagged
+    // `{"type":"boolean"}` this build parses. The question id is valid, so
+    // the payload must surface as a tool-level error rather than being handed
+    // to the model as raw JSON.
+    let stdout = br#"{"type":"needs_input","question":{"id":"apply_changes","text":"Apply?","answer_type":"Boolean","default":true}}"#;
+    let result = parse_command_output(stdout, b"", true);
+    assert!(
+        matches!(result, CommandResult::MalformedInquiry { .. }),
+        "expected MalformedInquiry, got {result:?}"
+    );
+    // Renders as a tool-level error, not raw text.
+    assert!(result.into_tool_result("fs_modify_file").is_err());
+}
+
+#[test]
+fn parse_command_output_needs_input_missing_field_is_malformed_inquiry() {
+    // A `needs_input` missing a required question field fails to deserialize;
+    // with a valid id it is a malformed inquiry, not raw output.
+    let stdout = br#"{"type":"needs_input","question":{"id":"confirm"}}"#;
+    let result = parse_command_output(stdout, b"", true);
+    assert!(
+        matches!(result, CommandResult::MalformedInquiry { .. }),
+        "expected MalformedInquiry, got {result:?}"
+    );
+    assert!(result.into_tool_result("t").is_err());
+}
+
+#[test]
 fn parse_command_output_non_outcome_is_raw() {
     assert!(matches!(
         parse_command_output(b"plain text", b"", true),
+        CommandResult::RawOutput { .. }
+    ));
+}
+
+#[test]
+fn parse_command_output_non_needs_input_json_is_raw() {
+    // Valid JSON that is not an `Outcome` and not a `needs_input` payload
+    // stays raw output — the malformed-inquiry path must not swallow it.
+    let stdout = br#"{"some":"object","the_tool":"did not use the protocol"}"#;
+    assert!(matches!(
+        parse_command_output(stdout, b"", true),
         CommandResult::RawOutput { .. }
     ));
 }
