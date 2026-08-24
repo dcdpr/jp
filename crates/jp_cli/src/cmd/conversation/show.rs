@@ -6,7 +6,8 @@ use crate::{
     cmd::{ConversationLoadRequest, Output, conversation_id::PositionalIds},
     ctx::Ctx,
     format::{
-        attachment_detail_item, compaction_detail_item, conversation::DetailsFmt, label_detail_item,
+        attachment_detail_item, compaction_detail_item, conversation::DetailsFmt,
+        label_detail_items,
     },
     output::print_details,
 };
@@ -42,11 +43,7 @@ impl Show {
                 attachments.push(attachment_detail_item(&attachment.to_url()?));
             }
 
-            let labels = conversation
-                .labels
-                .iter()
-                .map(|(key, value)| label_detail_item(key, value))
-                .collect();
+            let labels = label_detail_items(&conversation.labels);
 
             let compactions = events.compactions().map(compaction_detail_item).collect();
 

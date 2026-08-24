@@ -124,10 +124,7 @@ use crate::{
     cmd::{
         self,
         conversation::fork,
-        label::{
-            self, LabelDirectives,
-            resolve::{Resolver, Trigger},
-        },
+        label::resolve::{Resolver, Trigger},
         lock::{LockRequest, acquire_lock},
     },
     ctx::IntoPartialAppConfig,
@@ -294,13 +291,6 @@ pub(crate) struct Query {
     #[arg(long = "no-title", conflicts_with = "title")]
     no_title: bool,
 
-    /// Set labels on the conversation.
-    ///
-    /// Applied to the resolved conversation (new, forked, or resumed) before
-    /// the turn runs.
-    #[command(flatten)]
-    labels: LabelDirectives<true, false>,
-
     /// The tool to use.
     ///
     /// If a value is provided, the tool matching the value will be used.
@@ -357,19 +347,6 @@ impl Query {
         // 2. picker "start new": `start_new` is set, create a fresh conversation.
         // 3. --fork/--id/session: resolve an existing conversation, lock it.
         // 4. Lock contention: user picks "new" or "fork" from the prompt.
-        // `--label=:name` is accepted here, so resolve aliases against this
-        // conversation's config, which `resolve_config` has already layered.
-        //
-        // Resolved before `acquire_lock`, because that call may create or fork
-        // a conversation and persist it: an unknown alias failing afterwards
-        // would leave one behind that the user was never told about.
-        let prompts = TerminalPromptBackend;
-        let directives = if self.labels.is_empty() {
-            label::Resolved::default()
-        } else {
-            label::expand_aliases(&self.labels, &label_resolver(ctx, &cfg, &prompts)).await?
-        };
-
         let lock = self.acquire_lock(ctx, handle, start_new).await?;
 
         // Create symlinks and seed approvals for any `--mount` flags before the
@@ -380,13 +357,6 @@ impl Query {
         // resolved conversation may be new, freshly forked (which clones the
         // source's metadata, including any title), or resumed.
         apply_title_override(&lock, self.title.as_deref(), self.no_title);
-
-        if !directives.is_empty() {
-            let missing = lock
-                .as_mut()
-                .update_metadata(|m| label::apply(&mut m.labels, &directives));
-            label::report_missing(&ctx.printer, lock.id(), &missing.missing);
-        }
 
         // Record this conversation as the session's active conversation.
         if let Some(session) = &ctx.session
@@ -1774,7 +1744,6 @@ impl IntoPartialAppConfig for Query {
             compact: _,
             title: _,
             no_title: _,
-            labels: _,
             mount,
         } = &self;
 

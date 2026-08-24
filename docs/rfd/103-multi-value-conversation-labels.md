@@ -1,6 +1,6 @@
 # RFD 103: Multi-Value Conversation Labels
 
-- **Status**: Discussion
+- **Status**: Accepted
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-08-21
@@ -295,12 +295,54 @@ Accepting two shapes and emitting one means no migration step.
 
 ### Display and machine output
 
-`jp c show` and `jp c label ls` render one row per key, with the values as a
-list beneath it — the same numbered multi-line cell the details view already
-uses for attachments and compactions.
-Comma-separating them would be ambiguous: [RFD 101] places no restriction on
-values, so `branch=feat,exp` is one legitimate value and `feat,exp, main` could
-read as two values or three.
+`jp c label ls` writes one `key=value` per line, the way the user types them, so
+every line stands alone and none needs context from its neighbours:
+
+```console
+$ jp c label ls
+ crate=jp_config
+ crate=jp_llm
+ draft
+```
+
+Comma-separating the values of a key would be ambiguous: [RFD 101] places no
+restriction on values, so `branch=feat,exp` is one legitimate value and
+`feat,exp, main` could read as two values or three.
+One value per line has no such question.
+
+Every line carries a marker column, a space here, so a reader strips one
+character whichever command printed the line.
+
+A mutation reads as a diff: `-` for a value the key lost, `+` for one it gained,
+and a space for one it kept.
+The lines are data, so they go to stdout; the sentence naming what changed is
+chrome and goes to stderr, per [RFD 048]:
+
+```console
+$ jp c label rm crate=jp_llm
+Removed labels from jp-c17866928997: Tool Chaining
+
+ crate=jp_config
+-crate=jp_llm
+```
+
+```console
+$ jp c label set crate=jp_cli
+Set labels on jp-c17866928997: Tool Chaining
+
+-crate=jp_config
+-crate=jp_llm
++crate=jp_cli
+```
+
+One rule for every command means a line can be read without knowing what
+produced it, which is what makes `set` recoverable from its own output.
+A label key starts with a letter, so the marker column is never mistaken for
+part of the label.
+
+`jp c show` renders one row per key with the values as a list beneath it — the
+same numbered multi-line cell the details view already uses for attachments and
+compactions — because it is a details view rather than a listing to read from.
 
 The JSON form carries the set:
 
@@ -331,8 +373,11 @@ recoverability is a property of the output rather than of the reader's memory:
 
 [RFD 101]'s flat `labels` array cannot carry both halves, so it is replaced.
 `add` and `rm` use the same shape; for them one side is a subset of the other.
-The text form names the same before-and-after, so a `set` that displaced more
-than the user expected is undoable from either.
+A bare label carries no values a reader can act on, so both sides are empty
+arrays rather than the empty string it is stored as.
+
+The text form keeps `set` recoverable too: its `-` lines are the values it
+displaced.
 
 ## Drawbacks
 
@@ -507,5 +552,6 @@ Independent of Phase 2.
 
 [#101]: https://github.com/dcdpr/jp/issues/101
 [RFD 031]: 031-durable-conversation-storage-with-workspace-projection.md
+[RFD 048]: 048-four-channel-output-model.md
 [RFD 050]: 050-scripting-ergonomics-for-conversation-management.md
 [RFD 101]: 101-conversation-labels.md

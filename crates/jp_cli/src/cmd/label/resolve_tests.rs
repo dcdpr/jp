@@ -26,6 +26,19 @@ fn setup(
     (rules, tmp, printer, err, MockPromptBackend::new())
 }
 
+/// The values resolved under `key`, for readable assertions.
+fn values<'a>(labels: &'a Labels, key: &str) -> Vec<&'a str> {
+    labels
+        .get(key)
+        .map(|values| values.iter().map(String::as_str).collect())
+        .unwrap_or_default()
+}
+
+/// Every key that resolved, sorted.
+fn keys(labels: &Labels) -> Vec<&str> {
+    labels.iter().map(|(key, _)| key.as_str()).collect()
+}
+
 #[tokio::test]
 async fn static_rules_resolve_without_running_anything() {
     let (rules, tmp, printer, _err, prompts) = setup(
@@ -39,9 +52,37 @@ async fn static_rules_resolve_without_running_anything() {
 
     let resolved = resolver.automatic(Trigger::New).await.unwrap();
 
-    assert_eq!(resolved.len(), 2);
-    assert_eq!(resolved["team"], "platform");
-    assert_eq!(resolved["stage"], "review");
+    assert_eq!(keys(&resolved), ["stage", "team"]);
+    assert_eq!(values(&resolved, "team"), ["platform"]);
+    assert_eq!(values(&resolved, "stage"), ["review"]);
+}
+
+/// A list-valued rule contributes every value it names, in order.
+#[tokio::test]
+async fn list_rules_resolve_to_every_value() {
+    let (rules, tmp, printer, _err, prompts) = setup(
+        r#"{
+            "crate": ["jp_config", "jp_llm"],
+            "stage": { "value": ["draft", "review"] }
+        }"#,
+    );
+    let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
+
+    let resolved = resolver.automatic(Trigger::New).await.unwrap();
+
+    assert_eq!(values(&resolved, "crate"), ["jp_config", "jp_llm"]);
+    assert_eq!(values(&resolved, "stage"), ["draft", "review"]);
+}
+
+/// An empty list is how a rule is turned off without deleting it.
+#[tokio::test]
+async fn an_empty_list_rule_produces_no_label() {
+    let (rules, tmp, printer, _err, prompts) = setup(r#"{ "crate": { "value": [] } }"#);
+    let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
+
+    let resolved = resolver.automatic(Trigger::New).await.unwrap();
+
+    assert!(resolved.is_empty());
 }
 
 /// `apply_on` selects which rules a trigger applies.
@@ -58,24 +99,66 @@ async fn apply_on_selects_rules_per_trigger() {
     let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
 
     let new = resolver.automatic(Trigger::New).await.unwrap();
-    assert_eq!(new.keys().collect::<Vec<_>>(), ["onboth", "onnew"]);
+    assert_eq!(keys(&new), ["onboth", "onnew"]);
 
     let fork = resolver.automatic(Trigger::Fork).await.unwrap();
-    assert_eq!(fork.keys().collect::<Vec<_>>(), ["onboth", "onfork"]);
+    assert_eq!(keys(&fork), ["onboth", "onfork"]);
 }
 
 #[tokio::test]
-async fn unattended_commands_run_and_their_stdout_is_trimmed() {
+async fn unattended_commands_run_without_prompting() {
     let (rules, tmp, printer, _err, prompts) = setup(
         r#"{
-            "greeting": { "value": { "cmd": "echo  hello  " }, "run": "unattended" }
+            "greeting": { "value": { "cmd": "echo hello" }, "run": "unattended" }
         }"#,
     );
     let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
 
     let resolved = resolver.automatic(Trigger::New).await.unwrap();
 
-    assert_eq!(resolved["greeting"], "hello");
+    assert_eq!(values(&resolved, "greeting"), ["hello"]);
+}
+
+/// Each line of stdout is one value, so a value may contain any character
+/// without an escaping rule.
+/// Empty lines are dropped, which is what keeps a trailing newline from adding
+/// an empty value.
+#[tokio::test]
+async fn command_output_is_one_value_per_line() {
+    let (rules, tmp, printer, _err, prompts) = setup(
+        r#"{
+            "crate": {
+                "value": {
+                    "cmd": {
+                        "program": "printf 'jp_config\\nwith spaces, and a comma\\n\\n'",
+                        "args": [],
+                        "shell": true
+                    }
+                },
+                "run": "unattended"
+            }
+        }"#,
+    );
+    let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
+
+    let resolved = resolver.automatic(Trigger::New).await.unwrap();
+
+    assert_eq!(values(&resolved, "crate"), [
+        "jp_config",
+        "with spaces, and a comma"
+    ]);
+}
+
+/// A command that writes nothing produces no label, rather than a bare one.
+#[tokio::test]
+async fn a_silent_command_produces_no_label() {
+    let (rules, tmp, printer, _err, prompts) =
+        setup(r#"{ "quiet": { "value": { "cmd": "true" }, "run": "unattended" } }"#);
+    let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
+
+    let resolved = resolver.automatic(Trigger::New).await.unwrap();
+
+    assert!(resolved.is_empty());
 }
 
 #[tokio::test]
@@ -94,7 +177,7 @@ async fn shell_commands_get_a_shell() {
 
     let resolved = resolver.automatic(Trigger::New).await.unwrap();
 
-    assert_eq!(resolved["piped"], "a-b-c");
+    assert_eq!(values(&resolved, "piped"), ["a-b-c"]);
 }
 
 /// A rule the user asked for by name resolves regardless of `apply_on`.
@@ -107,7 +190,7 @@ async fn alias_ignores_apply_on() {
     assert!(resolver.automatic(Trigger::New).await.unwrap().is_empty());
     assert_eq!(
         resolver.alias("manual").await.unwrap(),
-        Some(("manual".to_owned(), "yes".to_owned()))
+        Some(("manual".to_owned(), vec!["yes".to_owned()]))
     );
 }
 
@@ -125,8 +208,8 @@ async fn automatic_application_drops_a_failing_command() {
 
     let resolved = resolver.automatic(Trigger::New).await.unwrap();
 
-    assert_eq!(resolved.len(), 1, "the working rule survives");
-    assert_eq!(resolved["ok"], "kept");
+    assert_eq!(keys(&resolved), ["ok"], "the working rule survives");
+    assert_eq!(values(&resolved, "ok"), ["kept"]);
 
     printer.flush();
     assert!(
@@ -202,8 +285,8 @@ async fn declining_the_prompt_drops_only_that_label() {
 
     let resolved = resolver.automatic(Trigger::New).await.unwrap();
 
-    assert_eq!(resolved.len(), 1, "the declined label is dropped");
-    assert_eq!(resolved["ok"], "kept");
+    assert_eq!(keys(&resolved), ["ok"], "the declined label is dropped");
+    assert_eq!(values(&resolved, "ok"), ["kept"]);
 }
 
 /// Cancelling the prompt (Ctrl-C, Esc) is not an answer: it aborts the whole
@@ -232,7 +315,7 @@ async fn approving_the_prompt_runs_the_command() {
 
     let resolved = resolver.automatic(Trigger::New).await.unwrap();
 
-    assert_eq!(resolved["asks"], "hi");
+    assert_eq!(values(&resolved, "asks"), ["hi"]);
 }
 
 /// A static rule never consults `run`, so it resolves with no terminal even
@@ -244,5 +327,5 @@ async fn static_rules_are_unaffected_by_run_policy() {
     let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
 
     let resolved = resolver.automatic(Trigger::New).await.unwrap();
-    assert_eq!(resolved["plain"], "v");
+    assert_eq!(values(&resolved, "plain"), ["v"]);
 }

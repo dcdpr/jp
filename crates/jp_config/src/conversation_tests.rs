@@ -247,6 +247,27 @@ fn merge_labels_deep_merges_entries() {
     );
 }
 
+/// A rule's values replace rather than extend across layers, so a narrower
+/// layer can shorten an inherited list.
+#[test]
+fn merge_labels_replaces_a_rules_values() {
+    use schematic::PartialConfig as _;
+
+    use crate::conversation::label::PartialLabelConfig;
+
+    let mut base: PartialConversationConfig =
+        toml::from_str("[labels]\ncrate = [\"jp_config\", \"jp_llm\"]\n").unwrap();
+    let next: PartialConversationConfig =
+        toml::from_str("[labels]\ncrate = [\"jp_cli\"]\n").unwrap();
+
+    base.merge(&(), next).unwrap();
+
+    assert_eq!(
+        base.labels.get("crate"),
+        Some(&PartialLabelConfig::List(vec!["jp_cli".to_owned()]))
+    );
+}
+
 #[test]
 fn merge_labels_honors_replace_strategy() {
     use schematic::PartialConfig as _;
@@ -287,6 +308,7 @@ fn labels_survive_the_full_build() {
 
             [conversation.labels]
             team = "platform"
+            crate = ["jp_config", "jp_llm"]
 
             [conversation.labels.stage]
             value = "review"
@@ -303,14 +325,18 @@ fn labels_survive_the_full_build() {
     let config = util::build(partial).unwrap();
     let labels = &config.conversation.labels;
 
-    assert_eq!(labels.len(), 2);
+    assert_eq!(labels.len(), 3);
     assert_eq!(
         labels.get("team").unwrap().value(),
-        LabelValueRef::Static("platform")
+        LabelValueRef::Values(&["platform".to_owned()])
+    );
+    assert_eq!(
+        labels.get("crate").unwrap().value(),
+        LabelValueRef::Values(&["jp_config".to_owned(), "jp_llm".to_owned()])
     );
 
     let stage = labels.get("stage").unwrap();
-    assert_eq!(stage.value(), LabelValueRef::Static("review"));
+    assert_eq!(stage.value(), LabelValueRef::Values(&["review".to_owned()]));
     assert!(!stage.apply_on().new);
     assert!(stage.apply_on().fork);
 }
@@ -361,6 +387,141 @@ fn label_delta_stays_minimal_when_nothing_is_dropped() {
 
     assert_eq!(delta.labels.len(), 1, "got: {:?}", delta.labels);
     assert!(delta.labels.contains_key("branch"));
+}
+
+/// A rule's values are assigned the way every other list setting is: a comma
+/// separates, a JSON array is taken element-wise, `:+=` adds to what the key
+/// already names, and `:=` replaces it.
+#[test]
+fn assign_labels_from_the_command_line() {
+    use crate::{assignment::KvAssignment, conversation::label::PartialLabelConfig};
+
+    let list = |values: &[&str]| {
+        Some(PartialLabelConfig::List(
+            values.iter().map(|v| (*v).to_owned()).collect(),
+        ))
+    };
+
+    let mut partial = PartialConversationConfig::default();
+
+    let kv = KvAssignment::try_from_cli("labels.crate", "jp_config,jp_llm").unwrap();
+    partial.assign(kv).unwrap();
+    assert_eq!(
+        partial.labels.get("crate").cloned(),
+        list(&["jp_config", "jp_llm"])
+    );
+
+    let kv = KvAssignment::try_from_cli("labels.crate:+", r#"["jp_cli"]"#).unwrap();
+    partial.assign(kv).unwrap();
+    assert_eq!(
+        partial.labels.get("crate").cloned(),
+        list(&["jp_config", "jp_llm", "jp_cli"])
+    );
+
+    let kv = KvAssignment::try_from_cli("labels.crate:", r#"["jp_cli"]"#).unwrap();
+    partial.assign(kv).unwrap();
+    assert_eq!(partial.labels.get("crate").cloned(), list(&["jp_cli"]));
+}
+
+/// The comma shorthand belongs to the bare form, so the JSON form names a value
+/// containing one — as a string or as an array element.
+#[test]
+fn assign_a_label_value_containing_a_comma() {
+    use crate::{assignment::KvAssignment, conversation::label::PartialLabelConfig};
+
+    let mut partial = PartialConversationConfig::default();
+
+    for value in [r#""feat,exp""#, r#"["feat,exp"]"#] {
+        let kv = KvAssignment::try_from_cli("labels.branch:", value).unwrap();
+        partial.assign(kv).unwrap();
+
+        assert_eq!(
+            partial.labels.get("branch"),
+            Some(&PartialLabelConfig::List(vec!["feat,exp".to_owned()])),
+            "got: {value}"
+        );
+    }
+}
+
+/// An empty string names no values, as it does for every other list setting, so
+/// a bare label is written as a one-element array.
+#[test]
+fn assign_a_bare_label() {
+    use crate::{assignment::KvAssignment, conversation::label::PartialLabelConfig};
+
+    let mut partial = PartialConversationConfig::default();
+
+    let kv = KvAssignment::try_from_cli("labels.draft", "").unwrap();
+    partial.assign(kv).unwrap();
+    assert_eq!(
+        partial.labels.get("draft"),
+        Some(&PartialLabelConfig::List(vec![])),
+        "an empty string names nothing, so the rule produces no label"
+    );
+
+    for value in [r#""""#, r#"[""]"#] {
+        let kv = KvAssignment::try_from_cli("labels.draft:", value).unwrap();
+        partial.assign(kv).unwrap();
+
+        assert_eq!(
+            partial.labels.get("draft"),
+            Some(&PartialLabelConfig::List(vec![String::new()])),
+            "the empty value is a value, and the JSON form names it; got: {value}"
+        );
+    }
+}
+
+/// The full form is the object-shaped value, so naming `value` and `apply_on`
+/// still works.
+#[test]
+fn assign_a_whole_label_rule_as_an_object() {
+    use crate::{
+        assignment::KvAssignment,
+        conversation::label::{PartialLabelConfig, PartialLabelValue},
+    };
+
+    let mut partial = PartialConversationConfig::default();
+
+    let kv = KvAssignment::try_from_cli(
+        "labels.stage:",
+        r#"{"value":"review","apply_on":{"fork":true}}"#,
+    )
+    .unwrap();
+    partial.assign(kv).unwrap();
+
+    let Some(PartialLabelConfig::Object(object)) = partial.labels.get("stage") else {
+        panic!("expected the object form");
+    };
+    assert_eq!(object.value, PartialLabelValue::Static("review".to_owned()));
+    assert_eq!(object.apply_on.fork, Some(true));
+}
+
+#[test]
+fn assign_a_json_array_to_an_existing_rules_value() {
+    use crate::{
+        assignment::KvAssignment,
+        conversation::label::{PartialLabelConfig, PartialLabelValue},
+    };
+
+    let mut partial: PartialConversationConfig =
+        toml::from_str("[labels.crate]\nvalue = \"jp_config\"\napply_on = { fork = true }\n")
+            .unwrap();
+
+    let kv = KvAssignment::try_from_cli("labels.crate.value", "jp_llm,jp_cli").unwrap();
+    partial.assign(kv).unwrap();
+
+    let Some(PartialLabelConfig::Object(object)) = partial.labels.get("crate") else {
+        panic!("expected the object form");
+    };
+    assert_eq!(
+        object.value,
+        PartialLabelValue::List(vec!["jp_llm".to_owned(), "jp_cli".to_owned()])
+    );
+    assert_eq!(
+        object.apply_on.fork,
+        Some(true),
+        "the rest of the rule is untouched"
+    );
 }
 
 #[test]
