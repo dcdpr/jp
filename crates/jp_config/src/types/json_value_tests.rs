@@ -72,6 +72,21 @@ fn merge_arrays_replace_by_default() {
     assert_eq!(base.0, json!([3, 4]));
 }
 
+#[test]
+fn merge_arrays_keep_duplicates_in_the_replacement() {
+    // Free-form values (tool options, template values) reach the vec merge with
+    // an implicit `replace`. Their contents are the author's own data, so a
+    // repeated element must not be collapsed.
+    let mut base = JsonValue(json!([0]));
+    base.merge(&(), JsonValue(json!([1, 1]))).unwrap();
+    assert_eq!(base.0, json!([1, 1]));
+
+    let mut base = JsonValue(json!({"retries": [500, 500, 500]}));
+    base.merge(&(), JsonValue(json!({"retries": [250, 250]})))
+        .unwrap();
+    assert_eq!(base.0, json!({"retries": [250, 250]}));
+}
+
 // --- Array strategies ---
 
 #[test]
