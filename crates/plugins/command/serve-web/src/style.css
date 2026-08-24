@@ -133,9 +133,13 @@ html:has(> body.scrolls) {
     overscroll-behavior: auto;
 }
 
+/* Above the list that passes under it. A sticky element with `z-index: auto`
+   does not create a stacking context, so the rows would otherwise paint over
+   the header's background and read as if it had none. */
 body.scrolls .page-header {
     position: sticky;
     top: 0;
+    z-index: 10;
 }
 
 body.scrolls .conversation-list {
