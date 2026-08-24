@@ -6,9 +6,10 @@ use crate::{
     cmd::{ConversationLoadRequest, Output, conversation_id::PositionalIds},
     ctx::Ctx,
     format::{
-        attachment_detail_item, compaction_detail_item, conversation::DetailsFmt, label_detail_item,
+        attachment_detail_item, compaction_detail_item, conversation::DetailsFmt,
+        label_detail_items,
     },
-    output::print_details_with_json,
+    output::{print_details, print_json},
 };
 
 #[derive(Debug, clap::Args)]
@@ -42,11 +43,7 @@ impl Show {
                 attachments.push(attachment_detail_item(&attachment.to_url()?));
             }
 
-            let labels = conversation
-                .labels
-                .iter()
-                .map(|(key, value)| label_detail_item(key, value))
-                .collect();
+            let labels = label_detail_items(&conversation.labels);
 
             let compactions = events.compactions().map(compaction_detail_item).collect();
 
@@ -65,12 +62,13 @@ impl Show {
                 .with_compactions(compactions)
                 .with_pretty_printing(ctx.printer.pretty_printing_enabled());
 
-            print_details_with_json(
-                &ctx.printer,
-                details.title.as_deref(),
-                details.rows(),
-                &details.json(),
-            );
+            // The two views carry different things: the payload is a stable
+            // snake_case contract, the rows are Title Case prose.
+            if ctx.printer.format().is_json() {
+                print_json(&ctx.printer, &details.json());
+            } else {
+                print_details(&ctx.printer, details.title.as_deref(), details.rows());
+            }
         }
         Ok(())
     }

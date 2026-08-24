@@ -129,7 +129,7 @@ enum Commands {
 
     /// Manage the labels on a conversation.
     ///
-    /// `jp c label add`, `rm`, `reset`, and `ls`; a bare `jp c label` lists.
+    /// `jp c label add`, `set`, `rm`, and `ls`; a bare `jp c label` lists.
     #[command(name = "label", visible_alias = "l", alias = "labels")]
     Label(label::Label),
 

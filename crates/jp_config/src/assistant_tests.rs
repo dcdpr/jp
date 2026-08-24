@@ -180,6 +180,7 @@ fn test_assistant_config_instructions() {
             strategy: None,
             separator: None,
             discard_when_merged: None,
+            dedup: None,
         }))
     );
 
@@ -194,6 +195,7 @@ fn test_assistant_config_instructions() {
             strategy: Some(MergedStringStrategy::Append),
             separator: None,
             discard_when_merged: None,
+            dedup: None,
         }))
     );
 
@@ -210,6 +212,7 @@ fn test_assistant_config_instructions() {
             strategy: Some(MergedStringStrategy::Append),
             separator: Some(MergedStringSeparator::Space),
             discard_when_merged: None,
+            dedup: None,
         }))
     );
 }
@@ -424,6 +427,7 @@ fn test_assistant_config_deserialize() {
                     strategy: Some(MergedStringStrategy::Append),
                     separator: Some(MergedStringSeparator::Paragraph),
                     discard_when_merged: None,
+                    dedup: None,
                 })),
                 instructions: MergedVec {
                     value: vec![

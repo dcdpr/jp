@@ -1,7 +1,7 @@
 //! Resolution of configured label rules into concrete label values.
 //!
-//! A rule's value is either a literal string, taken as-is, or a command whose
-//! trimmed stdout becomes the value.
+//! A rule produces the values of exactly one key: literals taken as they are
+//! written, or one value per line of a command's stdout.
 //! Command execution is gated by the rule's `run` policy, which may prompt.
 //!
 //! Two entry points with deliberately different failure semantics:
@@ -19,8 +19,6 @@
 //! Declining and cancelling are different answers.
 //! An explicit `n` drops the one label; a prompt error (Ctrl-C, Esc, a closed
 //! terminal) aborts the surrounding command, because the user asked to stop.
-
-use std::collections::BTreeMap;
 
 use camino::Utf8Path;
 use indexmap::IndexMap;
@@ -71,7 +69,13 @@ impl<'a> Resolver<'a> {
         }
     }
 
-    /// Resolve every rule that opts into `trigger`.
+    /// Resolve every rule that opts into `trigger`, in declaration order.
+    ///
+    /// A rule that resolves to no values keeps its key, with no values against
+    /// it: the rule matched and produced nothing, which is what lets a caller
+    /// replace the key's set with nothing.
+    /// A rule that fails is dropped entirely, so its key is absent and whatever
+    /// the conversation carries is left alone.
     ///
     /// # Errors
     ///
@@ -79,7 +83,10 @@ impl<'a> Resolver<'a> {
     /// to ask on, or when the confirmation prompt is cancelled or the prompt
     /// backend fails.
     /// Every other failure drops that one label and leaves the rest intact.
-    pub(crate) async fn automatic(&self, trigger: Trigger) -> Result<BTreeMap<String, String>> {
+    pub(crate) async fn automatic(
+        &self,
+        trigger: Trigger,
+    ) -> Result<IndexMap<String, Vec<String>>> {
         let wanted: Vec<_> = self
             .rules
             .iter()
@@ -89,15 +96,15 @@ impl<'a> Resolver<'a> {
             })
             .collect();
 
-        let mut resolved = BTreeMap::new();
+        let mut resolved: IndexMap<String, Vec<String>> = IndexMap::new();
         let mut pending = Vec::new();
 
         // Prompting is interactive and therefore serial; the commands the user
         // approves are then run concurrently below.
         for (key, rule) in wanted {
             match rule.value() {
-                LabelValueRef::Static(value) => {
-                    resolved.insert(key.clone(), value.to_owned());
+                LabelValueRef::Values(values) => {
+                    resolved.insert(key.clone(), values.to_vec());
                 }
                 LabelValueRef::Command(cmd) => {
                     let cmd = cmd.clone().command();
@@ -111,8 +118,8 @@ impl<'a> Resolver<'a> {
 
         for (key, output) in run_all(pending, self.root).await {
             match output {
-                Ok(value) => {
-                    resolved.insert(key, value);
+                Ok(values) => {
+                    resolved.insert(key, values);
                 }
                 Err(error) => {
                     self.report_skipped(&key, &error);
@@ -125,6 +132,7 @@ impl<'a> Resolver<'a> {
 
     /// Resolve the rule named `key`, ignoring its `apply_on` policy.
     ///
+    /// Returns the values the rule produces, which may be none.
     /// Returns `Ok(None)` when the user declines the confirmation prompt.
     ///
     /// # Errors
@@ -132,7 +140,7 @@ impl<'a> Resolver<'a> {
     /// Returns an error when no rule is configured under `key`, when the rule
     /// is `run = "deny"`, when there is no terminal to confirm on, or when the
     /// command fails.
-    pub(crate) async fn alias(&self, key: &str) -> Result<Option<(String, String)>> {
+    pub(crate) async fn alias(&self, key: &str) -> Result<Option<(String, Vec<String>)>> {
         let rule = self.rules.get(key).ok_or_else(|| {
             Error::Label(format!(
                 "unknown label alias ':{key}': no `conversation.labels.{key}` is configured"
@@ -140,8 +148,8 @@ impl<'a> Resolver<'a> {
         })?;
 
         let cmd = match rule.value() {
-            LabelValueRef::Static(value) => {
-                return Ok(Some((key.to_owned(), value.to_owned())));
+            LabelValueRef::Values(values) => {
+                return Ok(Some((key.to_owned(), values.to_vec())));
             }
             LabelValueRef::Command(cmd) => cmd.clone().command(),
         };
@@ -163,7 +171,7 @@ impl<'a> Resolver<'a> {
             }
             Approval::Approved => run_command(&cmd, self.root)
                 .await
-                .map(|value| Some((key.to_owned(), value)))
+                .map(|values| Some((key.to_owned(), values)))
                 .map_err(|error| Error::Label(format!("label ':{key}' failed: {error}"))),
         }
     }
@@ -231,7 +239,7 @@ enum Approval {
 async fn run_all(
     pending: Vec<(String, CommandConfig)>,
     root: &Utf8Path,
-) -> Vec<(String, std::result::Result<String, String>)> {
+) -> Vec<(String, std::result::Result<Vec<String>, String>)> {
     let futures = pending.into_iter().map(|(key, cmd)| async move {
         let result = run_command(&cmd, root).await;
         (key, result)
@@ -240,7 +248,12 @@ async fn run_all(
     futures::future::join_all(futures).await
 }
 
-/// Run a label command at `root` and return its trimmed stdout.
+/// Run a label command at `root` and return one value per line of its stdout.
+///
+/// Empty lines are dropped, so a trailing newline does not add a value and a
+/// command that writes nothing produces none.
+/// Splitting on lines rather than a delimiter is what lets a value contain any
+/// character without an escaping rule.
 ///
 /// A `shell = true` command is handed to `sh -c` with its arguments quoted, so
 /// pipes and `&&` work; otherwise the program is executed directly.
@@ -252,7 +265,10 @@ async fn run_all(
 /// their lifecycle through a cancellation token; a label command has no such
 /// handle, and blocking conversation creation on an unkillable command would be
 /// worse than losing the label.
-async fn run_command(cmd: &CommandConfig, root: &Utf8Path) -> std::result::Result<String, String> {
+async fn run_command(
+    cmd: &CommandConfig,
+    root: &Utf8Path,
+) -> std::result::Result<Vec<String>, String> {
     let mut command = if cmd.shell {
         let mut command = Command::new("sh");
         command
@@ -287,7 +303,11 @@ async fn run_command(cmd: &CommandConfig, root: &Utf8Path) -> std::result::Resul
         });
     }
 
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(ToOwned::to_owned)
+        .collect())
 }
 
 #[cfg(test)]

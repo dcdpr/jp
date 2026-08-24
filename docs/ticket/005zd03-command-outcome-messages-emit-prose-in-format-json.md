@@ -147,3 +147,40 @@ own RFD if the return-type change is the direction.
 Worth deciding *before* converting twelve commands by hand, since the conversion
 is the natural moment to change the signature and doing it twice would be
 wasteful.
+
+-----
+
+- **From**: jp
+- **Date**: 2026-08-23T16:12:54Z
+
+Two details above have moved since this was filed, both while implementing [RFD
+103].
+
+`cmd/conversation/fork.rs:190` is off the list.
+`jp c fork` prints the IDs it created — one per line in text mode, a JSON array
+under `-F json` — which is the line-oriented ID format [RFD 086] pipes into `jp
+c archive -`.
+That settles the "no data is lost except in `jp c fork`" note under Severity;
+the other eleven sites stand.
+
+The `jp c label` output quoted under "The mechanism already exists" is no longer
+the `{"key", "value"}` shape.
+A mutation emits `{"action", "conversation", "changes"}`, where each change
+carries `key`, `before`, and `after`.
+
+The mechanism moved too, and the remaining eleven sites should follow the new
+one rather than `print_outcome`.
+`jp c label` splits its output by channel, as [RFD 048] already asks for: the
+sentence is chrome and goes to stderr, the labels are data and go to stdout, one
+`key=value` per line.
+`--format=json` is unaffected — one object per conversation on stdout, nothing
+on stderr.
+
+That left `output::print_outcome` and `output::print_details_with_json` with no
+callers, so both were removed; `git log` has them.
+A command being converted needs the same two decisions rather than a helper:
+what is chrome (stderr), and what is the data a script would read (stdout).
+
+[RFD 048]: ../rfd/048-four-channel-output-model.md
+[RFD 086]: ../rfd/086-line-oriented-stdin-input-for-cli-arguments.md
+[RFD 103]: ../rfd/103-multi-value-conversation-labels.md

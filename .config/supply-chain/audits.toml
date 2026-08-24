@@ -61,6 +61,11 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.16.2 -> 0.17.0"
 
+[[audits.fancy-regex]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.17.0 -> 0.19.0"
+
 [[audits.finl_unicode]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"

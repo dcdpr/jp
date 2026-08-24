@@ -1,5 +1,4 @@
 use std::{
-    collections::BTreeMap,
     panic::{AssertUnwindSafe, catch_unwind, resume_unwind},
     sync::Arc,
     time::Duration,
@@ -9,7 +8,7 @@ use camino_tempfile::tempdir;
 use chrono::{DateTime, TimeZone as _, Utc};
 use jp_config::{AppConfig, PartialAppConfig};
 use jp_conversation::{
-    Conversation, ConversationEvent, ConversationId, ConversationStream,
+    Conversation, ConversationEvent, ConversationId, ConversationStream, Labels,
     event::{ChatRequest, ChatResponse, TurnStart},
 };
 use jp_printer::{OutputFormat, Printer};
@@ -20,7 +19,7 @@ use tokio::runtime::Runtime;
 use super::*;
 use crate::{
     Globals,
-    cmd::{compact_flag::CompactFlag, conversation_id::PositionalIds, label::LabelDirective},
+    cmd::{compact_flag::CompactFlag, conversation_id::PositionalIds},
 };
 
 #[test]
@@ -43,7 +42,6 @@ fn test_conversation_fork() {
                 first: None,
                 title: None,
                 compact: CompactFlag::default(),
-                labels: LabelDirectives::default(),
                 no_turns: false,
             },
             setup: |ctx| {
@@ -89,7 +87,6 @@ fn test_conversation_fork() {
                 first: None,
                 title: None,
                 compact: CompactFlag::default(),
-                labels: LabelDirectives::default(),
                 no_turns: false,
             },
             setup: |ctx| {
@@ -145,7 +142,6 @@ fn test_conversation_fork() {
                 first: None,
                 title: None,
                 compact: CompactFlag::default(),
-                labels: LabelDirectives::default(),
                 no_turns: true,
             },
             setup: |ctx| {
@@ -204,7 +200,6 @@ fn test_conversation_fork() {
                 first: None,
                 title: None,
                 compact: CompactFlag::default(),
-                labels: LabelDirectives::default(),
                 no_turns: false,
             },
             setup: |ctx| {
@@ -262,7 +257,6 @@ fn test_conversation_fork() {
                 first: None,
                 title: None,
                 compact: CompactFlag::default(),
-                labels: LabelDirectives::default(),
                 no_turns: false,
             },
             setup: |ctx| {
@@ -319,7 +313,6 @@ fn test_conversation_fork() {
                 first: None,
                 title: None,
                 compact: CompactFlag::default(),
-                labels: LabelDirectives::default(),
                 no_turns: false,
             },
             setup: |ctx| {
@@ -377,7 +370,6 @@ fn test_conversation_fork() {
                 first: None,
                 title: None,
                 compact: CompactFlag::default(),
-                labels: LabelDirectives::default(),
                 no_turns: false,
             },
             setup: |ctx| {
@@ -458,7 +450,6 @@ fn test_conversation_fork() {
                 first: None,
                 title: None,
                 compact: CompactFlag::default(),
-                labels: LabelDirectives::default(),
                 no_turns: false,
             },
             setup: |ctx| {
@@ -538,7 +529,6 @@ fn test_conversation_fork() {
                 first: None,
                 title: None,
                 compact: CompactFlag::default(),
-                labels: LabelDirectives::default(),
                 no_turns: false,
             },
             setup: |ctx| {
@@ -586,7 +576,6 @@ fn test_conversation_fork() {
                 first: None,
                 title: None,
                 compact: CompactFlag::default(),
-                labels: LabelDirectives::default(),
                 no_turns: false,
             },
             setup: |ctx| {
@@ -629,7 +618,6 @@ fn test_conversation_fork() {
                 until: None,
                 last: None,
                 compact: CompactFlag::default(),
-                labels: LabelDirectives::default(),
                 no_turns: false,
                 first: Some(None),
                 title: None,
@@ -709,7 +697,6 @@ fn test_conversation_fork() {
                 until: None,
                 last: Some(Some(1)),
                 compact: CompactFlag::default(),
-                labels: LabelDirectives::default(),
                 no_turns: false,
                 first: Some(Some(2)),
                 title: None,
@@ -782,7 +769,6 @@ fn test_conversation_fork() {
                 until: None,
                 last: None,
                 compact: CompactFlag::default(),
-                labels: LabelDirectives::default(),
                 no_turns: false,
                 first: Some(Some(10)),
                 title: None,
@@ -830,7 +816,6 @@ fn test_conversation_fork() {
                 until: None,
                 last: None,
                 compact: CompactFlag::default(),
-                labels: LabelDirectives::default(),
                 no_turns: false,
                 first: None,
                 title: Some("my custom title".to_owned()),
@@ -856,7 +841,7 @@ fn test_conversation_fork() {
                 assert_eq!(convs[1].1.title.as_deref(), Some("my custom title"));
             },
         }),
-        ("labels are inherited and overridden by the cli", TestCase {
+        ("labels are inherited", TestCase {
             args: Fork {
                 target: PositionalIds::default(),
                 activate: false,
@@ -866,16 +851,6 @@ fn test_conversation_fork() {
                 first: None,
                 title: None,
                 compact: CompactFlag::default(),
-                labels: LabelDirectives(vec![
-                    LabelDirective::Set {
-                        key: "branch".to_owned(),
-                        value: "feat".to_owned(),
-                    },
-                    LabelDirective::Set {
-                        key: "draft".to_owned(),
-                        value: String::new(),
-                    },
-                ]),
                 no_turns: false,
             },
             setup: |ctx| {
@@ -883,10 +858,7 @@ fn test_conversation_fork() {
                 ctx.workspace.create_conversation_with_id(
                     id,
                     Conversation {
-                        labels: BTreeMap::from([
-                            ("branch".to_owned(), "main".to_owned()),
-                            ("team".to_owned(), "platform".to_owned()),
-                        ]),
+                        labels: Labels::from_iter([("branch", ["main"]), ("team", ["platform"])]),
                         ..Conversation::default().with_last_activated_at(ctx.now())
                     },
                     ctx.config(),
@@ -903,20 +875,13 @@ fn test_conversation_fork() {
 
                 assert_eq!(
                     convs[0].1.labels,
-                    BTreeMap::from([
-                        ("branch".to_owned(), "main".to_owned()),
-                        ("team".to_owned(), "platform".to_owned()),
-                    ]),
+                    Labels::from_iter([("branch", ["main"]), ("team", ["platform"])]),
                     "the source conversation is untouched"
                 );
                 assert_eq!(
                     convs[1].1.labels,
-                    BTreeMap::from([
-                        ("branch".to_owned(), "feat".to_owned()),
-                        ("draft".to_owned(), String::new()),
-                        ("team".to_owned(), "platform".to_owned()),
-                    ]),
-                    "inherited labels survive, named ones are overwritten"
+                    Labels::from_iter([("branch", ["main"]), ("team", ["platform"])]),
+                    "the fork carries the source's labels"
                 );
             },
         }),
@@ -930,7 +895,6 @@ fn test_conversation_fork() {
                 first: None,
                 title: None,
                 compact: CompactFlag::default(),
-                labels: LabelDirectives::default(),
                 no_turns: false,
             },
             setup: |ctx| {
@@ -1027,7 +991,6 @@ fn test_conversation_fork() {
             .block_on(case.args.run(&mut ctx, &[source_handle]))
             .unwrap();
         ctx.printer.flush();
-        assert_eq!(*out.lock(), "Conversation forked.\n");
 
         let mut conversations: Vec<_> = ctx
             .workspace
@@ -1035,6 +998,15 @@ fn test_conversation_fork() {
             .map(|(id, conv)| (*id, conv.clone()))
             .collect();
         conversations.sort_by_key(|(id, _)| *id);
+
+        // The command prints the fork's ID and nothing else. The ID comes from
+        // the wall clock, so it is read back rather than hardcoded.
+        let fork_id = conversations
+            .iter()
+            .map(|(id, _)| *id)
+            .find(|id| *id != source_id)
+            .expect("the fork exists");
+        assert_eq!(*out.lock(), format!("{fork_id}\n"));
 
         let conversations = conversations
             .into_iter()
@@ -1055,18 +1027,21 @@ fn test_conversation_fork() {
     }
 }
 
-/// A rule with `apply_on.fork` is re-resolved on the fork and overwrites the
-/// inherited value for its own key; every other inherited label survives, and a
-/// rule that only opts into `new` is left alone.
+/// A rule with `apply_on.fork` is re-resolved on the fork and replaces the
+/// inherited set for its own key, rather than adding to it; every other
+/// inherited label survives, and a rule that only opts into `new` is left
+/// alone.
+/// A rule that resolves to no values replaces the key's set with nothing, which
+/// removes the key: the rule matched, and replacement is replacement.
 #[test]
 fn fork_reresolves_apply_on_fork_rules() {
     use jp_config::conversation::label::{
         ApplyOn, LabelConfig, LabelObject, LabelRunMode, LabelValue,
     };
 
-    let rule = |value: &str, apply_on: ApplyOn| {
+    let rule = |values: &[&str], apply_on: ApplyOn| {
         LabelConfig::Object(LabelObject {
-            value: LabelValue::Static(value.to_owned()),
+            value: LabelValue::List(values.iter().map(|v| (*v).to_owned()).collect()),
             apply_on,
             run: LabelRunMode::Ask,
         })
@@ -1075,14 +1050,21 @@ fn fork_reresolves_apply_on_fork_rules() {
     let mut config = AppConfig::new_test();
     config.conversation.labels.insert(
         "stage".to_owned(),
-        rule("forked", ApplyOn {
+        rule(&["approved", "ready"], ApplyOn {
+            new: false,
+            fork: true,
+        }),
+    );
+    config.conversation.labels.insert(
+        "quiet".to_owned(),
+        rule(&[], ApplyOn {
             new: false,
             fork: true,
         }),
     );
     config.conversation.labels.insert(
         "only_new".to_owned(),
-        rule("fresh", ApplyOn {
+        rule(&["fresh"], ApplyOn {
             new: true,
             fork: false,
         }),
@@ -1114,9 +1096,10 @@ fn fork_reresolves_apply_on_fork_rules() {
     ctx.workspace.create_conversation_with_id(
         source_id,
         Conversation {
-            labels: BTreeMap::from([
-                ("stage".to_owned(), "inherited".to_owned()),
-                ("team".to_owned(), "platform".to_owned()),
+            labels: Labels::from_iter([
+                ("stage", vec!["draft", "review"]),
+                ("quiet", vec!["inherited"]),
+                ("team", vec!["platform"]),
             ]),
             ..Conversation::default().with_last_activated_at(ctx.now())
         },
@@ -1141,11 +1124,14 @@ fn fork_reresolves_apply_on_fork_rules() {
 
     assert_eq!(
         labels,
-        BTreeMap::from([
-            // `apply_on.fork` overwrote the inherited value.
-            ("stage".to_owned(), "forked".to_owned()),
-            // An inherited label with no matching rule is untouched.
-            ("team".to_owned(), "platform".to_owned()),
+        Labels::from_iter([
+            // `apply_on.fork` replaced the inherited set rather than adding to
+            // it, so `draft` and `review` are gone.
+            ("stage", vec!["approved", "ready"]),
+            // An inherited label with no matching rule is untouched. `quiet`
+            // is absent: its rule matched and produced nothing, so the
+            // replacement emptied the key.
+            ("team", vec!["platform"]),
         ])
     );
 
@@ -1156,7 +1142,8 @@ fn fork_reresolves_apply_on_fork_rules() {
         .unwrap()
         .labels
         .clone();
-    assert_eq!(source_labels["stage"], "inherited");
+    assert!(source_labels.contains("stage", "draft"));
+    assert!(source_labels.contains("stage", "review"));
 }
 
 /// A rule that needs confirmation with no terminal to ask on fails the fork
@@ -1230,7 +1217,6 @@ fn a_failing_fork_rule_creates_no_conversation() {
         first: None,
         title: None,
         compact: CompactFlag::default(),
-        labels: LabelDirectives::default(),
         no_turns: false,
     };
 
@@ -1245,6 +1231,91 @@ fn a_failing_fork_rule_creates_no_conversation() {
         1,
         "the source survives and no fork was created"
     );
+}
+
+/// A fork is persisted the moment it is created, so a source that fails after
+/// an earlier one succeeded leaves a conversation behind.
+/// Its ID still reaches stdout, or the only pointer to it is gone; the run
+/// still fails, so the exit status says the work did not finish.
+#[test]
+fn a_failure_still_reports_the_forks_already_created() {
+    let tmp = tempdir().unwrap();
+    let (printer, out, _) = Printer::memory(OutputFormat::Text);
+    let storage = tmp.path().join(".jp");
+    let user = tmp.path().join("user");
+    let fs = Arc::new(
+        FsStorageBackend::new(&storage)
+            .unwrap()
+            .with_user_storage(&user, None, "abc")
+            .unwrap(),
+    );
+    let workspace = Workspace::in_memory(tmp.path()).with_backend(fs);
+    let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
+        workspace,
+        None,
+        Runtime::new().unwrap(),
+        Globals::default(),
+        AppConfig::new_test(),
+        None,
+        printer,
+    );
+
+    let first = ConversationId::try_from(ctx.now()).unwrap();
+    ctx.workspace.create_conversation_with_id(
+        first,
+        Conversation::default().with_last_activated_at(ctx.now()),
+        ctx.config(),
+    );
+
+    ctx.set_now(ctx.now() + Duration::from_secs(1));
+    let second = ConversationId::try_from(ctx.now()).unwrap();
+    ctx.workspace.create_conversation_with_id(
+        second,
+        Conversation::default().with_last_activated_at(ctx.now()),
+        ctx.config(),
+    );
+
+    let sources = vec![
+        ctx.workspace.acquire_conversation(&first).unwrap(),
+        ctx.workspace.acquire_conversation(&second).unwrap(),
+    ];
+
+    // Another process removes the second source while this invocation holds a
+    // handle to it, so the fork of the first has already landed when the second
+    // fails to load.
+    let doomed = ctx.workspace.acquire_conversation(&second).unwrap();
+    let lock = ctx.workspace.test_lock(doomed);
+    ctx.workspace.remove_conversation_with_lock(lock.into_mut());
+
+    ctx.set_now(ctx.now() + Duration::from_secs(1));
+
+    let fork = Fork {
+        target: PositionalIds::default(),
+        activate: false,
+        from: None,
+        until: None,
+        last: None,
+        first: None,
+        title: None,
+        compact: CompactFlag::default(),
+        no_turns: false,
+    };
+
+    let result = Runtime::new()
+        .unwrap()
+        .block_on(fork.run(&mut ctx, &sources));
+    ctx.printer.flush();
+
+    assert!(result.is_err(), "the second source cannot be forked");
+
+    let created = ctx
+        .workspace
+        .conversations()
+        .map(|(id, _)| *id)
+        .find(|id| *id != first)
+        .expect("the first source was forked before the failure");
+    assert_eq!(*out.lock(), format!("{created}\n"));
 }
 
 /// Create two conversations with distinct content, fork only one, and verify
@@ -1334,7 +1405,6 @@ fn fork_targets_correct_source() {
         last: None,
         first: None,
         compact: CompactFlag::default(),
-        labels: LabelDirectives::default(),
         no_turns: false,
         title: Some("forked-from-b".to_owned()),
     };
@@ -1428,4 +1498,66 @@ fn fork_inherits_local_only_projection() {
         Projection::LocalOnly,
         "a fork of a local-only conversation stays local-only"
     );
+}
+
+/// A machine reader gets a top-level array of IDs, not lines to split.
+#[test]
+fn fork_prints_a_json_array_of_ids() {
+    let tmp = tempdir().unwrap();
+    let (printer, out, _) = Printer::memory(OutputFormat::Json);
+    let storage = tmp.path().join(".jp");
+    let user = tmp.path().join("user");
+    let fs = Arc::new(
+        FsStorageBackend::new(&storage)
+            .unwrap()
+            .with_user_storage(&user, None, "abc")
+            .unwrap(),
+    );
+    let workspace = Workspace::in_memory(tmp.path()).with_backend(fs);
+    let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
+        workspace,
+        None,
+        Runtime::new().unwrap(),
+        Globals::default(),
+        AppConfig::new_test(),
+        None,
+        printer,
+    );
+
+    let source_id = ConversationId::try_from(ctx.now()).unwrap();
+    ctx.workspace.create_conversation_with_id(
+        source_id,
+        Conversation::default().with_last_activated_at(ctx.now()),
+        ctx.config(),
+    );
+
+    let fork = Fork {
+        target: PositionalIds::default(),
+        activate: false,
+        from: None,
+        until: None,
+        last: None,
+        first: None,
+        title: None,
+        compact: CompactFlag::default(),
+        no_turns: false,
+    };
+    let source = ctx.workspace.acquire_conversation(&source_id).unwrap();
+    Runtime::new()
+        .unwrap()
+        .block_on(fork.run(&mut ctx, &[source]))
+        .unwrap();
+    ctx.printer.flush();
+
+    // The fork's ID comes from the wall clock, so it is read back rather than
+    // hardcoded.
+    let fork_id = ctx
+        .workspace
+        .conversations()
+        .map(|(id, _)| *id)
+        .find(|id| *id != source_id)
+        .expect("the fork exists");
+
+    assert_eq!(*out.lock(), format!("[\"{fork_id}\"]\n"));
 }

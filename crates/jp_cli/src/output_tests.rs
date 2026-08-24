@@ -122,26 +122,6 @@ fn details_text_renders_markdown() {
 }
 
 #[test]
-fn details_json_emits_payload_not_rows() {
-    let (printer, out, _) = Printer::memory(OutputFormat::Json);
-    // Display rows and JSON payload deliberately disagree: display labels are
-    // Title Case prose, payload keys are a snake_case contract.
-    let rows = Details::Fields(vec![DetailRow::scalar("Version (semver)", "v1.0")]);
-    let payload = json!({"name": "jp", "version": "1.0"});
-
-    print_details_with_json(&printer, Some("info"), rows, &payload);
-    let output = flush_stdout(&printer, &out);
-
-    let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
-    assert_eq!(parsed, payload);
-    assert!(
-        !output.contains("Version (semver)"),
-        "display labels must not leak into JSON"
-    );
-    assert!(!output.trim().contains('\n'), "expected compact JSON");
-}
-
-#[test]
 fn details_json_pretty_is_indented() {
     let (printer, out, _) = Printer::memory(OutputFormat::JsonPretty);
     let rows = Details::Fields(vec![DetailRow::scalar("k", "v")]);
@@ -152,20 +132,6 @@ fn details_json_pretty_is_indented() {
     let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
     assert_eq!(parsed["details"]["k"], "v");
     assert!(output.contains("\n  "), "expected indented JSON");
-}
-
-#[test]
-fn details_title_stays_out_of_json() {
-    let (printer, out, _) = Printer::memory(OutputFormat::Json);
-    let rows = Details::Fields(vec![DetailRow::scalar("a", "b")]);
-
-    print_details_with_json(&printer, Some("Decorative Title"), rows, &json!({"a": "b"}));
-    let output = flush_stdout(&printer, &out);
-
-    // The title is a display concern; the payload alone defines the JSON.
-    let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
-    assert_eq!(parsed, json!({"a": "b"}));
-    assert!(!output.contains("Decorative Title"));
 }
 
 #[test]

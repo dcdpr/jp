@@ -66,7 +66,7 @@ duct = { workspace = true }
 fancy-regex = { workspace = true, features = ["std", "unicode"] }
 futures = { workspace = true }
 humantime = { workspace = true }
-indexmap = { workspace = true }
+indexmap = { workspace = true, features = ["serde"] }
 indoc = { workspace = true }
 inquire = { workspace = true, features = ["crossterm"] }
 minijinja = { workspace = true }

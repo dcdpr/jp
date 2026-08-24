@@ -1,22 +1,22 @@
 use std::sync::Arc;
 
-use jp_conversation::{ConversationStream, Error as ConversationError};
+use jp_conversation::{ConversationId, ConversationStream, Error as ConversationError};
 use jp_inquire::prompt::TerminalPromptBackend;
+use jp_printer::Printer;
 use jp_storage::backend::Projection;
 use jp_workspace::{ConversationHandle, ConversationLock};
+use serde_json::Value;
 use tracing::debug;
 
 use crate::{
     cmd::{
         ConversationLoadRequest, Output,
         conversation_id::PositionalIds,
-        label::{
-            self, LabelDirectives,
-            resolve::{Resolver, Trigger},
-        },
+        label::resolve::{Resolver, Trigger},
         time::TimeThreshold,
     },
     ctx::Ctx,
+    output::print_json,
 };
 
 #[derive(Debug, clap::Args)]
@@ -80,12 +80,6 @@ pub(crate) struct Fork {
     /// Set a custom title for the forked conversation.
     #[arg(long, short)]
     title: Option<String>,
-
-    /// Set labels on the forked conversation.
-    ///
-    /// Applied on top of the labels inherited from the source conversation.
-    #[command(flatten)]
-    labels: LabelDirectives<false, true>,
 }
 
 impl Fork {
@@ -94,6 +88,26 @@ impl Fork {
     }
 
     pub(crate) async fn run(self, ctx: &mut Ctx, handles: &[ConversationHandle]) -> Output {
+        let mut forked = Vec::with_capacity(handles.len());
+
+        // A fork is persisted as soon as it is created, so work that fails
+        // after that point leaves it behind. Reporting the IDs either way keeps
+        // the created conversations addressable; the error still propagates, so
+        // the exit status says the run did not finish.
+        let result = self.fork_each(ctx, handles, &mut forked).await;
+        print_forked(&ctx.printer, &forked);
+
+        result
+    }
+
+    /// Fork every source, recording each new conversation's ID as it is
+    /// created.
+    async fn fork_each(
+        &self,
+        ctx: &mut Ctx,
+        handles: &[ConversationHandle],
+        forked: &mut Vec<ConversationId>,
+    ) -> Output {
         for source in handles {
             // `--no-turns` folds the source's effective config (base + every
             // delta) into a fresh base config; resolving it here lets the
@@ -170,14 +184,6 @@ impl Fork {
                 });
             }
 
-            if !self.labels.is_empty() {
-                let directives = self.labels.resolved();
-                let missing = lock
-                    .as_mut()
-                    .update_metadata(|m| label::apply(&mut m.labels, &directives));
-                label::report_missing(&ctx.printer, lock.id(), &missing.missing);
-            }
-
             if self.activate
                 && let Some(session) = &ctx.session
                 && let Err(error) =
@@ -186,9 +192,28 @@ impl Fork {
             {
                 tracing::warn!(%error, "Failed to record activation.");
             }
+
+            forked.push(lock.id());
         }
-        ctx.printer.println("Conversation forked.");
+
         Ok(())
+    }
+}
+
+/// Report the conversations the fork created.
+///
+/// Text output is one ID per line, in source order, so `FORK_ID="$(jp c fork
+/// ...)"` captures the ID with nothing to strip.
+/// JSON output is a top-level array of IDs.
+fn print_forked(printer: &Printer, ids: &[ConversationId]) {
+    if printer.format().is_json() {
+        let ids = ids.iter().map(|id| Value::String(id.to_string())).collect();
+        print_json(printer, &Value::Array(ids));
+        return;
+    }
+
+    for id in ids {
+        printer.println(id.to_string());
     }
 }
 
@@ -222,7 +247,11 @@ pub(crate) async fn fork_conversation(
     let mut new_conversation = ctx.workspace.metadata(source)?.clone();
     new_conversation.last_activated_at = now;
     new_conversation.expires_at = None;
-    new_conversation.labels.extend(resolved);
+    // A rule replaces the key's set; keys with no matching rule are inherited
+    // untouched.
+    for (key, values) in resolved {
+        new_conversation.labels.set(key, values);
+    }
 
     let mut new_events = ctx.workspace.events(source)?.clone().with_created_at(now);
 
