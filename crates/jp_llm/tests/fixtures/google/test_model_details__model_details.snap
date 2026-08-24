@@ -20,11 +20,14 @@ expression: v
             65536,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 512,
-                max_tokens: Some(
-                    24576,
-                ),
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 512,
+                    max_tokens: Some(
+                        24576,
+                    ),
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -32,13 +35,14 @@ expression: v
         ),
         deprecated: Some(
             Deprecated {
-                note: "recommended replacement: unknown",
+                note: "recommended replacement: gemini-3.1-flash-lite",
                 retire_at: Some(
-                    2026-07-22,
+                    2026-10-16,
                 ),
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
 ]

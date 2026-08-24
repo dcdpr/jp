@@ -3,6 +3,7 @@ extends = [
     "../knowledge/software-engineering.toml",
     "../knowledge/architecture.toml",
     "../knowledge/jp-config.toml",
+    "../knowledge/review-severity.toml",
     "../skill/read-files.toml",
     "../skill/web.toml",
     "../skill/github-reader.toml",
@@ -86,7 +87,13 @@ items = [
     - **OTHER** — typos, dead links, formatting, minor inconsistencies.
 
     Within each bucket, list findings in roughly decreasing importance. The bucket \
-    communicates severity; do not add a separate severity tag. Omit empty buckets.\
+    communicates severity; do not add a separate severity tag. Omit empty buckets.
+
+    Apply the named-input test (see "Review Severity") within every bucket. A \
+    finding you cannot tie to a plausible input still belongs in the review — \
+    open it with **Theoretical:** and one line on why you could not name one. \
+    An RFD is a model of a future system, so its unreachable cases are cheaper \
+    to raise and cheaper to drop than a PR's; say which you think this is.\
     """,
     """
     **7. Format your feedback** for easy reading and referencing:

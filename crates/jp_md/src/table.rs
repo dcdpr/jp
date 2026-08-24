@@ -9,7 +9,9 @@
 //! that fits keeps its natural widths, and one that does not has its widest
 //! columns narrowed until the whole table fits.
 //! Cell content that exceeds its fitted column width is word-wrapped across
-//! multiple visual rows, preserving ANSI formatting state across line breaks.
+//! multiple visual lines, preserving ANSI formatting state across line breaks.
+//! A line that continues the row above opens with [`CONTINUATION_EDGE`] rather
+//! than `|`, so a wrapped row reads as one row instead of several.
 //!
 //! # Usage
 //!
@@ -20,6 +22,8 @@
 use std::{cmp::min, fmt::Write as _};
 
 use comrak::nodes::{NodeValue, TableAlignment};
+use unicode_segmentation::UnicodeSegmentation as _;
+use unicode_width::UnicodeWidthStr as _;
 
 use crate::{
     ansi::{self, AnsiState, RESET, Segment},
@@ -39,6 +43,28 @@ const MIN_COLUMN_WIDTH: usize = 3;
 /// space on either side of the cell.
 const COLUMN_CHROME: usize = 3;
 
+/// Opens a line that continues the row above rather than starting a new one.
+///
+/// Only the row's opening delimiter takes this glyph; the inner and trailing
+/// `|` stay put.
+/// GFM treats a row's leading `|` as optional, so a continuation line pasted
+/// into a markdown document still splits into the right columns on the pipes
+/// that remain.
+const CONTINUATION_EDGE: char = '┆';
+
+/// Marks a header cell cut short because it did not fit its column.
+const TRUNCATION_MARKER: char = '…';
+
+/// How many clusters past the limit to keep measuring for a sequence that
+/// narrows back under it.
+///
+/// Every width-collapsing rule in `unicode-width` reduces a run of two or three
+/// clusters, so a prefix that has overshot recovers within a cluster or two if
+/// it recovers at all.
+/// Probing a bounded distance keeps a long cell from turning the scan
+/// quadratic.
+const MAX_LIGATURE_PROBES: usize = 8;
+
 /// Options for table formatting.
 pub struct TableOptions {
     /// Upper bound on the visual width of any single column.
@@ -48,12 +74,27 @@ pub struct TableOptions {
     /// A column can still end up narrower than this, when the table would
     /// otherwise not fit the available width.
     pub max_column_width: usize,
+
+    /// Whether a line continuing the row above opens with [`CONTINUATION_EDGE`]
+    /// instead of `|`.
+    pub continuation_edge: bool,
 }
 
 impl TableOptions {
-    /// Create a new `TableOptions` with the given column width.
+    /// Create a new `TableOptions` with the given column width, marking the
+    /// continuation lines of wrapped rows.
     pub const fn new(max_column_width: usize) -> Self {
-        Self { max_column_width }
+        Self {
+            max_column_width,
+            continuation_edge: true,
+        }
+    }
+
+    /// Set whether continuation lines are marked.
+    #[must_use]
+    pub const fn continuation_edge(mut self, enabled: bool) -> Self {
+        self.continuation_edge = enabled;
+        self
     }
 }
 
@@ -73,7 +114,8 @@ impl TableOptions {
 ///    `width: 0` to disable wrapping inside cells).
 /// 3. Computes natural visual column widths (ignoring ANSI bytes) and fits them
 ///    to `budget`.
-/// 4. Word-wraps cells that exceed their fitted column width.
+/// 4. Word-wraps cells that exceed their fitted column width, opening each
+///    continuation line with [`CONTINUATION_EDGE`].
 /// 5. Pads and aligns cells according to the table's alignment markers.
 pub fn format_table(
     node: Node<'_>,
@@ -101,18 +143,31 @@ pub fn format_table(
     let mut out = String::new();
 
     for (row_idx, row) in rows.iter().enumerate() {
-        // Wrap each cell's content into lines that fit the column width.
+        let is_header = row_idx == 0;
+
+        // Wrap each cell's content into lines that fit the column width. The
+        // header is truncated to a single line instead: wrapping it would push
+        // the separator off the second line, and a markdown parser reading this
+        // output then promotes the header's own tail to the header row.
         let wrapped: Vec<Vec<String>> = (0..num_cols)
             .map(|col| {
                 let content = row.get(col).map_or("", |c| c.rendered.as_str());
-                wrap_to_visual_width(content, col_widths[col])
+                if is_header {
+                    vec![truncate_to_visual_width(content, col_widths[col])]
+                } else {
+                    wrap_to_visual_width(content, col_widths[col])
+                }
             })
             .collect();
 
         let max_lines = wrapped.iter().map(Vec::len).max().unwrap_or(1);
 
         for line_idx in 0..max_lines {
-            out.push('|');
+            if line_idx == 0 || !options.table_options.continuation_edge {
+                out.push('|');
+            } else {
+                out.push(CONTINUATION_EDGE);
+            }
             for (col, col_lines) in wrapped.iter().enumerate() {
                 if col >= num_cols {
                     break;
@@ -126,7 +181,7 @@ pub fn format_table(
         }
 
         // Separator line after header row.
-        if row_idx == 0 {
+        if is_header {
             out.push('|');
             for (col, align) in alignments.iter().enumerate() {
                 let w = col_widths[col];
@@ -323,6 +378,180 @@ fn pad_cell(content: &str, target_width: usize, alignment: TableAlignment) -> St
     }
 }
 
+/// Byte offset in `text` just past the longest prefix whose visual width, added
+/// to `base`, stays within `limit`, and the number of exact measurements taken.
+///
+/// `text` must be free of ANSI escapes.
+/// Grapheme clusters and visual width are properties of the visible text, so an
+/// escape sitting between a base character and its combining mark would hide
+/// their boundary and under-count the width; pass [`ansi::visible_text`] rather
+/// than a single escape-separated run.
+///
+/// `base` is the width already occupied ahead of `text`.
+/// The cut lands on a cluster boundary, so a retained character keeps the marks
+/// that modify it.
+///
+/// The measurement count is returned so tests can pin it: measuring is the
+/// expensive step, and its count has to follow `limit` rather than the length
+/// of `text`.
+fn longest_fitting_prefix(text: &str, base: usize, limit: usize) -> (usize, usize) {
+    // The running sum of cluster widths bounds the true width from above: the
+    // interactions that render a string narrower than its parts (ZWJ emoji,
+    // Arabic Lam-Alef, Tifinagh joiners) span cluster boundaries, while the ones
+    // that render it wider stay inside a single cluster and so are already
+    // counted by measuring the cluster whole. A prefix under the sum therefore
+    // fits for certain, at O(1) per cluster.
+    //
+    // Past the limit the exact width decides, and it is not monotonic: a
+    // Tifinagh joiner costs a column on its own and none once the consonant
+    // after it completes the ligature. So an overshooting prefix is not the end
+    // of the scan, it is the start of a bounded probe for one that narrows back
+    // under.
+    let mut end = 0;
+    let mut sum = base;
+    let mut probes = 0;
+    let mut measurements = 0;
+
+    for (offset, cluster) in text.grapheme_indices(true) {
+        let candidate = offset + cluster.len();
+        sum += cluster.width();
+        if sum <= limit {
+            end = candidate;
+            continue;
+        }
+
+        if probes == MAX_LIGATURE_PROBES {
+            break;
+        }
+        probes += 1;
+        measurements += 1;
+
+        let exact = base + text[..candidate].width();
+        if exact > limit {
+            continue;
+        }
+
+        // The exact width supersedes the estimate, so a cluster that renders
+        // narrower than its parts cannot leave the sum over-counting.
+        end = candidate;
+        sum = exact;
+        // A sequence closed and brought the prefix back under the limit; allow a
+        // fresh run of probes for the next one.
+        probes = 0;
+    }
+
+    (end, measurements)
+}
+
+/// Visible byte offsets at which `text` has to break so that no line exceeds
+/// `limit` columns, given `base` columns already occupied on the first line.
+///
+/// `text` must be free of ANSI escapes, for the reason
+/// [`longest_fitting_prefix`] gives.
+/// A cluster wider than `limit` takes a line of its own and overflows it, since
+/// splitting it would change what it renders as.
+fn break_offsets(text: &str, base: usize, limit: usize) -> Vec<usize> {
+    let mut cuts = Vec::new();
+    let mut start = 0;
+    let mut base = base;
+
+    while start < text.len() {
+        let (fit, _) = longest_fitting_prefix(&text[start..], base, limit);
+
+        // Nothing fits beside what the line already holds, so break and try
+        // again on an empty one.
+        if fit == 0 && base > 0 {
+            cuts.push(start);
+            base = 0;
+            continue;
+        }
+
+        let advance = if fit == 0 {
+            text[start..].graphemes(true).next().map_or(0, str::len)
+        } else {
+            fit
+        };
+        if advance == 0 {
+            break;
+        }
+
+        start += advance;
+        if start >= text.len() {
+            break;
+        }
+        cuts.push(start);
+        base = 0;
+    }
+
+    cuts
+}
+
+/// Truncate a string (possibly containing ANSI escapes) to a maximum visual
+/// width, marking the cut with [`TRUNCATION_MARKER`].
+///
+/// Content that already fits, and any content at all when `max_width` is `0`,
+/// is returned unchanged.
+/// The marker takes the last column, so `max_width` still bounds the result.
+/// The cut falls between grapheme clusters, so a retained character keeps the
+/// marks that modify it.
+///
+/// A retained SGR escape is followed by a reset, since its own closer may have
+/// been cut and [`AnsiState`] recognizes only some attributes.
+/// Escapes of any other kind are dropped rather than kept: nothing here can
+/// close one whose terminator sits in the discarded suffix.
+fn truncate_to_visual_width(content: &str, max_width: usize) -> String {
+    let visible = ansi::visible_text(content);
+    if max_width == 0 || visible.width() <= max_width {
+        return content.to_string();
+    }
+
+    // The marker takes the last column.
+    let (visible_end, _) = longest_fitting_prefix(&visible, 0, max_width - 1);
+
+    let mut out = String::new();
+    let mut retained_sgr = false;
+    let mut visible_pos = 0;
+
+    for segment in ansi::segments(content) {
+        match segment {
+            // A non-SGR escape is dropped: the reset below closes SGR only, so
+            // keeping an OSC 8 opener whose terminator is about to be discarded
+            // would leave the rest of the output linked.
+            Segment::Escape(escape) => {
+                if ansi::is_sgr(escape) {
+                    out.push_str(escape);
+                    retained_sgr = true;
+                }
+            }
+            Segment::Text(text) => {
+                // Visible offsets advance one-for-one with the bytes of a run,
+                // so the cut needs no lookup back into the source.
+                let take = min(text.len(), visible_end - visible_pos);
+                out.push_str(&text[..take]);
+                visible_pos += take;
+                if visible_pos == visible_end {
+                    break;
+                }
+            }
+        }
+    }
+
+    // An escape never ends in a space, so this only trims visible padding.
+    while out.ends_with(' ') {
+        out.pop();
+    }
+
+    out.push(TRUNCATION_MARKER);
+    // `AnsiState` tracks only some attributes, so whether a reset is owed cannot
+    // depend on what it understood: an untracked one (inverse video, dim) would
+    // otherwise leak past the cell with its closer discarded.
+    if retained_sgr {
+        out.push_str(RESET);
+    }
+
+    out
+}
+
 /// Word-wrap a string (possibly containing ANSI escapes) to a maximum visual
 /// width.
 ///
@@ -464,8 +693,11 @@ fn finalize_line(lines: &mut Vec<String>, current: &mut String, state: &AnsiStat
 /// Hard-break a word that exceeds `max_width` across multiple lines, preserving
 /// ANSI escape state.
 ///
-/// Uses `visual_width` on the accumulated line to decide break points, so
-/// multi-codepoint emoji sequences are measured correctly.
+/// Breaks fall between grapheme clusters, so a cluster wider than the remaining
+/// room moves to the next line whole rather than leaving its combining marks
+/// behind.
+/// Every escape is kept: nothing is discarded when wrapping, so a pair whose
+/// halves land on different lines stays balanced.
 fn hard_break_into(
     lines: &mut Vec<String>,
     current: &mut String,
@@ -473,6 +705,14 @@ fn hard_break_into(
     word: &str,
     max_width: usize,
 ) {
+    // Break points are decided over the visible text, where cluster boundaries
+    // are visible, then applied to the source below.
+    let visible = ansi::visible_text(word);
+    let mut cuts = break_offsets(&visible, ansi::visual_width(current), max_width)
+        .into_iter()
+        .peekable();
+    let mut visible_pos = 0;
+
     for segment in ansi::segments(word) {
         let text = match segment {
             Segment::Escape(escape) => {
@@ -483,15 +723,24 @@ fn hard_break_into(
             Segment::Text(text) => text,
         };
 
-        for c in text.chars() {
-            current.push(c);
-            if ansi::visual_width(current) > max_width {
-                current.pop();
-                finalize_line(lines, current, state);
-                *current = state.restore_sequence();
-                current.push(c);
+        let mut rest = text;
+        while let Some(&cut) = cuts.peek() {
+            if cut > visible_pos + rest.len() {
+                break;
             }
+
+            let take = cut - visible_pos;
+            current.push_str(&rest[..take]);
+            visible_pos += take;
+            rest = &rest[take..];
+            cuts.next();
+
+            finalize_line(lines, current, state);
+            *current = state.restore_sequence();
         }
+
+        current.push_str(rest);
+        visible_pos += rest.len();
     }
 }
 

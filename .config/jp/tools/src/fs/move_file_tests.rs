@@ -1,5 +1,5 @@
 use camino_tempfile::tempdir;
-use jp_tool::Outcome;
+use jp_tool::{AccessPolicy, FsRule, Outcome};
 use serde_json::{Map, Value, json};
 
 use super::*;
@@ -7,6 +7,17 @@ use crate::util::runner::{ExitCode, MockProcessRunner, ProcessOutput};
 
 fn no_answers() -> Map<String, Value> {
     Map::new()
+}
+
+/// A policy granting the whole workspace except `denied`.
+fn workspace_except(denied: &str) -> AccessPolicy {
+    AccessPolicy {
+        fs: vec![
+            FsRule::new("").with_read(true).with_write(true),
+            FsRule::new(denied).with_read(false).with_write(false),
+        ],
+        ..AccessPolicy::default()
+    }
 }
 
 fn answers(pairs: &[(&str, Value)]) -> Map<String, Value> {
@@ -127,6 +138,61 @@ fn moves_directory_creates_target_parents() {
 
     unwrap_success(result);
     assert!(root.join("vendored/upstream/src/foo.rs").exists());
+}
+
+#[test]
+fn refuses_to_move_out_of_a_path_a_deny_rule_closes() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir(root.join(".git")).unwrap();
+    std::fs::write(root.join(".git/HEAD"), "x").unwrap();
+
+    let result = fs_move_file_impl(
+        root,
+        Some(&workspace_except(".git")),
+        &no_answers(),
+        ".git/HEAD",
+        "head.txt",
+        &never_git_runner(),
+    )
+    .unwrap();
+
+    // Normalized: a resolved path carries native separators, so the message reads
+    // `.git\HEAD` on Windows.
+    assert_eq!(
+        unwrap_error(result).replace('\\', "/"),
+        "Access denied: cannot delete '.git/HEAD'. Paths granting delete: [.]. If required, ask \
+         the user for explicit access."
+    );
+    assert!(root.join(".git/HEAD").exists());
+}
+
+#[test]
+fn refuses_to_move_into_a_path_a_deny_rule_closes() {
+    // The target is checked as well as the source: writing into a closed tree is
+    // no more allowed than reading out of one.
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir(root.join(".git")).unwrap();
+    std::fs::write(root.join("note.txt"), "x").unwrap();
+
+    let result = fs_move_file_impl(
+        root,
+        Some(&workspace_except(".git")),
+        &no_answers(),
+        "note.txt",
+        ".git/note.txt",
+        // The refusal lands before any git work is done.
+        &never_git_runner(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        unwrap_error(result).replace('\\', "/"),
+        "Access denied: cannot create '.git/note.txt'. Paths granting create: [.]. If required, \
+         ask the user for explicit access."
+    );
+    assert!(root.join("note.txt").exists());
 }
 
 #[test]

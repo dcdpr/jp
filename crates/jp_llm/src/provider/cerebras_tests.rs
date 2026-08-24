@@ -6,6 +6,169 @@ use reqwest_eventsource::Error as SseError;
 use super::*;
 use crate::provider::llamacpp::StreamChunk;
 
+/// Regression: a model absent from the table must still request the parsed
+/// reasoning format.
+/// Without it, Cerebras returns reasoning inline in `content` wrapped in
+/// `<think>` tags, which leaks into the visible message instead of being
+/// recorded as reasoning.
+#[test]
+fn test_unknown_model_requests_parsed_reasoning() {
+    let model = ModelDetails::empty((PROVIDER, "future-model-99").try_into().unwrap());
+    assert_eq!(model.reasoning, None, "fixture must be unknown");
+
+    let query = ChatQuery {
+        thread: jp_conversation::thread::Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events: jp_conversation::ConversationStream::new_test().with_turn("test"),
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+    };
+
+    let (body, _) = create_request(&model, query).unwrap();
+
+    assert_eq!(
+        body["reasoning_format"], "parsed",
+        "unknown models must request parsed reasoning"
+    );
+}
+
+/// Build a query whose only config is an explicit reasoning setting.
+fn reasoning_query(reasoning: jp_config::model::parameters::PartialReasoningConfig) -> ChatQuery {
+    let mut events = jp_conversation::ConversationStream::new_test().with_turn("test");
+    let mut delta = jp_config::PartialAppConfig::empty();
+    delta.assistant.model.parameters.reasoning = Some(reasoning);
+    events.add_config_delta(delta);
+
+    ChatQuery {
+        thread: jp_conversation::thread::Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+    }
+}
+
+/// An explicit `off` is honoured for a model whose reasoning support is
+/// unknown.
+/// Discarding it would silently ignore the caller, and a model absent from the
+/// table may well accept `none`.
+#[test]
+fn create_request_honours_off_for_unknown_model() {
+    let model = ModelDetails::empty((PROVIDER, "future-model-99").try_into().unwrap());
+    assert_eq!(model.reasoning, None, "fixture must be unknown");
+
+    let query = reasoning_query(jp_config::model::parameters::PartialReasoningConfig::Off);
+    let (body, _) = create_request(&model, query).unwrap();
+
+    assert_eq!(body["reasoning_effort"], "none");
+}
+
+/// `auto` on a model with unknown support omits the effort so the server picks
+/// its own, while still requesting the parsed reasoning format so reasoning is
+/// captured rather than inlined as `<think>` tags.
+#[test]
+fn create_request_auto_defers_effort_for_unknown_model() {
+    let model = ModelDetails::empty((PROVIDER, "future-model-99").try_into().unwrap());
+
+    let query = reasoning_query(jp_config::model::parameters::PartialReasoningConfig::Auto);
+    let (body, _) = create_request(&model, query).unwrap();
+
+    assert!(body.get("reasoning_effort").is_none());
+    assert_eq!(body["reasoning_format"], "parsed");
+}
+
+/// A known ladder still resolves `auto` to a supported level, since there is
+/// one to pick from.
+#[test]
+fn create_request_auto_uses_known_ladder() {
+    let model = map_model("gpt-oss-120b").unwrap();
+
+    let query = reasoning_query(jp_config::model::parameters::PartialReasoningConfig::Auto);
+    let (body, _) = create_request(&model, query).unwrap();
+
+    assert_eq!(body["reasoning_effort"], "medium");
+}
+
+/// `gemma-4-31b` reasons but reports no ladder, so support is unknown and an
+/// explicit `off` is honoured via the unknown path.
+/// The recorded fixture for this model confirms the provider accepts it.
+#[test]
+fn create_request_honours_off_for_gemma() {
+    let model = map_model("gemma-4-31b").unwrap();
+    assert_eq!(
+        model.reasoning, None,
+        "no ladder is reported for this model"
+    );
+
+    let query = reasoning_query(jp_config::model::parameters::PartialReasoningConfig::Off);
+    let (body, _) = create_request(&model, query).unwrap();
+
+    assert_eq!(body["reasoning_effort"], "none");
+}
+
+/// A model known not to accept a `none` effort omits the field entirely and
+/// takes the server default, rather than sending a value it would reject.
+#[test]
+fn create_request_omits_off_for_model_without_none() {
+    let model = map_model("gpt-oss-120b").unwrap();
+
+    let query = reasoning_query(jp_config::model::parameters::PartialReasoningConfig::Off);
+    let (body, _) = create_request(&model, query).unwrap();
+
+    assert!(body.get("reasoning_effort").is_none());
+}
+
+/// Records a live request for a Cerebras model absent from the built-in table
+/// with `auto` reasoning.
+///
+/// Validates that omitting `reasoning_effort` is accepted while still asking
+/// for the parsed reasoning format, which is the shape the unit tests can only
+/// assert about in the abstract.
+#[tokio::test]
+async fn test_unknown_model_auto_omits_effort() -> jp_test::Result {
+    let id: ModelIdConfig = "cerebras/gemma-4-31b".parse().unwrap();
+
+    // No table entry, so support is unknown and `auto` defers the effort.
+    let details = ModelDetails::empty(id.clone());
+
+    let request = crate::test::TestRequest::chat(PROVIDER)
+        .model(id)
+        .model_details(details)
+        .reasoning(Some(
+            jp_config::model::parameters::PartialReasoningConfig::Auto,
+        ))
+        .chat_request("What is 2 + 2?");
+
+    crate::test::run_test(PROVIDER, jp_test::function_name!(), Some(request)).await
+}
+
+/// Records a live request for a model absent from the table with reasoning
+/// explicitly off.
+///
+/// Validates that `reasoning_effort: "none"` is accepted, which JP now sends
+/// for unknown models rather than discarding the caller's setting.
+#[tokio::test]
+async fn test_unknown_model_off_sends_none() -> jp_test::Result {
+    let id: ModelIdConfig = "cerebras/gemma-4-31b".parse().unwrap();
+    let details = ModelDetails::empty(id.clone());
+
+    let request = crate::test::TestRequest::chat(PROVIDER)
+        .model(id)
+        .model_details(details)
+        .reasoning(Some(
+            jp_config::model::parameters::PartialReasoningConfig::Off,
+        ))
+        .chat_request("What is 2 + 2?");
+
+    crate::test::run_test(PROVIDER, jp_test::function_name!(), Some(request)).await
+}
+
 fn sse_message(data: &str) -> SseEvent {
     SseEvent::Message(MessageEvent {
         data: data.to_owned(),
@@ -180,13 +343,101 @@ fn convert_tool_choice_values() {
     );
 }
 
+/// The public catalog supplies limits, structured output, deprecation, and
+/// whether the model reasons.
+/// The effort ladder is not reported, so it keeps coming from the built-in
+/// table.
+#[test]
+fn map_model_with_catalog_prefers_reported_limits() {
+    let public: PublicModel = serde_json::from_value(json!({
+        "id": "gpt-oss-120b",
+        "name": "OpenAI GPT OSS",
+        "limits": {"max_context_length": 262_144, "max_completion_tokens": 65_536},
+        "capabilities": {"reasoning": true, "structured_outputs": true},
+        "deprecated": false,
+    }))
+    .unwrap();
+
+    let details = map_model_with_catalog("gpt-oss-120b", Some(&public)).unwrap();
+
+    assert_eq!(details.display_name.as_deref(), Some("OpenAI GPT OSS"));
+    assert_eq!(details.context_window, Some(262_144));
+    assert_eq!(details.max_output_tokens, Some(65_536));
+    assert_eq!(details.structured_output, Some(true));
+    assert_eq!(details.deprecated, Some(ModelDeprecation::Active));
+    // Ladder retained from the table, which the catalog cannot express.
+    assert!(details.reasoning.unwrap().is_leveled());
+}
+
+/// A catalog entry reporting no reasoning overrides a table claiming otherwise.
+#[test]
+fn map_model_with_catalog_corrects_reasoning_support() {
+    let public: PublicModel = serde_json::from_value(json!({
+        "id": "gpt-oss-120b",
+        "capabilities": {"reasoning": false},
+    }))
+    .unwrap();
+
+    let details = map_model_with_catalog("gpt-oss-120b", Some(&public)).unwrap();
+
+    assert_eq!(details.reasoning, Some(ReasoningDetails::unsupported()));
+}
+
+/// A model the catalog reports as reasoning but the table has no ladder for is
+/// left unknown rather than given invented effort levels.
+#[test]
+fn map_model_with_catalog_unknown_ladder_stays_unknown() {
+    let public: PublicModel = serde_json::from_value(json!({
+        "id": "some-future-model",
+        "capabilities": {"reasoning": true},
+    }))
+    .unwrap();
+
+    let details = map_model_with_catalog("some-future-model", Some(&public)).unwrap();
+
+    assert_eq!(details.reasoning, None);
+}
+
+/// Without a catalog entry the built-in table is used unchanged, which is the
+/// path taken whenever the unauthenticated catalog is unreachable.
+#[test]
+fn map_model_with_catalog_falls_back_to_table() {
+    let details = map_model_with_catalog("gpt-oss-120b", None).unwrap();
+
+    assert_eq!(details.context_window, Some(131_072));
+    assert_eq!(details.max_output_tokens, Some(40_960));
+    assert!(details.reasoning.unwrap().is_leveled());
+}
+
+/// A catalog entry reporting no capabilities leaves the table's values intact,
+/// rather than reading the absent fields as "unsupported".
+#[test]
+fn map_model_with_catalog_absent_capabilities_keeps_table() {
+    let public: PublicModel = serde_json::from_value(json!({
+        "id": "gpt-oss-120b",
+        "limits": {"max_context_length": 262_144},
+    }))
+    .unwrap();
+
+    let details = map_model_with_catalog("gpt-oss-120b", Some(&public)).unwrap();
+
+    // Reported, so applied.
+    assert_eq!(details.context_window, Some(262_144));
+    // Unreported, so the table stands.
+    assert_eq!(details.max_output_tokens, Some(40_960));
+    assert_eq!(details.structured_output, Some(true));
+    assert!(details.reasoning.unwrap().is_leveled());
+}
+
 #[test]
 fn map_model_known() {
-    let details = map_model("llama3.1-8b").unwrap();
-    assert_eq!(details.display_name.as_deref(), Some("Llama 3.1 8B"));
-    assert_eq!(details.context_window, Some(32_768));
-    assert_eq!(details.max_output_tokens, Some(8_192));
-    assert!(details.reasoning.unwrap().is_unsupported());
+    let details = map_model("gemma-4-31b").unwrap();
+    assert_eq!(details.display_name.as_deref(), Some("Gemma 4 31B"));
+    assert_eq!(details.context_window, Some(131_072));
+    assert_eq!(details.max_output_tokens, Some(40_960));
+    // Limits are known, but the catalog names no effort levels, so the ladder
+    // stays unknown rather than being invented.
+    assert_eq!(details.reasoning, None);
 }
 
 #[test]

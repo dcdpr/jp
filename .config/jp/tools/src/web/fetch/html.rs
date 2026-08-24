@@ -266,15 +266,23 @@ fn extract_rustdoc_section(section: &ElementRef<'_>) -> String {
     parts.join("")
 }
 
-/// Extracts a heading element and all following siblings up to (but not
-/// including) the next heading of the same or higher level.
+/// Extracts a heading and all following siblings up to (but not including) the
+/// next heading of the same or higher level.
+///
+/// The sibling walk starts from the heading's wrapper when it has one (see
+/// [`heading_walk_origin`]): `MediaWiki` nests every heading in a `<div
+/// class="mw-heading">` together with its `[edit]` link, so the section body is
+/// a sibling of the wrapper, not of the heading itself.
+/// Boundary detection uses [`wrapped_heading_level`] for the same reason: the
+/// next section may start with a wrapper div rather than a bare heading.
 fn extract_heading_section(heading: &ElementRef<'_>) -> String {
     let level = heading_level(heading.value().name()).unwrap_or(0);
-    let mut parts = vec![heading.html()];
+    let origin = heading_walk_origin(heading);
+    let mut parts = vec![origin.html()];
 
-    for sibling in heading.next_siblings() {
+    for sibling in origin.next_siblings() {
         if let Some(el) = ElementRef::wrap(sibling) {
-            if let Some(sib_level) = heading_level(el.value().name())
+            if let Some(sib_level) = wrapped_heading_level(&el)
                 && sib_level <= level
             {
                 break;
@@ -286,6 +294,103 @@ fn extract_heading_section(heading: &ElementRef<'_>) -> String {
     }
 
     parts.join("")
+}
+
+/// Element tags that count as stand-alone section content.
+/// Used to tell heading *wrappers* (a heading plus inline chrome such as edit
+/// links or permalink buttons) apart from *content containers*.
+const BLOCK_CONTENT_TAGS: &[&str] = &[
+    "p",
+    "div",
+    "ul",
+    "ol",
+    "dl",
+    "table",
+    "pre",
+    "blockquote",
+    "section",
+    "article",
+    "aside",
+    "figure",
+    "img",
+    "video",
+    "form",
+    "details",
+    "hr",
+    "h1",
+    "h2",
+    "h3",
+    "h4",
+    "h5",
+    "h6",
+];
+
+/// True if `el` is, or contains, a block-level content element.
+fn is_block_content(el: &ElementRef<'_>) -> bool {
+    if BLOCK_CONTENT_TAGS.contains(&el.value().name()) {
+        return true;
+    }
+    el.descendants()
+        .filter_map(ElementRef::wrap)
+        .any(|d| BLOCK_CONTENT_TAGS.contains(&d.value().name()))
+}
+
+/// The element whose following siblings form the section body for `heading`.
+///
+/// Some sites wrap each heading in a chrome element: `MediaWiki` emits `<div
+/// class="mw-heading"><h2 id="..">…</h2><span
+/// class="mw-editsection">…</span></div>`, with the section prose as siblings
+/// of the *div*.
+/// Walking the heading's own siblings there yields only the `[edit]` span.
+///
+/// Hoisting is deliberately conservative so content containers never become the
+/// walk origin (which would leak surrounding content into the section): each
+/// hoist step requires the parent to be a plain grouping tag whose children —
+/// other than the subtree we came from — are all inline chrome.
+fn heading_walk_origin<'a>(heading: &ElementRef<'a>) -> ElementRef<'a> {
+    let mut origin = *heading;
+
+    while let Some(parent) = origin.parent().and_then(ElementRef::wrap) {
+        if !matches!(parent.value().name(), "div" | "header" | "hgroup") {
+            break;
+        }
+
+        let all_chrome = parent
+            .children()
+            .filter_map(ElementRef::wrap)
+            .filter(|c| c.id() != origin.id())
+            .all(|c| !is_block_content(&c));
+        if !all_chrome {
+            break;
+        }
+
+        origin = parent;
+    }
+
+    origin
+}
+
+/// Effective heading level of an element encountered while walking section
+/// siblings: its own `h1`-`h6` level, or the level of the heading it wraps.
+///
+/// An element wraps a heading when its first element child is a heading
+/// (possibly through nested wrappers) and every remaining child is inline
+/// chrome.
+/// Containers that merely include a heading alongside their own block content
+/// (callout boxes, nested sections) return `None` and are treated as section
+/// content.
+fn wrapped_heading_level(el: &ElementRef<'_>) -> Option<u8> {
+    if let Some(level) = heading_level(el.value().name()) {
+        return Some(level);
+    }
+
+    let mut children = el.children().filter_map(ElementRef::wrap);
+    let first = children.next()?;
+    if children.any(|c| is_block_content(&c)) {
+        return None;
+    }
+
+    wrapped_heading_level(&first)
 }
 
 fn is_heading(tag: &str) -> bool {
@@ -620,14 +725,17 @@ fn clean_heading_text(heading: &ElementRef<'_>) -> String {
 }
 
 /// Collect a short plain-text preview from content after the heading.
+/// Walks siblings of the heading's wrapper (see [`heading_walk_origin`]) so
+/// wrapped headings preview their prose instead of their `[edit]` chrome.
 fn extract_preview_after_heading(heading: &ElementRef<'_>) -> String {
     let mut text = String::new();
     let level = heading_level(heading.value().name()).unwrap_or(0);
+    let origin = heading_walk_origin(heading);
 
-    for sib in heading.next_siblings() {
+    for sib in origin.next_siblings() {
         if let Some(el) = ElementRef::wrap(sib) {
-            // Stop at next heading of same or higher level.
-            if let Some(l) = heading_level(el.value().name())
+            // Stop at next (possibly wrapped) heading of same or higher level.
+            if let Some(l) = wrapped_heading_level(&el)
                 && l <= level
             {
                 break;

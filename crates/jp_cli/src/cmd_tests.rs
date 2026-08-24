@@ -65,6 +65,29 @@ fn a_persist_failure_rides_along_with_an_existing_error() {
 }
 
 #[test]
+fn a_persist_failure_makes_an_expected_outcome_a_failure() {
+    // `jp conversation grep` exits 1 with `expected` set when it finds nothing,
+    // which suppresses the trace-log announcement. A run that could not save is
+    // broken regardless of how it was going to exit, so the flag has to clear —
+    // otherwise a data-loss run hides the log the user needs to diagnose it.
+    let error = fold_persist_failure(
+        Err(Error::from("No matches").expected()),
+        Some(persist_failure()),
+    )
+    .expect_err("the primary error is preserved");
+
+    assert!(!error.expected);
+}
+
+#[test]
+fn an_expected_outcome_stays_expected_when_nothing_was_recorded() {
+    let error = fold_persist_failure(Err(Error::from("No matches").expected()), None)
+        .expect_err("the primary error is preserved");
+
+    assert!(error.expected);
+}
+
+#[test]
 fn an_existing_error_survives_when_nothing_was_recorded() {
     let error = fold_persist_failure(Err(Error::from("Rate limited")), None)
         .expect_err("the primary error is preserved");

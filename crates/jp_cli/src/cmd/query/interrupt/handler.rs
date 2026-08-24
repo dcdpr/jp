@@ -78,11 +78,12 @@ pub enum InterruptAction {
     /// Resume generation (if stream is alive) or wait (if tool is running).
     Resume,
 
-    /// Continue generation from partial content using assistant prefill.
+    /// Continue generation from partial assistant content.
     ///
-    /// When the stream has died (e.g., due to timeout), we can inject the
-    /// partial content as an assistant message and ask the LLM to continue from
-    /// there.
+    /// When the stream has died (e.g., due to timeout), the partial response is
+    /// committed to the Conversation before a new Provider request is built.
+    /// Each Provider must encode that continuation in a form accepted by the
+    /// target model; native assistant prefill is not assumed.
     Continue,
 
     /// Cancel all running tools and restart the entire batch.

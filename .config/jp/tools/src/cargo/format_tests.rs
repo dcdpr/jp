@@ -1,5 +1,5 @@
 use camino_tempfile::{Utf8TempDir, tempdir};
-use jp_tool::{Action, Outcome};
+use jp_tool::{Action, Context, Outcome};
 use pretty_assertions::assert_eq;
 
 use super::*;
@@ -27,7 +27,7 @@ fn no_changes_anywhere_reports_nothing_to_format() {
         .expect("comfort")
         .returns_success("");
 
-    let result = cargo_format_impl(&ctx, None, &runner).unwrap();
+    let result = cargo_format_impl(&ctx.root, None, &runner).unwrap();
     assert_eq!(result.unwrap_content(), "No files to format.");
 }
 
@@ -41,10 +41,39 @@ fn rustfmt_changes_only_lists_those_files() {
         .expect("comfort")
         .returns_success("");
 
-    let result = cargo_format_impl(&ctx, None, &runner).unwrap();
+    let result = cargo_format_impl(&ctx.root, None, &runner).unwrap();
     assert_eq!(
         result.unwrap_content(),
         "Formatted files:\n- src/lib.rs\n- src/main.rs"
+    );
+}
+
+#[test]
+fn formatted_file_listing_is_bounded() {
+    let (_dir, ctx) = ctx();
+    let rustfmt_stdout = (0..4_000)
+        .map(|i| format!("{root}/src/generated/file_{i}.rs", root = ctx.root))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success(rustfmt_stdout)
+        .expect("comfort")
+        .returns_success("");
+
+    let content = cargo_format_impl(&ctx.root, None, &runner)
+        .unwrap()
+        .unwrap_content();
+
+    assert!(
+        content.len() < MAX_DIAGNOSTIC_BYTES + 200,
+        "listing grew to {} bytes",
+        content.len()
+    );
+    assert!(
+        content.contains("[Truncated: showing"),
+        "got tail: {}",
+        &content[content.len() - 100..]
     );
 }
 
@@ -58,7 +87,7 @@ fn comfort_changes_only_lists_those_files() {
         .expect("comfort")
         .returns_success(comfort_stdout);
 
-    let result = cargo_format_impl(&ctx, None, &runner).unwrap();
+    let result = cargo_format_impl(&ctx.root, None, &runner).unwrap();
     assert_eq!(
         result.unwrap_content(),
         "Formatted files:\n- crates/foo/src/lib.rs"
@@ -76,7 +105,7 @@ fn overlapping_changes_are_deduplicated_and_sorted() {
         .expect("comfort")
         .returns_success(comfort_stdout);
 
-    let result = cargo_format_impl(&ctx, None, &runner).unwrap();
+    let result = cargo_format_impl(&ctx.root, None, &runner).unwrap();
     assert_eq!(
         result.unwrap_content(),
         "Formatted files:\n- src/a.rs\n- src/b.rs\n- src/c.rs"
@@ -109,7 +138,7 @@ fn with_package_argument_is_passed_through_to_both_tools() {
         ])
         .returns_success("");
 
-    let result = cargo_format_impl(&ctx, Some("my_pkg"), &runner).unwrap();
+    let result = cargo_format_impl(&ctx.root, Some("my_pkg"), &runner).unwrap();
     assert_eq!(result.unwrap_content(), "No files to format.");
 }
 
@@ -132,7 +161,7 @@ fn without_package_uses_workspace_scope_on_both_tools() {
         ])
         .returns_success("");
 
-    let result = cargo_format_impl(&ctx, None, &runner).unwrap();
+    let result = cargo_format_impl(&ctx.root, None, &runner).unwrap();
     assert_eq!(result.unwrap_content(), "No files to format.");
 }
 
@@ -148,7 +177,7 @@ fn rustfmt_failure_short_circuits_before_running_comfort() {
             status: ExitCode::from_code(1),
         });
 
-    let result = cargo_format_impl(&ctx, None, &runner).unwrap();
+    let result = cargo_format_impl(&ctx.root, None, &runner).unwrap();
     match result {
         Outcome::Error { message, .. } => {
             assert_eq!(message, "cargo fmt failed: error: could not format files");
@@ -170,7 +199,7 @@ fn comfort_failure_is_reported_even_when_rustfmt_succeeded() {
             status: ExitCode::from_code(2),
         });
 
-    let result = cargo_format_impl(&ctx, None, &runner).unwrap();
+    let result = cargo_format_impl(&ctx.root, None, &runner).unwrap();
     match result {
         Outcome::Error { message, .. } => {
             assert_eq!(message, "comfort failed: comfort: parse error");
@@ -190,7 +219,7 @@ fn trailing_newlines_in_output_are_tolerated() {
         .expect("comfort")
         .returns_success(comfort_stdout);
 
-    let result = cargo_format_impl(&ctx, None, &runner).unwrap();
+    let result = cargo_format_impl(&ctx.root, None, &runner).unwrap();
     assert_eq!(
         result.unwrap_content(),
         "Formatted files:\n- src/lib.rs\n- src/main.rs"

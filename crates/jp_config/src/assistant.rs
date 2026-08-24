@@ -21,7 +21,7 @@ use crate::{
         tool_choice::ToolChoice,
     },
     delta::{PartialConfigDelta, delta_opt, delta_opt_partial},
-    fill::FillDefaults,
+    fill::{FillDefaults, fill_opt},
     internal::merge::{string_with_strategy, vec_with_strategy},
     model::{ModelConfig, PartialModelConfig},
     partial::{ToPartial, partial_opt, partial_opts},
@@ -98,6 +98,16 @@ impl AssignKeyValue for PartialAssistantConfig {
             "" => kv.try_merge_object(self)?,
             "name" => self.name = kv.try_some_string()?,
             "system_prompt" => self.system_prompt = kv.try_some_object_or_from_str()?,
+            // Nested keys (`system_prompt.value`, `.strategy`, `.separator`,
+            // `.discard_when_merged`, `.dedup`) address the merge metadata, so
+            // an absent value starts as `Merged` rather than the plain-string
+            // default, which has nowhere to put them.
+            _ if kv.p("system_prompt") => self
+                .system_prompt
+                .get_or_insert_with(|| {
+                    PartialMergeableString::Merged(PartialMergedString::default())
+                })
+                .assign(kv)?,
             _ if kv.p("instructions") => kv.try_vec_of_nested(self.instructions.as_mut())?,
             _ if kv.p("system_prompt_sections") => {
                 kv.try_vec_of_nested(self.system_prompt_sections.as_mut())?;
@@ -139,7 +149,10 @@ impl FillDefaults for PartialAssistantConfig {
     fn fill_from(self, defaults: Self) -> Self {
         Self {
             name: self.name.or(defaults.name),
-            system_prompt: self.system_prompt.or(defaults.system_prompt),
+            // `fill_opt` rather than `or`: a metadata-only prompt (from e.g.
+            // `--cfg assistant.system_prompt.dedup=false`) still needs the
+            // default's value filled in.
+            system_prompt: fill_opt(self.system_prompt, defaults.system_prompt),
             system_prompt_sections: self
                 .system_prompt_sections
                 .fill_from(defaults.system_prompt_sections),
@@ -210,6 +223,7 @@ fn default_system_prompt(_: &()) -> TransformResult<Option<PartialMergeableStrin
         strategy: None,
         separator: None,
         discard_when_merged: Some(true),
+        dedup: None,
     })))
 }
 

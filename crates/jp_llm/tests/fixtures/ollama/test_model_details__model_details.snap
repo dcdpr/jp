@@ -10,13 +10,18 @@ expression: v
                 "qwen3.5:9b",
             ),
         },
-        display_name: None,
-        context_window: None,
+        display_name: Some(
+            "qwen3.5:9b",
+        ),
+        context_window: Some(
+            262144,
+        ),
         max_output_tokens: None,
         reasoning: None,
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
 ]

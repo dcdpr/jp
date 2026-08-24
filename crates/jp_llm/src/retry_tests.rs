@@ -1,5 +1,36 @@
+use jp_config::{
+    assistant::tool_choice::ToolChoice,
+    model::id::{ModelIdConfig, ProviderId},
+};
+use jp_conversation::{ConversationStream, thread::Thread};
+
 use super::*;
-use crate::error::StreamError;
+use crate::{
+    error::{Error, StreamError, StreamErrorKind},
+    event::Event,
+    model::ModelDetails,
+    provider::mock::MockProvider,
+};
+
+fn empty_query() -> ChatQuery {
+    ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events: ConversationStream::new_test(),
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+    }
+}
+
+fn model() -> ModelDetails {
+    ModelDetails::empty(ModelIdConfig {
+        provider: ProviderId::Test,
+        name: "mock-model".parse().expect("valid model name"),
+    })
+}
 
 /// Default base backoff for tests.
 const TEST_BASE_BACKOFF_MS: u64 = 1000;
@@ -51,6 +82,38 @@ fn stream_error_is_retryable() {
 
     // Non-retryable
     assert!(!StreamError::other("test").is_retryable());
+}
+
+#[tokio::test]
+async fn collect_with_retry_applies_the_output_ceiling_without_retrying() {
+    // One scripted request is deliberate. If OutputLimit is misclassified as
+    // retryable, the mock panics when collect_with_retry asks for a second one.
+    let provider = MockProvider::with_batches(vec![vec![
+        Event::message(0, "0123456789"),
+        Event::message(0, "0123456789"),
+        Event::message(0, "0123456789"),
+    ]]);
+    let config = RetryConfig {
+        max_retries: 5,
+        base_backoff_ms: 1,
+        max_backoff_secs: 1,
+        max_response_bytes: 25,
+    };
+
+    let error = collect_with_retry(&provider, &model(), empty_query(), &config)
+        .await
+        .expect_err("response must stop at the configured ceiling");
+
+    assert!(
+        matches!(
+            error,
+            Error::Stream(StreamError {
+                kind: StreamErrorKind::OutputLimit,
+                ..
+            })
+        ),
+        "got: {error:?}"
+    );
 }
 
 #[test]

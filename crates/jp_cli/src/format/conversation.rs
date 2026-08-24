@@ -3,7 +3,7 @@ use std::fmt;
 use chrono::{DateTime, Utc};
 use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
-use jp_term::table::{DetailItem, DetailRow, details};
+use jp_term::table::{DetailItem, DetailRow, Details, details};
 
 use super::datetime::DateTimeFmt;
 
@@ -43,6 +43,9 @@ pub struct DetailsFmt {
     /// Display the timestamp of conversation expiration.
     pub expires_at: Option<DateTime<Utc>>,
 
+    /// Labels attached to the conversation.
+    pub labels: Vec<DetailItem>,
+
     /// Attachments associated with the conversation.
     pub attachments: Vec<DetailItem>,
 
@@ -68,6 +71,7 @@ impl DetailsFmt {
             last_message_at: None,
             last_activated_at: None,
             expires_at: None,
+            labels: vec![],
             attachments: vec![],
             compactions: vec![],
             pretty: true,
@@ -101,6 +105,12 @@ impl DetailsFmt {
     #[must_use]
     pub fn with_expires_at(mut self, expires_at: Option<DateTime<Utc>>) -> Self {
         self.expires_at = expires_at;
+        self
+    }
+
+    #[must_use]
+    pub fn with_labels(mut self, labels: Vec<DetailItem>) -> Self {
+        self.labels = labels;
         self
     }
 
@@ -159,9 +169,16 @@ impl DetailsFmt {
         self.title.as_deref()
     }
 
-    /// Return rows for a table displaying the conversation details.
+    /// Return the named fields of the conversation details view.
+    ///
+    /// Always [`Details::Fields`]: every row is a named property, so the JSON
+    /// form is an object whether or not the optional rows are present.
     #[must_use]
-    pub fn rows(&self) -> Vec<DetailRow> {
+    pub fn rows(&self) -> Details {
+        Details::Fields(self.fields())
+    }
+
+    fn fields(&self) -> Vec<DetailRow> {
         let mut rows = vec![];
 
         rows.push(self.scalar("ID", self.id.to_string()));
@@ -222,6 +239,13 @@ impl DetailsFmt {
                 "No".to_string()
             };
             rows.push(self.scalar("Local", value));
+        }
+
+        if !self.labels.is_empty() {
+            rows.push(DetailRow::list(
+                self.styled_label("Labels"),
+                self.labels.clone(),
+            ));
         }
 
         if !self.attachments.is_empty() {

@@ -29,8 +29,8 @@ use jp_config::AppConfig;
 use jp_conversation::{Conversation, ConversationId, ConversationStream};
 use jp_storage::{
     backend::{
-        ConversationFilter, ConversationIndexEntry, InMemoryStorageBackend, LoadBackend,
-        LockBackend, NullPersistBackend, PersistBackend, Projection, SessionBackend,
+        ConversationFilter, ConversationIndexEntry, FsStorageBackend, InMemoryStorageBackend,
+        LoadBackend, LockBackend, NullPersistBackend, PersistBackend, Projection, SessionBackend,
         StoragePresence,
     },
     lock::LockInfo,
@@ -43,6 +43,10 @@ use tracing::{debug, trace, warn};
 use crate::session::Session;
 
 const APPLICATION: &str = "jp";
+
+/// The directory a workspace stores its data in, relative to the workspace
+/// root.
+pub const DEFAULT_STORAGE_DIR: &str = ".jp";
 
 #[derive(Debug)]
 pub struct Workspace {
@@ -63,6 +67,9 @@ pub struct Workspace {
 
     /// Backend for session-to-conversation mapping storage.
     sessions: Arc<dyn SessionBackend>,
+
+    /// The filesystem backend, for workspaces opened from disk.
+    fs: Option<Arc<FsStorageBackend>>,
 
     /// The in-memory state of the workspace.
     state: State,
@@ -95,23 +102,25 @@ impl Workspace {
         }
     }
 
-    /// Creates a new workspace with the given root directory.
+    /// Creates a workspace with the given root directory, backed by memory.
     ///
-    /// The workspace starts with in-memory backends (no filesystem
-    /// persistence).
-    /// Call [`with_backend`] to wire in a storage backend.
+    /// Nothing is read from or written to disk.
+    /// Call [`with_backend`] to wire in a storage backend, or [`open`] to open
+    /// a workspace that already exists on disk.
     ///
+    /// [`open`]: Self::open
     /// [`with_backend`]: Self::with_backend
-    pub fn new(root: impl Into<Utf8PathBuf>) -> Self {
-        Self::new_with_id(root, id::Id::new())
+    pub fn in_memory(root: impl Into<Utf8PathBuf>) -> Self {
+        Self::in_memory_with_id(root, id::Id::new())
     }
 
-    /// Creates a new workspace with the given root directory and ID.
+    /// Creates a workspace with the given root directory and ID, backed by
+    /// memory.
     ///
     /// All four backend slots are wired to a single shared
     /// [`InMemoryStorageBackend`], so data written through one trait is visible
     /// through the others.
-    pub fn new_with_id(root: impl Into<Utf8PathBuf>, id: id::Id) -> Self {
+    pub fn in_memory_with_id(root: impl Into<Utf8PathBuf>, id: id::Id) -> Self {
         let root = root.into();
         trace!(root = %root, id = %id, "Initializing Workspace.");
 
@@ -123,9 +132,80 @@ impl Workspace {
             loader: backend.clone(),
             locker: backend.clone(),
             sessions: backend,
+            fs: None,
             state: State::default(),
             persist_failures: PersistFailures::default(),
         }
+    }
+
+    /// Open the workspace containing `dir`, wiring filesystem and user-local
+    /// storage.
+    ///
+    /// Walks up from `dir` until a [`DEFAULT_STORAGE_DIR`] directory is found,
+    /// and wires both that store and the workspace's user-local silo under
+    /// [`user_data_dir`].
+    /// Conversations live in either root, so both are needed to see all of
+    /// them.
+    ///
+    /// The conversation index is not populated, so [`conversations`] is empty
+    /// until [`load_conversation_index`] is called.
+    /// Call [`sanitize`] before that: it repairs the backing store, and
+    /// indexing an unrepaired store carries the damage into the index.
+    ///
+    /// Opening writes to disk: the user-local silo is created if missing, its
+    /// `storage` symlink is repointed at this workspace root, and the workspace
+    /// ID is persisted back to the store.
+    /// A store whose ID file is missing, unreadable, or malformed is assigned a
+    /// fresh ID.
+    ///
+    /// Returns [`Error::WorkspaceNotFound`] when neither `dir` nor any of its
+    /// parents holds a store.
+    ///
+    /// [`conversations`]: Self::conversations
+    /// [`load_conversation_index`]: Self::load_conversation_index
+    /// [`sanitize`]: Self::sanitize
+    pub fn open(dir: &Utf8Path) -> Result<Self> {
+        Self::open_with_storage_dir(dir, DEFAULT_STORAGE_DIR)
+    }
+
+    /// Open the workspace containing `dir`, looking for a store named
+    /// `storage_dir`.
+    ///
+    /// Behaves exactly like [`open`], which uses [`DEFAULT_STORAGE_DIR`].
+    ///
+    /// [`open`]: Self::open
+    fn open_with_storage_dir(dir: &Utf8Path, storage_dir: &str) -> Result<Self> {
+        trace!(dir = %dir, storage_dir, "Finding workspace.");
+        let root = Self::find_root(dir.to_path_buf(), storage_dir)
+            .ok_or_else(|| Error::WorkspaceNotFound(dir.to_path_buf()))?;
+        trace!(root = %root, "Found workspace root.");
+
+        let storage = root.join(storage_dir);
+        trace!(storage = %storage, "Initializing workspace storage.");
+
+        let id = Id::load(&storage)
+            .transpose()
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        trace!(%id, "Loaded unique workspace ID.");
+
+        let user_root = user_data_dir()?.join("workspace");
+        // The workspace directory name slugs a freshly created silo so users can
+        // recognize it; an existing silo is reused by ID regardless of its slug.
+        let slug = root.file_name();
+        let fs = Arc::new(FsStorageBackend::new(&storage)?.with_user_storage(
+            &user_root,
+            slug,
+            id.to_string(),
+        )?);
+
+        let mut workspace = Self::in_memory_with_id(root, id).with_backend(fs.clone());
+        workspace.fs = Some(fs);
+
+        workspace.id().store(&storage)?;
+
+        Ok(workspace)
     }
 
     /// Get the root path of the workspace.
@@ -172,6 +252,31 @@ impl Workspace {
     pub fn with_sessions(mut self, sessions: Arc<dyn SessionBackend>) -> Self {
         self.sessions = sessions;
         self
+    }
+
+    /// The filesystem storage backend, for workspaces opened from disk.
+    ///
+    /// `None` for workspaces built with [`in_memory`], including those that had
+    /// a filesystem backend wired in through [`with_backend`].
+    ///
+    /// [`in_memory`]: Self::in_memory
+    /// [`with_backend`]: Self::with_backend
+    #[must_use]
+    pub fn fs_storage(&self) -> Option<&Arc<FsStorageBackend>> {
+        self.fs.as_ref()
+    }
+
+    /// The backend session-to-conversation mappings are read from and written
+    /// to.
+    ///
+    /// Set by [`with_sessions`] or [`with_backend`]; an in-memory workspace
+    /// keeps its mappings for the lifetime of the backend.
+    ///
+    /// [`with_backend`]: Self::with_backend
+    /// [`with_sessions`]: Self::with_sessions
+    #[must_use]
+    pub fn sessions(&self) -> &Arc<dyn SessionBackend> {
+        &self.sessions
     }
 
     /// Set all four backends from a single implementation.
@@ -506,7 +611,7 @@ impl Workspace {
     ///
     /// Derived from the cross-root index load (and a conversation's creation
     /// intent).
-    /// Returns `None` for conversations not present in the active index.
+    /// Returns `None` for conversations not present in the live index.
     #[must_use]
     pub fn conversation_presence(&self, id: &ConversationId) -> Option<StoragePresence> {
         self.state.presence.get(id).copied()
@@ -615,7 +720,7 @@ impl Workspace {
         let id = conv.id();
 
         // Stamp archived_at and flush to disk before the rename.
-        // If the rename fails, the conversation stays active with a stale
+        // If the rename fails, the conversation stays live with a stale
         // archived_at — a cosmetic issue, not data loss. Directory location
         // is the source of truth for archived state.
         conv.update_metadata(|m| m.archived_at = Some(chrono::Utc::now()));
@@ -637,7 +742,7 @@ impl Workspace {
 
     /// Restore a conversation from the archive.
     ///
-    /// Moves the conversation back to the active partition and inserts it into
+    /// Moves the conversation back to the live partition and inserts it into
     /// the in-memory index.
     /// Returns a handle for the restored conversation.
     pub fn unarchive_conversation(&mut self, id: &ConversationId) -> Result<ConversationHandle> {

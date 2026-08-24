@@ -21,7 +21,7 @@ use super::*;
 
 /// Test helper: wire a single backend into all four Workspace slots.
 fn workspace_with_fs(root: impl Into<Utf8PathBuf>, fs: &FsStorageBackend) -> Workspace {
-    Workspace::new(root).with_backend(Arc::new(fs.clone()))
+    Workspace::in_memory(root).with_backend(Arc::new(fs.clone()))
 }
 
 /// Persistence backend whose every write fails with a full disk.
@@ -60,7 +60,7 @@ fn workspace_drains_a_persist_failure_left_by_a_dropped_lock() {
     // The teardown path for a cancelled command future: everything the run held
     // is dropped without any drain running, so the workspace is the only place
     // left that can still report the conversation was not saved.
-    let mut workspace = Workspace::new("root").with_persist(Arc::new(AlwaysFullBackend));
+    let mut workspace = Workspace::in_memory("root").with_persist(Arc::new(AlwaysFullBackend));
     let config = Arc::new(AppConfig::new_test());
 
     let lock = workspace
@@ -87,7 +87,7 @@ fn workspace_drains_a_persist_failure_left_by_a_dropped_lock() {
 
 #[test]
 fn conversation_presence_reflects_creation_intent() {
-    let mut ws = Workspace::new("root");
+    let mut ws = Workspace::in_memory("root");
     let config = Arc::new(AppConfig::new_test());
 
     let projected = ConversationId::try_from(datetime!(2024-07-01 00:00:00 Z)).unwrap();
@@ -121,7 +121,7 @@ fn conversation_presence_reflects_creation_intent() {
 
 #[test]
 fn lock_projection_follows_presence() {
-    let mut ws = Workspace::new("root");
+    let mut ws = Workspace::in_memory("root");
     let config = Arc::new(AppConfig::new_test());
 
     let local_id = ConversationId::try_from(datetime!(2024-08-01 00:00:00 Z)).unwrap();
@@ -273,7 +273,7 @@ fn test_workspace_persist_via_lock() {
 
 #[test]
 fn test_workspace_conversations() {
-    let mut workspace = Workspace::new(Utf8PathBuf::new());
+    let mut workspace = Workspace::in_memory(Utf8PathBuf::new());
     assert_eq!(workspace.conversations().count(), 0);
 
     let id = ConversationId::default();
@@ -290,7 +290,7 @@ fn test_workspace_conversations() {
 
 #[test]
 fn test_workspace_acquire_conversation() {
-    let mut workspace = Workspace::new(Utf8PathBuf::new());
+    let mut workspace = Workspace::in_memory(Utf8PathBuf::new());
     assert!(workspace.state.conversations.is_empty());
 
     let id = ConversationId::try_from(chrono::Utc::now() - Duration::from_secs(1)).unwrap();
@@ -311,7 +311,7 @@ fn test_workspace_acquire_conversation() {
 
 #[test]
 fn test_workspace_create_conversation() {
-    let mut workspace = Workspace::new(Utf8PathBuf::new());
+    let mut workspace = Workspace::in_memory(Utf8PathBuf::new());
     assert!(workspace.state.conversations.is_empty());
 
     let conversation = Conversation::default();
@@ -331,7 +331,7 @@ fn test_workspace_create_conversation() {
 
 #[test]
 fn test_workspace_remove_conversation() {
-    let mut workspace = Workspace::new(Utf8PathBuf::new());
+    let mut workspace = Workspace::in_memory(Utf8PathBuf::new());
     assert!(workspace.state.conversations.is_empty());
 
     let id = ConversationId::try_from(chrono::Utc::now() - Duration::from_secs(1)).unwrap();
@@ -681,7 +681,7 @@ fn test_no_persist_skips_locking() {
     let fs = Arc::new(FsStorageBackend::new(&storage).unwrap());
 
     // Simulate --no-persist: load from FS, but use null persist + null lock.
-    let mut workspace = Workspace::new(&root)
+    let mut workspace = Workspace::in_memory(&root)
         .with_loader(fs.clone() as Arc<dyn jp_storage::backend::LoadBackend>)
         .with_sessions(fs as Arc<dyn jp_storage::backend::SessionBackend>)
         .with_persist(Arc::new(NullPersistBackend))
@@ -706,7 +706,7 @@ fn test_no_persist_skips_locking() {
 /// denies the lock (instead of silently falling back to `NoopLockGuard`).
 #[test]
 fn test_lock_new_conversation_errors_on_denial() {
-    let mut workspace = Workspace::new("root");
+    let mut workspace = Workspace::in_memory("root");
     let config = Arc::new(AppConfig::new_test());
 
     // Create a conversation and lock it via the in-memory backend.
@@ -754,7 +754,7 @@ fn test_archive_removes_from_index() {
     let lock = ws.test_lock(h);
     ws.archive_conversation(lock.into_mut());
 
-    // No longer in the active index.
+    // No longer in the live index.
     assert!(ws.acquire_conversation(&id).is_err());
     assert_eq!(ws.conversations().count(), 0);
 }
@@ -822,7 +822,7 @@ fn test_unarchive_restores_to_index() {
     let handle = ws.unarchive_conversation(&id).unwrap();
     assert_eq!(handle.id(), id);
 
-    // Back in the active index.
+    // Back in the live index.
     assert!(ws.acquire_conversation(&id).is_ok());
     assert_eq!(ws.conversations().count(), 1);
 }
@@ -907,7 +907,7 @@ fn test_unarchive_clears_archived_at() {
     // Unarchive.
     ws.unarchive_conversation(&id).unwrap();
 
-    // archived_at should be cleared in the active index.
+    // archived_at should be cleared in the live index.
     let h = ws.acquire_conversation(&id).unwrap();
     let meta = ws.metadata(&h).unwrap();
     assert!(
@@ -918,7 +918,7 @@ fn test_unarchive_clears_archived_at() {
 
 #[test]
 fn test_archived_conversations_returns_empty_when_none() {
-    let ws = Workspace::new(Utf8PathBuf::new());
+    let ws = Workspace::in_memory(Utf8PathBuf::new());
     assert_eq!(ws.archived_conversations().count(), 0);
 }
 
@@ -975,6 +975,120 @@ fn test_unarchive_nonexistent_returns_error() {
 
     let id = ConversationId::try_from(datetime!(2024-06-01 00:00:00 Z)).unwrap();
     assert!(ws.unarchive_conversation(&id).is_err());
+}
+
+/// Conversations that live only in the user-local silo must be listed by a
+/// workspace opened from disk.
+///
+/// Wiring the filesystem backend without user-local storage still compiles,
+/// still returns conversations, and raises no error — it just returns a
+/// subset.
+/// This assertion is the only thing standing between that mistake and a silent
+/// data-visibility bug.
+#[test]
+#[serial(env_vars)]
+fn open_lists_conversations_that_exist_only_in_user_local_storage() {
+    let _guard = UserDataDirEnvGuard::capture();
+    let tmp = tempdir().unwrap();
+    let user_data = tmp.path().join("user-data");
+
+    // SAFETY: mutating the environment races with any concurrent reader in the
+    // process. `#[serial(env_vars)]` keeps every test that touches these
+    // variables from running alongside this one, and the guard restores them.
+    unsafe {
+        env::set_var("JP_USER_DATA_DIR", user_data.as_str());
+        env::remove_var("XDG_DATA_HOME");
+    }
+
+    let root = tmp.path().join("my-workspace");
+    let storage = root.join(DEFAULT_STORAGE_DIR);
+    fs::create_dir_all(&storage).unwrap();
+    let workspace_id: Id = "abcde".parse().unwrap();
+    workspace_id.store(&storage).unwrap();
+
+    // Seed a `--local` conversation, which is written to the user-local silo
+    // and deliberately not projected into the workspace store.
+    let fs_backend = FsStorageBackend::new(&storage)
+        .unwrap()
+        .with_user_storage(
+            &user_data.join("workspace"),
+            root.file_name(),
+            workspace_id.to_string(),
+        )
+        .unwrap();
+    let local_id = ConversationId::try_from(datetime!(2024-09-01 00:00:00 Z)).unwrap();
+    let mut seeded = workspace_with_fs(&root, &fs_backend);
+    seeded.create_conversation_with_projection(
+        local_id,
+        Conversation::default(),
+        Arc::new(AppConfig::new_test()),
+        Projection::LocalOnly,
+    );
+    let handle = seeded.acquire_conversation(&local_id).unwrap();
+    let mut conv = seeded.test_lock(handle).into_mut();
+    conv.update_metadata(|_| {});
+    conv.flush().unwrap();
+    drop(conv);
+    drop(seeded);
+
+    assert!(
+        !fs_backend
+            .build_conversation_dir(&local_id, None, false)
+            .exists(),
+        "the seeded conversation must exist in user-local storage only"
+    );
+
+    let mut opened = Workspace::open(&root).unwrap();
+    opened.load_conversation_index();
+
+    let ids: Vec<_> = opened.conversations().map(|(id, _)| *id).collect();
+    assert_eq!(ids, vec![local_id]);
+    assert_eq!(opened.id(), &workspace_id);
+    assert!(opened.fs_storage().is_some());
+}
+
+/// Opening any directory inside a workspace opens that workspace, matching how
+/// the CLI resolves a workspace from the current directory.
+#[test]
+#[serial(env_vars)]
+fn open_walks_up_from_a_nested_directory() {
+    let _guard = UserDataDirEnvGuard::capture();
+    let tmp = tempdir().unwrap();
+
+    // SAFETY: as above — `#[serial(env_vars)]` serializes every test that
+    // touches these variables, and the guard restores them.
+    unsafe {
+        env::set_var("JP_USER_DATA_DIR", tmp.path().join("user-data").as_str());
+        env::remove_var("XDG_DATA_HOME");
+    }
+
+    let root = tmp.path().join("my-workspace");
+    fs::create_dir_all(root.join(DEFAULT_STORAGE_DIR)).unwrap();
+    let nested = root.join("src/deeply/nested");
+    fs::create_dir_all(&nested).unwrap();
+
+    let opened = Workspace::open(&nested).unwrap();
+
+    assert_eq!(opened.root(), root);
+}
+
+// A store name that cannot exist keeps the assertion independent of whatever
+// lives above the temp directory on the machine running the test.
+#[test]
+fn open_errors_when_no_store_exists_above_dir() {
+    let tmp = tempdir().unwrap();
+    let dir = tmp.path().join("not-a-workspace");
+    fs::create_dir_all(&dir).unwrap();
+
+    assert_eq!(
+        Workspace::open_with_storage_dir(&dir, ".jp-no-such-store").unwrap_err(),
+        Error::WorkspaceNotFound(dir)
+    );
+}
+
+#[test]
+fn in_memory_workspace_has_no_fs_storage() {
+    assert!(Workspace::in_memory("root").fs_storage().is_none());
 }
 
 /// Snapshot the two env vars [`user_data_dir`] depends on, so each test can

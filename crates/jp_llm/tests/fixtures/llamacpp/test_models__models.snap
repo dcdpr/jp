@@ -7,16 +7,19 @@ expression: v
         id: ModelIdConfig {
             provider: Llamacpp,
             name: Name(
-                "Qwen3.5-35B-A3B-GGUF:UD-Q4_K_XL",
+                "Qwen3.5-9B-GGUF",
             ),
         },
         display_name: None,
-        context_window: None,
+        context_window: Some(
+            8192,
+        ),
         max_output_tokens: None,
         reasoning: None,
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
 ]

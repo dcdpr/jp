@@ -1,13 +1,38 @@
-use jp_tool::Context;
+use camino::Utf8Path;
 use serde_json::{Value, from_str};
 
+use super::MAX_DIAGNOSTIC_BYTES;
 use crate::{
     to_simple_xml_with_root,
     util::{
         ToolResult,
         runner::{DuctProcessRunner, ProcessOutput, ProcessRunner},
+        truncate,
     },
 };
+
+/// Cap for a single failing test's captured output.
+///
+/// Tighter than [`MAX_DIAGNOSTIC_BYTES`] because a run can report many
+/// failures, and each one contributes its own block.
+const MAX_TEST_OUTPUT_BYTES: usize = 8_000;
+
+/// Cap for the serialized failure blocks of a run, combined.
+///
+/// One broken fixture can fail every test in the workspace, so a per-failure
+/// cap alone leaves the total unbounded.
+/// Failures past this budget are counted and named in the summary but carry no
+/// output.
+const MAX_TEST_OUTPUT_BUDGET_BYTES: usize = 32_000;
+
+/// Approximate size of one serialized failure block minus its captured output:
+/// the XML tags and indentation around the crate, path, and output fields.
+///
+/// Charged against [`MAX_TEST_OUTPUT_BUDGET_BYTES`] so that failures with empty
+/// captured output still consume budget.
+/// Without it a run where every failure prints nothing spends nothing, and the
+/// block scaffolding alone grows the response without bound.
+const FAILURE_BLOCK_OVERHEAD_BYTES: usize = 120;
 
 #[derive(serde::Serialize)]
 struct TestFailure {
@@ -18,14 +43,14 @@ struct TestFailure {
 }
 
 pub(crate) async fn cargo_test(
-    ctx: &Context,
+    root: &Utf8Path,
     package: Option<String>,
     testname: Option<String>,
     backtrace: Option<bool>,
     checksum_freshness: bool,
 ) -> ToolResult {
     cargo_test_impl(
-        ctx,
+        root,
         package,
         testname,
         backtrace.unwrap_or(false),
@@ -35,7 +60,7 @@ pub(crate) async fn cargo_test(
 }
 
 fn cargo_test_impl<R: ProcessRunner>(
-    ctx: &Context,
+    root: &Utf8Path,
     package: Option<String>,
     testname: Option<String>,
     backtrace: bool,
@@ -75,12 +100,14 @@ fn cargo_test_impl<R: ProcessRunner>(
             "--message-format=libtest-json-plus",
             &test_name,
         ],
-        &ctx.root,
+        root,
         &env,
     )?;
 
     let mut total_tests = 0;
     let mut ran_tests = 0;
+    let mut failed_tests = 0;
+    let mut spent_bytes = 0;
     let mut failure = vec![];
     for l in stdout.lines().filter_map(|s| from_str::<Value>(s).ok()) {
         let kind = l.get("type").and_then(Value::as_str).unwrap_or_default();
@@ -107,29 +134,43 @@ fn cargo_test_impl<R: ProcessRunner>(
         let (krate, path) = name.split_once('$').unwrap_or(("", name));
         let krate = krate.split_once("::").unwrap_or((krate, "")).0;
 
+        failed_tests += 1;
+        if spent_bytes >= MAX_TEST_OUTPUT_BUDGET_BYTES {
+            continue;
+        }
+
+        let output = truncate(stdout, MAX_TEST_OUTPUT_BYTES);
+        spent_bytes += output.len() + name.len() + FAILURE_BLOCK_OVERHEAD_BYTES;
         failure.push(TestFailure {
             krate: krate.to_owned(),
             path: path.to_owned(),
-            output: stdout.to_owned(),
+            output,
         });
     }
 
     if ran_tests == 0 {
         Err(format!(
             "Unable to run any tests. This can be due to compilation issues, or incorrect package \
-             or test name:\n\n{stderr}"
+             or test name:\n\n{}",
+            truncate(&stderr, MAX_DIAGNOSTIC_BYTES)
         ))?;
     }
 
-    let mut response = format!(
-        "Ran {ran_tests}/{total_tests} tests, of which {} failed.\n",
-        failure.len()
-    );
+    let mut response =
+        format!("Ran {ran_tests}/{total_tests} tests, of which {failed_tests} failed.\n");
 
     if !failure.is_empty() {
         let xml = to_simple_xml_with_root(&failure, "results")?;
         response.push_str("\nWhat follows is an XML representation of the failed tests:\n\n");
         response.push_str(&format!("```xml\n{xml}\n```"));
+
+        let omitted = failed_tests - failure.len();
+        if omitted > 0 {
+            response.push_str(&format!(
+                "\n\nOutput for {omitted} further failing tests was omitted to bound the size of \
+                 this response. Re-run with `testname` set to inspect them."
+            ));
+        }
     }
 
     Ok(response.into())

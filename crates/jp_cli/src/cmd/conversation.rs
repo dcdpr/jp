@@ -1,13 +1,15 @@
-use jp_workspace::ConversationHandle;
+use jp_config::PartialAppConfig;
+use jp_workspace::{ConversationHandle, Workspace};
 
 use super::{ConversationLoadRequest, Output};
-use crate::ctx::Ctx;
+use crate::ctx::{Ctx, IntoPartialAppConfig};
 
 mod archive;
 pub(crate) mod compact;
 mod edit;
 pub(crate) mod fork;
 mod grep;
+mod label;
 mod ls;
 mod path;
 mod print;
@@ -32,6 +34,7 @@ impl Conversation {
             Commands::Fork(args) => args.run(ctx, &handles).await,
             Commands::Compact(args) => args.run(ctx, handles).await,
             Commands::Grep(args) => args.run(ctx, handles),
+            Commands::Label(args) => args.run(ctx, handles).await,
             Commands::Print(args) => args.run(ctx, &handles),
             Commands::Path(args) => args.run(ctx, handles),
             Commands::List(args) => args.run(ctx, &handles),
@@ -49,12 +52,38 @@ impl Conversation {
             Commands::Fork(args) => args.conversation_load_request(),
             Commands::Compact(args) => args.conversation_load_request(),
             Commands::Grep(args) => args.conversation_load_request(),
+            Commands::Label(args) => args.conversation_load_request(),
             Commands::Print(args) => args.conversation_load_request(),
             Commands::Path(args) => args.conversation_load_request(),
             Commands::List(args) => args.conversation_load_request(),
             Commands::Use(args) => args.conversation_load_request(),
             Commands::Archive(args) => args.conversation_load_request(),
             Commands::Unarchive(args) => args.conversation_load_request(),
+        }
+    }
+}
+
+impl IntoPartialAppConfig for Conversation {
+    fn apply_cli_config(
+        &self,
+        workspace: Option<&Workspace>,
+        partial: PartialAppConfig,
+        merged_config: Option<&PartialAppConfig>,
+    ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
+        match &self.command {
+            Commands::Compact(args) => args.apply_cli_config(workspace, partial, merged_config),
+            Commands::Show(_)
+            | Commands::Remove(_)
+            | Commands::Edit(_)
+            | Commands::Fork(_)
+            | Commands::Grep(_)
+            | Commands::Label(_)
+            | Commands::Print(_)
+            | Commands::Path(_)
+            | Commands::List(_)
+            | Commands::Use(_)
+            | Commands::Archive(_)
+            | Commands::Unarchive(_) => Ok(partial),
         }
     }
 }
@@ -66,7 +95,7 @@ enum Commands {
     Remove(rm::Rm),
 
     /// List conversations.
-    #[command(name = "ls", alias = "list", visible_alias = "l")]
+    #[command(name = "ls", alias = "list")]
     List(ls::Ls),
 
     /// Show conversation details.
@@ -97,6 +126,12 @@ enum Commands {
     /// Search through conversation history.
     #[command(name = "grep", alias = "rg", visible_alias = "g")]
     Grep(grep::Grep),
+
+    /// Manage the labels on a conversation.
+    ///
+    /// `jp c label add`, `set`, `rm`, and `ls`; a bare `jp c label` lists.
+    #[command(name = "label", visible_alias = "l", alias = "labels")]
+    Label(label::Label),
 
     /// Print conversation history to the terminal.
     #[command(name = "print", visible_alias = "p")]

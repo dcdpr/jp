@@ -1,0 +1,19 @@
+name: Bug Report
+description: Report something in JP that behaves incorrectly.
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: JP version
+      description: Paste the full output of `jp --version`.
+      placeholder: v0.1.0-a1b2c3d (2026-07-30)
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+    validations:
+      required: true

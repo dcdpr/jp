@@ -47,10 +47,12 @@ use jp_config::{
         load_partials_with_inheritance,
     },
 };
-use jp_printer::{OutputFormat, Printer};
-use jp_storage::backend::{FsStorageBackend, NullLockBackend, NullPersistBackend};
-use jp_term::table::{DetailRow, details, details_markdown};
-use jp_workspace::{Workspace, user_data_dir};
+use jp_printer::{OutputFormat, OutputWidth, Printer};
+use jp_storage::backend::{
+    FsStorageBackend, NullLockBackend, NullPersistBackend, ReadOnlySessionBackend,
+};
+use jp_term::table::{DetailRow, Details, details, details_markdown};
+use jp_workspace::{DEFAULT_STORAGE_DIR, Workspace, user_data_dir};
 use relative_path::RelativePath;
 use serde_json::Value;
 use tokio::runtime::{self, Runtime};
@@ -66,8 +68,6 @@ use crate::{
 };
 
 static WORKER_THREADS: AtomicUsize = AtomicUsize::new(0);
-
-const DEFAULT_STORAGE_DIR: &str = ".jp";
 
 #[expect(dead_code)]
 const DEFAULT_VARIABLE_PREFIX: &str = "JP_";
@@ -161,6 +161,16 @@ struct Globals {
     #[arg(short = 'w', long, global = true)]
     workspace: Option<WorkspaceIdOrPath>,
 
+    /// Lay output out against this many columns.
+    ///
+    /// Detected automatically when stdout is a terminal.
+    /// Set it when stdout is a pipe that still renders for a human at a known
+    /// width, such as a preview pane laid out by another program.
+    /// `0` means unknown, which is the default when piped: content keeps its
+    /// natural width instead of being fitted to a guess.
+    #[arg(long, global = true, value_name = "COLUMNS")]
+    width: Option<u16>,
+
     /// The format of the log output written to stderr.
     ///
     /// Defaults to "text" when stderr is a terminal, and "json" when stderr is
@@ -173,8 +183,9 @@ struct Globals {
     /// Write the full tracing log to the given file.
     ///
     /// Use `-` to stream logs to stderr instead.
-    /// When unset, the log is written to a temporary file whose path is printed
-    /// when a run fails or `JP_DEBUG=1` is set.
+    /// When unset, the log is written to a temporary file, which is kept and
+    /// its path printed when a run fails, or when `JP_DEBUG=1` is set and
+    /// stdout is a terminal.
     #[arg(long, global = true, value_name = "PATH")]
     log_file: Option<String>,
 
@@ -345,11 +356,17 @@ pub fn run() -> ExitCode {
     );
 
     trace!(command = cli.command.name(), arguments = %cli, "Starting CLI run.");
-    let (code, output) = match run_inner(cli, format) {
-        Ok(()) => (0, None),
+    let (code, outcome, output) = match run_inner(cli, format) {
+        Ok(()) => (0, RunOutcome::AsExpected, None),
         Err(error) => {
-            let (code, msg) = parse_error(error.into(), format);
-            (code, Some(msg))
+            let error = cmd::Error::from(error);
+            let outcome = if error.expected {
+                RunOutcome::AsExpected
+            } else {
+                RunOutcome::Failed
+            };
+            let (code, msg) = parse_error(error, format);
+            (code, outcome, Some(msg))
         }
     };
 
@@ -363,10 +380,13 @@ pub fn run() -> ExitCode {
         }
     }
 
-    if (code != 0
-        || env::var("JP_DEBUG")
-            .as_deref()
-            .is_ok_and(|v| v == "1" || v == "true"))
+    // Read here rather than inside the policy, which stays a pure function of
+    // its inputs.
+    let debug_enabled = env::var("JP_DEBUG")
+        .as_deref()
+        .is_ok_and(|v| v == "1" || v == "true");
+
+    if should_report_trace_log(outcome, is_tty, debug_enabled)
         && let Some(path) = guard.and_then(TracingGuard::persist)
     {
         if format.is_json() {
@@ -383,20 +403,74 @@ pub fn run() -> ExitCode {
     ExitCode::from(code)
 }
 
-/// Width of the controlling terminal in columns, when stdout is a TTY.
+/// How a run ended, as far as reporting its trace log goes.
+#[derive(Debug, Clone, Copy)]
+enum RunOutcome {
+    /// The run did what was asked: it either succeeded, or exited non-zero to
+    /// report a result.
+    /// `jp conversation grep` exits 1 when it finds nothing.
+    AsExpected,
+
+    /// The run failed.
+    Failed,
+}
+
+/// Whether to tell the user where the run's trace log was written.
 ///
-/// `None` when stdout is piped or redirected, so output keeps its full width
-/// for machine consumption rather than being laid out against a guessed size.
-fn detect_terminal_width() -> Option<u16> {
-    if !stdout().is_terminal() {
-        return None;
+/// A failed run always reports it: diagnosing the failure matters more than
+/// keeping the output stream clean.
+/// The exit status alone doesn't answer this, since a command can exit non-zero
+/// to report a result rather than a failure.
+///
+/// Every other run makes the report opt-in via `JP_DEBUG`, and only when stdout
+/// is a terminal.
+/// A piped stdout means `jp` is a component in someone else's pipeline, and a
+/// program consuming it may own the screen: an `fzf` list or preview, for
+/// instance, where two uninvited lines corrupt the layout.
+/// Note that stderr's own tty-ness is the wrong test: in `jp … | fzf`, stderr
+/// *is* the terminal, which is exactly how the corruption happens.
+///
+/// Set `--log-file` to choose the path when a piped run needs to be traced;
+/// nothing has to be announced when the caller picked the destination.
+fn should_report_trace_log(outcome: RunOutcome, stdout_is_tty: bool, debug_enabled: bool) -> bool {
+    match outcome {
+        RunOutcome::Failed => true,
+        RunOutcome::AsExpected => stdout_is_tty && debug_enabled,
+    }
+}
+
+/// The width to lay output out against.
+///
+/// A `--width` given on the command line is [`OutputWidth::Declared`], with `0`
+/// meaning unknown.
+/// Otherwise the controlling terminal is measured when stdout is a TTY.
+///
+/// [`OutputWidth::Unknown`] when stdout is piped or redirected and no width was
+/// given, so output keeps its full width for machine consumption rather than
+/// being laid out against a guessed size.
+fn detect_output_width(declared: Option<u16>) -> OutputWidth {
+    if let Some(width) = declared {
+        return if width > 0 {
+            OutputWidth::Declared(width)
+        } else {
+            OutputWidth::Unknown
+        };
     }
 
-    terminal::size().ok().map(|(cols, _)| cols)
+    if !stdout().is_terminal() {
+        return OutputWidth::Unknown;
+    }
+
+    terminal::size()
+        .ok()
+        .map_or(OutputWidth::Unknown, |(cols, _)| {
+            OutputWidth::Terminal(cols)
+        })
 }
 
 fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
-    let printer = Printer::terminal(format).with_terminal_width(detect_terminal_width());
+    let printer =
+        Printer::terminal(format).with_output_width(detect_output_width(cli.globals.width));
 
     // `jp init` is a special case that doesn't need the full startup pipeline.
     if let Commands::Init(args) = &cli.command {
@@ -656,6 +730,7 @@ fn parse_error(error: cmd::Error, format: OutputFormat) -> (u8, String) {
             })
             .collect();
 
+        let rows = Details::Fields(rows);
         let rendered = if format.is_pretty() {
             details(message.as_deref(), rows)
         } else {
@@ -817,7 +892,7 @@ fn load_partial_configs_from_files(
         partials.push(cwd_config);
     }
 
-    // Load `$XDG_DATA_HOME/jp/<workspace_id>/config.{toml,json,yaml}`.
+    // Load `$XDG_DATA_HOME/jp/workspace/<name>-<id>/config.{toml,json,yaml}`.
     if let Some(user_workspace_config) = fs
         .and_then(|f| f.user_storage_with_path(config_path))
         .and_then(|p| load_partial_at_path(p).transpose())
@@ -835,6 +910,9 @@ fn load_partial_configs_from_files(
 /// to [`NullPersistBackend`] and the lock backend to [`NullLockBackend`] so
 /// that ephemeral queries never write to disk and never block on lock
 /// contention.
+/// The session backend is wrapped in [`ReadOnlySessionBackend`] for the same
+/// reason: the run still needs to read which conversation the session is on,
+/// but must not record one that it never persisted.
 fn load_workspace(
     workspace: Option<&WorkspaceIdOrPath>,
     persist: bool,
@@ -861,47 +939,25 @@ fn load_workspace(
             .try_into()
             .map_err(FromPathBufError::into_io_error)?,
     };
-    trace!(cwd = %cwd, "Finding workspace.");
+    let mut workspace = Workspace::open(&cwd).map_err(|error| match error {
+        jp_workspace::Error::WorkspaceNotFound(_) => Error::Command(cmd::Error::from(format!(
+            "Could not locate workspace. Use `{}` to create a new workspace.",
+            "jp init".bold().yellow()
+        ))),
+        error => Error::Workspace(error),
+    })?;
 
-    let root = Workspace::find_root(cwd, DEFAULT_STORAGE_DIR).ok_or(cmd::Error::from(format!(
-        "Could not locate workspace. Use `{}` to create a new workspace.",
-        "jp init".bold().yellow()
-    )))?;
-    trace!(root = %root, "Found workspace root.");
-
-    let storage = root.join(DEFAULT_STORAGE_DIR);
-    trace!(storage = %storage, "Initializing workspace storage.");
-
-    let id = jp_workspace::Id::load(&storage)
-        .transpose()
-        .ok()
-        .flatten()
-        .unwrap_or_default();
-
-    trace!(%id, "Loaded unique workspace ID.");
-
-    let fs = FsStorageBackend::new(&storage).map_err(jp_workspace::Error::from)?;
-
-    let user_root = user_data_dir()?.join("workspace");
-    // The workspace directory name slugs a freshly created silo so users can
-    // recognize it; an existing silo is reused by ID regardless of its slug.
-    let slug = root.file_name();
-    let fs = fs
-        .with_user_storage(&user_root, slug, id.to_string())
-        .map_err(jp_workspace::Error::from)?;
-
-    let fs = Arc::new(fs);
-    let mut workspace = Workspace::new_with_id(root, id).with_backend(fs.clone());
+    let fs = workspace.fs_storage().cloned();
     if !persist {
+        let sessions = Arc::new(ReadOnlySessionBackend::new(workspace.sessions().clone()));
         workspace = workspace
             .with_persist(Arc::new(NullPersistBackend))
-            .with_locker(Arc::new(NullLockBackend));
+            .with_locker(Arc::new(NullLockBackend))
+            .with_sessions(sessions);
     }
     info!(workspace = %workspace.root(), "Using existing workspace.");
 
-    workspace.id().store(&storage)?;
-
-    Ok((workspace, Some(fs)))
+    Ok((workspace, fs))
 }
 
 const JP_CRATES: &[&str] = &[
@@ -941,7 +997,7 @@ pub struct TracingGuard {
 /// Where the full trace log is written.
 enum TraceSink {
     /// A delete-on-drop temp file, kept only when [`TracingGuard::persist`] is
-    /// called (a failed run, or `JP_DEBUG=1`).
+    /// called (a failed run, or `JP_DEBUG=1` with stdout on a terminal).
     Temp(NamedUtf8TempFile),
     /// A caller-chosen path (`--log-file <path>`).
     /// The file always persists.
@@ -1003,9 +1059,9 @@ fn configure_logging(
     let file_env_filter = tracing_subscriber::EnvFilter::new(file_filter.join(","));
 
     // An explicit `--log-file <path>` pins the trace log to that path;
-    // otherwise it goes to a delete-on-drop temp file that is only kept when
-    // the run fails or `JP_DEBUG=1` is set. (`-` selects the stderr layer
-    // below, not a file path.)
+    // otherwise it goes to a delete-on-drop temp file that is only kept when the
+    // run fails, or when `JP_DEBUG=1` is set and stdout is a terminal. (`-`
+    // selects the stderr layer below, not a file path.)
     let (file_writer, sink) = match log_file {
         Some(path) if path != "-" => {
             let file = fs::File::create(path).ok()?;

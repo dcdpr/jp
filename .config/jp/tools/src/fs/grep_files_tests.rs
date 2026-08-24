@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
 use camino_tempfile::tempdir;
+use ignore::gitignore::Gitignore;
 
-use super::*;
+use super::{super::utils::suppress_matcher, *};
 
 #[tokio::test]
 async fn grep_with_restricted_policy_skips_ungranted_files() {
@@ -26,6 +27,7 @@ async fn grep_with_restricted_policy_skips_ungranted_files() {
         None,
         None,
         None,
+        &Gitignore::empty(),
     )
     .await
     .unwrap()
@@ -36,6 +38,30 @@ async fn grep_with_restricted_policy_skips_ungranted_files() {
         !matches.contains("secret"),
         "ungranted file searched: {matches}"
     );
+}
+
+#[tokio::test]
+async fn grep_skips_binary_files() {
+    let ws = tempdir().unwrap();
+    std::fs::write(ws.path().join("lib.rs"), "needle in source").unwrap();
+    // An archive or object file: NUL bytes early, and the pattern present in a
+    // symbol name. Searching it would emit undecodable bytes.
+    std::fs::write(ws.path().join("libjp.a"), b"!<arch>\x00\x01needle\xff\xfe").unwrap();
+
+    let matches = fs_grep_files(
+        ws.path(),
+        None,
+        "needle".to_owned(),
+        None,
+        None,
+        None,
+        &Gitignore::empty(),
+    )
+    .await
+    .unwrap();
+
+    assert!(matches.contains("lib.rs"), "got: {matches}");
+    assert!(!matches.contains("libjp.a"), "binary searched: {matches}");
 }
 
 #[cfg(unix)]
@@ -67,6 +93,7 @@ async fn greps_files_under_approved_external_mount() {
         None,
         Some(vec!["fork".to_owned()].into()),
         None,
+        &Gitignore::empty(),
     )
     .await
     .unwrap();
@@ -92,6 +119,7 @@ async fn dot_means_workspace_root() {
         None,
         Some(vec![".".to_owned()].into()),
         None,
+        &Gitignore::empty(),
     )
     .await
     .unwrap();
@@ -128,6 +156,7 @@ async fn subdir_scope_respects_root_ignore() {
         None,
         Some(vec!["docs".to_owned()].into()),
         None,
+        &Gitignore::empty(),
     )
     .await
     .unwrap()
@@ -163,6 +192,7 @@ async fn restricts_to_extensions() {
         None,
         Some(vec!["docs".to_owned()].into()),
         Some(vec!["md".to_owned()].into()),
+        &Gitignore::empty(),
     )
     .await
     .unwrap()
@@ -182,6 +212,7 @@ async fn rejects_workspace_escape() {
         None,
         Some(vec!["../escape".to_owned()].into()),
         None,
+        &Gitignore::empty(),
     )
     .await;
 
@@ -190,6 +221,203 @@ async fn rejects_workspace_escape() {
         err.to_string().contains("escape the workspace"),
         "unexpected error: {err}"
     );
+}
+
+/// Workspace with one `.ignore`d fixture holding the sought text, mirroring
+/// `**/fixtures/` in the real workspace `.ignore`.
+fn fixtures_workspace(root: &camino::Utf8Path) {
+    std::fs::write(root.join(".ignore"), "**/fixtures/\n").unwrap();
+    std::fs::create_dir_all(root.join("crates/tests/fixtures")).unwrap();
+    std::fs::write(
+        root.join("crates/tests/fixtures/a.snap"),
+        "context_window: None",
+    )
+    .unwrap();
+}
+
+#[tokio::test]
+async fn ignored_directory_is_searched_when_named() {
+    // Regression: a sweep scoped to an `.ignore`d directory searched nothing and
+    // returned the same "no matches" as a real miss, which reads as evidence
+    // that the pattern is absent from files the tool never opened.
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    fixtures_workspace(root);
+
+    let matches = fs_grep_files(
+        root,
+        None,
+        "context_window: None".to_owned(),
+        None,
+        Some(vec!["crates/tests/fixtures".to_owned()].into()),
+        None,
+        &Gitignore::empty(),
+    )
+    .await
+    .unwrap()
+    .replace('\\', "/");
+
+    assert_eq!(
+        matches,
+        "crates/tests/fixtures/a.snap:1:context_window: None\n"
+    );
+}
+
+#[tokio::test]
+async fn explicitly_named_ignored_file_is_searched() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    fixtures_workspace(root);
+
+    let matches = fs_grep_files(
+        root,
+        None,
+        "context_window".to_owned(),
+        None,
+        Some(vec!["crates/tests/fixtures/a.snap".to_owned()].into()),
+        None,
+        &Gitignore::empty(),
+    )
+    .await
+    .unwrap()
+    .replace('\\', "/");
+
+    assert_eq!(
+        matches,
+        "crates/tests/fixtures/a.snap:1:context_window: None\n"
+    );
+}
+
+#[tokio::test]
+async fn suppressed_path_is_reported_so_the_caller_can_ask_the_user() {
+    // The tool will not return this content however it is asked, so the note points
+    // at the only route left rather than leaving the reader to conclude the text is
+    // absent.
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::create_dir_all(root.join(".git")).unwrap();
+    std::fs::write(root.join(".git/HEAD"), "ref: refs/heads/main").unwrap();
+
+    let matches = fs_grep_files(
+        root,
+        None,
+        "refs/heads".to_owned(),
+        None,
+        Some(vec![".git/HEAD".to_owned()].into()),
+        None,
+        &suppress_matcher(root, &[".git/".to_owned()]).unwrap(),
+    )
+    .await
+    .unwrap();
+
+    // Normalized: a resolved path carries native separators, so the note reads
+    // `.git\HEAD` on Windows.
+    assert_eq!(
+        matches.replace('\\', "/"),
+        "No matches found in the paths that were searched.\n\nNote: '.git/HEAD' is suppressed \
+         from this tool's results. If you need it, ask the user to provide it."
+    );
+}
+
+/// Search a single-file workspace, returning the tool's rendered output.
+///
+/// The pattern semantics below are the contract the tool exposes to callers;
+/// they must hold for whichever regex engine backs the search.
+async fn grep_one_file(content: &[u8], pattern: &str) -> String {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(root.join("a.txt"), content).unwrap();
+
+    fs_grep_files(
+        root,
+        None,
+        pattern.to_owned(),
+        None,
+        None,
+        None,
+        &Gitignore::empty(),
+    )
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn caret_and_dollar_anchor_per_line() {
+    let matches = grep_one_file(b"alpha\nbeta\nalphabet\n", "^alpha$").await;
+
+    assert_eq!(matches, "a.txt:1:alpha\n");
+}
+
+#[tokio::test]
+async fn dot_does_not_match_across_lines() {
+    let matches = grep_one_file(b"a\nb\n", "a.b").await;
+
+    assert_eq!(
+        matches,
+        "No matches found. Broaden your search to see more."
+    );
+}
+
+#[tokio::test]
+async fn word_boundaries_hold_and_matching_is_case_sensitive() {
+    let matches = grep_one_file(b"foo\nfoobar\nFOO\n", r"\bfoo\b").await;
+
+    assert_eq!(matches, "a.txt:1:foo\n");
+}
+
+#[tokio::test]
+async fn repeated_match_on_one_line_prints_the_line_once() {
+    let matches = grep_one_file(b"foo bar foo\n", "foo").await;
+
+    assert_eq!(matches, "a.txt:1:foo bar foo\n");
+}
+
+#[tokio::test]
+async fn a_zero_width_pattern_matches_an_empty_line() {
+    let matches = grep_one_file(b"alpha\n\nbeta\n", "^$").await;
+
+    assert_eq!(matches, "a.txt:2:\n");
+}
+
+#[tokio::test]
+async fn a_line_that_is_not_utf8_does_not_abort_the_search() {
+    // Latin-1 bytes in a text file are not binary (no NUL), so the search runs
+    // on. Only the matched line reaches the output, which keeps the final
+    // UTF-8 decode of the printer buffer intact.
+    let matches = grep_one_file(b"caf\xe9 latte\nneedle here\n", "needle").await;
+
+    assert_eq!(matches, "a.txt:2:needle here\n");
+}
+
+#[tokio::test]
+async fn negative_lookahead_excludes_a_match() {
+    let matches = grep_one_file(b"foo bar\nfoo baz\n", "foo (?!bar)").await;
+
+    assert_eq!(matches, "a.txt:2:foo baz\n");
+}
+
+#[tokio::test]
+async fn lookbehind_sees_text_before_the_match() {
+    let matches = grep_one_file(b"let needle\nfn needle\n", "(?<=let )needle").await;
+
+    assert_eq!(matches, "a.txt:1:let needle\n");
+}
+
+#[tokio::test]
+async fn backreference_matches_a_repeated_group() {
+    let matches = grep_one_file(b"hello hello\nhello world\n", r"(\w+) \1").await;
+
+    assert_eq!(matches, "a.txt:1:hello hello\n");
+}
+
+#[tokio::test]
+async fn a_backreference_survives_the_trailing_quote_recovery() {
+    // The stray trailing quote is a typo the tool recovers from. The recovery
+    // must not renumber the pattern's capture groups, or the backreference ends
+    // up pointing at a group that never participates and nothing matches.
+    let matches = grep_one_file(b"hello hello\nhello world\n", r#"(\w+) \1""#).await;
+
+    assert_eq!(matches, "a.txt:1:hello hello\n");
 }
 
 #[tokio::test]
@@ -305,10 +533,18 @@ async fn test_grep_files() {
 
         let paths = (!paths.is_empty()).then_some(paths.into_iter().map(str::to_owned).collect());
 
-        let matches = fs_grep_files(root, None, pattern.to_owned(), Some(5), paths, None)
-            .await
-            .unwrap()
-            .replace('\\', "/");
+        let matches = fs_grep_files(
+            root,
+            None,
+            pattern.to_owned(),
+            Some(5),
+            paths,
+            None,
+            &Gitignore::empty(),
+        )
+        .await
+        .unwrap()
+        .replace('\\', "/");
 
         assert_eq!(matches, expected.join(""), "test case: {name}");
     }

@@ -517,6 +517,97 @@ fn test_sanitize_removes_orphaned_inquiry_request() {
 }
 
 #[test]
+fn test_sanitize_inquiry_orphan_repair_is_turn_scoped() {
+    // Turn 1 holds an orphaned request that shares its id with a valid pair in
+    // turn 2. The turn-1 orphan must be repaired within its own turn, not
+    // cross-satisfied by turn 2's response.
+    let mut stream = ConversationStream::new_test();
+
+    stream.start_turn("turn 1");
+    stream.push(ConversationEvent::new(
+        InquiryRequest::new(
+            "call_1.confirm",
+            InquirySource::tool("t"),
+            InquiryQuestion::boolean("proceed?".into()),
+        ),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 1).unwrap(),
+    ));
+
+    stream.start_turn("turn 2");
+    stream.push(ConversationEvent::new(
+        InquiryRequest::new(
+            "call_1.confirm",
+            InquirySource::tool("t"),
+            InquiryQuestion::boolean("proceed?".into()),
+        ),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 2).unwrap(),
+    ));
+    stream.push(ConversationEvent::new(
+        InquiryResponse::boolean("call_1.confirm", true),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 3).unwrap(),
+    ));
+
+    stream.sanitize();
+
+    let requests = stream
+        .iter()
+        .filter(|e| e.event.is_inquiry_request())
+        .count();
+    let responses = stream
+        .iter()
+        .filter(|e| e.event.is_inquiry_response())
+        .count();
+    assert_eq!(requests, 1, "turn 1's orphan request should be removed");
+    assert_eq!(responses, 1, "turn 2's paired response should survive");
+}
+
+#[test]
+fn test_sanitize_legacy_duplicate_ids_pair_by_order() {
+    // A single turn with two requests sharing a legacy two-segment id and one
+    // response: the by-order pair is preserved and the remaining request
+    // orphan is removed.
+    let mut stream = ConversationStream::new_test();
+
+    stream.start_turn("turn");
+    stream.push(ConversationEvent::new(
+        InquiryRequest::new(
+            "call_1.confirm",
+            InquirySource::tool("t"),
+            InquiryQuestion::boolean("proceed?".into()),
+        ),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 1).unwrap(),
+    ));
+    stream.push(ConversationEvent::new(
+        InquiryRequest::new(
+            "call_1.confirm",
+            InquirySource::tool("t"),
+            InquiryQuestion::boolean("proceed?".into()),
+        ),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 2).unwrap(),
+    ));
+    stream.push(ConversationEvent::new(
+        InquiryResponse::boolean("call_1.confirm", true),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 3).unwrap(),
+    ));
+
+    stream.sanitize();
+
+    let requests = stream
+        .iter()
+        .filter(|e| e.event.is_inquiry_request())
+        .count();
+    let responses = stream
+        .iter()
+        .filter(|e| e.event.is_inquiry_response())
+        .count();
+    assert_eq!(
+        requests, 1,
+        "the unpaired duplicate request should be removed"
+    );
+    assert_eq!(responses, 1);
+}
+
+#[test]
 fn test_sanitize_keeps_matched_pairs_intact() {
     let mut stream = ConversationStream::new_test();
 
@@ -1038,6 +1129,34 @@ fn test_compaction_not_counted_by_is_empty() {
         stream.is_empty(),
         "Compaction alone should not make stream non-empty"
     );
+}
+
+#[test]
+fn test_remove_compaction_by_index() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn(ChatRequest::from("hello"));
+    stream.add_compaction(make_compaction(0, 1));
+    stream.add_compaction(make_compaction(2, 3));
+    stream.add_compaction(make_compaction(4, 5));
+
+    let removed = stream.remove_compaction(1).expect("second compaction");
+
+    assert_eq!((removed.from_turn, removed.to_turn), (2, 3));
+    let remaining: Vec<_> = stream
+        .compactions()
+        .map(|c| (c.from_turn, c.to_turn))
+        .collect();
+    assert_eq!(remaining, vec![(0, 1), (4, 5)]);
+}
+
+#[test]
+fn test_remove_compaction_out_of_range_is_a_no_op() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn(ChatRequest::from("hello"));
+    stream.add_compaction(make_compaction(0, 1));
+
+    assert!(stream.remove_compaction(1).is_none());
+    assert_eq!(stream.compactions().count(), 1);
 }
 
 #[test]
