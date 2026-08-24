@@ -210,8 +210,6 @@ fn comment_preview_renders_the_block_under_the_ticket_it_lands_on() {
         STAMP,
     )));
 
-    // The rule spans the text column rather than the terminal, and the `> `
-    // the preview quotes with takes two of the eighty.
     assert_eq!(
         out,
         concat!(
