@@ -411,6 +411,16 @@ async fn backreference_matches_a_repeated_group() {
 }
 
 #[tokio::test]
+async fn a_backreference_survives_the_trailing_quote_recovery() {
+    // The stray trailing quote is a typo the tool recovers from. The recovery
+    // must not renumber the pattern's capture groups, or the backreference ends
+    // up pointing at a group that never participates and nothing matches.
+    let matches = grep_one_file(b"hello hello\nhello world\n", r#"(\w+) \1""#).await;
+
+    assert_eq!(matches, "a.txt:1:hello hello\n");
+}
+
+#[tokio::test]
 #[test_log::test]
 async fn test_grep_files() {
     struct TestCase {

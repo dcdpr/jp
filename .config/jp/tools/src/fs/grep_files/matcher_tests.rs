@@ -41,6 +41,18 @@ fn offsets_stay_absolute_in_a_haystack_holding_invalid_utf8() {
 }
 
 #[test]
+fn a_backreference_matches_after_an_invalid_byte_on_the_same_line() {
+    let matcher = FancyMatcher::new(r"(\w+) \1").unwrap();
+
+    // `hello hello` starts at 5, right behind the latin-1 byte. A pattern the
+    // backtracking VM has to run (rather than one it can delegate) must still
+    // reach that start position.
+    let found = matcher.find_at(b"caf\xe9 hello hello", 0).unwrap().unwrap();
+
+    assert_eq!((found.start(), found.end()), (5, 16));
+}
+
+#[test]
 fn a_pattern_that_cannot_match_returns_none_rather_than_an_error() {
     let matcher = FancyMatcher::new("needle").unwrap();
 

@@ -1,3 +1,5 @@
+use std::str;
+
 use fancy_regex::{Regex, RegexBuilder};
 use grep_matcher::{Match, Matcher, NoCaptures};
 
@@ -23,6 +25,36 @@ impl FancyMatcher {
 
         Ok(Self { regex })
     }
+
+    /// Search each valid UTF-8 run of a haystack that is not valid UTF-8 as a
+    /// whole, reporting offsets into the original bytes.
+    ///
+    /// Handing the malformed bytes to the engine directly loses matches: it
+    /// advances over a stray byte by the width its UTF-8 lead byte claims, so a
+    /// match starting in the bytes that width covers is never attempted.
+    /// Lookaround cannot reach across a run boundary.
+    fn find_in_valid_runs(
+        &self,
+        haystack: &[u8],
+        at: usize,
+    ) -> Result<Option<Match>, fancy_regex::Error> {
+        let mut offset = 0;
+
+        for chunk in haystack.utf8_chunks() {
+            let run = chunk.valid();
+            let end = offset + run.len();
+
+            if at <= end
+                && let Some(m) = self.regex.find_from_pos(run, at.saturating_sub(offset))?
+            {
+                return Ok(Some(Match::new(offset + m.start(), offset + m.end())));
+            }
+
+            offset = end + chunk.invalid().len();
+        }
+
+        Ok(None)
+    }
 }
 
 impl Matcher for FancyMatcher {
@@ -30,15 +62,18 @@ impl Matcher for FancyMatcher {
     type Error = fancy_regex::Error;
 
     fn find_at(&self, haystack: &[u8], at: usize) -> Result<Option<Match>, Self::Error> {
+        // The engine expects valid UTF-8, and a buffer holding a latin-1 line is
+        // searched run by run instead.
+        let Ok(text) = str::from_utf8(haystack) else {
+            return self.find_in_valid_runs(haystack, at);
+        };
+
         // `find_from_pos` starts the search at `at` while leaving the preceding
         // bytes visible, which is what lets lookbehind work across the offset.
         // Slicing the haystack instead would hide them.
-        //
-        // Bytes that are not valid UTF-8 simply never match, so one latin-1
-        // line does not blind the search to the rest of the buffer.
         let found = self
             .regex
-            .find_from_pos(haystack, at)?
+            .find_from_pos(text, at)?
             .map(|m| Match::new(m.start(), m.end()));
 
         Ok(found)

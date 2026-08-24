@@ -43,8 +43,14 @@ pub(crate) async fn fs_grep_files(
     // Guard against a common mistake LLMs seem to make when using this tool.
     // Often the pattern ends with an escaped double quote, which will cause the
     // pattern to not match anything.
-    if let Some(pat) = pattern.strip_suffix('"') {
-        pattern = format!("{pattern}|{pat}");
+    if let Some(pat) = pattern.strip_suffix('"')
+        && !pat.is_empty()
+    {
+        // An optional quote rather than an alternation of both spellings:
+        // duplicating the pattern renumbers its capture groups, so a
+        // backreference would point at the copy in the branch it is not in and
+        // never match.
+        pattern = format!("{pat}\"?");
     }
 
     let matcher = FancyMatcher::new(&pattern)?;
