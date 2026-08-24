@@ -210,12 +210,14 @@ fn comment_preview_renders_the_block_under_the_ticket_it_lands_on() {
         STAMP,
     )));
 
+    // The rule spans the text column, which the blockquote's `> ` narrows by
+    // two: 78 characters, not the full 80.
     assert_eq!(
         out,
         concat!(
             "> # T-02wt0kx: Tool call header misaligned\n",
             "> \n",
-            "> ────────────────────────────────────────────────────────────────────────────────\n",
+            "> ──────────────────────────────────────────────────────────────────────────────\n",
             "> \n",
             "> - **From**: jp\n",
             "> - **Date**: 2026-08-05T14:03:11Z\n",
