@@ -80,3 +80,21 @@ display = "full"
 
 [conversation.tools.'*']
 run = "ask"
+
+# Record the VCS context a conversation was started in, so it can be found back
+# with `jp c ls --label=branch=<name>`. Re-resolved on fork, because a fork is a
+# new conversation started here and now, not a copy of where the source began.
+[conversation.labels.branch]
+value.cmd = "git branch --show-current"
+apply_on = { new = true, fork = true }
+run = "unattended"
+
+[conversation.labels.commit]
+value.cmd = "git rev-parse --short HEAD"
+apply_on = { new = true, fork = true }
+run = "unattended"
+
+[conversation.labels.worktree]
+value.cmd = { program = 'basename "$(git rev-parse --show-toplevel)"', shell = true }
+apply_on = { new = true, fork = true }
+run = "unattended"
