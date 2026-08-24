@@ -295,6 +295,14 @@ impl AssignKeyValue for PartialLabelConfig {
             // separates, a JSON array is taken element-wise, and `:+=` adds to
             // what the key already names.
             "" if kv.is_json_object() => *self = kv.try_object_or_from_str()?,
+            // Naming values on a rule that already has a full form lands on its
+            // `value`, so `apply_on` and `run` survive the assignment.
+            "" if matches!(self, Self::Object(_)) => {
+                let Self::Object(object) = self else {
+                    unreachable!("matched above")
+                };
+                object.value.assign(kv)?;
+            }
             "" => *self = Self::List(assign_values(self.values(), kv)?),
             _ => match self {
                 Self::Static(_) | Self::List(_) => return missing_key(&kv),
@@ -308,9 +316,13 @@ impl AssignKeyValue for PartialLabelConfig {
 
 impl PartialLabelConfig {
     /// Take the values named so far, leaving none behind.
+    ///
+    /// A scalar counts as one value, so `:+=` adds to it rather than replacing
+    /// it; the empty scalar is the unset default rather than a value to keep.
     fn values(&mut self) -> Vec<String> {
         match self {
             Self::List(values) => std::mem::take(values),
+            Self::Static(value) if !value.is_empty() => vec![std::mem::take(value)],
             _ => vec![],
         }
     }
@@ -318,9 +330,13 @@ impl PartialLabelConfig {
 
 impl PartialLabelValue {
     /// Take the values named so far, leaving none behind.
+    ///
+    /// A scalar counts as one value, so `:+=` adds to it rather than replacing
+    /// it; the empty scalar is the unset default rather than a value to keep.
     fn values(&mut self) -> Vec<String> {
         match self {
             Self::List(values) => std::mem::take(values),
+            Self::Static(value) if !value.is_empty() => vec![std::mem::take(value)],
             _ => vec![],
         }
     }

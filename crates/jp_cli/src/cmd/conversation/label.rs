@@ -271,8 +271,11 @@ impl Report {
     }
 
     /// Record one target's outcome for the collapsed line.
+    ///
+    /// A key the invocation named but did not change is left out: the collapsed
+    /// line reports what happened, not what was asked for.
     fn record(&mut self, changes: &[Change]) {
-        for change in changes {
+        for change in changes.iter().filter(|change| change.changed()) {
             if !self.keys.contains(&change.key) {
                 self.keys.push(change.key.clone());
             }
@@ -284,14 +287,18 @@ impl Report {
     fn print_chrome(&self, printer: &Printer, changes: &[Change], target: &str) {
         printer.eprintln(self.chrome(changes, target));
 
-        if !changes.is_empty() {
+        if changed(changes) {
             printer.eprintln("");
         }
     }
 
     /// What happened to one target, for the reader rather than the script.
+    ///
+    /// An invocation that named a key without changing it did nothing, and says
+    /// so: `jp c label add draft` on a key that already holds a value asks for
+    /// a presence the key already has.
     fn chrome(&self, changes: &[Change], target: &str) -> String {
-        if changes.is_empty() {
+        if !changed(changes) {
             return self.nothing_line(target);
         }
 
@@ -348,13 +355,25 @@ impl Report {
     }
 }
 
+/// Whether any key came out of the mutation holding something different.
+fn changed(changes: &[Change]) -> bool {
+    changes.iter().any(Change::changed)
+}
+
 /// Render what a mutation did as diff lines, one label per line.
 ///
 /// `-` marks a value the key lost, `+` one it gained, and a space one it kept,
 /// which is the same marker column a listing prints.
 /// Reading the same event the same way whatever the verb was means a line can
 /// be understood without knowing which verb produced it.
+///
+/// An invocation that changed nothing renders nothing: with no marked line to
+/// carry it, the context alone would read as a change that never happened.
 fn diff_lines(changes: &[Change]) -> Vec<String> {
+    if !changed(changes) {
+        return vec![];
+    }
+
     changes
         .iter()
         .flat_map(|change| {

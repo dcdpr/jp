@@ -27,17 +27,20 @@ fn setup(
 }
 
 /// The values resolved under `key`, for readable assertions.
-fn values<'a>(labels: &'a Labels, key: &str) -> Vec<&'a str> {
-    labels
+fn values<'a>(resolved: &'a Resolution, key: &str) -> Vec<&'a str> {
+    resolved
         .get(key)
         .map(|values| values.iter().map(String::as_str).collect())
         .unwrap_or_default()
 }
 
-/// Every key that resolved, sorted.
-fn keys(labels: &Labels) -> Vec<&str> {
-    labels.iter().map(|(key, _)| key.as_str()).collect()
+/// Every key that resolved, in rule-declaration order.
+fn keys(resolved: &Resolution) -> Vec<&str> {
+    resolved.keys().map(String::as_str).collect()
 }
+
+/// What [`Resolver::automatic`] hands back.
+type Resolution = IndexMap<String, Vec<String>>;
 
 #[tokio::test]
 async fn static_rules_resolve_without_running_anything() {
@@ -52,7 +55,7 @@ async fn static_rules_resolve_without_running_anything() {
 
     let resolved = resolver.automatic(Trigger::New).await.unwrap();
 
-    assert_eq!(keys(&resolved), ["stage", "team"]);
+    assert_eq!(keys(&resolved), ["team", "stage"], "in rule order");
     assert_eq!(values(&resolved, "team"), ["platform"]);
     assert_eq!(values(&resolved, "stage"), ["review"]);
 }
@@ -74,15 +77,17 @@ async fn list_rules_resolve_to_every_value() {
     assert_eq!(values(&resolved, "stage"), ["draft", "review"]);
 }
 
-/// An empty list is how a rule is turned off without deleting it.
+/// A rule that produced nothing keeps its key, so a caller can tell it apart
+/// from a rule that never matched and replace the key's set with nothing.
 #[tokio::test]
-async fn an_empty_list_rule_produces_no_label() {
+async fn an_empty_list_rule_keeps_its_key_with_no_values() {
     let (rules, tmp, printer, _err, prompts) = setup(r#"{ "crate": { "value": [] } }"#);
     let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
 
     let resolved = resolver.automatic(Trigger::New).await.unwrap();
 
-    assert!(resolved.is_empty());
+    assert_eq!(keys(&resolved), ["crate"]);
+    assert!(values(&resolved, "crate").is_empty());
 }
 
 /// `apply_on` selects which rules a trigger applies.
@@ -99,10 +104,10 @@ async fn apply_on_selects_rules_per_trigger() {
     let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
 
     let new = resolver.automatic(Trigger::New).await.unwrap();
-    assert_eq!(keys(&new), ["onboth", "onnew"]);
+    assert_eq!(keys(&new), ["onnew", "onboth"]);
 
     let fork = resolver.automatic(Trigger::Fork).await.unwrap();
-    assert_eq!(keys(&fork), ["onboth", "onfork"]);
+    assert_eq!(keys(&fork), ["onfork", "onboth"]);
 }
 
 #[tokio::test]
@@ -149,11 +154,26 @@ async fn command_output_is_one_value_per_line() {
     ]);
 }
 
-/// A command that writes nothing produces no label, rather than a bare one.
+/// A command that writes nothing produces no values, rather than a bare label.
+/// Its key survives, because the rule ran and succeeded.
 #[tokio::test]
-async fn a_silent_command_produces_no_label() {
+async fn a_silent_command_produces_no_values() {
     let (rules, tmp, printer, _err, prompts) =
         setup(r#"{ "quiet": { "value": { "cmd": "true" }, "run": "unattended" } }"#);
+    let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
+
+    let resolved = resolver.automatic(Trigger::New).await.unwrap();
+
+    assert_eq!(keys(&resolved), ["quiet"]);
+    assert!(values(&resolved, "quiet").is_empty());
+}
+
+/// A rule that failed is dropped entirely: its key is absent, so whatever the
+/// conversation already carries is left alone.
+#[tokio::test]
+async fn a_failing_command_drops_its_key() {
+    let (rules, tmp, printer, _err, prompts) =
+        setup(r#"{ "broken": { "value": { "cmd": "false" }, "run": "unattended" } }"#);
     let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
 
     let resolved = resolver.automatic(Trigger::New).await.unwrap();

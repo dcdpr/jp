@@ -223,6 +223,16 @@ order.
 A source carrying `stage={draft, review}` under a rule producing `{approved,
 ready}` forks to `{approved, ready}`, not to all four.
 
+Replacement is replacement when the rule produces nothing, so a matching rule
+that resolves to no values empties its key.
+That is what makes `value = []` a way to strip an inherited label on fork rather
+than a rule that quietly does nothing.
+A rule that *failed* is a different case: it is reported and dropped, and the
+inherited values stand, because a broken command is not a statement about what
+the key should hold.
+Resolution therefore carries "matched, produced nothing" separately from "did
+not match", which a bare set of labels cannot express.
+
 ### Data model
 
 ```rust
@@ -246,8 +256,20 @@ add diff noise to committed metadata and buy nothing.
 Sorted keys also match what [RFD 101] already writes, so key ordering does not
 change.
 
-The field is private and the invariant — no key maps to an empty set — is
-enforced by the type:
+The field is private and two invariants are enforced by the type.
+
+**No key maps to an empty set.** The invariant belongs on the map rather than on
+a non-empty set type: it is a property of the collection, and a `NonEmptySet`
+would still let a caller insert a key and then drain it.
+
+**The empty value never sits alongside a real one.** A bare label stores the
+empty value to record that its key is present, and holding any real value
+records the same thing, so the two together say nothing the second does not.
+Without this, `jp c label add draft draft=urgent` would leave `{"", "urgent"}`:
+a state where `--label=draft=` matches and `jp c label rm draft=` changes
+something, while every view that hides the marker shows a key holding one value.
+Adding a real value drops the marker, adding the marker to a key that holds one
+changes nothing, and reading normalizes a hand-edited pair away.
 
 | Method                     | Behaviour                                            |
 | -------------------------- | ---------------------------------------------------- |
@@ -256,10 +278,6 @@ enforced by the type:
 | `remove_key(key)`          | Removes the key and returns its set.                 |
 | `remove_value(key, value)` | Removes one value, dropping the key when it empties. |
 | `get`, `contains`, `iter`  | Read access.                                         |
-
-The invariant belongs on the map rather than on a non-empty set type: it is a
-property of the collection, and a `NonEmptySet` would still let a caller insert
-a key and then drain it.
 
 `Labels` also owns the on-disk contract, and deserializes through a validating
 conversion rather than a derive.
@@ -272,6 +290,7 @@ the whole conversation:
 - A scalar becomes a one-element set.
 - An array is deduplicated, first occurrence winning.
 - An empty array drops the key, matching `set(key, empty)`.
+- An array pairing the empty value with a real one drops the empty value.
 - A non-string value is a metadata load error.
 
 A value is read as either a scalar or an array, so conversations written before
@@ -292,6 +311,8 @@ this RFD load unchanged, and is always written as an array:
 ```
 
 Accepting two shapes and emitting one means no migration step.
+A JP built before `labels` existed skips the field as unknown, whatever shape
+its values take, so the array form costs nothing there either.
 
 ### Display and machine output
 

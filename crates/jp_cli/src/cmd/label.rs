@@ -93,7 +93,22 @@ impl LabelOperand {
 /// The only way to obtain one is [`expand_aliases`], which does the resolving,
 /// so an unresolved alias cannot be applied by accident.
 #[derive(Debug, Default, PartialEq, Eq)]
-pub(crate) struct Resolved(Vec<(String, Option<String>)>);
+pub(crate) struct Resolved(Vec<(String, Contribution)>);
+
+/// What one resolved operand contributes to its key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Contribution {
+    /// A bare `key`: the empty value under `add` and `set`, the whole key under
+    /// `rm`.
+    Bare,
+
+    /// The values the operand named, or the ones its rule produced.
+    ///
+    /// An alias whose rule produced nothing contributes no values, which is
+    /// distinct from naming none at all: the key was still named, so a `set`
+    /// replaces its set with nothing.
+    Values(Vec<String>),
+}
 
 impl Resolved {
     /// Group the operands for `add` and `set`, where a bare key names the empty
@@ -102,13 +117,21 @@ impl Resolved {
     /// Grouping is what makes a verb act on the union of what it was given: `jp
     /// c label set crate=jp_config crate=jp_llm` replaces the key's set once,
     /// with both values, rather than twice.
+    /// A key that was named keeps its group even when nothing resolved under
+    /// it, so `set :alias` on a rule that produced nothing clears the key
+    /// rather than passing over it.
     pub(crate) fn grouped(&self) -> Grouped {
         let mut grouped = Grouped::new();
-        for (key, value) in &self.0 {
-            grouped
-                .entry(key.clone())
-                .or_default()
-                .insert(value.clone().unwrap_or_default());
+        for (key, contribution) in &self.0 {
+            let values = grouped.entry(key.clone()).or_default();
+            match contribution {
+                Contribution::Bare => {
+                    values.insert(String::new());
+                }
+                Contribution::Values(named) => {
+                    values.extend(named.iter().cloned());
+                }
+            }
         }
 
         grouped
@@ -122,17 +145,17 @@ impl Resolved {
         let mut grouped = Grouped::new();
         let mut whole_keys = IndexSet::new();
 
-        for (key, value) in &self.0 {
+        for (key, contribution) in &self.0 {
             let values = grouped.entry(key.clone()).or_default();
-            match value {
-                None => {
+            match contribution {
+                Contribution::Bare => {
                     values.clear();
                     whole_keys.insert(key.clone());
                 }
-                Some(value) if !whole_keys.contains(key) => {
-                    values.insert(value.clone());
+                Contribution::Values(named) if !whole_keys.contains(key) => {
+                    values.extend(named.iter().cloned());
                 }
-                Some(_) => {}
+                Contribution::Values(_) => {}
             }
         }
 
@@ -159,12 +182,19 @@ pub(crate) async fn expand_aliases(
 
     for operand in operands {
         match operand {
-            LabelOperand::Pair { key, value } => resolved.push((key.clone(), value.clone())),
+            LabelOperand::Pair { key, value } => {
+                let contribution = value.clone().map_or(Contribution::Bare, |value| {
+                    Contribution::Values(vec![value])
+                });
+                resolved.push((key.clone(), contribution));
+            }
             // An alias contributes every value its rule produces to the key's
-            // group, which may be none at all.
+            // group, which may be none at all — the key is named either way.
+            // A declined prompt is the one case that names nothing, since the
+            // user just said not to.
             LabelOperand::Alias(name) => {
                 if let Some((key, values)) = resolver.alias(name).await? {
-                    resolved.extend(values.into_iter().map(|value| (key.clone(), Some(value))));
+                    resolved.push((key, Contribution::Values(values)));
                 }
             }
         }
@@ -201,6 +231,17 @@ pub(crate) struct Change {
 
     /// The values the key holds now; empty when the key is gone.
     pub(crate) after: IndexSet<String>,
+}
+
+impl Change {
+    /// Whether the key came out holding something different.
+    ///
+    /// A verb can name a key without changing it: adding a value it already
+    /// holds, or `add draft` on a key whose presence a real value already
+    /// records.
+    pub(crate) fn changed(&self) -> bool {
+        self.before != self.after
+    }
 }
 
 /// What applying a change did to one conversation.

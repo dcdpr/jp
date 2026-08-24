@@ -20,7 +20,12 @@ fn resolved(raw: &[&str], aliases: bool) -> Resolved {
     Resolved(
         raw.iter()
             .map(|raw| match LabelOperand::parse(raw, aliases).unwrap() {
-                LabelOperand::Pair { key, value } => (key, value),
+                LabelOperand::Pair { key, value } => {
+                    let contribution = value.map_or(Contribution::Bare, |value| {
+                        Contribution::Values(vec![value])
+                    });
+                    (key, contribution)
+                }
                 LabelOperand::Alias(name) => panic!("alias ':{name}' needs a resolver"),
             })
             .collect(),
@@ -407,10 +412,36 @@ async fn expand_aliases_replaces_aliases_and_keeps_order() {
     assert_eq!(
         expanded,
         Resolved(vec![
-            ("a".to_owned(), Some("1".to_owned())),
-            ("stage".to_owned(), Some("review".to_owned())),
+            ("a".to_owned(), Contribution::Values(vec!["1".to_owned()])),
+            (
+                "stage".to_owned(),
+                Contribution::Values(vec!["review".to_owned()])
+            ),
         ])
     );
+}
+
+/// A rule that produced nothing still names its key, so `set :alias` replaces
+/// the key's set with nothing rather than passing over it.
+#[tokio::test]
+async fn an_alias_that_produced_nothing_still_names_its_key() {
+    let rules = alias_resolver_rules(r#"{ "quiet": [] }"#);
+    let tmp = camino_tempfile::tempdir().unwrap();
+    let (printer, _out, _err) = jp_printer::Printer::memory(jp_printer::OutputFormat::Text);
+    let prompts = jp_inquire::prompt::MockPromptBackend::new();
+    let resolver = resolve::Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
+
+    let grouped = expand_aliases(&parse(&[":quiet"]), &resolver)
+        .await
+        .unwrap()
+        .grouped();
+
+    assert!(grouped["quiet"].is_empty(), "got: {grouped:?}");
+
+    let mut labels = Labels::from_iter([("quiet", ["inherited"])]);
+    apply(&mut labels, &LabelChange::Set(grouped));
+
+    assert!(labels.is_empty(), "the set replaced the key with nothing");
 }
 
 /// An alias contributes its values to its key's group, alongside anything else

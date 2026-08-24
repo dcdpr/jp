@@ -90,6 +90,24 @@ impl Fork {
     pub(crate) async fn run(self, ctx: &mut Ctx, handles: &[ConversationHandle]) -> Output {
         let mut forked = Vec::with_capacity(handles.len());
 
+        // A fork is persisted as soon as it is created, so work that fails
+        // after that point leaves it behind. Reporting the IDs either way keeps
+        // the created conversations addressable; the error still propagates, so
+        // the exit status says the run did not finish.
+        let result = self.fork_each(ctx, handles, &mut forked).await;
+        print_forked(&ctx.printer, &forked);
+
+        result
+    }
+
+    /// Fork every source, recording each new conversation's ID as it is
+    /// created.
+    async fn fork_each(
+        &self,
+        ctx: &mut Ctx,
+        handles: &[ConversationHandle],
+        forked: &mut Vec<ConversationId>,
+    ) -> Output {
         for source in handles {
             // `--no-turns` folds the source's effective config (base + every
             // delta) into a fresh base config; resolving it here lets the
@@ -178,7 +196,6 @@ impl Fork {
             forked.push(lock.id());
         }
 
-        print_forked(&ctx.printer, &forked);
         Ok(())
     }
 }

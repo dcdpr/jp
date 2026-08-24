@@ -1030,8 +1030,8 @@ fn test_conversation_fork() {
 /// inherited set for its own key, rather than adding to it; every other
 /// inherited label survives, and a rule that only opts into `new` is left
 /// alone.
-/// A rule that resolves to no values contributes nothing, so what the source
-/// carried is inherited untouched.
+/// A rule that resolves to no values replaces the key's set with nothing, which
+/// removes the key: the rule matched, and replacement is replacement.
 #[test]
 fn fork_reresolves_apply_on_fork_rules() {
     use jp_config::conversation::label::{
@@ -1126,9 +1126,9 @@ fn fork_reresolves_apply_on_fork_rules() {
             // `apply_on.fork` replaced the inherited set rather than adding to
             // it, so `draft` and `review` are gone.
             ("stage", vec!["approved", "ready"]),
-            // A rule that resolved to nothing left the inherited value alone.
-            ("quiet", vec!["inherited"]),
-            // An inherited label with no matching rule is untouched.
+            // An inherited label with no matching rule is untouched. `quiet`
+            // is absent: its rule matched and produced nothing, so the
+            // replacement emptied the key.
             ("team", vec!["platform"]),
         ])
     );
@@ -1228,6 +1228,90 @@ fn a_failing_fork_rule_creates_no_conversation() {
         1,
         "the source survives and no fork was created"
     );
+}
+
+/// A fork is persisted the moment it is created, so a source that fails after
+/// an earlier one succeeded leaves a conversation behind.
+/// Its ID still reaches stdout, or the only pointer to it is gone; the run
+/// still fails, so the exit status says the work did not finish.
+#[test]
+fn a_failure_still_reports_the_forks_already_created() {
+    let tmp = tempdir().unwrap();
+    let (printer, out, _) = Printer::memory(OutputFormat::Text);
+    let storage = tmp.path().join(".jp");
+    let user = tmp.path().join("user");
+    let fs = Arc::new(
+        FsStorageBackend::new(&storage)
+            .unwrap()
+            .with_user_storage(&user, None, "abc")
+            .unwrap(),
+    );
+    let workspace = Workspace::in_memory(tmp.path()).with_backend(fs);
+    let mut ctx = Ctx::new(
+        workspace,
+        None,
+        Runtime::new().unwrap(),
+        Globals::default(),
+        AppConfig::new_test(),
+        None,
+        printer,
+    );
+
+    let first = ConversationId::try_from(ctx.now()).unwrap();
+    ctx.workspace.create_conversation_with_id(
+        first,
+        Conversation::default().with_last_activated_at(ctx.now()),
+        ctx.config(),
+    );
+
+    ctx.set_now(ctx.now() + Duration::from_secs(1));
+    let second = ConversationId::try_from(ctx.now()).unwrap();
+    ctx.workspace.create_conversation_with_id(
+        second,
+        Conversation::default().with_last_activated_at(ctx.now()),
+        ctx.config(),
+    );
+
+    let sources = vec![
+        ctx.workspace.acquire_conversation(&first).unwrap(),
+        ctx.workspace.acquire_conversation(&second).unwrap(),
+    ];
+
+    // Another process removes the second source while this invocation holds a
+    // handle to it, so the fork of the first has already landed when the second
+    // fails to load.
+    let doomed = ctx.workspace.acquire_conversation(&second).unwrap();
+    let lock = ctx.workspace.test_lock(doomed);
+    ctx.workspace.remove_conversation_with_lock(lock.into_mut());
+
+    ctx.set_now(ctx.now() + Duration::from_secs(1));
+
+    let fork = Fork {
+        target: PositionalIds::default(),
+        activate: false,
+        from: None,
+        until: None,
+        last: None,
+        first: None,
+        title: None,
+        compact: CompactFlag::default(),
+        no_turns: false,
+    };
+
+    let result = Runtime::new()
+        .unwrap()
+        .block_on(fork.run(&mut ctx, &sources));
+    ctx.printer.flush();
+
+    assert!(result.is_err(), "the second source cannot be forked");
+
+    let created = ctx
+        .workspace
+        .conversations()
+        .map(|(id, _)| *id)
+        .find(|id| *id != first)
+        .expect("the first source was forked before the failure");
+    assert_eq!(*out.lock(), format!("{created}\n"));
 }
 
 /// Create two conversations with distinct content, fork only one, and verify

@@ -26,6 +26,46 @@ fn inserting_a_value_the_key_already_holds_changes_nothing() {
     assert_eq!(labels, Labels::from_iter([("crate", ["jp_config"])]));
 }
 
+/// The empty value records that the key is present, which holding a real value
+/// already does, so the two never coexist.
+#[test]
+fn a_real_value_replaces_the_presence_marker() {
+    let mut labels = Labels::from_iter([("draft", [""])]);
+
+    assert!(labels.insert("draft", "urgent"));
+
+    assert_eq!(values(&labels, "draft"), ["urgent"]);
+}
+
+#[test]
+fn the_presence_marker_is_dropped_on_a_key_that_holds_a_value() {
+    let mut labels = Labels::from_iter([("draft", ["urgent"])]);
+
+    assert!(!labels.insert("draft", ""), "nothing to add");
+
+    assert_eq!(values(&labels, "draft"), ["urgent"]);
+}
+
+/// `jp c label add draft draft=urgent` names both in one invocation, so the
+/// marker and the value arrive together rather than in sequence.
+#[test]
+fn set_drops_the_presence_marker_from_a_mixed_set() {
+    let mut labels = Labels::default();
+
+    labels.set("draft", ["", "urgent"]);
+
+    assert_eq!(values(&labels, "draft"), ["urgent"]);
+}
+
+#[test]
+fn set_keeps_the_presence_marker_when_it_is_the_only_value() {
+    let mut labels = Labels::default();
+
+    labels.set("draft", [""]);
+
+    assert_eq!(values(&labels, "draft"), [""]);
+}
+
 #[test]
 fn set_replaces_the_key_and_returns_what_it_displaced() {
     let mut labels = Labels::from_iter([("crate", vec!["jp_config", "jp_llm"])]);
@@ -147,6 +187,15 @@ fn an_empty_array_drops_the_key() {
     let labels: Labels = serde_json::from_str(r#"{"crate":[],"branch":["main"]}"#).unwrap();
 
     assert_eq!(labels, Labels::from_iter([("branch", ["main"])]));
+}
+
+/// A hand-edited file can pair the marker with a real value, which the API
+/// cannot produce; reading normalizes it away.
+#[test]
+fn a_mixed_set_on_disk_loses_the_presence_marker() {
+    let labels: Labels = serde_json::from_str(r#"{"draft":["","urgent"]}"#).unwrap();
+
+    assert_eq!(values(&labels, "draft"), ["urgent"]);
 }
 
 #[test]

@@ -257,16 +257,43 @@ fn a_set_marks_the_value_it_kept() {
     ]);
 }
 
-/// A `set` that changed nothing is all context.
+/// An invocation that named a key without changing it did nothing, and says so
+/// rather than printing context lines that read as a change.
 #[test]
-fn a_set_that_changed_nothing_is_all_context() {
+fn a_set_that_changed_nothing_says_so() {
     let (chrome, lines) = report_of(
         &[("crate", &["jp_cli"])],
         &LabelChange::Set(grouped(&[("crate", &["jp_cli"])])),
     );
 
-    assert_eq!(chrome, "Set labels on jp-c123: Title Here");
-    assert_eq!(lines, [" crate=jp_cli"]);
+    assert_eq!(chrome, "No labels to apply to jp-c123: Title Here");
+    assert!(lines.is_empty());
+}
+
+/// `jp c label add draft` asks for a presence the key already has once it holds
+/// a real value, so there is nothing to apply.
+#[test]
+fn adding_a_bare_label_to_a_key_that_holds_values_says_so() {
+    let (chrome, lines) = report_of(
+        &[("foo", &["bar", "baz"])],
+        &LabelChange::Add(grouped(&[("foo", &[""])])),
+    );
+
+    assert_eq!(chrome, "No labels to apply to jp-c123: Title Here");
+    assert!(lines.is_empty());
+}
+
+/// A key that did not change is still context for one that did, so the reader
+/// sees what the changed key sits alongside.
+#[test]
+fn an_unchanged_key_is_context_when_another_key_changed() {
+    let (chrome, lines) = report_of(
+        &[("crate", &["jp_cli"])],
+        &LabelChange::Add(grouped(&[("crate", &["jp_cli"]), ("draft", &[""])])),
+    );
+
+    assert_eq!(chrome, "Added labels to jp-c123: Title Here");
+    assert_eq!(lines, [" crate=jp_cli", "+draft"]);
 }
 
 #[test]

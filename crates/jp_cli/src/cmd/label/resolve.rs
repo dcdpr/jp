@@ -26,7 +26,6 @@ use jp_config::{
     conversation::label::{LabelConfig, LabelRunMode, LabelValueRef},
     types::command::{CommandConfig, shell_command_line},
 };
-use jp_conversation::Labels;
 use jp_inquire::{InlineOption, prompt::PromptBackend};
 use jp_printer::Printer;
 use tokio::process::Command;
@@ -70,10 +69,13 @@ impl<'a> Resolver<'a> {
         }
     }
 
-    /// Resolve every rule that opts into `trigger`.
+    /// Resolve every rule that opts into `trigger`, in declaration order.
     ///
-    /// A rule that resolves to no values contributes no key, so a command that
-    /// writes nothing leaves whatever the conversation already carries.
+    /// A rule that resolves to no values keeps its key, with no values against
+    /// it: the rule matched and produced nothing, which is what lets a caller
+    /// replace the key's set with nothing.
+    /// A rule that fails is dropped entirely, so its key is absent and whatever
+    /// the conversation carries is left alone.
     ///
     /// # Errors
     ///
@@ -81,7 +83,10 @@ impl<'a> Resolver<'a> {
     /// to ask on, or when the confirmation prompt is cancelled or the prompt
     /// backend fails.
     /// Every other failure drops that one label and leaves the rest intact.
-    pub(crate) async fn automatic(&self, trigger: Trigger) -> Result<Labels> {
+    pub(crate) async fn automatic(
+        &self,
+        trigger: Trigger,
+    ) -> Result<IndexMap<String, Vec<String>>> {
         let wanted: Vec<_> = self
             .rules
             .iter()
@@ -91,7 +96,7 @@ impl<'a> Resolver<'a> {
             })
             .collect();
 
-        let mut resolved = Labels::default();
+        let mut resolved: IndexMap<String, Vec<String>> = IndexMap::new();
         let mut pending = Vec::new();
 
         // Prompting is interactive and therefore serial; the commands the user
@@ -99,7 +104,7 @@ impl<'a> Resolver<'a> {
         for (key, rule) in wanted {
             match rule.value() {
                 LabelValueRef::Values(values) => {
-                    resolved.set(key.clone(), values.to_vec());
+                    resolved.insert(key.clone(), values.to_vec());
                 }
                 LabelValueRef::Command(cmd) => {
                     let cmd = cmd.clone().command();
@@ -114,7 +119,7 @@ impl<'a> Resolver<'a> {
         for (key, output) in run_all(pending, self.root).await {
             match output {
                 Ok(values) => {
-                    resolved.set(key, values);
+                    resolved.insert(key, values);
                 }
                 Err(error) => {
                     self.report_skipped(&key, &error);

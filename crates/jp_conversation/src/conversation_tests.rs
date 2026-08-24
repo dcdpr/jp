@@ -45,3 +45,17 @@ fn labels_round_trip_through_metadata() {
         r#"{"last_activated_at":"2023-01-01 00:00:00.0","labels":{"branch":["main"],"draft":[""]}}"#
     );
 }
+
+/// A field the reader does not know is skipped rather than failing the load.
+///
+/// That is what lets a JP built before a field existed read a conversation
+/// written after it: `labels` is simply not there for it, whatever shape the
+/// values take.
+#[test]
+fn an_unknown_field_is_ignored() {
+    let json = r#"{"last_activated_at":"2023-01-01 00:00:00.0","labels":{"crate":["jp_config"]},"from_the_future":{"a":1}}"#;
+
+    let conv: Conversation = serde_json::from_str(json).unwrap();
+
+    assert!(conv.labels.contains("crate", "jp_config"));
+}

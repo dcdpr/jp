@@ -84,7 +84,7 @@ use jp_config::{
     style::{mcp_startup::McpStartupConfig, reasoning::ReasoningDisplayConfig},
 };
 use jp_conversation::{
-    Conversation, ConversationEvent, ConversationId, ConversationStream,
+    Conversation, ConversationEvent, ConversationId, ConversationStream, Labels,
     event::{ChatRequest, ChatResponse},
     thread::{Thread, ThreadBuilder},
 };
@@ -782,9 +782,13 @@ impl Query {
         // confirmation, and finds no terminal to ask on, aborts without leaving
         // a half-labelled conversation behind.
         let prompts = TerminalPromptBackend;
-        let labels = label_resolver(ctx, &cfg, &prompts)
+        // A rule that produced no values names no label on a fresh
+        // conversation: there is nothing here for it to replace.
+        let labels: Labels = label_resolver(ctx, &cfg, &prompts)
             .automatic(Trigger::New)
-            .await?;
+            .await?
+            .into_iter()
+            .collect();
 
         let ws = &mut ctx.workspace;
         let projection = if self.is_local(&cfg.conversation) {

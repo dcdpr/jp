@@ -471,6 +471,67 @@ fn assign_a_bare_label() {
     }
 }
 
+/// A rule declared in a config file is the base an assignment lands on, so a
+/// merge adds to the value it already names rather than dropping it.
+#[test]
+fn assign_merges_onto_a_scalar_rule() {
+    use crate::{assignment::KvAssignment, conversation::label::PartialLabelConfig};
+
+    let mut partial: PartialConversationConfig =
+        toml::from_str("[labels]\nteam = \"platform\"\n").unwrap();
+
+    let kv = KvAssignment::try_from_cli("labels.team:+", r#"["urgent"]"#).unwrap();
+    partial.assign(kv).unwrap();
+
+    assert_eq!(
+        partial.labels.get("team"),
+        Some(&PartialLabelConfig::List(vec![
+            "platform".to_owned(),
+            "urgent".to_owned()
+        ]))
+    );
+}
+
+/// Naming values on a rule that carries `apply_on` and `run` lands on its
+/// `value`, so the assignment cannot silently change which creation path
+/// applies the rule.
+#[test]
+fn assign_values_onto_an_object_rule_keeps_its_policy() {
+    use crate::{
+        assignment::KvAssignment,
+        conversation::label::{LabelRunMode, PartialLabelConfig, PartialLabelValue},
+    };
+
+    let mut partial: PartialConversationConfig = toml::from_str(
+        "[labels.stage]\nvalue = \"review\"\napply_on = { new = false, fork = true }\nrun = \
+         \"unattended\"\n",
+    )
+    .unwrap();
+
+    for (key, value, expected) in [
+        ("labels.stage", "ready", vec!["ready".to_owned()]),
+        ("labels.stage:+", r#"["queued"]"#, vec![
+            "ready".to_owned(),
+            "queued".to_owned(),
+        ]),
+    ] {
+        let kv = KvAssignment::try_from_cli(key, value).unwrap();
+        partial.assign(kv).unwrap();
+
+        let Some(PartialLabelConfig::Object(object)) = partial.labels.get("stage") else {
+            panic!("expected the object form to survive; got: {key}={value}")
+        };
+        assert_eq!(object.value, PartialLabelValue::List(expected));
+        assert_eq!(object.apply_on.new, Some(false), "got: {key}={value}");
+        assert_eq!(object.apply_on.fork, Some(true), "got: {key}={value}");
+        assert_eq!(
+            object.run,
+            Some(LabelRunMode::Unattended),
+            "got: {key}={value}"
+        );
+    }
+}
+
 /// The full form is the object-shaped value, so naming `value` and `apply_on`
 /// still works.
 #[test]

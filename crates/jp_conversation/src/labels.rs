@@ -17,6 +17,11 @@ use serde::{Deserialize, Deserializer, Serialize, de};
 /// under the same key.
 /// A key never maps to an empty set — removing the last value removes the key.
 ///
+/// The empty value is how a *bare* label records that its key is present.
+/// Holding any real value records the same thing, so the two never coexist:
+/// adding a real value drops the marker, and adding the marker to a key that
+/// already holds a value changes nothing.
+///
 /// Keys are sorted; values keep the order they were added in, and that order is
 /// part of the on-disk contract.
 ///
@@ -58,23 +63,36 @@ impl Labels {
 
     /// Add `value` to the set held under `key`, creating the key when absent.
     ///
-    /// Returns `false` when the key already held that value, in which case
-    /// nothing changed.
+    /// Returns `false` when nothing changed: either the key already held that
+    /// value, or `value` is the presence marker and the key already holds a
+    /// real one.
     pub fn insert(&mut self, key: impl Into<String>, value: impl Into<String>) -> bool {
-        self.0.entry(key.into()).or_default().insert(value.into())
+        let value = value.into();
+        let values = self.0.entry(key.into()).or_default();
+
+        if value.is_empty() {
+            // A key holding a real value is already present, so the marker has
+            // nothing to add. The entry above is fresh when the set is empty,
+            // so this leaves no empty set behind.
+            return values.is_empty() && values.insert(value);
+        }
+
+        values.shift_remove("");
+        values.insert(value)
     }
 
     /// Replace the set held under `key`, returning the values it displaced.
     ///
     /// Empty `values` removes the key.
-    /// Duplicates are dropped, the first occurrence winning.
+    /// Duplicates are dropped, the first occurrence winning, and the presence
+    /// marker is dropped when a real value is present.
     pub fn set(
         &mut self,
         key: impl Into<String>,
         values: impl IntoIterator<Item = impl Into<String>>,
     ) -> IndexSet<String> {
         let key = key.into();
-        let values: IndexSet<String> = values.into_iter().map(Into::into).collect();
+        let values = canonical(values.into_iter().map(Into::into).collect());
 
         let displaced = if values.is_empty() {
             self.0.remove(&key)
@@ -157,6 +175,18 @@ impl<'de> Deserialize<'de> for Labels {
 
         Ok(raw.into_iter().map(|(key, set)| (key, set.0)).collect())
     }
+}
+
+/// Drop the presence marker from a set that carries a real value.
+///
+/// More than one value means at least one of them is non-empty, so the marker
+/// is redundant.
+fn canonical(mut values: IndexSet<String>) -> IndexSet<String> {
+    if values.len() > 1 {
+        values.shift_remove("");
+    }
+
+    values
 }
 
 /// One key's values as written on disk: a single string, or an array of them.
