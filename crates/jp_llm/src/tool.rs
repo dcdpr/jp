@@ -292,6 +292,21 @@ pub enum CommandResult {
         /// The offending question id, for the diagnostic trace.
         question_id: String,
     },
+
+    /// Tool emitted a payload shaped like a `needs_input` outcome (top-level
+    /// `"type": "needs_input"`) that failed to deserialize for a reason other
+    /// than an invalid question id: a field with the wrong shape, a missing
+    /// field, or a local-tool binary emitting an older wire protocol than this
+    /// build parses.
+    ///
+    /// Surfaced as a tool-level error rather than [`Self::RawOutput`] so a
+    /// protocol mismatch is loud, instead of silently handing the raw JSON to
+    /// the model as tool output.
+    MalformedInquiry {
+        /// The deserialization error, for the diagnostic trace and the
+        /// model-facing message.
+        detail: String,
+    },
 }
 
 impl CommandResult {
@@ -355,6 +370,16 @@ impl CommandResult {
                      contain '.'"
                         .to_owned(),
                 )
+            }
+            Self::MalformedInquiry { detail } => {
+                error!(
+                    tool = name,
+                    %detail,
+                    "tool produced a malformed inquiry that could not be parsed"
+                );
+                Err(format!(
+                    "tool '{name}' produced a malformed inquiry that could not be parsed: {detail}"
+                ))
             }
             Self::NeedsInput(_) => {
                 unreachable!("NeedsInput should be handled by the caller")
@@ -596,31 +621,46 @@ fn parse_command_output(stdout: &[u8], stderr: &[u8], success: bool) -> CommandR
             }
         }
         Ok(Outcome::NeedsInput { question }) => CommandResult::NeedsInput(question),
-        // A `needs_input` whose question id is empty or contains a `.` fails
-        // to deserialize (`QuestionId` rejects both). Surface that as a
-        // tool-level error rather than silently treating the outcome as raw
-        // text. Any other parse failure stays `RawOutput`.
-        Err(_) => {
-            let invalid_id = serde_json::from_str::<Value>(&stdout_str)
-                .ok()
-                .and_then(|v| {
-                    (v.get("type").and_then(Value::as_str) == Some("needs_input"))
-                        .then(|| {
-                            v.get("question")
-                                .and_then(|q| q.get("id"))
-                                .and_then(Value::as_str)
-                        })
-                        .flatten()
-                        .filter(|id| id.is_empty() || id.contains('.'))
-                        .map(str::to_owned)
-                });
+        // A payload shaped like a `needs_input` outcome that fails to
+        // deserialize must become a tool-level error, not `RawOutput`:
+        // silently handing the raw JSON to the model hides the failure (a
+        // stale local-tool binary emitting an older wire shape than this build
+        // parses, an invalid question id, a missing field) and leaves the
+        // model to invent an explanation. Output that is not an `Outcome` at
+        // all stays `RawOutput`.
+        Err(error) => {
+            let value = serde_json::from_str::<Value>(&stdout_str).ok();
+            let is_needs_input = value
+                .as_ref()
+                .and_then(|v| v.get("type"))
+                .and_then(Value::as_str)
+                == Some("needs_input");
 
-            match invalid_id {
-                Some(question_id) => CommandResult::InvalidInquiry { question_id },
-                None => CommandResult::RawOutput {
+            if !is_needs_input {
+                return CommandResult::RawOutput {
                     stdout: stdout_str.into_owned(),
                     stderr: String::from_utf8_lossy(stderr).into_owned(),
                     success,
+                };
+            }
+
+            let question_id = value
+                .as_ref()
+                .and_then(|v| v.get("question"))
+                .and_then(|q| q.get("id"))
+                .and_then(Value::as_str);
+
+            match question_id {
+                // The id itself is the problem: empty, or containing the `.`
+                // reserved as the inquiry-id separator (`QuestionId` rejects
+                // both).
+                Some(id) if id.is_empty() || id.contains('.') => CommandResult::InvalidInquiry {
+                    question_id: id.to_owned(),
+                },
+                // Some other field failed to parse (wrong shape, missing
+                // field, protocol skew).
+                _ => CommandResult::MalformedInquiry {
+                    detail: error.to_string(),
                 },
             }
         }
