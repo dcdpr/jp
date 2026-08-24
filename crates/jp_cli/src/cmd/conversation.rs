@@ -9,6 +9,7 @@ pub(crate) mod compact;
 mod edit;
 pub(crate) mod fork;
 mod grep;
+mod label;
 mod ls;
 mod path;
 mod print;
@@ -33,6 +34,7 @@ impl Conversation {
             Commands::Fork(args) => args.run(ctx, &handles).await,
             Commands::Compact(args) => args.run(ctx, handles).await,
             Commands::Grep(args) => args.run(ctx, handles),
+            Commands::Label(args) => args.run(ctx, handles).await,
             Commands::Print(args) => args.run(ctx, &handles),
             Commands::Path(args) => args.run(ctx, handles),
             Commands::List(args) => args.run(ctx, &handles),
@@ -50,6 +52,7 @@ impl Conversation {
             Commands::Fork(args) => args.conversation_load_request(),
             Commands::Compact(args) => args.conversation_load_request(),
             Commands::Grep(args) => args.conversation_load_request(),
+            Commands::Label(args) => args.conversation_load_request(),
             Commands::Print(args) => args.conversation_load_request(),
             Commands::Path(args) => args.conversation_load_request(),
             Commands::List(args) => args.conversation_load_request(),
@@ -74,6 +77,7 @@ impl IntoPartialAppConfig for Conversation {
             | Commands::Edit(_)
             | Commands::Fork(_)
             | Commands::Grep(_)
+            | Commands::Label(_)
             | Commands::Print(_)
             | Commands::Path(_)
             | Commands::List(_)
@@ -91,7 +95,7 @@ enum Commands {
     Remove(rm::Rm),
 
     /// List conversations.
-    #[command(name = "ls", alias = "list", visible_alias = "l")]
+    #[command(name = "ls", alias = "list")]
     List(ls::Ls),
 
     /// Show conversation details.
@@ -122,6 +126,12 @@ enum Commands {
     /// Search through conversation history.
     #[command(name = "grep", alias = "rg", visible_alias = "g")]
     Grep(grep::Grep),
+
+    /// Manage the labels on a conversation.
+    ///
+    /// `jp c label add`, `set`, `rm`, and `ls`; a bare `jp c label` lists.
+    #[command(name = "label", visible_alias = "l", alias = "labels")]
+    Label(label::Label),
 
     /// Print conversation history to the terminal.
     #[command(name = "print", visible_alias = "p")]

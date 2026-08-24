@@ -2,7 +2,7 @@ use jp_config::{AppConfig, style::reasoning::ReasoningDisplayConfig};
 use jp_conversation::event::{ChatResponse, ToolCallRequest};
 use jp_llm::event::FinishReason;
 use jp_printer::{OutputFormat, Printer};
-use serde_json::{Map, json};
+use serde_json::{Map, Value, json};
 
 use super::{super::state::TurnState, *};
 use crate::cmd::query::interrupt::InterruptAction;
@@ -62,15 +62,16 @@ fn test_transitions_to_executing_on_tool_call() {
     assert_eq!(tool_calls[0].id, "call_1");
 }
 
-/// A provider response carrying two reasoning items produces two reasoning
-/// events, and the second must not continue the first's paragraph.
+/// Reasoning items split across several provider items form one region, so text
+/// broken mid-word across the split renders as a single word.
 ///
-/// Pins the live path specifically: the renderer sees per-delta calls, so the
-/// only signal that item 0 is complete is its `Event::Flush`.
-/// Item 0's text ends mid-paragraph, so without a boundary there the markdown
-/// buffer glues item 1's opening text onto it.
+/// Reproduces Anthropic's redaction shape: a thinking block is interrupted by
+/// an opaque `redacted_thinking` block, which arrives as its own item holding
+/// no text, and the thinking continues in the item after it.
+/// Each item carries its own signature, so the three cannot be merged upstream
+/// — the renderer has to treat them as one region.
 #[test]
-fn consecutive_reasoning_events_render_as_separate_blocks() {
+fn reasoning_items_split_by_a_redacted_item_render_as_one_region() {
     let mut stream = ConversationStream::new_test();
     let (printer, out, _) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
@@ -82,22 +83,44 @@ fn consecutive_reasoning_events_render_as_separate_blocks() {
         style,
         None,
         None,
-        Some("openai/test".into()),
+        Some("anthropic/test".into()),
     );
 
     coordinator.start_turn(&mut stream, ChatRequest::from("hello"));
 
-    coordinator.handle_event(&mut stream, Event::reasoning(0, "First section."));
+    coordinator.handle_event(
+        &mut stream,
+        Event::reasoning(0, "I can test this directly by ver"),
+    );
     coordinator.handle_event(&mut stream, Event::flush(0));
-    coordinator.handle_event(&mut stream, Event::reasoning(1, "Second section."));
+    coordinator.handle_event(
+        &mut stream,
+        Event::reasoning(1, "").with_metadata_field("anthropic_redacted_thinking", "AAAA"),
+    );
     coordinator.handle_event(&mut stream, Event::flush(1));
+    coordinator.handle_event(&mut stream, Event::reasoning(2, "ifying the return value."));
+    coordinator.handle_event(&mut stream, Event::flush(2));
     coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
+
+    // Carrying the redacted payload is the only reason the content-less event
+    // is kept, so pin the payload rather than the event count: the next request
+    // has to replay it as a `redacted_thinking` block.
+    let redacted: Vec<_> = stream
+        .iter()
+        .filter_map(|e| e.event.metadata.get("anthropic_redacted_thinking"))
+        .filter_map(Value::as_str)
+        .collect();
+    assert_eq!(
+        redacted,
+        ["AAAA"],
+        "the redacted payload must survive into the stream"
+    );
 
     printer.flush();
     let output = strip_ansi(&out.lock());
     assert!(
-        output.ends_with("First section.\n\nSecond section.\n\n"),
-        "reasoning items must render as separate blocks, got: {output:?}"
+        output.ends_with("I can test this directly by verifying the return value.\n\n"),
+        "reasoning items must form one region, got: {output:?}"
     );
 }
 

@@ -1,6 +1,9 @@
+set fallback
+
 # see: <https://github.com/cargo-bins/cargo-quickinstall/releases>
 bacon_version        := "3.23.0"
 binstall_version     := "1.20.0"
+cbindgen_version     := "0.29.4"
 deny_version         := "0.19.9"
 expand_version       := "1.0.123"
 insta_version        := "1.48.0"
@@ -11,6 +14,14 @@ shear_version        := "1.12.4"
 vet_version          := "0.10.2"
 
 quiet_flag := if env_var_or_default("CI", "") == "true" { "" } else { "--quiet" }
+
+# Workspace crates that no `jp_*` crate depends on: standalone tooling binaries,
+# docs infrastructure, and command plugins. Skipping them drops their
+# dependencies from the build entirely, rather than merely skipping their tests.
+#
+# `grizzly` is deliberately absent: `jp_attachment_bear_note` depends on it, so
+# it is compiled either way.
+non_jp_excludes := "--exclude bookworm --exclude build-registry --exclude comfort --exclude jp-path --exclude jp-serve-web --exclude json_edit --exclude tools"
 
 alias r := run
 alias i := install
@@ -60,7 +71,7 @@ run *ARGS:
     #!/usr/bin/env sh
     set -eu
 
-    cargo run --package jp_cli -- "$@"
+    cargo run {{quiet_flag}} --package jp_cli -- "$@"
 
 # Install the `jp` binary from your local checkout.
 [group('build')]
@@ -87,8 +98,9 @@ commit *ARGS: _install-jp
     msg="Give me a commit message"
 
     args=$(just _shape-args "$msg" "$@")
+    branch=$(git rev-parse --abbrev-ref HEAD)
 
-    jp query --new --local --tmp=1h --cfg=personas/committer $args || exit 1
+    jp query --new --local --tmp=1h --title="just commit ($branch)" --cfg=personas/committer $args || exit 1
     git commit --amend
 
 [group('jp')]
@@ -116,6 +128,300 @@ stage-and-commit: _install-jp
 build-changelog: (_install "jilu@" + jilu_version)
     @jilu
 
+# Build the static library and C header that the macOS app links against, and
+# stage both where the Xcode project expects them.
+#
+# Universal. The app declares no `ARCHS`, so Xcode builds it for
+# `ARCHS_STANDARD` — arm64 and x86_64 — and a Release build links both slices.
+#
+# Xcode runs this from a build phase, so `just` stays the single entry point for
+# building the Rust side rather than Xcode growing a competing one.
+#
+# PROFILE is a cargo profile directory name (`debug`, `release`, ...).
+[group('build')]
+build-ffi PROFILE="debug": (_install "cbindgen@" + cbindgen_version)
+    #!/usr/bin/env sh
+    set -eu
+
+    if ! which jq >/dev/null 2>&1; then
+        echo "jq not found. Install it with: brew install jq" >&2
+        exit 1
+    fi
+
+    # The `dev` profile builds into a `debug` directory, so the profile's name
+    # and its output directory disagree for that one case.
+    if [ "{{PROFILE}}" = "debug" ]; then
+        build_profile="dev"
+    else
+        build_profile="{{PROFILE}}"
+    fi
+
+    # Both slices, every time. A host-only library satisfies the Debug build on
+    # the machine that produced it and nothing else, so the gap stays invisible
+    # until somebody cuts a release or runs the UI suite under Rosetta — at
+    # which point it is a link error a long way from its cause.
+    slices=""
+    for target in aarch64-apple-darwin x86_64-apple-darwin; do
+        rustup target add "$target" >/dev/null
+
+        # Ask cargo which file it wrote rather than reconstructing the path. The
+        # target directory is redirectable: sibling git worktrees here share one
+        # outside the checkout entirely.
+        #
+        # `json-render-diagnostics` and not `json`: the latter would send
+        # compiler errors down the pipe into `jq` instead of to the terminal.
+        #
+        # Deliberately not `{{quiet_flag}}`: a staticlib links the whole
+        # dependency graph, so a cold build runs long enough that silence reads
+        # as a hang. Cargo's status lines go to stderr and the JSON to stdout,
+        # so letting them through costs the pipe nothing.
+        slice=$(cargo build --package jp_ffi --profile "$build_profile" \
+                --target "$target" --message-format=json-render-diagnostics |
+            jq -r 'select(.reason == "compiler-artifact" and .target.name == "jp_ffi")
+                   | .filenames[] | select(endswith(".a"))' |
+            tail -n 1)
+
+        if [ -z "$slice" ] || [ ! -f "$slice" ]; then
+            echo "cargo did not produce a jp_ffi static library for $target" >&2
+            exit 1
+        fi
+
+        slices="$slices $slice"
+    done
+
+    # Stage into a fixed, checkout-local directory. Xcode's search paths are
+    # static build settings, so they need one location that does not move with
+    # the developer's cargo configuration.
+    out="apps/macos/.build/{{PROFILE}}"
+    mkdir -p "$out/include"
+
+    # A debug staticlib bundles every dependency, so joining the slices is worth
+    # skipping when what is staged is already newer than both of them.
+    if [ ! -f "$out/libjp_ffi.a" ] || [ -n "$(find $slices -newer "$out/libjp_ffi.a")" ]; then
+        lipo -create -output "$out/libjp_ffi.a" $slices
+    fi
+
+    cbindgen --config crates/jp_ffi/cbindgen.toml --crate jp_ffi --output "$out/include/jp_ffi.h"
+
+    echo "library: $out/libjp_ffi.a ($(lipo -archs "$out/libjp_ffi.a"))" >&2
+    echo "header:  $out/include/jp_ffi.h" >&2
+
+# Build the `jpdrive` accessibility driver that the `debug_app_*` tools shell out
+# to.
+#
+# A standalone SwiftPM package rather than a target in the app's Xcode project,
+# so the binary lands at a predictable path with no derived-data lookup.
+[group('build')]
+[macos]
+build-drive CONFIG="release":
+    #!/usr/bin/env sh
+    set -eu
+
+    swift build --package-path apps/macos/Tools/jpdrive -c {{CONFIG}}
+
+    bin=$(swift build --package-path apps/macos/Tools/jpdrive -c {{CONFIG}} --show-bin-path)
+    echo "binary: $bin/jpdrive" >&2
+
+# Run the `jpdrive` test suite.
+#
+# Covers the driver's traversal against a fake accessibility tree, so it needs no
+# running app and no accessibility grant.
+[group('test')]
+[macos]
+test-drive *ARGS:
+    swift test --package-path apps/macos/Tools/jpdrive {{ARGS}}
+
+# Report whether this process may read another app's accessibility tree.
+#
+# Run under the terminal, under `just`, and under `serve-tools` to find out
+# whether a TCC grant given to the terminal reaches a tool it started. See
+# `apps/macos/Tools/jpdrive/README.md`.
+#
+# PID is the target application's process id, e.g. `$(pgrep -f JP.app)`.
+[group('debug')]
+[macos]
+drive-doctor PID="": build-drive
+    #!/usr/bin/env sh
+    set -eu
+
+    bin=$(swift build --package-path apps/macos/Tools/jpdrive -c release --show-bin-path)
+
+    if [ -n "{{PID}}" ]; then
+        "$bin/jpdrive" doctor --pid "{{PID}}"
+    else
+        "$bin/jpdrive" doctor
+    fi
+
+# Generate the macOS app's Xcode project from `apps/macos/project.yml`.
+#
+# The project file is generated rather than committed, so `project.yml` stays the
+# reviewable source of truth for targets, build settings, and the Rust build
+# phase.
+[group('build')]
+[macos]
+gen-app:
+    #!/usr/bin/env sh
+    set -eu
+
+    if ! which xcodegen >/dev/null 2>&1; then
+        echo "xcodegen not found. Install it with: brew install xcodegen" >&2
+        exit 1
+    fi
+
+    xcodegen generate --spec apps/macos/project.yml --project apps/macos
+
+# Build the macOS app.
+#
+# The library and its header are built first, not left to the project's own build
+# phase: Xcode scans the bridging header while planning the build, before any
+# script phase runs.
+[group('build')]
+[macos]
+build-app CONFIG="Debug": gen-app
+    #!/usr/bin/env sh
+    set -eu
+
+    if [ "{{CONFIG}}" = "Release" ]; then
+        just build-ffi release
+    else
+        just build-ffi debug
+    fi
+
+    xcodebuild build -project apps/macos/JP.xcodeproj -scheme JP \
+        -configuration {{CONFIG}} -destination platform=macOS -quiet
+
+# Build and launch the macOS app, with its output attached to this terminal.
+#
+# WORKSPACE is the workspace to open, defaulting to this checkout. The app has a
+# File ▸ Open Workspace menu item too; this just saves a step.
+#
+# Runs in the foreground so `tracing` output and crashes are visible, and Ctrl-C
+# quits. Use `open` on the printed bundle path instead to launch it detached.
+[group('build')]
+[macos]
+run-app WORKSPACE=justfile_directory(): build-app
+    #!/usr/bin/env sh
+    set -eu
+
+    if ! which jq >/dev/null 2>&1; then
+        echo "jq not found. Install it with: brew install jq" >&2
+        exit 1
+    fi
+
+    # Ask Xcode where it put the bundle. The derived data directory is keyed by a
+    # hash of the project path, so there is no path to hardcode.
+    app=$(xcodebuild -project apps/macos/JP.xcodeproj -scheme JP -configuration Debug \
+            -showBuildSettings -json |
+        jq -r 'first(.[] | select(.target == "JP") | .buildSettings) |
+               "\(.BUILT_PRODUCTS_DIR)/\(.FULL_PRODUCT_NAME)"')
+
+    if [ ! -d "$app" ]; then
+        echo "Could not locate the built app (looked for '$app')" >&2
+        exit 1
+    fi
+
+    echo "bundle:    $app" >&2
+    echo "workspace: {{WORKSPACE}}" >&2
+
+    JP_WORKSPACE="{{WORKSPACE}}" "$app/Contents/MacOS/JP"
+
+# Build and launch the macOS app through LaunchServices, detached.
+#
+# `run-app` execs the binary inside the bundle directly, which is convenient for
+# watching output but is not how macOS launches an app. Some AppKit behaviour
+# depends on the app being launched and registered normally, so this is the one to
+# reach for when the app misbehaves in ways the code does not explain.
+#
+# Output goes to the system log rather than this terminal, and the workspace comes
+# from the recents list rather than an environment variable.
+[group('build')]
+[macos]
+open-app: build-app
+    #!/usr/bin/env sh
+    set -eu
+
+    if ! which jq >/dev/null 2>&1; then
+        echo "jq not found. Install it with: brew install jq" >&2
+        exit 1
+    fi
+
+    app=$(xcodebuild -project apps/macos/JP.xcodeproj -scheme JP -configuration Debug \
+            -showBuildSettings -json |
+        jq -r 'first(.[] | select(.target == "JP") | .buildSettings) |
+               "\(.BUILT_PRODUCTS_DIR)/\(.FULL_PRODUCT_NAME)"')
+
+    if [ ! -d "$app" ]; then
+        echo "Could not locate the built app (looked for '$app')" >&2
+        exit 1
+    fi
+
+    echo "bundle: $app" >&2
+    open "$app"
+
+# Run the macOS app's unit tests.
+#
+# The UI tests are excluded: they launch the app and drive it through the screen,
+# so they cannot run alongside anything else using the machine. `test-app-ui`
+# runs those.
+[group('test')]
+[macos]
+test-app: gen-app (build-ffi "debug")
+    xcodebuild test -project apps/macos/JP.xcodeproj -scheme JP \
+        -destination platform=macOS -only-testing:JPTests -quiet
+
+# Run every one of the macOS app's UI tests.
+#
+# Takes over the screen for the length of the run. This is the CI job; while
+# writing a test, run it by name through the `swift_test_ui` tool instead, which
+# stops at the first failure.
+#
+# Every test runs here even after one fails, which is what `CI` means to that
+# tool and what a run nobody is watching should do.
+#
+# The result bundle is written into the checkout rather than left in derived
+# data, so a failing run leaves its evidence somewhere a reader or a CI artifact
+# step can reach without deriving a container path. `swift_test_ui` writes to
+# the same place for the same reason.
+[group('test')]
+[macos]
+test-app-ui: gen-app (build-ffi "debug")
+    #!/usr/bin/env sh
+    set -eu
+
+    # Not tidying up: `xcodebuild` refuses to write over an existing bundle, so
+    # without this the second run in a checkout fails before it starts.
+    rm -rf tmp/uitests/run.xcresult
+    mkdir -p tmp/uitests
+
+    # Captured rather than propagated, so the bundle is still reported on the
+    # failing run — which is the only run anybody opens it for.
+    status=0
+    CI=1 xcodebuild test -project apps/macos/JP.xcodeproj -scheme JP \
+        -destination platform=macOS -only-testing:JPUITests \
+        -resultBundlePath tmp/uitests/run.xcresult -quiet || status=$?
+
+    if [ -d tmp/uitests/run.xcresult ]; then
+        echo "result bundle: tmp/uitests/run.xcresult" >&2
+    fi
+
+    exit $status
+
+# Format the macOS app's Swift sources.
+[group('fmt')]
+[macos]
+fmt-app:
+    swift format --in-place --recursive --parallel \
+        apps/macos/Sources apps/macos/Tests apps/macos/UITests \
+        apps/macos/Tools/jpdrive/Sources apps/macos/Tools/jpdrive/Tests
+
+# Check Swift formatting and lints without rewriting anything.
+[group('check')]
+[macos]
+lint-app:
+    swift format lint --strict --recursive --parallel \
+        apps/macos/Sources apps/macos/Tests apps/macos/UITests \
+        apps/macos/Tools/jpdrive/Sources apps/macos/Tools/jpdrive/Tests
+
 [group('profile')]
 [positional-arguments]
 profile-heap *ARGS:
@@ -136,6 +442,19 @@ rfd-this *ARGS: _install-jp
     args=$(just _shape-args "$msg" "$@")
 
     jp query --cfg=skill/rfd $args
+
+# Open a commit message in the editor, using Jean-Pierre.
+[group('jp')]
+[positional-arguments]
+commit-this *ARGS: _install-jp
+    #!/usr/bin/env sh
+    set -eu
+
+    msg="I gave you the commit skill, use it to stage and commit all relevant changes part of our conversation."
+
+    args=$(just _shape-args "$msg" "$@")
+
+    jp query --cfg=skill/git-reading --cfg=skill/git-stage --cfg=skill/git-commit-writing $args
 
 # Review a GitHub pull request, queueing inline comments to a draft review.
 #
@@ -781,23 +1100,14 @@ rfd-draft CATEGORY +TITLE:
         design)   template="design"  ;;
         decision) template="decision" ;;
         guide)    template="guide"   ;;
-        process)  template="guide"   ;;
+        process)  template="process" ;;
         *) echo "Unknown category '$category'. Use 'design', 'decision', 'guide', or 'process'." >&2; exit 1 ;;
     esac
 
     # Find the first available draft number (D01–D99).
     draft_id=$(just _rfd-next-draft-slot) || exit 1
 
-    # Resolve the author from git config, falling back to $USER.
-    git_name=$(git config user.name 2>/dev/null || true)
-    git_email=$(git config user.email 2>/dev/null || true)
-    if [ -n "$git_name" ] && [ -n "$git_email" ]; then
-        author="${git_name} <${git_email}>"
-    elif [ -n "$git_name" ]; then
-        author="$git_name"
-    else
-        author="${USER:-unknown}"
-    fi
+    author=$(just _git-author)
 
     # Capitalize the category for the metadata header.
     cap_category=$(echo "$category" | awk '{print toupper(substr($0,1,1)) substr($0,2)}')
@@ -1128,13 +1438,13 @@ _rfd-link SOURCE TARGET FORWARD INVERSE:
 # Advance an RFD's status: Draft -> Discussion -> Accepted -> Implemented.
 #
 # For drafts (DNN-prefixed files), assigns the next available permanent number
-# and renames the file. When promoting to Accepted, offers to create a GitHub
-# tracking issue via `jp` (prompting on TTY, defaulting to yes in
-# non-interactive runs) and injects the link into the metadata.
+# and renames the file. When promoting to Accepted, offers to turn each phase of
+# the Implementation Plan into a ticket carrying `Implements: NNN` (prompting on
+# TTY, defaulting to yes in non-interactive runs).
 #
 # Accepts: a permanent number (41, 041) or a draft ID (D01).
 [group('rfd')]
-rfd-promote NNN: _install-jp _install-comfort
+rfd-promote NNN: _install-jp _install-comfort _install-ticket
     #!/usr/bin/env sh
     set -eu
 
@@ -1314,10 +1624,12 @@ rfd-promote NNN: _install-jp _install-comfort
         # promoted file. These are bookkeeping artefacts of the bidirectional
         # draft-draft policy; the file is now published and cannot carry
         # draft back-links.
+        promoted_head=$(grep -n '^## ' "$new_file" | head -1 | cut -d: -f1)
+        promoted_head="${promoted_head:-9999}"
         for field in "Required by" "Extended by"; do
-            awk -v field="$field" '
+            awk -v field="$field" -v header_end="$promoted_head" '
                 BEGIN { search = "^- \\*\\*" field "\\*\\*: " }
-                $0 ~ search {
+                NR <= header_end && $0 ~ search {
                     sub(search, "", $0)
                     n = split($0, entries, /, /)
                     new = ""
@@ -1353,7 +1665,17 @@ rfd-promote NNN: _install-jp _install-comfort
                 fi
                 [ -z "$dep_file" ] && continue
 
-                existing=$(sed -n "s/^- \\*\\*${inverse}\\*\\*: //p" "$dep_file" | head -1)
+                # Scoped to the metadata header, like `add_link` in `_rfd-link`.
+                # RFDs that document these fields carry metadata-shaped examples
+                # in fenced blocks — 001 and 041 both do, and they are the most
+                # likely extension targets. Reading unscoped finds the example and
+                # concludes a header line exists; writing unscoped appends to the
+                # example instead of the header.
+                dep_head=$(grep -n '^## ' "$dep_file" | head -1 | cut -d: -f1)
+                dep_head="${dep_head:-9999}"
+
+                existing=$(head -n "$dep_head" "$dep_file" \
+                    | sed -n "s/^- \\*\\*${inverse}\\*\\*: //p" | head -1)
                 if echo "$existing" | grep -qE "RFD ${num}([^0-9]|\$)"; then
                     continue
                 fi
@@ -1367,11 +1689,11 @@ rfd-promote NNN: _install-jp _install-comfort
                 link="[RFD ${num}](${rel})"
 
                 if [ -n "$existing" ]; then
-                    sed "s|^- \\*\\*${inverse}\\*\\*: .*|&, ${link}|" "$dep_file" > "${dep_file}.tmp"
+                    sed "1,${dep_head}s|^- \\*\\*${inverse}\\*\\*: .*|&, ${link}|" \
+                        "$dep_file" > "${dep_file}.tmp"
                     mv "${dep_file}.tmp" "$dep_file"
                 else
-                    first_heading=$(grep -n '^## ' "$dep_file" | head -1 | cut -d: -f1)
-                    last_meta=$(head -n "${first_heading:-9999}" "$dep_file" | grep -n '^- \*\*' | tail -1 | cut -d: -f1)
+                    last_meta=$(head -n "$dep_head" "$dep_file" | grep -n '^- \*\*' | tail -1 | cut -d: -f1)
                     awk -v ln="$last_meta" -v entry="- **${inverse}**: ${link}" '
                         NR == ln { print; print entry; next }
                         { print }
@@ -1387,61 +1709,59 @@ rfd-promote NNN: _install-jp _install-comfort
             echo "Updated ${updated} cross-reference(s) in RFD files."
         fi
 
-    # --- Discussion -> Accepted: create tracking issue via jp ---
+    # --- Discussion -> Accepted: offer to seed phase tickets ---
     elif [ "$current" = "Discussion" ]; then
         sed "s/^- \*\*Status\*\*: Discussion/- **Status**: Accepted/" "$file" > "${file}.tmp"
         mv "${file}.tmp" "$file"
+        echo "${file}: Discussion -> Accepted"
 
-        # Decide whether to create a tracking issue. When a TTY is
-        # attached, ask the caller so they can skip issue creation. In
-        # non-interactive runs (e.g. CI), default to creating one to
-        # preserve prior behaviour.
-        create_issue=true
+        # Acceptance records an agreed direction, not a commitment to start
+        # building, so the tickets are offered rather than created. Whoever
+        # accepts reviews them before they land. Non-interactive runs default to
+        # creating them.
+        create_tickets=true
         if [ -r /dev/tty ] && [ -w /dev/tty ]; then
-            printf "Create GitHub tracking issue for %s? [Y/n] " "$(basename "$file")" > /dev/tty
+            printf "Create phase tickets for %s? [Y/n] " "$(basename "$file")" > /dev/tty
             if IFS= read -r answer < /dev/tty; then
                 case "$answer" in
-                    n|N|no|No|NO) create_issue=false ;;
+                    n|N|no|No|NO) create_tickets=false ;;
                 esac
             fi
         fi
 
-        if [ "$create_issue" = true ]; then
-            # Create tracking issue using jp + structured output.
-            SCHEMA='{"type":"object","properties":{"number":{"type":"integer","description":"GitHub issue number"},"url":{"type":"string","description":"GitHub issue URL"}},"required":["number","url"]}'
-            PROMPT="Read the attached RFD. Create a tracking issue for it by calling the github_create_issue_rfd_tracking tool. Return the issue number and url."
-            TOOL_CFG='conversation.tools.github_create_issue_rfd_tracking:={"enable":true,"run":"unattended"}'
+        if [ "$create_tickets" = true ]; then
+            # The phases differ per RFD, so they're read out of the document
+            # rather than templated. Structured output keeps the result parseable.
+            SCHEMA='{"type":"object","properties":{"phases":{"type":"array","description":"One entry per phase of the Implementation Plan, in order","items":{"type":"object","properties":{"title":{"type":"string","description":"Imperative title, at most 60 characters"},"summary":{"type":"string","description":"What the phase delivers, one to three sentences of markdown"}},"required":["title","summary"]}}},"required":["phases"]}'
+            PROMPT="Read the attached RFD and list the phases of its Implementation Plan, in order. Give each a short imperative title and a summary of what it delivers. Return an empty array if the RFD has no Implementation Plan."
 
             result=$(
-                jp query --new --local --tmp=5m --format=json --no-reasoning \
-                    -c "$TOOL_CFG" \
+                jp query --new --local --tmp=5m --format=json --no-reasoning --no-tools \
                     --schema "$SCHEMA" \
                     --attachment "$file" \
                     "$PROMPT" \
                 | jq -s '.[-1]' 2>/dev/null
             ) || true
 
-            issue_num=$(echo "$result" | jq -r '.number // empty' 2>/dev/null || true)
-            issue_url=$(echo "$result" | jq -r '.url // empty' 2>/dev/null || true)
+            count=$(echo "$result" | jq '.phases | length' 2>/dev/null || echo 0)
+            count=${count:-0}
 
-            if [ -n "$issue_num" ] && [ -n "$issue_url" ]; then
-                first_heading=$(grep -n '^## ' "$file" | head -1 | cut -d: -f1)
-                last_meta=$(head -n "${first_heading:-9999}" "$file" | grep -n '^- \*\*' | tail -1 | cut -d: -f1)
-                awk -v ln="$last_meta" -v ti="- **Tracking Issue**: [#${issue_num}](${issue_url})" '
-                    NR == ln { print; print ti; next }
-                    { print }
-                ' "$file" > "${file}.tmp"
-                mv "${file}.tmp" "$file"
-                echo "${file}: Discussion -> Accepted"
-                echo "Tracking issue: #${issue_num} (${issue_url})"
+            if [ "$count" -eq 0 ]; then
+                echo "No implementation phases found; no tickets created." >&2
             else
-                echo "${file}: Discussion -> Accepted"
-                echo "Warning: tracking issue creation failed or was skipped." >&2
-                echo "Create one manually and add '- **Tracking Issue**: #NNN' to the metadata." >&2
+                i=0
+                while [ "$i" -lt "$count" ]; do
+                    title=$(echo "$result" | jq -r ".phases[$i].title")
+                    summary=$(echo "$result" | jq -r ".phases[$i].summary")
+                    jp ticket add feature "$title" \
+                        --implements "$rfd_id" \
+                        --body "$summary"
+                    i=$((i + 1))
+                done
+                echo "Review the tickets before committing them; 'just ticket-list' shows the board."
             fi
         else
-            echo "${file}: Discussion -> Accepted"
-            echo "Skipped tracking issue creation. Add one manually if needed." >&2
+            echo "Skipped phase tickets. File them later with 'just ticket-add'." >&2
         fi
 
     # --- Accepted -> Implemented ---
@@ -1681,6 +2001,26 @@ rfd-renumber NNN MMM="":
         echo "Run \`just rfd-summaries\` to refresh the summary cache." >&2
     fi
 
+# Internal: print the commit author as `Name <email>`.
+#
+# Falls back to the bare name, then to $USER, so a checkout without git identity
+# still produces something to attribute a document to.
+[private]
+_git-author:
+    #!/usr/bin/env sh
+    set -eu
+
+    name=$(git config user.name 2>/dev/null || true)
+    email=$(git config user.email 2>/dev/null || true)
+
+    if [ -n "$name" ] && [ -n "$email" ]; then
+        echo "${name} <${email}>"
+    elif [ -n "$name" ]; then
+        echo "$name"
+    else
+        echo "${USER:-unknown}"
+    fi
+
 # Internal: print the first available draft slot id (D01–D99).
 #
 # Exits 1 when all 99 slots are in use. Callers should propagate the exit
@@ -1730,21 +2070,20 @@ _rfd-next-number:
 # Internal: rewrite an RFD id in the priority board.
 #
 # `priority.json` stores RFD ids; substitute OLD for NEW wherever the id
-# appears (the `planned` milestone groups, `backlog`, `in_development`, and
-# the legacy flat `order`). A missing board file is a no-op.
+# appears (the `planned` milestone groups, `backlog`, and the legacy flat
+# `order`). A missing board file is a no-op.
 [private]
 _rfd-priority-rewrite OLD NEW:
     #!/usr/bin/env sh
     set -eu
 
-    priority_file="docs/rfd/priority.json"
+    priority_file="docs/rfd/.priority.json"
     [ -f "$priority_file" ] || exit 0
     jq --arg old "{{OLD}}" --arg new "{{NEW}}" '
         def sub_id: map(if . == $old then $new else . end);
         (if .planned then .planned |= map(.ids |= sub_id) else . end)
         | (if .order then .order |= sub_id else . end)
         | .backlog = ((.backlog // []) | sub_id)
-        | .in_development = ((.in_development // []) | sub_id)
     ' "$priority_file" > "${priority_file}.tmp" && mv "${priority_file}.tmp" "$priority_file"
 
 # Mark an RFD as abandoned with the given reason.
@@ -1909,20 +2248,238 @@ rfd-grep +ARGS:
 rfd-list *ARGS:
     node docs/.vitepress/rfd-list.mjs {{ARGS}}
 
+# File a ticket. KIND is 'bug', 'feature', or 'chore'.
+#
+# Tickets are markdown files under `docs/ticket/`, numbered from a counter that
+# never reuses an id. Write a ticket when the work is clear enough to start, and
+# an RFD when it needs a design first.
+#
+# The author comes from your JP or git identity. Omit the title to compose the
+# ticket inline — first line the title, blank line, then the description, with
+# `Ctrl+X` to escape into your editor. Piped text seeds the buffer:
+#
+#   just ticket-add bug "Tool call header misaligned"
+#   just ticket-add bug
+#   pbpaste | just ticket-add chore "Bump the deny list"
+[group('ticket')]
+ticket-add KIND *TITLE: _install-ticket
+    #!/usr/bin/env sh
+    set -eu
+
+    # The plugin's stdin carries the host protocol, so a piped description is
+    # read here and handed over as an argument.
+    body=""
+    if [ ! -t 0 ]; then
+        body=$(cat)
+    fi
+
+    set -- add {{quote(KIND)}}
+    if [ -n "{{TITLE}}" ]; then
+        set -- "$@" {{quote(TITLE)}}
+    fi
+    if [ -n "$body" ]; then
+        set -- "$@" --body "$body"
+    fi
+
+    jp ticket "$@"
+
+# Append a comment to a ticket.
+#
+# NNN is T-02wt0kx or 02wt0kx; append `#N` to reply to the Nth comment. The body
+# comes from the arguments, from stdin when piped, or from the inline composer
+# when neither is given.
+#
+#   just ticket-comment T-02wt0kx "Reproduced at 72 columns."
+#   just ticket-comment T-02wt0kx#1 "The wrap calculation is off."
+#   git log -1 | just ticket-comment T-02wt0kx
+#   just ticket-comment T-02wt0kx
+#
+# The author comes from your JP or git identity.
+[group('ticket')]
+[positional-arguments]
+ticket-comment NNN *BODY: _install-ticket
+    #!/usr/bin/env sh
+    set -eu
+
+    shift # remove NNN from positional params
+
+    # `T-02wt0kx#1` addresses a comment; split the reply target off the id.
+    id="{{NNN}}"
+    re=""
+    case "$id" in
+        *'#'*) re="${id##*#}"; id="${id%%#*}" ;;
+    esac
+
+    # The plugin's stdin carries the host protocol, so a piped body is read
+    # here and handed over as an argument. With neither, the plugin asks the
+    # host to open the inline composer.
+    body=""
+    if [ "$#" -gt 0 ]; then
+        body="$*"
+    elif [ ! -t 0 ]; then
+        body=$(cat)
+    fi
+
+    set -- comment "$id"
+    if [ -n "$re" ]; then
+        set -- "$@" --re "$re"
+    fi
+    if [ -n "$body" ]; then
+        set -- "$@" --body "$body"
+    fi
+
+    jp ticket "$@"
+
+# Mark a ticket as Done. NNN is T-02wt0kx or 02wt0kx.
+[group('ticket')]
+ticket-close NNN: _install-ticket
+    @jp ticket close {{quote(NNN)}}
+
+# List tickets, ordered by id.
+#
+#   just ticket-list                        # every ticket
+#   just ticket-list --status "In Progress" # one column of the board
+#   just ticket-list --kind bug
+#   just ticket-list --json                 # for `jq`
+[group('ticket')]
+[positional-arguments]
+ticket-list *ARGS: _install-ticket
+    #!/usr/bin/env sh
+    set -eu
+
+    jp ticket list "$@"
+
+# Read one ticket, with its comments numbered for replies.
+#
+# Pass `--json` for the machine-readable form.
+[group('ticket')]
+[positional-arguments]
+ticket-show NNN *ARGS: _install-ticket
+    #!/usr/bin/env sh
+    set -eu
+
+    shift # remove NNN from positional params
+    jp ticket show {{quote(NNN)}} "$@"
+
+# Import a GitHub issue as a ticket, or refresh one already imported.
+#
+# One way only: the title, description, and comments come from GitHub, and the
+# metadata block stays local, so triage survives the next import. Replies belong
+# on GitHub and arrive when you import again.
+#
+#   just ticket-import 123
+#   just ticket-import 123 --kind feature
+[group('ticket')]
+[positional-arguments]
+ticket-import NNN *ARGS: _install-ticket
+    #!/usr/bin/env sh
+    set -eu
+
+    shift # remove NNN from positional params
+    jp ticket import {{quote(NNN)}} "$@"
+
+# Promote a ticket to an RFD draft. CATEGORY is 'design' (default), 'decision',
+# 'guide', or 'process'.
+#
+# A ticket whose discussion turned into a design question becomes an RFD: the
+# draft is seeded from the ticket's title and description, and the ticket closes
+# as Done with `Promoted to` naming the draft. The work item is finished; the
+# work moved.
+#
+# Idempotent: a ticket that already names an existing draft reports it and stops,
+# so a run that failed partway can simply be repeated.
+[group('ticket')]
+ticket-promote NNN CATEGORY="design": _install-ticket
+    #!/usr/bin/env sh
+    set -eu
+
+    detail=$(jp ticket show {{quote(NNN)}} --json)
+    id=$(echo "$detail" | jq -r '.id')
+    title=$(echo "$detail" | jq -r '.title')
+    description=$(echo "$detail" | jq -r '.description')
+    promoted=$(echo "$detail" | jq -r '.metadata.promoted_to // empty')
+
+    if [ -n "$promoted" ]; then
+        existing=$(ls docs/rfd/drafts/${promoted}-*.md docs/rfd/${promoted}-*.md 2>/dev/null | head -1)
+        if [ -n "$existing" ]; then
+            echo "${id} is already promoted to ${promoted} (${existing})." >&2
+            exit 0
+        fi
+        echo "${id} names ${promoted}, but no such RFD exists; seeding a new draft." >&2
+    fi
+
+    out=$(just rfd-draft {{quote(CATEGORY)}} "$title")
+    echo "$out"
+    file=${out#Created }
+    draft=$(basename "$file" | sed 's/^\(D[0-9]*\)-.*/\1/')
+
+    # Seed the Summary with the ticket's description, replacing the template's
+    # placeholder prose. The remaining sections are left for the author.
+    awk -v desc="$description" -v id="$id" '
+        /^## Summary$/ {
+            print; print ""
+            if (desc != "") { print desc; print "" }
+            print "Promoted from ticket " id "."
+            print ""
+            skip = 1
+            next
+        }
+        skip && /^## / { skip = 0 }
+        skip { next }
+        { print }
+    ' "$file" > "${file}.tmp" && mv "${file}.tmp" "$file"
+
+    jp ticket promote "$id" --to "$draft"
+
+# Give a ticket a fresh id, after CI reports two files claiming one.
+#
+# PATH names the losing ticket file — an id would name both. Run this on the
+# branch that has not merged yet: its commits are still rewritable and every
+# reference to the id on it is unambiguously its own.
+#
+# References are rewritten in what the branch changed against BASE (`main` by
+# default). Occurrences elsewhere are reported, not touched: the same token on
+# BASE belongs to the ticket that kept the id.
+#
+#   just ticket-refresh docs/ticket/02wt0kx-some-bug.md
+#   just ticket-refresh docs/ticket/02wt0kx-some-bug.md develop
+[group('ticket')]
+ticket-refresh PATH BASE="main": _install-ticket
+    @jp ticket refresh {{quote(PATH)}} --base {{quote(BASE)}}
+
+# Convert tickets left in the pre-RFD-102 `NNNN-slug.md` format.
+#
+# Run it on a branch cut before the id change, after rebasing onto main. Each
+# ticket lands in the time bucket of the commit that added it, so it keeps its
+# order against tickets already on main.
+#
+# The docs build rejects the old filename shape, so a branch that merges without
+# running this fails rather than dropping the ticket silently.
+#
+# Transitional: delete this recipe once no such branch is left.
+[group('ticket')]
+ticket-migrate: _install-ticket
+    @jp ticket migrate
+
+# Search across all tickets.
+[group('ticket')]
+ticket-grep +ARGS:
+    @rg {{ARGS}} docs/ticket/
+
 # Locally develop the documentation, with hot-reloading.
 [group('docs')]
-develop-docs *FLAGS="--open": rfd-summaries
+develop-docs *FLAGS="--host --allowedHosts --open": rfd-summaries
     just _docs "dev" {{FLAGS}}
 
 # Open the RFD priority board for drag-and-drop reordering.
 #
 # Starts the docs dev server and opens the board at `/rfd/priority`. Dragging
-# rows and toggling "in development" writes `docs/rfd/priority.json`; commit that
+# rows and toggling "in development" writes `docs/rfd/.priority.json`; commit that
 # file to publish the new order. The board is read-only in the production build
 # — the write endpoint only exists on the dev server.
 [group('rfd')]
 rfd-manage: rfd-summaries
-    just _docs "dev" "--open" "/rfd/priority"
+    just _docs "dev" "--host" "--allowedHosts" "--open" "/rfd/priority"
 
 # Build the statically built documentation.
 [group('docs')]
@@ -1951,8 +2508,12 @@ check-and-fix *FLAGS:
 # Run tests, using nextest.
 [group('check')]
 [group('main')]
+[positional-arguments]
 test *FLAGS="--workspace": (_install "cargo-nextest@" + nextest_version + " cargo-expand@" + expand_version)
-    cargo nextest run --all-targets --cargo-profile=nextest --status-level=slow --failure-output=final {{FLAGS}}
+    #!/usr/bin/env sh
+    set -eu
+
+    cargo nextest run --all-targets --cargo-profile=nextest --status-level=slow --failure-output=final "$@"
 
 # Continuously run tests, using Bacon.
 [group('check')]
@@ -2041,10 +2602,11 @@ plugin-build-local: _install-jp (plugin-build "")
     target=$(rustc -vV | sed -n 's/host: //p')
     dir="$(jp path user-local --plugins=command)"
     mkdir -p "$dir"
-    for manifest in crates/plugins/command/*/Cargo.toml; do
-        [ -f "$manifest" ] || continue
-        id=$(cargo metadata --manifest-path "$manifest" --format-version=1 --no-deps \
-            | jq -r '.packages[0].metadata["jp-registry"].id')
+    # `[package.metadata.jp-registry]` marks a plugin as installable. Plugins
+    # without it are built but not installed here; `cargo install --path` them.
+    ids=$(cargo metadata --no-deps --format-version=1 \
+        | jq -r '.packages[] | select(.metadata["jp-registry"]) | .metadata["jp-registry"].id')
+    for id in $ids; do
         src="target/${target}/release/jp-${id}"
         [ -f "$src" ] || continue
         cp "$src" "${dir}/jp-${id}"
@@ -2077,9 +2639,13 @@ fmt-markdown-ci: _install-comfort _install_ci_matchers
     comfort --check --workspace --language markdown --format-markdown --reference-links --prune-reference-links
 
 # Test the code on CI.
+#
+# `SCOPE` selects the crates to test: `workspace` covers every member, `jp-only`
+# skips the crates listed in `non_jp_excludes`. An unrecognised scope tests the
+# full workspace.
 [group('ci')]
-test-ci: (_install "cargo-nextest@" + nextest_version) _install_ci_matchers
-    cargo nextest run --locked --lib --tests --cargo-profile=nextest --status-level=slow --failure-output=immediate-final --workspace --no-fail-fast
+test-ci SCOPE="workspace": (_install "cargo-nextest@" + nextest_version) _install_ci_matchers
+    cargo nextest run --locked --lib --tests --cargo-profile=nextest --status-level=slow --failure-output=immediate-final --workspace --no-fail-fast {{ if SCOPE == "jp-only" { non_jp_excludes } else { "" } }}
 
 # Generate documentation on CI.
 [group('ci')]
@@ -2130,7 +2696,7 @@ vet-ci: (_install "cargo-vet@" + vet_version)
     echo "::add-matcher::.github/matchers.json"
 
 [working-directory: 'docs']
-@_docs CMD="dev" *FLAGS: _docs-install
+@_docs CMD="dev --host --allowedHosts" *FLAGS: _docs-install
     yarn vitepress {{CMD}} {{FLAGS}}
 
 @_install +CRATES: _install-binstall
@@ -2156,6 +2722,19 @@ _install-tools *args:
         exit 0
     fi
     cargo install {{quiet_flag}} --locked --path .config/jp/tools --debug {{args}}
+
+# Build and install the `jp-ticket` command plugin that backs `jp ticket`.
+#
+# The plugin is not in the published registry, so `jp` picks it up from `$PATH`
+# (`plugins.command.ticket.run` in `.jp/config.toml` approves it).
+_install-ticket *args:
+    #!/usr/bin/env sh
+    set -eu
+    if [ -n "${JP_NO_INSTALL:-}" ]; then
+        echo "Skipping jp-ticket rebuild (JP_NO_INSTALL set); using the installed binary." >&2
+        exit 0
+    fi
+    cargo install {{quiet_flag}} --locked --path crates/plugins/command/ticket --debug {{args}}
 
 @_install-comfort *args:
     cargo install {{quiet_flag}} --locked --path crates/contrib/comfort {{args}}

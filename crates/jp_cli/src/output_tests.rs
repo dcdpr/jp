@@ -1,5 +1,6 @@
 use comfy_table::{Cell, Row};
 use jp_printer::{OutputFormat, Printer};
+use jp_term::table::DetailRow;
 use serde_json::json;
 
 use super::*;
@@ -90,7 +91,7 @@ fn table_empty_rows() {
 #[test]
 fn details_text_pretty_with_title() {
     let (printer, out, _) = Printer::memory(OutputFormat::TextPretty);
-    let rows = vec![DetailRow::scalar("Key", "Value")];
+    let rows = Details::Fields(vec![DetailRow::scalar("Key", "Value")]);
 
     print_details(&printer, Some("My Title"), rows);
     let output = flush_stdout(&printer, &out);
@@ -103,7 +104,7 @@ fn details_text_pretty_with_title() {
 #[test]
 fn details_text_renders_markdown() {
     let (printer, out, _) = Printer::memory(OutputFormat::Text);
-    let rows = vec![DetailRow::scalar("color", "red")];
+    let rows = Details::Fields(vec![DetailRow::scalar("color", "red")]);
 
     print_details(&printer, None, rows);
     let output = flush_stdout(&printer, &out);
@@ -116,25 +117,27 @@ fn details_text_renders_markdown() {
 #[test]
 fn details_json_compact() {
     let (printer, out, _) = Printer::memory(OutputFormat::Json);
-    let rows = vec![
+    let rows = Details::Fields(vec![
         DetailRow::scalar("name", "jp"),
         DetailRow::scalar("version", "1.0"),
-    ];
+    ]);
 
     print_details(&printer, Some("info"), rows);
     let output = flush_stdout(&printer, &out);
 
     let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
     assert_eq!(parsed["title"], "info");
-    assert_eq!(parsed["details"]["name"], "jp");
-    assert_eq!(parsed["details"]["version"], "1.0");
+    assert_eq!(
+        parsed["details"],
+        serde_json::json!({ "name": "jp", "version": "1.0" })
+    );
     assert!(!output.trim().contains('\n'), "expected compact JSON");
 }
 
 #[test]
 fn details_json_pretty_is_indented() {
     let (printer, out, _) = Printer::memory(OutputFormat::JsonPretty);
-    let rows = vec![DetailRow::scalar("k", "v")];
+    let rows = Details::Fields(vec![DetailRow::scalar("k", "v")]);
 
     print_details(&printer, None, rows);
     let output = flush_stdout(&printer, &out);
@@ -147,7 +150,7 @@ fn details_json_pretty_is_indented() {
 #[test]
 fn details_no_title_json() {
     let (printer, out, _) = Printer::memory(OutputFormat::Json);
-    let rows = vec![DetailRow::scalar("a", "b")];
+    let rows = Details::Fields(vec![DetailRow::scalar("a", "b")]);
 
     print_details(&printer, None, rows);
     let output = flush_stdout(&printer, &out);

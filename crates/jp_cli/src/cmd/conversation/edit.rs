@@ -356,7 +356,8 @@ async fn generate_titles(
         tool_choice: jp_config::assistant::tool_choice::ToolChoice::default(),
     };
 
-    let retry_config = RetryConfig::default();
+    let retry_config =
+        RetryConfig::default().with_max_response_bytes(config.assistant.request.max_response_bytes);
     let llm_events =
         collect_with_retry(provider.as_ref(), &model_details, query, &retry_config).await?;
 

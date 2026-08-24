@@ -1,6 +1,27 @@
 use super::*;
 use crate::format::HrStyle;
 
+/// Tifinagh consonant, consonant joiner, consonant: a ligature that renders in
+/// one column, having cost two before the final consonant closed it.
+const TIFINAGH_LIGATURE: &str = "\u{2D4F}\u{2D7F}\u{2D3E}";
+
+/// Arabic Lam followed by Alef: two grapheme clusters that ligate into a single
+/// column.
+const LAM_ALEF: &str = "\u{0644}\u{0627}";
+
+/// Character positions of the column edges on a rendered line.
+///
+/// A continuation line opens with [`CONTINUATION_EDGE`] instead of `|`, and
+/// that glyph is three bytes wide, so edges are counted in characters rather
+/// than byte offsets.
+fn column_edges(line: &str) -> Vec<usize> {
+    line.chars()
+        .enumerate()
+        .filter(|(_, c)| *c == '|' || *c == CONTINUATION_EDGE)
+        .map(|(i, _)| i)
+        .collect()
+}
+
 #[test]
 fn test_pad_cell_left() {
     assert_eq!(pad_cell("hi", 10, TableAlignment::Left), "hi        ");
@@ -88,6 +109,146 @@ fn test_wrap_ansi_state_continues() {
         "second line should reopen bold: {:?}",
         lines[1]
     );
+}
+
+#[test]
+fn test_truncate_fits_unchanged() {
+    assert_eq!(truncate_to_visual_width("hello", 10), "hello");
+    assert_eq!(truncate_to_visual_width("hello", 5), "hello");
+}
+
+#[test]
+fn test_truncate_unlimited() {
+    assert_eq!(truncate_to_visual_width("hello world", 0), "hello world");
+}
+
+#[test]
+fn test_truncate_marks_the_cut() {
+    // The marker takes the last column, so the result still fits the width.
+    assert_eq!(truncate_to_visual_width("abcdefghij", 5), "abcd…");
+}
+
+#[test]
+fn test_truncate_drops_the_space_before_the_marker() {
+    assert_eq!(truncate_to_visual_width("ab cdef", 4), "ab…");
+}
+
+#[test]
+fn test_tifinagh_ligature_narrows_once_completed() {
+    // The premise the prefix scan depends on. The joiner extends the first
+    // consonant's cluster and costs a column there, and completing the ligature
+    // drops the total to one, so prefix width is not monotonic. If this changes
+    // upstream, the test below stops testing what it claims to.
+    assert_eq!(TIFINAGH_LIGATURE.graphemes(true).collect::<Vec<_>>(), [
+        "\u{2D4F}\u{2D7F}",
+        "\u{2D3E}"
+    ]);
+    assert_eq!(ansi::visual_width("\u{2D4F}\u{2D7F}"), 2);
+    assert_eq!(ansi::visual_width(TIFINAGH_LIGATURE), 1);
+}
+
+#[test]
+fn test_truncate_keeps_a_narrowing_sequence_that_fits() {
+    // The ligature's first cluster is two columns and the completed ligature is
+    // one, so the prefix dips back under the budget as the sequence closes.
+    // Stopping at the first overshoot keeps `A` alone and drops content the
+    // column had room for.
+    let input = format!("A{TIFINAGH_LIGATURE}xy");
+    assert_eq!(ansi::visual_width(&input), 4);
+
+    let truncated = truncate_to_visual_width(&input, 3);
+    assert_eq!(truncated, format!("A{TIFINAGH_LIGATURE}\u{2026}"));
+    assert_eq!(ansi::visual_width(&truncated), 3);
+}
+
+#[test]
+fn test_prefix_scan_measures_the_limit_not_the_input() {
+    // Measuring is the expensive step, so its count has to follow the limit
+    // rather than the size of the cell. ASCII never narrows, so every probe past
+    // the overshoot is wasted and the cap is what ends the scan.
+    let (_, short) = longest_fitting_prefix(&"x".repeat(500), 0, 9);
+    let (_, long) = longest_fitting_prefix(&"x".repeat(100_000), 0, 9);
+
+    assert_eq!(short, long, "measurement count grew with the input");
+    assert!(
+        long <= MAX_LIGATURE_PROBES,
+        "{long} measurements for a 9-column limit"
+    );
+}
+
+#[test]
+fn test_prefix_scan_measurements_stay_bounded_across_ligatures() {
+    // Ligatures are why the exact measurement exists at all, so the bound has to
+    // hold for an input made entirely of them, where a probe that finds a
+    // fitting prefix starts a fresh run.
+    let (_, short) = longest_fitting_prefix(&LAM_ALEF.repeat(250), 0, 2);
+    let (_, long) = longest_fitting_prefix(&LAM_ALEF.repeat(50_000), 0, 2);
+
+    assert_eq!(short, long, "measurement count grew with the input");
+}
+
+#[test]
+fn test_truncate_drops_a_hyperlink_it_cannot_close() {
+    // OSC 8 is not an SGR sequence, so `RESET` cannot close it. Keeping the
+    // opener while its terminator falls in the dropped suffix would leave every
+    // following cell, and the rest of the output, linked.
+    let input = "\x1b]8;;url\x1b\\abcdef\x1b]8;;\x1b\\";
+    assert_eq!(truncate_to_visual_width(input, 4), "abc…");
+}
+
+#[test]
+fn test_truncate_measures_a_cluster_split_across_an_escape() {
+    // The escape hides the variation selector from the run it would have been
+    // segmented with, but the visible text is a two-column emoji heart, not a
+    // one-column text heart plus a zero-width selector. Trusting the runs kept
+    // `A` plus the heart at three columns and then added the marker: four
+    // against a `max_width` of three, which pushed the header row out of
+    // alignment with the rest of the table.
+    let truncated = truncate_to_visual_width("A\u{2764}\x1b[31m\u{FE0F}xyz", 3);
+    assert_eq!(truncated, "A…");
+    assert_eq!(ansi::visual_width(&truncated), 2);
+}
+
+#[test]
+fn test_truncate_closes_an_untracked_sgr_attribute() {
+    // `AnsiState` tracks neither inverse video nor its `27` closer, so whether a
+    // reset is owed cannot depend on what it recognized: the closer here is in
+    // the dropped suffix, and without the reset the attribute runs on through
+    // every following cell.
+    let input = "\x1b[7mabcdefghij\x1b[27m";
+    assert_eq!(truncate_to_visual_width(input, 6), "\x1b[7mabcde…\x1b[0m");
+}
+
+#[test]
+fn test_truncate_keeps_grapheme_clusters_whole() {
+    // U+2764 is one column alone and two with the U+FE0F that follows it, so
+    // cutting between the two would render a different character than the input
+    // asked for. Written as escapes because the selector is invisible.
+    assert_eq!(truncate_to_visual_width("A\u{2764}\u{FE0F}x", 3), "A…");
+}
+
+#[test]
+fn test_hard_break_keeps_grapheme_clusters_whole() {
+    // The cluster does not fit the tail of the first line, so it moves whole to
+    // the second rather than leaving its selector orphaned.
+    let lines = wrap_to_visual_width("ab\u{2764}\u{FE0F}cd", 3);
+    assert_eq!(lines, vec!["ab", "\u{2764}\u{FE0F}c", "d"]);
+}
+
+#[test]
+fn test_hard_break_lets_an_oversized_cluster_overflow() {
+    // A cluster wider than the whole column cannot be split without changing
+    // what it renders as, so each one takes a line and overflows it.
+    let lines = wrap_to_visual_width("\u{2764}\u{FE0F}\u{2764}\u{FE0F}", 1);
+    assert_eq!(lines, vec!["\u{2764}\u{FE0F}", "\u{2764}\u{FE0F}"]);
+}
+
+#[test]
+fn test_truncate_closes_open_ansi_state() {
+    // Bold opens before the cut, so it has to be closed or it bleeds into the
+    // rest of the line.
+    let input = "\x1b[1m**bold text**\x1b[22m";
+    assert_eq!(truncate_to_visual_width(input, 6), "\x1b[1m**bol…\x1b[0m");
 }
 
 #[test]
@@ -245,20 +406,15 @@ fn test_format_simple_table() {
         assert!(line.ends_with('|'), "line should end with |: {line}");
     }
 
-    // Pipe positions should be consistent across all content rows.
-    let pipe_positions: Vec<Vec<usize>> = lines
+    // Column edges should be consistent across all content rows.
+    let edges: Vec<Vec<usize>> = lines
         .iter()
         .enumerate()
         .filter(|(i, _)| *i != 1) // skip separator
-        .map(|(_, line)| {
-            line.char_indices()
-                .filter(|(_, c)| *c == '|')
-                .map(|(i, _)| i)
-                .collect()
-        })
+        .map(|(_, line)| column_edges(line))
         .collect();
-    for (i, pos) in pipe_positions.iter().enumerate().skip(1) {
-        assert_eq!(*pos, pipe_positions[0], "pipe positions differ at row {i}");
+    for (i, row_edges) in edges.iter().enumerate().skip(1) {
+        assert_eq!(*row_edges, edges[0], "column edges differ at row {i}");
     }
 }
 
@@ -317,7 +473,7 @@ fn test_format_table_with_wrapping() {
     let plain: String = result
         .lines()
         .flat_map(|l| l.chars())
-        .filter(|c| !c.is_control() && *c != '|')
+        .filter(|c| !c.is_control() && *c != '|' && *c != CONTINUATION_EDGE)
         .collect();
     let normalized: String = plain.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(
@@ -361,27 +517,19 @@ fn test_format_table_wrapping_respects_alignment() {
     )
     .expect("should format");
 
-    // All data lines should have consistent pipe positions.
+    // All data lines should have consistent column edge positions.
     let data_lines: Vec<&str> = result
         .lines()
         .enumerate()
         .filter(|(i, _)| *i != 1) // skip separator
         .map(|(_, l)| l)
         .collect();
-    let first_pipes: Vec<usize> = data_lines[0]
-        .char_indices()
-        .filter(|(_, c)| *c == '|')
-        .map(|(i, _)| i)
-        .collect();
+    let first_edges = column_edges(data_lines[0]);
     for (i, line) in data_lines.iter().enumerate().skip(1) {
-        let pipes: Vec<usize> = line
-            .char_indices()
-            .filter(|(_, c)| *c == '|')
-            .map(|(i, _)| i)
-            .collect();
         assert_eq!(
-            pipes, first_pipes,
-            "pipe positions differ at data line {i}: {line:?}"
+            column_edges(line),
+            first_edges,
+            "column edges differ at data line {i}: {line:?}"
         );
     }
 
@@ -398,6 +546,137 @@ fn test_format_table_wrapping_respects_alignment() {
     assert!(
         right_cell.starts_with("  "),
         "right-aligned continuation should have leading spaces: {right_cell:?}"
+    );
+}
+
+/// A line that continues the row above opens with the continuation edge instead
+/// of `|`, so a reader can tell a wrapped row from the next one.
+/// Only the opening delimiter changes: GFM makes a row's leading `|` optional,
+/// so a continuation line pasted into a markdown document still splits into the
+/// right columns on the pipes that remain.
+#[test]
+fn test_wrapped_rows_open_with_the_continuation_edge() {
+    let arena = comrak::Arena::new();
+    let options = comrak::Options {
+        extension: comrak::options::Extension {
+            table: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let input = "| Name | Desc |\n| --- | --- |\n| a | one two three |\n";
+    let root = comrak::parse_document(&arena, input, &options);
+    let table_node = root.first_child().expect("should have table");
+    let theme = crate::theme::resolve(None);
+    let opts = TableOptions::new(9);
+    let hr_opts = crate::render::HrOptions {
+        style: HrStyle::Markdown,
+    };
+    let result = format_table(
+        table_node,
+        RenderOptions {
+            width: 0,
+            terminal_width: None,
+            table_options: &opts,
+            hr_options: &hr_opts,
+            theme: &theme,
+            default_background: None,
+            inline_code_bg: None,
+            indent: 0,
+        },
+        None,
+    )
+    .expect("should format");
+
+    assert_eq!(
+        result,
+        "| Name | Desc      |\n|------|-----------|\n| a    | one two   |\n┆      | three     |\n"
+    );
+}
+
+/// Opting out returns every line to `|`, for output that has to stay a valid
+/// markdown table row by row.
+#[test]
+fn test_continuation_edge_can_be_disabled() {
+    let arena = comrak::Arena::new();
+    let options = comrak::Options {
+        extension: comrak::options::Extension {
+            table: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let input = "| Name | Desc |\n| --- | --- |\n| a | one two three |\n";
+    let root = comrak::parse_document(&arena, input, &options);
+    let table_node = root.first_child().expect("should have table");
+    let theme = crate::theme::resolve(None);
+    let opts = TableOptions::new(9).continuation_edge(false);
+    let hr_opts = crate::render::HrOptions {
+        style: HrStyle::Markdown,
+    };
+    let result = format_table(
+        table_node,
+        RenderOptions {
+            width: 0,
+            terminal_width: None,
+            table_options: &opts,
+            hr_options: &hr_opts,
+            theme: &theme,
+            default_background: None,
+            inline_code_bg: None,
+            indent: 0,
+        },
+        None,
+    )
+    .expect("should format");
+
+    assert_eq!(
+        result,
+        "| Name | Desc      |\n|------|-----------|\n| a    | one two   |\n|      | three     |\n"
+    );
+}
+
+/// A header cell wider than its column is truncated, not wrapped, so the
+/// separator stays on the second line.
+/// A wrapped header pushes the separator down, and a markdown parser reading
+/// that output promotes the header's own tail to the header row.
+#[test]
+fn test_wide_header_is_truncated_not_wrapped() {
+    let arena = comrak::Arena::new();
+    let options = comrak::Options {
+        extension: comrak::options::Extension {
+            table: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let input = "| Alpha heading | Beta |\n| --- | --- |\n| a | b |\n";
+    let root = comrak::parse_document(&arena, input, &options);
+    let table_node = root.first_child().expect("should have table");
+    let theme = crate::theme::resolve(None);
+    let opts = TableOptions::new(9);
+    let hr_opts = crate::render::HrOptions {
+        style: HrStyle::Markdown,
+    };
+    let result = format_table(
+        table_node,
+        RenderOptions {
+            width: 0,
+            terminal_width: None,
+            table_options: &opts,
+            hr_options: &hr_opts,
+            theme: &theme,
+            default_background: None,
+            inline_code_bg: None,
+            indent: 0,
+        },
+        None,
+    )
+    .expect("should format");
+
+    assert_eq!(
+        result,
+        "| Alpha he… | Beta |\n|-----------|------|\n| a         | b    |\n"
     );
 }
 

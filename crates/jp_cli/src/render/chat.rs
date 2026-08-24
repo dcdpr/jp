@@ -44,7 +44,7 @@ use jp_md::{
     },
     theme,
 };
-use jp_printer::{PrintableExt as _, Printer};
+use jp_printer::{OutputWidth, PrintableExt as _, Printer};
 use tracing::warn;
 
 use crate::timer::{LineTimer, spawn_line_timer};
@@ -136,7 +136,7 @@ pub struct ChatRenderer {
 impl ChatRenderer {
     pub fn new(printer: Arc<Printer>, config: StyleConfig) -> Self {
         let pretty = printer.pretty_printing_enabled();
-        let formatter = formatter_from_config(&config, pretty, printer.terminal_width());
+        let formatter = formatter_from_config(&config, pretty, printer.output_width().columns());
         // Configure the printer's bounded-latency controller from the
         // typewriter style. `max_latency = 0` (the default) leaves the
         // controller disabled, preserving the original static per-character
@@ -216,7 +216,7 @@ impl ChatRenderer {
             label,
             suffix,
             detail,
-            self.config.markdown.wrap_width,
+            wrap_width(&self.config, self.printer.output_width().columns()),
             pretty,
         );
 
@@ -423,16 +423,16 @@ impl ChatRenderer {
                 }
                 self.code_block = Some(self.formatter.begin_code_block(language));
                 let bg = self.terminal_options(0).default_background;
-                let rendered = self
-                    .formatter
-                    .render_code_fence(&format!("{event}\n"), bg.as_ref());
+                let rendered =
+                    self.formatter
+                        .render_code_fence(&format!("{event}\n"), bg.as_ref(), indent);
                 self.print_code(&rendered, indent);
             }
             Event::FencedCodeLine { content, indent } => {
                 let bg = self.terminal_options(0).default_background;
                 let rendered = if let Some(ref mut state) = self.code_block {
                     self.formatter
-                        .render_code_line(&content, state, bg.as_ref())
+                        .render_code_line(&content, state, bg.as_ref(), indent)
                 } else {
                     content
                 };
@@ -447,9 +447,9 @@ impl ChatRenderer {
                 // visual flow of the list, so we emit the fence on
                 // its own and let the next event handle its own
                 // separation.
-                let mut rendered = self
-                    .formatter
-                    .render_code_fence(&format!("{fence}\n"), bg.as_ref());
+                let mut rendered =
+                    self.formatter
+                        .render_code_fence(&format!("{fence}\n"), bg.as_ref(), indent);
                 if indent == 0 {
                     rendered.push_str(&render_separator(bg.as_ref()));
                 }
@@ -471,7 +471,8 @@ impl ChatRenderer {
     /// Print a raw code string with the code typewriter delay.
     ///
     /// The content is already highlighted and has background applied by the
-    /// formatter's streaming code block API.
+    /// formatter's streaming code block API, which was told the same `indent`
+    /// so its line fill accounts for the spaces added here.
     /// `indent` is the visual column the renderer should put each line at (used
     /// when the code block is inside a list item).
     fn print_code(&self, content: &str, indent: usize) {
@@ -507,9 +508,8 @@ impl ChatRenderer {
     }
 
     fn print_block(&mut self, block: &str, indent: usize, terminal: bool) {
-        // Skip whitespace-only blocks. These can appear when the LLM emits
-        // blank text content blocks (e.g. "\n\n" between interleaved thinking
-        // blocks) that survive a buffer flush.
+        // A whitespace-only block has nothing to print, and emitting it would
+        // add a stray line to the region's spacing.
         if block.trim().is_empty() {
             return;
         }
@@ -610,13 +610,23 @@ impl ChatRenderer {
     }
 
     /// The full-width background fill configured for reasoning content, if any.
+    ///
+    /// A terminal gets the erase-to-end-of-line escape: it follows the real
+    /// edge, so a window resized part-way through a response still shades whole
+    /// lines, and it leaves no trailing spaces in a copied selection.
+    /// A width declared by the caller pads with real spaces instead, because a
+    /// host that lays out its own sub-window — an `fzf` preview pane — drops
+    /// the erase, leaving the shading to stop at the last character.
     fn reasoning_background(&self) -> Option<DefaultBackground> {
         self.config
             .reasoning
             .background
             .map(|color| DefaultBackground {
                 param: crate::format::color_to_bg_param(color),
-                fill: BackgroundFill::Terminal,
+                fill: match self.printer.output_width() {
+                    OutputWidth::Declared(width) => BackgroundFill::Column(usize::from(width)),
+                    OutputWidth::Terminal(_) | OutputWidth::Unknown => BackgroundFill::Terminal,
+                },
             })
     }
 
@@ -654,18 +664,20 @@ impl ChatRenderer {
         self.emit_pending_separator(false);
     }
 
-    /// Close the block region of the chat response that just ended.
+    /// Commit buffered content at a streaming-cycle boundary the same response
+    /// continues across, leaving the deferred separator unresolved.
     ///
-    /// Each `ChatResponse` is a self-contained block of assistant output: two
-    /// consecutive reasoning events are two blocks, not one paragraph
-    /// continued.
-    /// Committing the buffered markdown here keeps the next event's opening
-    /// text from being parsed as a continuation of this one's last paragraph.
+    /// A stream error commits what was streamed and resends the request, with
+    /// nothing persistent rendered in between.
+    /// A separator owed by reasoning therefore stays pending and the
+    /// continuation's first content decides its shading, exactly as the next
+    /// block would inside one streaming cycle.
+    /// Pair with [`reset_preserving_region`], which carries the pending
+    /// separator across the reset the continuation performs.
     ///
-    /// The deferred separator is left pending, so the following content still
-    /// decides its shading: another reasoning block keeps the gap inside the
-    /// reasoning region, a message ends the region with a plain blank line.
-    pub fn end_response(&mut self) {
+    /// [`reset_preserving_region`]: Self::reset_preserving_region
+    pub fn flush_for_continuation(&mut self) {
+        self.cancel_reasoning_timer();
         self.drain_buffer();
     }
 
@@ -720,8 +732,8 @@ impl ChatRenderer {
     ///
     /// `Static` writes its `reasoning...` line at the transition whatever the
     /// chunk holds.
-    /// `Full` renders the chunk as-is, so a whitespace-only one (interleaved
-    /// thinking emits them between tool calls) puts nothing on screen.
+    /// `Full` renders the chunk as-is, so a whitespace-only one puts nothing on
+    /// screen.
     /// `Truncate` answers for the text it would actually render, elision marker
     /// included — whitespace that fills the remaining budget still shows a
     /// `...`, while everything past the budget shows nothing.
@@ -825,7 +837,8 @@ impl ChatRenderer {
         self.cancel_reasoning_timer();
         self.buffer = Buffer::new();
         let pretty = self.printer.pretty_printing_enabled();
-        self.formatter = formatter_from_config(&self.config, pretty, self.printer.terminal_width());
+        self.formatter =
+            formatter_from_config(&self.config, pretty, self.printer.output_width().columns());
         self.last_content_kind = None;
         self.last_response_kind = None;
         self.pending_separator = None;
@@ -836,6 +849,24 @@ impl ChatRenderer {
         // captured by the event builder, so it is safe to discard.
         self.para_source.clear();
         self.para_emitted = 0;
+    }
+
+    /// Reset the renderer state, keeping the content region open.
+    ///
+    /// Used at a streaming-cycle boundary the same response continues across:
+    /// the deferred separator survives, along with the content kinds that
+    /// decide its shading, so the continuation's first content resolves the gap
+    /// the interrupted block owed.
+    pub fn reset_preserving_region(&mut self) {
+        let last_content_kind = self.last_content_kind;
+        let last_response_kind = self.last_response_kind;
+        let pending_separator = self.pending_separator;
+
+        self.reset();
+
+        self.last_content_kind = last_content_kind;
+        self.last_response_kind = last_response_kind;
+        self.pending_separator = pending_separator;
     }
 }
 
@@ -924,6 +955,21 @@ fn indent_lines(content: &str, indent: usize) -> String {
     out
 }
 
+/// Columns prose wraps at: the configured width, capped by the space available.
+///
+/// `style.markdown.wrap_width` is a reading-comfort preference, so a wider
+/// output area doesn't widen it.
+/// A *narrower* one has to win, though — wrapping past the available width
+/// leaves the host to wrap again on top, which double-wraps in a terminal and
+/// silently truncates in a pane that clips.
+fn wrap_width(config: &StyleConfig, terminal_width: Option<u16>) -> usize {
+    let configured = config.markdown.wrap_width;
+    match terminal_width {
+        Some(available) => configured.min(usize::from(available)),
+        None => configured,
+    }
+}
+
 /// Build a markdown formatter from the style config.
 ///
 /// `terminal_width` bounds blocks that can't be soft-wrapped (tables); `None`
@@ -944,9 +990,10 @@ fn formatter_from_config(
         warn!("Unknown theme {name:?} in `style.markdown.theme`, falling back to the default.");
     }
 
-    Formatter::with_width(config.markdown.wrap_width)
+    Formatter::with_width(wrap_width(config, terminal_width))
         .terminal_width(terminal_width.map_or(0, usize::from))
         .table_max_column_width(config.markdown.table_max_column_width)
+        .table_continuation_edge(config.markdown.table_continuation_edge)
         .theme(theme_name)
         .pretty_hr(pretty && config.markdown.hr_style.is_line())
         .inline_code_bg(

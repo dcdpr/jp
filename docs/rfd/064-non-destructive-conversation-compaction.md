@@ -156,6 +156,12 @@ The projection layer then has nothing to apply, and the LLM sees the original
 uncompacted events.
 This is useful for undoing compaction when the result is unsatisfactory.
 
+> [!NOTE]
+> `--reset` also takes an optional index: `--reset=2` removes only the second
+> compaction event, numbered as `jp conversation show` lists them.
+> The value requires `=`, so a bare `--reset` followed by a conversation ID
+> still targets that conversation.
+
 #### The `--compact` Flag (DSL)
 
 The `--compact` flag is available on `query`, `fork`, and `compact` itself.

@@ -3,7 +3,7 @@ use std::time::Duration;
 use camino_tempfile::tempdir;
 use chrono::{DateTime, TimeZone as _, Utc};
 use jp_config::{
-    AppConfig,
+    AppConfig, PartialAppConfig,
     conversation::tool::style::{InlineResults, LinkStyle, ParametersStyle},
     style::reasoning::{ReasoningDisplayConfig, TruncateChars},
 };
@@ -47,7 +47,7 @@ fn setup_ctx_with_config(
 ) -> (Ctx, ConversationId, SharedBuffer, SharedBuffer, Runtime) {
     let tmp = tempdir().unwrap();
     let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
-    let workspace = Workspace::new(tmp.path());
+    let workspace = Workspace::in_memory(tmp.path());
     let runtime = Runtime::new().unwrap();
 
     let mut ctx = Ctx::new(
@@ -99,17 +99,60 @@ fn prints_user_message() {
     assert!(output.contains("Hello world"), "got: {output}");
 }
 
-/// Replay renders each stored event whole, so two consecutive reasoning events
-/// must be separated even when the first one's text ends mid-paragraph.
+/// Replay joins consecutive stored reasoning events into one region, so text
+/// broken mid-word across two events renders as a single word.
+///
+/// This is Anthropic's redaction shape as it lands on disk: a thinking block,
+/// an opaque `redacted_thinking` block stored as a reasoning event with no
+/// text, and the thinking continuing in the event after it.
 #[test]
-fn prints_consecutive_reasoning_events_as_separate_blocks() {
+fn prints_reasoning_events_split_by_a_redacted_event_as_one_region() {
+    let mut config = AppConfig::new_test();
+    config.style.reasoning.display = ReasoningDisplayConfig::Full;
+    config.style.reasoning.background = None;
+
+    let (mut ctx, id, out, _err, _rt) = setup_ctx_with_config(config, vec![
+        ConversationEvent::new(
+            ChatResponse::reasoning("I can test this directly by ver"),
+            ts(0, 0, 0),
+        ),
+        ConversationEvent::new(ChatResponse::reasoning(""), ts(0, 0, 1)),
+        ConversationEvent::new(
+            ChatResponse::reasoning("ifying the return value."),
+            ts(0, 0, 2),
+        ),
+    ]);
+
+    let print = Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        range: TurnSelection::from_last_turn(None, None),
+        current_config: false,
+        style: None,
+        compacted: false,
+    };
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let result = print.run(&mut ctx, &[h]);
+    ctx.printer.flush();
+
+    result.unwrap();
+    let output = strip_ansi(&out.lock());
+    assert!(
+        output.contains("I can test this directly by verifying the return value."),
+        "stored reasoning events must render as one region, got: {output:?}"
+    );
+}
+
+/// A blank line stored inside the reasoning text splits it into two blocks,
+/// whether it arrived as its own event or inside one.
+#[test]
+fn prints_reasoning_separator_as_a_block_break() {
     let mut config = AppConfig::new_test();
     config.style.reasoning.display = ReasoningDisplayConfig::Full;
     config.style.reasoning.background = None;
 
     let (mut ctx, id, out, _err, _rt) = setup_ctx_with_config(config, vec![
         ConversationEvent::new(ChatResponse::reasoning("First section."), ts(0, 0, 0)),
-        ConversationEvent::new(ChatResponse::reasoning("Second section."), ts(0, 0, 1)),
+        ConversationEvent::new(ChatResponse::reasoning("\n\nSecond section."), ts(0, 0, 1)),
     ]);
 
     let print = Print {
@@ -127,7 +170,7 @@ fn prints_consecutive_reasoning_events_as_separate_blocks() {
     let output = strip_ansi(&out.lock());
     assert!(
         output.contains("First section.\n\nSecond section."),
-        "stored reasoning events must render as separate blocks, got: {output:?}"
+        "a stored separator must break the region into blocks, got: {output:?}"
     );
 }
 
@@ -1400,6 +1443,99 @@ fn role_header_renders_assistant_label_with_model_suffix() {
     assert!(
         output.contains("── jp (anthropic/test) "),
         "assistant header should include model suffix, got: {output:?}"
+    );
+}
+
+/// A two-turn conversation whose model changed between the turns: turn 1 ran on
+/// `anthropic/test` (the conversation's base config), turn 2 on
+/// `openai/gpt-4o`.
+fn two_turns_with_model_switch() -> (Ctx, ConversationId, SharedBuffer, SharedBuffer, Runtime) {
+    let (ctx, id, out, err, rt) = setup_ctx(vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("first"), ts(0, 0, 1)),
+        ConversationEvent::new(ChatResponse::message("one"), ts(0, 0, 2)),
+    ]);
+
+    let mut delta = PartialAppConfig::empty();
+    delta.assistant.model.id = "openai/gpt-4o".into();
+
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let lock = ctx.workspace.test_lock(h);
+    lock.as_mut().update_events(|e| {
+        e.add_config_delta(delta);
+        e.extend(vec![
+            ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+            ConversationEvent::new(ChatRequest::from("second"), ts(0, 1, 1)),
+            ConversationEvent::new(ChatResponse::message("two"), ts(0, 1, 2)),
+        ]);
+    });
+
+    (ctx, id, out, err, rt)
+}
+
+fn print_with_style(style: Option<PrintStyle>, id: ConversationId) -> Print {
+    Print {
+        target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
+        range: TurnSelection::from_last_turn(None, None),
+        current_config: false,
+        style,
+        compacted: false,
+    }
+}
+
+#[test]
+fn assistant_header_names_the_model_each_turn_ran_on() {
+    let (mut ctx, id, out, _err, _rt) = two_turns_with_model_switch();
+
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print_with_style(None, id).run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let output = strip_ansi(&out.lock());
+    assert!(
+        output.contains("── jp (anthropic/test) ") && output.contains("── jp (openai/gpt-4o) "),
+        "each turn should name its own model, got: {output:?}"
+    );
+}
+
+/// A `--style` preset overrides presentation only.
+/// It must not swap the per-turn config out for the current workspace config,
+/// which would label every turn with the model configured right now.
+#[test]
+fn style_preset_keeps_the_per_turn_model_in_the_assistant_header() {
+    let (mut ctx, id, out, _err, _rt) = two_turns_with_model_switch();
+
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print_with_style(Some(PrintStyle::Full), id)
+        .run(&mut ctx, &[h])
+        .unwrap();
+    ctx.printer.flush();
+
+    let output = strip_ansi(&out.lock());
+    assert!(
+        output.contains("── jp (anthropic/test) ") && output.contains("── jp (openai/gpt-4o) "),
+        "each turn should name its own model, got: {output:?}"
+    );
+}
+
+/// `--current-config` is the documented opt-out: it renders every turn with the
+/// workspace config, so both turns carry that model.
+#[test]
+fn current_config_labels_every_turn_with_the_workspace_model() {
+    let (mut ctx, id, out, _err, _rt) = two_turns_with_model_switch();
+
+    let mut print = print_with_style(None, id);
+    print.current_config = true;
+
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    print.run(&mut ctx, &[h]).unwrap();
+    ctx.printer.flush();
+
+    let output = strip_ansi(&out.lock());
+    assert_eq!(
+        output.matches("── jp (anthropic/test) ").count(),
+        2,
+        "both turns should use the workspace model, got: {output:?}"
     );
 }
 

@@ -233,9 +233,13 @@ pub(crate) enum ConversationTarget {
     /// A specific conversation ID.
     Id(ConversationId),
 
+    /// The session's active conversation.
+    /// `active`, `.`
+    SessionActive,
+
     /// The most recently activated conversation in the workspace.
-    /// `latest`, `l`
-    Latest,
+    /// `recent`, `r`
+    Recent,
 
     /// The most recently created conversation.
     /// `newest`, `n`
@@ -243,11 +247,15 @@ pub(crate) enum ConversationTarget {
 
     /// The most recently pinned conversation.
     /// `pinned`, `p`
-    LatestPinned,
+    RecentPinned,
 
     /// The session's previously active conversation.
     /// `session`, `s`
     SessionPrevious,
+
+    /// Every live conversation in the workspace.
+    /// `+live`, `+l`
+    AllLive,
 
     /// All conversations in the current session's history.
     /// `+session`, `+s`
@@ -352,13 +360,15 @@ impl ConversationTarget {
             }),
 
             // Conversation aliases (single target)
+            "active" | "." => Self::SessionActive,
             "newest" | "n" => Self::Newest,
-            "latest" | "l" => Self::Latest,
-            "pinned" | "p" => Self::LatestPinned,
+            "recent" | "r" => Self::Recent,
+            "pinned" | "p" => Self::RecentPinned,
             "session" | "s" => Self::SessionPrevious,
             "archived" | "a" => Self::Archived,
 
             // Multi-target keywords
+            "+live" | "+l" => Self::AllLive,
             "+session" | "+s" => Self::AllSession,
             "+pinned" | "+p" => Self::AllPinned,
             "+archived" | "+a" => Self::AllArchived,
@@ -385,7 +395,8 @@ impl ConversationTarget {
     pub(crate) fn requires_session(&self) -> bool {
         matches!(
             self,
-            Self::SessionPrevious
+            Self::SessionActive
+                | Self::SessionPrevious
                 | Self::AllSession
                 | Self::Picker(PickerFilter { session: true, .. })
         )
@@ -405,11 +416,13 @@ impl ConversationTarget {
             Self::Picker(f) if f.pinned => Some("pinned"),
             Self::Picker(f) if f.archived => Some("archived"),
             Self::Id(_) | Self::Picker(_) | Self::Help | Self::Stdin => None,
+            Self::SessionActive => Some("active"),
             Self::Newest => Some("newest"),
-            Self::Latest => Some("latest"),
-            Self::LatestPinned => Some("pinned"),
+            Self::Recent => Some("recent"),
+            Self::RecentPinned => Some("pinned"),
             Self::SessionPrevious => Some("session"),
             Self::Archived => Some("archived"),
+            Self::AllLive => Some("+live"),
             Self::AllSession => Some("+session"),
             Self::AllPinned => Some("+pinned"),
             Self::AllArchived => Some("+archived"),
@@ -428,7 +441,18 @@ impl ConversationTarget {
     ) -> Result<Vec<ConversationId>> {
         match self {
             Self::Id(id) => Ok(vec![*id]),
-            Self::Latest => {
+            Self::SessionActive => {
+                let id = session
+                    .and_then(|s| workspace.session_active_conversation(s))
+                    .ok_or_else(|| {
+                        Error::NotFound(
+                            "conversation",
+                            "no active conversation in this session".into(),
+                        )
+                    })?;
+                Ok(vec![id])
+            }
+            Self::Recent => {
                 let id = workspace
                     .conversations()
                     .max_by_key(|(_, c)| c.last_activated_at)
@@ -448,7 +472,7 @@ impl ConversationTarget {
                     })?;
                 Ok(vec![id])
             }
-            Self::LatestPinned => {
+            Self::RecentPinned => {
                 let id = workspace
                     .conversations()
                     .filter(|(_, c)| c.is_pinned())
@@ -470,32 +494,24 @@ impl ConversationTarget {
                     })?;
                 Ok(vec![id])
             }
-            Self::AllSession => {
-                let ids = session
+            Self::AllLive => non_empty(
+                workspace.conversations().map(|(id, _)| *id).collect(),
+                "no live conversations",
+            ),
+            Self::AllSession => non_empty(
+                session
                     .map(|s| workspace.session_conversation_ids(s))
-                    .unwrap_or_default();
-                if ids.is_empty() {
-                    return Err(Error::NotFound(
-                        "conversation",
-                        "no conversations in this session".into(),
-                    ));
-                }
-                Ok(ids)
-            }
-            Self::AllPinned => {
-                let ids: Vec<_> = workspace
+                    .unwrap_or_default(),
+                "no conversations in this session",
+            ),
+            Self::AllPinned => non_empty(
+                workspace
                     .conversations()
                     .filter(|(_, c)| c.is_pinned())
                     .map(|(id, _)| *id)
-                    .collect();
-                if ids.is_empty() {
-                    return Err(Error::NotFound(
-                        "conversation",
-                        "no pinned conversations".into(),
-                    ));
-                }
-                Ok(ids)
-            }
+                    .collect(),
+                "no pinned conversations",
+            ),
             Self::Archived => {
                 let id = workspace
                     .archived_conversations()
@@ -506,23 +522,29 @@ impl ConversationTarget {
                     })?;
                 Ok(vec![id])
             }
-            Self::AllArchived => {
-                let ids: Vec<_> = workspace
+            Self::AllArchived => non_empty(
+                workspace
                     .archived_conversations()
                     .map(|(id, _, _)| id)
-                    .collect();
-                if ids.is_empty() {
-                    return Err(Error::NotFound(
-                        "conversation",
-                        "no archived conversations".into(),
-                    ));
-                }
-                Ok(ids)
-            }
+                    .collect(),
+                "no archived conversations",
+            ),
             Self::Stdin => read_stdin_ids(),
             Self::Picker(_) | Self::Help => Ok(vec![]),
         }
     }
+}
+
+/// Pass `ids` through, failing with `empty` when nothing matched.
+///
+/// A keyword that names a set the workspace doesn't have is an error rather
+/// than an empty result, so a caller never silently operates on nothing.
+fn non_empty(ids: Vec<ConversationId>, empty: &'static str) -> Result<Vec<ConversationId>> {
+    if ids.is_empty() {
+        return Err(Error::NotFound("conversation", empty.into()));
+    }
+
+    Ok(ids)
 }
 
 /// Read conversation IDs from standard input, one per line.
@@ -696,7 +718,7 @@ fn resolve_default_id(
 ) -> Option<ConversationId> {
     let target = match default_id {
         DefaultConversationId::Ask => return None,
-        DefaultConversationId::LastActivated => ConversationTarget::Latest,
+        DefaultConversationId::LastActivated => ConversationTarget::Recent,
         DefaultConversationId::LastCreated => ConversationTarget::Newest,
         DefaultConversationId::Previous => ConversationTarget::SessionPrevious,
         DefaultConversationId::Id(id) => id.parse::<_>().ok().map(ConversationTarget::Id)?,

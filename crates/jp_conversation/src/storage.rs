@@ -9,9 +9,25 @@
 //! The inner event types serialize as plain text.
 
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use chrono::{DateTime, SecondsFormat, Utc};
 use serde_json::{Map, Value};
 
 use crate::event::EventKind;
+
+/// A timestamp in the one format events cross a boundary in.
+///
+/// Storage keeps timestamps in `time`'s human-readable format (`2024-09-01
+/// 10:00:00.0`), which nothing outside Rust parses.
+/// A reader on the far side of a boundary wants one format, and RFC 3339 is the
+/// one every platform's date parser accepts.
+///
+/// Sub-second precision is kept when the value has any and omitted when it does
+/// not, which is what `AutoSi` means: a timestamp stored with a fractional part
+/// keeps it.
+#[must_use]
+pub fn rfc3339(timestamp: DateTime<Utc>) -> String {
+    timestamp.to_rfc3339_opts(SecondsFormat::AutoSi, true)
+}
 
 /// Which encoding to apply to a given field.
 enum Field {

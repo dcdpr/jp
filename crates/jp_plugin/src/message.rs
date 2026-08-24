@@ -166,6 +166,10 @@ pub struct ConversationSummary {
     /// When the conversation was last activated.
     pub last_activated_at: DateTime<Utc>,
 
+    /// When the conversation was pinned, absent if it is not pinned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pinned_at: Option<DateTime<Utc>>,
+
     /// Number of events in the conversation.
     pub events_count: usize,
 }

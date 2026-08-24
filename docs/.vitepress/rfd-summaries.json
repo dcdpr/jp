@@ -1,6 +1,6 @@
 {
   "001-jp-rfd-process.md": {
-    "hash": "45bbfb5aa52f98002b13208b1098392958d1a7c05f3cc8191fd93b1945fab6fa",
+    "hash": "530085202f0a497981e72bffbc56f6cbf4164bb29f1fd45b50335dd4fecfba34",
     "summary": "Establishes lightweight Request for Discussion process for proposing and tracking design decisions with clear lifecycle states."
   },
   "002-using-llms.md": {
@@ -12,7 +12,7 @@
     "summary": "Buffer segments streaming markdown blocks; TerminalRenderer applies ANSI-aware terminal formatting; comrak chosen over pulldown-cmark."
   },
   "005-first-class-inquiry-events.md": {
-    "hash": "bd19573644d77d9c4d14b7b9c8feae87c997320977d53846fb717a7b69d6397f",
+    "hash": "6e06d81559aa0ca48fffd041ea70d2f74c8e3a59d3a9d3b9adba1e19361226ca",
     "summary": "Record inquiry events in conversation stream with centralized filtering to keep them hidden from LLM providers."
   },
   "006-turn-scoped-mutations.md": {
@@ -116,7 +116,7 @@
     "summary": "Make JP scriptable with concise schema DSL and inferred clean JSON output when piping or with --schema flag."
   },
   "030-schema-dsl.md": {
-    "hash": "d8f041473711fa0ec15010002e56e1ef8e8f65c1b55481601e6efdffc4d70f2e",
+    "hash": "97d9fe44330e60174d9045dfba09869ee1f005af585df97f79163a947cdd7ff6",
     "summary": "JP's concise DSL syntax for defining JSON Schema objects via command-line flags with types, descriptions, and nested structures."
   },
   "031-durable-conversation-storage-with-workspace-projection.md": {
@@ -156,7 +156,7 @@
     "summary": "Hide conversations from default listings and expose conversation_id to tools for sub-agent workflows."
   },
   "041-rfd-lifecycle-enhancements.md": {
-    "hash": "c640083e40b592c53f088a16eda1a5b30dd4c20e27433cc61c48f0f06c10cf0c",
+    "hash": "3d71aebd35512ed91f2dd0a566cddcbd3f36a9642fe9d47912ef520a9c7e013b",
     "summary": "Defer RFD numbering to Discussion, auto-create tracking issues, add Extends/Extended by metadata."
   },
   "042-tool-options.md": {
@@ -232,7 +232,7 @@
     "summary": "Add `jp completions` and `jp manpage` subcommands using clap_complete and clap_mangen for shell integration."
   },
   "060-config-explain.md": {
-    "hash": "b944888f2eea5fb4e717826c184af99b5a5b2e0bb8b1a3822e8642510a3f4c42",
+    "hash": "af1475f128e5897ec6b895706f6ef04f91a75dbeb61753b4768503a9a8ae4e22",
     "summary": "Global `--explain` flag traces config resolution through 9 layers, showing where each field value originates."
   },
   "061-interactive-config.md": {
@@ -248,7 +248,7 @@
     "summary": "Extend config wizard with frecency-based field ordering using CLI usage tracking data."
   },
   "064-non-destructive-conversation-compaction.md": {
-    "hash": "418d90052040c11bb52c94998ea718c45198f2063fb416747a943dfcdbd0e2ea",
+    "hash": "41a1c7dfc2b427ff0fd0ca2bd62b369e679eca1bf648506d1bd917ac874bf386",
     "summary": "Non-destructive conversation compaction through overlay events that project reduced views without mutating stored data."
   },
   "065-typed-resource-model-for-attachments.md": {
@@ -280,7 +280,7 @@
     "summary": "Replace Workspace's optional Storage with four focused trait objects (Persist, Load, Lock, Session) for cleaner polymorphism."
   },
   "070-negative-config-deltas.md": {
-    "hash": "dd648e260c9e0106271ab0891855c06a6776f29a5bda11fb33ad2d3fbb4ca47c",
+    "hash": "4302104ffbc8d0f6d22fd3550c9bb025cb7bf4fde484cad5ce90b435705ff0eb",
     "summary": "Introduces `-C` flag to selectively revert previously applied config sources using provenance tracking via claims maps."
   },
   "071-conversation-archiving.md": {
@@ -292,7 +292,7 @@
     "summary": "UPPERCASE keywords NONE and WORKSPACE reset config state; loader.reset entry setting provides local resets; ConfigDelta becomes enum to persist resets."
   },
   "079-config-sources-and-load-order.md": {
-    "hash": "5e5c78898d1ba2ac5de5ef86ebad0da886c8ca608beaa6fd202e75ba6db670fc",
+    "hash": "4f02ce9e5d97a0573d9f408509498177337b9ea0c959a9cb369b5cc77dad5c12",
     "summary": "JP loads config from four implicit sources plus environment variables, with extends directives and inherit flags controlling precedence."
   },
   "074-eager-loading-with-command-declared-data-requirements.md": {
@@ -324,11 +324,11 @@
     "summary": "Split tool enable into state and allow_toggle to fix directive bugs and eliminate variant proliferation."
   },
   "082-unified-inquiry-event-recording.md": {
-    "hash": "57e2a66512d7ec922bb83f8078a81177a884797ae41ec6609f8f1e75e6fb842a",
+    "hash": "b2d476597db461a7970e469876845c6709c532b2e24ab624015500eb9bd7175f",
     "summary": "Unify inquiry event recording across all routing paths; add cancellation/redaction variants; track attempts per turn."
   },
   "083-built-in-ask_user-tool-for-assistant-initiated-inquiries.md": {
-    "hash": "11b0999e4212efd2f5ecbed7549921df06764b620d2c53475066e926e8292e99",
+    "hash": "c98f03d892b251f8b2c47ea359945c6db61a5138677650ee6d150cbfa4e02701",
     "summary": "Built-in tool for assistant to ask typed questions mid-turn with human-only enforcement and optional answer persistence."
   },
   "084-configurable-markdown-element-coloring.md": {
@@ -340,11 +340,11 @@
     "summary": "Add --explain flag to jp query showing rendered system prompt, tools, attachments, and final request without calling the LLM provider."
   },
   "086-line-oriented-stdin-input-for-cli-arguments.md": {
-    "hash": "df319f2f8d8476bcfec18dc2315a29ddba75f0cc212d6ec7ec6fd1d695746d7b",
+    "hash": "9425e7b6fa3fedd4d77f6e9d4466c15368f9a35accb665a4153ac2acdfdfc0eb",
     "summary": "Convention for multi-value CLI arguments: `-` reads line-oriented values from stdin, starting with conversation targeting."
   },
   "087-session-scoped-active-workspace.md": {
-    "hash": "63795fd09a15895ff477f2a6210cdda7698f6cb7421534934b244749bf74e828",
+    "hash": "33c87af5d75b59ef2f8ed995ede4f62bcac538e4c7139257676f174ae19c1bbf",
     "summary": "Session-scoped active workspace lets JP commands run from anywhere after selecting a workspace with `jp w use`."
   },
   "088-unified-editor-service-and-inline-reply-widget.md": {
@@ -380,7 +380,7 @@
     "summary": "Extend reasoning-region background shading across tool calls to visually represent continuous reasoning despite interleaved tool execution."
   },
   "096-terminal-output-sanitization-for-untrusted-content.md": {
-    "hash": "10bedc94a7d1454fffef85238fbe8f7d2216ca9969aef50abb90d9c50feaed06",
+    "hash": "8abdc1050cab6c682042be4f5cdc621baed71c1ae407be68318fad667b9afa46",
     "summary": "Sanitize terminal output by allowlisting safe ANSI sequences (colors) and dropping dangerous ones (cursor, erase, OSC) to prevent escape injection attacks from untrusted content."
   },
   "097-stable-event-identifiers.md": {
@@ -390,5 +390,25 @@
   "098-request-response-event-linking.md": {
     "hash": "9e4099d9ae5835c978c66ac78fde41f8ce24313d59f33abde3e555fd3651f236",
     "summary": "Request-response linking via persistent event IDs detects answer scope under structural edits."
+  },
+  "101-conversation-labels.md": {
+    "hash": "7be4cc00cbd33cb5cd8a4b96ce9f8838a7e6e059f3032c65fa640fce355f1e7a",
+    "summary": "Conversations gain configurable key-value labels—static, command-backed, or CLI-set—managed through `jp c label` and used to filter by context like VCS branches."
+  },
+  "100-in-repo-ticket-tracking.md": {
+    "hash": "1ce52e4dd0d9d326b503d8e03e86e7623ff8bc08080b13020f2023a7ed982a04",
+    "summary": "Lightweight markdown-based work items tracked in-repo, displacing GitHub issues from assistant context with kanban board and RFD promotion mechanics."
+  },
+  "102-collision-resistant-ticket-identifiers.md": {
+    "hash": "5b31c977edb43275206de792a76589c98b8af75f012b4e508a2fedfb9aecbd1a",
+    "summary": "Replace sequential ticket ids with collision-resistant time-bucketed random ids to enable parallel distributed ticket creation."
+  },
+  "099-native-macos-app-for-browsing-conversations.md": {
+    "hash": "4955066abb71a8a098675aa3f9a628aca2ec16511d94cc6da35bcf320a39addc",
+    "summary": "Native macOS app for browsing JP conversations via FFI, with public Workspace::open API extracted from CLI."
+  },
+  "103-multi-value-conversation-labels.md": {
+    "hash": "1c9a52e7756e2b35badcb201f11f4bf625421849532602355980ebdbef7c65ca",
+    "summary": "Multi-valued labels replacing single-valued ones; add/set/rm verbs, set-membership filtering, config list-values, removes --label from query/fork."
   }
 }

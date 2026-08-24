@@ -1,0 +1,53 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            part: ToolCall(
+                Start {
+                    id: "toolu_012shPkgnEf5sUQ9oWo4q6AY",
+                    name: "run_me",
+                },
+            ),
+            metadata: {},
+        },
+        KeepAlive,
+        Part {
+            index: 0,
+            part: ToolCall(
+                ArgumentChunk(
+                    "",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: ToolCall(
+                ArgumentChunk(
+                    "{\"foo\": \"",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: ToolCall(
+                ArgumentChunk(
+                    "hello\"}",
+                ),
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

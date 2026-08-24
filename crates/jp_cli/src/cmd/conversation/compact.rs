@@ -92,20 +92,26 @@ pub(crate) struct Compact {
     #[arg(long)]
     dry_run: bool,
 
-    /// Remove all compaction events from the stream.
+    /// Remove compaction events from the stream.
     ///
-    /// Restores the raw event history so the LLM sees all original events.
+    /// Without a value, removes every compaction event, restoring the raw event
+    /// history so the LLM sees all original events.
+    /// With a value (`--reset=2`), removes only that compaction event, numbered
+    /// as `jp conversation show` lists them.
     /// Mutually exclusive with the policy, range, and DSL flags: `--reset`
     /// undoes compaction, it does not re-compact in the same invocation.
     /// Composes with `--dry-run` to preview the removal.
     #[arg(
         long,
+        value_name = "INDEX",
+        require_equals = true,
+        value_parser = parse_compaction_index,
         conflicts_with_all = [
             "keep_first", "keep_last", "from", "to", "first", "last", "turn",
             "reasoning", "tools", "summarize", "compact", "model",
         ],
     )]
-    reset: bool,
+    reset: Option<Option<usize>>,
 
     /// Compact using an inline DSL rule.
     ///
@@ -220,6 +226,48 @@ fn parse_tool_calls_mode(s: &str) -> Result<ToolCallsMode, String> {
         "expected one of: strip (s), strip-requests (sreq), strip-responses (sres), omit (o)"
             .to_string()
     })
+}
+
+/// Parse the `--reset=INDEX` value: a 1-based position among the conversation's
+/// compaction events.
+fn parse_compaction_index(s: &str) -> Result<usize, String> {
+    match s.parse() {
+        Ok(0) => Err("compaction indices are 1-based; `0` is not a valid index".to_owned()),
+        Ok(n) => Ok(n),
+        Err(_) => Err(format!("invalid compaction index '{s}'")),
+    }
+}
+
+/// Look up the compaction event a 1-based `--reset=INDEX` addresses.
+///
+/// Returns its 0-based position among the stream's compaction events, plus a
+/// `turns X..Y` label for the removal message (turn numbers 1-based, as the
+/// user sees them elsewhere).
+/// An index naming no event is an error rather than a silent no-op, matching
+/// how `--turn` treats an out-of-range turn.
+fn resolve_reset_index(
+    events: &ConversationStream,
+    index: usize,
+) -> Result<(usize, String), String> {
+    let Some(position) = index.checked_sub(1) else {
+        return Err("compaction indices are 1-based; `0` is not a valid index".to_owned());
+    };
+
+    let Some(compaction) = events.compactions().nth(position) else {
+        let count = events.compactions().count();
+        return Err(format!(
+            "compaction {index} out of range (conversation has {count} compaction event(s))"
+        ));
+    };
+
+    Ok((
+        position,
+        format!(
+            "turns {}..{}",
+            compaction.from_turn + 1,
+            compaction.to_turn + 1
+        ),
+    ))
 }
 
 /// Resolve the turn range a single rule would compact within one selected
@@ -614,26 +662,8 @@ impl Compact {
         let conv = lock.into_mut();
         let events_snapshot = conv.events().clone();
 
-        if self.reset {
-            if self.dry_run {
-                // Preview only — `--dry-run` must not mutate the conversation.
-                let count = events_snapshot.compactions().count();
-                if count > 0 {
-                    ctx.printer
-                        .println(format!("Would remove {count} compaction event(s)."));
-                } else {
-                    ctx.printer.println("No compaction events to remove.");
-                }
-            } else {
-                let removed = conv.update_events(ConversationStream::remove_compactions);
-                if removed > 0 {
-                    ctx.printer
-                        .println(format!("Removed {removed} compaction event(s)."));
-                } else {
-                    ctx.printer.println("No compaction events to remove.");
-                }
-            }
-            return Ok(());
+        if let Some(index) = self.reset {
+            return self.run_reset(ctx, &conv, &events_snapshot, index);
         }
 
         self.range.check_turn_range(events_snapshot.turn_count())?;
@@ -675,6 +705,50 @@ impl Compact {
         for line in timeline_lines(&segments, last_turn, false) {
             ctx.printer.println(line);
         }
+
+        Ok(())
+    }
+
+    /// Handle `--reset[=INDEX]`: remove every compaction event, or just the one
+    /// at `index` (1-based, in stream order).
+    ///
+    /// Under `--dry-run` nothing is mutated and the message describes what
+    /// would be removed.
+    /// An `index` past the last compaction event is an error rather than a
+    /// silent no-op (matching `--turn`).
+    fn run_reset(
+        &self,
+        ctx: &Ctx,
+        conv: &ConversationMut,
+        events: &ConversationStream,
+        index: Option<usize>,
+    ) -> Output {
+        let Some(index) = index else {
+            let count = if self.dry_run {
+                events.compactions().count()
+            } else {
+                conv.update_events(ConversationStream::remove_compactions)
+            };
+
+            ctx.printer.println(match (count, self.dry_run) {
+                (0, _) => "No compaction events to remove.".to_owned(),
+                (count, true) => format!("Would remove {count} compaction event(s)."),
+                (count, false) => format!("Removed {count} compaction event(s)."),
+            });
+            return Ok(());
+        };
+
+        let (position, range) = resolve_reset_index(events, index)?;
+
+        if self.dry_run {
+            ctx.printer
+                .println(format!("Would remove compaction {index} ({range})."));
+            return Ok(());
+        }
+
+        conv.update_events(|stream| stream.remove_compaction(position));
+        ctx.printer
+            .println(format!("Removed compaction {index} ({range})."));
 
         Ok(())
     }

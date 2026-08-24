@@ -1054,3 +1054,181 @@ mod definition_term_sections {
         );
     }
 }
+
+/// Tests covering wrapper-div headings, the `MediaWiki` shape: `<div
+/// class="mw-heading"><h2 id="..">…</h2><span
+/// class="mw-editsection">…</span></div>`.
+/// The section prose is a sibling of the wrapper, not of the heading, so both
+/// the sibling walk and the next-section boundary check must operate on
+/// wrappers.
+/// Two layouts exist in the wild: Parsoid nests each section's content in a
+/// `<section>` element; legacy parser output is flat, with wrapper divs and
+/// paragraphs all siblings of each other.
+mod wrapped_headings {
+    use scraper::Html;
+
+    use super::*;
+
+    const PARSOID_PAGE: &str = r#"
+        <html>
+        <head><title>Wiki Article</title></head>
+        <body>
+            <section data-mw-section-id="1">
+                <div class="mw-heading mw-heading2"><h2 id="Impact">Impact</h2><span class="mw-editsection">[<a href="/edit">edit</a>]</span></div>
+                <p>Impact prose here.</p>
+                <p>More impact prose.</p>
+            </section>
+            <section data-mw-section-id="2">
+                <div class="mw-heading mw-heading2"><h2 id="Criticism">Criticism</h2><span class="mw-editsection">[<a href="/edit">edit</a>]</span></div>
+                <p>Criticism prose here.</p>
+                <section data-mw-section-id="3">
+                    <div class="mw-heading mw-heading3"><h3 id="Rebuttals">Rebuttals</h3><span class="mw-editsection">[<a href="/edit">edit</a>]</span></div>
+                    <p>Rebuttal prose.</p>
+                </section>
+            </section>
+        </body>
+        </html>
+    "#;
+
+    const FLAT_PAGE: &str = r#"
+        <html>
+        <head><title>Legacy Wiki Article</title></head>
+        <body>
+            <div class="mw-heading mw-heading2"><h2 id="First">First</h2><span class="mw-editsection">[edit]</span></div>
+            <p>First prose.</p>
+            <div class="mw-heading mw-heading3"><h3 id="First_sub">First sub</h3><span class="mw-editsection">[edit]</span></div>
+            <p>Sub prose.</p>
+            <div class="mw-heading mw-heading2"><h2 id="Second">Second</h2><span class="mw-editsection">[edit]</span></div>
+            <p>Second prose.</p>
+        </body>
+        </html>
+    "#;
+
+    #[test]
+    fn parsoid_extract_includes_section_body() {
+        let doc = Html::parse_document(PARSOID_PAGE);
+        let result = extract_section_html_from_doc(&doc, "Impact").unwrap();
+
+        assert!(
+            result.contains("Impact prose here"),
+            "missing body: {result}"
+        );
+        assert!(result.contains("More impact prose"));
+        assert!(
+            !result.contains("Criticism prose"),
+            "next section bled in: {result}"
+        );
+    }
+
+    #[test]
+    fn parsoid_extract_includes_nested_subsections() {
+        let doc = Html::parse_document(PARSOID_PAGE);
+        let result = extract_section_html_from_doc(&doc, "Criticism").unwrap();
+
+        assert!(result.contains("Criticism prose here"));
+        assert!(
+            result.contains("Rebuttal prose"),
+            "nested subsection should be included: {result}"
+        );
+        assert!(!result.contains("Impact prose"));
+    }
+
+    #[test]
+    fn parsoid_preview_uses_prose_not_edit_chrome() {
+        let headers = list_section_headers(PARSOID_PAGE);
+        let impact = headers.iter().find(|h| h.id == "Impact").unwrap();
+
+        assert!(
+            impact.preview.starts_with("Impact prose here."),
+            "unexpected preview: {:?}",
+            impact.preview
+        );
+        assert!(
+            !impact.preview.contains("edit"),
+            "edit chrome leaked into preview: {:?}",
+            impact.preview
+        );
+    }
+
+    #[test]
+    fn flat_extract_stops_at_next_wrapped_heading_of_same_level() {
+        let doc = Html::parse_document(FLAT_PAGE);
+        let result = extract_section_html_from_doc(&doc, "First").unwrap();
+
+        assert!(result.contains("First prose"));
+        assert!(
+            result.contains("Sub prose"),
+            "deeper wrapped heading should be included: {result}"
+        );
+        assert!(
+            !result.contains("Second prose"),
+            "walk should stop at the next wrapped h2: {result}"
+        );
+    }
+
+    #[test]
+    fn flat_extract_subsection_stops_at_higher_level_wrapper() {
+        let doc = Html::parse_document(FLAT_PAGE);
+        let result = extract_section_html_from_doc(&doc, "First_sub").unwrap();
+
+        assert!(result.contains("Sub prose"));
+        assert!(!result.contains("First prose"));
+        assert!(
+            !result.contains("Second prose"),
+            "wrapped h2 must bound the h3 section: {result}"
+        );
+    }
+
+    #[test]
+    fn content_container_is_not_hoisted() {
+        // A heading that happens to be the last child of a content container
+        // must not promote the container to walk origin: that would pull the
+        // container's own content and its siblings into the section.
+        let html = r#"
+            <html><body>
+                <div class="post">
+                    <p>Intro text</p>
+                    <h2 id="refs">References</h2>
+                </div>
+                <div class="comments"><p>Comment text</p></div>
+            </body></html>
+        "#;
+
+        let doc = Html::parse_document(html);
+        let result = extract_section_html_from_doc(&doc, "refs").unwrap();
+
+        assert!(result.contains("References"));
+        assert!(
+            !result.contains("Intro text"),
+            "container content leaked in: {result}"
+        );
+        assert!(
+            !result.contains("Comment text"),
+            "container sibling leaked in: {result}"
+        );
+    }
+
+    #[test]
+    fn callout_starting_with_heading_is_kept_as_content() {
+        // An admonition box whose first child is a heading is section
+        // content, not a boundary: its own block content disqualifies it
+        // from being a heading wrapper.
+        let html = r#"
+            <html><body>
+                <h2 id="guide">Guide</h2>
+                <p>Guide text.</p>
+                <div class="admonition"><h5>Note</h5><p>Note body.</p></div>
+                <p>More guide text.</p>
+                <h2 id="next">Next</h2>
+                <p>Next text.</p>
+            </body></html>
+        "#;
+
+        let doc = Html::parse_document(html);
+        let result = extract_section_html_from_doc(&doc, "guide").unwrap();
+
+        assert!(result.contains("Note body"), "callout dropped: {result}");
+        assert!(result.contains("More guide text"));
+        assert!(!result.contains("Next text"));
+    }
+}

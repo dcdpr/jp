@@ -12,9 +12,12 @@ use camino::Utf8PathBuf;
 use chrono::Utc;
 use jp_config::{
     AppConfig, PartialAppConfig,
-    conversation::tool::{ToolConfigWithDefaults, ToolsConfig, style::ParametersStyle},
+    conversation::tool::{
+        ToolConfigWithDefaults, ToolsConfig,
+        style::{DisplayStyleConfig, ParametersStyle},
+    },
     model::id::PartialModelIdOrAliasConfig,
-    style::{StyleConfig, typewriter::DelayDuration},
+    style::{StyleConfig, reasoning::ReasoningDisplayConfig, typewriter::DelayDuration},
 };
 use jp_conversation::{
     EventKind,
@@ -39,6 +42,34 @@ pub enum ConfigSource {
     Fixed,
 }
 
+/// Display overrides applied on top of whichever config a turn is rendered
+/// with.
+///
+/// An overlay is re-applied after every per-turn config rebuild, so it controls
+/// presentation without taking over the identity a turn is labeled with.
+#[derive(Debug, Clone)]
+pub struct StyleOverlay {
+    /// How much of the assistant's reasoning to show.
+    pub reasoning_display: ReasoningDisplayConfig,
+
+    /// Whether tool call chrome is rendered at all.
+    pub tool_call_show: bool,
+
+    /// Display style applied to every tool and to the tool defaults.
+    pub tool_style: DisplayStyleConfig,
+}
+
+impl StyleOverlay {
+    fn apply(&self, style: &mut StyleConfig, tools: &mut ToolsConfig) {
+        style.reasoning.display = self.reasoning_display;
+        style.tool_call.show = self.tool_call_show;
+        tools.defaults.style = self.tool_style.clone();
+        for (_name, tool) in tools.iter_mut() {
+            tool.style = Some(self.tool_style.clone());
+        }
+    }
+}
+
 /// Renders conversation events for replay (e.g. `jp conversation print`).
 ///
 /// Owns a [`TurnView`] for chat/structured rendering and a [`ToolRenderer`] for
@@ -55,6 +86,9 @@ pub struct TurnRenderer {
     view: TurnView,
     tool: ToolRenderer,
     tools_config: ToolsConfig,
+
+    /// Presentation overrides re-applied after each per-turn config rebuild.
+    style_overlay: Option<StyleOverlay>,
 
     /// When set, only the user's own messages are rendered; assistant messages,
     /// reasoning, and tool calls are skipped.
@@ -76,15 +110,20 @@ pub struct TurnRenderer {
 impl TurnRenderer {
     pub fn new(
         printer: Arc<Printer>,
-        style: StyleConfig,
-        tools_config: ToolsConfig,
+        mut style: StyleConfig,
+        mut tools_config: ToolsConfig,
         assistant_name: Option<String>,
         model_id: Option<String>,
         root: Utf8PathBuf,
         is_tty: bool,
         source: ConfigSource,
         invocation: InvocationContext,
+        style_overlay: Option<StyleOverlay>,
     ) -> Self {
+        if let Some(overlay) = &style_overlay {
+            overlay.apply(&mut style, &mut tools_config);
+        }
+
         let mut view = TurnView::new(printer.clone(), style.clone(), assistant_name, model_id);
         let tool_chrome_shown = style.tool_call.show;
         let tool = ToolRenderer::new(
@@ -104,6 +143,7 @@ impl TurnRenderer {
             view,
             tool,
             tools_config,
+            style_overlay,
             user_only: false,
             tool_names: HashMap::new(),
             tool_chrome_shown,
@@ -230,6 +270,11 @@ impl TurnRenderer {
         };
 
         let mut style = config.style;
+        let mut tools_config = config.conversation.tools;
+        if let Some(overlay) = &self.style_overlay {
+            overlay.apply(&mut style, &mut tools_config);
+        }
+
         style.typewriter.text_delay = DelayDuration::instant();
         style.typewriter.code_delay = DelayDuration::instant();
         self.tool_chrome_shown = style.tool_call.show;
@@ -248,7 +293,7 @@ impl TurnRenderer {
             self.invocation.clone(),
         );
         self.view.set_tool_separator(self.tool.separator_flag());
-        self.tools_config = config.conversation.tools;
+        self.tools_config = tools_config;
     }
 }
 

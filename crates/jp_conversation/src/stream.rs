@@ -1,6 +1,6 @@
 //! See [`ConversationStream`].
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use chrono::{DateTime, Utc};
 use jp_config::{AppConfig, PartialAppConfig, PartialConfig as _};
@@ -423,6 +423,26 @@ impl ConversationStream {
         before - self.events.len()
     }
 
+    /// Remove a single compaction event, addressed by its 0-based position
+    /// among the compaction events in the stream.
+    ///
+    /// Returns the removed event, or `None` when the stream holds fewer
+    /// compaction events than that (in which case the stream is unchanged).
+    pub fn remove_compaction(&mut self, index: usize) -> Option<Compaction> {
+        let position = self
+            .events
+            .iter()
+            .enumerate()
+            .filter(|(_, event)| matches!(event, InternalEvent::Compaction(_)))
+            .map(|(position, _)| position)
+            .nth(index)?;
+
+        match self.events.remove(position) {
+            InternalEvent::Compaction(compaction) => Some(compaction),
+            _ => unreachable!("position points at a compaction event"),
+        }
+    }
+
     /// Returns an iterator over the [`Compaction`] events in the stream.
     pub fn compactions(&self) -> impl Iterator<Item = &Compaction> {
         self.events.iter().filter_map(|e| match e {
@@ -800,51 +820,91 @@ impl ConversationStream {
         });
     }
 
-    /// Removes [`InquiryResponse`]s whose ID doesn't match any
-    /// [`InquiryRequest`] in the stream.
+    /// Removes [`InquiryResponse`]s that have no matching [`InquiryRequest`]
+    /// **within the same turn**.
+    ///
+    /// The ID set is scoped to the containing turn so `InquiryId` reuse across
+    /// turns cannot cross-satisfy a pair.
+    /// When a legacy two-segment ID collides within a turn, requests and
+    /// responses pair by order (each request satisfies at most one response);
+    /// the unpaired excess is removed.
     ///
     /// [`InquiryRequest`]: crate::event::InquiryRequest
     /// [`InquiryResponse`]: crate::event::InquiryResponse
     fn remove_orphaned_inquiry_responses(&mut self) {
-        let request_ids: Vec<InquiryId> = self
-            .events
-            .iter()
-            .filter_map(InternalEvent::as_event)
-            .filter_map(|e| e.as_inquiry_request())
-            .map(|r| r.id.clone())
-            .collect();
-
-        self.events.retain(|event| {
-            if let Some(event) = event.as_event()
-                && let Some(response) = event.as_inquiry_response()
-            {
-                return request_ids.contains(&response.id);
+        let mut request_counts: HashMap<(usize, InquiryId), usize> = HashMap::new();
+        let mut turn = 0;
+        for event in self.events.iter().filter_map(InternalEvent::as_event) {
+            if event.is_turn_start() {
+                turn += 1;
+            } else if let Some(request) = event.as_inquiry_request() {
+                *request_counts
+                    .entry((turn, request.id.clone()))
+                    .or_default() += 1;
             }
-            true
+        }
+
+        let mut turn = 0;
+        self.events.retain(|event| {
+            let Some(event) = event.as_event() else {
+                return true;
+            };
+            if event.is_turn_start() {
+                turn += 1;
+                return true;
+            }
+            let Some(response) = event.as_inquiry_response() else {
+                return true;
+            };
+            match request_counts.get_mut(&(turn, response.id().clone())) {
+                Some(remaining) if *remaining > 0 => {
+                    *remaining -= 1;
+                    true
+                }
+                _ => false,
+            }
         });
     }
 
-    /// Removes [`InquiryRequest`]s whose ID doesn't match any
-    /// [`InquiryResponse`] in the stream.
+    /// Removes [`InquiryRequest`]s that have no matching [`InquiryResponse`]
+    /// **within the same turn** (see
+    /// [`Self::remove_orphaned_inquiry_responses`] for the turn-scoping and
+    /// order-pairing rationale).
     ///
     /// [`InquiryRequest`]: crate::event::InquiryRequest
     /// [`InquiryResponse`]: crate::event::InquiryResponse
     fn remove_orphaned_inquiry_requests(&mut self) {
-        let response_ids: Vec<InquiryId> = self
-            .events
-            .iter()
-            .filter_map(InternalEvent::as_event)
-            .filter_map(|e| e.as_inquiry_response())
-            .map(|r| r.id.clone())
-            .collect();
-
-        self.events.retain(|event| {
-            if let Some(event) = event.as_event()
-                && let Some(request) = event.as_inquiry_request()
-            {
-                return response_ids.contains(&request.id);
+        let mut response_counts: HashMap<(usize, InquiryId), usize> = HashMap::new();
+        let mut turn = 0;
+        for event in self.events.iter().filter_map(InternalEvent::as_event) {
+            if event.is_turn_start() {
+                turn += 1;
+            } else if let Some(response) = event.as_inquiry_response() {
+                *response_counts
+                    .entry((turn, response.id().clone()))
+                    .or_default() += 1;
             }
-            true
+        }
+
+        let mut turn = 0;
+        self.events.retain(|event| {
+            let Some(event) = event.as_event() else {
+                return true;
+            };
+            if event.is_turn_start() {
+                turn += 1;
+                return true;
+            }
+            let Some(request) = event.as_inquiry_request() else {
+                return true;
+            };
+            match response_counts.get_mut(&(turn, request.id.clone())) {
+                Some(remaining) if *remaining > 0 => {
+                    *remaining -= 1;
+                    true
+                }
+                _ => false,
+            }
         });
     }
 
@@ -1001,6 +1061,40 @@ impl ConversationStream {
         IterTurns::new(self.iter())
     }
 
+    /// Returns each event paired with the 0-based index of the turn it belongs
+    /// to.
+    ///
+    /// Turn boundaries match [`Self::iter_turns`]: a [`TurnStart`] opens a new
+    /// turn, and events before the first `TurnStart` form an implicit leading
+    /// turn.
+    ///
+    /// Unlike `iter_turns`, no per-event configuration is resolved.
+    /// `iter_turns` clones the accumulated [`PartialAppConfig`] for every event
+    /// and materializes the whole stream up front; this walks the events once
+    /// and allocates nothing.
+    /// Prefer it whenever only event content is needed.
+    ///
+    /// [`TurnStart`]: crate::event::TurnStart
+    pub fn iter_events_by_turn(&self) -> impl Iterator<Item = (usize, &ConversationEvent)> {
+        let mut turn = 0;
+        let mut seen_event = false;
+
+        self.events.iter().filter_map(move |internal| {
+            let InternalEvent::Event(event) = internal else {
+                return None;
+            };
+
+            // A leading `TurnStart` opens the first turn rather than closing an
+            // empty one, matching `IterTurns`.
+            if event.is_turn_start() && seen_event {
+                turn += 1;
+            }
+            seen_event = true;
+
+            Some((turn, &**event))
+        })
+    }
+
     /// Returns the number of turns in the stream.
     ///
     /// A turn is delimited by [`TurnStart`] events.
@@ -1010,7 +1104,9 @@ impl ConversationStream {
     /// [`TurnStart`]: crate::event::TurnStart
     #[must_use]
     pub fn turn_count(&self) -> usize {
-        self.iter_turns().len()
+        self.iter_events_by_turn()
+            .last()
+            .map_or(0, |(turn, _)| turn + 1)
     }
 
     /// Returns the turn that was active at the given time.

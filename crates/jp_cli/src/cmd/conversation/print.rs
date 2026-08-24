@@ -14,7 +14,7 @@ use crate::{
         turn_selection::TurnSelection,
     },
     ctx::Ctx,
-    render::{ConfigSource, TurnRenderer},
+    render::{ConfigSource, StyleOverlay, TurnRenderer},
 };
 
 /// Brief-mode tool display style: no arguments, no results, no file links.
@@ -152,7 +152,7 @@ impl Print {
             .unwrap_or(ctx.workspace.root())
             .to_path_buf();
 
-        let source = if current_config || print_style.is_some() {
+        let source = if current_config {
             ConfigSource::Fixed
         } else {
             ConfigSource::PerTurn
@@ -163,12 +163,8 @@ impl Print {
         render_style.typewriter.text_delay = DelayDuration::instant();
         render_style.typewriter.code_delay = DelayDuration::instant();
 
-        let mut tools_config = cfg.conversation.tools.clone();
-
-        if let Some(preset) = print_style {
-            apply_style_preset(preset, &mut render_style, &mut tools_config);
-        }
-
+        let tools_config = cfg.conversation.tools.clone();
+        let style_overlay = print_style.map(style_overlay);
         let user_only = matches!(print_style, Some(PrintStyle::User));
 
         let assistant_name = cfg.assistant.name.clone();
@@ -189,6 +185,7 @@ impl Print {
             ctx.term.is_tty,
             source,
             invocation,
+            style_overlay,
         );
         renderer.set_user_only(user_only);
 
@@ -227,22 +224,21 @@ impl Print {
     }
 }
 
-/// Apply a style preset to the rendering config and tool config.
-fn apply_style_preset(
-    preset: PrintStyle,
-    style: &mut jp_config::style::StyleConfig,
-    tools_config: &mut jp_config::conversation::tool::ToolsConfig,
-) {
-    let (reasoning_display, tool_style) = match preset {
-        PrintStyle::User | PrintStyle::Chat => (ReasoningDisplayConfig::Hidden, CHAT_TOOL_STYLE),
-        PrintStyle::Brief => (ReasoningDisplayConfig::Hidden, BRIEF_TOOL_STYLE),
-        PrintStyle::Full => (ReasoningDisplayConfig::Full, FULL_TOOL_STYLE),
+/// Translate a style preset into the display overrides the renderer applies on
+/// top of each turn's own config.
+fn style_overlay(preset: PrintStyle) -> StyleOverlay {
+    let (reasoning_display, tool_call_show, tool_style) = match preset {
+        PrintStyle::User | PrintStyle::Chat => {
+            (ReasoningDisplayConfig::Hidden, false, CHAT_TOOL_STYLE)
+        }
+        PrintStyle::Brief => (ReasoningDisplayConfig::Hidden, true, BRIEF_TOOL_STYLE),
+        PrintStyle::Full => (ReasoningDisplayConfig::Full, true, FULL_TOOL_STYLE),
     };
 
-    style.reasoning.display = reasoning_display;
-    tools_config.defaults.style = tool_style.clone();
-    for (_name, tool) in tools_config.iter_mut() {
-        tool.style = Some(tool_style.clone());
+    StyleOverlay {
+        reasoning_display,
+        tool_call_show,
+        tool_style,
     }
 }
 
