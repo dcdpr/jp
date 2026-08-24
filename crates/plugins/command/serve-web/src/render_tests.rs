@@ -58,6 +58,58 @@ fn render_reasoning() {
     );
 }
 
+/// Consecutive reasoning events form one region, so text broken mid-word across
+/// a content-less event in between joins into a single word.
+///
+/// This is Anthropic's redaction shape as it lands on disk: a thinking block,
+/// an opaque `redacted_thinking` block stored with no text, and the thinking
+/// continuing after it.
+#[test]
+fn render_reasoning_events_split_by_a_redacted_event_as_one_region() {
+    let events = vec![
+        json!({"type": "turn_start", "timestamp": "2025-01-01T00:00:00Z"}),
+        json!({"type": "chat_request", "timestamp": "2025-01-01T00:00:01Z", "content": "think"}),
+        json!({"type": "chat_response", "timestamp": "2025-01-01T00:00:02Z", "reasoning": "I can test this directly by ver"}),
+        json!({"type": "chat_response", "timestamp": "2025-01-01T00:00:03Z", "reasoning": ""}),
+        json!({"type": "chat_response", "timestamp": "2025-01-01T00:00:04Z", "reasoning": "ifying the return value."}),
+    ];
+
+    let rendered = render_events(&events);
+    assert_eq!(rendered.len(), 2);
+    assert!(
+        matches!(
+            &rendered[1],
+            RenderedEvent::Reasoning { html }
+                if html.contains("I can test this directly by verifying the return value.")
+        ),
+        "reasoning events must form one region, got: {:?}",
+        &rendered[1]
+    );
+}
+
+/// A blank line stored inside the reasoning text splits the region into two
+/// paragraphs, whether it arrived as its own event or inside one.
+#[test]
+fn render_reasoning_separator_as_a_paragraph_break() {
+    let events = vec![
+        json!({"type": "turn_start", "timestamp": "2025-01-01T00:00:00Z"}),
+        json!({"type": "chat_request", "timestamp": "2025-01-01T00:00:01Z", "content": "think"}),
+        json!({"type": "chat_response", "timestamp": "2025-01-01T00:00:02Z", "reasoning": "First section."}),
+        json!({"type": "chat_response", "timestamp": "2025-01-01T00:00:03Z", "reasoning": "\n\nSecond section."}),
+    ];
+
+    let rendered = render_events(&events);
+    assert_eq!(rendered.len(), 2);
+    let RenderedEvent::Reasoning { html } = &rendered[1] else {
+        panic!("expected one reasoning region, got: {:?}", &rendered[1]);
+    };
+    assert_eq!(
+        html.matches("<p>").count(),
+        2,
+        "a stored separator must open a second paragraph, got: {html:?}"
+    );
+}
+
 #[test]
 fn render_structured_response() {
     let events = vec![

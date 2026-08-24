@@ -125,14 +125,12 @@ when:
           ]
         },
         {
-          "role": "assistant"
-        },
-        {
           "role": "assistant",
           "tool_calls": [
             {
               "id": "call_SCrHXkoTjhdI0yrDDvCXB7Bj",
               "index": 0,
+              "type": "function",
               "function": {
                 "name": "run_me",
                 "arguments": "{\"foo\":\"foo\",\"bar\":\"foo\"}"

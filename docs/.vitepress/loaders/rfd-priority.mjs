@@ -1,5 +1,5 @@
 // Pure parsing and validation for the priority board file
-// (`docs/rfd/priority.json`). No Node imports: the Node-side loaders
+// (`docs/rfd/.priority.json`). No Node imports: the Node-side loaders
 // (`rfd-shared.mjs`) and the browser-side board (`RfdBoard.vue`) both consume
 // this module, so it must run in either environment.
 
@@ -12,11 +12,15 @@
 //   guaranteed.
 // - `order`: the flattened planned ids, for rank arithmetic (the cutoff sits
 //   at `order.length`).
-// - `backlog` / `inDevelopment`: string id arrays.
+// - `backlog`: string id array.
 //
 // The legacy shape — a flat `order` array instead of `planned` — is accepted
 // as a single unassigned group. Missing or malformed fields degrade to empty,
 // matching "a missing file is an empty board".
+//
+// There is no in-development field: "someone is writing code for this" is a
+// property of a work item, not of a design document, and is derived from ticket
+// state instead (see RFD 100).
 export function normalizePriority(raw) {
     const ids = v => (Array.isArray(v) ? v.map(String) : [])
 
@@ -37,7 +41,6 @@ export function normalizePriority(raw) {
         planned,
         order: planned.flatMap(g => g.ids),
         backlog: ids(raw?.backlog),
-        inDevelopment: ids(raw?.in_development),
     }
 }
 
@@ -56,7 +59,7 @@ export function checkMilestones(planned) {
         const names = [...dups].sort().join(', ')
         return `Duplicate milestone names in priority board: ${names}.\n\n` +
             `Milestone markers are keyed by name; rename or merge the ` +
-            `duplicates in \`docs/rfd/priority.json\`.`
+            `duplicates in \`docs/rfd/.priority.json\`.`
     }
 
     const nullIndex = planned.findIndex(g => g.milestone === null)
@@ -64,7 +67,7 @@ export function checkMilestones(planned) {
         return `Misplaced unassigned group in priority board.\n\n` +
             `The \`"milestone": null\` group holds planned-but-unassigned ` +
             `RFDs and must be the last \`planned\` group in ` +
-            `\`docs/rfd/priority.json\`.`
+            `\`docs/rfd/.priority.json\`.`
     }
 
     return null

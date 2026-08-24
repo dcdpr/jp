@@ -22,14 +22,19 @@ type = "stdio"
 command = "just"
 arguments = ["serve-bookworm"]
 
+# `jp ticket` is served by a plugin in this repository, installed with
+# `just _install-ticket` and found on $PATH. It is deliberately absent from the
+# published registry, so approve it here rather than on every invocation.
+[plugins.command.ticket]
+run = "unattended"
+
 [providers.llm.aliases]
 # Anthropic aliases
 anthropic = "anthropic/claude-sonnet-5"
 claude = "anthropic/claude-sonnet-5"
 sonnet = "anthropic/claude-sonnet-5"
-opus = "anthropic/claude-opus-4-8"
+opus = "anthropic/claude-opus-5"
 fable = "anthropic/claude-fable-5"
-opus6 = "anthropic/claude-opus-4-6"
 haiku = "anthropic/claude-haiku-4-5"
 zai = "cerebras/zai-glm-4.7"
 # OpenAI aliases

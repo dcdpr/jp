@@ -51,6 +51,7 @@ async fn list_conversations_roundtrip() {
             id: "123".to_owned(),
             title: Some("Test".to_owned()),
             last_activated_at: chrono::Utc::now(),
+            pinned_at: None,
             events_count: 5,
         }],
     });

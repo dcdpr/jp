@@ -96,6 +96,7 @@ pub async fn generate_summary(
         stream,
         instructions,
         &user_message,
+        app_cfg.assistant.request.max_response_bytes,
     )
     .await
 }
@@ -105,7 +106,7 @@ pub async fn generate_summary(
 /// A provider that answers with [`FinishReason::Retry`] supplies patches that
 /// make the request acceptable; each round applies them to `stream` and
 /// resends.
-/// Providers degrade one bad event per round (see Anthropic's
+/// Providers degrade a bounded subset of bad events per round (see Anthropic's
 /// `build_thinking_patches` and Google's `build_thought_signature_patch`), so a
 /// stream carrying several bad events legitimately needs several rounds.
 ///
@@ -120,8 +121,9 @@ async fn summarize_stream(
     mut stream: ConversationStream,
     instructions: &str,
     user_message: &str,
+    max_response_bytes: u32,
 ) -> Result<String> {
-    let retry_config = RetryConfig::default();
+    let retry_config = RetryConfig::default().with_max_response_bytes(max_response_bytes);
 
     loop {
         let thread = ThreadBuilder::default()

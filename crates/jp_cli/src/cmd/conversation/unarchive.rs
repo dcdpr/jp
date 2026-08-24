@@ -23,7 +23,7 @@ pub(crate) struct Unarchive {
 impl Unarchive {
     #[expect(clippy::unused_self)]
     pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
-        // Archived conversations aren't in the active index, so we bypass
+        // Archived conversations aren't in the live index, so we bypass
         // normal resolution entirely.
         ConversationLoadRequest::none()
     }

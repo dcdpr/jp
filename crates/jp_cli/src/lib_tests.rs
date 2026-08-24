@@ -22,6 +22,38 @@ use test_log::test;
 
 use super::*;
 
+#[test]
+fn a_piped_successful_run_never_announces_its_trace_log() {
+    // Two uninvited lines on stderr corrupt any program that owns the screen,
+    // and in `jp … | fzf` stderr *is* the terminal. `JP_DEBUG` is pinned on
+    // here because it's the only reason a non-failing run would print at all.
+    assert!(!should_report_trace_log(
+        RunOutcome::AsExpected,
+        false,
+        true
+    ));
+}
+
+#[test]
+fn a_successful_run_on_a_terminal_announces_its_trace_log_only_under_jp_debug() {
+    assert!(should_report_trace_log(RunOutcome::AsExpected, true, true));
+    assert!(!should_report_trace_log(
+        RunOutcome::AsExpected,
+        true,
+        false
+    ));
+}
+
+#[test]
+fn a_failed_run_announces_its_trace_log_even_when_piped() {
+    // Diagnosing a failure beats keeping the pipeline clean, so neither the tty
+    // nor `JP_DEBUG` has a say. A command that exits non-zero to report a
+    // result (`grep` finding nothing) is `AsExpected`, not `Failed`, and takes
+    // the rules above instead.
+    assert!(should_report_trace_log(RunOutcome::Failed, false, false));
+    assert!(should_report_trace_log(RunOutcome::Failed, true, false));
+}
+
 fn write_config(path: &camino::Utf8Path, content: &str) {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).unwrap();
@@ -97,7 +129,7 @@ fn test_cli() {
 fn test_load_cli_cfg_args_workspace_root() {
     let tmp = tempdir().unwrap();
     let root = tmp.path();
-    let workspace = Workspace::new(root);
+    let workspace = Workspace::in_memory(root);
 
     write_config(
         &root.join(".jp/config/skill/web.toml"),
@@ -142,7 +174,7 @@ fn test_load_cli_cfg_args_merges_global_and_workspace() {
 
     unsafe { std::env::set_var("JP_GLOBAL_CONFIG_DIR", global_dir.as_str()) };
 
-    let workspace = Workspace::new(&ws_root);
+    let workspace = Workspace::in_memory(&ws_root);
 
     write_config(
         &global_dir.join("config/.jp/config/skill/web.toml"),
@@ -176,7 +208,7 @@ fn test_load_cli_cfg_args_workspace_overrides_global() {
 
     unsafe { std::env::set_var("JP_GLOBAL_CONFIG_DIR", global_dir.as_str()) };
 
-    let workspace = Workspace::new(&ws_root);
+    let workspace = Workspace::in_memory(&ws_root);
 
     write_config(
         &global_dir.join("config/.jp/config/skill/web.toml"),
@@ -200,7 +232,7 @@ fn test_load_cli_cfg_args_workspace_overrides_global() {
 fn test_load_cli_cfg_args_missing_file_reports_searched_paths() {
     let tmp = tempdir().unwrap();
     let root = tmp.path();
-    let workspace = Workspace::new(root);
+    let workspace = Workspace::in_memory(root);
 
     let partial = partial_with_load_paths(&[".jp/config"]);
     let overrides = vec![KeyValueOrPath::Path(Utf8PathBuf::from("skill/missing"))];
@@ -224,7 +256,7 @@ fn test_load_cli_cfg_args_missing_file_reports_searched_paths() {
 fn test_load_cli_cfg_args_first_load_path_wins_within_root() {
     let tmp = tempdir().unwrap();
     let root = tmp.path();
-    let workspace = Workspace::new(root);
+    let workspace = Workspace::in_memory(root);
 
     write_config(
         &root.join("first/skill/web.toml"),
@@ -341,7 +373,7 @@ fn test_load_cli_cfg_args_global_only_when_workspace_has_no_match() {
 
     unsafe { std::env::set_var("JP_GLOBAL_CONFIG_DIR", global_dir.as_str()) };
 
-    let workspace = Workspace::new(&ws_root);
+    let workspace = Workspace::in_memory(&ws_root);
 
     write_config(
         &global_dir.join("config/.jp/config/skill/web.toml"),
@@ -379,7 +411,7 @@ fn query_model_override_persists_config_delta_through_run_inner() {
     env::set_current_dir(root).unwrap();
 
     let fs_backend = Arc::new(FsStorageBackend::new(&storage).unwrap());
-    let mut workspace = Workspace::new(root).with_backend(fs_backend.clone());
+    let mut workspace = Workspace::in_memory(root).with_backend(fs_backend.clone());
     let conversation_id = make_id(1000);
     let base_config = Arc::new(config_with_model(ProviderId::Anthropic, "opus"));
 
@@ -493,7 +525,7 @@ fn query_model_override_persists_config_delta_through_session_targeting() {
     unsafe { env::remove_var("EDITOR") };
     env::set_current_dir(root).unwrap();
 
-    let mut workspace = Workspace::new(root);
+    let mut workspace = Workspace::in_memory(root);
     let user_root = user_data_dir().unwrap().join("workspace");
     let fs_backend = Arc::new(
         FsStorageBackend::new(&storage)
@@ -608,7 +640,7 @@ fn resolve_config_consumes_default_id() {
     let tmp = tempdir().unwrap();
     let root = tmp.path();
 
-    let mut workspace = Workspace::new(root);
+    let mut workspace = Workspace::in_memory(root);
     workspace.load_conversation_index();
 
     // Inject default_id into the base partial — no filesystem needed.
@@ -646,7 +678,7 @@ fn resolve_config_applies_the_compact_model_flag() {
     let storage = root.join(".jp");
 
     let fs_backend = Arc::new(FsStorageBackend::new(&storage).unwrap());
-    let mut workspace = Workspace::new(root).with_backend(fs_backend);
+    let mut workspace = Workspace::in_memory(root).with_backend(fs_backend);
     let conversation_id = make_id(3000);
     workspace
         .create_and_lock_conversation_with_id(

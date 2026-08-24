@@ -4,6 +4,7 @@ mod config;
 mod conversation;
 pub(crate) mod conversation_id;
 mod init;
+pub(crate) mod label;
 mod lock;
 pub(crate) mod plugin;
 mod query;
@@ -199,6 +200,14 @@ pub(crate) struct Error {
 
     /// Whether to disable persistence when this error is encountered.
     pub(super) disable_persistence: bool,
+
+    /// Whether the non-zero status reports an expected outcome instead of a
+    /// failure.
+    ///
+    /// `jp conversation grep` exits 1 when it finds nothing: the status is
+    /// non-zero, but the run did what was asked.
+    /// Diagnostics that only make sense for a broken run stay quiet for these.
+    pub(super) expected: bool,
 }
 
 impl Error {
@@ -214,6 +223,7 @@ impl Error {
             message: Some("Interrupted".to_owned()),
             metadata: vec![],
             disable_persistence: false,
+            expected: false,
         }
     }
 
@@ -222,6 +232,16 @@ impl Error {
             disable_persistence: !persist,
             ..self
         }
+    }
+
+    /// Mark this error as reporting an expected outcome instead of a failure.
+    ///
+    /// The exit status stays non-zero; what changes is that the run doesn't
+    /// count as broken, so failure-only diagnostics (the trace log location)
+    /// stay quiet.
+    pub(crate) fn expected(mut self) -> Self {
+        self.expected = true;
+        self
     }
 }
 
@@ -248,6 +268,7 @@ impl From<u8> for Error {
             message: None,
             metadata: vec![],
             disable_persistence: true,
+            expected: false,
         }
     }
 }
@@ -295,6 +316,7 @@ impl From<(u8, String, Vec<(String, Value)>)> for Error {
             message: Some(message),
             metadata: metadata.into_iter().collect(),
             disable_persistence: true,
+            expected: false,
         }
     }
 }
@@ -372,6 +394,12 @@ impl From<crate::error::Error> for Error {
                 ("message", "Not found".into()),
                 ("target", target.into()),
                 ("id", id),
+            ]
+            .into(),
+            ArgFile { path, source } => [
+                ("message", "Cannot read argument file".into()),
+                ("path", path),
+                ("error", source.to_string()),
             ]
             .into(),
             Attachment(error) => [
@@ -457,6 +485,7 @@ impl From<crate::error::Error> for Error {
                     message: Some(format_target_help(session, multi, true)),
                     metadata: vec![],
                     disable_persistence: false,
+                    expected: false,
                 };
             }
             NoConversationTarget => {
@@ -469,6 +498,7 @@ impl From<crate::error::Error> for Error {
                     )),
                     metadata: vec![],
                     disable_persistence: false,
+                    expected: false,
                 };
             }
             NewConflictsWithTarget => [(
@@ -478,6 +508,7 @@ impl From<crate::error::Error> for Error {
             )]
             .into(),
             Compaction(error) => [("message", "Compaction error".into()), ("error", error)].into(),
+            Label(error) => [("message", "Label error".into()), ("error", error)].into(),
             Summarize { model, reason } => [
                 ("message", "Summarization failed".to_owned()),
                 ("model", model),
@@ -703,6 +734,11 @@ impl From<jp_workspace::Error> for Error {
             ]
             .into(),
             MissingStorage => [("message", "Missing storage directory".into())].into(),
+            WorkspaceNotFound(path) => [
+                ("message", "No workspace found".into()),
+                ("path", path.to_string().into()),
+            ]
+            .into(),
             LockFailed(id) => [(
                 "message",
                 format!("Failed to lock conversation {id}").into(),

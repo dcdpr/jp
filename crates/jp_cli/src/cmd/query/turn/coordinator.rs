@@ -221,6 +221,15 @@ impl TurnCoordinator {
         self.state = TurnPhase::Streaming;
     }
 
+    /// Process one event from a Provider stream.
+    ///
+    /// [`Event::Flush`] commits an indexed response to the Conversation but
+    /// does not flush terminal rendering.
+    /// Neither a provider aggregation boundary nor the boundary between two
+    /// adjacent same-kind [`ChatResponse`] events is a Markdown boundary:
+    /// consecutive responses of the same kind stay in one renderer content
+    /// region until a semantic boundary such as a tool call, content-kind
+    /// transition, or end of stream.
     pub fn handle_event(
         &mut self,
         stream: &mut ConversationStream,
@@ -290,10 +299,9 @@ impl TurnCoordinator {
                     .cloned()
                     .map_or(CommittedEvent::None, CommittedEvent::ToolCallRequest);
 
-                // The provider closed this item, so the region opened by the
-                // chunks rendered above ends here: a following response of the
-                // same kind starts a new block rather than continuing this
-                // one's last paragraph.
+                // The provider closed this item. A structured response's `json`
+                // fence is terminated here; a text-bearing one stays open, so
+                // consecutive reasoning or message items form a single region.
                 if event.is_chat_response() {
                     self.view.end_chat_response();
                 }
@@ -407,15 +415,34 @@ impl TurnCoordinator {
         self.event_builder.peek_partial_events()
     }
 
-    /// Resets the coordinator state back to Streaming for a new cycle.
+    /// Reset per-request state before continuing from committed partial output.
     ///
-    /// Used after handling a Continue action with prefill - the partial content
-    /// has been injected into the thread, and we're ready to receive the
-    /// continuation from the LLM.
+    /// The next request rebuilds the Thread with that output as continuation
+    /// context.
+    /// The Provider decides whether the target model accepts native assistant
+    /// prefill or needs another supported wire representation.
     pub fn prepare_continuation(&mut self) {
-        // Clear any partial buffers since we're starting fresh with prefill
-        self.event_builder = EventBuilder::new();
+        self.prepare_next_cycle();
         self.view.reset_for_continuation();
+    }
+
+    /// Reset per-request state before resending a request a stream error cut
+    /// short.
+    ///
+    /// Like [`prepare_continuation`], but keeps the renderer's content region
+    /// open: a retry puts nothing persistent on the terminal, so the reasoning
+    /// region and the separator it owes span the boundary.
+    ///
+    /// [`prepare_continuation`]: Self::prepare_continuation
+    pub fn prepare_retry_continuation(&mut self) {
+        self.prepare_next_cycle();
+        self.view.reset_for_stream_retry();
+    }
+
+    /// Drop the per-request event buffer and re-enter the streaming phase.
+    fn prepare_next_cycle(&mut self) {
+        // The committed partial response replaces these per-request buffers.
+        self.event_builder = EventBuilder::new();
         self.state = TurnPhase::Streaming;
     }
 
@@ -426,6 +453,19 @@ impl TurnCoordinator {
     /// printer and becomes visible before the interrupt menu appears.
     pub fn flush_renderer(&mut self) {
         self.view.flush();
+    }
+
+    /// Flush the renderer at a streaming-cycle boundary the same response
+    /// continues across.
+    ///
+    /// Commits buffered content like [`flush_renderer`], but leaves a separator
+    /// owed by reasoning pending: the continuation resends the request with no
+    /// persistent content rendered in between, so its first content decides the
+    /// gap's shading.
+    ///
+    /// [`flush_renderer`]: Self::flush_renderer
+    pub fn flush_renderer_for_continuation(&mut self) {
+        self.view.flush_for_continuation();
     }
 
     /// Resolve the live tool-call boundary, returning the background the tool's
@@ -467,8 +507,8 @@ impl TurnCoordinator {
     ///
     /// Transitions the state machine based on the user's choice from the
     /// interrupt menu.
-    /// Content injection (partial content, prefill, replies) is handled here to
-    /// keep the state machine self-contained.
+    /// Partial responses and replies are committed here to keep the state
+    /// machine self-contained.
     pub fn handle_streaming_interrupt(
         &mut self,
         action: InterruptAction,

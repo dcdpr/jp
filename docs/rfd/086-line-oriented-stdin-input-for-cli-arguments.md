@@ -38,13 +38,13 @@ The motivating workflow is archiving a batch of conversations selected by a
 pattern:
 
 ```sh
-jp c grep -l --regex '\Apr-triage:\d{3}\z' | jp c archive -
+jp c grep --output ids --regex '\Apr-triage:\d{3}\z' | jp c archive -
 ```
 
 [RFD 050] defines the *production* half of this story for `conversation new` and
 `conversation fork`: they print one conversation ID per line (JSON array under
 `-F json`).
-`jp c grep --list` emits the same line-oriented ID format.
+`jp c grep --output ids` emits the same line-oriented ID format.
 This RFD defines the *consumption* half — the matching input convention — so
 the line-oriented ID output of one JP command is valid input to another with no
 `jq`/`xargs` glue.
@@ -72,8 +72,8 @@ It is the rule users already know from `cat -`, `git`, and most Unix tools
 The format `-` consumes is the **line-oriented ID list**: one opaque
 conversation ID per nonblank line.
 This is the same format `conversation new`, `conversation fork`, and `grep
---list` emit in text mode — a deliberate, stable machine format, distinct from
-the human-facing rendered output that JP changes freely.
+--output ids` emit in text mode — a deliberate, stable machine format, distinct
+from the human-facing rendered output that JP changes freely.
 `-` does *not* consume JSON: `-F json` emits an array, which a tool transforms
 (`jq -r '.[].id'`) before piping into `-`.
 
@@ -81,7 +81,7 @@ the human-facing rendered output that JP changes freely.
 
 ```sh
 # positional, multi-ID
-jp c grep -l --regex '\Apr-triage:\d{3}\z' | jp c archive -
+jp c grep --output ids --regex '\Apr-triage:\d{3}\z' | jp c archive -
 
 # explicit producer, same shape
 jp c ls -F json | jq -r '.[].id' | jp c rm -
@@ -281,9 +281,9 @@ The convention makes the common case glue-free.
 - **Building a generic cross-command stdin-argument framework now.** The
   convention is stated; the shared mechanism is extracted when a second consumer
   needs it.
-- **The producer side.** `jp c grep`'s regex matching and `--list` output, which
-  feed the pipeline above, emit the line-oriented ID format but are implemented
-  as separate work, not specified by this convention.
+- **The producer side.** `jp c grep`'s regex matching and `--output ids` output,
+  which feed the pipeline above, emit the line-oriented ID format but are
+  implemented as separate work, not specified by this convention.
 
 ## Implementation Plan
 

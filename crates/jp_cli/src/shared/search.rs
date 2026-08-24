@@ -6,11 +6,19 @@
 //! event, how to read the title — live here so neither command has to depend
 //! on the other.
 
-use std::borrow::Cow;
+use std::{
+    borrow::Cow,
+    ops::Range,
+    sync::{
+        Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 use jp_conversation::{ConversationId, EventKind, event::ChatResponse};
 use jp_workspace::ConversationHandle;
 use rayon::prelude::*;
+use regex::RegexBuilder;
 use tracing::warn;
 
 use crate::ctx::Ctx;
@@ -79,8 +87,8 @@ pub(crate) fn event_scope(kind: &EventKind) -> Option<ConcreteScope> {
 
 /// Extract all searchable text lines from an event.
 ///
-/// Lines may be borrowed from the event or owned (tool call arguments are
-/// serialized on demand).
+/// Lines may be borrowed from the event or owned (tool call arguments and
+/// structured responses are serialized on demand).
 pub(crate) fn event_lines(kind: &EventKind) -> Vec<Cow<'_, str>> {
     match kind {
         EventKind::ChatRequest(req) => req.content.lines().map(Cow::Borrowed).collect(),
@@ -90,12 +98,21 @@ pub(crate) fn event_lines(kind: &EventKind) -> Vec<Cow<'_, str>> {
         EventKind::ChatResponse(ChatResponse::Reasoning { reasoning }) => {
             reasoning.lines().map(Cow::Borrowed).collect()
         }
-        EventKind::ChatResponse(ChatResponse::Structured { data }) => data
-            .as_str()
-            .iter()
-            .flat_map(|text| text.lines())
-            .map(Cow::Borrowed)
-            .collect(),
+        EventKind::ChatResponse(ChatResponse::Structured { data }) => match data.as_str() {
+            // A response whose JSON failed to parse is kept as a raw string.
+            // Searching it verbatim avoids re-quoting and escaping it.
+            Some(text) => text.lines().map(Cow::Borrowed).collect(),
+            // Anything else was parsed into a `Value` before it was persisted,
+            // so its text has to be rebuilt. Pretty-printed for the same reason
+            // tool call arguments are.
+            None => serde_json::to_string_pretty(data)
+                .map(|json| {
+                    json.lines()
+                        .map(|line| Cow::Owned(line.to_owned()))
+                        .collect()
+                })
+                .unwrap_or_default(),
+        },
         EventKind::ToolCallRequest(req) => {
             let mut out: Vec<Cow<'_, str>> = req.name.lines().map(Cow::Borrowed).collect();
             if !req.arguments.is_empty() {
@@ -124,102 +141,228 @@ pub(crate) fn title_for(ctx: &Ctx, handle: &ConversationHandle) -> Option<String
         .and_then(|m| m.title.clone())
 }
 
-/// Case-aware substring test.
+/// Whether matching should ignore case.
 ///
-/// When `ignore_case` is true, `needle` is expected to already be lowercased;
-/// only the haystack is lowercased per call.
-pub(crate) fn contains_substr(haystack: &str, needle: &str, ignore_case: bool) -> bool {
-    if ignore_case {
-        haystack.to_lowercase().contains(needle)
-    } else {
-        haystack.contains(needle)
-    }
+/// An `explicit` preference wins.
+/// Without one, smart-case applies: an all-lowercase pattern matches
+/// case-insensitively, and any uppercase character in the pattern makes the
+/// whole pattern case-sensitive.
+pub(crate) fn resolve_ignore_case(pattern: &str, explicit: Option<bool>) -> bool {
+    explicit.unwrap_or_else(|| !pattern.chars().any(char::is_uppercase))
+}
+
+/// The compiled pattern behind a [`Matcher`].
+enum Pattern {
+    /// A literal pattern.
+    ///
+    /// Compiled as an escaped regex rather than scanned as a substring: the
+    /// engine folds case inside the automaton, so reported offsets stay valid
+    /// against the original line even when pattern and text differ in case.
+    Literal(Box<regex::Regex>),
+
+    /// A regular expression.
+    /// `fancy-regex` supports look-around and backreferences in addition to the
+    /// standard syntax.
+    Regex(Box<fancy_regex::Regex>),
 }
 
 /// A compiled match predicate over a single line of text.
 ///
 /// `c grep` builds one of these from the user's pattern and reuses it across
 /// every line of every conversation it searches.
-pub(crate) enum Matcher {
-    /// Substring match.
-    /// `needle` is pre-lowercased when `ignore_case` is set.
-    Substring { needle: String, ignore_case: bool },
+/// Match positions are reported as byte ranges into the line exactly as it was
+/// passed in, so a caller can highlight what matched.
+///
+/// A `fancy-regex` pattern can fail part-way through a search — an exceeded
+/// backtrack limit is the common case — which is a different outcome from
+/// finding nothing.
+/// Such a failure is recorded rather than swallowed; check [`Self::failure`]
+/// once the search is done and report it instead of the results.
+pub(crate) struct Matcher {
+    pattern: Pattern,
 
-    /// Regular-expression match.
-    /// `fancy-regex` supports look-around and backreferences in addition to the
-    /// standard syntax.
-    Regex(Box<fancy_regex::Regex>),
+    /// Whether a match attempt has failed.
+    ///
+    /// Separate from `message` so the common path is one relaxed atomic load
+    /// rather than a mutex acquisition.
+    failed: AtomicBool,
+
+    /// The first failure's message, kept for the error shown to the user.
+    message: Mutex<Option<String>>,
+
+    /// Whether a recorded failure short-circuits further match attempts.
+    ///
+    /// See [`Self::ungated`] for when it must be off.
+    gate_on_failure: bool,
 }
 
 impl Matcher {
-    /// Build a substring matcher.
-    pub(crate) fn substring(pattern: &str, ignore_case: bool) -> Self {
-        let needle = if ignore_case {
-            pattern.to_lowercase()
+    /// Compile `pattern`, treating it as a regular expression when `regex` is
+    /// set and as a literal otherwise.
+    ///
+    /// The error is the underlying engine's message, suitable for showing to
+    /// the user.
+    pub(crate) fn new(pattern: &str, regex: bool, ignore_case: bool) -> Result<Self, String> {
+        let pattern = if regex {
+            fancy_regex::RegexBuilder::new(pattern)
+                .case_insensitive(ignore_case)
+                .build()
+                .map(|re| Pattern::Regex(Box::new(re)))
+                .map_err(|e| e.to_string())?
         } else {
-            pattern.to_owned()
+            RegexBuilder::new(&regex::escape(pattern))
+                .case_insensitive(ignore_case)
+                .build()
+                .map(|re| Pattern::Literal(Box::new(re)))
+                .map_err(|e| e.to_string())?
         };
-        Self::Substring {
-            needle,
-            ignore_case,
-        }
+
+        Ok(Self {
+            pattern,
+            failed: AtomicBool::new(false),
+            message: Mutex::new(None),
+            gate_on_failure: true,
+        })
     }
 
-    /// Compile a regular-expression matcher.
-    pub(crate) fn regex(pattern: &str, ignore_case: bool) -> Result<Self, fancy_regex::Error> {
-        let re = fancy_regex::RegexBuilder::new(pattern)
-            .case_insensitive(ignore_case)
-            .build()?;
-        Ok(Self::Regex(Box::new(re)))
+    /// Keep recording failures, but stop short-circuiting on them.
+    ///
+    /// The short-circuit saves work when a failure will discard every result.
+    /// A caller whose answer *survives* a failure must not use it: with the
+    /// gate on, whether a worker reaches the failing input before the answering
+    /// one decides the outcome.
+    /// `grep -q` is that caller — one found match is the whole answer — and
+    /// there is no work to save there anyway, since the search stops at the
+    /// first match.
+    #[must_use]
+    pub(crate) fn ungated(mut self) -> Self {
+        self.gate_on_failure = false;
+        self
+    }
+
+    /// The first match failure, if any attempt has failed.
+    ///
+    /// A search that reports a failure has an unknown result: it may have found
+    /// fewer matches than the pattern describes, so the failure supersedes
+    /// whatever was collected.
+    pub(crate) fn failure(&self) -> Option<String> {
+        if !self.failed.load(Ordering::Relaxed) {
+            return None;
+        }
+
+        self.message
+            .lock()
+            .ok()
+            .and_then(|message| message.clone())
+            .or_else(|| Some("pattern matching failed".to_owned()))
+    }
+
+    /// Record a match failure, keeping the first message seen.
+    fn fail(&self, error: &fancy_regex::Error) {
+        if let Ok(mut message) = self.message.lock()
+            && message.is_none()
+        {
+            *message = Some(error.to_string());
+        }
+
+        self.failed.store(true, Ordering::Relaxed);
     }
 
     /// Whether `line` matches.
+    ///
+    /// A failed attempt reports `false` and is recorded; see [`Self::failure`].
     pub(crate) fn is_match(&self, line: &str) -> bool {
-        match self {
-            Self::Substring {
-                needle,
-                ignore_case,
-            } => contains_substr(line, needle, *ignore_case),
-            // A regex that errors mid-match (e.g. an exceeded backtrack limit on
-            // a fancy pattern) counts as a non-match rather than aborting the
-            // whole search.
-            Self::Regex(re) => re.is_match(line).unwrap_or(false),
+        match &self.pattern {
+            Pattern::Literal(re) => re.is_match(line),
+            Pattern::Regex(re) => {
+                // A recorded failure supersedes every result, so further
+                // attempts are wasted work — and each one can burn the full
+                // backtrack limit again. Workers mid-attempt still finish that
+                // attempt; this stops the next one.
+                if self.gate_on_failure && self.failed.load(Ordering::Relaxed) {
+                    return false;
+                }
+
+                match re.is_match(line) {
+                    Ok(matched) => matched,
+                    Err(error) => {
+                        self.fail(&error);
+                        false
+                    }
+                }
+            }
         }
+    }
+
+    /// Byte ranges of every match in `line`, in order.
+    ///
+    /// Zero-width matches are skipped: an empty pattern matches at every
+    /// position and there is nothing there to highlight.
+    /// A failed attempt ends the scan, keeping the spans already found, and is
+    /// recorded; see [`Self::failure`].
+    pub(crate) fn find_spans(&self, line: &str) -> Vec<Range<usize>> {
+        let mut spans = Vec::new();
+        match &self.pattern {
+            Pattern::Literal(re) => spans.extend(re.find_iter(line).map(|m| m.start()..m.end())),
+            Pattern::Regex(re) => {
+                // Same early exit as `is_match`: a poisoned matcher stops
+                // paying the backtrack limit for results nobody will see.
+                if self.gate_on_failure && self.failed.load(Ordering::Relaxed) {
+                    return spans;
+                }
+
+                for found in re.find_iter(line) {
+                    match found {
+                        Ok(m) => spans.push(m.start()..m.end()),
+                        Err(error) => {
+                            self.fail(&error);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        spans.retain(|span| !span.is_empty());
+        spans
     }
 }
 
-/// Filter conversation IDs to those whose title or chat content contains
-/// `pattern` as a substring.
+/// Filter conversation IDs to those containing `pattern` as a literal.
 ///
 /// Smart-case: case-insensitive unless `pattern` contains an uppercase
 /// character.
-/// Searched scopes: title, user, assistant, reasoning, and structured.
+/// Every searchable scope is read: title, chat text, reasoning, structured
+/// output, tool call names and arguments, tool results, and inquiry questions.
+/// That is the same set `conversation grep` searches by default.
 /// Runs in parallel via rayon and short-circuits on the first match per
 /// conversation.
-pub(crate) fn filter_ids(ctx: &Ctx, ids: &[ConversationId], pattern: &str) -> Vec<ConversationId> {
-    let ignore_case = !pattern.chars().any(char::is_uppercase);
-    let needle = if ignore_case {
-        pattern.to_lowercase()
-    } else {
-        pattern.to_owned()
-    };
+///
+/// Returns the compiler's message when `pattern` cannot be compiled, which for
+/// a literal means only that it exceeded the engine's size limit.
+pub(crate) fn filter_ids(
+    ctx: &Ctx,
+    ids: &[ConversationId],
+    pattern: &str,
+) -> Result<Vec<ConversationId>, String> {
+    let ignore_case = resolve_ignore_case(pattern, None);
+    let matcher = Matcher::new(pattern, false, ignore_case)?;
 
-    ids.par_iter()
+    Ok(ids
+        .par_iter()
         .copied()
-        .filter(|id| id_matches(ctx, *id, &needle, ignore_case))
-        .collect()
+        .filter(|id| id_matches(ctx, *id, &matcher))
+        .collect())
 }
 
-/// Whether the conversation's title or chat content contains `needle`.
-///
-/// `needle` is expected to be pre-lowercased when `ignore_case` is true.
-fn id_matches(ctx: &Ctx, id: ConversationId, needle: &str, ignore_case: bool) -> bool {
+/// Whether any of the conversation's searchable text matches.
+fn id_matches(ctx: &Ctx, id: ConversationId, matcher: &Matcher) -> bool {
     let Ok(handle) = ctx.workspace.acquire_conversation(&id) else {
         return false;
     };
 
     if let Some(title) = title_for(ctx, &handle)
-        && contains_substr(&title, needle, ignore_case)
+        && matcher.is_match(&title)
     {
         return true;
     }
@@ -233,20 +376,8 @@ fn id_matches(ctx: &Ctx, id: ConversationId, needle: &str, ignore_case: bool) ->
     };
 
     for event in events.iter() {
-        let Some(scope) = event_scope(&event.event.kind) else {
-            continue;
-        };
-        if !matches!(
-            scope,
-            ConcreteScope::User
-                | ConcreteScope::Assistant
-                | ConcreteScope::Reasoning
-                | ConcreteScope::Structured
-        ) {
-            continue;
-        }
         for line in event_lines(&event.event.kind) {
-            if contains_substr(&line, needle, ignore_case) {
+            if matcher.is_match(&line) {
                 return true;
             }
         }

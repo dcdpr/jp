@@ -14,7 +14,7 @@ use schematic::{Config, ConfigEnum, PartialConfig as _, Schematic};
 use serde::{Deserialize, Deserializer, Serialize, de::DeserializeOwned};
 use serde_untagged::UntaggedEnumVisitor;
 
-use crate::{delta::PartialConfigDelta, partial::ToPartial};
+use crate::{delta::PartialConfigDelta, fill::FillDefaults, partial::ToPartial};
 
 /// Map of `String` to `T`, either defaulting to a merge strategy of
 /// `deep_merge`, or defining a specific merge strategy.
@@ -122,6 +122,64 @@ impl<T> Default for MergeableMap<T> {
     fn default() -> Self {
         Self::Map(IndexMap::default())
     }
+}
+
+impl<T> FromIterator<(String, T)> for MergeableMap<T> {
+    fn from_iter<I: IntoIterator<Item = (String, T)>>(iter: I) -> Self {
+        Self::Map(iter.into_iter().collect())
+    }
+}
+
+impl<T> IntoIterator for MergeableMap<T> {
+    type IntoIter = indexmap::map::IntoIter<String, T>;
+    type Item = (String, T);
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.into_map().into_iter()
+    }
+}
+
+impl<T> FillDefaults for MergeableMap<T> {
+    /// Inherit the merge strategy from `defaults` when this value declares
+    /// none.
+    ///
+    /// Entries are always kept from `self`; only the `Merged` wrapper metadata
+    /// is inherited.
+    fn fill_from(self, defaults: Self) -> Self {
+        let Self::Map(entries) = self else {
+            return self;
+        };
+
+        if let Self::Merged(default_merged) = defaults
+            && default_merged.strategy.is_some()
+        {
+            return Self::Merged(MergedMap {
+                value: entries,
+                strategy: default_merged.strategy,
+                discard_when_merged: false,
+            });
+        }
+
+        Self::Map(entries)
+    }
+}
+
+/// Convert a resolved map to a `MergeableMap<T::Partial>` with replace
+/// strategy.
+///
+/// Used by `ToPartial` impls for fields whose finalized type is a plain map but
+/// whose partial is a [`MergeableMap`].
+pub fn map_to_mergeable_partial<'a, T: ToPartial + 'a>(
+    entries: impl IntoIterator<Item = (&'a String, &'a T)>,
+) -> MergeableMap<T::Partial> {
+    MergeableMap::Merged(MergedMap {
+        value: entries
+            .into_iter()
+            .map(|(k, v)| (k.clone(), v.to_partial()))
+            .collect(),
+        strategy: Some(MergedMapStrategy::Replace),
+        discard_when_merged: false,
+    })
 }
 
 impl<T> From<IndexMap<String, T>> for MergeableMap<T> {

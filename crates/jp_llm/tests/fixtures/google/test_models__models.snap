@@ -20,11 +20,14 @@ expression: v
             65536,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: Some(
-                    24576,
-                ),
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 0,
+                    max_tokens: Some(
+                        24576,
+                    ),
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -32,13 +35,14 @@ expression: v
         ),
         deprecated: Some(
             Deprecated {
-                note: "recommended replacement: gemini-3-flash-preview",
+                note: "recommended replacement: gemini-3.6-flash",
                 retire_at: Some(
-                    2026-06-17,
+                    2026-10-16,
                 ),
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -58,11 +62,14 @@ expression: v
             65536,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 512,
-                max_tokens: Some(
-                    24576,
-                ),
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 512,
+                    max_tokens: Some(
+                        24576,
+                    ),
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -70,13 +77,14 @@ expression: v
         ),
         deprecated: Some(
             Deprecated {
-                note: "recommended replacement: gemini-3-pro-preview",
+                note: "recommended replacement: gemini-3.1-pro-preview",
                 retire_at: Some(
-                    2026-06-17,
+                    2026-10-16,
                 ),
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -96,25 +104,12 @@ expression: v
             8192,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: Some(
-                    24576,
-                ),
-            },
+            Unsupported,
         ),
-        knowledge_cutoff: Some(
-            2024-08-01,
-        ),
-        deprecated: Some(
-            Deprecated {
-                note: "recommended replacement: gemini-2.5-flash",
-                retire_at: Some(
-                    2026-06-01,
-                ),
-            },
-        ),
+        knowledge_cutoff: None,
+        deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -134,25 +129,12 @@ expression: v
             8192,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 0,
-                max_tokens: Some(
-                    24576,
-                ),
-            },
+            Unsupported,
         ),
-        knowledge_cutoff: Some(
-            2024-08-01,
-        ),
-        deprecated: Some(
-            Deprecated {
-                note: "recommended replacement: gemini-2.5-flash",
-                retire_at: Some(
-                    2026-06-01,
-                ),
-            },
-        ),
+        knowledge_cutoff: None,
+        deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -174,18 +156,10 @@ expression: v
         reasoning: Some(
             Unsupported,
         ),
-        knowledge_cutoff: Some(
-            2024-08-01,
-        ),
-        deprecated: Some(
-            Deprecated {
-                note: "recommended replacement: gemini-2.5-flash-lite",
-                retire_at: Some(
-                    2026-06-01,
-                ),
-            },
-        ),
+        knowledge_cutoff: None,
+        deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -207,18 +181,10 @@ expression: v
         reasoning: Some(
             Unsupported,
         ),
-        knowledge_cutoff: Some(
-            2024-08-01,
-        ),
-        deprecated: Some(
-            Deprecated {
-                note: "recommended replacement: gemini-2.5-flash-lite",
-                retire_at: Some(
-                    2026-06-01,
-                ),
-            },
-        ),
+        knowledge_cutoff: None,
+        deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -237,10 +203,13 @@ expression: v
         max_output_tokens: Some(
             16384,
         ),
-        reasoning: None,
+        reasoning: Some(
+            Unsupported,
+        ),
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -259,142 +228,59 @@ expression: v
         max_output_tokens: Some(
             16384,
         ),
-        reasoning: None,
+        reasoning: Some(
+            Unsupported,
+        ),
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
         id: ModelIdConfig {
             provider: Google,
             name: Name(
-                "gemma-3-1b-it",
+                "gemma-4-26b-a4b-it",
             ),
         },
         display_name: Some(
-            "Gemma 3 1B",
+            "Gemma 4 26B A4B IT",
         ),
         context_window: Some(
+            262144,
+        ),
+        max_output_tokens: Some(
             32768,
         ),
-        max_output_tokens: Some(
-            8192,
-        ),
         reasoning: None,
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
         id: ModelIdConfig {
             provider: Google,
             name: Name(
-                "gemma-3-4b-it",
+                "gemma-4-31b-it",
             ),
         },
         display_name: Some(
-            "Gemma 3 4B",
+            "Gemma 4 31B IT",
         ),
         context_window: Some(
+            262144,
+        ),
+        max_output_tokens: Some(
             32768,
         ),
-        max_output_tokens: Some(
-            8192,
-        ),
         reasoning: None,
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Google,
-            name: Name(
-                "gemma-3-12b-it",
-            ),
-        },
-        display_name: Some(
-            "Gemma 3 12B",
-        ),
-        context_window: Some(
-            32768,
-        ),
-        max_output_tokens: Some(
-            8192,
-        ),
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Google,
-            name: Name(
-                "gemma-3-27b-it",
-            ),
-        },
-        display_name: Some(
-            "Gemma 3 27B",
-        ),
-        context_window: Some(
-            131072,
-        ),
-        max_output_tokens: Some(
-            8192,
-        ),
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Google,
-            name: Name(
-                "gemma-3n-e4b-it",
-            ),
-        },
-        display_name: Some(
-            "Gemma 3n E4B",
-        ),
-        context_window: Some(
-            8192,
-        ),
-        max_output_tokens: Some(
-            2048,
-        ),
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Google,
-            name: Name(
-                "gemma-3n-e2b-it",
-            ),
-        },
-        display_name: Some(
-            "Gemma 3n E2B",
-        ),
-        context_window: Some(
-            8192,
-        ),
-        max_output_tokens: Some(
-            2048,
-        ),
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -414,14 +300,16 @@ expression: v
             65536,
         ),
         reasoning: Some(
-            Leveled {
-                none: false,
-                xlow: true,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: false,
-                max: false,
+            Supported {
+                mode: Leveled {
+                    xlow: true,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: false,
             },
         ),
         knowledge_cutoff: Some(
@@ -431,6 +319,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -450,11 +339,14 @@ expression: v
             65536,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 512,
-                max_tokens: Some(
-                    24576,
-                ),
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 512,
+                    max_tokens: Some(
+                        24576,
+                    ),
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -462,13 +354,14 @@ expression: v
         ),
         deprecated: Some(
             Deprecated {
-                note: "recommended replacement: unknown",
+                note: "recommended replacement: gemini-3.1-flash-lite",
                 retire_at: Some(
-                    2026-07-22,
+                    2026-10-16,
                 ),
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -488,14 +381,16 @@ expression: v
             65536,
         ),
         reasoning: Some(
-            Leveled {
-                none: false,
-                xlow: false,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: false,
-                max: false,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: false,
             },
         ),
         knowledge_cutoff: Some(
@@ -505,6 +400,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -524,11 +420,14 @@ expression: v
             65536,
         ),
         reasoning: Some(
-            Budgetted {
-                min_tokens: 512,
-                max_tokens: Some(
-                    24576,
-                ),
+            Supported {
+                mode: Budgetted {
+                    min_tokens: 512,
+                    max_tokens: Some(
+                        24576,
+                    ),
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
@@ -536,13 +435,14 @@ expression: v
         ),
         deprecated: Some(
             Deprecated {
-                note: "recommended replacement: unknown",
+                note: "recommended replacement: gemini-3.1-flash-lite",
                 retire_at: Some(
-                    2026-07-22,
+                    2026-10-16,
                 ),
             },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -561,48 +461,13 @@ expression: v
         max_output_tokens: Some(
             32768,
         ),
-        reasoning: None,
+        reasoning: Some(
+            Unsupported,
+        ),
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Google,
-            name: Name(
-                "gemini-2.5-flash-lite-preview-09-2025",
-            ),
-        },
-        display_name: Some(
-            "Gemini 2.5 Flash-Lite Preview Sep 2025",
-        ),
-        context_window: Some(
-            1048576,
-        ),
-        max_output_tokens: Some(
-            65536,
-        ),
-        reasoning: Some(
-            Budgetted {
-                min_tokens: 512,
-                max_tokens: Some(
-                    24576,
-                ),
-            },
-        ),
-        knowledge_cutoff: Some(
-            2025-01-01,
-        ),
-        deprecated: Some(
-            Deprecated {
-                note: "recommended replacement: unknown",
-                retire_at: Some(
-                    2026-07-22,
-                ),
-            },
-        ),
-        structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -622,23 +487,31 @@ expression: v
             65536,
         ),
         reasoning: Some(
-            Leveled {
-                none: false,
-                xlow: false,
-                low: true,
-                medium: false,
-                high: true,
-                xhigh: false,
-                max: false,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: false,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: false,
             },
         ),
         knowledge_cutoff: Some(
             2025-01-01,
         ),
         deprecated: Some(
-            Active,
+            Deprecated {
+                note: "recommended replacement: gemini-3.1-pro-preview",
+                retire_at: Some(
+                    2026-03-09,
+                ),
+            },
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -658,14 +531,16 @@ expression: v
             65536,
         ),
         reasoning: Some(
-            Leveled {
-                none: false,
-                xlow: true,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: false,
-                max: false,
+            Supported {
+                mode: Leveled {
+                    xlow: true,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: false,
             },
         ),
         knowledge_cutoff: Some(
@@ -675,6 +550,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -694,14 +570,16 @@ expression: v
             65536,
         ),
         reasoning: Some(
-            Leveled {
-                none: false,
-                xlow: false,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: false,
-                max: false,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: false,
             },
         ),
         knowledge_cutoff: Some(
@@ -711,6 +589,7 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -730,14 +609,16 @@ expression: v
             65536,
         ),
         reasoning: Some(
-            Leveled {
-                none: false,
-                xlow: false,
-                low: true,
-                medium: true,
-                high: true,
-                xhigh: false,
-                max: false,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: false,
             },
         ),
         knowledge_cutoff: Some(
@@ -747,6 +628,53 @@ expression: v
             Active,
         ),
         structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Google,
+            name: Name(
+                "gemini-3.1-flash-lite-preview",
+            ),
+        },
+        display_name: Some(
+            "Gemini 3.1 Flash Lite Preview",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: Some(
+            65536,
+        ),
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Google,
+            name: Name(
+                "gemini-3.1-flash-lite",
+            ),
+        },
+        display_name: Some(
+            "Gemini 3.1 Flash Lite",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: Some(
+            65536,
+        ),
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -769,6 +697,30 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Google,
+            name: Name(
+                "gemini-3-pro-image",
+            ),
+        },
+        display_name: Some(
+            "Nano Banana Pro",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: Some(
+            32768,
+        ),
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -791,6 +743,241 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Google,
+            name: Name(
+                "gemini-3.1-flash-image-preview",
+            ),
+        },
+        display_name: Some(
+            "Nano Banana 2",
+        ),
+        context_window: Some(
+            65536,
+        ),
+        max_output_tokens: Some(
+            65536,
+        ),
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Google,
+            name: Name(
+                "gemini-3.1-flash-image",
+            ),
+        },
+        display_name: Some(
+            "Nano Banana 2",
+        ),
+        context_window: Some(
+            65536,
+        ),
+        max_output_tokens: Some(
+            65536,
+        ),
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Google,
+            name: Name(
+                "gemini-3.1-flash-lite-image",
+            ),
+        },
+        display_name: Some(
+            "Nano Banana 2 Lite",
+        ),
+        context_window: Some(
+            65536,
+        ),
+        max_output_tokens: Some(
+            65536,
+        ),
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Google,
+            name: Name(
+                "gemini-3.5-flash",
+            ),
+        },
+        display_name: Some(
+            "Gemini 3.5 Flash",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: Some(
+            65536,
+        ),
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Google,
+            name: Name(
+                "gemini-3.5-flash-lite",
+            ),
+        },
+        display_name: Some(
+            "Gemini 3.5 Flash Lite",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: Some(
+            65536,
+        ),
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Google,
+            name: Name(
+                "gemini-omni-flash-preview",
+            ),
+        },
+        display_name: Some(
+            "Gemini Omni Flash Preview",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: Some(
+            65536,
+        ),
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Google,
+            name: Name(
+                "gemini-3.6-flash",
+            ),
+        },
+        display_name: Some(
+            "Gemini 3.6 Flash",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: Some(
+            65536,
+        ),
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Google,
+            name: Name(
+                "lyria-3-clip-preview",
+            ),
+        },
+        display_name: Some(
+            "Lyria 3 Clip Preview",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: Some(
+            65536,
+        ),
+        reasoning: Some(
+            Unsupported,
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Google,
+            name: Name(
+                "lyria-3-pro-preview",
+            ),
+        },
+        display_name: Some(
+            "Lyria 3 Pro Preview",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: Some(
+            65536,
+        ),
+        reasoning: Some(
+            Unsupported,
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Google,
+            name: Name(
+                "gemini-3.1-flash-tts-preview",
+            ),
+        },
+        display_name: Some(
+            "Gemini 3.1 Flash TTS Preview",
+        ),
+        context_window: Some(
+            8192,
+        ),
+        max_output_tokens: Some(
+            16384,
+        ),
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -813,6 +1000,30 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Google,
+            name: Name(
+                "gemini-robotics-er-1.6-preview",
+            ),
+        },
+        display_name: Some(
+            "Gemini Robotics-ER 1.6 Preview",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: Some(
+            65536,
+        ),
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -835,6 +1046,78 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Google,
+            name: Name(
+                "antigravity-preview-05-2026",
+            ),
+        },
+        display_name: Some(
+            "Antigravity Agent Preview",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: Some(
+            65536,
+        ),
+        reasoning: Some(
+            Unsupported,
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Google,
+            name: Name(
+                "deep-research-max-preview-04-2026",
+            ),
+        },
+        display_name: Some(
+            "Deep Research Max Preview (Apr-21-2026)",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: Some(
+            65536,
+        ),
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Google,
+            name: Name(
+                "deep-research-preview-04-2026",
+            ),
+        },
+        display_name: Some(
+            "Deep Research Preview (Apr-21-2026)",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: Some(
+            65536,
+        ),
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -857,6 +1140,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -875,10 +1159,63 @@ expression: v
         max_output_tokens: Some(
             1,
         ),
-        reasoning: None,
+        reasoning: Some(
+            Unsupported,
+        ),
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Google,
+            name: Name(
+                "gemini-embedding-2-preview",
+            ),
+        },
+        display_name: Some(
+            "Gemini Embedding 2 Preview",
+        ),
+        context_window: Some(
+            8192,
+        ),
+        max_output_tokens: Some(
+            1,
+        ),
+        reasoning: Some(
+            Unsupported,
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Google,
+            name: Name(
+                "gemini-embedding-2",
+            ),
+        },
+        display_name: Some(
+            "Gemini Embedding 2",
+        ),
+        context_window: Some(
+            8192,
+        ),
+        max_output_tokens: Some(
+            1,
+        ),
+        reasoning: Some(
+            Unsupported,
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -897,10 +1234,13 @@ expression: v
         max_output_tokens: Some(
             1024,
         ),
-        reasoning: None,
+        reasoning: Some(
+            Unsupported,
+        ),
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -919,10 +1259,13 @@ expression: v
         max_output_tokens: Some(
             8192,
         ),
-        reasoning: None,
+        reasoning: Some(
+            Unsupported,
+        ),
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -941,10 +1284,13 @@ expression: v
         max_output_tokens: Some(
             8192,
         ),
-        reasoning: None,
+        reasoning: Some(
+            Unsupported,
+        ),
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -963,76 +1309,13 @@ expression: v
         max_output_tokens: Some(
             8192,
         ),
-        reasoning: None,
+        reasoning: Some(
+            Unsupported,
+        ),
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Google,
-            name: Name(
-                "veo-2.0-generate-001",
-            ),
-        },
-        display_name: Some(
-            "Veo 2",
-        ),
-        context_window: Some(
-            480,
-        ),
-        max_output_tokens: Some(
-            8192,
-        ),
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Google,
-            name: Name(
-                "veo-3.0-generate-001",
-            ),
-        },
-        display_name: Some(
-            "Veo 3",
-        ),
-        context_window: Some(
-            480,
-        ),
-        max_output_tokens: Some(
-            8192,
-        ),
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Google,
-            name: Name(
-                "veo-3.0-fast-generate-001",
-            ),
-        },
-        display_name: Some(
-            "Veo 3 fast",
-        ),
-        context_window: Some(
-            480,
-        ),
-        max_output_tokens: Some(
-            8192,
-        ),
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1051,10 +1334,13 @@ expression: v
         max_output_tokens: Some(
             8192,
         ),
-        reasoning: None,
+        reasoning: Some(
+            Unsupported,
+        ),
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1073,10 +1359,38 @@ expression: v
         max_output_tokens: Some(
             8192,
         ),
-        reasoning: None,
+        reasoning: Some(
+            Unsupported,
+        ),
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Google,
+            name: Name(
+                "veo-3.1-lite-generate-preview",
+            ),
+        },
+        display_name: Some(
+            "Veo 3.1 lite",
+        ),
+        context_window: Some(
+            480,
+        ),
+        max_output_tokens: Some(
+            8192,
+        ),
+        reasoning: Some(
+            Unsupported,
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1099,6 +1413,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1121,6 +1436,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
         features: [],
     },
     ModelDetails {
@@ -1143,6 +1459,57 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Google,
+            name: Name(
+                "gemini-3.1-flash-live-preview",
+            ),
+        },
+        display_name: Some(
+            "Gemini 3.1 Flash Live Preview",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: Some(
+            65536,
+        ),
+        reasoning: Some(
+            Unsupported,
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Google,
+            name: Name(
+                "gemini-3.5-live-translate-preview",
+            ),
+        },
+        display_name: Some(
+            "Gemini 3.5 Live Translate Preview",
+        ),
+        context_window: Some(
+            16384,
+        ),
+        max_output_tokens: Some(
+            32768,
+        ),
+        reasoning: Some(
+            Unsupported,
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
         features: [],
     },
 ]

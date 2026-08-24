@@ -75,6 +75,37 @@ pub struct RequestConfig {
     #[setting(default = 60)]
     pub stream_idle_timeout_secs: u32,
 
+    /// Abort a response after it generates more than this many bytes.
+    ///
+    /// Defaults to `1048576` (1 MiB, roughly 260,000 tokens).
+    /// Set to `0` to disable the ceiling.
+    ///
+    /// This is a runaway guard rather than a length preference.
+    /// It exists so a model that gets stuck generating without end cannot run
+    /// up an unbounded bill while nobody is watching the terminal.
+    /// The default allows long responses assembled from several continuation
+    /// requests while bounding the cost of a runaway response.
+    ///
+    /// During a query, content streamed before the ceiling is reached stays in
+    /// the conversation and only the turn ends, with an error.
+    /// Background requests that collect a whole response before using it (title
+    /// generation, summarization, tool inquiries) keep no partial result: they
+    /// fail outright.
+    ///
+    /// Inquiry requests can be held to their own ceiling via
+    /// `conversation.inquiry.assistant.request.max_response_bytes`, or per
+    /// question via a question's assistant target.
+    /// In the `conversation.inquiry` block, `0` means "inherit this ceiling"
+    /// rather than "disable it"; disable it per question instead.
+    ///
+    /// The ceiling counts bytes rather than tokens because tokens cannot be
+    /// counted locally; four bytes per token is a rough guide.
+    /// It counts the bytes JP receives, which can be fewer than the bytes
+    /// billed: a provider that assembles a response from several continuation
+    /// requests may discard some of what it generated before returning it.
+    #[setting(default = 1_048_576)]
+    pub max_response_bytes: u32,
+
     /// Prompt caching policy.
     ///
     /// Controls whether the provider applies prompt caching optimizations (e.g.
@@ -122,6 +153,7 @@ impl AssignKeyValue for PartialRequestConfig {
             "stream_idle_timeout_secs" => {
                 self.stream_idle_timeout_secs = kv.try_some_u32()?;
             }
+            "max_response_bytes" => self.max_response_bytes = kv.try_some_u32()?,
             "cache" => self.cache = kv.try_some_bool_or_from_str()?,
             _ => return missing_key(&kv),
         }
@@ -140,6 +172,10 @@ impl PartialConfigDelta for PartialRequestConfig {
                 self.stream_idle_timeout_secs.as_ref(),
                 next.stream_idle_timeout_secs,
             ),
+            max_response_bytes: delta_opt(
+                self.max_response_bytes.as_ref(),
+                next.max_response_bytes,
+            ),
             cache: delta_opt(self.cache.as_ref(), next.cache),
         }
     }
@@ -154,6 +190,7 @@ impl FillDefaults for PartialRequestConfig {
             stream_idle_timeout_secs: self
                 .stream_idle_timeout_secs
                 .or(defaults.stream_idle_timeout_secs),
+            max_response_bytes: self.max_response_bytes.or(defaults.max_response_bytes),
             cache: self.cache.or(defaults.cache),
         }
     }
@@ -171,6 +208,7 @@ impl ToPartial for RequestConfig {
                 &self.stream_idle_timeout_secs,
                 defaults.stream_idle_timeout_secs,
             ),
+            max_response_bytes: partial_opt(&self.max_response_bytes, defaults.max_response_bytes),
             cache: partial_opt(&self.cache, defaults.cache),
         }
     }

@@ -19,6 +19,9 @@ pub enum Error {
     #[error("Cannot persist workspace without storage")]
     MissingStorage,
 
+    #[error("No workspace found at or above: {0}")]
+    WorkspaceNotFound(Utf8PathBuf),
+
     #[error("Failed to acquire lock on conversation {0}")]
     LockFailed(String),
 

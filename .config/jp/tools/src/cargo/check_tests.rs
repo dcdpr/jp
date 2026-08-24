@@ -1,9 +1,12 @@
+use std::{io, sync::Mutex};
+
+use camino::Utf8Path;
 use camino_tempfile::{Utf8TempDir, tempdir};
-use jp_tool::{Action, Outcome};
+use jp_tool::{Action, Context, Outcome};
 use pretty_assertions::assert_eq;
 
 use super::*;
-use crate::util::runner::{ExitCode, MockProcessRunner, ProcessOutput};
+use crate::util::runner::{ExitCode, MockProcessRunner, ProcessOutput, RunnerOpts};
 
 fn ctx() -> (Utf8TempDir, Context) {
     let dir = tempdir().unwrap();
@@ -47,7 +50,7 @@ fn test_cargo_check_with_warnings() {
         .expect("comfort")
         .returns_success("");
 
-    let result = cargo_check_impl(&ctx, None, false, &runner).unwrap();
+    let result = cargo_check_impl(&ctx.root, None, false, &runner).unwrap();
 
     assert_eq!(result.into_content().unwrap(), indoc::indoc! {r#"
             ```
@@ -77,7 +80,7 @@ fn test_cargo_check_no_warnings() {
         .expect("comfort")
         .returns_success("");
 
-    let result = cargo_check_impl(&ctx, None, false, &runner).unwrap();
+    let result = cargo_check_impl(&ctx.root, None, false, &runner).unwrap();
 
     assert_eq!(
         result.into_content().unwrap(),
@@ -100,10 +103,12 @@ fn clean_clippy_with_comfort_drift_appends_note() {
             status: ExitCode::from_code(1),
         });
 
-    let result = cargo_check_impl(&ctx, None, false, &runner).unwrap();
+    let result = cargo_check_impl(&ctx.root, None, false, &runner).unwrap();
 
+    // The header is clippy-scoped, not a blanket "Check succeeded", so it does
+    // not contradict the drift note below it.
     assert_eq!(result.into_content().unwrap(), indoc::indoc! {"
-            Check succeeded. No warnings or errors found.
+            `cargo clippy` found no warnings or errors.
 
             Doc comments in the following files are badly formatted. Run `cargo_fmt` to auto-fix them:
             - src/lib.rs
@@ -129,7 +134,7 @@ fn clippy_warnings_and_comfort_drift_are_both_reported() {
             status: ExitCode::from_code(1),
         });
 
-    let result = cargo_check_impl(&ctx, None, false, &runner).unwrap();
+    let result = cargo_check_impl(&ctx.root, None, false, &runner).unwrap();
 
     assert_eq!(result.into_content().unwrap(), indoc::indoc! {"
             ```
@@ -158,7 +163,7 @@ fn comfort_drift_listing_is_bounded() {
             status: ExitCode::from_code(1),
         });
 
-    let content = cargo_check_impl(&ctx, None, false, &runner)
+    let content = cargo_check_impl(&ctx.root, None, false, &runner)
         .unwrap()
         .unwrap_content();
 
@@ -188,7 +193,7 @@ fn comfort_real_failure_is_reported_as_error() {
             status: ExitCode::from_code(2),
         });
 
-    let result = cargo_check_impl(&ctx, None, false, &runner).unwrap();
+    let result = cargo_check_impl(&ctx.root, None, false, &runner).unwrap();
     match result {
         Outcome::Error { message, .. } => {
             assert_eq!(message, "comfort failed: comfort: parse error");
@@ -209,7 +214,7 @@ fn clippy_failure_short_circuits_before_running_comfort() {
             status: ExitCode::from_code(101),
         });
 
-    let result = cargo_check_impl(&ctx, None, false, &runner).unwrap();
+    let result = cargo_check_impl(&ctx.root, None, false, &runner).unwrap();
     match result {
         Outcome::Error { message, .. } => {
             assert_eq!(message, "Cargo command failed: error: build failed");
@@ -230,6 +235,7 @@ fn package_scope_is_passed_through_to_both_tools() {
             "--package=my_pkg",
             "--quiet",
             "--all-targets",
+            "--all-features",
         ])
         .returns_success("")
         .expect("comfort")
@@ -246,9 +252,130 @@ fn package_scope_is_passed_through_to_both_tools() {
         ])
         .returns_success("");
 
-    let result = cargo_check_impl(&ctx, Some("my_pkg"), false, &runner).unwrap();
+    let result = cargo_check_impl(&ctx.root, Some("my_pkg"), false, &runner).unwrap();
     assert_eq!(
         result.into_content().unwrap(),
         "Check succeeded. No warnings or errors found."
     );
+}
+
+/// `CARGO_UNSTABLE_CHECKSUM_FRESHNESS` has to reach cargo.
+///
+/// Sibling git worktrees share a target directory, and mtime-based freshness
+/// lets one checkout serve the other's stale artifacts; content checksums are
+/// what prevent that.
+/// `MockProcessRunner` validates args but ignores the environment, so nothing
+/// else here would notice the variable going missing.
+#[test]
+fn checksum_freshness_reaches_cargo() {
+    let (_dir, ctx) = ctx();
+
+    let runner: CallCapturingRunner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success("")
+        .expect("comfort")
+        .returns_success("")
+        .into();
+
+    cargo_check_impl(&ctx.root, None, true, &runner).unwrap();
+
+    let call = runner
+        .call_with_arg("clippy")
+        .expect("the clippy pass must have run");
+
+    assert_eq!(
+        call.env
+            .iter()
+            .find(|(key, _)| key == "CARGO_UNSTABLE_CHECKSUM_FRESHNESS")
+            .map(|(_, value)| value.as_str()),
+        Some("true"),
+    );
+}
+
+/// Off unless opted into, so the tools also work on stable cargo.
+#[test]
+fn checksum_freshness_is_absent_unless_opted_into() {
+    let (_dir, ctx) = ctx();
+
+    let runner: CallCapturingRunner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_success("")
+        .expect("comfort")
+        .returns_success("")
+        .into();
+
+    cargo_check_impl(&ctx.root, None, false, &runner).unwrap();
+
+    let call = runner
+        .call_with_arg("clippy")
+        .expect("the clippy pass must have run");
+
+    assert!(
+        !call
+            .env
+            .iter()
+            .any(|(key, _)| key == "CARGO_UNSTABLE_CHECKSUM_FRESHNESS"),
+        "the clippy pass must not require nightly cargo unless asked to",
+    );
+}
+
+/// One recorded subprocess invocation.
+struct CapturedCall {
+    args: Vec<String>,
+    env: Vec<(String, String)>,
+}
+
+/// A runner that records every call's args and environment.
+///
+/// `EnvCapturingRunner` in `cargo/test_tests.rs` keeps only the most recent
+/// call's environment; `cargo_check` makes two, so the clippy pass has to be
+/// picked out rather than assumed to be last.
+struct CallCapturingRunner {
+    inner: MockProcessRunner,
+    calls: Mutex<Vec<CapturedCall>>,
+}
+
+impl From<MockProcessRunner> for CallCapturingRunner {
+    fn from(inner: MockProcessRunner) -> Self {
+        Self {
+            inner,
+            calls: Mutex::new(Vec::new()),
+        }
+    }
+}
+
+impl CallCapturingRunner {
+    /// The first recorded call whose first argument is `arg`.
+    fn call_with_arg(&self, arg: &str) -> Option<CapturedCall> {
+        self.calls
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|call| call.args.first().is_some_and(|first| first == arg))
+            .map(|call| CapturedCall {
+                args: call.args.clone(),
+                env: call.env.clone(),
+            })
+    }
+}
+
+impl ProcessRunner for CallCapturingRunner {
+    fn run_with_opts(
+        &self,
+        program: &str,
+        args: &[&str],
+        working_dir: &Utf8Path,
+        opts: &RunnerOpts<'_>,
+    ) -> Result<ProcessOutput, io::Error> {
+        self.calls.lock().unwrap().push(CapturedCall {
+            args: args.iter().map(|a| (*a).to_owned()).collect(),
+            env: opts
+                .env
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                .collect(),
+        });
+
+        self.inner.run_with_opts(program, args, working_dir, opts)
+    }
 }

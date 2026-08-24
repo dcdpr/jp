@@ -43,6 +43,7 @@ expression: v
         "base_backoff_ms": 1000,
         "max_backoff_secs": 60,
         "stream_idle_timeout_secs": 60,
+        "max_response_bytes": 1048576,
         "cache": true
       }
     },
@@ -89,6 +90,11 @@ expression: v
         "strategy": "replace",
         "discard_when_merged": false
       },
+      "labels": {
+        "value": {},
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
       "start_local": false
     },
     "style": {
@@ -101,8 +107,14 @@ expression: v
       "markdown": {
         "wrap_width": 80,
         "table_max_column_width": 40,
+        "table_continuation_edge": true,
         "theme": "gruvbox-dark",
         "hr_style": "line"
+      },
+      "mcp_startup": {
+        "show": true,
+        "delay_secs": 4,
+        "interval_ms": 100
       },
       "reasoning": {
         "display": "full",

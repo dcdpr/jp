@@ -20,7 +20,10 @@ use tokio_util::sync::CancellationToken;
 use tracing::{info, trace};
 
 use super::handler::{InterruptAction, InterruptHandler};
-use crate::cmd::query::turn::{Action, CommittedEvent, TurnCoordinator, TurnPhase};
+use crate::cmd::query::{
+    stream::{RebuildRefusal, StreamRetryState},
+    turn::{Action, CommittedEvent, TurnCoordinator, TurnPhase},
+};
 
 /// Action to take in a select loop.
 ///
@@ -32,6 +35,10 @@ pub enum LoopAction {
 
     /// Break the inner loop.
     Break,
+
+    /// The provider asked to rebuild the request and was refused.
+    /// The turn cannot make progress and must abort.
+    RebuildRefused(RebuildRefusal),
 }
 
 /// Result of handling an interrupt during LLM streaming.
@@ -126,15 +133,36 @@ pub fn handle_llm_event(
     event: Event,
     turn_coordinator: &mut TurnCoordinator,
     conversation_stream: &mut ConversationStream,
+    retry_state: &mut StreamRetryState,
 ) -> (LoopAction, CommittedEvent) {
     // `Patch` is a side-channel instruction from the provider to fix bad events
     // in the conversation stream. This can be handled directly instead of
     // passing through the turn coordinator.
     if let Event::Patch(patches) = event {
         let count = apply_patches(conversation_stream, &patches);
+        let shrinks = patches.iter().all(|patch| patch.action.shrinks_stream());
+        retry_state.record_patch(count, shrinks);
+
+        if !shrinks {
+            // A patch set that can grow the stream gives no guarantee the repair
+            // loop ends, so the rebuild below is refused whatever it changed.
+            tracing::warn!(
+                patches = patches.len(),
+                "History patches include an action that may not shrink the conversation stream."
+            );
+        }
+
         if count > 0 {
             tracing::debug!(count, "Applied history patches to conversation stream.");
+        } else {
+            // The rebuilt request would be byte-identical, so the rebuild that
+            // follows is refused below rather than resent.
+            tracing::warn!(
+                patches = patches.len(),
+                "History patches matched no events in the conversation stream."
+            );
         }
+
         return (LoopAction::Continue, CommittedEvent::None);
     }
 
@@ -142,7 +170,10 @@ pub fn handle_llm_event(
     // Break the inner streaming loop while keeping the phase as `Streaming` so
     // the outer turn loop re-enters with a fresh request.
     if matches!(event, Event::Finished(FinishReason::Retry)) {
-        return (LoopAction::Break, CommittedEvent::None);
+        return match retry_state.authorize_rebuild() {
+            Ok(()) => (LoopAction::Break, CommittedEvent::None),
+            Err(refusal) => (LoopAction::RebuildRefused(refusal), CommittedEvent::None),
+        };
     }
 
     let outcome = turn_coordinator.handle_event(conversation_stream, event);

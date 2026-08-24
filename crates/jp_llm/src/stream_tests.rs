@@ -7,9 +7,16 @@ use std::{
 };
 
 use futures::{StreamExt as _, future, stream};
+use serde_json::Map;
 
-use super::{with_idle_timeout, with_idle_timeout_at, with_tool_call_keepalive};
-use crate::{StreamError, StreamErrorKind, event::Event};
+use super::{
+    output_limit_bytes, with_idle_timeout, with_idle_timeout_at, with_output_limit,
+    with_tool_call_keepalive,
+};
+use crate::{
+    StreamError, StreamErrorKind,
+    event::{Event, EventPart, FinishReason},
+};
 
 #[tokio::test(start_paused = true)]
 async fn idle_timeout_fires_when_wall_clock_exceeds_idle() {
@@ -52,6 +59,199 @@ async fn active_stream_passes_through_without_timeout() {
     assert!(wrapped.next().await.expect("first item").is_ok());
     assert!(wrapped.next().await.expect("second item").is_ok());
     assert!(wrapped.next().await.is_none(), "inner stream exhausted");
+}
+
+#[tokio::test]
+async fn output_limit_fires_once_the_ceiling_is_crossed() {
+    // Four 10-byte parts against a 25-byte ceiling. The third crosses it, so
+    // exactly three parts are forwarded before the guard errors: the crossing
+    // part is still delivered, because content already generated is never
+    // withheld. The fourth part is never polled.
+    let inner = stream::iter(vec![
+        Ok(Event::reasoning(0, "0123456789")),
+        Ok(Event::message(1, "0123456789")),
+        Ok(Event::structured(2, "0123456789")),
+        Ok(Event::tool_call_args(3, "0123456789")),
+    ])
+    .boxed();
+    let mut wrapped = with_output_limit(inner, 25);
+
+    for index in 0..3 {
+        assert!(
+            wrapped.next().await.expect("a forwarded part").is_ok(),
+            "part {index} is forwarded"
+        );
+    }
+
+    let err = wrapped
+        .next()
+        .await
+        .expect("an item before the stream ends")
+        .expect_err("an output limit error");
+    assert_eq!(err.kind, StreamErrorKind::OutputLimit);
+    assert!(
+        !err.is_retryable(),
+        "regenerating a runaway response must not be retried"
+    );
+
+    assert!(
+        wrapped.next().await.is_none(),
+        "stream ends after the output limit fires"
+    );
+}
+
+#[tokio::test]
+async fn output_under_the_ceiling_passes_through_untouched() {
+    let inner = stream::iter(vec![
+        Ok(Event::message(0, "0123456789")),
+        Ok(Event::flush(0)),
+        Ok(Event::Finished(FinishReason::Completed)),
+    ])
+    .boxed();
+    let mut wrapped = with_output_limit(inner, 25);
+
+    assert!(matches!(wrapped.next().await, Some(Ok(Event::Part { .. }))));
+    assert!(matches!(
+        wrapped.next().await,
+        Some(Ok(Event::Flush { .. }))
+    ));
+    assert!(matches!(
+        wrapped.next().await,
+        Some(Ok(Event::Finished(FinishReason::Completed)))
+    ));
+    assert!(wrapped.next().await.is_none(), "inner stream exhausted");
+}
+
+#[tokio::test]
+async fn non_content_events_do_not_count_toward_the_ceiling() {
+    // Keep-alives, patches, and metadata-free flushes carry nothing generated,
+    // so a stream of nothing but those must survive a 1-byte ceiling.
+    let inner = stream::iter(vec![
+        Ok(Event::flush(0)),
+        Ok(Event::KeepAlive),
+        Ok(Event::Patch(vec![])),
+        Ok(Event::flush(1)),
+    ])
+    .boxed();
+
+    let items: Vec<_> = with_output_limit(inner, 1).collect().await;
+
+    assert_eq!(items.len(), 4, "no extra error item is appended");
+    assert!(items.iter().all(Result::is_ok), "got: {items:?}");
+}
+
+#[tokio::test]
+async fn retained_part_metadata_counts_toward_the_ceiling() {
+    // Anthropic delivers redacted thinking as an empty reasoning part with the
+    // payload in metadata. Counting only the content field would let an
+    // arbitrarily large retained payload through at zero counted bytes.
+    let payload = "0123456789".repeat(4);
+    let inner = stream::iter(vec![
+        Ok(Event::Part {
+            index: 0,
+            part: EventPart::Reasoning(String::new()),
+            metadata: Map::from_iter([(
+                "anthropic_redacted_thinking".to_owned(),
+                payload.clone().into(),
+            )]),
+        }),
+        Ok(Event::Part {
+            index: 0,
+            part: EventPart::Reasoning(String::new()),
+            metadata: Map::from_iter([("anthropic_redacted_thinking".to_owned(), payload.into())]),
+        }),
+    ])
+    .boxed();
+
+    // 40 metadata bytes per part against a 50-byte ceiling: the second crosses.
+    let mut wrapped = with_output_limit(inner, 50);
+
+    assert!(
+        wrapped.next().await.expect("the first part").is_ok(),
+        "the first part is under the ceiling"
+    );
+    assert!(wrapped.next().await.expect("the second part").is_ok());
+
+    let err = wrapped
+        .next()
+        .await
+        .expect("an item before the stream ends")
+        .expect_err("an output limit error");
+    assert_eq!(err.kind, StreamErrorKind::OutputLimit);
+}
+
+#[tokio::test]
+async fn retained_flush_metadata_counts_toward_the_ceiling() {
+    // OpenAI attaches encrypted reasoning content to the flush rather than to a
+    // part, so a flush is not automatically free.
+    let inner = stream::iter(vec![Ok(Event::flush_with_metadata_field(
+        0,
+        "openai_encrypted_content",
+        "0123456789".repeat(4),
+    ))])
+    .boxed();
+
+    let mut wrapped = with_output_limit(inner, 25);
+
+    assert!(
+        wrapped.next().await.expect("the flush").is_ok(),
+        "the flush is forwarded before the guard errors"
+    );
+
+    let err = wrapped
+        .next()
+        .await
+        .expect("an item before the stream ends")
+        .expect_err("an output limit error");
+    assert_eq!(err.kind, StreamErrorKind::OutputLimit);
+}
+
+#[tokio::test]
+async fn repeated_tool_call_openings_reach_the_ceiling() {
+    // A tool call's `id` and `name` are generated response bytes. A model that
+    // emits nothing but empty tool calls must still hit the ceiling, rather
+    // than streaming forever at zero counted bytes.
+    let inner = stream::iter(
+        std::iter::repeat_with(|| Ok(Event::tool_call_start(0, "call_01", "some_tool")))
+            .take(20)
+            .collect::<Vec<_>>(),
+    )
+    .boxed();
+
+    // 16 bytes per opening (7 + 9) against a 40-byte ceiling: the third crosses
+    // it at 48 bytes.
+    let mut wrapped = with_output_limit(inner, 40);
+
+    for index in 0..3 {
+        assert!(
+            wrapped.next().await.expect("a forwarded part").is_ok(),
+            "tool call opening {index} is forwarded"
+        );
+    }
+
+    let err = wrapped
+        .next()
+        .await
+        .expect("an item before the stream ends")
+        .expect_err("an output limit error");
+    assert_eq!(err.kind, StreamErrorKind::OutputLimit);
+
+    assert!(
+        wrapped.next().await.is_none(),
+        "stream ends after the output limit fires"
+    );
+}
+
+#[test]
+fn output_ceiling_of_zero_is_disabled() {
+    // `0` means "no ceiling" at the config layer. Both call sites route through
+    // this translation so they cannot drift on what `0` means.
+    assert!(output_limit_bytes(0).is_none(), "zero disables the ceiling");
+    assert_eq!(
+        output_limit_bytes(512),
+        Some(512),
+        "a non-zero ceiling is used as-is"
+    );
 }
 
 #[tokio::test(start_paused = true)]

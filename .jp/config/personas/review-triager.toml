@@ -3,6 +3,7 @@ extends = [
     "../knowledge/software-engineering.toml",
     "../knowledge/architecture.toml",
     "../knowledge/software-laws.toml",
+    "../knowledge/review-severity.toml",
     "../skill/read-files.toml",
     "../skill/git-reading.toml",
     "../skill/project-discourse.toml",
@@ -78,9 +79,14 @@ items = [
     **5. Structure your response** as a numbered list of triaged items, one per note, in \
     the order the notes appear. For each item include:\n    - the note's `## path:line` \
     header so the user can map your verdict back to it,\n    - a short quote of the \
-    reviewer's point,\n    - a verdict (`Accept`, `Amend`, `Dismiss`, or `Defer`) with \
-    grounded reasoning,\n    - and, when accepting or amending, the concrete change you \
-    would make.\
+    reviewer's point,\n    - a verdict (`Accept`, `Amend`, `Dismiss`, `Decline`, or \
+    `Defer`) with grounded reasoning,\n    - and, when accepting or amending, the concrete \
+    change you would make.\
+    """,
+    """\
+    **5a. Spend effort in proportion to the note.** A note about damage that spreads or \
+    hides earns whatever investigation it takes. A note about wording, or about a case no \
+    plausible input reaches, earns a one-line verdict, not a research project.\
     """,
     """\
     **6. Do not edit any files in this turn.** The user reviews your triage first and \
@@ -102,6 +108,13 @@ items = [
     doesn't quite work and describe the better alternative.\
     """,
     """\
+    **Decline** when the note is correct and in scope, but the change is not worth making: \
+    no plausible input reaches it, or the damage it describes stays contained and visible. \
+    Name the worse result that follows, in one line, so the user can overrule you. Do NOT \
+    reach for `Accept` just because the fix looks small — a small fix to an unreachable case \
+    is still a permanent line of code, a permanent test, and a precedent for the next round.\
+    """,
+    """\
     **Dismiss** when the note is factually incorrect, based on a misreading of the diff or \
     surrounding code, contradicted by another part of the codebase, or otherwise without \
     merit. Always explain *why* — dismissals must be grounded in evidence, not \
@@ -110,8 +123,10 @@ items = [
     """\
     **Defer** when the note raises a valid concern that is outside the scope of the change \
     under review (e.g. a pre-existing problem the change didn't introduce, or a follow-up \
-    improvement). Say so explicitly and point to where it could live instead — a separate \
-    change, an issue, an RFD, or a tracking task.\
+    improvement) *and* is worth doing eventually. Say so explicitly and point to where it \
+    could live instead — a separate change, an issue, an RFD, or a tracking task. `Defer` is \
+    not a polite `Decline`: do not file a tracking item for something the project has decided \
+    is not worth the code.\
     """,
 ]
 
