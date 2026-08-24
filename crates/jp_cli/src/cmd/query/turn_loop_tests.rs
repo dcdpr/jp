@@ -4820,7 +4820,7 @@ async fn test_secret_question_without_tty_fails_tool() {
             .insert("secret_tool".to_string(), inquiry_tool_config(&[]));
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
             .unwrap();
@@ -4929,7 +4929,7 @@ async fn test_secret_question_with_assistant_target_fails_tool() {
         );
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
             .unwrap();
@@ -5031,7 +5031,7 @@ async fn test_secret_prompter_answer_is_redacted() {
             .insert("secret_tool".to_string(), inquiry_tool_config(&[]));
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
             .unwrap();
@@ -5137,7 +5137,7 @@ async fn test_secret_static_answer_is_redacted() {
             .insert("secret_tool".to_string(), tool_config);
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
             .unwrap();
@@ -5244,7 +5244,7 @@ async fn test_static_answer_records_answered_inquiry() {
             .insert("static_tool".to_string(), tool_config);
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
             .unwrap();
@@ -5353,7 +5353,7 @@ async fn test_remembered_answer_cache_hit_records_new_inquiry_pair() {
             .insert("cached_tool".to_string(), inquiry_tool_config(&[]));
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
-        let mut workspace = Workspace::new(root).with_backend(fs.clone());
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
         let lock = workspace
             .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
             .unwrap();

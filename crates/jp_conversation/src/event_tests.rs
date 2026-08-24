@@ -45,7 +45,7 @@ fn every_kind() -> Vec<EventKind> {
             InquiryQuestion::text("Which file?".to_owned()),
         )
         .into(),
-        InquiryResponse::new(InquiryId::new("q1"), Value::Null).into(),
+        InquiryResponse::boolean(InquiryId::new("q1"), true).into(),
     ]
 }
 
