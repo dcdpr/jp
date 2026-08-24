@@ -1,12 +1,14 @@
 use camino::{Utf8Path, Utf8PathBuf};
 use grep_printer::StandardBuilder;
-use grep_regex::RegexMatcher;
 use grep_searcher::{BinaryDetection, SearcherBuilder};
 use ignore::gitignore::Gitignore;
 use jp_tool::AccessPolicy;
+use matcher::FancyMatcher;
 
 use super::fs_list_files;
 use crate::{Error, util::OneOrMany};
+
+mod matcher;
 
 pub(crate) async fn fs_grep_files(
     root: &Utf8Path,
@@ -41,11 +43,17 @@ pub(crate) async fn fs_grep_files(
     // Guard against a common mistake LLMs seem to make when using this tool.
     // Often the pattern ends with an escaped double quote, which will cause the
     // pattern to not match anything.
-    if let Some(pat) = pattern.strip_suffix('"') {
-        pattern = format!("{pattern}|{pat}");
+    if let Some(pat) = pattern.strip_suffix('"')
+        && !pat.is_empty()
+    {
+        // An optional quote rather than an alternation of both spellings:
+        // duplicating the pattern renumbers its capture groups, so a
+        // backreference would point at the copy in the branch it is not in and
+        // never match.
+        pattern = format!("{pat}\"?");
     }
 
-    let matcher = RegexMatcher::new(&pattern)?;
+    let matcher = FancyMatcher::new(&pattern)?;
 
     let mut printer = StandardBuilder::new()
         .max_columns(Some(1000))

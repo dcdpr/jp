@@ -1037,6 +1037,18 @@ fn quiet_reports_a_match_through_its_exit_status_alone() {
     );
 }
 
+/// A line that drives the pattern `(a+)+\1b` past its backtrack limit.
+///
+/// The leading `b` is the part that matters.
+/// With the pattern's required literal absent from the line, the search is
+/// decided before the backtracking VM is ever entered, and a bare run of `a`s
+/// is scanned cheaply.
+/// Here the `b` is present but unreachable, since no match can end at it, so
+/// the VM runs and exhausts its step budget.
+fn backtracking_line() -> String {
+    format!("b{}", "a".repeat(4000))
+}
+
 #[test]
 fn quiet_exits_zero_when_a_match_survives_a_failing_pattern() {
     // `grep -q`'s rule: if a line is selected the status is 0 even if an error
@@ -1052,7 +1064,7 @@ fn quiet_exits_zero_when_a_match_survives_a_failing_pattern() {
     let (mut ctx, _out) = setup(vec![(
         id,
         turn(vec![ConversationEvent::new(
-            ChatRequest::from(format!("{}\naab", "a".repeat(64)).as_str()),
+            ChatRequest::from(format!("{}\naab", backtracking_line()).as_str()),
             ts(),
         )]),
     )]);
@@ -1076,7 +1088,7 @@ fn quiet_exits_two_when_a_failure_leaves_no_match() {
     let (mut ctx, _out) = setup(vec![(
         id,
         turn(vec![ConversationEvent::new(
-            ChatRequest::from("a".repeat(64).as_str()),
+            ChatRequest::from(backtracking_line().as_str()),
             ts(),
         )]),
     )]);
@@ -1159,7 +1171,7 @@ fn a_pattern_that_fails_mid_search_exits_two() {
     let (mut ctx, out) = setup(vec![(
         id,
         turn(vec![ConversationEvent::new(
-            ChatRequest::from("a".repeat(64).as_str()),
+            ChatRequest::from(backtracking_line().as_str()),
             ts(),
         )]),
     )]);
