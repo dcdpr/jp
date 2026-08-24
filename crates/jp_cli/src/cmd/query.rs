@@ -84,11 +84,11 @@ use jp_config::{
     style::{mcp_startup::McpStartupConfig, reasoning::ReasoningDisplayConfig},
 };
 use jp_conversation::{
-    Conversation, ConversationEvent, ConversationId, ConversationStream,
+    Conversation, ConversationEvent, ConversationId, ConversationStream, Labels,
     event::{ChatRequest, ChatResponse},
     thread::{Thread, ThreadBuilder},
 };
-use jp_inquire::prompt::TerminalPromptBackend;
+use jp_inquire::prompt::{PromptBackend, TerminalPromptBackend};
 use jp_llm::{
     ToolError, provider,
     tool::{
@@ -124,6 +124,7 @@ use crate::{
     cmd::{
         self,
         conversation::fork,
+        label::resolve::{Resolver, Trigger},
         lock::{LockRequest, acquire_lock},
     },
     ctx::IntoPartialAppConfig,
@@ -140,12 +141,6 @@ type BoxedResult<T> = std::result::Result<T, Box<dyn std::error::Error + Send + 
 
 #[derive(Debug, Default, clap::Args)]
 pub(crate) struct Query {
-    /// The query to send.
-    /// If not provided, uses `$JP_EDITOR`, `$VISUAL` or `$EDITOR` to open edit
-    /// the query in an editor.
-    #[arg(value_parser = string_or_path)]
-    query: Option<Vec<String>>,
-
     /// Use the query string as a Jinja2 template.
     ///
     /// You can provide values for template variables using the
@@ -232,27 +227,8 @@ pub(crate) struct Query {
     #[arg(short = 'E', long = "no-edit", conflicts_with = "edit")]
     no_edit: bool,
 
-    /// Pre-fill the editor with the last assistant message quoted as a markdown
-    /// blockquote (each line prefixed with ` >  `).
-    ///
-    /// Useful for inline replies: open `$EDITOR` with the assistant's last
-    /// response pre-quoted, then intersperse your replies between the quoted
-    /// lines (mutt/email style).
-    /// The complete buffer — quotes plus your replies — becomes your next
-    /// message.
-    ///
-    /// Forces the editor open by default; respects `--no-edit` / `--edit=false`
-    /// if explicitly suppressed, in which case the quoted text is sent as-is
-    /// and echoed to the terminal before the turn runs.
-    /// Composes with `--replay`: the quote is taken from the stream *after* the
-    /// replayed turn has been trimmed, i.e. the assistant message preceding the
-    /// turn being replayed.
-    ///
-    /// If no prior assistant message exists in this conversation, a warning is
-    /// emitted and the editor opens with whatever other content was seeded
-    /// (query, stdin, or empty).
-    #[arg(long = "quote")]
-    quote: bool,
+    #[command(flatten)]
+    input: QueryInput,
 
     /// The model to use.
     #[arg(short = 'm', long = "model")]
@@ -359,6 +335,11 @@ impl Query {
         let now = ctx.now();
         let cfg = ctx.config();
 
+        // Resolve the query before any conversation or session state is
+        // touched: an unreadable `@path` must not leave a conversation created
+        // and recorded as the session's active one.
+        let query = self.resolve_query()?;
+
         // Resolve the target conversation and acquire an exclusive lock.
         //
         // Paths:
@@ -428,6 +409,8 @@ impl Query {
             |fs| fs.build_conversation_dir(&cid, conv_title.as_deref(), true),
         );
 
+        let piped = read_piped_stdin()?;
+
         // Build the request read-only: replay resolution, quote seeding, and
         // the editor session all operate on (a view of) the stream without
         // mutating it. The destructive replay trim is described by
@@ -438,7 +421,9 @@ impl Query {
             mut editor_provided_config,
             pending_trim,
             chat_request,
-        } = lock.with_events(|stream| self.build_conversation(stream, &cfg, &conversation_path))?;
+        } = lock.with_events(|stream| {
+            self.build_conversation(&piped, query.as_deref(), stream, &cfg, &conversation_path)
+        })?;
 
         let Some(mut chat_request) = chat_request else {
             // Empty query, early exit. Nothing was mutated and nothing is
@@ -657,6 +642,30 @@ impl Query {
         turn_result
     }
 
+    /// Resolve the positional query into the text to send.
+    ///
+    /// A query of exactly one `@path` value is read from that file; any other
+    /// query is its values joined with spaces, leaving an `@` word inside a
+    /// multi-word query as ordinary text.
+    /// Returns `None` when no query was given, which leaves the request to be
+    /// composed from piped stdin, a replayed request, or the editor.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::ArgFile`] if the named file cannot be read.
+    fn resolve_query(&self) -> Result<Option<String>> {
+        let Some(values) = &self.input.query else {
+            return Ok(None);
+        };
+
+        let text = match query_file_path(values) {
+            Some(path) => read_arg_file(path)?,
+            None => values.join(" "),
+        };
+
+        Ok(Some(text))
+    }
+
     /// Declare what conversations this command needs.
     pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
         if self.is_new() {
@@ -677,6 +686,8 @@ impl Query {
     /// [`TurnCoordinator::start_turn`]: turn::TurnCoordinator::start_turn
     fn build_conversation(
         &self,
+        piped: &str,
+        query: Option<&str>,
         stream: &ConversationStream,
         config: &AppConfig,
         conversation_root: &Utf8Path,
@@ -703,25 +714,7 @@ impl Query {
         };
         let view = view.as_ref();
 
-        // If stdin contains data, we prepend it to the chat request.
-        let stdin = io::stdin();
-        let piped = if stdin.is_terminal() {
-            String::new()
-        } else {
-            // Read the payload verbatim: interior newlines (fenced code
-            // blocks, paragraph breaks, ...) are part of the message. Only
-            // the final line terminator is dropped; the composition below
-            // adds its own separators.
-            let mut piped = io::read_to_string(stdin.lock())?;
-            if piped.ends_with('\n') {
-                piped.pop();
-                if piped.ends_with('\r') {
-                    piped.pop();
-                }
-            }
-            piped
-        };
-
+        // If stdin contained data, we prepend it to the chat request.
         if !piped.is_empty() {
             let sep = if chat_request.is_empty() { "" } else { "\n\n" };
             *chat_request = format!("{piped}{sep}{chat_request}");
@@ -730,24 +723,20 @@ impl Query {
         // If a query is provided, prepend it to the chat request. This is only
         // relevant for replays, otherwise the chat request is still empty, so
         // we replace it with the provided query.
-        if let Some(text) = &self.query {
-            let text = text.join(" ");
+        if let Some(text) = query {
             let sep = if chat_request.is_empty() { "" } else { "\n\n" };
             *chat_request = format!("{text}{sep}{chat_request}");
         }
 
-        // If --quote is set, prepend the last assistant message as a markdown
-        // blockquote so it sits at the top of the editor buffer. The user can
-        // then intersperse replies between the quoted lines (mutt-style inline
-        // reply). Missing message (e.g. brand new conversation) degrades to a
-        // warning and the editor opens with whatever else was seeded.
-        if self.quote {
-            if let Some(message) = last_assistant_message(view) {
-                let quoted = blockquote(message);
-                *chat_request = format!("{quoted}\n\n{chat_request}");
-            } else {
-                warn!("--quote: no prior assistant message in this conversation");
-            }
+        // If --quote is set, prepend the last assistant message so it sits at
+        // the top of the editor buffer. The user can then intersperse replies
+        // between the quoted lines (mutt-style inline reply). Missing message
+        // (e.g. brand new conversation) degrades to a warning and the editor
+        // opens with whatever else was seeded.
+        if let Some(prefixed) = self.input.quote
+            && !seed_quoted_reply(&mut chat_request, view, prefixed)
+        {
+            warn!("--quote: no prior assistant message in this conversation");
         }
 
         let (query_source, editor_provided_config) = self.edit_message(
@@ -786,17 +775,32 @@ impl Query {
     }
 
     /// Create a new conversation and return an exclusive lock.
-    fn create_new_conversation(&self, ctx: &mut Ctx) -> Result<ConversationLock> {
+    async fn create_new_conversation(&self, ctx: &mut Ctx) -> Result<ConversationLock> {
         let cfg = ctx.config();
-        let ws = &mut ctx.workspace;
 
+        // Resolved before the conversation exists so a rule that needs
+        // confirmation, and finds no terminal to ask on, aborts without leaving
+        // a half-labelled conversation behind.
+        let prompts = TerminalPromptBackend;
+        // A rule that produced no values names no label on a fresh
+        // conversation: there is nothing here for it to replace.
+        let labels: Labels = label_resolver(ctx, &cfg, &prompts)
+            .automatic(Trigger::New)
+            .await?
+            .into_iter()
+            .collect();
+
+        let ws = &mut ctx.workspace;
         let projection = if self.is_local(&cfg.conversation) {
             Projection::LocalOnly
         } else {
             Projection::Projected
         };
         let lock = ws.create_and_lock_conversation_with_projection(
-            Conversation::default(),
+            Conversation {
+                labels,
+                ..Conversation::default()
+            },
             cfg.clone(),
             ctx.session.as_ref(),
             projection,
@@ -870,7 +874,7 @@ impl Query {
         // `--quote` that text was assembled from the quoted assistant message
         // rather than typed by the user, so it is synthesized too (and
         // therefore echoed); anything else was typed or piped inline.
-        let source = if self.quote {
+        let source = if self.input.quote.is_some() {
             QuerySource::Synthesized
         } else {
             QuerySource::Inline
@@ -879,7 +883,9 @@ impl Query {
         // If a query is provided, and editing is not explicitly requested, or
         // in addition to the query, stdin contains data, or editing was
         // explicitly suppressed with `--no-edit`, we omit opening the editor.
-        if (self.query.as_ref().is_some_and(|v| !v.is_empty()) || !piped || self.force_no_edit())
+        if (self.input.query.as_ref().is_some_and(|v| !v.is_empty())
+            || !piped
+            || self.force_no_edit())
             && !self.force_edit()
             && !request.is_empty()
         {
@@ -1002,7 +1008,7 @@ impl Query {
     /// In either case the editor should be opened, regardless of whether a
     /// query is provided as an argument.
     fn force_edit(&self) -> bool {
-        !self.force_no_edit() && (self.edit || self.quote)
+        !self.force_no_edit() && (self.edit || self.input.quote.is_some())
     }
 
     #[must_use]
@@ -1058,8 +1064,9 @@ impl Query {
             &events,
             cfg,
             &rules,
-            crate::cmd::turn_range::Bound::Default,
-            crate::cmd::turn_range::Bound::Default,
+            // `--compact` on a query applies the configured rules to the whole
+            // conversation; there are no turn-selection flags to honour.
+            &crate::cmd::turn_selection::TurnSelection::default(),
             // `--compact` on a query is a quick adjunct; apply it silently so
             // compaction details don't clutter the query output.
             None,
@@ -1079,7 +1086,7 @@ impl Query {
     ) -> Result<ConversationLock> {
         // Handle --new: create a fresh conversation.
         if self.is_new() {
-            return self.create_new_conversation(ctx);
+            return self.create_new_conversation(ctx).await;
         }
 
         // Handle the picker's "start a new conversation" choice. It carries no
@@ -1089,14 +1096,14 @@ impl Query {
             if !self.allows_new_from_picker() {
                 return Err(Error::NewConflictsWithTarget);
             }
-            return self.create_new_conversation(ctx);
+            return self.create_new_conversation(ctx).await;
         }
 
         let handle = handle.ok_or(Error::NoConversationTarget)?;
 
         // Handle --fork: fork the conversation before locking.
         if let Some(fork_turns) = &self.fork {
-            return fork_conversation(ctx, &handle, *fork_turns);
+            return fork_conversation(ctx, &handle, *fork_turns).await;
         }
 
         let req = LockRequest::from_ctx(handle, ctx)
@@ -1105,8 +1112,8 @@ impl Query {
 
         match acquire_lock(req).await? {
             LockOutcome::Acquired(lock) => Ok(lock),
-            LockOutcome::NewConversation => self.create_new_conversation(ctx),
-            LockOutcome::ForkConversation(handle) => fork_conversation(ctx, &handle, None),
+            LockOutcome::NewConversation => self.create_new_conversation(ctx).await,
+            LockOutcome::ForkConversation(handle) => fork_conversation(ctx, &handle, None).await,
         }
     }
 }
@@ -1248,6 +1255,210 @@ fn blockquote(text: &str) -> String {
         .join("\n")
 }
 
+/// Prepend the stream's last assistant message to `request` as a quoted reply
+/// seed.
+///
+/// With `prefixed` the message is marked up as a markdown blockquote, otherwise
+/// it is inserted verbatim.
+/// Returns `false` when the stream holds no assistant message, leaving
+/// `request` untouched.
+fn seed_quoted_reply(
+    request: &mut ChatRequest,
+    stream: &ConversationStream,
+    prefixed: bool,
+) -> bool {
+    let Some(message) = last_assistant_message(stream) else {
+        return false;
+    };
+
+    let quoted = if prefixed {
+        blockquote(message)
+    } else {
+        message.to_owned()
+    };
+    request.content = format!("{quoted}\n\n{request}");
+
+    true
+}
+
+/// The query text and the `--quote` seed.
+///
+/// The two are parsed together because `--quote` accepts its value either
+/// attached (`--quote=false`) or as the word right after the flag (`--quote
+/// false`), and in the second form that word arrives as query text.
+#[derive(Debug, Default)]
+pub(crate) struct QueryInput {
+    /// The query words, in the order they were given.
+    query: Option<Vec<String>>,
+
+    /// `Some(true)` prefixes the quoted message with ` >  `, `Some(false)`
+    /// seeds it verbatim, `None` means `--quote` was not given.
+    quote: Option<bool>,
+}
+
+impl QueryInput {
+    /// Split the parsed arguments into the query and the quote seed.
+    fn resolve(args: QueryInputArgs, matches: &clap::ArgMatches) -> Self {
+        let QueryInputArgs {
+            mut query,
+            escaped_query,
+            quote,
+        } = args;
+
+        let quote = match quote {
+            None => None,
+            Some(QuoteArg::Attached(prefixed)) => Some(prefixed),
+            // A bare `--quote` reads its value from the next word when that
+            // word is exactly `true` or `false`. Anything else there is query
+            // text, and the flag falls back to its default.
+            Some(QuoteArg::Bare) => Some(take_quote_value(&mut query, matches).unwrap_or(true)),
+        };
+
+        // The two halves are one query. They stay apart until here so that
+        // `--quote` above only ever sees the unescaped words, and stay in this
+        // order because `--` always comes last.
+        if let Some(escaped) = escaped_query {
+            query.get_or_insert_default().extend(escaped);
+        }
+
+        Self { query, quote }
+    }
+}
+
+/// Take the `true` / `false` word sitting directly after `--quote` out of the
+/// query and return its value.
+///
+/// Returns `None` — leaving the query untouched — when the flag is followed
+/// by anything else.
+/// Words given after `--` are never candidates: they land in a separate
+/// argument that this never reads.
+fn take_quote_value(query: &mut Option<Vec<String>>, matches: &clap::ArgMatches) -> Option<bool> {
+    // clap counts a flag and its value as two separate indices, so the word
+    // directly after `--quote` sits one past the index of the flag's own
+    // (defaulted) value.
+    let after_quote = matches.index_of("quote")? + 1;
+    let position = matches
+        .indices_of("query")?
+        .position(|index| index == after_quote)?;
+
+    let words = query.as_mut()?;
+    let value = words.get(position)?.parse::<bool>().ok()?;
+
+    words.remove(position);
+    if words.is_empty() {
+        *query = None;
+    }
+
+    Some(value)
+}
+
+/// Argument declarations for [`QueryInput`].
+///
+/// [`QueryInput`] borrows these declarations and resolves the parsed values
+/// itself; it is never constructed as a command's own arguments.
+#[derive(Debug, clap::Args)]
+struct QueryInputArgs {
+    /// The query to send.
+    /// If not provided, uses `$JP_EDITOR`, `$VISUAL` or `$EDITOR` to open edit
+    /// the query in an editor.
+    ///
+    /// A query consisting of a single `@path` value is read from that file.
+    query: Option<Vec<String>>,
+
+    /// Query words given after `--`.
+    ///
+    /// clap only fills this argument through the `--` separator, which makes it
+    /// the record of which words were escaped.
+    /// They are appended to `query` once `--quote` has been resolved, so `--`
+    /// shields a `true` / `false` word from being read as the flag's value.
+    #[arg(last = true, hide = true)]
+    escaped_query: Option<Vec<String>>,
+
+    /// Pre-fill the editor with the last assistant message quoted as a markdown
+    /// blockquote (each line prefixed with ` >  `).
+    ///
+    /// Useful for inline replies: open `$EDITOR` with the assistant's last
+    /// response pre-quoted, then intersperse your replies between the quoted
+    /// lines (mutt/email style).
+    /// The complete buffer — quotes plus your replies — becomes your next
+    /// message.
+    ///
+    /// `--quote=false` seeds the message verbatim, without the ` >  ` prefixes.
+    /// `--quote=true` is the same as a bare `--quote`.
+    /// Both values also work unattached (`--quote false`); any other word after
+    /// `--quote` stays part of the query, so `jp q --quote what now?` still
+    /// asks "what now?".
+    /// To ask a question that *is* `true` or `false`, put it after `--`.
+    ///
+    /// Forces the editor open by default; respects `--no-edit` / `--edit=false`
+    /// if explicitly suppressed, in which case the quoted text is sent as-is
+    /// and echoed to the terminal before the turn runs.
+    /// Composes with `--replay`: the quote is taken from the stream *after* the
+    /// replayed turn has been trimmed, i.e. the assistant message preceding the
+    /// turn being replayed.
+    ///
+    /// If no prior assistant message exists in this conversation, a warning is
+    /// emitted and the editor opens with whatever other content was seeded
+    /// (query, stdin, or empty).
+    #[arg(
+        long = "quote",
+        value_name = "BOOL",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "",
+        value_parser = parse_quote_arg,
+    )]
+    quote: Option<QuoteArg>,
+}
+
+/// The `--quote` value as it was written on the command line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum QuoteArg {
+    /// `--quote` with nothing attached.
+    Bare,
+
+    /// `--quote=true` or `--quote=false`.
+    Attached(bool),
+}
+
+/// Parse the `--quote` value.
+///
+/// The empty string is what a bare `--quote` yields, since `require_equals`
+/// keeps it from swallowing the next word and the flag falls back to its
+/// `default_missing_value`.
+fn parse_quote_arg(s: &str) -> std::result::Result<QuoteArg, String> {
+    match s {
+        "" => Ok(QuoteArg::Bare),
+        "true" => Ok(QuoteArg::Attached(true)),
+        "false" => Ok(QuoteArg::Attached(false)),
+        _ => Err("expected `true` or `false`".to_owned()),
+    }
+}
+
+impl clap::Args for QueryInput {
+    fn augment_args(cmd: clap::Command) -> clap::Command {
+        QueryInputArgs::augment_args(cmd)
+    }
+
+    fn augment_args_for_update(cmd: clap::Command) -> clap::Command {
+        QueryInputArgs::augment_args_for_update(cmd)
+    }
+}
+
+impl clap::FromArgMatches for QueryInput {
+    fn from_arg_matches(matches: &clap::ArgMatches) -> std::result::Result<Self, clap::Error> {
+        QueryInputArgs::from_arg_matches(matches).map(|args| Self::resolve(args, matches))
+    }
+
+    fn update_from_arg_matches(
+        &mut self,
+        matches: &clap::ArgMatches,
+    ) -> std::result::Result<(), clap::Error> {
+        *self = Self::from_arg_matches(matches)?;
+        Ok(())
+    }
+}
+
 /// A single tool selection directive from the CLI.
 ///
 /// Directives are evaluated left-to-right, allowing users to compose tool sets
@@ -1384,7 +1595,7 @@ impl clap::Args for ToolDirectives {
 }
 
 /// Fork a conversation and return the new conversation's lock.
-fn fork_conversation(
+async fn fork_conversation(
     ctx: &mut Ctx,
     source: &ConversationHandle,
     fork_turns: Option<usize>,
@@ -1394,6 +1605,25 @@ fn fork_conversation(
             events.retain_last_turns(n);
         }
     })
+    .await
+}
+
+/// Build a label resolver for this run.
+///
+/// Commands run at the workspace root so a rule produces the same value
+/// wherever in the tree the user invoked JP from.
+fn label_resolver<'a>(
+    ctx: &'a Ctx,
+    cfg: &'a AppConfig,
+    prompts: &'a dyn PromptBackend,
+) -> Resolver<'a> {
+    Resolver::new(
+        &cfg.conversation.labels,
+        ctx.workspace.root(),
+        ctx.term.is_tty,
+        &ctx.printer,
+        prompts,
+    )
 }
 
 /// Where the outgoing chat request's content came from.
@@ -1504,10 +1734,9 @@ impl IntoPartialAppConfig for Query {
             attachments,
             edit: _,
             no_edit: _,
-            quote: _,
+            input: _,
             tool_use,
             no_tool_use,
-            query: _,
             parameters,
             hide_reasoning,
             hide_tool_calls,
@@ -2272,15 +2501,68 @@ fn parse_fork_turns(s: &str) -> std::result::Result<Option<usize>, String> {
         .map_err(|_| format!("expected a positive integer, got '{s}'"))
 }
 
-fn string_or_path(s: &str) -> Result<String> {
-    if let Some(s) = s
-        .strip_prefix(PATH_STRING_PREFIX)
-        .and_then(|s| expand_tilde(s, env::var("HOME").ok()))
-    {
-        return fs::read_to_string(s).map_err(Into::into);
+/// Read the piped stdin payload, or the empty string when stdin is a terminal.
+///
+/// The payload is taken verbatim: interior newlines (fenced code blocks,
+/// paragraph breaks, ...) are part of the message.
+/// Only the final line terminator is dropped, so request composition can add
+/// its own separators.
+fn read_piped_stdin() -> Result<String> {
+    let stdin = io::stdin();
+    if stdin.is_terminal() {
+        return Ok(String::new());
     }
 
-    Ok(s.to_owned())
+    let mut piped = io::read_to_string(stdin.lock())?;
+    if piped.ends_with('\n') {
+        piped.pop();
+        if piped.ends_with('\r') {
+            piped.pop();
+        }
+    }
+
+    Ok(piped)
+}
+
+/// Resolve an argument value that may use the `@path` form.
+///
+/// A value starting with `@` is replaced by the contents of the file it names.
+/// Any other value is returned as-is.
+fn string_or_path(s: &str) -> Result<String> {
+    match arg_file_path(s) {
+        Some(path) => read_arg_file(path),
+        None => Ok(s.to_owned()),
+    }
+}
+
+/// Path an argument value refers to, if it uses the `@path` form.
+///
+/// Returns `None` for a value without the sigil, and for a bare `@` whose
+/// remainder is empty or only whitespace — that is ordinary text, not a path.
+fn arg_file_path(s: &str) -> Option<&str> {
+    s.strip_prefix(PATH_STRING_PREFIX)
+        .filter(|path| !path.trim().is_empty())
+}
+
+/// Path a positional query refers to, if it uses the `@path` form.
+///
+/// Only a query consisting of exactly one value participates, so an `@` word
+/// inside a multi-word query stays ordinary text.
+fn query_file_path(values: &[String]) -> Option<&str> {
+    match values {
+        [value] => arg_file_path(value),
+        _ => None,
+    }
+}
+
+/// Read the file an `@path` argument names, expanding a leading `~` to `$HOME`.
+fn read_arg_file(path: &str) -> Result<String> {
+    let path = expand_tilde(path, env::var("HOME").ok()).unwrap_or_else(|| Utf8PathBuf::from(path));
+
+    fs::read_to_string(&path).map_err(|source| Error::ArgFile {
+        path: path.into_string(),
+        source,
+    })
 }
 
 #[cfg(test)]

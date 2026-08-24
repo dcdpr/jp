@@ -4,7 +4,7 @@ use std::{fmt, str::FromStr};
 
 use indexmap::IndexMap;
 use schematic::{Config, ConfigEnum};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de::Error as DeError};
 
 use crate::{
     BoxedError,
@@ -16,8 +16,11 @@ use crate::{
 };
 
 /// Assistant-specific configuration.
+///
+/// Parameters JP does not model are collected into [`Self::other`], so a
+/// provider-specific key can be written directly in the parameter block.
 #[derive(Debug, Clone, PartialEq, Config)]
-#[config(default, rename_all = "snake_case", allow_unknown_fields)]
+#[config(default, rename_all = "snake_case")]
 pub struct ParametersConfig {
     /// Maximum number of tokens to generate.
     ///
@@ -77,12 +80,96 @@ pub struct ParametersConfig {
     /// The `stop_words` parameter can be set to specific sequences, such as a
     /// period or specific word, to stop the model from generating text when it
     /// encounters these sequences.
-    #[setting(default, merge = schematic::merge::append_vec, skip_serializing_if = "Vec::is_empty")]
+    #[setting(default, merge = schematic::merge::append_vec)]
     pub stop_words: Vec<String>,
 
     /// Other non-typed parameters that some models might support.
-    #[setting(default, flatten, merge = schematic::merge::merge_iter, skip_serializing_if = "IndexMap::is_empty")]
+    ///
+    /// Any key in the parameter block that JP does not recognize lands here and
+    /// is forwarded to the provider as written:
+    ///
+    /// ```toml
+    /// [assistant.model.parameters]
+    /// presence_penalty = 0.5
+    /// ```
+    ///
+    /// The equivalent explicit form is also accepted:
+    ///
+    /// ```toml
+    /// [assistant.model.parameters.other]
+    /// presence_penalty = 0.5
+    /// ```
+    #[setting(default, merge = schematic::merge::merge_iter)]
     pub other: IndexMap<String, JsonValue>,
+}
+
+/// Every key [`ParametersConfig`] models.
+/// Anything else is a provider parameter and is collected into `other`.
+///
+/// Kept in sync with the struct by `known_keys_match_the_schema`.
+pub(crate) const KNOWN_KEYS: &[&str] = &[
+    "max_tokens",
+    "reasoning",
+    "temperature",
+    "top_p",
+    "top_k",
+    "stop_words",
+    "other",
+];
+
+/// Deserialize a parameter block, collecting unrecognized keys into `other`.
+///
+/// Unrecognized keys are provider parameters JP does not model, so discarding
+/// them (what serde does with an unknown field on a lenient container) silently
+/// drops user intent.
+/// An explicit `other` table is also accepted and merges with the collected
+/// keys, the explicit entries winning.
+///
+/// Applied through `#[setting(deserialize_with = ...)]` on the field holding
+/// this config rather than as a `Deserialize` impl, so the generated
+/// field-by-field deserializer still does the real work.
+///
+/// # Errors
+///
+/// Returns an error if the block is not a map, if `other` is present but is not
+/// a map, or if any modelled field fails to deserialize.
+pub(crate) fn deserialize_collecting_other<'de, D>(
+    deserializer: D,
+) -> Result<PartialParametersConfig, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let mut map = serde_json::Map::<String, serde_json::Value>::deserialize(deserializer)?;
+
+    let mut other = IndexMap::new();
+    map.retain(|key, value| {
+        if KNOWN_KEYS.contains(&key.as_str()) {
+            return true;
+        }
+
+        other.insert(key.clone(), JsonValue(value.clone()));
+        false
+    });
+
+    // Merged after the collected keys so an explicit entry wins a collision.
+    let explicit = map.remove("other");
+    let has_explicit = explicit.is_some();
+    if let Some(explicit) = explicit {
+        let explicit: IndexMap<String, JsonValue> =
+            serde_json::from_value(explicit).map_err(DeError::custom)?;
+        other.extend(explicit);
+    }
+
+    let mut partial: PartialParametersConfig =
+        serde_json::from_value(serde_json::Value::Object(map)).map_err(DeError::custom)?;
+
+    // An explicit `other` is kept even when empty, so a serialize/deserialize
+    // round-trip of a config carrying `other = {}` is lossless.
+    if has_explicit || !other.is_empty() {
+        partial.other = Some(other);
+    }
+
+    Ok(partial)
 }
 
 impl AssignKeyValue for PartialParametersConfig {

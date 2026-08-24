@@ -129,7 +129,7 @@ fn test_cli() {
 fn test_load_cli_cfg_args_workspace_root() {
     let tmp = tempdir().unwrap();
     let root = tmp.path();
-    let workspace = Workspace::new(root);
+    let workspace = Workspace::in_memory(root);
 
     write_config(
         &root.join(".jp/config/skill/web.toml"),
@@ -174,7 +174,7 @@ fn test_load_cli_cfg_args_merges_global_and_workspace() {
 
     unsafe { std::env::set_var("JP_GLOBAL_CONFIG_DIR", global_dir.as_str()) };
 
-    let workspace = Workspace::new(&ws_root);
+    let workspace = Workspace::in_memory(&ws_root);
 
     write_config(
         &global_dir.join("config/.jp/config/skill/web.toml"),
@@ -208,7 +208,7 @@ fn test_load_cli_cfg_args_workspace_overrides_global() {
 
     unsafe { std::env::set_var("JP_GLOBAL_CONFIG_DIR", global_dir.as_str()) };
 
-    let workspace = Workspace::new(&ws_root);
+    let workspace = Workspace::in_memory(&ws_root);
 
     write_config(
         &global_dir.join("config/.jp/config/skill/web.toml"),
@@ -232,7 +232,7 @@ fn test_load_cli_cfg_args_workspace_overrides_global() {
 fn test_load_cli_cfg_args_missing_file_reports_searched_paths() {
     let tmp = tempdir().unwrap();
     let root = tmp.path();
-    let workspace = Workspace::new(root);
+    let workspace = Workspace::in_memory(root);
 
     let partial = partial_with_load_paths(&[".jp/config"]);
     let overrides = vec![KeyValueOrPath::Path(Utf8PathBuf::from("skill/missing"))];
@@ -256,7 +256,7 @@ fn test_load_cli_cfg_args_missing_file_reports_searched_paths() {
 fn test_load_cli_cfg_args_first_load_path_wins_within_root() {
     let tmp = tempdir().unwrap();
     let root = tmp.path();
-    let workspace = Workspace::new(root);
+    let workspace = Workspace::in_memory(root);
 
     write_config(
         &root.join("first/skill/web.toml"),
@@ -373,7 +373,7 @@ fn test_load_cli_cfg_args_global_only_when_workspace_has_no_match() {
 
     unsafe { std::env::set_var("JP_GLOBAL_CONFIG_DIR", global_dir.as_str()) };
 
-    let workspace = Workspace::new(&ws_root);
+    let workspace = Workspace::in_memory(&ws_root);
 
     write_config(
         &global_dir.join("config/.jp/config/skill/web.toml"),
@@ -411,7 +411,7 @@ fn query_model_override_persists_config_delta_through_run_inner() {
     env::set_current_dir(root).unwrap();
 
     let fs_backend = Arc::new(FsStorageBackend::new(&storage).unwrap());
-    let mut workspace = Workspace::new(root).with_backend(fs_backend.clone());
+    let mut workspace = Workspace::in_memory(root).with_backend(fs_backend.clone());
     let conversation_id = make_id(1000);
     let base_config = Arc::new(config_with_model(ProviderId::Anthropic, "opus"));
 
@@ -525,7 +525,7 @@ fn query_model_override_persists_config_delta_through_session_targeting() {
     unsafe { env::remove_var("EDITOR") };
     env::set_current_dir(root).unwrap();
 
-    let mut workspace = Workspace::new(root);
+    let mut workspace = Workspace::in_memory(root);
     let user_root = user_data_dir().unwrap().join("workspace");
     let fs_backend = Arc::new(
         FsStorageBackend::new(&storage)
@@ -640,7 +640,7 @@ fn resolve_config_consumes_default_id() {
     let tmp = tempdir().unwrap();
     let root = tmp.path();
 
-    let mut workspace = Workspace::new(root);
+    let mut workspace = Workspace::in_memory(root);
     workspace.load_conversation_index();
 
     // Inject default_id into the base partial — no filesystem needed.
@@ -678,7 +678,7 @@ fn resolve_config_applies_the_compact_model_flag() {
     let storage = root.join(".jp");
 
     let fs_backend = Arc::new(FsStorageBackend::new(&storage).unwrap());
-    let mut workspace = Workspace::new(root).with_backend(fs_backend);
+    let mut workspace = Workspace::in_memory(root).with_backend(fs_backend);
     let conversation_id = make_id(3000);
     workspace
         .create_and_lock_conversation_with_id(
@@ -720,3 +720,7 @@ fn resolve_config_applies_the_compact_model_flag() {
         "openai/gpt-5"
     );
 }
+
+// Workspace-root selection by ID moved into the bootstrap step (RFD 087
+// phase 2/3); its behavior is covered by `bootstrap_tests` and
+// `cmd::workspace::target` tests.

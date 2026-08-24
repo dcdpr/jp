@@ -1,6 +1,6 @@
 # RFD 087: Session-Scoped Active Workspace
 
-- **Status**: Accepted
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-06-01
@@ -244,6 +244,10 @@ work:
   checkout owns exactly one file and writes never contend.
 - Each run upserts only its own file, recording the canonical path and a
   `last_used` timestamp.
+  The rewrite is debounced: an entry refreshed within the last few minutes is
+  left untouched, since recency only feeds display ordering and `latest`
+  targeting — a per-run rewrite would churn the user data directory on every
+  invocation and re-trigger any external file watcher observing it.
   No file is read-modified-written by more than one checkout.
 - Liveness is **derived**, not stored: a root is live when JP workspace
   discovery from that path resolves a workspace whose loaded ID equals `<id>`
@@ -261,9 +265,9 @@ work:
 { "path": "/Users/jean/Projects/jp.git/my-feature", "last_used": "2026-06-01T18:25:00Z" }
 ```
 
-The roots registry is workspace-scoped, living under the workspace's user-local
-silo directory (`<slug>-<id>`, located by ID suffix per [RFD 031]; the `<id>`
-shorthand in the paths above stands for that silo).
+The roots registry is workspace-scoped, living under the workspace's
+user-workspace directory (`<slug>-<id>`, located by ID suffix per [RFD 031]; the
+`<id>` shorthand in the paths above stands for that directory).
 The session store is user-global (under `sessions/`, mapping a session to its
 active workspace).
 These are deliberately separate, not one store doing two jobs.
@@ -303,6 +307,9 @@ Examples below use `jp w` for brevity.
   `jp w use` is interactive-only in all forms — including `cwd` — because it
   mutates session state; scripts target with `jp -w` instead (see
   [Non-interactive mode](#precedence-and-the-cwd-vs-active-conflict)).
+  Selecting a checkout also registers it in the roots registry, so a workspace
+  selected by path before any command has run inside it is immediately reachable
+  by `<id>` from anywhere — which is what a session-scoped selection promises.
 - `jp w use cwd` (short `.`): drop the session's active workspace and fall back
   to cwd resolution.
   This replaces a `--clear` flag — clearing is just selecting the cwd-derived
@@ -320,17 +327,33 @@ Examples below use `jp w` for brevity.
   includes external (`ext`) conversations that live only in one checkout (see
   [RFD 031]).
   `jp w show <id>` therefore loads the conversation index (index only, not event
-  contents) for each live root and deduplicates by ID — the one place `show`
-  does a multi-root read, chosen so the count is accurate rather than cheap.
+  contents) for one live root — which already merges the user-local store —
+  and scans each sibling root's conversation directory for the IDs that live
+  there alone, deduplicating by ID: the one place `show` does a multi-root read,
+  accurate without paying a full workspace load per root.
   When the target resolves to a single concrete root — a path, or an `<id>`
   with one live root — the readout shows that root.
+  When the target names a checkout the roots registry has not seen yet, the
+  readout still lists it: resolution reached it directly, and reporting "no live
+  checkouts" for the path the user just named would contradict the target.
+  Such a checkout has no `last_used`, because `show` reports without
+  registering.
   When an `<id>` has several live roots, `jp w show` lists every live root and
   marks the session-active one (if any); it does not prompt, so `show` stays
   read-only and script-friendly.
+  Read-only is literal: inspecting a workspace creates no user-workspace
+  directory, runs no migration or import, writes no registry entry, and leaves
+  recency untouched, so `jp w show` can never change what `l` / `latest`
+  resolves to.
 - `jp -w <target>`: a per-command workspace override using the same targeting
   grammar.
   It selects the workspace for this invocation only — it does not change the
   session's active workspace.
+  On `jp w use` and `jp w show` the flag instead names the workspace the
+  subcommand acts on, so `jp -w foo w show` and `jp w show foo` are the same
+  command; giving both spellings at once is an error rather than a silent
+  precedence rule, and `jp w ls` rejects the flag outright since it lists every
+  workspace.
   A bare `<target>` is treated as a path if it resolves to an existing path,
   otherwise parsed as a workspace ID, so a local directory whose name matches a
   workspace ID shadows the ID.
@@ -350,10 +373,24 @@ single-letter aliases for the concepts that carry over:
 | `?`              | pick from all known workspaces                                                                                      |
 | `?s`, `?session` | pick from this session's workspace history                                                                          |
 | `s`, `session`   | the session's previously active workspace (like `cd -`)                                                             |
-| `l`, `latest`    | the live root with the newest `last_used` across the roots registry (global recency, distinct from `s` / `session`) |
+| `r`, `recent`    | the live root with the newest `last_used` across the roots registry (global recency, distinct from `s` / `session`) |
 | `cwd`, `.`       | the cwd-derived workspace; as a `use` target, clears the session selection                                          |
 | `-`              | read a workspace ID from stdin (for `jp -w` in non-interactive use)                                                 |
 | `help`           | print keyword help and exit                                                                                         |
+
+> [!WARNING]
+> **`.` is already taken in `ConversationTarget`.** It is the short form of
+> `active`: the session's active conversation.
+> Mapping it to `cwd` here gives one character two meanings that are *opposite*
+> on the session axis — the conversation target is "whatever my session
+> picked", while `cwd` explicitly **clears** the session selection.
+> A user who learns one grammar will predict the wrong behavior in the other,
+> which is the failure the shared grammar exists to prevent.
+>
+> Suggested resolution: drop the `.` alias here and keep `cwd` as the only
+> spelling.
+> `cwd` is already unambiguous on its own, whereas the conversation grammar has
+> no alternative short form available (`a` is `archived`).
 
 Keywords with no workspace meaning are intentionally omitted: `newest` / `n`
 (workspaces have no creation timeline), the `pinned` / `p` family (workspaces
@@ -368,12 +405,15 @@ workspace ID *plus* checkout root — not on the workspace ID alone.
 `s` restores the exact previously active checkout (`cd -` semantics), not the
 previous workspace re-resolved against its roots; multiple roots of the same ID
 are distinct history entries.
+When that exact checkout is gone, `s` fails rather than substituting a sibling,
+and points at the full picker (`?`) — not `?s`, which filters this session's
+history by the same exact-root rule and can therefore offer nothing.
 
 The picker and fuzzy free-text match display each workspace by its **slug** —
-the `<slug>` in the user-local silo directory `<slug>-<id>` (see [RFD 031]), the
-workspace directory name captured when the silo was first created.
-The slug is cosmetic: it may be absent (a bare `<id>` silo, in which case the
-`<id>` is shown), is never renamed, and is not unique across workspaces.
+the `<slug>` in the user-workspace directory `<slug>-<id>` (see [RFD 031]), the
+workspace directory name captured when the directory was first created.
+The slug is cosmetic: it may be absent (a bare `<id>` directory, in which case
+the `<id>` is shown), is never renamed, and is not unique across workspaces.
 Fuzzy free-text matches over slug, path, and ID, but resolution is always by ID
 and concrete root — never by slug — so a shared or stale slug affects only
 display and search, never which workspace a command runs against.
@@ -492,14 +532,18 @@ The `sticky` field is the persisted `A` state from the precedence ladder.
 - **`Env` (including `$JP_SESSION`)**: process liveness is unknown, so cleanup
   is existence-based across the whole history, mirroring RFD 020's `Env` rule
   (which keeps a mapping while *any* referenced conversation still exists).
-  A history entry is pruned only when its `workspace_id` has no live root; the
-  whole mapping is removed only when no history entry references a workspace ID
-  with any live root.
+  A history entry is pruned only when nothing it names is live: neither its own
+  recorded checkout, nor any registered checkout of its `workspace_id`.
+  The whole mapping is removed only when no entry survives that test.
   Keying cleanup off the workspace ID rather than the single active root is what
   lets the missing-root recovery flow run: when the active root is gone but its
   `<id>` still has other live checkouts, the mapping survives so recovery can
   re-prompt among them (see [Reprompt on a missing active
   workspace](#reprompt-on-a-missing-active-workspace)).
+  Accepting the recorded checkout as evidence in its own right covers the
+  opposite case: a checkout that holds the workspace but has not reached the
+  roots registry yet is live regardless of what the registry knows, so a
+  just-recorded selection cannot be pruned by the same run that wrote it.
 - A sticky `A` choice has no process bound for `Env` sources, so it persists
   until its `workspace_id` has no live root — not merely until the active root
   dies.
@@ -516,7 +560,7 @@ active = `history[0]`); session identity, the `getsid` / `Hwnd` / `Env` source
 split, and the stale-cleanup rules are the same machinery; `jp w use` / `ls` /
 `show` mirror `jp c use` / `ls` / `show`; and the targeting grammar reuses
 `ConversationTarget`'s keywords and single-letter aliases for the concepts that
-carry over (`?`, `?s`, `s` / `session`, `l` / `latest`, `-`, `help`).
+carry over (`?`, `?s`, `s` / `session`, `r` / `recent`, `-`, `help`).
 
 Two things genuinely diverge, by necessity:
 

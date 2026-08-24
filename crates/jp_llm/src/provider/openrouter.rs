@@ -1,9 +1,10 @@
 use std::{env, time::Duration};
 
+use async_stream::try_stream;
 use async_trait::async_trait;
 use base64::Engine as _;
 use chrono::NaiveDate;
-use futures::{StreamExt as _, TryStreamExt as _, stream};
+use futures::{StreamExt as _, TryStreamExt as _, pin_mut, stream};
 use jp_attachment::AttachmentContent;
 use jp_config::{
     assistant::tool_choice::ToolChoice,
@@ -15,7 +16,7 @@ use jp_config::{
 };
 use jp_conversation::{
     ConversationStream,
-    event::{ChatResponse, EventKind},
+    event::{ChatResponse, ConversationEvent, EventKind},
     thread::{Thread, ThreadParts, text_attachments_to_xml},
 };
 use jp_openrouter::{
@@ -28,20 +29,21 @@ use jp_openrouter::{
             self, ChatCompletion as OpenRouterChunk, FinishReason, ReasoningDetails,
             ReasoningDetailsFormat, ReasoningDetailsKind,
         },
-        tool::{self, FunctionCall, Tool, ToolCall, ToolFunction},
+        tool::{self, FunctionCall, Tool, ToolCall, ToolCallType, ToolFunction},
     },
 };
 use serde::Serialize;
 use serde_json::{Map, Value};
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, info, trace, warn};
 
 use super::{EventStream, ModelDetails};
 use crate::{
     Error, StreamError,
     error::{Result, StreamErrorKind, looks_like_quota_error},
-    event::{self, Event, EventPart},
+    event::{self, Event, EventPart, ToolCallPart},
+    event_builder::EventBuilder,
     model::ReasoningDetails as ModelReasoningDetails,
-    provider::{Provider, openai::parameters_with_strict_mode},
+    provider::{Provider, openai::parameters_with_strict_mode, trace_to_tmpfile},
     query::ChatQuery,
     stream::with_tool_call_keepalive,
 };
@@ -61,6 +63,7 @@ const OPENAI_ENCRYPTED_CONTENT_KEY: &str = "openai_encrypted_content";
 /// Stays below the enforced minimum `stream_idle_timeout_secs` (10s) so the
 /// heartbeat always lands before the idle window elapses.
 const TOOL_CALL_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(5);
+const SOFT_FORCE_MAX_RETRIES: u8 = 3;
 
 #[derive(Debug, Clone)]
 pub struct Openrouter {
@@ -78,6 +81,36 @@ impl Openrouter {
     fn with_base_url(mut self, base_url: String) -> Self {
         self.client = self.client.with_base_url(base_url);
         self
+    }
+}
+
+/// How to retry when a reasoning request cannot carry a forced tool choice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ForceStrategy {
+    /// Disable reasoning and restore the requested tool choice for one retry.
+    DisableThinking,
+
+    /// Keep reasoning active and retry with progressively stronger nudges.
+    EscalatingNudge { remaining: u8 },
+}
+
+/// The original forced tool choice and the retry strategy selected for it.
+#[derive(Debug, Clone)]
+struct ForcedToolFallback {
+    tool_choice: tool::ToolChoice,
+    strategy: ForceStrategy,
+}
+
+impl ForcedToolFallback {
+    /// Whether the response called the tool requested by the original choice.
+    fn is_satisfied_by(&self, tool_names_called: &[String]) -> bool {
+        match &self.tool_choice {
+            tool::ToolChoice::Function(function) => tool_names_called
+                .iter()
+                .any(|name| name == &function.function.name),
+            tool::ToolChoice::Required => !tool_names_called.is_empty(),
+            tool::ToolChoice::Auto | tool::ToolChoice::None => true,
+        }
     }
 }
 
@@ -108,31 +141,218 @@ impl Provider for Openrouter {
         model: &ModelDetails,
         query: ChatQuery,
     ) -> Result<EventStream> {
-        debug!(
-            model = %model.id,
-            "Starting OpenRouter chat completion stream."
+        let (request, is_structured, forced_tool_fallback) = create_request(model, query)?;
+
+        Ok(call(
+            self.client.clone(),
+            request,
+            is_structured,
+            forced_tool_fallback,
+        ))
+    }
+}
+
+fn call(
+    client: Client,
+    request: request::ChatCompletion,
+    is_structured: bool,
+    forced_tool_fallback: Option<ForcedToolFallback>,
+) -> EventStream {
+    Box::pin(try_stream! {
+        debug!(stream = true, "OpenRouter chat completion stream request.");
+        trace!(
+            request = %trace_to_tmpfile("jp-openrouter-request", &request),
+            "Request payload."
         );
 
-        let (request, is_structured) = create_request(model, query)?;
         let mut state = AggregationState {
             tool_call_indices: Vec::new(),
             aggregating_reasoning: false,
             aggregating_message: false,
             is_structured,
         };
+        let mut builder = EventBuilder::new();
+        let mut events = vec![];
+        let mut tool_names_called = vec![];
 
-        let raw_stream = self
-            .client
-            .chat_completion_stream(request)
+        let raw_stream = client
+            .chat_completion_stream(request.clone())
             .map_err(StreamError::from)
-            .map_ok(move |v| stream::iter(map_completion(v, &mut state)))
+            .map_ok(move |value| stream::iter(map_completion(value, &mut state)))
             .try_flatten()
             .boxed();
+        let event_stream = with_tool_call_keepalive(raw_stream, TOOL_CALL_KEEPALIVE_INTERVAL);
 
-        Ok(with_tool_call_keepalive(
-            raw_stream,
-            TOOL_CALL_KEEPALIVE_INTERVAL,
-        ))
+        pin_mut!(event_stream);
+        while let Some(result) = event_stream.next().await {
+            match result? {
+                Event::Finished(event::FinishReason::Completed)
+                    if let Some(fallback) = forced_tool_fallback
+                        .as_ref()
+                        .filter(|fallback| !fallback.is_satisfied_by(&tool_names_called)) =>
+                {
+                    events.extend(builder.drain());
+                    for await event in dispatch_force_retry(
+                        client.clone(),
+                        request.clone(),
+                        events,
+                        fallback,
+                        is_structured,
+                    ) {
+                        yield event?;
+                    }
+                    return;
+                }
+                done @ Event::Finished(_) => {
+                    yield done;
+                    return;
+                }
+                Event::Part { index, part, metadata } => {
+                    if let EventPart::ToolCall(ToolCallPart::Start { name, .. }) = &part {
+                        tool_names_called.push(name.clone());
+                    } else if forced_tool_fallback.is_some() && !part.is_tool_call() {
+                        builder.handle_part(index, part.clone(), metadata.clone());
+                    }
+
+                    yield Event::Part { index, part, metadata };
+                }
+                flush @ Event::Flush { .. } => {
+                    if forced_tool_fallback.is_some()
+                        && let Event::Flush { index, metadata } = &flush
+                    {
+                        events.extend(builder.handle_flush(*index, metadata.clone()));
+                    }
+                    yield flush;
+                }
+                patch @ Event::Patch(_) => yield patch,
+                keep_alive @ Event::KeepAlive => yield keep_alive,
+            }
+        }
+    })
+}
+
+fn dispatch_force_retry(
+    client: Client,
+    request: request::ChatCompletion,
+    events: Vec<ConversationEvent>,
+    fallback: &ForcedToolFallback,
+    is_structured: bool,
+) -> EventStream {
+    match fallback.strategy {
+        ForceStrategy::DisableThinking => {
+            info!(
+                "Model did not call the required tool. Retrying with reasoning disabled and \
+                 forced tool_choice."
+            );
+            force_tool_retry(client, request, events, fallback, is_structured)
+        }
+        ForceStrategy::EscalatingNudge { remaining } => {
+            info!(
+                remaining,
+                "Model did not call the required tool. Retrying with a firmer nudge."
+            );
+            soft_force_retry(client, request, events, fallback, is_structured, remaining)
+        }
+    }
+}
+
+fn force_tool_retry(
+    client: Client,
+    request: request::ChatCompletion,
+    events: Vec<ConversationEvent>,
+    fallback: &ForcedToolFallback,
+    is_structured: bool,
+) -> EventStream {
+    let request = prepare_force_tool_retry_request(request, events, fallback);
+    call(client, request, is_structured, None)
+}
+
+fn prepare_force_tool_retry_request(
+    mut request: request::ChatCompletion,
+    events: Vec<ConversationEvent>,
+    fallback: &ForcedToolFallback,
+) -> request::ChatCompletion {
+    request.messages.extend(convert_conversation_events(events));
+    request.messages.push(
+        Message::default()
+            .with_text(force_retry_prompt(&fallback.tool_choice))
+            .user(),
+    );
+    request.reasoning = Some(request::Reasoning {
+        exclude: true,
+        effort: request::ReasoningEffort::None,
+    });
+    request.tool_choice = Some(fallback.tool_choice.clone());
+    request
+}
+
+fn soft_force_retry(
+    client: Client,
+    request: request::ChatCompletion,
+    events: Vec<ConversationEvent>,
+    fallback: &ForcedToolFallback,
+    is_structured: bool,
+    remaining: u8,
+) -> EventStream {
+    let (request, next_fallback) =
+        prepare_soft_force_retry_request(request, events, fallback, remaining);
+    call(client, request, is_structured, next_fallback)
+}
+
+fn prepare_soft_force_retry_request(
+    mut request: request::ChatCompletion,
+    events: Vec<ConversationEvent>,
+    fallback: &ForcedToolFallback,
+    remaining: u8,
+) -> (request::ChatCompletion, Option<ForcedToolFallback>) {
+    request.messages.extend(convert_conversation_events(events));
+
+    let attempt = SOFT_FORCE_MAX_RETRIES - remaining + 1;
+    let target = force_target(&fallback.tool_choice);
+    let intensifier = match attempt {
+        1 => "",
+        2 => "You have now failed to do this twice. ",
+        _ => "This is your final attempt. ",
+    };
+    request.messages.push(
+        Message::default()
+            .with_text(format!(
+                "{intensifier}You did not call {target} as required. You MUST call {target} now. \
+                 Do not produce any other text, reasoning, or questions; just make the tool call."
+            ))
+            .user(),
+    );
+    request.tool_choice = Some(tool::ToolChoice::Auto);
+
+    let next_fallback = (remaining > 1).then(|| ForcedToolFallback {
+        tool_choice: fallback.tool_choice.clone(),
+        strategy: ForceStrategy::EscalatingNudge {
+            remaining: remaining - 1,
+        },
+    });
+
+    (request, next_fallback)
+}
+
+fn force_target(choice: &tool::ToolChoice) -> String {
+    match choice {
+        tool::ToolChoice::Function(function) => {
+            format!("the tool named '{}'", function.function.name)
+        }
+        _ => "at least one tool".to_owned(),
+    }
+}
+
+fn force_retry_prompt(choice: &tool::ToolChoice) -> String {
+    match choice {
+        tool::ToolChoice::Function(function) => format!(
+            "You did not call the required tool. You MUST call the tool named '{}' now. Do not \
+             respond with text.",
+            function.function.name
+        ),
+        _ => "You did not call any tool. You MUST call at least one tool now. Do not respond with \
+              text."
+            .to_owned(),
     }
 }
 
@@ -380,6 +600,7 @@ fn map_event(
             function,
             id,
             index,
+            kind: _,
         },
     ) in tool_calls.into_iter().enumerate()
     {
@@ -411,7 +632,7 @@ fn map_event(
         Some(FinishReason::Length) => {
             events.push(Ok(Event::Finished(event::FinishReason::MaxTokens)));
         }
-        Some(FinishReason::Stop) => {
+        Some(FinishReason::Stop | FinishReason::ToolCalls) => {
             events.push(Ok(Event::Finished(event::FinishReason::Completed)));
         }
         Some(FinishReason::Error) => {
@@ -441,18 +662,79 @@ impl Openrouter {
         model: &ModelDetails,
         query: ChatQuery,
     ) -> Result<serde_json::Value> {
-        let (request, _) = create_request(model, query)?;
+        let (request, _, _) = create_request(model, query)?;
         Ok(serde_json::to_value(request)?)
+    }
+}
+
+fn convert_tool_choice(choice: ToolChoice) -> tool::ToolChoice {
+    match choice {
+        ToolChoice::Auto => tool::ToolChoice::Auto,
+        ToolChoice::None => tool::ToolChoice::None,
+        ToolChoice::Required => tool::ToolChoice::Required,
+        ToolChoice::Function(name) => tool::ToolChoice::function(name),
+    }
+}
+
+fn prepare_forced_tool_fallback(
+    model: &ModelDetails,
+    thinking_active: bool,
+    tool_choice: &ToolChoice,
+    messages: &mut RequestMessages,
+) -> Option<ForcedToolFallback> {
+    if !thinking_active || !tool_choice.is_forced_call() {
+        return None;
+    }
+
+    info!(
+        ?tool_choice,
+        "OpenRouter routes forced tool choices to providers that may reject them while reasoning \
+         is active. Switching to soft-force mode with fallback."
+    );
+
+    let strategy = if model.supports_disabling_thinking() {
+        ForceStrategy::DisableThinking
+    } else {
+        ForceStrategy::EscalatingNudge {
+            remaining: SOFT_FORCE_MAX_RETRIES,
+        }
+    };
+    let fallback = ForcedToolFallback {
+        tool_choice: convert_tool_choice(tool_choice.clone()),
+        strategy,
+    };
+
+    messages.0.insert(
+        0,
+        Message::default()
+            .with_text(force_nudge(&fallback.tool_choice))
+            .system(),
+    );
+
+    Some(fallback)
+}
+
+fn force_nudge(choice: &tool::ToolChoice) -> String {
+    match choice {
+        tool::ToolChoice::Function(function) => format!(
+            "IMPORTANT: You MUST call the tool named '{}'. DO NOT QUESTION THIS DIRECTIVE. DO NOT \
+             PROMPT FOR MORE CONTEXT OR DETAILS. JUST RUN IT.",
+            function.function.name
+        ),
+        _ => "IMPORTANT: You MUST use AT LEAST ONE tool available to you. DO NOT QUESTION THIS \
+              DIRECTIVE. DO NOT PROMPT FOR MORE CONTEXT OR DETAILS. JUST RUN IT."
+            .to_owned(),
     }
 }
 
 /// Create the request for the OpenRouter API.
 ///
-/// Returns the request and whether structured output is active.
+/// Returns the request, whether structured output is active, and any fallback
+/// required because reasoning prevents a forced tool choice on the wire.
 fn create_request(
     model: &ModelDetails,
     query: ChatQuery,
-) -> Result<(request::ChatCompletion, bool)> {
+) -> Result<(request::ChatCompletion, bool, Option<ForcedToolFallback>)> {
     let ChatQuery {
         thread,
         tools,
@@ -478,7 +760,7 @@ fn create_request(
     let slug = model.id.name.to_string();
     let reasoning = model.custom_reasoning_config(parameters.reasoning);
 
-    let messages: RequestMessages = (&model.id, thread).try_into()?;
+    let mut messages: RequestMessages = (&model.id, thread).try_into()?;
     let tools = tools
         .into_iter()
         .map(|tool| Tool::Function {
@@ -490,15 +772,20 @@ fn create_request(
             },
         })
         .collect::<Vec<_>>();
+    let thinking_active = reasoning.is_some()
+        || model
+            .reasoning
+            .as_ref()
+            .is_some_and(|details| !details.can_disable());
+    let forced_tool_fallback =
+        prepare_forced_tool_fallback(model, thinking_active, &tool_choice, &mut messages);
+
     let tool_choice = if tools.is_empty() {
         None
+    } else if forced_tool_fallback.is_some() {
+        Some(tool::ToolChoice::Auto)
     } else {
-        Some(match tool_choice {
-            ToolChoice::Auto => tool::ToolChoice::Auto,
-            ToolChoice::None => tool::ToolChoice::None,
-            ToolChoice::Required => tool::ToolChoice::Required,
-            ToolChoice::Function(name) => tool::ToolChoice::function(name),
-        })
+        Some(convert_tool_choice(tool_choice))
     };
 
     trace!(
@@ -558,6 +845,7 @@ fn create_request(
             ..Default::default()
         },
         is_structured,
+        forced_tool_fallback,
     ))
 }
 
@@ -805,59 +1093,112 @@ impl TryFrom<(&ModelIdConfig, Thread)> for RequestMessages {
 /// Expects a pre-filtered stream (internal events already removed by
 /// [`Thread::into_parts`]).
 fn convert_events(events: ConversationStream) -> Vec<RequestMessage> {
-    events
+    let messages = events
         .into_iter()
-        .flat_map(|event| match event.event.kind {
-            EventKind::ChatRequest(request) => {
-                vec![Message::default().with_text(request.content).user()]
-            }
-            EventKind::ChatResponse(response) => match response {
-                ChatResponse::Message { message } => {
-                    vec![Message::default().with_text(message).assistant()]
-                }
-                ChatResponse::Reasoning { reasoning, .. } => {
-                    vec![Message::default().with_reasoning(reasoning).assistant()]
-                }
-                ChatResponse::Structured { data } => {
-                    vec![Message::default().with_text(data.to_string()).assistant()]
-                }
-            },
-            EventKind::ToolCallRequest(request) => {
-                let message = Message {
-                    tool_calls: vec![ToolCall {
-                        id: Some(request.id.clone()),
-                        index: 0,
-                        function: FunctionCall {
-                            name: Some(request.name),
-                            arguments: if request.arguments.is_empty() {
-                                None
-                            } else {
-                                serde_json::to_string(&request.arguments).ok()
+        .flat_map(|event| convert_event_kind(event.event.kind))
+        .collect();
+
+    coalesce_assistant_messages(messages)
+}
+
+fn convert_conversation_events(events: Vec<ConversationEvent>) -> Vec<RequestMessage> {
+    let messages = events
+        .into_iter()
+        .flat_map(|event| convert_event_kind(event.kind))
+        .collect();
+
+    coalesce_assistant_messages(messages)
+}
+
+/// Combine the separately stored parts of one assistant response.
+///
+/// Chat Completions requests require content and parallel tool calls from one
+/// model response to share one assistant message.
+/// Consecutive assistant messages can be interpreted as a trailing prefill by
+/// Anthropic-compatible endpoints.
+fn coalesce_assistant_messages(messages: Vec<RequestMessage>) -> Vec<RequestMessage> {
+    messages
+        .into_iter()
+        .fold(Vec::new(), |mut messages, message| {
+            match (messages.last_mut(), message) {
+                (
+                    Some(RequestMessage::Assistant(previous)),
+                    RequestMessage::Assistant(mut next),
+                ) => {
+                    previous.content.append(&mut next.content);
+
+                    if let Some(reasoning) = next.reasoning {
+                        previous
+                            .reasoning
+                            .get_or_insert_default()
+                            .push_str(&reasoning);
+                    }
+
+                    let first_index = previous.tool_calls.len();
+                    previous
+                        .tool_calls
+                        .extend(next.tool_calls.into_iter().enumerate().map(
+                            |(offset, mut tool_call)| {
+                                tool_call.index = first_index + offset;
+                                tool_call
                             },
-                        },
-                    }],
-                    ..Default::default()
-                };
-
-                vec![message.assistant()]
+                        ));
+                }
+                (_, message) => messages.push(message),
             }
-            EventKind::ToolCallResponse(response) => {
-                let content = match response.result {
-                    Ok(content) => content,
-                    Err(error) => error,
-                };
 
-                vec![RequestMessage::Tool(tool::Message {
-                    tool_call_id: response.id,
-                    content,
-                    name: None,
-                })]
-            }
-            // Internal events are filtered by into_parts(), but we still need
-            // an exhaustive match.
-            _ => vec![],
+            messages
         })
-        .collect()
+}
+
+fn convert_event_kind(kind: EventKind) -> Vec<RequestMessage> {
+    match kind {
+        EventKind::ChatRequest(request) => {
+            vec![Message::default().with_text(request.content).user()]
+        }
+        EventKind::ChatResponse(response) => match response {
+            ChatResponse::Message { message } => {
+                vec![Message::default().with_text(message).assistant()]
+            }
+            ChatResponse::Reasoning { reasoning, .. } => {
+                vec![Message::default().with_reasoning(reasoning).assistant()]
+            }
+            ChatResponse::Structured { data } => {
+                vec![Message::default().with_text(data.to_string()).assistant()]
+            }
+        },
+        EventKind::ToolCallRequest(request) => {
+            let message = Message {
+                tool_calls: vec![ToolCall {
+                    id: Some(request.id.clone()),
+                    index: 0,
+                    kind: ToolCallType::Function,
+                    function: FunctionCall {
+                        name: Some(request.name),
+                        arguments: serde_json::to_string(&request.arguments).ok(),
+                    },
+                }],
+                ..Default::default()
+            };
+
+            vec![message.assistant()]
+        }
+        EventKind::ToolCallResponse(response) => {
+            let content = match response.result {
+                Ok(content) => content,
+                Err(error) => error,
+            };
+
+            vec![RequestMessage::Tool(tool::Message {
+                tool_call_id: response.id,
+                content,
+                name: None,
+            })]
+        }
+        // Internal events are filtered by into_parts(), but we still need
+        // an exhaustive match.
+        _ => vec![],
+    }
 }
 
 impl From<jp_openrouter::Error> for StreamError {

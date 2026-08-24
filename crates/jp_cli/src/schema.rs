@@ -134,7 +134,7 @@ impl SchemaType {
             Self::Number => json!({"type": "number"}),
             Self::Boolean => json!({"type": "boolean"}),
             Self::Any => json!({}),
-            Self::Literal(val) => json!({"const": val}),
+            Self::Literal(value) => literal_schema(value),
             Self::Array(items) => json!({
                 "type": "array",
                 "items": items.to_json(),
@@ -667,23 +667,63 @@ fn fields_to_json(fields: &[SchemaField]) -> serde_json::Value {
     serde_json::Value::Object(schema)
 }
 
-/// Convert a union to JSON Schema, optimizing all-literal unions to `enum`.
+/// Convert a union to JSON Schema, optimizing compatible literal unions to a
+/// typed `enum`.
 fn union_to_json(types: &[SchemaType]) -> serde_json::Value {
-    if types.iter().all(SchemaType::is_literal) {
-        // All literals: use the more widely supported `enum` form.
-        let values: Vec<&serde_json::Value> = types
-            .iter()
-            .map(|t| match t {
-                SchemaType::Literal(v) => v,
-                _ => unreachable!(),
-            })
-            .collect();
-        json!({ "enum": values })
-    } else {
-        // Mixed types and literals: use `anyOf`.
-        json!({
+    if !types.iter().all(SchemaType::is_literal) {
+        return json!({
             "anyOf": types.iter().map(SchemaType::to_json).collect::<Vec<_>>(),
+        });
+    }
+
+    let values = types
+        .iter()
+        .map(|type_| match type_ {
+            SchemaType::Literal(value) => value,
+            _ => unreachable!(),
         })
+        .collect::<Vec<_>>();
+
+    match common_literal_type(&values) {
+        Some(type_) => json!({ "type": type_, "enum": values }),
+        None => json!({
+            "anyOf": values.into_iter().map(literal_schema).collect::<Vec<_>>(),
+        }),
+    }
+}
+
+// The type is redundant next to `const` for validation: both forms accept the
+// same documents. It is emitted anyway because a consumer that dispatches on
+// `type` skips a node without one, and at least one provider rejects such a
+// node outright.
+fn literal_schema(value: &serde_json::Value) -> serde_json::Value {
+    json!({
+        "type": literal_type(value),
+        "const": value,
+    })
+}
+
+fn common_literal_type(values: &[&serde_json::Value]) -> Option<&'static str> {
+    let first = values.first().map(|value| literal_type(value))?;
+    if values.iter().all(|value| literal_type(value) == first) {
+        return Some(first);
+    }
+
+    values
+        .iter()
+        .all(|value| matches!(literal_type(value), "integer" | "number"))
+        .then_some("number")
+}
+
+fn literal_type(value: &serde_json::Value) -> &'static str {
+    match value {
+        serde_json::Value::Null => "null",
+        serde_json::Value::Bool(_) => "boolean",
+        serde_json::Value::Number(number) if number.is_i64() || number.is_u64() => "integer",
+        serde_json::Value::Number(_) => "number",
+        serde_json::Value::String(_) => "string",
+        serde_json::Value::Array(_) => "array",
+        serde_json::Value::Object(_) => "object",
     }
 }
 

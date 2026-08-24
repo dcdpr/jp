@@ -6,8 +6,8 @@
 pub(crate) mod retry;
 
 pub(crate) use retry::{
-    RebuildRefusal, StreamErrorOutcome, StreamRetryState, commit_partial_response,
-    handle_stream_error,
+    RebuildRefusal, ResponseBoundary, StreamErrorOutcome, StreamRetryState,
+    commit_partial_response, handle_stream_error,
 };
 
 pub(crate) use crate::render::TurnView;

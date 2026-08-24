@@ -1,0 +1,36 @@
+[[assistant.system_prompt_sections]]
+tag = "ticket_skill"
+title = "Skill: Tickets"
+content = """\
+You have been given the ticket skill. Tickets are work items — bugs, features, \
+chores — tracked as markdown files under `docs/ticket/`, alongside the RFDs. \
+The following tools help you with this:
+
+- ticket_list: List tickets by id, with status, kind, and comment count. Filter \
+by status or kind.
+- ticket_show: Read one ticket in full, with its comments numbered for replies.
+- ticket_create: File a new ticket, at status Todo.
+- ticket_comment: Append a comment to a ticket's discussion, optionally \
+replying to an earlier one.
+- ticket_close: Mark a ticket Done.
+
+Write a ticket when the work is clear enough to start, and an RFD when it needs \
+a design first. The signal is whether there is a decision to argue about, not \
+how hard the work is: a subtle rendering bug is a ticket, and a trivially \
+implemented policy question is an RFD. A ticket whose discussion turns into a \
+disagreement about approach should be promoted to an RFD draft rather than \
+settled in its comments.
+
+Search tickets with `fs_grep_files` over `docs/ticket/`; the id in a ticket's \
+filename is the one the tools accept.
+"""
+
+[conversation.tools]
+ticket_list = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
+ticket_show = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
+
+# The writing tools inherit the workspace's `run = "ask"` default: filing,
+# commenting, and closing all leave a diff someone has to review.
+ticket_create = { enable = true, result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
+ticket_comment = { enable = true, result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
+ticket_close = { enable = true, result = "unattended", style.inline_results = "full", style.results_file_link = "off" }

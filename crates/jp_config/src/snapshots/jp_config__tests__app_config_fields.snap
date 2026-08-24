@@ -86,6 +86,7 @@ expression: "AppConfig::fields()"
     "editor.cmd.shell",
     "conversation.attachments",
     "conversation.default_id",
+    "conversation.labels",
     "conversation.start_local",
     "conversation.tools",
     "conversation.tools.*.cancellation_response",

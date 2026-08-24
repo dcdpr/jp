@@ -136,6 +136,16 @@ applies: if the slice point falls mid-turn, fork produces `(ConversationStream,
 IncompleteTurn)` where the stream satisfies the structural invariants and the
 incomplete turn is the valid residual.
 
+> [!NOTE]
+> `conversation fork` no longer has a slice point that can fall mid-turn.
+> Its range flags are `--from`/`--to` (the shared turn selector; `--until` is
+> gone), and every bound — including the time-based ones — resolves to a whole
+> turn.
+> A fork therefore never produces a residual partial turn from range filtering,
+> so this section applies only to forking a conversation whose *latest* turn is
+> already incomplete (the case described just above).
+> See [Indexing and Counting Conventions].
+
 ### Incremental Persistence
 
 Today, tool call responses are persisted as a batch.
@@ -551,6 +561,12 @@ events.
 The fork is valid — it just has an incomplete turn that can be resumed or
 discarded.
 
+> [!NOTE]
+> This paragraph is obsolete: fork's range bounds are turn-granular, so no fork
+> range can slice mid-turn.
+> The preceding paragraph — forking a conversation that already carries an
+> incomplete trailing turn — is the live case.
+
 ### ConfigDelta events in incomplete turns
 
 The `IncompleteTurn` may contain `ConfigDelta` events that were applied during
@@ -627,7 +643,10 @@ Depends on Phase 1.
 - `ConversationStream::sanitize()` (`crates/jp_conversation/src/stream.rs`) —
   existing structural repair logic; scope narrowed by this RFD to only cover
   complete turns.
+- [Indexing and Counting Conventions] — why fork's range bounds resolve to
+  whole turns and never slice one.
 
+[Indexing and Counting Conventions]: ../architecture/indexing-conventions.md
 [RFD 005]: 005-first-class-inquiry-events.md
 [RFD 009]: 009-stateful-tool-protocol.md
 [RFD 020]: 020-parallel-conversations.md

@@ -14,7 +14,7 @@ fn setup() -> (Utf8TempDir, Arc<FsStorageBackend>, Workspace) {
     let tmp = tempdir().unwrap();
     let storage_path = tmp.path().join("storage");
     let fs = Arc::new(FsStorageBackend::new(&storage_path).unwrap());
-    let mut ws = Workspace::new(tmp.path()).with_backend(fs.clone());
+    let mut ws = Workspace::in_memory(tmp.path()).with_backend(fs.clone());
     ws.disable_persistence();
     (tmp, fs, ws)
 }
@@ -148,7 +148,7 @@ fn test_skips_dot_prefixed_directories() {
 fn test_no_storage_returns_empty_report() {
     // Without filesystem storage, sanitize returns an empty report
     // (InMemoryStorageBackend has nothing to sanitize).
-    let mut ws = Workspace::new("/nonexistent");
+    let mut ws = Workspace::in_memory("/nonexistent");
     let report = ws.sanitize().unwrap();
     assert!(!report.has_repairs());
 }

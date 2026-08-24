@@ -78,6 +78,9 @@ PartialAppConfig {
         attachments: Vec(
             [],
         ),
+        labels: Map(
+            {},
+        ),
         inquiry: PartialInquiryConfig {
             assistant: PartialAssistantConfig {
                 name: None,

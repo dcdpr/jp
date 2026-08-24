@@ -28,6 +28,18 @@ fn parse_relative_duration_days() {
 }
 
 #[test]
+fn parse_rejects_a_duration_chrono_cannot_represent() {
+    // `humantime` parses durations far larger than chrono's date range, and
+    // subtracting one from `now` panics. `--created-since 10000000000000s` must
+    // return a parse error rather than abort the process.
+    let err = "10000000000000s".parse::<TimeThreshold>().unwrap_err();
+    assert!(
+        err.contains("too large"),
+        "expected a too-large error, got: {err}"
+    );
+}
+
+#[test]
 fn parse_relative_duration_hours() {
     let t: TimeThreshold = "6h".parse().unwrap();
     let diff = Utc::now() - *t;
@@ -105,23 +117,23 @@ fn creation_range_is_set() {
     assert!(!empty.is_set());
 
     let from_only: CreationRange = CreationRange {
-        from: Some(ts(1000).into()),
-        until: None,
+        since: Some(ts(1000).into()),
+        before: None,
     };
     assert!(from_only.is_set());
 
     let until_only: CreationRange = CreationRange {
-        from: None,
-        until: Some(ts(1000).into()),
+        since: None,
+        before: Some(ts(1000).into()),
     };
     assert!(until_only.is_set());
 }
 
 #[test]
-fn creation_range_from_inclusive() {
+fn creation_range_since_is_inclusive() {
     let range: CreationRange = CreationRange {
-        from: Some(ts(1000).into()),
-        until: None,
+        since: Some(ts(1000).into()),
+        before: None,
     };
 
     // Strictly before: excluded.
@@ -133,10 +145,10 @@ fn creation_range_from_inclusive() {
 }
 
 #[test]
-fn creation_range_until_exclusive() {
+fn creation_range_before_is_exclusive() {
     let range: CreationRange = CreationRange {
-        from: None,
-        until: Some(ts(2000).into()),
+        since: None,
+        before: Some(ts(2000).into()),
     };
 
     assert!(range.matches(make_id(1999)));
@@ -148,8 +160,8 @@ fn creation_range_until_exclusive() {
 #[test]
 fn creation_range_half_open() {
     let range: CreationRange = CreationRange {
-        from: Some(ts(1000).into()),
-        until: Some(ts(2000).into()),
+        since: Some(ts(1000).into()),
+        before: Some(ts(2000).into()),
     };
 
     assert!(!range.matches(make_id(999)));
@@ -184,21 +196,30 @@ struct RangeWithIds {
 }
 
 #[test]
-fn clap_parses_from_and_until() {
-    let cmd =
-        RangeWithIds::try_parse_from(["test-creation-range", "--from", "3w", "--until", "1d"])
-            .unwrap();
-    assert!(cmd.range.from.is_some());
-    assert!(cmd.range.until.is_some());
+fn clap_parses_created_since_and_created_before() {
+    let cmd = RangeWithIds::try_parse_from([
+        "test-creation-range",
+        "--created-since",
+        "3w",
+        "--created-before",
+        "1d",
+    ])
+    .unwrap();
+    assert!(cmd.range.since.is_some());
+    assert!(cmd.range.before.is_some());
     assert!(cmd.range.is_set());
 }
 
 #[test]
 fn clap_conflicts_range_with_positional_id() {
     let id = ConversationId::try_from(Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap()).unwrap();
-    let err =
-        RangeWithIds::try_parse_from(["test-creation-range", &id.to_string(), "--from", "3w"])
-            .unwrap_err();
+    let err = RangeWithIds::try_parse_from([
+        "test-creation-range",
+        &id.to_string(),
+        "--created-since",
+        "3w",
+    ])
+    .unwrap_err();
     assert!(
         err.to_string().contains("cannot be used with"),
         "expected clap conflict error, got: {err}"
@@ -219,14 +240,14 @@ struct PermissiveRangeWithIds {
 fn clap_permissive_range_composes_with_positional_id() {
     // `CreationRange<false>` is the candidate-filter variant used by `c use`.
     // It must *not* conflict with the positional id, so combinations like
-    // `jp c use ?p --from 3w` parse successfully.
+    // `jp c use ?p --created-since 3w` parse successfully.
     let id = ConversationId::try_from(Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap()).unwrap();
     let cmd = PermissiveRangeWithIds::try_parse_from([
         "test-creation-range-permissive",
         &id.to_string(),
-        "--from",
+        "--created-since",
         "3w",
     ])
     .expect("non-exclusive range should compose with positional id");
-    assert!(cmd.range.from.is_some());
+    assert!(cmd.range.since.is_some());
 }

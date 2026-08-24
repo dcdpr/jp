@@ -9,11 +9,11 @@ use crate::{LoadError, validate::ValidationError};
 
 /// Controls which storage partition to scan.
 ///
-/// Active (non-archived) conversations are returned by default.
+/// Live conversations are returned by default.
 /// Set `archived` to `true` to scan the archive partition instead.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct ConversationFilter {
-    /// If true, scan the archive partition instead of the active one.
+    /// If true, scan the archive partition instead of the live one.
     pub archived: bool,
 }
 
@@ -55,7 +55,7 @@ pub trait LoadBackend: Send + Sync + Debug {
     /// Scan conversation IDs from the backing store, deduplicated by ID.
     ///
     /// The `filter` controls which partition to scan.
-    /// By default, only active (non-archived) conversations are returned.
+    /// By default, only live conversations are returned.
     fn load_conversation_ids(&self, filter: ConversationFilter) -> Vec<ConversationId> {
         self.load_conversation_index(filter)
             .into_iter()

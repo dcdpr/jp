@@ -38,9 +38,12 @@ jp_test = { path = "crates/jp_test" }
 jp_tool = { path = "crates/jp_tool" }
 jp_workspace = { path = "crates/jp_workspace" }
 
+comfort = { path = "crates/contrib/comfort" }
 grizzly = { path = "crates/contrib/grizzly", default-features = false }
 schematic = { path = "crates/contrib/schematic", default-features = false }
+ticket = { path = "crates/internal/ticket" }
 
+addr2line = { version = "0.26" }
 ahash = { version = "0.8", default-features = false, features = ["runtime-rng", "std", "serde"] }
 assert_matches = { version = "1", default-features = false }
 async-anthropic = { git = "https://github.com/JeanMertz/async-anthropic", default-features = false }
@@ -58,6 +61,7 @@ clean-path = { version = "0.2", default-features = false }
 comfy-table = { version = "7", default-features = false }
 comrak = { version = "0.52", default-features = false }
 convert_case = { version = "0.11", default-features = false }
+cpp_demangle = { version = "0.5", default-features = false }
 crossbeam-channel = { version = "0.5", default-features = false }
 crossterm = { version = "0.29", default-features = false }
 darling = { version = "0.23", default-features = false }
@@ -68,12 +72,13 @@ duct = { version = "1", default-features = false }
 dyn-clone = { version = "1", default-features = false }
 dyn-hash = { version = "1", default-features = false }
 eventsource-stream = { version = "0.2", default-features = false }
-fancy-regex = { version = "0.17", default-features = false }
+fancy-regex = { version = "0.19", default-features = false }
 futures = { version = "0.3", default-features = false }
 gemini_client_rs = { git = "https://github.com/JeanMertz/gemini-client", default-features = false } # <https://github.com/Adriftdev/gemini-client/pull/16>
+gimli = { version = "0.33" }
 glob = { version = "0.3", default-features = false }
+grep-matcher = { version = "0.1", default-features = false }
 grep-printer = { version = "0.3", default-features = false }
-grep-regex = { version = "0.1", default-features = false }
 grep-searcher = { version = "0.1", default-features = false }
 htmd = { version = "0.5", default-features = false }
 httpmock = { git = "https://github.com/JeanMertz/httpmock", branch = "tweaks", default-features = false }
@@ -89,6 +94,7 @@ libc = { version = "0.2", default-features = false }
 linkme = { version = "0.3", default-features = false }
 maud = { version = "0.27", default-features = false }
 minijinja = { version = "2", default-features = false }
+object = { version = "0.39" }
 # Pinned to a rev rather than a branch: a branch dependency follows its HEAD on
 # `cargo update`. Carries the `LocalModel` model-details fields on top of 0.3.4,
 # which is the last release on reqwest 0.12.

@@ -217,3 +217,141 @@ fn test_command_config_structured_passthrough() {
         shell: true,
     });
 }
+
+#[test]
+fn template_span_with_spaces_stays_one_arg() {
+    // A template expression with interior spaces (and a quoted filter arg) must
+    // survive the shell split as a single argument.
+    let p =
+        PartialCommandConfigOrString::from_str("just rfd-renumber {{ a }} {{ b | default('') }}")
+            .unwrap();
+    let cfg = CommandConfigOrString::from_partial(p, vec![]).unwrap();
+
+    assert_eq!(cfg.command(), CommandConfig {
+        program: "just".to_owned(),
+        args: vec![
+            "rfd-renumber".to_owned(),
+            "{{ a }}".to_owned(),
+            "{{ b | default('') }}".to_owned(),
+        ],
+        shell: false,
+    });
+}
+
+#[test]
+fn template_statement_and_comment_spans_are_atomic() {
+    let p = PartialCommandConfigOrString::from_str("run {% if x %} {# note #}").unwrap();
+    let cfg = CommandConfigOrString::from_partial(p, vec![]).unwrap();
+
+    assert_eq!(cfg.command(), CommandConfig {
+        program: "run".to_owned(),
+        args: vec!["{% if x %}".to_owned(), "{# note #}".to_owned()],
+        shell: false,
+    });
+}
+
+#[test]
+fn template_span_adjacent_to_literal_text() {
+    let p = PartialCommandConfigOrString::from_str("cmd pre{{ x }}post").unwrap();
+    let cfg = CommandConfigOrString::from_partial(p, vec![]).unwrap();
+
+    assert_eq!(cfg.command(), CommandConfig {
+        program: "cmd".to_owned(),
+        args: vec!["pre{{ x }}post".to_owned()],
+        shell: false,
+    });
+}
+
+#[test]
+fn template_span_closer_inside_string_literal() {
+    // The `}}` inside the quoted string must not end the span early.
+    let p = PartialCommandConfigOrString::from_str(r#"echo {{ "}}" }}"#).unwrap();
+    let cfg = CommandConfigOrString::from_partial(p, vec![]).unwrap();
+
+    assert_eq!(cfg.command(), CommandConfig {
+        program: "echo".to_owned(),
+        args: vec![r#"{{ "}}" }}"#.to_owned()],
+        shell: false,
+    });
+}
+
+#[test]
+fn unterminated_template_span_is_kept_whole() {
+    // An unterminated `{{` swallows the rest; minijinja reports the real error
+    // at render time rather than the splitter mangling it.
+    let p = PartialCommandConfigOrString::from_str("just x {{ a").unwrap();
+    let cfg = CommandConfigOrString::from_partial(p, vec![]).unwrap();
+
+    assert_eq!(cfg.command(), CommandConfig {
+        program: "just".to_owned(),
+        args: vec!["x".to_owned(), "{{ a".to_owned()],
+        shell: false,
+    });
+}
+
+#[test]
+fn template_span_with_nested_braces_stays_one_arg() {
+    // Minijinja only ends a variable block at nesting depth zero, so the `}}`
+    // that closes the two maps must not end the span.
+    let p = PartialCommandConfigOrString::from_str(r#"cmd {{ {"outer": {"inner": 1}} | tojson }}"#)
+        .unwrap();
+    let cfg = CommandConfigOrString::from_partial(p, vec![]).unwrap();
+
+    assert_eq!(cfg.command(), CommandConfig {
+        program: "cmd".to_owned(),
+        args: vec![r#"{{ {"outer": {"inner": 1}} | tojson }}"#.to_owned()],
+        shell: false,
+    });
+}
+
+#[test]
+fn template_span_ends_at_first_depth_zero_closer() {
+    // The span ends at the `}}` that follows the balanced map, and text after it
+    // is split as ordinary shell words.
+    let p = PartialCommandConfigOrString::from_str(r#"cmd {{ {"a": 1} }} tail"#).unwrap();
+    let cfg = CommandConfigOrString::from_partial(p, vec![]).unwrap();
+
+    assert_eq!(cfg.command(), CommandConfig {
+        program: "cmd".to_owned(),
+        args: vec![r#"{{ {"a": 1} }}"#.to_owned(), "tail".to_owned()],
+        shell: false,
+    });
+}
+
+#[test]
+fn from_str_rejects_nul_byte() {
+    let err = PartialCommandConfigOrString::from_str("echo \0").unwrap_err();
+    assert!(err.to_string().contains("NUL byte"), "got: {err}");
+}
+
+#[test]
+fn json_nul_bearing_command_is_not_rewritten_by_span_restoration() {
+    // JSON (and YAML, and JSON5) can encode an interior NUL, and that path
+    // deserializes the string variant directly without going through `from_str`.
+    // Text shaped like a span placeholder must not be substituted with real span
+    // text: the command stays unexecutable instead of turning into a different
+    // one.
+    let p: PartialCommandConfigOrString =
+        serde_json::from_str(r#""\u00000\u0000 {{ evil }}""#).unwrap();
+    let cfg = CommandConfigOrString::from_partial(p, vec![]).unwrap();
+
+    assert_eq!(cfg.command(), CommandConfig {
+        program: String::new(),
+        args: vec![],
+        shell: false,
+    });
+}
+
+#[test]
+fn from_str_ignores_quotes_inside_template_span() {
+    // The apostrophe inside the comment is minijinja text, not shell quoting;
+    // masking the span keeps the unbalanced-quote check from rejecting it.
+    let p = PartialCommandConfigOrString::from_str("echo {# don't split #}").unwrap();
+    let cfg = CommandConfigOrString::from_partial(p, vec![]).unwrap();
+
+    assert_eq!(cfg.command(), CommandConfig {
+        program: "echo".to_owned(),
+        args: vec!["{# don't split #}".to_owned()],
+        shell: false,
+    });
+}

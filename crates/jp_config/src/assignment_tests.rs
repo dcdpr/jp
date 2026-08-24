@@ -587,6 +587,33 @@ fn test_kv_assignment_try_vec_of_strings() {
     assert_eq!(&error.to_string(), "2: unknown index");
 }
 
+/// The comma shorthand belongs to the bare form, where there is no other way to
+/// name a list.
+/// A JSON string already says what the value is, so it is one element.
+#[test]
+fn test_kv_assignment_try_vec_of_strings_json_string() {
+    let mut v: Vec<String> = vec![];
+    let kv = KvAssignment::try_from_cli(":", r#""foo,bar""#).unwrap();
+    kv.try_vec_of_strings(&mut v).unwrap();
+    assert_eq!(v, vec!["foo,bar".to_owned()]);
+
+    // Nor is it trimmed, or dropped for being empty, the way a bare element is.
+    let mut v: Vec<String> = vec![];
+    let kv = KvAssignment::try_from_cli(":", r#"" ""#).unwrap();
+    kv.try_vec_of_strings(&mut v).unwrap();
+    assert_eq!(v, vec![" ".to_owned()]);
+
+    let mut v: Vec<String> = vec![];
+    let kv = KvAssignment::try_from_cli(":", r#""""#).unwrap();
+    kv.try_vec_of_strings(&mut v).unwrap();
+    assert_eq!(v, vec![String::new()]);
+
+    let mut v: Vec<String> = vec![];
+    let kv = KvAssignment::try_from_cli("", "").unwrap();
+    kv.try_vec_of_strings(&mut v).unwrap();
+    assert!(v.is_empty(), "the bare form drops an empty element");
+}
+
 #[test]
 fn test_assign_to_entry_sets_value() {
     let mut map = IndexMap::<String, JsonValue>::new();

@@ -156,6 +156,12 @@ The projection layer then has nothing to apply, and the LLM sees the original
 uncompacted events.
 This is useful for undoing compaction when the result is unsatisfactory.
 
+> [!NOTE]
+> `--reset` also takes an optional index: `--reset=2` removes only the second
+> compaction event, numbered as `jp conversation show` lists them.
+> The value requires `=`, so a bare `--reset` followed by a conversation ID
+> still targets that conversation.
+
 #### The `--compact` Flag (DSL)
 
 The `--compact` flag is available on `query`, `fork`, and `compact` itself.
@@ -965,6 +971,7 @@ Can proceed in parallel with Phases 3 and 4.
 - [Issue #57] — Make conversation management more powerful
 - [Multi-turn degradation paper][paper] — cited in Issue \#57
 
+[Indexing and Counting Conventions]: ../architecture/indexing-conventions.md
 [InternalEvent]: https://github.com/dcdpr/jp/blob/main/crates/jp_conversation/src/stream.rs
 [Issue #57]: https://github.com/dcdpr/jp/issues/57
 [RFD 011]: 011-system-notification-queue.md

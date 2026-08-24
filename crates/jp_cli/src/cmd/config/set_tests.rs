@@ -43,7 +43,7 @@ fn setup(
         .with_user_storage(&user, None, "abc")
         .unwrap();
     let fs = Arc::new(fs);
-    let mut workspace = Workspace::new(tmp.path()).with_backend(fs.clone());
+    let mut workspace = Workspace::in_memory(tmp.path()).with_backend(fs.clone());
     workspace.load_conversation_index();
 
     for &id in conversation_ids {
@@ -57,6 +57,7 @@ fn setup(
     };
     let fs_backend = Some(fs);
     let ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
         workspace,
         fs_backend,
         Runtime::new().unwrap(),
@@ -330,7 +331,7 @@ fn load_request_none_when_no_ids() {
 fn load_request_explicit_when_ids_present() {
     let set = Set {
         file_target: FileTarget::default(),
-        conversation: FlagIds::from_targets(vec![ConversationTarget::Latest]),
+        conversation: FlagIds::from_targets(vec![ConversationTarget::Recent]),
     };
     let req = set.conversation_load_request();
     assert!(req.targets.is_some());

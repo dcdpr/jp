@@ -80,7 +80,7 @@ summary = "Files to show the diff for. Required to prevent accidental full-tree 
 
 [conversation.tools.git_diff_file.parameters.pattern]
 type = "string"
-summary = "Regex pattern to search within the diff output. When set, only matching lines with context are returned instead of the full diff."
+summary = "Regex pattern to search within the diff output. When set, only matching lines with context are returned instead of the full diff. Lookaround and backreferences are supported."
 
 [conversation.tools.git_diff_file.parameters.context]
 type = "integer"

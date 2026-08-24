@@ -81,10 +81,11 @@ fn setup_conversations_with(
 ) -> (Ctx, SharedBuffer) {
     let tmp = tempdir().unwrap();
     let config = AppConfig::new_test();
-    let workspace = Workspace::new(tmp.path());
+    let workspace = Workspace::in_memory(tmp.path());
     let (printer, out, _err) = Printer::memory(format);
     let printer = printer.with_output_width(width);
     let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
         workspace,
         None,
         tokio::runtime::Runtime::new().unwrap(),
@@ -1037,6 +1038,18 @@ fn quiet_reports_a_match_through_its_exit_status_alone() {
     );
 }
 
+/// A line that drives the pattern `(a+)+\1b` past its backtrack limit.
+///
+/// The leading `b` is the part that matters.
+/// With the pattern's required literal absent from the line, the search is
+/// decided before the backtracking VM is ever entered, and a bare run of `a`s
+/// is scanned cheaply.
+/// Here the `b` is present but unreachable, since no match can end at it, so
+/// the VM runs and exhausts its step budget.
+fn backtracking_line() -> String {
+    format!("b{}", "a".repeat(4000))
+}
+
 #[test]
 fn quiet_exits_zero_when_a_match_survives_a_failing_pattern() {
     // `grep -q`'s rule: if a line is selected the status is 0 even if an error
@@ -1052,7 +1065,7 @@ fn quiet_exits_zero_when_a_match_survives_a_failing_pattern() {
     let (mut ctx, _out) = setup(vec![(
         id,
         turn(vec![ConversationEvent::new(
-            ChatRequest::from(format!("{}\naab", "a".repeat(64)).as_str()),
+            ChatRequest::from(format!("{}\naab", backtracking_line()).as_str()),
             ts(),
         )]),
     )]);
@@ -1076,7 +1089,7 @@ fn quiet_exits_two_when_a_failure_leaves_no_match() {
     let (mut ctx, _out) = setup(vec![(
         id,
         turn(vec![ConversationEvent::new(
-            ChatRequest::from("a".repeat(64).as_str()),
+            ChatRequest::from(backtracking_line().as_str()),
             ts(),
         )]),
     )]);
@@ -1159,7 +1172,7 @@ fn a_pattern_that_fails_mid_search_exits_two() {
     let (mut ctx, out) = setup(vec![(
         id,
         turn(vec![ConversationEvent::new(
-            ChatRequest::from("a".repeat(64).as_str()),
+            ChatRequest::from(backtracking_line().as_str()),
             ts(),
         )]),
     )]);
@@ -1308,6 +1321,28 @@ fn tool_results_are_searched() {
 
     assert_eq!(run(grep("secret-keyword"), &mut ctx, &out), [format!(
         "{id}:1:tool-result:m:file content with secret-keyword here"
+    )]);
+}
+
+#[test]
+fn scope_structured_searches_serialized_json() {
+    let id = make_id(9500);
+    let (mut ctx, out) = setup(vec![(
+        id,
+        turn(vec![ConversationEvent::new(
+            ChatResponse::structured(json!({ "name": "Alice" })),
+            ts(),
+        )]),
+    )]);
+
+    let grep = Grep {
+        scopes: vec![Scope::Structured],
+        ..grep("Alice")
+    };
+    // The persisted value is a JSON object, so the searchable text is the
+    // pretty-printed serialization rather than the value itself.
+    assert_eq!(run(grep, &mut ctx, &out), [format!(
+        "{id}:1:structured:m:  \"name\": \"Alice\""
     )]);
 }
 
@@ -2114,5 +2149,5 @@ fn lowercase_shorts_owned_by_globals_are_not_reclaimed() {
     // *both*, so the user can't tell which flag they invoked. `-i` belongs to
     // the conversation-target flag on every `jp c` subcommand.
     assert!(parse(&["x", "--ignore-case"]).is_ok());
-    assert!(!parse(&["x", "-i", "latest"]).unwrap().ignore_case);
+    assert!(!parse(&["x", "-i", "recent"]).unwrap().ignore_case);
 }

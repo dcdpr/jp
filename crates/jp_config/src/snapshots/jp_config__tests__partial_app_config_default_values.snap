@@ -27,6 +27,7 @@ Ok(
                             discard_when_merged: Some(
                                 true,
                             ),
+                            dedup: None,
                         },
                     ),
                 ),
@@ -166,6 +167,9 @@ Ok(
                         discard_when_merged: true,
                     },
                 ),
+                labels: Map(
+                    {},
+                ),
                 inquiry: PartialInquiryConfig {
                     assistant: PartialAssistantConfig {
                         name: None,
@@ -180,6 +184,7 @@ Ok(
                                     discard_when_merged: Some(
                                         true,
                                     ),
+                                    dedup: None,
                                 },
                             ),
                         ),

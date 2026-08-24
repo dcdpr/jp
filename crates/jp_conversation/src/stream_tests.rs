@@ -517,6 +517,97 @@ fn test_sanitize_removes_orphaned_inquiry_request() {
 }
 
 #[test]
+fn test_sanitize_inquiry_orphan_repair_is_turn_scoped() {
+    // Turn 1 holds an orphaned request that shares its id with a valid pair in
+    // turn 2. The turn-1 orphan must be repaired within its own turn, not
+    // cross-satisfied by turn 2's response.
+    let mut stream = ConversationStream::new_test();
+
+    stream.start_turn("turn 1");
+    stream.push(ConversationEvent::new(
+        InquiryRequest::new(
+            "call_1.confirm",
+            InquirySource::tool("t"),
+            InquiryQuestion::boolean("proceed?".into()),
+        ),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 1).unwrap(),
+    ));
+
+    stream.start_turn("turn 2");
+    stream.push(ConversationEvent::new(
+        InquiryRequest::new(
+            "call_1.confirm",
+            InquirySource::tool("t"),
+            InquiryQuestion::boolean("proceed?".into()),
+        ),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 2).unwrap(),
+    ));
+    stream.push(ConversationEvent::new(
+        InquiryResponse::boolean("call_1.confirm", true),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 3).unwrap(),
+    ));
+
+    stream.sanitize();
+
+    let requests = stream
+        .iter()
+        .filter(|e| e.event.is_inquiry_request())
+        .count();
+    let responses = stream
+        .iter()
+        .filter(|e| e.event.is_inquiry_response())
+        .count();
+    assert_eq!(requests, 1, "turn 1's orphan request should be removed");
+    assert_eq!(responses, 1, "turn 2's paired response should survive");
+}
+
+#[test]
+fn test_sanitize_legacy_duplicate_ids_pair_by_order() {
+    // A single turn with two requests sharing a legacy two-segment id and one
+    // response: the by-order pair is preserved and the remaining request
+    // orphan is removed.
+    let mut stream = ConversationStream::new_test();
+
+    stream.start_turn("turn");
+    stream.push(ConversationEvent::new(
+        InquiryRequest::new(
+            "call_1.confirm",
+            InquirySource::tool("t"),
+            InquiryQuestion::boolean("proceed?".into()),
+        ),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 1).unwrap(),
+    ));
+    stream.push(ConversationEvent::new(
+        InquiryRequest::new(
+            "call_1.confirm",
+            InquirySource::tool("t"),
+            InquiryQuestion::boolean("proceed?".into()),
+        ),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 2).unwrap(),
+    ));
+    stream.push(ConversationEvent::new(
+        InquiryResponse::boolean("call_1.confirm", true),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 3).unwrap(),
+    ));
+
+    stream.sanitize();
+
+    let requests = stream
+        .iter()
+        .filter(|e| e.event.is_inquiry_request())
+        .count();
+    let responses = stream
+        .iter()
+        .filter(|e| e.event.is_inquiry_response())
+        .count();
+    assert_eq!(
+        requests, 1,
+        "the unpaired duplicate request should be removed"
+    );
+    assert_eq!(responses, 1);
+}
+
+#[test]
 fn test_sanitize_keeps_matched_pairs_intact() {
     let mut stream = ConversationStream::new_test();
 
@@ -1041,6 +1132,34 @@ fn test_compaction_not_counted_by_is_empty() {
 }
 
 #[test]
+fn test_remove_compaction_by_index() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn(ChatRequest::from("hello"));
+    stream.add_compaction(make_compaction(0, 1));
+    stream.add_compaction(make_compaction(2, 3));
+    stream.add_compaction(make_compaction(4, 5));
+
+    let removed = stream.remove_compaction(1).expect("second compaction");
+
+    assert_eq!((removed.from_turn, removed.to_turn), (2, 3));
+    let remaining: Vec<_> = stream
+        .compactions()
+        .map(|c| (c.from_turn, c.to_turn))
+        .collect();
+    assert_eq!(remaining, vec![(0, 1), (4, 5)]);
+}
+
+#[test]
+fn test_remove_compaction_out_of_range_is_a_no_op() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn(ChatRequest::from("hello"));
+    stream.add_compaction(make_compaction(0, 1));
+
+    assert!(stream.remove_compaction(1).is_none());
+    assert_eq!(stream.compactions().count(), 1);
+}
+
+#[test]
 fn test_retain_removing_events_drops_compactions() {
     let mut stream = ConversationStream::new_test();
     stream.start_turn(ChatRequest::from("hello"));
@@ -1105,7 +1224,7 @@ fn test_retain_removing_within_turn_event_drops_compactions() {
 }
 
 #[test]
-fn test_retain_first_turns_drops_compactions() {
+fn test_retain_turns_drops_compactions() {
     let mut stream = ConversationStream::new_test();
     for t in 0..6 {
         stream.start_turn(format!("turn {t}"));
@@ -1114,7 +1233,7 @@ fn test_retain_first_turns_drops_compactions() {
     // summary text covers turns the fork no longer has.
     stream.add_compaction(make_compaction(0, 5));
 
-    stream.retain_first_turns(2);
+    stream.retain_turns(|index| index < 2);
 
     assert_eq!(stream.turn_count(), 2);
     assert_eq!(
@@ -1135,7 +1254,7 @@ fn test_retain_keeps_compactions_entirely_before_removal() {
 
     // `--first 4` drops turns 4-5; turns 0-1 are untouched and not renumbered,
     // so the overlay over them keeps valid anchors and survives.
-    stream.retain_first_turns(4);
+    stream.retain_turns(|index| index < 4);
 
     assert_eq!(stream.turn_count(), 4);
     let compactions: Vec<_> = stream.compactions().collect();
@@ -1148,7 +1267,7 @@ fn test_retain_keeps_compactions_entirely_before_removal() {
 }
 
 #[test]
-fn test_retain_first_and_last_keeps_leading_block_compaction() {
+fn test_retain_turns_two_windows_keeps_leading_block_compaction() {
     let mut stream = ConversationStream::new_test();
     for t in 0..8 {
         stream.start_turn(format!("turn {t}"));
@@ -1158,7 +1277,7 @@ fn test_retain_first_and_last_keeps_leading_block_compaction() {
     stream.add_compaction(make_compaction(3, 6));
 
     // Keep first 3 and last 2 turns, dropping the middle (turns 3-5).
-    stream.retain_first_and_last_turns(3, 2);
+    stream.retain_turns(|index| !(3..6).contains(&index));
 
     let compactions: Vec<_> = stream.compactions().collect();
     assert_eq!(

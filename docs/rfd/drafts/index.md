@@ -14,10 +14,10 @@ implemented proposals.
 
 <script setup>
 import { data } from '../../.vitepress/loaders/rfd-drafts.data.js'
-import RfdIndex from '../../.vitepress/theme/RfdIndex.vue'
+import DocIndex from '../../.vitepress/theme/DocIndex.vue'
 </script>
 
-<RfdIndex :entries="data" :show-status="false" storage-key="rfd-drafts" />
+<DocIndex :entries="data" :show-status="false" storage-key="rfd-drafts" />
 
 [RFD 001]: ../001-jp-rfd-process
 [published RFDs]: ../
