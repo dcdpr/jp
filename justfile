@@ -73,6 +73,321 @@ run *ARGS:
 
     cargo run {{quiet_flag}} --package jp_cli -- "$@"
 
+# Serve the web UI from this checkout, rebuilding the plugin first.
+#
+# Takes the plugin's own flags: `--bind <ADDR>`, `--port <PORT>`.
+[group('main')]
+[positional-arguments]
+serve-web *ARGS: _install-serve-web
+    #!/usr/bin/env sh
+    set -eu
+
+    cargo run {{quiet_flag}} --package jp_cli -- serve-web "$@"
+
+# Serve the web UI, picking up source changes without killing a running turn.
+#
+# Starts on a broken tree: it waits for a change that compiles rather than
+# refusing, so this can be left running across an edit that does not build.
+#
+# Watching sources and restarting directly — `cargo watch -w crates -s 'just
+# serve-web'` — cannot work here: a turn started from the browser runs inside the
+# host process this plugin is attached to, so restarting on a file change aborts
+# whatever the assistant was in the middle of. Which includes the assistant
+# editing these very files.
+#
+# So the restart waits for the server to say it's idle. Two loops: a watcher
+# rebuilds on every change to `crates/` and then stops the server once `/status`
+# reports no turn in flight, and the supervisor loop starts it again on the new
+# build.
+#
+# Takes the plugin's own flags: `--bind <ADDR>`, `--port <PORT>`.
+#
+# `JP_SERVE_WEB_WORKSPACE=<dir>` serves that workspace instead of this checkout,
+# so the UI being developed here drives conversations in another worktree. The
+# build always comes from here.
+#
+# Ctrl-C stops both.
+[group('main')]
+[positional-arguments]
+serve-web-watch *ARGS:
+    #!/usr/bin/env sh
+    set -eu
+
+    # `/status` is polled over loopback regardless of what the server binds, so
+    # only the port matters here. Read it back out of the arguments rather than
+    # taking it as a recipe parameter, so the flags are passed exactly as written.
+    port=3001
+    prev=""
+    for arg in "$@"; do
+        case "$prev" in --port) port="$arg" ;; esac
+        case "$arg" in --port=*) port="${arg#--port=}" ;; esac
+        prev="$arg"
+    done
+
+    # The restart finds the server by its command line, so the port has to be on
+    # it. Added only when it is absent, so what was passed is left as written.
+    case " $* " in
+        *" --port"*) ;;
+        *) set -- "$@" --port "$port" ;;
+    esac
+
+    # Which workspace the server serves, and therefore which one every
+    # conversation started from the browser belongs to. Defaults to this
+    # checkout, which is also the only tree that gets built.
+    #
+    # A stop-gap until the web UI can pick a worktree itself: run the UI you are
+    # developing here against a project you are working on elsewhere.
+    workspace="${JP_SERVE_WEB_WORKSPACE:-}"
+    if [ -n "$workspace" ] && [ ! -d "$workspace/.jp" ]; then
+        echo "$workspace is not a JP workspace; run 'jp init' there first." >&2
+        exit 1
+    fi
+
+    jp="$(cargo metadata --format-version 1 | jq -r .build_directory)/debug/jp"
+
+    # A tree that does not compile is not a reason to refuse to start. The loop
+    # below waits for the watcher to report a build that does, which is the state
+    # you are in whenever you start this in the middle of an edit.
+    if just _install-serve-web && cargo build {{quiet_flag}} --package jp_cli; then
+        ready=1
+    else
+        ready=0
+    fi
+
+    # Where the watcher says "I stopped the server on purpose". Keyed by port so
+    # two of these can run side by side.
+    restart_stamp="${TMPDIR:-/tmp}/jp-serve-web-restart.$port"
+    rm -f "$restart_stamp"
+    export JP_SERVE_WEB_RESTART_STAMP="$restart_stamp"
+
+    # How the watcher wakes this loop when there is finally something to run.
+    # A pipe rather than a stamp file, so waiting costs nothing and needs no
+    # polling interval: a read blocks until the watcher writes.
+    ready_fifo="${TMPDIR:-/tmp}/jp-serve-web-ready.$port"
+    rm -f "$ready_fifo"
+    mkfifo "$ready_fifo"
+    export JP_SERVE_WEB_READY="$ready_fifo"
+
+    # Mirrors `jp_workspace::user_data_dir`; the watcher reads conversation locks
+    # from under it to decide whether stopping the server would interrupt a turn.
+    if [ -n "${JP_USER_DATA_DIR:-}" ]; then
+        export JP_SERVE_WEB_DATA="$JP_USER_DATA_DIR"
+    elif [ -n "${XDG_DATA_HOME:-}" ]; then
+        export JP_SERVE_WEB_DATA="$XDG_DATA_HOME/jp"
+    elif [ "$(uname -s)" = "Darwin" ]; then
+        export JP_SERVE_WEB_DATA="$HOME/Library/Application Support/jp"
+    else
+        export JP_SERVE_WEB_DATA="$HOME/.local/share/jp"
+    fi
+
+    # `--postpone` matters: without it the watcher runs once on startup and stops
+    # the server it is about to supervise.
+    #
+    # Deliberately not `--quiet`: its "[Running ...]" line is the only evidence
+    # from the terminal that a source change was noticed at all.
+    echo "Watching crates/ for changes; restarts wait for /status on :$port." >&2
+    cargo watch --postpone --watch crates --delay 2 \
+        --shell "just _restart-serve-web $port" &
+    watcher=$!
+
+    # Not INT. Ctrl-C reaches every process in the foreground group, including
+    # this one, and trapping it here used to kill the watcher while the loop below
+    # carried on — so restarts worked exactly once, until the first Ctrl-C.
+    #
+    # Ignoring it instead leaves Ctrl-C to `jp`, which owns the interrupt menu.
+    # Whether to come back up is decided by the stamp, not by the signal.
+    trap 'kill $watcher 2>/dev/null || true; rm -f "$ready_fifo"' EXIT TERM
+    trap '' INT
+
+    # Run the built binary rather than `cargo run`, so the process the watcher
+    # stops is the server itself and not a cargo wrapper around it.
+    #
+    # In the foreground, deliberately. Backgrounding it to capture `$!` makes it a
+    # background process, and a background process reading the terminal gets EOF —
+    # so the interrupt menu appeared, read nothing, and exited. The watcher finds
+    # the pid with `pgrep` instead.
+    waiting=""
+    while true; do
+        # Nothing to run: the tree was broken when this started, or when it last
+        # rebuilt. Block until the watcher reports a build — a read on an empty
+        # pipe sleeps until someone writes, so this costs nothing while it waits.
+        #
+        # The wakeup is a hint, not a promise: confirm with a build of our own,
+        # which is a cached no-op when the watcher has just done the work.
+        if [ "$ready" -eq 0 ]; then
+            if [ -z "$waiting" ]; then
+                echo "The tree does not compile; waiting for a change that fixes it." >&2
+                waiting=yes
+            fi
+
+            read -r _ < "$ready_fifo" || true
+
+            if just _install-serve-web && cargo build {{quiet_flag}} --package jp_cli; then
+                ready=1
+                waiting=""
+            fi
+            continue
+        fi
+
+        # `--workspace` goes before the subcommand on purpose: `serve-web` is an
+        # external subcommand, so clap hands everything after it to the plugin
+        # verbatim, global flags included.
+        if [ -n "$workspace" ]; then
+            "$jp" --workspace "$workspace" -vv serve-web "$@" | cat || true
+        else
+            "$jp" -vv serve-web "$@" | cat || true
+        fi
+
+        if [ ! -f "$restart_stamp" ]; then
+            echo "jp-serve-web exited on its own; stopping." >&2
+            exit 0
+        fi
+
+        rm -f "$restart_stamp"
+        echo "jp-serve-web stopped for a rebuild; starting the current build." >&2
+        sleep 1
+    done
+
+# Rebuild the web UI and stop the running server once it falls idle.
+#
+# The supervisor loop in `serve-web-watch` starts it again, so stopping is all
+# this has to do. Waits indefinitely while a turn is in flight: a rebuild is never
+# worth cutting off an assistant mid-answer.
+#
+# "In flight" means a conversation lock naming this server's pid. A lock held by
+# any other process is somebody else's turn, and stopping this server cannot
+# interrupt it, so it is no reason to wait. The plugin's own `/status` is consulted
+# too, which covers the moment between a browser submitting and the host taking
+# the lock.
+[private]
+_restart-serve-web PORT:
+    #!/usr/bin/env sh
+    set -eu
+
+    echo "Source changed; rebuilding." >&2
+
+    # A broken tree must leave the running server alone. Without this the next
+    # save after a compile error stops a working server and the supervisor brings
+    # up nothing, because there is nothing new to bring up.
+    #
+    # Tests run before the install, so a plugin that builds but misbehaves is
+    # never copied over a working one. They are the only gate on anything the
+    # compiler cannot see for itself.
+    if ! cargo test {{quiet_flag}} --package jp-serve-web \
+        || ! just _install-serve-web \
+        || ! cargo build {{quiet_flag}} --package jp_cli; then
+        echo "Build or tests failed; leaving the running server alone." >&2
+        exit 0
+    fi
+
+    # Wake a supervisor that has nothing to run.
+    #
+    # Opened read-write, which is what keeps this from blocking: a plain write to
+    # a pipe waits for a reader, and there usually isn't one — the supervisor only
+    # listens while it has no build to run. With no reader the message is dropped,
+    # which is the right outcome, because nobody was waiting for it.
+    if [ -p "${JP_SERVE_WEB_READY:-}" ]; then
+        echo ready 1<>"$JP_SERVE_WEB_READY" || true
+    fi
+
+    data="${JP_SERVE_WEB_DATA:-}"
+
+    # The running server, found by its own command line rather than a pidfile:
+    # writing one would mean backgrounding it, and a backgrounded server cannot
+    # read the terminal, which is where the interrupt menu takes its keys.
+    #
+    # Scoped to the port so a second supervisor is not caught by it.
+    #
+    # The subcommand does not follow the binary name directly: the supervisor runs
+    # `jp -vv serve-web`, and a pattern that assumes otherwise matches nothing and
+    # turns the kill below into a silent no-op.
+    server_pid() {
+        pgrep -f "/jp .*serve-web.*--port[= ]{{PORT}}" 2>/dev/null | head -1 || true
+    }
+
+    # Does a conversation lock name the server we are about to stop?
+    #
+    # A pid recorded by a process that has since died counts as free: SIGKILL
+    # leaves the lock's metadata behind, and waiting on a dead holder would hold
+    # the restart forever.
+    holds_a_lock() {
+        [ -n "$1" ] || return 1
+        kill -0 "$1" 2>/dev/null || return 1
+        [ -n "$data" ] || return 1
+
+        for lock in "$data"/workspace/*/locks/*.lock; do
+            [ -f "$lock" ] || continue
+            if [ "$(jq -r '.pid // empty' "$lock" 2>/dev/null || true)" = "$1" ]; then
+                return 0
+            fi
+        done
+
+        return 1
+    }
+
+    # Which conversations the server is holding, as a space-separated list.
+    #
+    # The lock file is named for its conversation, so the names come from the
+    # paths rather than from reading each file twice.
+    held_conversations() {
+        [ -n "$1" ] || return 0
+        [ -n "$data" ] || return 0
+
+        for lock in "$data"/workspace/*/locks/*.lock; do
+            [ -f "$lock" ] || continue
+            if [ "$(jq -r '.pid // empty' "$lock" 2>/dev/null || true)" = "$1" ]; then
+                name="${lock##*/}"
+                printf '%s ' "${name%.lock}"
+            fi
+        done
+    }
+
+    # An unreachable server counts as idle: there is nothing to interrupt, and
+    # the supervisor loop will pick up the new build on its own.
+    #
+    # The wait is unbounded on purpose — a rebuild is never worth cutting off an
+    # assistant mid-answer — so it has to stay legible, or "waiting correctly" and
+    # "wedged" look identical. It says what it is waiting on, and keeps saying so.
+    waited=0
+    announced=""
+    while true; do
+        server=$(server_pid)
+        reported=$(curl -sf "http://127.0.0.1:{{PORT}}/status" | jq -r '.busy' 2>/dev/null || true)
+
+        if holds_a_lock "$server" || [ "$reported" = "true" ]; then
+            # An empty list with the loop still holding means the plugin reported
+            # busy while no lock is held — a turn between acquiring the
+            # conversation and starting, or a status the plugin has not cleared.
+            held=$(held_conversations "$server")
+            [ -n "$held" ] || held="no lock held; the plugin reports busy"
+
+            # Once on arrival, then every 30s: often enough to show it is still
+            # alive, rarely enough not to bury the build output.
+            if [ -z "$announced" ]; then
+                echo "Holding the restart for: ${held}" >&2
+                echo "Interrupt the turn, or wait — the rebuild is already done." >&2
+                announced=yes
+            elif [ $((waited % 30)) -eq 0 ]; then
+                echo "Still holding after ${waited}s for: ${held}" >&2
+            fi
+
+            sleep 2
+            waited=$((waited + 2))
+            continue
+        fi
+
+        break
+    done
+
+    echo "Idle; stopping the server so the supervisor starts the new build." >&2
+    : > "${JP_SERVE_WEB_RESTART_STAMP:-${TMPDIR:-/tmp}/jp-serve-web-restart.{{PORT}}}"
+
+    # Port-scoped, so a second supervisor on another port is left alone.
+    server=$(server_pid)
+    if [ -n "$server" ]; then
+        kill "$server" 2>/dev/null || true
+    fi
+
 # Install the `jp` binary from your local checkout.
 [group('build')]
 [group('main')]
@@ -3648,6 +3963,44 @@ _install-ticket *args:
         exit 0
     fi
     cargo install {{quiet_flag}} --locked --path crates/plugins/command/ticket --debug {{args}}
+
+# Build the `jp-serve-web` command plugin into JP's plugin directory.
+#
+# Not `cargo install`, unlike the other plugins. `jp` resolves a plugin by
+# checking its own plugin directory first and returning immediately, and
+# `serve-web` is an official registry plugin, so anything the registry put there
+# shadows a build in `~/.cargo/bin` forever. Writing the local build to the same
+# place is what lets a checkout win.
+#
+# Deliberately ignores `JP_NO_INSTALL`: that variable exists to stop recipes from
+# rebuilding `jp` itself, and this recipe's only job is to build the plugin.
+_install-serve-web *args:
+    #!/usr/bin/env sh
+    set -eu
+
+    # Mirrors `jp_workspace::user_data_dir`.
+    if [ -n "${JP_USER_DATA_DIR:-}" ]; then
+        data="$JP_USER_DATA_DIR"
+    elif [ -n "${XDG_DATA_HOME:-}" ]; then
+        data="$XDG_DATA_HOME/jp"
+    elif [ "$(uname -s)" = "Darwin" ]; then
+        data="$HOME/Library/Application Support/jp"
+    else
+        data="$HOME/.local/share/jp"
+    fi
+
+    cargo build {{quiet_flag}} --locked --package jp-serve-web {{args}}
+
+    dir="$data/plugins/command"
+    mkdir -p "$dir"
+    build=$(cargo metadata --format-version 1 | jq -r .build_directory)
+
+    # Copy beside the target and rename, so replacing the binary of a server
+    # that's still running can't fail on a busy file.
+    cp "$build/debug/jp-serve-web" "$dir/.jp-serve-web.new"
+    chmod 755 "$dir/.jp-serve-web.new"
+    mv -f "$dir/.jp-serve-web.new" "$dir/jp-serve-web"
+    echo "Installed jp-serve-web to $dir" >&2
 
 _install-comfort *args:
     #!/usr/bin/env sh
