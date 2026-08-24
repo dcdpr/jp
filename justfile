@@ -3403,12 +3403,15 @@ ticket-close NNN: _install-ticket
 
 # List tickets, ordered by id.
 #
+# `jp -F json` switches the whole invocation to the machine-readable form; the
+# command has no format flag of its own.
+#
 #   just ticket-list                        # every ticket
 #   just ticket-list --status "In Progress" # one column of the board
 #   just ticket-list --kind bug
 #   just ticket-list --label package=jp_cli # one area of the system
 #   just ticket-list --label package        # any value of one key
-#   just ticket-list --json                 # for `jq`
+#   jp -F json ticket list                  # for `jq`
 [group('ticket')]
 [positional-arguments]
 ticket-list *ARGS: _install-ticket
@@ -3536,7 +3539,7 @@ ticket-labels-sync:
 
 # Read one ticket, with its comments numbered for replies.
 #
-# Pass `--json` for the machine-readable form.
+# Run it as `jp -F json ticket show NNN` for the machine-readable form.
 [group('ticket')]
 [positional-arguments]
 ticket-show NNN *ARGS: _install-ticket
@@ -3578,7 +3581,7 @@ ticket-promote NNN CATEGORY="design": _install-ticket
     #!/usr/bin/env sh
     set -eu
 
-    detail=$(jp ticket show {{quote(NNN)}} --json)
+    detail=$(jp --format json ticket show {{quote(NNN)}})
     id=$(echo "$detail" | jq -r '.id')
     title=$(echo "$detail" | jq -r '.title')
     description=$(echo "$detail" | jq -r '.description')
@@ -3744,9 +3747,8 @@ serve-tools CONTEXT TOOL:
 # recipe, so every `jp query` that uses bookworm tools picks up the latest
 # local source automatically.
 [group('tools')]
-serve-bookworm: # _build-bookworm
-    /Users/jean/.cargo/bin/bookworm mcp
-    # @$(cargo metadata --format-version 1 | jq -r .build_directory)/release/bookworm mcp
+serve-bookworm: _build-bookworm
+    @$(cargo metadata --format-version 1 | jq -r .build_directory)/release/bookworm mcp
 
 [private]
 @_build-bookworm:
