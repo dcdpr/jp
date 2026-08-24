@@ -1043,6 +1043,7 @@ fn fork_reresolves_apply_on_fork_rules() {
             value: LabelValue::List(values.iter().map(|v| (*v).to_owned()).collect()),
             apply_on,
             run: LabelRunMode::Ask,
+            optional: false,
         })
     };
 
@@ -1168,6 +1169,7 @@ fn a_failing_fork_rule_creates_no_conversation() {
             },
             // The default policy: needs a terminal, and the test Ctx has none.
             run: LabelRunMode::Ask,
+            optional: false,
         }),
     );
 

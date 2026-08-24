@@ -338,6 +338,70 @@ async fn approving_the_prompt_runs_the_command() {
     assert_eq!(values(&resolved, "asks"), ["hi"]);
 }
 
+// ── `optional` rules drop what they can't produce, quietly ───────────────────
+
+/// An optional rule that fails is dropped without a message, so a label that
+/// only resolves in some checkouts adds no noise to every other one.
+#[tokio::test]
+async fn an_optional_failing_command_is_skipped_silently() {
+    let (rules, tmp, printer, err, prompts) = setup(
+        r#"{
+            "ok": "kept",
+            "broken": { "value": { "cmd": "false" }, "run": "unattended", "optional": true }
+        }"#,
+    );
+    let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
+
+    let resolved = resolver.automatic(Trigger::New).await.unwrap();
+
+    assert_eq!(keys(&resolved), ["ok"], "the working rule survives");
+
+    printer.flush();
+    assert_eq!(err.lock().as_str(), "");
+}
+
+/// Named on the command line, an optional rule that fails resolves to nothing
+/// rather than aborting the command.
+#[tokio::test]
+async fn an_optional_alias_failure_resolves_to_nothing() {
+    let (rules, tmp, printer, err, prompts) = setup(
+        r#"{ "broken": { "value": { "cmd": "false" }, "run": "unattended", "optional": true } }"#,
+    );
+    let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
+
+    assert_eq!(resolver.alias("broken").await.unwrap(), None);
+
+    printer.flush();
+    assert_eq!(err.lock().as_str(), "");
+}
+
+/// No terminal to confirm on is one of the ways an optional rule can't be
+/// produced, so both paths skip it instead of aborting.
+#[tokio::test]
+async fn an_optional_rule_without_a_terminal_is_skipped() {
+    let (rules, tmp, printer, err, prompts) =
+        setup(r#"{ "asks": { "value": { "cmd": "echo x" }, "optional": true } }"#);
+    let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
+
+    assert!(resolver.automatic(Trigger::New).await.unwrap().is_empty());
+    assert_eq!(resolver.alias("asks").await.unwrap(), None);
+
+    printer.flush();
+    assert_eq!(err.lock().as_str(), "");
+}
+
+/// `deny` is a refusal to ever run the command, so the rule can never produce a
+/// value and naming it stays an error even when it is optional.
+#[tokio::test]
+async fn an_optional_deny_rule_still_errors_as_an_alias() {
+    let (rules, tmp, printer, _err, prompts) =
+        setup(r#"{ "denied": { "value": { "cmd": "echo x" }, "run": "deny", "optional": true } }"#);
+    let resolver = Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
+
+    let error = resolver.alias("denied").await.unwrap_err().to_string();
+    assert!(error.contains("deny"), "got: {error}");
+}
+
 /// A static rule never consults `run`, so it resolves with no terminal even
 /// under the default `ask` policy.
 #[tokio::test]
