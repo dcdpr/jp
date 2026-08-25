@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use clap::{Parser, Subcommand};
 use grizzly::{
     BearDb, SearchParams,
+    search::Cutoff,
     server::{GrizzlyService, ServerConfig},
 };
 use rmcp::{ServiceExt, transport::stdio};
@@ -45,8 +46,12 @@ enum Command {
         tags: Vec<String>,
 
         /// Only notes created on or after this day, as `YYYY-MM-DD`.
+        ///
+        /// A full `YYYY-MM-DD HH:MM:SS` is honoured to the second.
+        /// Zero-padded either way: the comparison is lexical, so `2026-08-1`
+        /// would mean a different day rather than the one written.
         #[arg(long)]
-        created_after: Option<String>,
+        created_after: Option<Cutoff>,
 
         /// Most notes to return.
         #[arg(long, default_value_t = 50)]
