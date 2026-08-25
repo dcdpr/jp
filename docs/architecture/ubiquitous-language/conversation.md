@@ -7,9 +7,6 @@ Six terms describe its structure — a **Conversation** is the stored entity, a
 **Tool Calls** and **Inquiries** are specific event kinds, and a **Thread** is
 the projection of a Conversation that gets sent to an LLM provider.
 
-Three more name a Conversation's *state*: **Live** and **Archived** are where it
-sits, and **Active** is the one a session is working on.
-
 These terms are tightly coupled — paraphrasing one usually breaks the model for
 another.
 Use them as written.

@@ -10,7 +10,7 @@ use jp_workspace::{
 };
 
 use super::*;
-use crate::cmd::conversation_id::PositionalIds;
+use crate::cmd::conversation_id::{FlagIds, PositionalIds};
 
 fn workspace_with_conversation() -> (Workspace, ConversationId) {
     let mut ws = Workspace::in_memory(Utf8PathBuf::new());
@@ -351,6 +351,82 @@ fn grammar_converts_to_a_no_target_error() {
             multi: true,
             allow_new: true
         }
+    ));
+}
+
+/// A command's grammar reaches the request even when no target was given.
+///
+/// The empty-argument path is the one a bare `jp query` takes.
+/// Its argument type is `FlagIds<false, false>`, so the request must not claim
+/// the session or multi support that its own parser rejects — nor drop the
+/// support a multi-target command does have.
+#[test]
+fn an_empty_target_list_keeps_the_commands_grammar() {
+    let neither = FlagIds::<false, false>::from_targets(vec![]);
+    for request in [
+        ConversationLoadRequest::explicit_or_session(&neither),
+        ConversationLoadRequest::explicit_or_session_with_config(&neither),
+        ConversationLoadRequest::explicit_or_none(&neither),
+        ConversationLoadRequest::explicit_or_previous(&neither),
+    ] {
+        assert!(!request.session, "invented session keyword support");
+        assert!(!request.multi, "invented multi-target support");
+    }
+
+    let both = PositionalIds::<true, true>::from_targets(vec![]);
+    for request in [
+        ConversationLoadRequest::explicit_or_session(&both),
+        ConversationLoadRequest::explicit_or_session_with_config(&both),
+        ConversationLoadRequest::explicit_or_none(&both),
+        ConversationLoadRequest::explicit_or_previous(&both),
+    ] {
+        assert!(request.session, "dropped session keyword support");
+        assert!(request.multi, "dropped multi-target support");
+    }
+}
+
+/// A filter that matches nothing shows no prompt, so the failure has to name
+/// the empty set rather than claim the user declined something.
+///
+/// Safe to drive directly: both helpers return before constructing a prompt, so
+/// no terminal is involved.
+#[test]
+fn a_picker_with_no_candidates_reports_what_was_missing() {
+    let (ws, _) = workspace_with_conversation();
+    let pinned = PickerFilter {
+        pinned: true,
+        ..PickerFilter::default()
+    };
+
+    let error = pick_conversation(&ws, None, &pinned, false).expect_err("nothing is pinned");
+    assert_eq!(
+        error.to_string(),
+        "conversation not found: no pinned conversations"
+    );
+
+    let error = pick_conversations(&ws, None, &pinned).expect_err("nothing is pinned");
+    assert_eq!(
+        error.to_string(),
+        "conversation not found: no pinned conversations"
+    );
+}
+
+/// Only Esc, Ctrl-C, and EOF are the user declining.
+/// Anything else is the prompt itself breaking, and must keep its cause so the
+/// run is reported as a failure rather than a choice.
+#[test]
+fn only_cancellation_reads_as_a_declined_picker() {
+    assert!(matches!(
+        declined_or_failed(InquireError::OperationCanceled),
+        Error::NoConversationSelected
+    ));
+    assert!(matches!(
+        declined_or_failed(InquireError::OperationInterrupted),
+        Error::NoConversationSelected
+    ));
+    assert!(matches!(
+        declined_or_failed(InquireError::NotTTY),
+        Error::Inquire(_)
     ));
 }
 
