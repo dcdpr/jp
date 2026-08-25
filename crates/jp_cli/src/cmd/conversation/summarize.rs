@@ -193,7 +193,7 @@ enum StreamOutcome {
 /// Reduce one summarizer stream to its outcome.
 ///
 /// Only a stream that both finishes with [`FinishReason::Completed`] and
-/// carries non-blank message text yields a summary.
+/// carries message text yields a summary.
 /// Every other terminal reason is unusable even when text was streamed first: a
 /// truncated or declined response would otherwise be stored as the summary and
 /// replace the turns it was meant to stand in for, silently dropping whatever
@@ -240,8 +240,6 @@ fn summarize_events(events: Vec<Event>) -> StreamOutcome {
         })
         .collect::<String>();
 
-    // Whitespace-only output is as unusable as no output: storing it would
-    // replace the turns it stands for with nothing.
     if matches!(finish, Some(FinishReason::Completed)) && !summary.is_empty() {
         return StreamOutcome::Summary(summary);
     }

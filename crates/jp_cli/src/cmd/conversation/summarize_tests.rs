@@ -218,9 +218,12 @@ fn completed_stream_without_text_is_unusable() {
 
 #[test]
 fn completed_stream_with_only_whitespace_is_unusable() {
-    // A provider can complete with nothing but a newline. Storing that would
-    // replace the turns it stands for with a blank summary, in every future
-    // request, without telling anyone.
+    // `EventBuilder::handle_flush` drops a whitespace-only message, so a stream
+    // carrying nothing but a newline arrives here with no message at all and
+    // takes the same path as one that never produced text.
+    //
+    // This pins the composed behavior across that boundary, not a check in
+    // `summarize_events`: no input can make `summary` non-empty and blank.
     let events = stream_with_text(" \n", FinishReason::Completed);
 
     assert_eq!(
