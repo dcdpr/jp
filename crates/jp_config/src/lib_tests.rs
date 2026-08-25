@@ -307,17 +307,15 @@ fn inquiry_inheritance_survives_a_partial_round_trip() {
     );
 }
 
-/// A later layer naming the assistant model by alias must not strand the
-/// inquiry's own model.
+/// A changed inquiry model id is recorded whole, so a later layer naming the
+/// assistant model by alias cannot strand it.
 ///
 /// A resolved config becomes a layer again through `to_partial` (a stored
 /// conversation config, a `--cfg` baseline), which records the inquiry model as
 /// a diff against the assistant's.
-/// An inquiry sharing the assistant's provider records only its name, and
-/// inherits the provider back at build time — but only if the assistant's
-/// model id is still an id at that point.
-/// A `--cfg=personas/...` layer setting `assistant.model.id` to an alias leaves
-/// it an unresolved `Alias`, with no provider for the inquiry to inherit.
+/// A diff keeping only the differing field would leave the inquiry holding a
+/// name and no provider, and an assistant named by alias carries no provider
+/// field to fill it back in.
 #[test]
 fn inquiry_model_survives_an_aliased_assistant_layer() {
     use crate::{
@@ -346,6 +344,19 @@ fn inquiry_model_survives_an_aliased_assistant_layer() {
     .into();
 
     let mut round_tripped = build(partial).expect("valid config").to_partial();
+
+    assert_eq!(
+        round_tripped
+            .conversation
+            .inquiry
+            .assistant
+            .model
+            .id
+            .to_string(),
+        "anthropic/claude-haiku-4-5",
+        "the recorded diff carries the whole id, not just the changed name"
+    );
+
     round_tripped.assistant.model.id = PartialModelIdOrAliasConfig::Alias("opus".to_owned());
 
     let config = build(round_tripped).expect("valid config");
@@ -361,6 +372,63 @@ fn inquiry_model_survives_an_aliased_assistant_layer() {
             .to_string(),
         "anthropic/claude-haiku-4-5",
         "the inquiry keeps its own model, provider included"
+    );
+}
+
+/// An inquiry model keeps its own provider when the assistant moves to another
+/// one.
+///
+/// An id is one value across two fields: an inquiry left holding only
+/// `claude-haiku-4-5` takes `openai` from the assistant below it and resolves
+/// to a model that does not exist, which fails only once the request is sent.
+#[test]
+fn an_inquiry_model_keeps_its_provider_when_the_assistant_changes_provider() {
+    use crate::{
+        model::id::{ModelIdConfig, PartialModelIdOrAliasConfig, ProviderId},
+        util::build,
+    };
+
+    let mut partial = PartialAppConfig::new_test();
+    partial.providers.llm.aliases.insert(
+        "sol".to_owned(),
+        PartialModelIdOrAliasConfig::from("openai/gpt-5.6-sol"),
+    );
+    partial.assistant.model.id = ModelIdConfig {
+        provider: ProviderId::Anthropic,
+        name: "claude-opus-5".parse().unwrap(),
+    }
+    .to_partial()
+    .into();
+    partial.conversation.inquiry.assistant.model.id = ModelIdConfig {
+        provider: ProviderId::Anthropic,
+        name: "claude-haiku-4-5".parse().unwrap(),
+    }
+    .to_partial()
+    .into();
+
+    // The assistant moves to another provider; the inquiry says nothing about
+    // it.
+    let mut round_tripped = build(partial).expect("valid config").to_partial();
+    round_tripped.assistant.model.id = PartialModelIdOrAliasConfig::Alias("sol".to_owned());
+
+    let config = build(round_tripped).expect("valid config");
+
+    assert_eq!(
+        config
+            .conversation
+            .inquiry
+            .assistant
+            .model
+            .id
+            .resolved()
+            .to_string(),
+        "anthropic/claude-haiku-4-5",
+        "the inquiry keeps the provider its own model needs"
+    );
+    assert_eq!(
+        config.assistant.model.id.resolved().to_string(),
+        "openai/gpt-5.6-sol",
+        "and the assistant moves to the model its alias names"
     );
 }
 
@@ -422,9 +490,11 @@ fn an_unknown_assistant_alias_reports_itself() {
 
     let error = build(partial).unwrap_err().to_string();
 
-    assert!(
-        error.contains("assistant.model.id"),
-        "the error names the field holding the alias, got: {error}"
+    assert_eq!(
+        error,
+        "assistant.model.id: model ID does not match a known alias nor matches the full ID format \
+         <provider>/<model>",
+        "an unresolvable alias is reported as one, not as a missing field"
     );
 }
 
