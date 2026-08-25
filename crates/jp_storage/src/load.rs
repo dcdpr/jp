@@ -216,7 +216,7 @@ impl Storage {
         // Legacy format: base config packed as first element in events.json.
         let events = load_json(&events_path)?;
         match ConversationStream::from_legacy_events(events) {
-            Ok(Some(stream)) => Ok(stream),
+            Ok(Some(stream)) => Ok(stream.with_created_at(id.timestamp())),
             Ok(None) => Err(LoadError::new(
                 conv_dir.to_owned(),
                 LoadErrorInner::Stream(StreamError::FromEmptyIterator),
