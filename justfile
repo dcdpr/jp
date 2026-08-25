@@ -351,12 +351,21 @@ pr-gc: _install-jp
     fi
     open=$(printf '%s' "$body" | jq -r '[.[].number | tostring] | join(" ")')
 
-    # `<id>:pr-<kind>:<number>` per line. Conversation ids carry no colon, so
-    # the id is everything before the first one and the PR number everything
-    # after the last.
-    convs=$(jp -F json conversation ls 2>/dev/null \
-        | jq -r '.[] | select((.Title // "") | test("^pr-(review|triage):[0-9]+$")) | "\(.ID):\(.Title)"' \
-        2>/dev/null || true)
+    convs=$(jp -F json conversation ls) || {
+        echo "Could not list conversations." >&2
+        exit 1
+    }
+
+    # `<id>:<title>:<number>` per line. Conversation ids carry no colon, so the
+    # id is everything before the first one. The trailing number is the title's
+    # PR number without leading zeros, since `pr-review:0948` and
+    # `pr-review:948` both name pull request 948.
+    convs=$(printf '%s' "$convs" | jq -r '
+        .[]
+        | (.Title // "") as $t
+        | select($t | test("^pr-(review|triage):[0-9]+$"))
+        | ($t | capture(":(?<n>[0-9]+)$") | .n | tonumber | tostring) as $n
+        | "\(.ID):\($t):\($n)"')
 
     if [ -z "$convs" ]; then
         echo "No pr-review or pr-triage conversations found."
@@ -379,7 +388,8 @@ pr-gc: _install-jp
     ids=""
     echo "These conversations track pull requests that are no longer open:"
     for entry in $stale; do
-        printf "  %s (%s)\n" "${entry#*:}" "${entry%%:*}"
+        title=${entry#*:}
+        printf "  %s (%s)\n" "${title%:*}" "${entry%%:*}"
         ids="${ids} ${entry%%:*}"
     done
 
