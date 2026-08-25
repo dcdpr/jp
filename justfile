@@ -128,11 +128,17 @@ stage-and-commit: _install-jp
 # prompts where to resolve them (a [p]icked conversation, a [n]ew one, or
 # [q]uit) and sends the merge output plus `git status -sb` as the query. The
 # conflicted files stay in the working tree; jp edits them in place, and does
-# not commit or abort the merge.
+# not commit or abort the merge. Exits nonzero, listing what is left, when
+# conflicts remain after the query.
 #
 # Re-running while a merge is already in progress skips the merge itself and
 # hands the outstanding conflicts over again, so a resolution that went
-# sideways can be retried in another conversation.
+# sideways can be retried in another conversation. That merge's source is read
+# from MERGE_HEAD, not from REF, so the retry needs no arguments.
+#
+# Refuses to start when unmerged paths exist without a merge in progress: a
+# rebase, cherry-pick, or revert stopped on conflicts is not this recipe's to
+# resolve.
 #
 # A picked conversation keeps its own config; it usually already holds the
 # branch's context. A new one gets `personas/dev`, since the workspace default
@@ -148,18 +154,27 @@ git-merge REF="main" *ARGS: _install-jp _install-tools
     #!/usr/bin/env sh
     set -eu
 
+    ref="$1"
     shift # remove REF from positional params
 
     if git rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
-        merge_out="A merge is already in progress; 'git merge {{REF}}' was not re-run."
+        # This invocation's REF says nothing about the merge already underway;
+        # MERGE_HEAD is the commit actually being merged.
+        ref=$(git name-rev --name-only --always MERGE_HEAD)
+        merge_block="(a merge with ${ref} was already in progress; no new merge was started)"
         merge_exit=0
-        printf '%s\n' "$merge_out" >&2
+        printf '%s\n' "$merge_block" >&2
+    elif [ -n "$(git diff --name-only --diff-filter=U)" ]; then
+        echo "Unmerged paths exist but no merge is in progress." >&2
+        echo "Finish or abort the rebase/cherry-pick/revert that stopped first." >&2
+        exit 1
     else
         set +e
-        merge_out=$(git merge "{{REF}}" 2>&1)
+        merge_out=$(git merge "$ref" 2>&1)
         merge_exit=$?
         set -e
         printf '%s\n' "$merge_out"
+        merge_block=$(printf '$ git merge %s\n%s' "$ref" "$merge_out")
     fi
 
     # Unmerged paths, not the exit status, decide whether there's work for jp:
@@ -180,25 +195,31 @@ git-merge REF="main" *ARGS: _install-jp _install-tools
         ans=n
     fi
 
-    target=""
-    persona=""
     branch=$(git rev-parse --abbrev-ref HEAD)
     case "$ans" in
         ""|p|P) jp conversation use '?' ;;
-        n|N)    target="--new --title merge:{{REF}}-into-${branch}"
-                persona="--cfg=personas/dev" ;;
+        n|N)    set -- --new --title "merge:${ref}-into-${branch}" --cfg=personas/dev "$@" ;;
         q|Q)    exit 0 ;;
         *)      echo "Unknown choice '$ans'; aborting." >&2; exit 1 ;;
     esac
 
-    preamble="Please resolve the merge conflicts with {{REF}}. Read each conflicted file, \
+    preamble="Please resolve the merge conflicts with ${ref}. Read each conflicted file, \
     work out what both sides were after, and write the resolution that keeps both intents. \
     Where the two sides genuinely disagree, stop and tell me instead of picking one. Leave \
     the merge uncommitted and do not run 'git merge --abort'."
 
-    printf '%s\n\n```sh\n$ git merge %s\n%s\n\n$ git status -sb\n%s\n```\n' \
-        "$preamble" "{{REF}}" "$merge_out" "$(git status -sb)" \
-        | jp query $target $persona "$@"
+    printf '%s\n\n```sh\n%s\n\n$ git status -sb\n%s\n```\n' \
+        "$preamble" "$merge_block" "$(git status -sb)" \
+        | jp query "$@"
+
+    # `--diff-filter=U` reports index-level unmerged entries, which is exactly
+    # what `git commit` refuses on: a file edited but never staged still counts.
+    remaining=$(git diff --name-only --diff-filter=U)
+    if [ -n "$remaining" ]; then
+        printf "\nStill conflicted:\n" >&2
+        printf '%s\n' "$remaining" | sed 's/^/  /' >&2
+        exit 1
+    fi
 
     printf "\nReview the resolution, then 'git commit' to conclude the merge.\n" >&2
 
