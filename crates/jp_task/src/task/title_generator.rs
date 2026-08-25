@@ -1,26 +1,11 @@
 use std::error::Error;
 
 use async_trait::async_trait;
-use jp_config::{
-    AppConfig,
-    model::{
-        ModelConfig,
-        id::ModelIdConfig,
-        parameters::{CustomReasoningConfig, ParametersConfig, ReasoningEffort},
-    },
-    providers::llm::LlmProviderConfig,
-};
-use jp_conversation::{
-    ConversationEvent, ConversationId, ConversationStream,
-    event::{ChatRequest, ChatResponse},
-    thread::ThreadBuilder,
-};
+use jp_config::{AppConfig, model::ModelConfig, providers::llm::LlmProviderConfig};
+use jp_conversation::{ConversationId, ConversationStream};
 use jp_llm::{
-    event::Event,
-    event_builder::EventBuilder,
     provider,
-    retry::{RetryConfig, collect_with_retry},
-    title,
+    title::{self, TitleRequest},
 };
 use jp_workspace::Workspace;
 use tokio_util::sync::CancellationToken;
@@ -31,7 +16,7 @@ use crate::Task;
 #[derive(Debug)]
 pub struct TitleGeneratorTask {
     pub conversation_id: ConversationId,
-    pub model_id: ModelIdConfig,
+    pub model: ModelConfig,
     pub providers: LlmProviderConfig,
     pub events: ConversationStream,
     pub title: Option<String>,
@@ -51,42 +36,17 @@ impl TitleGeneratorTask {
         config: &AppConfig,
         is_tty: bool,
     ) -> Result<Self, Box<dyn Error + Send + Sync>> {
-        // Prefer the title generation model id, otherwise use the assistant
-        // model id.
-        let mut model = config
-            .conversation
-            .title
-            .generate
-            .model
-            .clone()
-            .unwrap_or_else(|| ModelConfig {
-                id: config.assistant.model.id.clone(),
-                parameters: ParametersConfig::default(),
-            });
-
-        let model_id = model.id.resolved().clone();
+        let model = title::resolve_model(config, None);
 
         // Fail fast on a misconfigured title provider (e.g. a missing API
         // key environment variable). Without this, the failure only surfaces
         // inside the spawned task, after the query has already committed to
         // waiting for it at teardown.
-        provider::preflight(model_id.provider, &config.providers.llm)?;
-
-        // If reasoning is explicitly enabled for title generation, use it,
-        // otherwise limit it to low effort.
-        if model.parameters.reasoning.is_none() {
-            model.parameters.reasoning = Some(
-                CustomReasoningConfig {
-                    effort: ReasoningEffort::Low,
-                    exclude: true,
-                }
-                .into(),
-            );
-        }
+        provider::preflight(model.id.resolved().provider, &config.providers.llm)?;
 
         Ok(Self {
             conversation_id,
-            model_id,
+            model,
             providers: config.providers.llm.clone(),
             events,
             title: None,
@@ -98,68 +58,26 @@ impl TitleGeneratorTask {
     async fn update_title(&mut self) -> Result<(), Box<dyn Error + Send + Sync>> {
         trace!(conversation_id = %self.conversation_id, "Updating conversation title.");
 
-        let provider = provider::get_provider(self.model_id.provider, &self.providers)?;
-        let model = provider.model_details(&self.model_id.name).await?;
+        let model_id = self.model.id.resolved().clone();
+        let provider = provider::get_provider(model_id.provider, &self.providers)?;
+        let details = provider.model_details(&model_id.name).await?;
 
-        let sections = title::title_instructions(1, &[]);
-        let thread = ThreadBuilder::default()
-            .with_events(self.events.clone())
-            .with_sections(sections)
-            .build()?;
+        let titles = title::generate(provider.as_ref(), &details, TitleRequest {
+            events: self.events.clone(),
+            model: self.model.clone(),
+            count: 1,
+            rejected: vec![],
+            max_response_bytes: self.max_response_bytes,
+        })
+        .await?;
 
-        let schema = title::title_schema(1);
-        let mut events = thread.events.clone();
-        events.start_turn(ChatRequest {
-            content: "Generate a title for this conversation.".into(),
-            schema: Some(schema),
-            author: None,
-        });
-
-        let query = jp_llm::query::ChatQuery {
-            thread: jp_conversation::thread::Thread { events, ..thread },
-            tools: vec![],
-            tool_choice: jp_config::assistant::tool_choice::ToolChoice::default(),
-        };
-
-        let retry_config = RetryConfig::default().with_max_response_bytes(self.max_response_bytes);
-        let llm_events =
-            collect_with_retry(provider.as_ref(), &model, query, &retry_config).await?;
-
-        // Pipe raw streaming events through the EventBuilder so that
-        // structured JSON chunks are concatenated and parsed into a
-        // proper Value (rather than individual Value::String fragments).
-        let mut builder = EventBuilder::new();
-        let mut flushed = Vec::new();
-        for event in llm_events {
-            match event {
-                Event::Part {
-                    index,
-                    part,
-                    metadata,
-                } => {
-                    builder.handle_part(index, part, metadata);
-                }
-                Event::Flush { index, metadata } => {
-                    flushed.extend(builder.handle_flush(index, metadata));
-                }
-                Event::Finished(_) => flushed.extend(builder.drain()),
-                Event::Patch(_) | Event::KeepAlive => {}
-            }
-        }
-
-        let structured_data = flushed
-            .into_iter()
-            .filter_map(ConversationEvent::into_chat_response)
-            .find_map(ChatResponse::into_structured_data);
-
-        if let Some(data) = structured_data {
-            let titles = title::extract_titles(&data);
-            trace!(titles = ?titles, "Received conversation titles.");
-            if let Some(t) = titles.into_iter().next() {
-                self.title = Some(t);
-            }
-        } else {
-            warn!(conversation_id = %self.conversation_id, "No structured data in title response.");
+        trace!(?titles, "Received conversation titles.");
+        self.title = titles.into_iter().next();
+        if self.title.is_none() {
+            warn!(
+                conversation_id = %self.conversation_id,
+                "No title in the generation response."
+            );
         }
 
         Ok(())

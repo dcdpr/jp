@@ -21,19 +21,15 @@ use async_trait::async_trait;
 use indexmap::IndexMap;
 use jp_attachment::Attachment;
 use jp_config::assistant::{sections::SectionConfig, tool_choice::ToolChoice};
-use jp_conversation::{
-    ConversationEvent, ConversationStream, EventKind,
-    event::{ChatRequest, ChatResponse},
-    thread::Thread,
-};
+use jp_conversation::{ConversationStream, event::ChatRequest, thread::Thread};
 use jp_llm::{
     Provider,
-    event::Event,
-    event_builder::EventBuilder,
+    event_builder::structured_data,
     model::ModelDetails,
     query::ChatQuery,
     retry::{RetryConfig, collect_with_retry},
     tool::ToolDefinition,
+    window,
 };
 use jp_tool::{AnswerType, Question};
 use serde_json::{Map, Value, json};
@@ -235,15 +231,15 @@ impl InquiryBackend for LlmInquiryBackend {
 
         // Truncate older events if the inquiry model has a smaller context
         // window than what the conversation has accumulated.
-        if let Some(max_tokens) = config.model.context_window {
-            let overhead = estimate_fixed_overhead_chars(
+        if let Some(context_window) = config.model.context_window {
+            let overhead = window::estimate_overhead_chars(
                 config.system_prompt.as_deref(),
                 &config.sections,
                 &self.attachments,
                 &self.tools,
             );
 
-            truncate_to_fit(&mut events, max_tokens, overhead);
+            window::truncate_to_fit(&mut events, context_window, overhead);
         }
 
         // Tag the second-to-last provider-visible event with a cache
@@ -307,33 +303,8 @@ impl InquiryBackend for LlmInquiryBackend {
             }
         };
 
-        // Pipe raw streaming events through the EventBuilder so that
-        // structured JSON chunks are concatenated and parsed into a
-        // proper Value (rather than individual Value::String fragments).
-        let mut builder = EventBuilder::new();
-        let mut flushed = Vec::new();
-        for event in llm_events {
-            match event {
-                Event::Part {
-                    index,
-                    part,
-                    metadata,
-                } => {
-                    builder.handle_part(index, part, metadata);
-                }
-                Event::Flush { index, metadata } => {
-                    flushed.extend(builder.handle_flush(index, metadata));
-                }
-                Event::Finished(_) => flushed.extend(builder.drain()),
-                Event::Patch(_) | Event::KeepAlive => {}
-            }
-        }
-
-        let mut structured_data = flushed
-            .into_iter()
-            .filter_map(ConversationEvent::into_chat_response)
-            .find_map(ChatResponse::into_structured_data)
-            .ok_or(InquiryError::MissingStructuredData)?;
+        let mut structured_data =
+            structured_data(llm_events).ok_or(InquiryError::MissingStructuredData)?;
 
         info!(
             inquiry_id,
@@ -398,54 +369,6 @@ impl InquiryBackend for MockInquiryBackend {
     }
 }
 
-/// Estimated chars-per-token ratio used for estimation.
-const CHARS_PER_TOKEN: usize = 3;
-
-/// Safety margin for tokenization imprecision (the 3 chars/token ratio varies
-/// by content type) and provider framing overhead (JSON wrapping, role tags,
-/// structured output injection, etc.).
-///
-/// The system prompt, sections, attachments, and tool definitions are now
-/// measured explicitly via `estimate_fixed_overhead_chars`, so this factor only
-/// needs to cover the remaining approximation error.
-const OVERHEAD_FACTOR: usize = 90; // percent
-
-/// When truncation is needed, target this fraction of the context window.
-/// Leaves headroom so subsequent inquiries in the same turn don't re-truncate
-/// (which would bust the prompt cache).
-const TARGET_FACTOR: usize = 80; // percent
-
-fn estimate_chars(events: &ConversationStream) -> usize {
-    events.iter().map(|e| estimate_event_chars(e.event)).sum()
-}
-
-fn token_budget(max_tokens: u32, overhead_chars: usize) -> usize {
-    let total = (max_tokens as usize) * CHARS_PER_TOKEN * OVERHEAD_FACTOR / 100;
-    total.saturating_sub(overhead_chars)
-}
-
-fn token_target(max_tokens: u32, overhead_chars: usize) -> usize {
-    let total = (max_tokens as usize) * CHARS_PER_TOKEN * TARGET_FACTOR / 100;
-    total.saturating_sub(overhead_chars)
-}
-
-fn estimate_event_chars(event: &ConversationEvent) -> usize {
-    match &event.kind {
-        EventKind::ChatRequest(r) => r.content.len(),
-        EventKind::ChatResponse(ChatResponse::Message { message }) => message.len(),
-        EventKind::ChatResponse(ChatResponse::Reasoning { reasoning }) => reasoning.len(),
-        EventKind::ChatResponse(ChatResponse::Structured { data }) => data.to_string().len(),
-        EventKind::ToolCallRequest(r) => {
-            r.name.len() + serde_json::to_string(&r.arguments).map_or(0, |s| s.len())
-        }
-        EventKind::ToolCallResponse(r) => {
-            r.result.as_ref().map_or(0, String::len)
-                + r.result.as_ref().err().map_or(0, String::len)
-        }
-        _ => 0,
-    }
-}
-
 /// Find the iteration index of the second-to-last provider-visible event.
 ///
 /// Returns `None` if there are fewer than two visible events.
@@ -461,125 +384,6 @@ fn second_last_visible_event_index(events: &ConversationStream) -> Option<usize>
     }
 
     second_last
-}
-
-/// Char-based estimate of the fixed overhead that shares the model's context
-/// window with conversation events: system prompt, sections, attachments, and
-/// tool definitions.
-fn estimate_fixed_overhead_chars(
-    system_prompt: Option<&str>,
-    sections: &[SectionConfig],
-    attachments: &[Attachment],
-    tools: &[ToolDefinition],
-) -> usize {
-    let mut chars = 0;
-
-    if let Some(prompt) = system_prompt {
-        chars += prompt.len();
-    }
-
-    for section in sections {
-        chars += section.render().len();
-    }
-
-    for attachment in attachments {
-        if let Some(text) = attachment.as_text() {
-            chars += text.len();
-        }
-        // Binary attachments also consume tokens (base64, etc.) but we can't
-        // easily measure them. The OVERHEAD_FACTOR margin covers this.
-    }
-
-    for tool in tools {
-        chars += tool.name.len();
-        if let Some(desc) = tool.docs.schema_description() {
-            chars += desc.len();
-        }
-        // Parameter schemas are serialized as JSON by providers.
-        chars += serde_json::to_string(&tool.to_parameters_schema()).map_or(0, |s| s.len());
-    }
-
-    chars
-}
-
-/// Drop older events so the conversation fits within the model's context
-/// window.
-///
-/// The budget is calculated from the model's context window minus the measured
-/// fixed overhead (system prompt, sections, attachments, tool definitions).
-/// When the estimated char count of conversation events exceeds this budget,
-/// events are dropped from the **start** until enough chars have been removed
-/// to bring the total under the target.
-///
-/// Dropping from the start (oldest events) produces a stable cutoff across
-/// multiple inquiry calls within the same turn.
-/// Since `ConversationStream` is append-only, the same K oldest events are
-/// dropped regardless of how many new events were appended at the end.
-/// This preserves the prompt cache prefix across inquiries.
-///
-/// After truncation, `sanitize()` restores structural invariants (orphaned tool
-/// calls, leading non-user events, etc.).
-fn truncate_to_fit(events: &mut ConversationStream, max_tokens: u32, overhead_chars: usize) {
-    let budget = token_budget(max_tokens, overhead_chars);
-    let total_chars = estimate_chars(events);
-
-    if total_chars <= budget {
-        return;
-    }
-
-    let target = token_target(max_tokens, overhead_chars);
-
-    // Round must_drop up to the nearest 10% of target so that small
-    // additions at the end of the stream (e.g. a tool response from a
-    // previous inquiry) don't shift the cutoff point. This keeps the
-    // prefix stable across multiple inquiry calls in the same turn,
-    // preserving prompt cache hits on the conversation messages.
-    let granularity = target / 10;
-    let raw_drop = total_chars.saturating_sub(target);
-    let must_drop = match granularity {
-        0 => raw_drop,
-        g => raw_drop.div_ceil(g) * g,
-    };
-
-    // Walk from the start (oldest), accumulating chars to drop.
-    let char_counts: Vec<usize> = events
-        .iter()
-        .map(|e| estimate_event_chars(e.event))
-        .collect();
-
-    let mut dropped_chars = 0;
-    let mut dropped_events = 0;
-
-    for count in &char_counts {
-        if dropped_chars >= must_drop {
-            break;
-        }
-        dropped_chars += count;
-        dropped_events += 1;
-    }
-
-    let mut idx = 0;
-    events.retain(|_| {
-        let keep = idx >= dropped_events;
-        idx += 1;
-        keep
-    });
-
-    events.sanitize();
-
-    // If truncation removed all ChatRequests, the remaining events (assistant
-    // responses, tool calls) cannot form a valid provider message sequence —
-    // providers require the first message to be a user message. Clear the
-    // stream so the inquiry's own ChatRequest (added by the caller via
-    // `start_turn`) becomes the only content.
-    if !events.has_chat_request() {
-        events.clear();
-    }
-
-    info!(
-        max_tokens,
-        dropped_events, "Truncated inquiry context to fit model window",
-    );
 }
 
 #[cfg(test)]
