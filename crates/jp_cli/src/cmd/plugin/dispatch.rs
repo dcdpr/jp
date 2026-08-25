@@ -201,26 +201,38 @@ impl Composer<'_> {
     }
 }
 
-/// Run a plugin binary, handling the full protocol lifecycle.
+/// Where a plugin run reads and writes.
 ///
-/// `binary` is the path to the plugin executable.
-/// `args` are the remaining CLI arguments to forward.
-/// `child_cwd` is the bootstrap-resolved working directory for the child (RFD
-/// 087): `Some` when JP operates on a workspace other than the launch cwd's
-/// own, `None` to inherit the process cwd.
-pub(crate) fn run_plugin(
+/// Grouped because they arrive together and are all optional paths: as separate
+/// parameters, two of them could be transposed at the call site and nothing
+/// would say so.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PluginPaths<'a> {
+    /// The bootstrap-resolved working directory for the child (RFD 087).
+    ///
+    /// `Some` when JP operates on a workspace other than the launch cwd's own,
+    /// `None` to inherit the process cwd.
+    pub(crate) child_cwd: Option<&'a Utf8Path>,
+
+    /// The workspace's storage directory.
+    pub(crate) storage: Option<&'a Utf8Path>,
+
+    /// The user-local storage directory for this workspace, when there is one.
+    pub(crate) user_storage: Option<&'a Utf8Path>,
+}
+
+/// The `init` message a plugin is greeted with, and the config it carries.
+///
+/// The config is returned alongside because the message loop answers
+/// `read_config` from the same value, rather than serializing it twice.
+fn init_message(
     name: &str,
-    binary: &Utf8Path,
     args: &[String],
     workspace: &Workspace,
-    child_cwd: Option<&Utf8Path>,
-    storage_path: Option<&Utf8Path>,
-    user_storage_path: Option<&Utf8Path>,
+    paths: PluginPaths<'_>,
     config: &Arc<AppConfig>,
-    signals: &SignalRouter,
     log_level: u8,
-    composer: &Composer<'_>,
-) -> Result<(), cmd::Error> {
+) -> Result<(HostToPlugin, Value), cmd::Error> {
     let config_json = serde_json::to_value(config.as_ref().to_partial())
         .map_err(|e| cmd::Error::from(format!("failed to serialize config: {e}")))?;
 
@@ -233,21 +245,41 @@ pub(crate) fn run_plugin(
         .cloned()
         .unwrap_or_default();
 
-    let storage_path = storage_path.ok_or("workspace has no storage configured")?;
+    let storage = paths.storage.ok_or("workspace has no storage configured")?;
 
     let init = HostToPlugin::Init(InitMessage {
         version: PROTOCOL_VERSION,
         workspace: WorkspaceInfo {
             root: workspace.root().to_owned(),
-            storage: storage_path.to_owned(),
+            storage: storage.to_owned(),
             id: workspace.id().to_string(),
         },
-        paths: well_known_paths(user_storage_path),
+        paths: well_known_paths(paths.user_storage),
         config: config_json.clone(),
         options,
         args: args.to_vec(),
         log_level,
     });
+
+    Ok((init, config_json))
+}
+
+/// Run a plugin binary, handling the full protocol lifecycle.
+///
+/// `binary` is the path to the plugin executable.
+/// `args` are the remaining CLI arguments to forward.
+pub(crate) fn run_plugin(
+    name: &str,
+    binary: &Utf8Path,
+    args: &[String],
+    workspace: &Workspace,
+    paths: PluginPaths<'_>,
+    config: &Arc<AppConfig>,
+    signals: &SignalRouter,
+    log_level: u8,
+    composer: &Composer<'_>,
+) -> Result<(), cmd::Error> {
+    let (init, config_json) = init_message(name, args, workspace, paths, config, log_level)?;
 
     debug!(%binary, "Spawning plugin.");
 
@@ -259,7 +291,7 @@ pub(crate) fn run_plugin(
     // The root-as-working-directory invariant (RFD 087): when JP operates on
     // a workspace other than the launch cwd's own, plugins run as if launched
     // from the selected workspace root.
-    if let Some(cwd) = child_cwd {
+    if let Some(cwd) = paths.child_cwd {
         cmd.current_dir(cwd);
     }
 
@@ -1130,9 +1162,11 @@ pub(crate) async fn run_external(args: &[String], ctx: &Ctx) -> cmd::Output {
         &binary,
         plugin_args,
         &ctx.workspace,
-        ctx.exec.child_cwd(),
-        ctx.storage_path(),
-        ctx.user_storage_path(),
+        PluginPaths {
+            child_cwd: ctx.exec.child_cwd(),
+            storage: ctx.storage_path(),
+            user_storage: ctx.user_storage_path(),
+        },
         &config,
         &ctx.signals,
         ctx.term.args.verbose,
