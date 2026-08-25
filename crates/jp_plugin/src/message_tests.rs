@@ -70,13 +70,42 @@ fn plugin_ready_roundtrip() {
     assert_eq!(msg, parsed);
 }
 
-/// A plugin built before the field existed sends a bare `ready`, and is taken
-/// at its word: it can only have been written against protocol 1.
+/// A plugin built before the field existed sends a bare `ready`, and is assumed
+/// to need protocol 1.
+///
+/// An assumption, not a report: it needs whatever it was built against, which
+/// may be more than 1, and it has no way to say so.
 #[test]
 fn plugin_ready_without_a_protocol_reads_as_the_first_version() {
     let parsed: PluginToHost = from_str(r#"{"type":"ready"}"#).unwrap();
 
     assert_eq!(parsed, PluginToHost::Ready(ReadyMessage { protocol: 1 }));
+}
+
+/// A host built before the field existed still reads a `ready` that carries
+/// one.
+///
+/// The other direction of the same drift: the plugin is updated and `jp` is
+/// not.
+/// `LegacyPluginToHost` is the shape such a host compiled against, so this
+/// holds it to the compatibility this design assumes rather than to whatever
+/// serde happens to do with an unknown key.
+#[test]
+fn a_ready_carrying_a_protocol_still_reads_on_a_host_that_predates_it() {
+    #[derive(Debug, serde::Deserialize, PartialEq)]
+    #[serde(tag = "type", rename_all = "snake_case")]
+    enum LegacyPluginToHost {
+        Ready,
+        Exit(ExitMessage),
+    }
+
+    let parsed: LegacyPluginToHost = from_str(r#"{"type":"ready","protocol":2}"#).unwrap();
+
+    assert_eq!(
+        parsed,
+        LegacyPluginToHost::Ready,
+        "an older host reads the version field as an unknown key, not as a parse failure"
+    );
 }
 
 #[test]

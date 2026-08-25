@@ -2,6 +2,53 @@ use serde_json::json;
 
 use super::*;
 
+/// A plugin that ignores `Shutdown` is killed rather than waited on forever.
+///
+/// The host holds the only handles to the plugin's stdin — this scope and the
+/// shutdown thread — so a plugin blocked on a read never sees EOF and never
+/// exits on its own.
+/// Waiting on one is a wait with no end, and it takes the error that caused it
+/// down with it.
+///
+/// The child here is `sleep`, which is exactly that plugin: it reads nothing
+/// and exits on nothing short of a signal.
+#[cfg(unix)]
+#[test]
+fn stop_plugin_kills_a_plugin_that_will_not_go() {
+    use std::{process::Stdio, sync::mpsc};
+
+    let mut child = std::process::Command::new("sleep")
+        .arg("60")
+        .stdin(Stdio::piped())
+        .spawn()
+        .expect("sleep is available");
+
+    let id = child.id();
+    let stdin = Mutex::new(child.stdin.take().expect("stdin piped"));
+    let sent = AtomicBool::new(false);
+
+    // On its own thread with a deadline: if `stop_plugin` ever goes back to
+    // waiting indefinitely, this fails rather than hanging the suite — which is
+    // the failure mode being guarded against.
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        stop_plugin(&stdin, &sent, id, Duration::from_millis(200));
+        let _ = tx.send(());
+    });
+
+    rx.recv_timeout(Duration::from_secs(10))
+        .expect("stop_plugin returned rather than waiting forever");
+
+    assert!(
+        child.wait().is_ok(),
+        "the child is reaped, so it is no longer running"
+    );
+    assert!(
+        !is_process_alive(id),
+        "a plugin that ignored the request is gone"
+    );
+}
+
 #[test]
 fn handle_read_config_full() {
     let config = json!({"assistant": {"name": "JP"}, "style": {"code": {}}});

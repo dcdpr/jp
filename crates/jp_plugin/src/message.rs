@@ -247,8 +247,13 @@ pub struct ErrorResponse {
 pub struct ReadyMessage {
     /// The lowest protocol version this plugin can work with.
     ///
-    /// Defaults to 1 on the wire, so a plugin built before this field existed
-    /// still parses, and is taken at its word.
+    /// Absent on the wire, it reads as 1.
+    /// That is an assumption about a plugin built before the field existed, not
+    /// something the plugin said: such a plugin has no way to report what it
+    /// needs, and may well need more than 1 — one built against protocol 2
+    /// uses `compose` and still sends a bare `ready`.
+    /// So this is the one mismatch the handshake cannot catch, and it surfaces
+    /// later as a message the host cannot parse.
     #[serde(default = "legacy_protocol")]
     pub protocol: u32,
 }
