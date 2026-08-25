@@ -153,6 +153,29 @@ fn emit_schematic_impls(args: &SchematicImplArgs<'_>) -> TokenStream {
     let partial_schema_name = partial_name.to_string();
     let partial_schema_impl = crate::common::Container::generate_partial_schema(name, cfg.generics);
 
+    // `schema_union_with` unions the derived schema with caller-supplied
+    // variants, for a type that deserializes from more shapes than its fields
+    // describe. Using it asserts the extra shapes are shorthands for the fields,
+    // which is what lets the union name an expanded form below. The partial's
+    // impl delegates here, so it sees the union too.
+    let build_body = match cfg.args.schema_union_with.as_ref() {
+        None => quote! {
+            #schema_impl
+        },
+        Some(path) => quote! {
+            let described = { #schema_impl };
+            let mut variants = #path(&mut schema);
+
+            // The derived schema goes last and is marked as the expanded form:
+            // the caller-supplied variants are shorthand spellings of it, so a
+            // consumer resolving keys should follow the derived fields.
+            let expanded = variants.len();
+            variants.push(described);
+
+            schema.union(UnionType::new_any(variants).with_expanded_index(expanded))
+        },
+    };
+
     quote! {
         #[automatically_derived]
         impl #impl_generics schematic::Schematic for #name #ty_generics #schematic_where {
@@ -164,7 +187,7 @@ fn emit_schematic_impls(args: &SchematicImplArgs<'_>) -> TokenStream {
             fn build_schema(mut schema: schematic::SchemaBuilder) -> schematic::Schema {
                 use schematic::schema::*;
 
-                #schema_impl
+                #build_body
             }
         }
 

@@ -55,13 +55,13 @@ async fn summarize_with(
     batches: Vec<Vec<Event>>,
     stream: ConversationStream,
 ) -> super::Result<String> {
-    summarize_with_ceiling(batches, stream, 1_048_576).await
+    summarize_with_ceiling(batches, stream, Some(1_048_576)).await
 }
 
 async fn summarize_with_ceiling(
     batches: Vec<Vec<Event>>,
     stream: ConversationStream,
-    max_response_bytes: u32,
+    max_response_bytes: Option<u64>,
 ) -> super::Result<String> {
     let provider = MockProvider::with_batches(batches);
     let model_id = test_model_id();
@@ -91,7 +91,7 @@ async fn summarize_applies_the_configured_output_ceiling() {
         FinishReason::Completed,
     )];
 
-    let error = summarize_with_ceiling(batches, range_stream(&["sig"]), 25)
+    let error = summarize_with_ceiling(batches, range_stream(&["sig"]), Some(25))
         .await
         .expect_err("the summary must stop at the configured ceiling");
 
