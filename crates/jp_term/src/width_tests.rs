@@ -414,6 +414,18 @@ fn wrap_ranges_collapses_a_run_of_whitespace_at_a_break() {
 }
 
 #[test]
+fn wrap_ranges_measures_a_bounded_prefix_rather_than_the_whole_suffix() {
+    // Measuring the remaining suffix once per row is quadratic, and grep wraps
+    // single-line tool results that run to megabytes. This input takes minutes
+    // that way and milliseconds when each row measures only its own width.
+    let s = "lorem ipsum dolor sit amet ".repeat(20_000);
+    let rows = wrap_ranges(&s, 40);
+
+    assert_eq!(rows.len(), 14_286, "rows for {} bytes", s.len());
+    assert_eq!(rows.last().map(|row| row.end), Some(s.len()));
+}
+
+#[test]
 fn wrap_ranges_rows_all_fit_the_budget() {
     // The property the whole function exists for, checked across the shapes the
     // cases above pin individually.

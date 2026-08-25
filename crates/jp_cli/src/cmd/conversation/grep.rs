@@ -127,8 +127,8 @@ pub(crate) struct Grep {
     /// `jp c grep --width=100 --wrap PATTERN`.
     /// Has no effect when the output width is unknown, which is the case for a
     /// pipe with no `--width`.
-    // Rejected in line mode, where every emitted line is an `ID:TURN:SCOPE:KIND:TEXT`
-    // record and a continuation row has no coordinate to carry.
+    /// Groups hits under per-conversation headings even when piped, since a
+    /// continuation row has no coordinate to carry.
     #[arg(long, conflicts_with = "no_heading")]
     wrap: bool,
 
@@ -422,8 +422,10 @@ impl Grep {
     ///
     /// A terminal gets headings; a pipe gets one self-contained line per hit so
     /// that field-splitting tools see a fixed shape.
+    /// `--wrap` forces headings: its continuation rows carry no coordinate, so
+    /// wrapping and the one-record-per-line shape cannot both hold.
     fn heading_enabled(&self, pretty: bool) -> bool {
-        if self.heading {
+        if self.heading || self.wrap {
             true
         } else if self.no_heading {
             false
@@ -1076,25 +1078,25 @@ fn snap_to_word_start(text: &str, start: usize, limit: usize) -> usize {
 /// and one running past the row's end is cut there.
 /// A cut span's styling carries onto the trailing [`ELLIPSIS`], marking it as
 /// "the match continues" rather than "the line continues".
+/// A span reaching back past the origin is clipped to the row's left edge,
+/// which is how a match crossing a wrap break stays styled on both rows.
+/// The leading [`ELLIPSIS`] is never styled: that clip lands at the start of
+/// the kept region, after the marker.
 /// A span whose clipped end isn't a character boundary is skipped rather than
 /// split.
-///
-/// The leading marker is never styled.
-/// The window is anchored at or before the first span's start and every later
-/// span begins to the right of it, so no match is ever cut by the row's left
-/// edge.
 fn highlight(row: &Row, spans: &[Range<usize>]) -> String {
     let text = row.text.as_str();
     let mut out = String::with_capacity(text.len());
     let mut cursor = 0;
 
     for span in spans {
-        // A span starting before the origin belongs to an earlier row.
-        let Some(offset) = span.start.checked_sub(row.origin) else {
+        // A span ending at or before the origin belongs to an earlier row.
+        if span.end <= row.origin {
             continue;
-        };
+        }
 
-        let start = offset + row.kept.start;
+        // One that began on an earlier row resumes at this row's left edge.
+        let start = span.start.saturating_sub(row.origin) + row.kept.start;
         if start >= row.kept.end || start < cursor {
             continue;
         }

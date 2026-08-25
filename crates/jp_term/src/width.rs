@@ -125,6 +125,9 @@ pub fn suffix_start_for_width(s: &str, max_width: usize) -> usize {
 ///
 /// `s` is expected to carry no ANSI escapes, for the reason given on
 /// [`truncate_to_width`].
+///
+/// Runs in time proportional to the input: each row measures only as far as its
+/// own width, never the rest of the string.
 #[must_use]
 pub fn wrap_ranges(s: &str, max_width: usize) -> Vec<Range<usize>> {
     if s.is_empty() || max_width == 0 {
@@ -136,12 +139,16 @@ pub fn wrap_ranges(s: &str, max_width: usize) -> Vec<Range<usize>> {
 
     while start < s.len() {
         let rest = &s[start..];
-        if display_width(rest) <= max_width {
+        let mut end = prefix_end_for_width(rest, max_width);
+
+        // Reaching the end of the input is the fit check: the offset returned is
+        // one that measured within the budget. Measuring `rest` itself would
+        // rescan every byte still to come, once per row.
+        if end == rest.len() {
             rows.push(start..s.len());
             return rows;
         }
 
-        let mut end = prefix_end_for_width(rest, max_width);
         if end == 0 {
             // A single cluster wider than the whole row. It has to go somewhere,
             // and leaving it for the next row would never terminate.

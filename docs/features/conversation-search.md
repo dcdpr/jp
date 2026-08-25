@@ -298,8 +298,10 @@ column:
 jp c grep --width=72 --wrap 'MergeableMap'
 ```
 
-A pipe reports no width, so `--wrap` needs `--width` there or it does nothing.
-It is rejected alongside `--no-heading`: every line that mode emits is an
+A pipe reports no width, so `--wrap` needs `--width` there to have anything to
+wrap at.
+It also groups hits under headings, which a pipe would otherwise skip, and is
+rejected alongside `--no-heading`: every line that mode emits is an
 `ID:TURN:SCOPE:KIND:TEXT` record, and a continuation row has no coordinate to
 carry.
 

@@ -933,6 +933,45 @@ fn wrap_highlights_a_match_on_a_continuation_row() {
 }
 
 #[test]
+fn wrap_highlights_a_match_crossing_a_row_boundary() {
+    // The match starts on the first row and finishes on the second, so the
+    // second row's span reaches back past its origin. Dropping it there leaves
+    // half a match styled and half of it plain.
+    let id = make_id(3375);
+    let line = "alpha beta gamma delta the quick brown fox jumps";
+    let (mut ctx, out) = setup_pretty(
+        vec![(
+            id,
+            turn(vec![ConversationEvent::new(ChatRequest::from(line), ts())]),
+        )],
+        40,
+    );
+
+    let grep = Grep {
+        wrap: true,
+        ..grep("the quick brown fox")
+    };
+    run(grep, &mut ctx, &out);
+
+    let raw = out.lock().clone();
+    let rows: Vec<&str> = raw.trim_end().lines().collect();
+
+    assert_eq!(
+        rows[1],
+        format!(
+            "  {}:{}:alpha beta gamma delta {}",
+            "1".green(),
+            "user".dim(),
+            "the".red().bold()
+        )
+    );
+    assert_eq!(
+        rows[2],
+        format!("         {} jumps", "quick brown fox".red().bold())
+    );
+}
+
+#[test]
 fn wrap_keeps_a_line_that_already_fits_on_one_row() {
     let id = make_id(3380);
     let (mut ctx, out) = setup_pretty(
@@ -958,8 +997,7 @@ fn wrap_keeps_a_line_that_already_fits_on_one_row() {
 
 #[test]
 fn wrap_does_nothing_without_a_known_output_width() {
-    // Nothing to wrap at, and a pipe expects the text whole. `--heading` forces
-    // the grouped shape so that only the wrapping is under test.
+    // Nothing to wrap at, so the text is handed over whole.
     let id = make_id(3390);
     let text = format!("needle {}", "z".repeat(200));
     let (mut ctx, out) = setup(vec![(
@@ -972,12 +1010,43 @@ fn wrap_does_nothing_without_a_known_output_width() {
 
     let grep = Grep {
         wrap: true,
-        heading: true,
         ..grep("needle")
     };
     assert_eq!(run(grep, &mut ctx, &out), [
         format!("{id}  (no title)  1 match · 1 turn"),
         format!("  1:user:{text}"),
+    ]);
+}
+
+#[test]
+fn wrap_groups_hits_even_when_piped() {
+    // A pipe selects line mode, where every emitted line is a coordinate record
+    // and a continuation row has nowhere to go. Asking to wrap asks for the
+    // grouped shape, rather than having the flag quietly do nothing.
+    let id = make_id(3392);
+    let (mut ctx, out) = setup_with(
+        vec![(
+            id,
+            turn(vec![ConversationEvent::new(
+                ChatRequest::from(
+                    "the needle is here and the rest of this line keeps going for a while yet",
+                ),
+                ts(),
+            )]),
+        )],
+        OutputFormat::Text,
+        OutputWidth::Declared(40),
+    );
+
+    let grep = Grep {
+        wrap: true,
+        ..grep("needle")
+    };
+    assert_eq!(run(grep, &mut ctx, &out), [
+        format!("{id}  (no title)   1 match · 1 turn"),
+        "  1:user:the needle is here and the rest".to_owned(),
+        "         of this line keeps going for a".to_owned(),
+        "         while yet".to_owned(),
     ]);
 }
 
