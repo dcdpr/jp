@@ -25,7 +25,7 @@
 
 /* ── RFD status badges ────────────────────────────────────────────── */
 
-.rfd-badge {
+.doc-badge {
     display: inline-block;
     padding: 0.1rem 0.55rem;
     border-radius: 9999px;
@@ -34,118 +34,174 @@
     line-height: 1.4;
     white-space: nowrap;
 }
-.rfd-badge--implemented {
+.doc-badge--implemented {
     background: color-mix(in srgb, #10b981 20%, transparent);
     color: #059669;
 }
-.rfd-badge--accepted {
+.doc-badge--accepted {
     background: color-mix(in srgb, #3b82f6 20%, transparent);
     color: #2563eb;
 }
-.rfd-badge--discussion {
+.doc-badge--discussion {
     background: color-mix(in srgb, #a855f7 20%, transparent);
     color: #7c3aed;
 }
-.rfd-badge--superseded {
+.doc-badge--superseded {
     background: color-mix(in srgb, #f59e0b 20%, transparent);
     color: #d97706;
 }
-.rfd-badge--abandoned {
+.doc-badge--abandoned {
     background: color-mix(in srgb, #ef4444 20%, transparent);
     color: #dc2626;
 }
-.dark .rfd-badge--implemented {
+.dark .doc-badge--implemented {
     background: color-mix(in srgb, #10b981 25%, transparent);
     color: #6ee7b7;
 }
-.dark .rfd-badge--accepted {
+.dark .doc-badge--accepted {
     background: color-mix(in srgb, #3b82f6 25%, transparent);
     color: #93c5fd;
 }
-.dark .rfd-badge--discussion {
+.dark .doc-badge--discussion {
     background: color-mix(in srgb, #a855f7 25%, transparent);
     color: #d8b4fe;
 }
-.dark .rfd-badge--superseded {
+.dark .doc-badge--superseded {
     background: color-mix(in srgb, #f59e0b 25%, transparent);
     color: #fcd34d;
 }
-.dark .rfd-badge--abandoned {
+.dark .doc-badge--abandoned {
     background: color-mix(in srgb, #ef4444 25%, transparent);
     color: #fca5a5;
 }
-.rfd-badge--indev {
+.doc-badge--indev {
     background: color-mix(in srgb, #14b8a6 20%, transparent);
     color: #0d9488;
 }
-.dark .rfd-badge--indev {
+.dark .doc-badge--indev {
     background: color-mix(in srgb, #14b8a6 25%, transparent);
     color: #5eead4;
 }
-.rfd-badge--draft {
+.doc-badge--draft {
     background: color-mix(in srgb, #64748b 22%, transparent);
     color: #475569;
 }
-.dark .rfd-badge--draft {
+.dark .doc-badge--draft {
     background: color-mix(in srgb, #64748b 28%, transparent);
     color: #cbd5e1;
 }
 
-/* ── RFD link colors (status-coded) ───────────────────────────────── */
+/* Ticket statuses, sharing the RFD badge shape: Todo reads like Draft (not
+   started), In Progress like Accepted (being worked), Done like Implemented. */
+.doc-badge--todo {
+    background: color-mix(in srgb, #64748b 22%, transparent);
+    color: #475569;
+}
+.dark .doc-badge--todo {
+    background: color-mix(in srgb, #64748b 28%, transparent);
+    color: #cbd5e1;
+}
+.doc-badge--in-progress {
+    background: color-mix(in srgb, #14b8a6 20%, transparent);
+    color: #0d9488;
+}
+.dark .doc-badge--in-progress {
+    background: color-mix(in srgb, #14b8a6 25%, transparent);
+    color: #5eead4;
+}
+.doc-badge--done {
+    background: color-mix(in srgb, #10b981 20%, transparent);
+    color: #059669;
+}
+.dark .doc-badge--done {
+    background: color-mix(in srgb, #10b981 25%, transparent);
+    color: #6ee7b7;
+}
+.doc-badge--blocked {
+    background: color-mix(in srgb, #f59e0b 20%, transparent);
+    color: #d97706;
+}
+.dark .doc-badge--blocked {
+    background: color-mix(in srgb, #f59e0b 25%, transparent);
+    color: #fcd34d;
+}
+
+/* ── Document link colors (status-coded) ──────────────────────────── */
+
+/* Ticket statuses, matching the badge palette above. */
+.doc-link--todo {
+    color: #475569;
+}
+.dark .doc-link--todo {
+    color: #cbd5e1;
+}
+.doc-link--in-progress {
+    color: #0d9488;
+}
+.dark .doc-link--in-progress {
+    color: #5eead4;
+}
+.doc-link--done {
+    color: #059669;
+}
+.dark .doc-link--done {
+    color: #6ee7b7;
+}
+
 
 /* Inline body links and reference pills both pick up the badge palette
    via these classes. The selectors include `:hover` to keep the status
    color when hovered (overriding VitePress's default brand-2 hover). */
-.vp-doc a.rfd-link--implemented,
-.vp-doc a.rfd-link--implemented:hover,
-.rfd-ref-link.rfd-link--implemented,
-.rfd-ref-link.rfd-link--implemented:hover { color: #059669; }
-.vp-doc a.rfd-link--accepted,
-.vp-doc a.rfd-link--accepted:hover,
-.rfd-ref-link.rfd-link--accepted,
-.rfd-ref-link.rfd-link--accepted:hover    { color: #2563eb; }
-.vp-doc a.rfd-link--discussion,
-.vp-doc a.rfd-link--discussion:hover,
-.rfd-ref-link.rfd-link--discussion,
-.rfd-ref-link.rfd-link--discussion:hover  { color: #7c3aed; }
-.vp-doc a.rfd-link--superseded,
-.vp-doc a.rfd-link--superseded:hover,
-.rfd-ref-link.rfd-link--superseded,
-.rfd-ref-link.rfd-link--superseded:hover  { color: #d97706; }
-.vp-doc a.rfd-link--abandoned,
-.vp-doc a.rfd-link--abandoned:hover,
-.rfd-ref-link.rfd-link--abandoned,
-.rfd-ref-link.rfd-link--abandoned:hover   { color: #dc2626; }
+.vp-doc a.doc-link--implemented,
+.vp-doc a.doc-link--implemented:hover,
+.doc-ref-link.doc-link--implemented,
+.doc-ref-link.doc-link--implemented:hover { color: #059669; }
+.vp-doc a.doc-link--accepted,
+.vp-doc a.doc-link--accepted:hover,
+.doc-ref-link.doc-link--accepted,
+.doc-ref-link.doc-link--accepted:hover    { color: #2563eb; }
+.vp-doc a.doc-link--discussion,
+.vp-doc a.doc-link--discussion:hover,
+.doc-ref-link.doc-link--discussion,
+.doc-ref-link.doc-link--discussion:hover  { color: #7c3aed; }
+.vp-doc a.doc-link--superseded,
+.vp-doc a.doc-link--superseded:hover,
+.doc-ref-link.doc-link--superseded,
+.doc-ref-link.doc-link--superseded:hover  { color: #d97706; }
+.vp-doc a.doc-link--abandoned,
+.vp-doc a.doc-link--abandoned:hover,
+.doc-ref-link.doc-link--abandoned,
+.doc-ref-link.doc-link--abandoned:hover   { color: #dc2626; }
 
-.dark .vp-doc a.rfd-link--implemented,
-.dark .vp-doc a.rfd-link--implemented:hover,
-.dark .rfd-ref-link.rfd-link--implemented,
-.dark .rfd-ref-link.rfd-link--implemented:hover { color: #6ee7b7; }
-.dark .vp-doc a.rfd-link--accepted,
-.dark .vp-doc a.rfd-link--accepted:hover,
-.dark .rfd-ref-link.rfd-link--accepted,
-.dark .rfd-ref-link.rfd-link--accepted:hover    { color: #93c5fd; }
-.dark .vp-doc a.rfd-link--discussion,
-.dark .vp-doc a.rfd-link--discussion:hover,
-.dark .rfd-ref-link.rfd-link--discussion,
-.dark .rfd-ref-link.rfd-link--discussion:hover  { color: #d8b4fe; }
-.dark .vp-doc a.rfd-link--superseded,
-.dark .vp-doc a.rfd-link--superseded:hover,
-.dark .rfd-ref-link.rfd-link--superseded,
-.dark .rfd-ref-link.rfd-link--superseded:hover  { color: #fcd34d; }
-.dark .vp-doc a.rfd-link--abandoned,
-.dark .vp-doc a.rfd-link--abandoned:hover,
-.dark .rfd-ref-link.rfd-link--abandoned,
-.dark .rfd-ref-link.rfd-link--abandoned:hover   { color: #fca5a5; }
+.dark .vp-doc a.doc-link--implemented,
+.dark .vp-doc a.doc-link--implemented:hover,
+.dark .doc-ref-link.doc-link--implemented,
+.dark .doc-ref-link.doc-link--implemented:hover { color: #6ee7b7; }
+.dark .vp-doc a.doc-link--accepted,
+.dark .vp-doc a.doc-link--accepted:hover,
+.dark .doc-ref-link.doc-link--accepted,
+.dark .doc-ref-link.doc-link--accepted:hover    { color: #93c5fd; }
+.dark .vp-doc a.doc-link--discussion,
+.dark .vp-doc a.doc-link--discussion:hover,
+.dark .doc-ref-link.doc-link--discussion,
+.dark .doc-ref-link.doc-link--discussion:hover  { color: #d8b4fe; }
+.dark .vp-doc a.doc-link--superseded,
+.dark .vp-doc a.doc-link--superseded:hover,
+.dark .doc-ref-link.doc-link--superseded,
+.dark .doc-ref-link.doc-link--superseded:hover  { color: #fcd34d; }
+.dark .vp-doc a.doc-link--abandoned,
+.dark .vp-doc a.doc-link--abandoned:hover,
+.dark .doc-ref-link.doc-link--abandoned,
+.dark .doc-ref-link.doc-link--abandoned:hover   { color: #fca5a5; }
 
 /* Reference pills also tint their background to match their status. */
-.rfd-ref-link.rfd-link--implemented { background: color-mix(in srgb, #10b981 12%, transparent); }
-.rfd-ref-link.rfd-link--accepted    { background: color-mix(in srgb, #3b82f6 12%, transparent); }
-.rfd-ref-link.rfd-link--discussion  { background: color-mix(in srgb, #a855f7 12%, transparent); }
-.rfd-ref-link.rfd-link--superseded  { background: color-mix(in srgb, #f59e0b 12%, transparent); }
-.rfd-ref-link.rfd-link--abandoned   { background: color-mix(in srgb, #ef4444 12%, transparent); }
-.rfd-ref-link.rfd-link--implemented:hover { background: color-mix(in srgb, #10b981 22%, transparent); }
-.rfd-ref-link.rfd-link--accepted:hover    { background: color-mix(in srgb, #3b82f6 22%, transparent); }
-.rfd-ref-link.rfd-link--discussion:hover  { background: color-mix(in srgb, #a855f7 22%, transparent); }
-.rfd-ref-link.rfd-link--superseded:hover  { background: color-mix(in srgb, #f59e0b 22%, transparent); }
-.rfd-ref-link.rfd-link--abandoned:hover   { background: color-mix(in srgb, #ef4444 22%, transparent); }
+.doc-ref-link.doc-link--implemented { background: color-mix(in srgb, #10b981 12%, transparent); }
+.doc-ref-link.doc-link--accepted    { background: color-mix(in srgb, #3b82f6 12%, transparent); }
+.doc-ref-link.doc-link--discussion  { background: color-mix(in srgb, #a855f7 12%, transparent); }
+.doc-ref-link.doc-link--superseded  { background: color-mix(in srgb, #f59e0b 12%, transparent); }
+.doc-ref-link.doc-link--abandoned   { background: color-mix(in srgb, #ef4444 12%, transparent); }
+.doc-ref-link.doc-link--implemented:hover { background: color-mix(in srgb, #10b981 22%, transparent); }
+.doc-ref-link.doc-link--accepted:hover    { background: color-mix(in srgb, #3b82f6 22%, transparent); }
+.doc-ref-link.doc-link--discussion:hover  { background: color-mix(in srgb, #a855f7 22%, transparent); }
+.doc-ref-link.doc-link--superseded:hover  { background: color-mix(in srgb, #f59e0b 22%, transparent); }
+.doc-ref-link.doc-link--abandoned:hover   { background: color-mix(in srgb, #ef4444 22%, transparent); }

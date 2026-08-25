@@ -12,7 +12,7 @@ fn workspace_with_backend(
     id: jp_workspace::Id,
     backend: FsStorageBackend,
 ) -> Workspace {
-    let mut workspace = Workspace::new_with_id(root, id).with_backend(Arc::new(backend));
+    let mut workspace = Workspace::in_memory_with_id(root, id).with_backend(Arc::new(backend));
     workspace.load_conversation_index();
     workspace
 }
@@ -205,7 +205,7 @@ fn validate_accepts_valid_uri() {
 #[test]
 fn resolve_errors_when_conversation_is_not_loaded() {
     let tmp = camino_tempfile::tempdir().unwrap();
-    let workspace = Workspace::new(tmp.path().to_path_buf());
+    let workspace = Workspace::in_memory(tmp.path().to_path_buf());
     let id = ConversationId::try_from_deciseconds(17_013_123_456).unwrap();
     let uri = Url::parse(&format!("jp://{id}")).unwrap();
 
@@ -220,7 +220,7 @@ fn resolve_errors_when_conversation_is_not_loaded() {
 #[test]
 fn resolve_returns_conversation_missing_variant_when_id_not_in_index() {
     let tmp = camino_tempfile::tempdir().unwrap();
-    let workspace = Workspace::new(tmp.path().to_path_buf());
+    let workspace = Workspace::in_memory(tmp.path().to_path_buf());
     let id = ConversationId::try_from_deciseconds(17_013_123_456).unwrap();
     let uri = Url::parse(&format!("jp://{id}")).unwrap();
 
@@ -234,7 +234,7 @@ fn resolve_returns_conversation_missing_variant_when_id_not_in_index() {
 #[test]
 fn resolve_returns_other_for_invalid_selector() {
     let tmp = camino_tempfile::tempdir().unwrap();
-    let workspace = Workspace::new(tmp.path().to_path_buf());
+    let workspace = Workspace::in_memory(tmp.path().to_path_buf());
     let id = ConversationId::try_from_deciseconds(17_013_123_456).unwrap();
     let uri = Url::parse(&format!("jp://{id}?select=zzz")).unwrap();
 

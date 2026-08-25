@@ -92,8 +92,148 @@ fn build_cfg(
     overrides: &[KeyValueOrPath],
     workspace: Option<&Workspace>,
 ) -> Result<PartialAppConfig> {
-    let pipeline = config_pipeline::ConfigPipeline::new(base, overrides, workspace, None)?;
+    let pipeline = config_pipeline::ConfigPipeline::new(overrides, workspace, None, || Ok(base))?;
     pipeline.partial_without_conversation()
+}
+
+/// Persistence backend whose every write fails with a full disk.
+#[derive(Debug)]
+struct AlwaysFullBackend;
+
+impl jp_storage::backend::PersistBackend for AlwaysFullBackend {
+    fn write(
+        &self,
+        _id: &ConversationId,
+        _metadata: &Conversation,
+        _events: &jp_conversation::ConversationStream,
+        _projection: jp_storage::backend::Projection,
+    ) -> std::result::Result<(), jp_storage::Error> {
+        Err(jp_storage::Error::write_failed(
+            camino::Utf8Path::new("/data/conv/events.json"),
+            std::io::Error::from(std::io::ErrorKind::StorageFull),
+        ))
+    }
+
+    fn remove(&self, _id: &ConversationId) -> std::result::Result<(), jp_storage::Error> {
+        Ok(())
+    }
+
+    fn archive(&self, _id: &ConversationId) -> std::result::Result<(), jp_storage::Error> {
+        Ok(())
+    }
+
+    fn unarchive(&self, _id: &ConversationId) -> std::result::Result<(), jp_storage::Error> {
+        Ok(())
+    }
+}
+
+#[test]
+fn a_cancelled_command_future_still_reports_its_persist_failure() {
+    // Mirrors `run_inner`'s shutdown arm: on Ctrl-C the command future is
+    // dropped mid-flight, so the drain inside it never runs. The command arm
+    // here parks forever after dirtying the conversation, which holds the
+    // window open — cancellation always lands while the scope is still alive,
+    // rather than racing a sleep.
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    let mut workspace = Workspace::in_memory("root").with_persist(Arc::new(AlwaysFullBackend));
+    let lock = workspace
+        .create_and_lock_conversation(
+            Conversation::default(),
+            Arc::new(AppConfig::new_test()),
+            None,
+        )
+        .unwrap();
+
+    let output: cmd::Output = rt.block_on(async {
+        tokio::select! {
+            biased;
+            () = async {
+                let conv = lock.as_mut();
+                conv.update_metadata(|m| m.title = Some("unsaved".into()));
+                std::future::pending::<()>().await;
+            } => unreachable!("the command arm never completes"),
+            () = std::future::ready(()) => Err(cmd::Error::interrupted()),
+        }
+    });
+    drop(lock);
+
+    let error = cmd::fold_persist_failure(output, workspace.take_persist_failure())
+        .expect_err("the run was interrupted");
+
+    // The interrupt stays the headline and keeps its exit code; the fact that
+    // nothing was saved rides along instead of being lost to the log file.
+    assert_eq!(error.message.as_deref(), Some("Interrupted"));
+    assert_eq!(error.code.get(), 130);
+    assert_eq!(
+        error
+            .metadata
+            .iter()
+            .find(|(key, _)| key == "persist_failure")
+            .map(|(_, value)| value.as_str().unwrap_or_default()),
+        Some("Storage error: no space left on device while writing /data/conv/events.json")
+    );
+}
+
+#[test]
+fn a_background_task_persist_failure_is_recorded_after_the_command_finished() {
+    // `TitleGeneratorTask::sync` takes a conversation lock of its own and
+    // swallows a failed `flush()` into a `warn!`. The still-dirty scope's drop
+    // then records on the workspace, which happens while background tasks are
+    // draining — after the command's own drain has already run. That is why
+    // `run_inner` folds a second time once the drain returns.
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    let mut workspace = Workspace::in_memory("root").with_persist(Arc::new(AlwaysFullBackend));
+
+    let lock = workspace
+        .create_and_lock_conversation(
+            Conversation::default(),
+            Arc::new(AppConfig::new_test()),
+            None,
+        )
+        .unwrap();
+    let id = lock.id();
+    // `sync` acquires the lock itself and skips when it is already held, which
+    // would make every assertion below pass vacuously.
+    drop(lock);
+    assert!(
+        workspace.take_persist_failure().is_none(),
+        "setup must record nothing, or the failure asserted below proves nothing"
+    );
+
+    let cfg = AppConfig::new_test();
+    let task = Box::new(jp_task::task::TitleGeneratorTask {
+        conversation_id: id,
+        // The same resolution `TitleGeneratorTask::new` performs, minus its
+        // provider preflight, which would fail without credentials.
+        model: jp_llm::title::resolve_model(&cfg, None),
+        providers: cfg.providers.llm.clone(),
+        events: jp_conversation::ConversationStream::new_test(),
+        title: Some("generated".into()),
+        max_response_bytes: cfg.assistant.request.max_response_bytes,
+        is_tty: false,
+    });
+
+    // `sync` reports success: it only logs the write failure.
+    rt.block_on(jp_task::Task::sync(task, &mut workspace))
+        .expect("sync swallows the write failure");
+
+    let recorded = workspace
+        .take_persist_failure()
+        .expect("the title task's failed write is recorded on the workspace");
+    assert_eq!(
+        recorded.to_string(),
+        "Storage error: no space left on device while writing /data/conv/events.json"
+    );
+
+    // What the post-drain fold makes of it: a run that would otherwise have
+    // exited zero now carries the failure.
+    let error = cmd::fold_persist_failure(Ok(()), Some(recorded))
+        .expect_err("an unsaved conversation must not exit zero");
+    assert_eq!(error.message.as_deref(), Some("No space left on device"));
 }
 
 #[test]
@@ -129,7 +269,7 @@ fn test_cli() {
 fn test_load_cli_cfg_args_workspace_root() {
     let tmp = tempdir().unwrap();
     let root = tmp.path();
-    let workspace = Workspace::new(root);
+    let workspace = Workspace::in_memory(root);
 
     write_config(
         &root.join(".jp/config/skill/web.toml"),
@@ -174,7 +314,7 @@ fn test_load_cli_cfg_args_merges_global_and_workspace() {
 
     unsafe { std::env::set_var("JP_GLOBAL_CONFIG_DIR", global_dir.as_str()) };
 
-    let workspace = Workspace::new(&ws_root);
+    let workspace = Workspace::in_memory(&ws_root);
 
     write_config(
         &global_dir.join("config/.jp/config/skill/web.toml"),
@@ -208,7 +348,7 @@ fn test_load_cli_cfg_args_workspace_overrides_global() {
 
     unsafe { std::env::set_var("JP_GLOBAL_CONFIG_DIR", global_dir.as_str()) };
 
-    let workspace = Workspace::new(&ws_root);
+    let workspace = Workspace::in_memory(&ws_root);
 
     write_config(
         &global_dir.join("config/.jp/config/skill/web.toml"),
@@ -232,7 +372,7 @@ fn test_load_cli_cfg_args_workspace_overrides_global() {
 fn test_load_cli_cfg_args_missing_file_reports_searched_paths() {
     let tmp = tempdir().unwrap();
     let root = tmp.path();
-    let workspace = Workspace::new(root);
+    let workspace = Workspace::in_memory(root);
 
     let partial = partial_with_load_paths(&[".jp/config"]);
     let overrides = vec![KeyValueOrPath::Path(Utf8PathBuf::from("skill/missing"))];
@@ -256,7 +396,7 @@ fn test_load_cli_cfg_args_missing_file_reports_searched_paths() {
 fn test_load_cli_cfg_args_first_load_path_wins_within_root() {
     let tmp = tempdir().unwrap();
     let root = tmp.path();
-    let workspace = Workspace::new(root);
+    let workspace = Workspace::in_memory(root);
 
     write_config(
         &root.join("first/skill/web.toml"),
@@ -373,7 +513,7 @@ fn test_load_cli_cfg_args_global_only_when_workspace_has_no_match() {
 
     unsafe { std::env::set_var("JP_GLOBAL_CONFIG_DIR", global_dir.as_str()) };
 
-    let workspace = Workspace::new(&ws_root);
+    let workspace = Workspace::in_memory(&ws_root);
 
     write_config(
         &global_dir.join("config/.jp/config/skill/web.toml"),
@@ -411,7 +551,7 @@ fn query_model_override_persists_config_delta_through_run_inner() {
     env::set_current_dir(root).unwrap();
 
     let fs_backend = Arc::new(FsStorageBackend::new(&storage).unwrap());
-    let mut workspace = Workspace::new(root).with_backend(fs_backend.clone());
+    let mut workspace = Workspace::in_memory(root).with_backend(fs_backend.clone());
     let conversation_id = make_id(1000);
     let base_config = Arc::new(config_with_model(ProviderId::Anthropic, "opus"));
 
@@ -525,7 +665,7 @@ fn query_model_override_persists_config_delta_through_session_targeting() {
     unsafe { env::remove_var("EDITOR") };
     env::set_current_dir(root).unwrap();
 
-    let mut workspace = Workspace::new(root);
+    let mut workspace = Workspace::in_memory(root);
     let user_root = user_data_dir().unwrap().join("workspace");
     let fs_backend = Arc::new(
         FsStorageBackend::new(&storage)
@@ -640,7 +780,7 @@ fn resolve_config_consumes_default_id() {
     let tmp = tempdir().unwrap();
     let root = tmp.path();
 
-    let mut workspace = Workspace::new(root);
+    let mut workspace = Workspace::in_memory(root);
     workspace.load_conversation_index();
 
     // Inject default_id into the base partial — no filesystem needed.
@@ -648,9 +788,9 @@ fn resolve_config_consumes_default_id() {
     base.conversation.default_id = Some(DefaultConversationId::LastActivated);
 
     let cli = Cli::try_parse_from(["jp", "conversation", "ls"]).unwrap();
-    let (config, _handles, _start_new) = resolve_config(
+    let (config, _handles, _start_new, _config_reset) = resolve_config(
         &cli.command,
-        base,
+        || Ok(base),
         &cli.globals.config,
         &mut workspace,
         None,
@@ -678,7 +818,7 @@ fn resolve_config_applies_the_compact_model_flag() {
     let storage = root.join(".jp");
 
     let fs_backend = Arc::new(FsStorageBackend::new(&storage).unwrap());
-    let mut workspace = Workspace::new(root).with_backend(fs_backend);
+    let mut workspace = Workspace::in_memory(root).with_backend(fs_backend);
     let conversation_id = make_id(3000);
     workspace
         .create_and_lock_conversation_with_id(
@@ -705,9 +845,9 @@ fn resolve_config_applies_the_compact_model_flag() {
         "gpt",
     ])
     .unwrap();
-    let (config, _handles, _start_new) = resolve_config(
+    let (config, _handles, _start_new, _config_reset) = resolve_config(
         &cli.command,
-        base,
+        || Ok(base),
         &cli.globals.config,
         &mut workspace,
         None,
@@ -720,3 +860,204 @@ fn resolve_config_applies_the_compact_model_flag() {
         "openai/gpt-5"
     );
 }
+
+fn kv(s: &str) -> KeyValueOrPath {
+    KeyValueOrPath::KeyValue(s.parse().unwrap())
+}
+
+/// `--no-cfg` expands to a leading `NONE` keyword for config resolution only;
+/// the raw `--cfg` args stay as typed, so commands that re-consume them (e.g.
+/// `config set`, which rejects reset keywords) don't see a synthetic keyword
+/// ([RFD 038]).
+#[test]
+fn no_cfg_shorthand_does_not_leak_into_raw_cfg_args() {
+    let cli = Cli::try_parse_from(["jp", "--no-cfg", "conversation", "ls"]).unwrap();
+
+    let overrides = effective_cfg_overrides(&cli.globals);
+    assert!(
+        matches!(overrides.as_slice(), [KeyValueOrPath::Keyword(
+            CfgKeyword::None
+        )]),
+        "expected a single synthetic NONE keyword, got: {overrides:?}",
+    );
+
+    // The raw args are untouched — `config set` and friends never see the
+    // synthetic keyword.
+    assert!(cli.globals.config.is_empty(), "{:?}", cli.globals.config);
+
+    // Without `--no-cfg`, the list passes through unchanged.
+    let cli = Cli::try_parse_from(["jp", "--cfg", "user.name=x", "conversation", "ls"]).unwrap();
+    let overrides = effective_cfg_overrides(&cli.globals);
+    assert_eq!(overrides.len(), 1);
+    assert!(matches!(&overrides[0], KeyValueOrPath::KeyValue(_)));
+}
+
+/// A `--cfg` reset point must not resolve the targeted conversation's config:
+/// the reset discards that layer, and resolving it can fail outright —
+/// recovering a conversation with broken config is a reset use case ([RFD
+/// 038]).
+#[test]
+fn resolve_config_reset_skips_broken_conversation_config() {
+    use jp_conversation::stream::ResetDelta;
+
+    let tmp = tempdir().unwrap();
+    let mut workspace = Workspace::in_memory(tmp.path());
+    workspace.load_conversation_index();
+
+    let base_config = Arc::new(config_with_model(ProviderId::Anthropic, "base-model"));
+    let conversation_id = make_id(4000);
+    workspace.create_conversation_with_id(
+        conversation_id,
+        Conversation::default(),
+        Arc::clone(&base_config),
+    );
+
+    // Break the conversation's config resolution: a bare `Reset` with no
+    // restoring `Apply` leaves the stream at program defaults, which lack
+    // required fields, so `events.config()` fails.
+    {
+        let handle = workspace.acquire_conversation(&conversation_id).unwrap();
+        let lock = workspace.test_lock(handle);
+        lock.as_mut().update_events(|events| {
+            events.add_config_delta(ResetDelta {
+                timestamp: chrono::DateTime::<chrono::Utc>::UNIX_EPOCH,
+            });
+        });
+    }
+
+    let id = conversation_id.to_string();
+    let cli = Cli::try_parse_from(["jp", "query", "--id", &id, "hello"]).unwrap();
+
+    // Without a reset point, the conversation layer is resolved and fails.
+    let result = resolve_config(
+        &cli.command,
+        || Ok(base_config.to_partial()),
+        &[],
+        &mut workspace,
+        None,
+        None,
+    );
+    assert!(result.is_err(), "broken conversation config must propagate");
+
+    // With `--cfg=NONE` (+ the required fields), the conversation layer is
+    // skipped and resolution succeeds — the escape hatch works.
+    let (config, _handles, _start_new, config_reset) = resolve_config(
+        &cli.command,
+        || Ok(base_config.to_partial()),
+        &[
+            KeyValueOrPath::Keyword(CfgKeyword::None),
+            kv("assistant.model.id=openai/fresh-model"),
+            kv("conversation.tools.*.run=ask"),
+        ],
+        &mut workspace,
+        None,
+        None,
+    )
+    .expect("--cfg=NONE must recover a broken conversation config");
+
+    assert_eq!(
+        config.assistant.model.id.resolved().name.as_ref(),
+        "fresh-model"
+    );
+    assert!(config_reset.is_some());
+}
+
+/// Reset layers are persisted into conversation streams, so they must contain
+/// resolved model IDs ([`PartialAppConfig::resolve_model_aliases`]): the
+/// stream's own config resolution never resolves aliases ([RFD 038]).
+#[test]
+fn resolve_config_reset_workspace_layer_contains_resolved_model_ids() {
+    use jp_config::model::id::PartialModelIdOrAliasConfig;
+
+    let tmp = tempdir().unwrap();
+    let mut workspace = Workspace::in_memory(tmp.path());
+    workspace.load_conversation_index();
+
+    // The workspace config defines an alias and references it.
+    let mut base = AppConfig::new_test().to_partial();
+    base.providers.llm.aliases.insert(
+        "fast".to_owned(),
+        PartialModelIdOrAliasConfig::Id(PartialModelIdConfig {
+            provider: Some(ProviderId::Openai),
+            name: "gpt-4".parse().ok(),
+        }),
+    );
+    base.assistant.model.id = PartialModelIdOrAliasConfig::Alias("fast".to_owned());
+
+    let cli = Cli::try_parse_from(["jp", "conversation", "ls"]).unwrap();
+    let (_config, _handles, _start_new, config_reset) = resolve_config(
+        &cli.command,
+        || Ok(base),
+        &[KeyValueOrPath::Keyword(CfgKeyword::Workspace)],
+        &mut workspace,
+        None,
+        None,
+    )
+    .unwrap();
+
+    let reset_events = config_reset.expect("WORKSPACE keyword produces a reset");
+    let ConfigReset::Workspace(layer) = &reset_events.reset else {
+        panic!("expected a WORKSPACE reset, got: {:?}", reset_events.reset);
+    };
+
+    match &layer.assistant.model.id {
+        PartialModelIdOrAliasConfig::Id(id) => {
+            assert_eq!(id.provider, Some(ProviderId::Openai));
+        }
+        PartialModelIdOrAliasConfig::Alias(alias) => {
+            panic!("alias `{alias}` persisted unresolved in the workspace layer");
+        }
+    }
+
+    // The post layer is the diff between two resolved states; it must not
+    // carry an alias either.
+    assert!(
+        !matches!(
+            reset_events.post.assistant.model.id,
+            PartialModelIdOrAliasConfig::Alias(_)
+        ),
+        "alias persisted unresolved in the post layer",
+    );
+}
+
+/// Post-reset `--cfg` directives referencing an alias must persist the resolved
+/// model ID, not the alias ([RFD 038]).
+#[test]
+fn resolve_config_reset_post_layer_contains_resolved_model_ids() {
+    use jp_config::model::id::PartialModelIdOrAliasConfig;
+
+    let tmp = tempdir().unwrap();
+    let mut workspace = Workspace::in_memory(tmp.path());
+    workspace.load_conversation_index();
+
+    let cli = Cli::try_parse_from(["jp", "conversation", "ls"]).unwrap();
+    let (_config, _handles, _start_new, config_reset) = resolve_config(
+        &cli.command,
+        || unreachable!("NONE skips implicit loading"),
+        &[
+            KeyValueOrPath::Keyword(CfgKeyword::None),
+            kv("providers.llm.aliases.fast=openai/gpt-4"),
+            kv("assistant.model.id=fast"),
+            kv("conversation.tools.*.run=ask"),
+        ],
+        &mut workspace,
+        None,
+        None,
+    )
+    .unwrap();
+
+    let reset_events = config_reset.expect("NONE keyword produces a reset");
+    match &reset_events.post.assistant.model.id {
+        PartialModelIdOrAliasConfig::Id(id) => {
+            assert_eq!(id.provider, Some(ProviderId::Openai));
+            assert_eq!(id.name.as_ref().unwrap().to_string(), "gpt-4");
+        }
+        PartialModelIdOrAliasConfig::Alias(alias) => {
+            panic!("alias `{alias}` persisted unresolved in the post layer");
+        }
+    }
+}
+
+// Workspace-root selection by ID moved into the bootstrap step (RFD 087
+// phase 2/3); its behavior is covered by `bootstrap_tests` and
+// `cmd::workspace::target` tests.

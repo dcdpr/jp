@@ -1,6 +1,6 @@
 use std::collections::BTreeSet;
 
-use jp_tool::Context;
+use camino::Utf8Path;
 
 use super::MAX_DIAGNOSTIC_BYTES;
 use crate::util::{
@@ -10,12 +10,12 @@ use crate::util::{
 };
 
 pub(crate) async fn cargo_check(
-    ctx: &Context,
+    root: &Utf8Path,
     package: Option<String>,
     checksum_freshness: bool,
 ) -> ToolResult {
     cargo_check_impl(
-        ctx,
+        root,
         package.as_deref(),
         checksum_freshness,
         &DuctProcessRunner,
@@ -23,7 +23,7 @@ pub(crate) async fn cargo_check(
 }
 
 fn cargo_check_impl<R: ProcessRunner>(
-    ctx: &Context,
+    root: &Utf8Path,
     package: Option<&str>,
     checksum_freshness: bool,
     runner: &R,
@@ -52,7 +52,7 @@ fn cargo_check_impl<R: ProcessRunner>(
             // compiled without this, so its lints surface only on CI.
             "--all-features",
         ],
-        &ctx.root,
+        root,
         &env,
     )?;
 
@@ -67,7 +67,7 @@ fn cargo_check_impl<R: ProcessRunner>(
     let clippy = strip_ansi_escapes::strip_str(stderr);
     let clippy = truncate(clippy.trim(), MAX_DIAGNOSTIC_BYTES);
 
-    let comfort_note = match comfort_check(ctx, package, runner)? {
+    let comfort_note = match comfort_check(root, package, runner)? {
         ComfortCheck::Clean => None,
         ComfortCheck::Drift(note) => Some(note),
         ComfortCheck::Failed(stderr) => {
@@ -114,7 +114,7 @@ enum ComfortCheck {
 /// Drift is not a failure: `cargo_fmt` auto-fixes it, so it comes back as a
 /// [`ComfortCheck::Drift`] note rather than an error.
 fn comfort_check<R: ProcessRunner>(
-    ctx: &Context,
+    root: &Utf8Path,
     package: Option<&str>,
     runner: &R,
 ) -> Result<ComfortCheck, std::io::Error> {
@@ -138,10 +138,10 @@ fn comfort_check<R: ProcessRunner>(
         stderr,
         status,
         stdout,
-    } = runner.run_with_env("comfort", &comfort_args, &ctx.root, &[])?;
+    } = runner.run_with_env("comfort", &comfort_args, root, &[])?;
 
     let strip_root = |line: &str| -> String {
-        line.trim_start_matches(ctx.root.as_str())
+        line.trim_start_matches(root.as_str())
             .trim_start_matches('/')
             .to_owned()
     };

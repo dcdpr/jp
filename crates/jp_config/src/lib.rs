@@ -42,6 +42,7 @@ pub(crate) mod fill;
 pub mod fs;
 pub(crate) mod internal;
 pub mod interrupt;
+pub mod loader;
 pub mod model;
 mod partial;
 pub mod plugins;
@@ -74,6 +75,7 @@ use crate::{
     delta::{PartialConfigDelta, delta_opt_vec},
     editor::{EditorConfig, PartialEditorConfig},
     interrupt::{InterruptConfig, PartialInterruptConfig},
+    loader::{LoaderConfig, PartialLoaderConfig},
     partial::partial_opt,
     plugins::{PartialPluginsConfig, PluginsConfig},
     providers::{PartialProviderConfig, ProviderConfig},
@@ -97,7 +99,6 @@ type BoxedError = Box<dyn std::error::Error + Send + Sync>;
 #[config(rename_all = "snake_case")]
 pub struct AppConfig {
     /// Inherit from a local ancestor or global configuration file.
-    #[setting(optional)]
     pub inherit: bool,
 
     /// Directories to search for additional configuration files.
@@ -109,7 +110,7 @@ pub struct AppConfig {
     ///
     /// For example, to load `.jp/agents/dev.toml`, add `.jp/agents` to this
     /// list and run `jp query --cfg dev`.
-    #[setting(optional, merge = schematic::merge::append_vec, transform = util::vec_dedup)]
+    #[setting(merge = internal::merge::append_vec_dedup)]
     pub config_load_paths: Vec<RelativePathBuf>,
 
     /// Extends the configuration from the given files.
@@ -123,6 +124,16 @@ pub struct AppConfig {
     /// `config_load_paths`, which load only when requested with `--cfg`.
     #[setting(default = vec!["config.d/**/*".into()], merge = schematic::merge::preserve)]
     pub extends: Vec<ExtendingRelativePath>,
+
+    /// Loader directives for the config file declaring them.
+    ///
+    /// Interpreted while the declaring file is loaded, never part of the
+    /// resolved runtime configuration: the section is ignored when the file is
+    /// reached through `extends`, and is never persisted ([RFD 038]).
+    ///
+    /// [RFD 038]: https://jp.computer/rfd/038
+    #[setting(nested)]
+    pub loader: LoaderConfig,
 
     /// Assistant configuration.
     ///
@@ -238,6 +249,11 @@ impl PartialConfigDelta for PartialAppConfig {
             // `inherit` value of `true`.
             inherit: None,
 
+            // Loader metadata is interpreted while the declaring file is
+            // loaded ([RFD 038]): only its *effect* outlives loading, never
+            // the field itself.
+            loader: PartialLoaderConfig::default(),
+
             config_load_paths: delta_opt_vec(
                 self.config_load_paths.as_ref(),
                 next.config_load_paths,
@@ -262,6 +278,7 @@ impl FillDefaults for PartialAppConfig {
             inherit: self.inherit.or(defaults.inherit),
             config_load_paths: self.config_load_paths.or(defaults.config_load_paths),
             extends: self.extends.or(defaults.extends),
+            loader: self.loader.fill_from(defaults.loader),
             assistant: self.assistant.fill_from(defaults.assistant),
             conversation: self.conversation.fill_from(defaults.conversation),
             style: self.style.fill_from(defaults.style),
@@ -283,6 +300,7 @@ impl ToPartial for AppConfig {
             inherit: partial_opt(&self.inherit, defaults.inherit),
             config_load_paths: partial_opt(&self.config_load_paths, defaults.config_load_paths),
             extends: partial_opt(&self.extends, defaults.extends),
+            loader: self.loader.to_partial(),
             assistant: self.assistant.to_partial(),
             conversation: self.conversation.to_partial(),
             style: self.style.to_partial(),

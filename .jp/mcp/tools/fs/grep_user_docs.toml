@@ -39,7 +39,7 @@ parameters = "function_call"
 [conversation.tools.fs_grep_user_docs.parameters.pattern]
 type = "string"
 required = true
-summary = "Regular expression to filter the results by."
+summary = "Regular expression to filter the results by. Lookaround and backreferences are supported."
 
 [conversation.tools.fs_grep_user_docs.parameters.context]
 type = "integer"

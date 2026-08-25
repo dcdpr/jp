@@ -4,14 +4,18 @@
 - **Category**: Process
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-09
+- **Extended by**: [RFD 100]
 
 ## Summary
 
 This RFD introduces three improvements to the RFD lifecycle: RFD numbers are
 assigned at Discussion (not at Draft creation), a GitHub tracking issue is
-created automatically at that same promotion event, and two new metadata fields
+created automatically when an RFD is accepted, and two new metadata fields
 (`Extends` / `Extended by`) make directional relationships between RFDs
 machine-readable.
+
+The tracking-issue half is superseded by [RFD 100], which tracks implementation
+work in tickets instead.
 
 ## Motivation
 
@@ -70,8 +74,20 @@ relationships to be resolved before both RFDs reach Discussion.
 
 ### 2\. Tracking Issues
 
-When `just rfd-promote` advances an RFD to Discussion, a GitHub tracking issue
-is created automatically alongside the file rename and status change.
+> [!TIP]
+> This section is superseded by [RFD 100].
+> Implementation work is tracked in tickets: `rfd-promote` offers to turn each
+> phase of the Implementation Plan into a ticket carrying `Implements: NNN`, and
+> one ticket serves as both the tracking item and the prioritised work item.
+> No GitHub tracking issue is created, and the `Tracking Issue` metadata field
+> is retired.
+>
+> The original text below is preserved for historical context.
+> Note that it describes issue creation at Discussion; as implemented, it
+> happened at Accepted.
+
+When `just rfd-promote` advances an RFD to Accepted, a GitHub tracking issue is
+created automatically alongside the status change.
 
 The issue:
 
@@ -204,7 +220,7 @@ accordingly.
 - **Renumbering existing drafts.** Existing Draft-status RFDs at the time this
   ships keep their numbers under the grandfather clause.
 - **Automated tracking issue updates.** The tracking issue is created once at
-  Discussion promotion.
+  promotion.
   Keeping it current (checking off tasks) is the author's and implementer's
   responsibility.
 - **`Related` as manual metadata.** Covered by website automation.
@@ -277,3 +293,4 @@ Can be merged independently.
 
 [RFD 001]: 001-jp-rfd-process.md
 [RFD 003]: 003-jp-assisted-rfds.md
+[RFD 100]: 100-in-repo-ticket-tracking.md

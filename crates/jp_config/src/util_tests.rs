@@ -732,18 +732,201 @@ fn test_load_partial_at_path_diamond_is_not_a_cycle() {
     );
     write_config(&root.join("d.toml"), "assistant.system_prompt = \"d\"");
 
-    let partial = load_partial_at_path(root.join("a.toml")).unwrap();
-    assert!(partial.is_some());
+    let partial = load_partial_at_path(root.join("a.toml")).unwrap().unwrap();
+    assert_eq!(partial.assistant.system_prompt.as_deref(), Some("d"));
 }
 
 #[test]
-fn test_vec_dedup_preserves_order() {
-    let result = vec_dedup(vec![3, 1, 2, 1, 3, 4], &()).unwrap();
-    assert_eq!(result, vec![3, 1, 2, 4]);
+fn test_load_loader_directives_reads_own_section() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    write_config(
+        &root.join("entry.toml"),
+        indoc::indoc!(
+            r#"
+                [loader]
+                reset = "none"
+            "#
+        ),
+    );
+
+    let loader = load_loader_directives(root.join("entry.toml")).unwrap();
+    assert_eq!(loader.reset, Some(crate::loader::LoaderReset::None));
+
+    write_config(&root.join("plain.toml"), "assistant.system_prompt = \"p\"");
+    let loader = load_loader_directives(root.join("plain.toml")).unwrap();
+    assert_eq!(loader.reset, None);
 }
 
 #[test]
-fn test_vec_dedup_no_duplicates() {
-    let result = vec_dedup(vec![1, 2, 3], &()).unwrap();
-    assert_eq!(result, vec![1, 2, 3]);
+fn test_load_loader_directives_ignores_extends() {
+    // The read is shallow: `[loader]` in a file reached through `extends`
+    // must not affect the declaring entry ([RFD 038]).
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    write_config(
+        &root.join("entry.toml"),
+        indoc::indoc!(
+            r#"
+                extends = ["fragment.toml"]
+            "#
+        ),
+    );
+    write_config(
+        &root.join("fragment.toml"),
+        indoc::indoc!(
+            r#"
+                [loader]
+                reset = "none"
+            "#
+        ),
+    );
+
+    let loader = load_loader_directives(root.join("entry.toml")).unwrap();
+    assert_eq!(loader.reset, None);
+
+    // The full load, by contrast, merges the fragment's section into the
+    // resolved partial; the pipeline strips it after reading directives.
+    let partial = load_partial_at_path(root.join("entry.toml"))
+        .unwrap()
+        .unwrap();
+    assert_eq!(partial.loader.reset, Some(crate::loader::LoaderReset::None));
+}
+
+#[test]
+fn test_load_partial_at_path_diamond_applies_shared_file_once() {
+    // a -> b -> d
+    // a -> c -> d
+    //
+    // `d` appends to the system prompt. Reaching it through both branches must
+    // apply the append once: a shared dependency is a diamond, not two
+    // separate contributions.
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    write_config(&root.join("a.toml"), r#"extends = ["b.toml", "c.toml"]"#);
+    write_config(&root.join("b.toml"), r#"extends = ["d.toml"]"#);
+    write_config(&root.join("c.toml"), r#"extends = ["d.toml"]"#);
+    write_config(
+        &root.join("d.toml"),
+        indoc::indoc!(
+            r#"
+                [assistant.system_prompt]
+                strategy = "append"
+                separator = "space"
+                value = "d"
+            "#
+        ),
+    );
+
+    let partial = load_partial_at_path(root.join("a.toml")).unwrap().unwrap();
+    assert_eq!(partial.assistant.system_prompt.as_deref(), Some("d"));
+}
+
+#[test]
+fn test_load_partial_at_path_diamond_keeps_shared_file_last() {
+    // a -> b -> d
+    // a -> c -> d
+    //
+    // `b` and `d` both set the same replace-merged field. Collapsing `d`'s two
+    // visits to the last one keeps `d` after `b`, so `d` wins — which is the
+    // same winner the uncollapsed graph produced (`[d, b, d, c, a]`), because
+    // the repeat visit already clobbered `b`.
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    write_config(&root.join("a.toml"), r#"extends = ["b.toml", "c.toml"]"#);
+    write_config(
+        &root.join("b.toml"),
+        indoc::indoc!(
+            r#"
+                extends = ["d.toml"]
+                assistant.name = "b"
+            "#
+        ),
+    );
+    write_config(&root.join("c.toml"), r#"extends = ["d.toml"]"#);
+    write_config(&root.join("d.toml"), r#"assistant.name = "d""#);
+
+    let partial = load_partial_at_path(root.join("a.toml")).unwrap().unwrap();
+    assert_eq!(partial.assistant.name.as_deref(), Some("d"));
+}
+
+#[test]
+fn test_load_partial_at_path_repeat_visit_keeps_last_position() {
+    // a -> b -> d
+    // a -> d
+    //
+    // `a` declares `extends = ["b.toml", "d.toml"]`, so `d` overrides `b`.
+    // Collapsing the repeat visit must not move `d` ahead of `b` and flip that
+    // precedence.
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    write_config(&root.join("a.toml"), r#"extends = ["b.toml", "d.toml"]"#);
+    write_config(
+        &root.join("b.toml"),
+        indoc::indoc!(
+            r#"
+                extends = ["d.toml"]
+                assistant.name = "b"
+            "#
+        ),
+    );
+    write_config(&root.join("d.toml"), r#"assistant.name = "d""#);
+
+    let partial = load_partial_at_path(root.join("a.toml")).unwrap().unwrap();
+    assert_eq!(partial.assistant.name.as_deref(), Some("d"));
+}
+
+/// The `config_load_paths` entries of a loaded partial, as strings.
+fn load_paths(partial: &PartialAppConfig) -> Vec<&str> {
+    partial
+        .config_load_paths
+        .as_deref()
+        .unwrap_or_default()
+        .iter()
+        .map(|p| p.as_str())
+        .collect()
+}
+
+#[test]
+fn test_load_partial_at_path_dedups_load_paths_across_files() {
+    // Two files naming the same search directory contribute it once. This is
+    // the path the merge strategy actually runs on: `merge_setting` only
+    // invokes it when both layers supply a value.
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    write_config(
+        &root.join("a.toml"),
+        indoc::indoc!(
+            r#"
+                extends = ["b.toml"]
+                config_load_paths = ["shared", "a-only"]
+            "#
+        ),
+    );
+    write_config(
+        &root.join("b.toml"),
+        r#"config_load_paths = ["shared", "b-only"]"#,
+    );
+
+    let partial = load_partial_at_path(root.join("a.toml")).unwrap().unwrap();
+
+    assert_eq!(load_paths(&partial), ["shared", "b-only", "a-only"]);
+}
+
+#[test]
+fn test_load_partial_at_path_keeps_repeats_from_a_single_file() {
+    // One file, so nothing is combined and the list is stored as written.
+    // Repeats inside a single source are the author's own data, the same rule
+    // `replace` follows on `MergeableVec`; the resolved list is searched in
+    // order and stops at the first match, so a repeat changes no outcome.
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    write_config(
+        &root.join("a.toml"),
+        r#"config_load_paths = ["dupe", "dupe"]"#,
+    );
+
+    let partial = load_partial_at_path(root.join("a.toml")).unwrap().unwrap();
+
+    assert_eq!(load_paths(&partial), ["dupe", "dupe"]);
 }

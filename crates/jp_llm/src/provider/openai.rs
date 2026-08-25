@@ -33,7 +33,7 @@ use super::{EventStream, ModelDetails, Provider};
 use crate::{
     error::{
         Error, Result, StreamError, StreamErrorKind, extract_retry_from_text,
-        looks_like_quota_error,
+        looks_like_context_window_error, looks_like_quota_error,
     },
     event::{Event, FinishReason},
     model::{ModelDeprecation, ReasoningDetails},
@@ -1541,10 +1541,23 @@ fn classify_stream_error(error: types::response::Error) -> StreamError {
         );
     }
 
+    // An oversized prompt is the same size on the next attempt, so the typed
+    // signal is checked before the retryable categories below.
+    if code == Some("context_length_exceeded") || type_ == "context_length_exceeded" {
+        return StreamError::context_window_exceeded(error.message);
+    }
+
     // Rate-limits may signal via either `type` or `code`. OpenAI's TPM/RPM
     // in-stream limits use `type=tokens|requests` with `code=rate_limit_exceeded`.
+    // This outranks the message sniff below: a token-per-minute limit reads much
+    // like a window overflow, and only the typed code tells them apart.
     if code == Some("rate_limit_exceeded") || type_ == "rate_limit_exceeded" {
         return StreamError::rate_limit(retry_after);
+    }
+
+    // No typed signal said window or rate limit, so fall back to the message.
+    if looks_like_context_window_error(&error.message) {
+        return StreamError::context_window_exceeded(error.message);
     }
 
     // Server-side transient errors. Match on either type or code: OpenAI emits
