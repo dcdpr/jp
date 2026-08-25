@@ -364,6 +364,70 @@ fn inquiry_model_survives_an_aliased_assistant_layer() {
     );
 }
 
+/// A half-written inquiry model id takes its missing half from an assistant
+/// model named by alias.
+///
+/// `--cfg conversation.inquiry.assistant.model.id.name=<name>` sets one field
+/// of the pair.
+/// The other has to come from the assistant, which is reachable only once the
+/// alias naming it has been resolved.
+#[test]
+fn a_half_written_inquiry_model_id_inherits_from_an_aliased_assistant() {
+    use crate::{
+        model::id::{PartialModelIdConfig, PartialModelIdOrAliasConfig},
+        util::build,
+    };
+
+    let mut partial = PartialAppConfig::new_test();
+    partial.providers.llm.aliases.insert(
+        "opus".to_owned(),
+        PartialModelIdOrAliasConfig::from("anthropic/claude-opus-5"),
+    );
+    partial.assistant.model.id = PartialModelIdOrAliasConfig::Alias("opus".to_owned());
+    partial.conversation.inquiry.assistant.model.id = PartialModelIdConfig {
+        provider: None,
+        name: Some("claude-haiku-4-5".parse().unwrap()),
+    }
+    .into();
+
+    let config = build(partial).expect("valid config");
+
+    assert_eq!(
+        config
+            .conversation
+            .inquiry
+            .assistant
+            .model
+            .id
+            .resolved()
+            .to_string(),
+        "anthropic/claude-haiku-4-5",
+        "the inquiry keeps its own name and inherits the assistant's provider"
+    );
+    assert_eq!(
+        config.assistant.model.id.resolved().to_string(),
+        "anthropic/claude-opus-5",
+        "and the assistant keeps the model its alias names"
+    );
+}
+
+/// An alias the map cannot resolve is still reported as an unresolved alias,
+/// not as a missing field.
+#[test]
+fn an_unknown_assistant_alias_reports_itself() {
+    use crate::{model::id::PartialModelIdOrAliasConfig, util::build};
+
+    let mut partial = PartialAppConfig::new_test();
+    partial.assistant.model.id = PartialModelIdOrAliasConfig::Alias("nope".to_owned());
+
+    let error = build(partial).unwrap_err().to_string();
+
+    assert!(
+        error.contains("assistant.model.id"),
+        "the error names the field holding the alias, got: {error}"
+    );
+}
+
 /// An inquiry value the user genuinely set survives the same round-trip.
 #[test]
 fn an_explicit_inquiry_value_survives_a_partial_round_trip() {

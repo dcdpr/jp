@@ -372,6 +372,13 @@ impl AppConfig {
     pub(crate) fn from_partial_with_defaults(
         mut partial: PartialAppConfig,
     ) -> Result<Self, ConfigError> {
+        // Inheritance fills the inquiry field by field, so the assistant's
+        // model id has to be spelled out for the inquiry to take anything from
+        // it: an id the user half-wrote (`...inquiry.assistant.model.id.name`)
+        // needs the provider from here, and an alias carries no fields.
+        let aliases = &partial.providers.llm.aliases;
+        partial.assistant.model.id.finalize_in_place(aliases);
+
         // Inquiry settings inherit from the top-level assistant. This runs
         // before the `#[setting(default)]` layer below, so an unset inquiry
         // field takes the user's configured assistant value rather than the

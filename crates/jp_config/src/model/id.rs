@@ -222,6 +222,22 @@ impl PartialModelIdOrAliasConfig {
         }
     }
 
+    /// Replace an `Alias` variant with the partial model ID it names, following
+    /// the chain through a partial alias map.
+    ///
+    /// A no-op for an `Id`, and for an alias the map cannot resolve — an
+    /// unresolvable alias is left in place to be reported when the config is
+    /// finalized.
+    pub fn finalize_in_place(&mut self, aliases: &IndexMap<String, Self>) {
+        let Self::Alias(alias) = self else {
+            return;
+        };
+
+        if let Ok(resolved) = resolve_partial_alias_chain(alias, aliases) {
+            *self = Self::Id(resolved);
+        }
+    }
+
     /// Resolve to a concrete [`ModelIdConfig`] using the alias map.
     ///
     /// This bridges partial config types (from e.g.
