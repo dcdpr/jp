@@ -307,6 +307,63 @@ fn inquiry_inheritance_survives_a_partial_round_trip() {
     );
 }
 
+/// A later layer naming the assistant model by alias must not strand the
+/// inquiry's own model.
+///
+/// A resolved config becomes a layer again through `to_partial` (a stored
+/// conversation config, a `--cfg` baseline), which records the inquiry model as
+/// a diff against the assistant's.
+/// An inquiry sharing the assistant's provider records only its name, and
+/// inherits the provider back at build time — but only if the assistant's
+/// model id is still an id at that point.
+/// A `--cfg=personas/...` layer setting `assistant.model.id` to an alias leaves
+/// it an unresolved `Alias`, with no provider for the inquiry to inherit.
+#[test]
+fn inquiry_model_survives_an_aliased_assistant_layer() {
+    use crate::{
+        model::id::{ModelIdConfig, PartialModelIdOrAliasConfig, ProviderId},
+        util::build,
+    };
+
+    let mut partial = PartialAppConfig::new_test();
+    partial.providers.llm.aliases.insert(
+        "opus".to_owned(),
+        PartialModelIdOrAliasConfig::from("anthropic/claude-opus-5"),
+    );
+    partial.assistant.model.id = ModelIdConfig {
+        provider: ProviderId::Anthropic,
+        name: "claude-opus-5".parse().unwrap(),
+    }
+    .to_partial()
+    .into();
+
+    // Same provider as the assistant, different model.
+    partial.conversation.inquiry.assistant.model.id = ModelIdConfig {
+        provider: ProviderId::Anthropic,
+        name: "claude-haiku-4-5".parse().unwrap(),
+    }
+    .to_partial()
+    .into();
+
+    let mut round_tripped = build(partial).expect("valid config").to_partial();
+    round_tripped.assistant.model.id = PartialModelIdOrAliasConfig::Alias("opus".to_owned());
+
+    let config = build(round_tripped).expect("valid config");
+
+    assert_eq!(
+        config
+            .conversation
+            .inquiry
+            .assistant
+            .model
+            .id
+            .resolved()
+            .to_string(),
+        "anthropic/claude-haiku-4-5",
+        "the inquiry keeps its own model, provider included"
+    );
+}
+
 /// An inquiry value the user genuinely set survives the same round-trip.
 #[test]
 fn an_explicit_inquiry_value_survives_a_partial_round_trip() {

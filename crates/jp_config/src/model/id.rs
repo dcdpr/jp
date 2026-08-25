@@ -58,7 +58,17 @@ impl AssignKeyValue for PartialModelIdOrAliasConfig {
 impl PartialConfigDelta for PartialModelIdOrAliasConfig {
     fn delta(&self, next: Self) -> Self {
         match (self, next) {
-            (Self::Id(prev), Self::Id(next)) => Self::Id(prev.delta(next)),
+            // A model id is one value spelled across two fields, so a changed id
+            // is recorded whole. Keeping only the field that differs leaves a
+            // half id, which takes its missing half from whatever model the
+            // layer below happens to name.
+            (Self::Id(prev), Self::Id(next)) => {
+                if prev.delta(next.clone()).is_empty() {
+                    Self::empty()
+                } else {
+                    Self::Id(next)
+                }
+            }
             (Self::Alias(prev), Self::Alias(next)) if prev == &next => Self::empty(),
             (_, next) => next,
         }
