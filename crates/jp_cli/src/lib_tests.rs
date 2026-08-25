@@ -213,7 +213,7 @@ fn a_background_task_persist_failure_is_recorded_after_the_command_finished() {
         providers: cfg.providers.llm.clone(),
         events: jp_conversation::ConversationStream::new_test(),
         title: Some("generated".into()),
-        max_response_bytes: cfg.assistant.request.max_response_bytes,
+        max_response_bytes: cfg.assistant.request.max_response_bytes.bytes(),
         is_tty: false,
     });
 
