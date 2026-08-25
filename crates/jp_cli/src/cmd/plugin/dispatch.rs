@@ -12,6 +12,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread,
+    time::{Duration, Instant},
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
@@ -360,22 +361,12 @@ pub(crate) fn run_plugin(
             return;
         }
 
-        // Send Shutdown over the protocol.
-        if let Ok(mut writer) = shutdown_writer.lock() {
-            drop(write_message(&mut *writer, &HostToPlugin::Shutdown));
-        }
-        shutdown_flag.store(true, Ordering::Release);
-
-        // Grace period: wait in short intervals so we don't block cleanup
-        // if the plugin exits promptly.
-        for _ in 0..50 {
-            thread::sleep(std::time::Duration::from_millis(100));
-            if !is_process_alive(child_id) {
-                return;
-            }
-        }
-
-        kill_child(child_id);
+        stop_plugin(
+            &shutdown_writer,
+            &shutdown_flag,
+            child_id,
+            Duration::from_secs(5),
+        );
     });
 
     // Send init.
@@ -396,12 +387,52 @@ pub(crate) fn run_plugin(
         composer,
     );
 
+    // A plugin that asked a question the host answered with an error is still
+    // waiting for the reply. Nothing here closes its stdin — this scope holds a
+    // handle and so does the shutdown thread — so waiting on it without saying
+    // anything first is a wait for a process that has no reason to exit, and the
+    // error above never reaches the caller.
+    //
+    // Short grace: unlike an interrupt, there is no work in flight worth letting
+    // finish.
+    if result.is_err() {
+        stop_plugin(&stdin, &shutdown_sent, child_id, Duration::from_secs(1));
+    }
+
     // Always clean up, even on error.
     drop(child.wait());
     drop(stderr_handle.join());
     drop(shutdown_handle);
 
     result
+}
+
+/// Ask a plugin to stop, and make sure it does.
+///
+/// Sends `Shutdown` over the protocol, gives the plugin `grace` to act on it,
+/// and kills it if it doesn't.
+/// `sent` marks the request so the two callers don't both make it.
+///
+/// Killing rather than closing stdin: the handle is shared, so no single holder
+/// can produce the EOF that would let a reading plugin notice on its own.
+fn stop_plugin(stdin: &Mutex<impl Write>, sent: &AtomicBool, child_id: u32, grace: Duration) {
+    if !sent.swap(true, Ordering::AcqRel)
+        && let Ok(mut writer) = stdin.lock()
+    {
+        drop(write_message(&mut *writer, &HostToPlugin::Shutdown));
+    }
+
+    // Polled in short intervals, so a plugin that goes quietly doesn't hold up
+    // cleanup for the whole grace period.
+    let deadline = Instant::now() + grace;
+    while Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(50));
+        if !is_process_alive(child_id) {
+            return;
+        }
+    }
+
+    kill_child(child_id);
 }
 
 /// The JP directories a plugin is told about, so it needs no platform logic of
