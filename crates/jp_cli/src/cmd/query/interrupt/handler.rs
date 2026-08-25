@@ -479,10 +479,14 @@ impl<P: PromptBackend> InterruptHandler<P> {
         let mut buffer = String::new();
         loop {
             let output = printer.owned_prompt_writer();
-            match self
-                .backend
-                .inline_reply(message, &buffer, self.edit_mode, editor_escape, output)
-            {
+            match self.backend.inline_reply(
+                message,
+                &buffer,
+                self.edit_mode,
+                editor_escape,
+                None,
+                output,
+            ) {
                 Ok(ReplyOutcome::OpenEditor { current_text }) => {
                     // The editor escape always returns here; whatever was typed
                     // before `Ctrl+X` is preserved.

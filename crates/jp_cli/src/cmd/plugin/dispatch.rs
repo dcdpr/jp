@@ -22,41 +22,217 @@ use jp_config::{
         command::{CommandPluginConfig, RunPolicy},
     },
 };
-use jp_inquire::{InlineOption, InlineSelect};
+use jp_editor::{EditOutcome, EditorBackend};
+use jp_inquire::{
+    InlineOption, InlineSelect, ReplyEditMode, ReplyOutcome,
+    prompt::{PromptBackend, TerminalPromptBackend},
+};
 use jp_plugin::{
     PROTOCOL_VERSION,
     message::{
-        ConfigResponse, ConversationSummary, ConversationsResponse, DescribeResponse,
-        ErrorResponse, EventsResponse, HostToPlugin, InitMessage, LogMessage, PathsInfo,
-        PluginToHost, WorkspaceInfo,
+        ComposeMode, ComposeOption, ComposeRequest, ComposeResponse, ConfigResponse,
+        ConversationSummary, ConversationsResponse, DescribeResponse, ErrorResponse,
+        EventsResponse, HostToPlugin, InitMessage, LogMessage, PathsInfo, PluginToHost,
+        WorkspaceInfo,
     },
 };
+use jp_printer::Printer;
 use jp_workspace::Workspace;
 use serde_json::Value;
 use tracing::{debug, error, trace, warn};
 
 use super::registry;
-use crate::{Ctx, cmd, signals::SignalRouter};
+use crate::{
+    Ctx, cmd, cmd::query::interrupt::reply_edit_mode, editor::report_editor_failure,
+    signals::SignalRouter,
+};
 
-/// Run a plugin binary, handling the full protocol lifecycle.
+/// Runs the prompts a plugin asks for.
 ///
-/// `binary` is the path to the plugin executable.
-/// `args` are the remaining CLI arguments to forward.
-/// `child_cwd` is the bootstrap-resolved working directory for the child (RFD
-/// 087): `Some` when JP operates on a workspace other than the launch cwd's
-/// own, `None` to inherit the process cwd.
-pub(crate) fn run_plugin(
+/// Composition lives on this side of the protocol because the host owns both
+/// ends of it: the plugin's stdin carries the protocol, so it has no terminal
+/// to read keys from, and only the host knows which editor `Ctrl+X` opens.
+pub(crate) struct Composer<'a> {
+    printer: &'a Printer,
+
+    /// Renders the widgets, rather than the composer building them.
+    ///
+    /// Everything the widget owns — its keybindings, and the hints that
+    /// describe them — lives behind here, so a second caller cannot quietly
+    /// ship a reply buffer with the wrong edit mode or no key hints at all.
+    prompts: &'a dyn PromptBackend,
+
+    editor: Option<Arc<dyn EditorBackend>>,
+    edit_mode: ReplyEditMode,
+    is_tty: bool,
+}
+
+impl Composer<'_> {
+    /// Collect what the request asks for, or nothing if the user declines.
+    fn compose(&self, request: &ComposeRequest) -> ComposeResponse {
+        let mut response = ComposeResponse {
+            id: request.id.clone(),
+            text: None,
+            values: vec![],
+        };
+
+        if !self.is_tty {
+            debug!("Plugin asked to compose without a terminal to ask on.");
+            return response;
+        }
+
+        match &request.mode {
+            ComposeMode::MultiSelect { options } => {
+                response.values = self.ask_many(request, options);
+            }
+            _ => response.text = self.ask(request),
+        }
+
+        response
+    }
+
+    /// Pick any number of the offered options.
+    fn ask_many(&self, request: &ComposeRequest, options: &[ComposeOption]) -> Vec<String> {
+        if options.is_empty() {
+            return vec![];
+        }
+
+        let labels: Vec<&str> = options.iter().map(|o| o.label.as_str()).collect();
+        let mut writer = self.printer.prompt_writer();
+        let mut prompt = inquire::MultiSelect::new(&request.message, labels);
+        if let Some(help) = &request.help {
+            prompt = prompt.with_help_message(help);
+        }
+
+        let Ok(chosen) = prompt.raw_prompt_with_writer(&mut writer) else {
+            return vec![];
+        };
+
+        chosen
+            .into_iter()
+            .filter_map(|item| options.get(item.index).map(|o| o.value.clone()))
+            .collect()
+    }
+
+    fn ask(&self, request: &ComposeRequest) -> Option<String> {
+        match &request.mode {
+            ComposeMode::Line { default } => {
+                let mut writer = self.printer.prompt_writer();
+                let mut prompt = inquire::Text::new(&request.message);
+                if let Some(default) = default {
+                    prompt = prompt.with_initial_value(default);
+                }
+                if let Some(help) = &request.help {
+                    prompt = prompt.with_help_message(help);
+                }
+
+                prompt.prompt_with_writer(&mut writer).ok()
+            }
+            // Answered by `ask_many`, which `compose` routes to first.
+            ComposeMode::MultiSelect { .. } => None,
+            ComposeMode::Buffer { initial_text } => {
+                self.buffer(request, initial_text.as_deref().unwrap_or_default())
+            }
+            ComposeMode::Select { options, default } => {
+                if options.is_empty() {
+                    return None;
+                }
+
+                let labels: Vec<&str> = options.iter().map(|o| o.label.as_str()).collect();
+                let start = default
+                    .as_ref()
+                    .and_then(|value| options.iter().position(|o| &o.value == value))
+                    .unwrap_or(0);
+
+                let mut writer = self.printer.prompt_writer();
+                let mut prompt =
+                    inquire::Select::new(&request.message, labels).with_starting_cursor(start);
+                if let Some(help) = &request.help {
+                    prompt = prompt.with_help_message(help);
+                }
+
+                let chosen = prompt.raw_prompt_with_writer(&mut writer).ok()?;
+
+                options.get(chosen.index).map(|o| o.value.clone())
+            }
+        }
+    }
+
+    /// The multi-line widget, looping so the editor escape returns to it.
+    fn buffer(&self, request: &ComposeRequest, initial: &str) -> Option<String> {
+        let mut buffer = initial.to_owned();
+
+        loop {
+            let outcome = self.prompts.inline_reply(
+                request.message.as_str(),
+                buffer.as_str(),
+                self.edit_mode,
+                self.editor.is_some(),
+                request.help.as_deref(),
+                Box::new(self.printer.owned_prompt_writer()),
+            );
+
+            match outcome {
+                Ok(ReplyOutcome::Submit(text)) => return Some(text),
+                Ok(ReplyOutcome::Cancelled) => return None,
+                Ok(ReplyOutcome::OpenEditor { current_text }) => {
+                    // Whatever was typed before `Ctrl+X` seeds the editor, and
+                    // whatever comes back seeds the widget again.
+                    buffer = current_text;
+                    let Some(editor) = self.editor.as_ref() else {
+                        continue;
+                    };
+                    match editor.edit_text(&buffer) {
+                        Ok((EditOutcome::Saved, edited)) => buffer = edited,
+                        Ok((EditOutcome::Cancelled, _)) => {}
+                        Err(error) => report_editor_failure(
+                            self.printer,
+                            &error,
+                            "Continuing with the inline editor.",
+                        ),
+                    }
+                }
+                Err(error) => {
+                    warn!(%error, "Inline composition failed.");
+                    return None;
+                }
+            }
+        }
+    }
+}
+
+/// Where a plugin run reads and writes.
+///
+/// Grouped because they arrive together and are all optional paths: as separate
+/// parameters, two of them could be transposed at the call site and nothing
+/// would say so.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PluginPaths<'a> {
+    /// The bootstrap-resolved working directory for the child (RFD 087).
+    ///
+    /// `Some` when JP operates on a workspace other than the launch cwd's own,
+    /// `None` to inherit the process cwd.
+    pub(crate) child_cwd: Option<&'a Utf8Path>,
+
+    /// The workspace's storage directory.
+    pub(crate) storage: Option<&'a Utf8Path>,
+
+    /// The user-local storage directory for this workspace, when there is one.
+    pub(crate) user_storage: Option<&'a Utf8Path>,
+}
+
+/// The `init` message a plugin is greeted with, and the config it carries.
+///
+/// The config is returned alongside because the message loop answers
+/// `read_config` from the same value, rather than serializing it twice.
+fn init_message(
     name: &str,
-    binary: &Utf8Path,
     args: &[String],
     workspace: &Workspace,
-    child_cwd: Option<&Utf8Path>,
-    storage_path: Option<&Utf8Path>,
-    user_storage_path: Option<&Utf8Path>,
+    paths: PluginPaths<'_>,
     config: &Arc<AppConfig>,
-    signals: &SignalRouter,
     log_level: u8,
-) -> Result<(), cmd::Error> {
+) -> Result<(HostToPlugin, Value), cmd::Error> {
     let config_json = serde_json::to_value(config.as_ref().to_partial())
         .map_err(|e| cmd::Error::from(format!("failed to serialize config: {e}")))?;
 
@@ -69,27 +245,41 @@ pub(crate) fn run_plugin(
         .cloned()
         .unwrap_or_default();
 
-    let storage_path = storage_path.ok_or("workspace has no storage configured")?;
-
-    let home = std::env::home_dir().and_then(|p| camino::Utf8PathBuf::from_path_buf(p).ok());
+    let storage = paths.storage.ok_or("workspace has no storage configured")?;
 
     let init = HostToPlugin::Init(InitMessage {
         version: PROTOCOL_VERSION,
         workspace: WorkspaceInfo {
             root: workspace.root().to_owned(),
-            storage: storage_path.to_owned(),
+            storage: storage.to_owned(),
             id: workspace.id().to_string(),
         },
-        paths: PathsInfo {
-            user_data: jp_workspace::user_data_dir().ok(),
-            user_config: jp_config::fs::user_global_config_dir(home.as_deref()),
-            user_workspace: user_storage_path.map(ToOwned::to_owned),
-        },
+        paths: well_known_paths(paths.user_storage),
         config: config_json.clone(),
         options,
         args: args.to_vec(),
         log_level,
     });
+
+    Ok((init, config_json))
+}
+
+/// Run a plugin binary, handling the full protocol lifecycle.
+///
+/// `binary` is the path to the plugin executable.
+/// `args` are the remaining CLI arguments to forward.
+pub(crate) fn run_plugin(
+    name: &str,
+    binary: &Utf8Path,
+    args: &[String],
+    workspace: &Workspace,
+    paths: PluginPaths<'_>,
+    config: &Arc<AppConfig>,
+    signals: &SignalRouter,
+    log_level: u8,
+    composer: &Composer<'_>,
+) -> Result<(), cmd::Error> {
+    let (init, config_json) = init_message(name, args, workspace, paths, config, log_level)?;
 
     debug!(%binary, "Spawning plugin.");
 
@@ -101,7 +291,7 @@ pub(crate) fn run_plugin(
     // The root-as-working-directory invariant (RFD 087): when JP operates on
     // a workspace other than the launch cwd's own, plugins run as if launched
     // from the selected workspace root.
-    if let Some(cwd) = child_cwd {
+    if let Some(cwd) = paths.child_cwd {
         cmd.current_dir(cwd);
     }
 
@@ -197,7 +387,14 @@ pub(crate) fn run_plugin(
 
     // Read messages from plugin.
     let reader = BufReader::new(stdout);
-    let result = message_loop(reader, &stdin, workspace, &config_json, &shutdown_sent);
+    let result = message_loop(
+        reader,
+        &stdin,
+        workspace,
+        &config_json,
+        &shutdown_sent,
+        composer,
+    );
 
     // Always clean up, even on error.
     drop(child.wait());
@@ -207,6 +404,18 @@ pub(crate) fn run_plugin(
     result
 }
 
+/// The JP directories a plugin is told about, so it needs no platform logic of
+/// its own.
+fn well_known_paths(user_storage_path: Option<&Utf8Path>) -> PathsInfo {
+    let home = std::env::home_dir().and_then(|p| camino::Utf8PathBuf::from_path_buf(p).ok());
+
+    PathsInfo {
+        user_data: jp_workspace::user_data_dir().ok(),
+        user_config: jp_config::fs::user_global_config_dir(home.as_deref()),
+        user_workspace: user_storage_path.map(ToOwned::to_owned),
+    }
+}
+
 /// The main message loop: reads plugin requests and sends responses.
 fn message_loop(
     reader: BufReader<impl std::io::Read>,
@@ -214,6 +423,7 @@ fn message_loop(
     workspace: &Workspace,
     config_json: &Value,
     shutdown_sent: &AtomicBool,
+    composer: &Composer<'_>,
 ) -> Result<(), cmd::Error> {
     for line in reader.lines() {
         let line =
@@ -227,6 +437,21 @@ fn message_loop(
             .map_err(|e| cmd::Error::from(format!("invalid plugin message: {e}: {line}")))?;
 
         trace!(?msg, "Received plugin message.");
+
+        // Composing blocks on the user, so it runs before the lock is taken:
+        // the shutdown thread needs that same lock to deliver `Shutdown` if the
+        // user interrupts mid-prompt.
+        let msg = match msg {
+            PluginToHost::Compose(request) => {
+                let response = composer.compose(&request);
+                let mut writer = stdin.lock().expect("stdin lock poisoned");
+                write_message(&mut *writer, &HostToPlugin::Composed(response)).map_err(|e| {
+                    cmd::Error::from(format!("failed to answer a compose request: {e}"))
+                })?;
+                continue;
+            }
+            other => other,
+        };
 
         let mut writer = stdin.lock().expect("stdin lock poisoned");
 
@@ -266,6 +491,9 @@ fn message_loop(
             PluginToHost::Describe(_) => {
                 debug!("Ignoring describe in message loop.");
             }
+
+            // Handled above, before the lock this arm holds.
+            PluginToHost::Compose(_) => unreachable!("compose is answered before the lock"),
 
             PluginToHost::Exit(exit) => {
                 debug!(code = exit.code, "Plugin exited.");
@@ -893,8 +1121,15 @@ pub(crate) async fn run_external(args: &[String], ctx: &Ctx) -> cmd::Output {
         .split_first()
         .ok_or("no subcommand provided for plugin dispatch")?;
 
-    // Handle help without downloading or approval.
-    if plugin_args.iter().any(|a| a == "-h" || a == "--help") {
+    // A bare `jp <plugin> --help` is answered from the plugin's self-description,
+    // without downloading or approving anything.
+    //
+    // Help for something *within* the plugin (`jp <plugin> add --help`) is the
+    // plugin's own to render, and only it knows its subcommands, so that goes
+    // through normal dispatch below.
+    let bare_help =
+        !plugin_args.is_empty() && plugin_args.iter().all(|a| a == "-h" || a == "--help");
+    if bare_help {
         let binary = find_any_plugin_binary(subcommand).ok_or_else(|| {
             cmd::Error::from(format!(
                 "plugin `{subcommand}` not found. No installed plugin or `jp-{subcommand}` binary \
@@ -912,17 +1147,30 @@ pub(crate) async fn run_external(args: &[String], ctx: &Ctx) -> cmd::Output {
 
     debug!(%binary, subcommand, "Dispatching to plugin.");
 
+    let prompts = TerminalPromptBackend;
+    let composer = Composer {
+        printer: &ctx.printer,
+        prompts: &prompts,
+        editor: crate::editor::build_editor_backend(&config.editor),
+        // The configured mode, as every other inline reply in the CLI uses.
+        edit_mode: reply_edit_mode(config.editor.inline.edit_mode),
+        is_tty: ctx.term.is_tty,
+    };
+
     run_plugin(
         subcommand,
         &binary,
         plugin_args,
         &ctx.workspace,
-        ctx.exec.child_cwd(),
-        ctx.storage_path(),
-        ctx.user_storage_path(),
+        PluginPaths {
+            child_cwd: ctx.exec.child_cwd(),
+            storage: ctx.storage_path(),
+            user_storage: ctx.user_storage_path(),
+        },
         &config,
         &ctx.signals,
         ctx.term.args.verbose,
+        &composer,
     )?;
     Ok(())
 }
