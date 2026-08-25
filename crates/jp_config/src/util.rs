@@ -285,27 +285,38 @@ pub fn load_partial_at_path_recursive<P: Into<PathBuf>>(
     Ok(result)
 }
 
+/// Log the diagnostics for a freshly loaded configuration.
+///
+/// Emits the merged partial at debug level, dumps it to a temporary JSON file
+/// at trace level, and reports tools that are missing their required `source`
+/// field.
+///
+/// Call this once per invocation, where the layered configuration is assembled.
+/// [`build`] itself is silent, because it also runs for every per-turn and
+/// per-request configuration, which are not loads.
+pub fn log_load_diagnostics(partial: &PartialAppConfig) {
+    debug!("Loading configuration.");
+    trace!(
+        config = %trace_to_tmpfile("jp-config", partial),
+        "Configuration details."
+    );
+
+    for (name, tool) in &partial.conversation.tools.tools {
+        if tool.source.is_none() {
+            error!(
+                tool = %name,
+                "Tool config is missing required `source` field."
+            );
+        }
+    }
+}
+
 /// Build a final configuration from merged partial configurations.
 ///
 /// # Errors
 ///
 /// Can error if partial validation fails.
 pub fn build(partial: PartialAppConfig) -> Result<AppConfig, Error> {
-    debug!("Loading configuration.");
-    trace!(
-        config = %trace_to_tmpfile("jp-config", &partial),
-        "Configuration details."
-    );
-
-    for (name, tool) in &partial.conversation.tools.tools {
-        if tool.source.is_none() {
-            tracing::error!(
-                tool = %name,
-                "Tool config is missing required `source` field."
-            );
-        }
-    }
-
     let mut config = AppConfig::from_partial_with_defaults(partial)?;
 
     // Resolve model aliases so downstream code can assume all model IDs are

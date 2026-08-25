@@ -51,7 +51,7 @@ a resolved config → use.
 `PartialConfig::finalize` (called via `default_values`). Calling \
 `from_partial` on an unfinalized partial silently falls back to Rust's \
 `Default` trait — `""` for `String`, `0` for `u16`, etc. Always go through \
-`jp_config::util::build`, the crate's only public way to reach a resolved \
+`jp_config::util::build`, the only supported way to reach a resolved \
 `AppConfig`. It merges schematic defaults as a base layer, then resolves \
 model aliases and orders instructions and prompt sections — all three of \
 which the rest of JP assumes have happened.

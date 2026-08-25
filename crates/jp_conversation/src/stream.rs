@@ -1868,9 +1868,14 @@ pub enum StreamError {
 
     /// Building the stream's [`AppConfig`] failed.
     ///
-    /// Distinct from [`Config`]: that is a partial that would not convert, this
-    /// is everything else assembling a usable configuration involves, a model
-    /// alias that resolves to nothing being the most common.
+    /// Covers everything `jp_config::util::build` does: filling defaults,
+    /// converting and validating the partial, resolving model aliases, and
+    /// ordering instructions and prompt sections.
+    /// Conversion and validation failures arrive here too, wrapped as
+    /// `jp_config::Error::Schematic`; an alias that resolves to nothing is the
+    /// most common cause.
+    ///
+    /// [`Config`] covers the earlier step: merging deltas into the partial.
     ///
     /// [`Config`]: Self::Config
     #[error(transparent)]

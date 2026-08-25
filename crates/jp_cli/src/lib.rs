@@ -45,7 +45,7 @@ use jp_config::{
     fs::user_global_config_dir,
     util::{
         build, load_envs, load_partial_at_path, load_partial_at_path_recursive,
-        load_partials_with_inheritance,
+        load_partials_with_inheritance, log_load_diagnostics,
     },
 };
 use jp_printer::{OutputFormat, OutputWidth, Printer};
@@ -978,6 +978,7 @@ pub(crate) fn resolve_config(
     // payload, before `build` consumes it.
     let post_partial = config_reset.as_ref().map(|_| partial.clone());
 
+    log_load_diagnostics(&partial);
     let config = build(partial)?;
 
     // Assemble the reset point for conversation persistence ([RFD 038]): a

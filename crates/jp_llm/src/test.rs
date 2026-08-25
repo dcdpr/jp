@@ -4,7 +4,7 @@ use chrono::{TimeZone as _, Utc};
 use futures::TryStreamExt as _;
 use jp_attachment::Attachment;
 use jp_config::{
-    AppConfig, PartialAppConfig, ToPartial as _,
+    PartialAppConfig, ToPartial as _,
     assistant::tool_choice::ToolChoice,
     conversation::tool::ToolParameterConfig,
     model::{
@@ -12,6 +12,7 @@ use jp_config::{
         parameters::{PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningEffort},
     },
     providers::llm::LlmProviderConfig,
+    util::build,
 };
 use jp_conversation::{
     ConversationEvent, ConversationStream,
@@ -107,8 +108,7 @@ impl TestRequest {
                                 provider: Some(provider),
                                 name: Some("test".parse().unwrap()),
                             });
-                        let config = AppConfig::from_partial_with_defaults(partial)
-                            .expect("a valid test config");
+                        let config = build(partial).expect("a valid test config");
 
                         ConversationStream::new(config.into())
                             .with_created_at(Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap())
@@ -192,7 +192,7 @@ impl TestRequest {
         // resolution, so an in-place edit would leave them on the old value.
         let mut partial = thread.events.base_config().to_partial();
         partial.assistant.model.parameters.reasoning = reasoning;
-        let base = AppConfig::from_partial_with_defaults(partial).expect("a valid test config");
+        let base = build(partial).expect("a valid test config");
 
         let placeholder = ConversationStream::new(thread.events.base_config());
         let stream = std::mem::replace(&mut thread.events, placeholder);
