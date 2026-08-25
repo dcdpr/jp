@@ -338,7 +338,6 @@ pub async fn run_test(
 ) -> jp_test::Result {
     crate::test::run_chat_completion(
         test_name,
-        env!("CARGO_MANIFEST_DIR"),
         provider,
         LlmProviderConfig::default(),
         requests.into_iter().collect(),
@@ -349,24 +348,20 @@ pub async fn run_test(
 #[expect(clippy::too_many_lines)]
 pub async fn run_chat_completion(
     test_name: impl AsRef<str>,
-    manifest_dir: &'static str,
     provider_id: ProviderId,
     mut config: LlmProviderConfig,
     requests: Vec<TestRequest>,
 ) -> std::result::Result<(), Box<dyn std::error::Error>> {
-    let vcr = Vcr::new(
-        match provider_id {
-            ProviderId::Anthropic => config.anthropic.base_url.clone(),
-            ProviderId::Cerebras => config.cerebras.base_url.clone(),
-            ProviderId::Google => config.google.base_url.clone(),
-            ProviderId::Llamacpp => config.llamacpp.base_url.clone(),
-            ProviderId::Ollama => config.ollama.base_url.clone(),
-            ProviderId::Openai => config.openai.base_url.clone(),
-            ProviderId::Openrouter => config.openrouter.base_url.clone(),
-            _ => String::new(),
-        },
-        manifest_dir,
-    )
+    let vcr = Vcr::new(match provider_id {
+        ProviderId::Anthropic => config.anthropic.base_url.clone(),
+        ProviderId::Cerebras => config.cerebras.base_url.clone(),
+        ProviderId::Google => config.google.base_url.clone(),
+        ProviderId::Llamacpp => config.llamacpp.base_url.clone(),
+        ProviderId::Ollama => config.ollama.base_url.clone(),
+        ProviderId::Openai => config.openai.base_url.clone(),
+        ProviderId::Openrouter => config.openrouter.base_url.clone(),
+        _ => String::new(),
+    })
     .with_fixture_suffix(&provider_id.as_str());
 
     vcr.cassette(
@@ -644,7 +639,7 @@ pub async fn run_chat_completion(
 /// The file is read from `crates/jp_llm/tests/fixtures/{path}` and its type is
 /// detected via `infer`.
 pub(crate) fn fixture_attachment(path: impl AsRef<Path>) -> Attachment {
-    let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures");
+    let base = jp_test::fixtures_dir();
     let full = base.join(path.as_ref());
     let data = std::fs::read(&full).unwrap_or_else(|e| {
         panic!("Failed to read test fixture {}: {e}", full.display());

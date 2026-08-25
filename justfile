@@ -2624,6 +2624,25 @@ ci: lint-ci fmt-ci test-ci docs-ci coverage-ci deny-ci insta-ci shear-ci vet-ci
 # Lint the code on CI.
 [group('ci')]
 lint-ci: (_rustup_component "clippy") _install_ci_matchers
+    #!/usr/bin/env sh
+    set -eu
+
+    # `env!("CARGO_MANIFEST_DIR")` is resolved when the binary is compiled. With
+    # a target directory shared between git worktrees, the binary that runs is
+    # not always the one this worktree compiled, so the baked path can point at
+    # a sibling worktree: fixtures and snapshots then resolve against the wrong
+    # checkout. Read the variable at runtime instead, via
+    # `jp_test::fixtures_dir()` or `std::env::var`, which stays correct wherever
+    # the binary was built.
+    #
+    # Matches `option_env!` and the two-argument form too. A newline between the
+    # macro's paren and the string would slip past this line-oriented check, but
+    # `fmt-ci` collapses that spelling onto one line.
+    if grep -rnE --include='*.rs' '(env|option_env)!\s*\(\s*"CARGO_MANIFEST_DIR"' crates .config/jp/tools; then
+        echo "error: resolve the paths above at runtime, not at compile time" >&2
+        exit 1
+    fi
+
     cargo clippy --locked --workspace --all-targets --all-features --no-deps --profile=lint -- --deny warnings
 
 # Check code formatting on CI.
