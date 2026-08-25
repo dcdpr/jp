@@ -16,6 +16,7 @@ mod print;
 mod rm;
 mod show;
 pub(crate) mod summarize;
+mod title;
 mod unarchive;
 mod use_;
 
@@ -33,6 +34,7 @@ impl Conversation {
             Commands::Edit(args) => args.run(ctx, handles).await,
             Commands::Fork(args) => args.run(ctx, &handles).await,
             Commands::Compact(args) => args.run(ctx, handles).await,
+            Commands::Title(args) => args.run(ctx, handles).await,
             Commands::Grep(args) => args.run(ctx, handles),
             Commands::Label(args) => args.run(ctx, handles).await,
             Commands::Print(args) => args.run(ctx, &handles),
@@ -51,6 +53,7 @@ impl Conversation {
             Commands::Edit(args) => args.conversation_load_request(),
             Commands::Fork(args) => args.conversation_load_request(),
             Commands::Compact(args) => args.conversation_load_request(),
+            Commands::Title(args) => args.conversation_load_request(),
             Commands::Grep(args) => args.conversation_load_request(),
             Commands::Label(args) => args.conversation_load_request(),
             Commands::Print(args) => args.conversation_load_request(),
@@ -72,6 +75,7 @@ impl IntoPartialAppConfig for Conversation {
     ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
         match &self.command {
             Commands::Compact(args) => args.apply_cli_config(workspace, partial, merged_config),
+            Commands::Title(args) => args.apply_cli_config(workspace, partial, merged_config),
             Commands::Show(_)
             | Commands::Remove(_)
             | Commands::Edit(_)
@@ -122,6 +126,14 @@ enum Commands {
     /// The original events are preserved.
     #[command(name = "compact")]
     Compact(compact::Compact),
+
+    /// Generate a conversation title with an LLM.
+    ///
+    /// Offers the generated candidates as a picker, and applies the chosen one
+    /// as the conversation's title.
+    /// Use `edit --title "TITLE"` to set a title without involving a model.
+    #[command(name = "title", visible_alias = "t")]
+    Title(title::Title),
 
     /// Search through conversation history.
     #[command(name = "grep", alias = "rg", visible_alias = "g")]
