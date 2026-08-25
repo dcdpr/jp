@@ -68,17 +68,15 @@ fn parse_bound_rejects_zero() {
 }
 
 #[test]
-fn parse_bound_accepts_last_compaction_and_alias() {
-    // `last-compaction` is canonical; `last` is a deprecated alias.
-    for s in ["last-compaction", "last"] {
-        assert!(
-            matches!(
-                parse_bound(s).unwrap(),
-                CliRangeBound::Resolved(RangeBound::AfterLastCompaction)
-            ),
-            "`{s}` should parse as the last-compaction marker"
-        );
-    }
+fn parse_bound_accepts_last_compaction() {
+    assert!(matches!(
+        parse_bound("last-compaction").unwrap(),
+        CliRangeBound::Resolved(RangeBound::AfterLastCompaction)
+    ));
+
+    // `last` alone names nothing; it falls through to the time parsers and
+    // fails there.
+    assert!(parse_bound("last").is_err());
 }
 
 #[test]
@@ -172,13 +170,15 @@ fn parse_keep_last_rejects_the_last_compaction_marker() {
     // would make the flag a silent no-op — and in `compact` it would suppress
     // the rule's own `keep_last` on top of that.
     assert!(parse_keep_last("last-compaction").is_err());
-    // The deprecated bare alias reaches the same arm.
+    // `last` alone is not the marker, so it fails in the bound parser instead.
     assert!(parse_keep_last("last").is_err());
+    // An absolute turn has no config spelling, so it fails there too.
+    assert!(parse_keep_last("@3").is_err());
 
-    // Every other bound form still parses.
+    // Every other bound form still parses. `-3` is a position — the third turn
+    // from the end — stored as the 0-based offset 2.
     assert_eq!(parse_keep_last("2").unwrap(), RuleBound::Turns(2));
-    assert_eq!(parse_keep_last("@3").unwrap(), RuleBound::Absolute(3));
-    assert_eq!(parse_keep_last("-3").unwrap(), RuleBound::FromEnd(3));
+    assert_eq!(parse_keep_last("-3").unwrap(), RuleBound::FromEnd(2));
     assert!(matches!(
         parse_keep_last("5h").unwrap(),
         RuleBound::Duration(_)
@@ -196,25 +196,25 @@ fn clap_rejects_last_compaction_only_at_the_end_of_the_selection() {
 
 #[test]
 fn parse_turn_single_and_range() {
-    assert!(matches!(parse_turn("3").unwrap(), TurnSpec::Single(3)));
-    assert!(matches!(
+    assert_eq!(
+        parse_turn("3").unwrap(),
+        TurnSpec::Single(TurnPos::Absolute(3))
+    );
+    assert_eq!(
         parse_turn("1..5").unwrap(),
-        TurnSpec::Range(Some(1), Some(5))
-    ));
+        TurnSpec::Range(Some(TurnPos::Absolute(1)), Some(TurnPos::Absolute(5)))
+    );
 
     // Open-ended ranges.
-    assert!(matches!(
+    assert_eq!(
         parse_turn("10..").unwrap(),
-        TurnSpec::Range(Some(10), None)
-    ));
-    assert!(matches!(
+        TurnSpec::Range(Some(TurnPos::Absolute(10)), None)
+    );
+    assert_eq!(
         parse_turn("..10").unwrap(),
-        TurnSpec::Range(None, Some(10))
-    ));
-    assert!(matches!(
-        parse_turn("..").unwrap(),
-        TurnSpec::Range(None, None)
-    ));
+        TurnSpec::Range(None, Some(TurnPos::Absolute(10)))
+    );
+    assert_eq!(parse_turn("..").unwrap(), TurnSpec::Range(None, None));
 
     // 1-based: `0` is rejected wherever a number appears.
     assert!(parse_turn("0").is_err());
@@ -226,11 +226,49 @@ fn parse_turn_single_and_range() {
 }
 
 #[test]
-fn parse_one_based_rejects_zero() {
-    assert_eq!(parse_one_based("1").unwrap(), 1);
-    assert_eq!(parse_one_based("7").unwrap(), 7);
-    assert!(parse_one_based("0").is_err());
-    assert!(parse_one_based("x").is_err());
+fn parse_turn_pos_is_one_based_on_both_sides() {
+    assert_eq!(parse_turn_pos("1").unwrap(), TurnPos::Absolute(1));
+    assert_eq!(parse_turn_pos("7").unwrap(), TurnPos::Absolute(7));
+    assert_eq!(parse_turn_pos("-1").unwrap(), TurnPos::FromEnd(1));
+    assert_eq!(parse_turn_pos("-7").unwrap(), TurnPos::FromEnd(7));
+    assert!(parse_turn_pos("0").is_err());
+    assert!(parse_turn_pos("-0").is_err());
+    assert!(parse_turn_pos("x").is_err());
+    assert!(parse_turn_pos("-x").is_err());
+}
+
+#[test]
+fn parse_turn_accepts_from_end_positions() {
+    // `-1` is the last turn, matching `--from -1` / `--to -1`.
+    assert_eq!(
+        parse_turn("-1").unwrap(),
+        TurnSpec::Single(TurnPos::FromEnd(1))
+    );
+
+    // Both ends may count from the end, and the two conventions can be mixed.
+    assert_eq!(
+        parse_turn("-3..-2").unwrap(),
+        TurnSpec::Range(Some(TurnPos::FromEnd(3)), Some(TurnPos::FromEnd(2)))
+    );
+    assert_eq!(
+        parse_turn("-3..").unwrap(),
+        TurnSpec::Range(Some(TurnPos::FromEnd(3)), None)
+    );
+    assert_eq!(
+        parse_turn("..-2").unwrap(),
+        TurnSpec::Range(None, Some(TurnPos::FromEnd(2)))
+    );
+    assert_eq!(
+        parse_turn("2..-1").unwrap(),
+        TurnSpec::Range(Some(TurnPos::Absolute(2)), Some(TurnPos::FromEnd(1)))
+    );
+}
+
+#[test]
+fn turn_pos_displays_as_written() {
+    // The out-of-range error quotes the position the user typed.
+    assert_eq!(TurnPos::Absolute(4).to_string(), "4");
+    assert_eq!(TurnPos::FromEnd(4).to_string(), "-4");
 }
 
 /// Parse a selection from CLI arguments.
@@ -388,14 +426,14 @@ fn zero_count_on_one_side_leaves_the_other_window() {
 fn turn_open_ended_ranges_cover_both_ends() {
     // `--turn 3..` is turn 3 through the last turn.
     let onward = TurnSelection {
-        turn: Some(TurnSpec::Range(Some(3), None)),
+        turn: Some(TurnSpec::Range(Some(TurnPos::Absolute(3)), None)),
         ..Default::default()
     };
     assert_eq!(windows(&onward, 5), vec![(2, 4)]);
 
     // `--turn ..3` is the first three turns.
     let up_to = TurnSelection {
-        turn: Some(TurnSpec::Range(None, Some(3))),
+        turn: Some(TurnSpec::Range(None, Some(TurnPos::Absolute(3)))),
         ..Default::default()
     };
     assert_eq!(windows(&up_to, 5), vec![(0, 2)]);
@@ -655,17 +693,32 @@ fn validate_allows_equal_keep_and_count_on_both_windows() {
 #[test]
 fn check_turn_range_rejects_endpoints_past_the_conversation() {
     let selection = TurnSelection {
-        turn: Some(TurnSpec::Single(7)),
+        turn: Some(TurnSpec::Single(TurnPos::Absolute(7))),
         ..Default::default()
     };
     assert!(selection.check_turn_range(5).is_err());
     assert!(selection.check_turn_range(7).is_ok());
 
     let selection = TurnSelection {
-        turn: Some(TurnSpec::Range(Some(2), Some(9))),
+        turn: Some(TurnSpec::Range(
+            Some(TurnPos::Absolute(2)),
+            Some(TurnPos::Absolute(9)),
+        )),
         ..Default::default()
     };
     assert!(selection.check_turn_range(5).is_err());
+
+    // A from-end endpoint is checked against the same count, and the error
+    // quotes it as written.
+    let selection = TurnSelection {
+        turn: Some(TurnSpec::Single(TurnPos::FromEnd(6))),
+        ..Default::default()
+    };
+    assert_eq!(
+        selection.check_turn_range(5).unwrap_err(),
+        "turn -6 out of range (conversation has 5 turns)"
+    );
+    assert!(selection.check_turn_range(6).is_ok());
 
     // Counts clamp instead of erroring, so `--first` is never out of range.
     let selection = TurnSelection {

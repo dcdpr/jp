@@ -437,7 +437,7 @@ async fn interrupt_during_backoff_cuts_wait_short() {
 
     signal_handle.await.unwrap();
 
-    assert!(matches!(result, StreamErrorOutcome::Interrupted));
+    assert!(matches!(result, StreamErrorOutcome::Interrupted(_)));
     // The attempt was recorded before the wait began.
     assert_eq!(retry_state.consecutive_failures, 1);
 }

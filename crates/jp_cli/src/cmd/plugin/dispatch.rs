@@ -154,7 +154,13 @@ pub(crate) fn run_plugin(
     let shutdown_handle = thread::spawn(move || {
         let interrupted = futures::executor::block_on(async {
             tokio::select! {
-                notified = interrupt_rx.recv() => notified.is_some(),
+                // Asking the plugin to shut down acts on the press, so it
+                // leaves the escalation ladder; a further press then reaches
+                // the router with a fresh count.
+                notified = interrupt_rx.recv() => notified.is_some_and(|notice| {
+                    notice.handled();
+                    true
+                }),
                 () = shutdown_token.cancelled() => true,
             }
         });

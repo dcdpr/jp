@@ -357,3 +357,134 @@ fn legacy_enable_strings_survive_compat_deserialization() {
     );
     assert_eq!(tools["off_tool"].enable, Some(PartialEnableConfig::OFF));
 }
+
+#[test]
+fn legacy_rule_bounds_survive_compat_deserialization() {
+    use jp_config::conversation::compaction::RuleBound;
+
+    // A conversation stored before `last` was renamed to `last-compaction`, and
+    // before `@N` stopped being a config spelling, must still load. The
+    // settings around the stale bound are what a hard failure would cost.
+    let value = json!({
+        "style": { "code": { "color": false } },
+        "conversation": {
+            "compaction": {
+                "rules": {
+                    "value": [
+                        { "keep_first": "last", "keep_last": 3 },
+                        { "keep_first": "@5", "keep_last": "-4" }
+                    ],
+                    "strategy": "replace"
+                }
+            }
+        }
+    });
+
+    let config = deserialize_partial_config(value);
+
+    assert_eq!(
+        config.style.code.color,
+        Some(false),
+        "an unrelated setting must survive a stale compaction bound"
+    );
+
+    // `last` is renamed in place; the `@5` rule goes entirely, because running
+    // it with a substituted bound would compact a range it never named.
+    let rules = &config.conversation.compaction.rules;
+    assert_eq!(rules.len(), 1);
+    assert_eq!(rules[0].keep_first, Some(RuleBound::AfterLastCompaction));
+    assert_eq!(rules[0].keep_last, Some(RuleBound::Turns(3)));
+}
+
+#[test]
+fn legacy_rule_bounds_migrate_in_bare_array_form() {
+    use jp_config::conversation::compaction::RuleBound;
+
+    // `rules` is a `MergeableVec`, so a hand-written config or `--cfg` delta
+    // can store the bare-array form instead of the `{ value: [...] }` shape
+    // `to_parts` writes.
+    let value = json!({
+        "conversation": {
+            "compaction": {
+                "rules": [
+                    { "keep_first": "LAST", "keep_last": 2 },
+                    { "keep_first": "@9" }
+                ]
+            }
+        }
+    });
+
+    let rules = deserialize_partial_config(value)
+        .conversation
+        .compaction
+        .rules;
+    assert_eq!(rules.len(), 1);
+    assert_eq!(rules[0].keep_first, Some(RuleBound::AfterLastCompaction));
+    assert_eq!(rules[0].keep_last, Some(RuleBound::Turns(2)));
+}
+
+#[test]
+fn dropping_the_only_rule_leaves_an_explicit_empty_rule_set() {
+    // An empty bare array reads as "unset" to
+    // `PartialCompactionConfig::fill_from`, which answers with the built-in
+    // strip-everything rule — a wider range than the rule just dropped. The
+    // `Merged` form with a strategy reads as "no rules" instead.
+    let mut value = json!({
+        "conversation": {
+            "compaction": {
+                "rules": [{ "keep_first": "@9", "reasoning": "strip" }]
+            }
+        }
+    });
+
+    migrate_legacy_rule_bounds(&mut value);
+
+    assert_eq!(
+        value["conversation"]["compaction"]["rules"],
+        json!({ "value": [], "strategy": "replace" })
+    );
+}
+
+#[test]
+fn dropping_the_only_rule_in_a_metadata_free_wrapper_leaves_a_strategy() {
+    // The object wrapper without a strategy is as "unset" as a bare array
+    // once its last rule goes: `MergeableVec::is_empty` looks at the metadata,
+    // not at which of the two shapes was written.
+    let mut value = json!({
+        "conversation": {
+            "compaction": {
+                "rules": { "value": [{ "keep_first": "@9" }] }
+            }
+        }
+    });
+
+    migrate_legacy_rule_bounds(&mut value);
+
+    assert_eq!(
+        value["conversation"]["compaction"]["rules"],
+        json!({ "value": [], "strategy": "replace" })
+    );
+}
+
+#[test]
+fn emptying_a_rule_set_keeps_the_strategy_it_already_had() {
+    // An emptied `append` list is a no-op against lower layers. Forcing
+    // `replace` here would turn it into one that wipes their rules.
+    let mut value = json!({
+        "conversation": {
+            "compaction": {
+                "rules": {
+                    "value": [{ "keep_first": "@9" }],
+                    "strategy": "append"
+                }
+            }
+        }
+    });
+
+    migrate_legacy_rule_bounds(&mut value);
+
+    assert_eq!(
+        value["conversation"]["compaction"]["rules"],
+        json!({ "value": [], "strategy": "append" })
+    );
+}

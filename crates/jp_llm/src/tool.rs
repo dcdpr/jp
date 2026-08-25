@@ -803,8 +803,8 @@ impl ToolDefinition {
                 )
                 .await
             }
-            ToolSource::Builtin { .. } => {
-                self.execute_builtin(id, &arguments, answers, builtin_executors)
+            ToolSource::Builtin { tool } => {
+                self.execute_builtin(id, &arguments, answers, tool.as_deref(), builtin_executors)
                     .await
             }
         }
@@ -935,17 +935,23 @@ impl ToolDefinition {
     }
 
     /// Execute a builtin tool and return the outcome.
+    ///
+    /// `source_name` is the implementation named by `source =
+    /// "builtin.<name>"`, which the registry is keyed on.
+    /// When absent, the implementation shares the tool's own name.
     async fn execute_builtin(
         &self,
         id: String,
         arguments: &Value,
         answers: &IndexMap<String, Value>,
+        source_name: Option<&str>,
         builtin_executors: &builtin::BuiltinExecutors,
     ) -> Result<ExecutionOutcome, ToolError> {
+        let name = source_name.unwrap_or(&self.name);
         let executor = builtin_executors
-            .get(&self.name)
+            .get(name)
             .ok_or_else(|| ToolError::NotFound {
-                name: self.name.clone(),
+                name: name.to_owned(),
             })?;
 
         let outcome = executor.execute(arguments, answers).await;

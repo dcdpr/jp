@@ -16,9 +16,11 @@ the router's), preserving the current ability to show interactive terminal menus
 and return actions to the surrounding event loop.
 When no handler is registered, SIGINT triggers a graceful shutdown via a
 `CancellationToken`.
-Escalating Ctrl-C provides a reliable escape hatch: first press invokes the
-handler, second press triggers graceful shutdown, third press terminates
-immediately.
+Escalating Ctrl-C provides a reliable escape hatch: the first press invokes the
+handler, a second *unanswered* press triggers graceful shutdown, and a third
+terminates immediately.
+A handler that acts on a press reports it and clears the count, so ordinary use
+of an interrupt menu never escalates by accident.
 
 ## Motivation
 
@@ -80,7 +82,8 @@ The new design preserves this property.
 
 ### Escalating Ctrl-C
 
-Ctrl-C follows a three-level escalation:
+Ctrl-C follows a three-level escalation, counting only presses that no handler
+has acted on:
 
 | Level | Behavior                                |
 | ----- | --------------------------------------- |
@@ -99,10 +102,18 @@ is cancelled by Ctrl-C (when the terminal is in raw mode, see [Dual Delivery
 Paths](#dual-delivery-paths-and-prompt-escalation)).
 Both produce the same result: graceful shutdown.
 
-The router's escalation counter resets after a configurable cooldown (e.g. 2
-seconds without a Ctrl-C).
-This prevents a Ctrl-C during streaming (1st press, handled by the menu) from
-counting toward escalation minutes later.
+Two things reset the router's escalation counter.
+
+A handler that acts on a press reports it, which clears the count immediately.
+This is what keeps the ladder out of ordinary menu use: opening the streaming
+menu, choosing "Continue", and interrupting again a second later gives a fresh
+first press rather than a shutdown.
+Only presses that produced nothing accumulate, which is the situation the ladder
+exists for.
+
+A configurable cooldown also resets it (2 seconds by default, set through
+`interrupt.escalation_cooldown_secs`), so an unanswered press does not count
+toward escalation minutes later.
 
 SIGTERM always triggers graceful shutdown (cancels the root
 `CancellationToken`).
@@ -179,14 +190,20 @@ pub enum InterruptOutcome {
     /// The caller should trigger graceful shutdown.
     /// See "Dual Delivery Paths and Prompt Escalation."
     Escalated,
+
+    /// The handler's interactive prompt could not run at all.
+    /// Nothing was decided, so the caller leaves its work untouched and leaves
+    /// the press on the escalation ladder.
+    /// See "Dual Delivery Paths and Prompt Escalation."
+    PromptFailed,
 }
 
 struct RegisteredHandler {
     id: HandlerId,
-    /// The router sends to this channel to notify the handler's event loop that
-    /// SIGINT arrived.
-    /// The event loop then calls the handler.
-    notify_tx: mpsc::Sender<()>,
+    /// The router sends an [`InterruptNotice`] to this channel to notify the
+    /// handler's event loop that SIGINT arrived.
+    /// The event loop then calls the handler and resolves the notice.
+    notify_tx: mpsc::Sender<InterruptNotice>,
 }
 ```
 
@@ -204,9 +221,9 @@ Registration returns an RAII guard and a notification receiver:
 ```rust
 impl SignalRouter {
     /// Register a handler scope.
-    /// Returns a guard (drop to deregister) and a receiver that fires when
-    /// SIGINT arrives while this handler is topmost.
-    pub fn push_handler(&self) -> (InterruptGuard, mpsc::Receiver<()>) {
+    /// Returns a guard (drop to deregister) and a receiver that yields an
+    /// [`InterruptNotice`] when SIGINT arrives while this handler is topmost.
+    pub fn push_handler(&self) -> (InterruptGuard, mpsc::Receiver<InterruptNotice>) {
         let (tx, rx) = mpsc::channel(1);
         let id = self.inner.push(tx);
         (InterruptGuard { inner: self.inner.clone(), id }, rx)
@@ -239,15 +256,48 @@ position.
 If an inner guard drops before an outer one due to early return or panic
 unwinding, the stack remains consistent.
 
+### Resolving a Delivered Press
+
+Each delivered press arrives as an `InterruptNotice`, which the event loop
+resolves once its interrupt logic finishes:
+
+```rust
+impl InterruptNotice {
+    /// The handler acted on this press.
+    /// Clears the escalation count.
+    pub fn handled(self) { ... }
+
+    /// The handler declined this press.
+    /// Notifies the next handler down the stack, or requests a graceful shutdown
+    /// when this was the last one.
+    /// The press keeps its place on the escalation ladder.
+    pub fn decline(self) { ... }
+}
+```
+
+Dropping a notice without resolving it leaves the press on the ladder.
+That is the safe default: a handler that was notified but produced nothing
+visible should still escalate on the next press.
+
+The reset lives on the delivered value rather than on the router so it cannot be
+forgotten independently of receiving the press.
+An event loop cannot reach the point of deciding what a press did without
+holding the notice that records the decision, and the type is `#[must_use]`.
+This matters because the ladder has to behave the same wherever it exists: a
+reset each handler had to remember to call separately would make escalation
+depend on which handler answered.
+
 ### Notification Dispatch
 
 When SIGINT arrives and the escalation count is 1 (first press):
 
 1. The signal task locks the stack, clones the topmost handler's `notify_tx`,
    and releases the lock.
-2. It sends `()` to `notify_tx`.
+2. It sends an `InterruptNotice` to `notify_tx`.
    If the channel is full (handler hasn't consumed the previous notification),
-   the send is a no-op — the handler already has a pending interrupt.
+   the send is a no-op — the handler already has a pending interrupt, and the
+   undelivered notice is dropped unresolved, which correctly leaves the press on
+   the ladder.
 3. The handler's event loop wakes up and processes the interrupt.
 
 If the handler's event loop has exited but the guard hasn't been dropped yet (a
@@ -386,6 +436,16 @@ returns a new `InterruptOutcome::Escalated` variant.
 The event loop receives this and cancels the `shutdown_token`, producing the
 same effect as the router's 2nd-Ctrl-C path.
 
+A prompt that *cannot run* is a different case, and must not escalate.
+An I/O failure or a missing terminal answers nothing, so treating it as an
+escalation would end the run on a decision the user never made — silently,
+since there is no menu on screen to explain it.
+The handler returns `PromptFailed` instead: the event loop leaves its work as it
+was and leaves the press on the escalation ladder.
+The user's next Ctrl-C then reaches the router with the count intact and
+escalates through the ladder, so getting out never depends on the prompt
+working.
+
 ```rust
 pub enum InterruptOutcome {
     /// The handler fully processed the signal.
@@ -398,6 +458,10 @@ pub enum InterruptOutcome {
     /// The handler's interactive prompt was cancelled by Ctrl-C.
     /// The event loop should trigger graceful shutdown.
     Escalated,
+
+    /// The handler's interactive prompt could not run at all.
+    /// The event loop changes nothing and leaves the press on the ladder.
+    PromptFailed,
 }
 ```
 
@@ -433,9 +497,12 @@ Note: `inquire` already distinguishes the two keys — ESC produces
 `InquireError::OperationCanceled` and Ctrl-C produces
 `InquireError::OperationInterrupted` (with the `crossterm` backend, which JP
 uses).
-The conflation is in JP's call sites, which treat every prompt error alike.
-For interrupt menus this is fine — cancelling an interrupt menu by any means
-should escalate.
+Cancelling an interrupt menu by either means escalates, so the two are treated
+alike.
+What must stay distinct is cancellation versus failure: every other
+`InquireError` — `NotTTY`, an I/O error, a custom error — means the prompt
+never ran, and maps to `PromptFailed` rather than an escalation.
+
 For non-interrupt prompts (tool permissions, tool questions), distinguishing ESC
 ("skip this prompt") from Ctrl-C ("I want the interrupt menu") remains valuable
 and requires no upstream change.
@@ -447,22 +514,14 @@ The tool handler already does this: when `is_prompting` is true, it suppresses
 the interrupt menu to let the active tool prompt handle Ctrl-C.
 
 With the new model, decline works as follows: the event loop receives the
-notification, evaluates whether it should handle the interrupt, and if not,
-calls `signal_router.decline()`.
+notice, evaluates whether it should handle the interrupt, and if not, resolves
+the notice with `decline()`.
 This tells the router to notify the next handler down the stack.
 If no handler remains, the router cancels the `shutdown_token`.
 
-```rust
-impl SignalRouter {
-    /// Called by a handler's event loop when it declines to handle the current
-    /// interrupt.
-    /// The router notifies the next handler on the stack, or falls back to
-    /// graceful shutdown.
-    pub fn decline(&self) {
-        self.inner.notify_next_or_shutdown();
-    }
-}
-```
+Declining leaves the press on the escalation ladder.
+Nothing has acted on it yet — it is only being offered to a different handler
+— so it still counts if the user presses again.
 
 ### Interaction With RFD 026 and RFD 027
 
@@ -590,14 +649,14 @@ The router has already moved on.
 No deadlock or inconsistency.
 
 **Escalation state across handlers.** The escalation counter tracks Ctrl-C
-presses globally.
-A 1st press during streaming (handled by the streaming menu) followed by a 2nd
-press during tool execution would trigger graceful shutdown, even though the
-tool handler never got a chance.
-This is correct — the user is escalating — but might surprise users who expect
-each handler to get a "fresh" first press.
-The cooldown timer mitigates this: if enough time passes between presses, the
-counter resets.
+presses globally rather than per handler.
+A press answered by the streaming menu clears the count, so a later press during
+tool execution starts fresh and reaches the tool handler.
+An *unanswered* press still carries across handler boundaries: if the streaming
+menu never appeared, the next press escalates even though the tool handler never
+got a chance.
+That is the intent — the user is escalating because nothing happened — and the
+cooldown bounds how long such a press stays armed.
 
 **Escalation counter and raw-mode presses.** Because Ctrl-C during a raw-mode
 prompt doesn't generate SIGINT, the router's escalation counter and the
@@ -611,6 +670,15 @@ brief normal-mode window while the prompt is being set up) could behave
 unexpectedly.
 In practice the window is negligible, and the outcome (graceful shutdown) is
 correct regardless of which path triggers it.
+
+The paths are independent, but only one of them is a hard guarantee.
+A prompt library that swallowed Ctrl-C outright would leave the raw-mode path
+dead, and the router cannot see the press to compensate.
+`PromptFailed` covers the case the router *can* observe — a prompt that failed
+rather than one that silently ate the key — by keeping the press on the ladder
+so the next one escalates.
+Closing the remaining gap would mean keeping signal delivery enabled during
+prompts, which is a property of `reedline` and `inquire` rather than of JP.
 
 **Turn-level handler granularity.** The `TurnInterruptHandler` covers all gaps
 between streaming and tool execution.

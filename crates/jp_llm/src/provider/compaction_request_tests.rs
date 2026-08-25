@@ -132,11 +132,9 @@ fn snapshot(
         ChatQuery::from(thread),
     )?;
 
-    let path = format!(
-        "{}/tests/fixtures/{}/compaction",
-        env!("CARGO_MANIFEST_DIR"),
-        provider.as_str(),
-    );
+    let path = jp_test::fixtures_dir()
+        .join(provider.as_str())
+        .join("compaction");
 
     insta::with_settings!({ snapshot_path => path, prepend_module_to_snapshot => false }, {
         insta::assert_json_snapshot!(name, request);

@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use camino_tempfile::{Utf8TempDir, tempdir};
 use chrono::{DateTime, TimeZone as _, Utc};
+use clap::Parser as _;
 use jp_config::{
     AppConfig, PartialAppConfig,
     conversation::tool::style::{InlineResults, LinkStyle, ParametersStyle},
@@ -1104,6 +1105,139 @@ fn turn_prints_specific_turn() {
     assert!(
         !output.contains("Third"),
         "turn 3 should be excluded, got: {output}"
+    );
+}
+
+/// Parse a `Print` from `jp conversation print <args>`, targeting `id`.
+///
+/// Goes through clap so the tests cover the flag surface (value syntax
+/// included), not just the parsed representation.
+fn parse_print(args: &[&str], id: ConversationId) -> Print {
+    #[derive(clap::Parser)]
+    struct TestCli {
+        #[command(flatten)]
+        print: Print,
+    }
+
+    let mut argv = vec!["print"];
+    argv.extend_from_slice(args);
+    let mut print = TestCli::try_parse_from(argv).unwrap().print;
+    print.target = PositionalIds::from_targets(vec![ConversationTarget::Id(id)]);
+    print
+}
+
+/// Three turns, one question and answer each, numbered in their text.
+fn three_turns() -> Vec<ConversationEvent> {
+    vec![
+        ConversationEvent::new(TurnStart, ts(0, 0, 0)),
+        ConversationEvent::new(ChatRequest::from("First question"), ts(0, 0, 1)),
+        ConversationEvent::new(ChatResponse::message("First answer.\n\n"), ts(0, 0, 2)),
+        ConversationEvent::new(TurnStart, ts(0, 1, 0)),
+        ConversationEvent::new(ChatRequest::from("Second question"), ts(0, 1, 1)),
+        ConversationEvent::new(ChatResponse::message("Second answer.\n\n"), ts(0, 1, 2)),
+        ConversationEvent::new(TurnStart, ts(0, 2, 0)),
+        ConversationEvent::new(ChatRequest::from("Third question"), ts(0, 2, 1)),
+        ConversationEvent::new(ChatResponse::message("Third answer.\n\n"), ts(0, 2, 2)),
+    ]
+}
+
+#[test]
+fn turn_minus_one_prints_the_last_turn() {
+    let (mut ctx, id, out, _err, _rt) = setup_ctx(three_turns());
+
+    let print = parse_print(&["--turn=-1"], id);
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let result = print.run(&mut ctx, &[h]);
+    ctx.printer.flush();
+
+    result.unwrap();
+    let output = out.lock().clone();
+    assert!(!output.contains("First"), "got: {output}");
+    assert!(!output.contains("Second"), "got: {output}");
+    assert!(output.contains("Third question"), "got: {output}");
+}
+
+#[test]
+fn turn_minus_two_prints_the_second_to_last_turn() {
+    let (mut ctx, id, out, _err, _rt) = setup_ctx(three_turns());
+
+    let print = parse_print(&["--turn=-2"], id);
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let result = print.run(&mut ctx, &[h]);
+    ctx.printer.flush();
+
+    result.unwrap();
+    let output = out.lock().clone();
+    assert!(!output.contains("First"), "got: {output}");
+    assert!(output.contains("Second question"), "got: {output}");
+    assert!(output.contains("Second answer."), "got: {output}");
+    assert!(!output.contains("Third"), "got: {output}");
+}
+
+#[test]
+fn turn_from_end_range_excludes_the_last_turn() {
+    let (mut ctx, id, out, _err, _rt) = setup_ctx(three_turns());
+
+    // `-3..-2` is inclusive on both ends: the two turns before the last one.
+    let print = parse_print(&["--turn=-3..-2"], id);
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let result = print.run(&mut ctx, &[h]);
+    ctx.printer.flush();
+
+    result.unwrap();
+    let output = out.lock().clone();
+    assert!(output.contains("First question"), "got: {output}");
+    assert!(output.contains("Second question"), "got: {output}");
+    assert!(!output.contains("Third"), "got: {output}");
+}
+
+#[test]
+fn turn_open_ended_from_end_range_reaches_the_last_turn() {
+    let (mut ctx, id, out, _err, _rt) = setup_ctx(three_turns());
+
+    // `-2..` is the second-to-last turn through the end.
+    let print = parse_print(&["--turn=-2.."], id);
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let result = print.run(&mut ctx, &[h]);
+    ctx.printer.flush();
+
+    result.unwrap();
+    let output = out.lock().clone();
+    assert!(!output.contains("First"), "got: {output}");
+    assert!(output.contains("Second question"), "got: {output}");
+    assert!(output.contains("Third question"), "got: {output}");
+}
+
+#[test]
+fn turn_open_started_from_end_range_starts_at_the_first_turn() {
+    let (mut ctx, id, out, _err, _rt) = setup_ctx(three_turns());
+
+    // `..-2` is the start of the conversation through the second-to-last turn.
+    let print = parse_print(&["--turn=..-2"], id);
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let result = print.run(&mut ctx, &[h]);
+    ctx.printer.flush();
+
+    result.unwrap();
+    let output = out.lock().clone();
+    assert!(output.contains("First question"), "got: {output}");
+    assert!(output.contains("Second question"), "got: {output}");
+    assert!(!output.contains("Third"), "got: {output}");
+}
+
+#[test]
+fn turn_from_end_past_the_conversation_errors() {
+    let (mut ctx, id, _out, _err, _rt) = setup_ctx(three_turns());
+
+    let print = parse_print(&["--turn=-4"], id);
+    let h = ctx.workspace.acquire_conversation(&id).unwrap();
+    let err = print
+        .run(&mut ctx, &[h])
+        .expect_err("a 3-turn conversation has no turn -4");
+
+    assert_eq!(
+        err.message.as_deref(),
+        Some("turn -4 out of range (conversation has 3 turns)")
     );
 }
 

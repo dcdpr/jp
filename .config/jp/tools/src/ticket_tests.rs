@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use camino_tempfile::Utf8TempDir;
 use jp_tool::{Action, Outcome};
@@ -14,7 +14,7 @@ const FIXED_ID: &str = "T-02wt0kx";
 
 /// The directory holding this module's tool declarations.
 fn declarations() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../.jp/mcp/tools/ticket")
+    PathBuf::from("../../../.jp/mcp/tools/ticket")
 }
 
 fn declaration(file: &str) -> toml::Value {

@@ -2149,6 +2149,11 @@ fn apply_directive_to_tool(
 ///
 /// Merging in place preserves each tool's position in the map, which is the
 /// order tools are presented to the provider.
+///
+/// An entry that names a built-in's key but declares a different `source`
+/// merges the same way: the user's `source` wins and their executor runs, but
+/// the built-in's `run`, `style`, `enable`, and `parameters` survive unless the
+/// user overrides those too (RFD 083).
 fn inject_builtin_tools(partial: &mut PartialAppConfig) -> BoxedResult<()> {
     for (name, defaults) in tool::builtins::all() {
         let tools = &mut partial.conversation.tools.tools;

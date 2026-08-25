@@ -123,6 +123,107 @@ stage-and-commit: _install-jp
     out=$(just stage -c style.reasoning.display=hidden)
     just commit "$out - now write me a commit message"
 
+# Merge REF into the current branch and hand any conflicts to jp.
+#
+# A clean merge just reports and exits. When the merge stops on conflicts,
+# prompts where to resolve them (a [p]icked conversation, a [n]ew one, or
+# [q]uit) and sends the merge output plus `git status -sb` as the query. The
+# conflicted files stay in the working tree; jp edits them in place, and does
+# not commit or abort the merge. Exits nonzero, listing what is left, when
+# conflicts remain after the query.
+#
+# Re-running while a merge is already in progress skips the merge itself and
+# hands the outstanding conflicts over again, so a resolution that went
+# sideways can be retried in another conversation. That merge's source is read
+# from MERGE_HEAD, not from REF, so the retry needs no arguments.
+#
+# Refuses to start when unmerged paths exist without a merge in progress: a
+# rebase, cherry-pick, or revert stopped on conflicts is not this recipe's to
+# resolve.
+#
+# A picked conversation keeps its own config; it usually already holds the
+# branch's context. A new one gets `personas/dev`, since the workspace default
+# has no file-editing tools.
+#
+# ARGS are forwarded to `jp query` as flags:
+#
+#   just git-merge main
+#   just git-merge origin/main --edit
+[group('jp')]
+[positional-arguments]
+git-merge REF="main" *ARGS: _install-jp _install-tools
+    #!/usr/bin/env sh
+    set -eu
+
+    ref="$1"
+    shift # remove REF from positional params
+
+    if git rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
+        # This invocation's REF says nothing about the merge already underway;
+        # MERGE_HEAD is the commit actually being merged.
+        ref=$(git name-rev --name-only --always MERGE_HEAD)
+        merge_block="(a merge with ${ref} was already in progress; no new merge was started)"
+        merge_exit=0
+        printf '%s\n' "$merge_block" >&2
+    elif [ -n "$(git diff --name-only --diff-filter=U)" ]; then
+        echo "Unmerged paths exist but no merge is in progress." >&2
+        echo "Finish or abort the rebase/cherry-pick/revert that stopped first." >&2
+        exit 1
+    else
+        set +e
+        merge_out=$(git merge "$ref" 2>&1)
+        merge_exit=$?
+        set -e
+        printf '%s\n' "$merge_out"
+        merge_block=$(printf '$ git merge %s\n%s' "$ref" "$merge_out")
+    fi
+
+    # Unmerged paths, not the exit status, decide whether there's work for jp:
+    # a merge can also fail for reasons it can't help with (dirty tree, unknown
+    # ref), and an in-progress merge may already be fully resolved.
+    conflicts=$(git diff --name-only --diff-filter=U)
+    if [ -z "$conflicts" ]; then
+        exit "$merge_exit"
+    fi
+
+    count=$(printf '%s\n' "$conflicts" | wc -l | tr -d ' ')
+
+    if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+        printf "\n%s file(s) left conflicted.\n" "$count" > /dev/tty
+        printf "  Resolve in a [p]icked conversation / [n]ew conversation / [q]uit: " > /dev/tty
+        IFS= read -r ans < /dev/tty
+    else
+        ans=n
+    fi
+
+    branch=$(git rev-parse --abbrev-ref HEAD)
+    case "$ans" in
+        ""|p|P) jp conversation use '?' ;;
+        n|N)    set -- --new --title "merge:${ref}-into-${branch}" --cfg=personas/dev "$@" ;;
+        q|Q)    exit 0 ;;
+        *)      echo "Unknown choice '$ans'; aborting." >&2; exit 1 ;;
+    esac
+
+    preamble="Please resolve the merge conflicts with ${ref}. Read each conflicted file, \
+    work out what both sides were after, and write the resolution that keeps both intents. \
+    Where the two sides genuinely disagree, stop and tell me instead of picking one. Leave \
+    the merge uncommitted and do not run 'git merge --abort'."
+
+    printf '%s\n\n```sh\n%s\n\n$ git status -sb\n%s\n```\n' \
+        "$preamble" "$merge_block" "$(git status -sb)" \
+        | jp query "$@"
+
+    # `--diff-filter=U` reports index-level unmerged entries, which is exactly
+    # what `git commit` refuses on: a file edited but never staged still counts.
+    remaining=$(git diff --name-only --diff-filter=U)
+    if [ -n "$remaining" ]; then
+        printf "\nStill conflicted:\n" >&2
+        printf '%s\n' "$remaining" | sed 's/^/  /' >&2
+        exit 1
+    fi
+
+    printf "\nReview the resolution, then 'git commit' to conclude the merge.\n" >&2
+
 # Generate changelog for the project.
 [group('build')]
 build-changelog: (_install "jilu@" + jilu_version)
@@ -629,6 +730,87 @@ pr-triage NNN *ARGS: _install-jp _install-tools
             --attach "gh:pull/{{NNN}}/reviews?include_outdated=true" \
             $args
     fi
+
+# Archive `pr-review:NNN` / `pr-triage:NNN` conversations whose pull request is
+# no longer open.
+#
+# Fetches dcdpr/jp's open PRs once, then archives every conversation whose title
+# names a PR outside that set (merged, closed, or never existed). Set
+# `JP_GITHUB_TOKEN` or `GITHUB_TOKEN` to avoid GitHub's 60-requests-per-hour
+# anonymous rate limit. Archiving is reversible with `jp c unarchive`.
+[group('jp')]
+pr-gc: _install-jp
+    #!/usr/bin/env sh
+    set -eu
+
+    api="https://api.github.com/repos/dcdpr/jp/pulls?state=open&per_page=100"
+    token="${JP_GITHUB_TOKEN:-${GITHUB_TOKEN:-}}"
+    if [ -n "$token" ]; then
+        body=$(curl -fsSL -H "Authorization: Bearer $token" "$api" || true)
+    else
+        body=$(curl -fsSL "$api" || true)
+    fi
+
+    # A failed request must not read as "no PRs are open", which would archive
+    # every conversation. Insist on a JSON array before going further.
+    if ! printf '%s' "$body" | jq -e 'type == "array"' >/dev/null 2>&1; then
+        echo "Could not list open pull requests for dcdpr/jp." >&2
+        echo "Check your network, or set JP_GITHUB_TOKEN / GITHUB_TOKEN if you're rate-limited." >&2
+        exit 1
+    fi
+    open=$(printf '%s' "$body" | jq -r '[.[].number | tostring] | join(" ")')
+
+    convs=$(jp -F json conversation ls) || {
+        echo "Could not list conversations." >&2
+        exit 1
+    }
+
+    # `<id>:<title>:<number>` per line. Conversation ids carry no colon, so the
+    # id is everything before the first one. The trailing number is the title's
+    # PR number without leading zeros, since `pr-review:0948` and
+    # `pr-review:948` both name pull request 948.
+    convs=$(printf '%s' "$convs" | jq -r '
+        .[]
+        | (.Title // "") as $t
+        | select($t | test("^pr-(review|triage):[0-9]+$"))
+        | ($t | capture(":(?<n>[0-9]+)$") | .n | tonumber | tostring) as $n
+        | "\(.ID):\($t):\($n)"')
+
+    if [ -z "$convs" ]; then
+        echo "No pr-review or pr-triage conversations found."
+        exit 0
+    fi
+
+    stale=""
+    for entry in $convs; do
+        case " $open " in
+            *" ${entry##*:} "*) continue ;;
+        esac
+        stale="${stale} ${entry}"
+    done
+
+    if [ -z "$stale" ]; then
+        echo "Nothing to archive: every conversation tracks an open pull request."
+        exit 0
+    fi
+
+    ids=""
+    echo "These conversations track pull requests that are no longer open:"
+    for entry in $stale; do
+        title=${entry#*:}
+        printf "  %s (%s)\n" "${title%:*}" "${entry%%:*}"
+        ids="${ids} ${entry%%:*}"
+    done
+
+    if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+        printf "Archive them? [Y/n] " > /dev/tty
+        IFS= read -r ans < /dev/tty
+        case "$ans" in
+            n|N|no|No|NO) echo "Nothing archived."; exit 0 ;;
+        esac
+    fi
+
+    jp conversation archive --yes $ids
 
 # Review the current diff with revdiff and send the annotations to jp for
 # triage. The assistant (personas/review-triager: dev/architect knowledge,
@@ -1704,6 +1886,19 @@ rfd-promote NNN: _install-jp _install-comfort _install-ticket
             done
         done
 
+        # The review and triage conversations are titled after the draft id,
+        # which no longer names anything. Archive them; a later cycle starts
+        # fresh under the permanent number.
+        for kind in review triage; do
+            conv_title="rfd-${kind}:${old_draft_id}"
+            conv_id=$(jp -F json conversation ls 2>/dev/null \
+                | jq -r --arg t "$conv_title" 'first(.[] | select(.Title == $t) | .ID) // empty' \
+                2>/dev/null || true)
+            [ -n "$conv_id" ] || continue
+            echo "  archiving conversation ${conv_title} (${conv_id})"
+            jp conversation archive "$conv_id" || true
+        done
+
         echo "${new_file}: Draft -> Discussion (assigned ${num})"
         if [ "$updated" -gt 0 ]; then
             echo "Updated ${updated} cross-reference(s) in RFD files."
@@ -2624,6 +2819,25 @@ ci: lint-ci fmt-ci test-ci docs-ci coverage-ci deny-ci insta-ci shear-ci vet-ci
 # Lint the code on CI.
 [group('ci')]
 lint-ci: (_rustup_component "clippy") _install_ci_matchers
+    #!/usr/bin/env sh
+    set -eu
+
+    # `env!("CARGO_MANIFEST_DIR")` is resolved when the binary is compiled. With
+    # a target directory shared between git worktrees, the binary that runs is
+    # not always the one this worktree compiled, so the baked path can point at
+    # a sibling worktree: fixtures and snapshots then resolve against the wrong
+    # checkout. Read the variable at runtime instead, via
+    # `jp_test::fixtures_dir()` or `std::env::var`, which stays correct wherever
+    # the binary was built.
+    #
+    # Matches `option_env!` and the two-argument form too. A newline between the
+    # macro's paren and the string would slip past this line-oriented check, but
+    # `fmt-ci` collapses that spelling onto one line.
+    if grep -rnE --include='*.rs' '(env|option_env)!\s*\(\s*"CARGO_MANIFEST_DIR"' crates .config/jp/tools; then
+        echo "error: resolve the paths above at runtime, not at compile time" >&2
+        exit 1
+    fi
+
     cargo clippy --locked --workspace --all-targets --all-features --no-deps --profile=lint -- --deny warnings
 
 # Check code formatting on CI.
