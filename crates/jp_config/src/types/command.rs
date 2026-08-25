@@ -98,10 +98,14 @@ impl AssignKeyValue for PartialCommandConfigOrString {
 ///
 /// Splits exactly as [`CommandConfigOrString::command`] does, so expanding
 /// before assigning a field cannot change which command ends up running.
+/// That includes keeping a minijinja template span in one argument even when it
+/// contains spaces.
 /// `shell` and any empty part are left unset so their defaults still apply, and
 /// so a later layer can still fill them.
 fn expand_shorthand(shorthand: &str) -> PartialCommandConfig {
-    let mut tokens = shlex::split(shorthand).unwrap_or_default().into_iter();
+    let mut tokens = split_command_words(shorthand)
+        .unwrap_or_default()
+        .into_iter();
     let program = tokens.next();
     let args: Vec<_> = tokens.collect();
 

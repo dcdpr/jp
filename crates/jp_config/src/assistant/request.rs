@@ -155,7 +155,7 @@ impl AssignKeyValue for PartialRequestConfig {
                 self.stream_idle_timeout_secs = kv.try_some_u32()?;
             }
             "max_response_bytes" => {
-                self.max_response_bytes = kv.try_some_number_or_from_str()?;
+                self.max_response_bytes = kv.try_some_bool_number_or_from_str()?;
             }
             "cache" => self.cache = kv.try_some_bool_or_from_str()?,
             _ => return missing_key(&kv),

@@ -68,6 +68,34 @@ fn test_request_config_assign() {
     assert_eq!(p.max_response_bytes, Some(MaxResponseBytes::Disabled));
 }
 
+/// Every documented spelling works through the JSON assignment path too.
+///
+/// `KEY=false` arrives as a string and parses via `FromStr`, but `KEY:=false`
+/// arrives as a JSON bool.
+/// Accepting only the former makes an advertised value depend on which
+/// assignment syntax the user reaches for.
+#[test]
+fn max_response_bytes_accepts_a_json_bool() {
+    let mut p = PartialRequestConfig::default();
+
+    let kv = KvAssignment::try_from_cli("max_response_bytes:", "false").unwrap();
+    p.assign(kv).unwrap();
+    assert_eq!(p.max_response_bytes, Some(MaxResponseBytes::Disabled));
+
+    let kv = KvAssignment::try_from_cli("max_response_bytes:", "true").unwrap();
+    p.assign(kv).unwrap();
+    assert_eq!(p.max_response_bytes, Some(MaxResponseBytes::default()));
+
+    // The number and string arms still work through the same helper.
+    let kv = KvAssignment::try_from_cli("max_response_bytes:", "4096").unwrap();
+    p.assign(kv).unwrap();
+    assert_eq!(p.max_response_bytes, Some(MaxResponseBytes::Bytes(4096)));
+
+    let kv = KvAssignment::try_from_cli("max_response_bytes:", "\"disabled\"").unwrap();
+    p.assign(kv).unwrap();
+    assert_eq!(p.max_response_bytes, Some(MaxResponseBytes::Disabled));
+}
+
 #[test]
 fn max_response_bytes_round_trips_through_json() {
     for (value, expected) in [

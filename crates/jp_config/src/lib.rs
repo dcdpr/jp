@@ -333,6 +333,14 @@ impl ToPartial for AppConfig {
         // no choice of the user's. Keeping only the differences is what lets a
         // later layer that changes `assistant` still reach the inquiry: a
         // recorded copy of the inherited value would pin it instead.
+        //
+        // Equality is the only signal available here. A resolved `AppConfig`
+        // records values, not whether the user wrote them, so an inquiry field
+        // deliberately set to the same value as the assistant's is
+        // indistinguishable from an inherited one and is dropped. It then
+        // follows a later assistant-only change instead of holding its pinned
+        // value. Telling the two apart needs per-field presence to survive
+        // resolution, which the resolved tree does not carry.
         partial.conversation.inquiry.assistant = self
             .assistant
             .to_partial()
@@ -370,7 +378,7 @@ impl AppConfig {
             .conversation
             .inquiry
             .assistant
-            .fill_from(partial.assistant.clone());
+            .inherit_from(partial.assistant.clone());
 
         let partial = match PartialAppConfig::default_values(&())? {
             Some(defaults) => partial.fill_from(defaults),

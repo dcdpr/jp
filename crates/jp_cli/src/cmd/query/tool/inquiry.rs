@@ -20,7 +20,10 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use indexmap::IndexMap;
 use jp_attachment::Attachment;
-use jp_config::assistant::{sections::SectionConfig, tool_choice::ToolChoice};
+use jp_config::{
+    PartialAppConfig,
+    assistant::{PartialAssistantConfig, sections::SectionConfig, tool_choice::ToolChoice},
+};
 use jp_conversation::{ConversationStream, event::ChatRequest, thread::Thread};
 use jp_llm::{
     Provider,
@@ -147,6 +150,14 @@ pub struct InquiryConfig {
     /// `conversation.inquiry.assistant.request.max_response_bytes`.
     /// `None` leaves the response unbounded.
     pub max_response_bytes: Option<u64>,
+
+    /// The effective assistant settings for this inquiry, applied to the
+    /// request's stream as a config delta.
+    ///
+    /// Providers read model parameters and the caching policy from the stream's
+    /// config rather than from the fields above, so anything the inquiry
+    /// configures beyond the model id has to reach them this way.
+    pub assistant: PartialAssistantConfig,
 }
 
 /// Resolves inquiries by making structured output calls to an LLM provider.
@@ -259,6 +270,20 @@ impl InquiryBackend for LlmInquiryBackend {
                     .event
                     .add_metadata_field(jp_conversation::event::CACHE_BREAKPOINT_KEY, true);
             }
+        }
+
+        // Providers read model parameters and the caching policy from the
+        // stream's config, so the inquiry's assistant settings are appended as
+        // a config delta. Without this an inquiry silently runs with the parent
+        // assistant's temperature, cache policy, and everything else the
+        // provider reads from there.
+        //
+        // A delta rather than a rebased base config: it applies on top of the
+        // conversation's own deltas without discarding them.
+        {
+            let mut delta = PartialAppConfig::empty();
+            delta.assistant = config.assistant.clone();
+            events.add_config_delta(delta);
         }
 
         // Append the user-facing question with the structured output schema.

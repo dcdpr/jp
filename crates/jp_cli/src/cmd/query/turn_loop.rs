@@ -18,7 +18,7 @@ use futures::{
 use indexmap::IndexMap;
 use jp_attachment::Attachment;
 use jp_config::{
-    AppConfig, PartialConfig,
+    AppConfig, PartialConfig, ToPartial as _,
     assistant::{request::MaxResponseBytes, tool_choice::ToolChoice},
     conversation::tool::QuestionTarget,
     model::id::ProviderId,
@@ -891,6 +891,11 @@ async fn build_inquiry_backend(
     let default_system_prompt = inquiry_cfg.system_prompt.clone();
     let default_max_response_bytes = inquiry_cfg.request.max_response_bytes.bytes();
 
+    // Carried as a partial so the per-question layer below can inherit from it
+    // without a second resolution pass, and so it can be applied to the
+    // request's stream as a config delta.
+    let default_assistant = inquiry_cfg.to_partial();
+
     // Track providers we've already constructed to avoid duplicates.
     let mut providers: IndexMap<ProviderId, Arc<dyn Provider>> = IndexMap::new();
 
@@ -909,6 +914,7 @@ async fn build_inquiry_backend(
             system_prompt: default_system_prompt,
             sections: sections.clone(),
             max_response_bytes: default_max_response_bytes,
+            assistant: default_assistant,
         }
     } else {
         // Attribute failures to the override: without this, e.g. a missing
@@ -952,6 +958,7 @@ async fn build_inquiry_backend(
             system_prompt: default_system_prompt,
             sections: sections.clone(),
             max_response_bytes: default_max_response_bytes,
+            assistant: default_assistant,
         }
     };
 
@@ -1049,12 +1056,21 @@ async fn build_inquiry_overrides(
                 .max_response_bytes
                 .map_or(default_config.max_response_bytes, MaxResponseBytes::bytes);
 
+            // Everything the provider reads from the stream's config follows
+            // the same order, so the per-question partial inherits from the
+            // global inquiry one rather than from the bare defaults.
+            let assistant = per_q
+                .as_ref()
+                .clone()
+                .inherit_from(default_config.assistant.clone());
+
             overrides.insert((tool_name.to_owned(), question_id.clone()), InquiryConfig {
                 provider: inq_provider,
                 model: inq_model,
                 system_prompt,
                 sections: default_config.sections.clone(),
                 max_response_bytes,
+                assistant,
             });
         }
     }

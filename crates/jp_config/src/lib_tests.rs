@@ -62,6 +62,130 @@ fn inquiry_inherits_unset_request_fields_from_the_assistant() {
     );
 }
 
+/// The mergeable collections inherit their entries, not just their metadata.
+///
+/// `MergeableVec::fill_from` keeps its own items by design, so filling the
+/// inquiry block from the assistant with it would leave the inquiry's lists
+/// empty and let the schematic defaults claim them.
+/// `build_sections` reads the inquiry config, so that silently drops a user's
+/// instructions and sections from every inquiry.
+#[test]
+fn inquiry_inherits_assistant_collections() {
+    use crate::assistant::{
+        instructions::PartialInstructionsConfig, sections::PartialSectionConfig,
+    };
+
+    let mut partial = PartialAppConfig::new_test();
+    partial.assistant.instructions = vec![PartialInstructionsConfig {
+        title: Some("House rules".to_owned()),
+        items: Some(vec!["Be concise".to_owned()]),
+        ..Default::default()
+    }]
+    .into();
+    partial.assistant.system_prompt_sections = vec![PartialSectionConfig {
+        content: Some("Context".to_owned()),
+        ..Default::default()
+    }]
+    .into();
+
+    let config = AppConfig::from_partial_with_defaults(partial).expect("valid config");
+    let inquiry = &config.conversation.inquiry.assistant;
+
+    assert_eq!(
+        inquiry.instructions.len(),
+        1,
+        "the inquiry inherits the assistant's instructions rather than the type defaults"
+    );
+    assert_eq!(
+        inquiry.instructions[0].title.as_deref(),
+        Some("House rules"),
+        "and inherits the user's entry, not a default one"
+    );
+    assert_eq!(
+        inquiry.system_prompt_sections.len(),
+        1,
+        "the inquiry inherits the assistant's prompt sections"
+    );
+}
+
+/// An inquiry that declares its own collections keeps them.
+#[test]
+fn an_explicit_inquiry_collection_wins_over_the_assistant() {
+    use crate::assistant::instructions::PartialInstructionsConfig;
+
+    let mut partial = PartialAppConfig::new_test();
+    partial.assistant.instructions = vec![PartialInstructionsConfig {
+        title: Some("Assistant rules".to_owned()),
+        ..Default::default()
+    }]
+    .into();
+    partial.conversation.inquiry.assistant.instructions = vec![PartialInstructionsConfig {
+        title: Some("Inquiry rules".to_owned()),
+        ..Default::default()
+    }]
+    .into();
+
+    let config = AppConfig::from_partial_with_defaults(partial).expect("valid config");
+    let inquiry = &config.conversation.inquiry.assistant;
+
+    assert_eq!(inquiry.instructions.len(), 1);
+    assert_eq!(
+        inquiry.instructions[0].title.as_deref(),
+        Some("Inquiry rules"),
+        "a declared list is not merged with the parent's"
+    );
+    assert_eq!(
+        config.assistant.instructions[0].title.as_deref(),
+        Some("Assistant rules"),
+        "and the parent keeps its own"
+    );
+}
+
+/// An inquiry value pinned to the same number as the assistant's does not
+/// survive a round-trip, and follows a later assistant-only change.
+///
+/// This records a known limitation rather than desired behavior.
+/// `to_partial` only has equality to work from, so it cannot tell a deliberate
+/// same-as-parent value from an inherited one.
+/// Dropping it is the lesser evil: recording every inherited value instead
+/// would stop `assistant` changes from ever reaching the inquiry, which is the
+/// far more common path (see
+/// `inquiry_inheritance_survives_a_partial_round_trip`).
+///
+/// Fixing it needs per-field presence to survive resolution.
+#[test]
+fn a_same_valued_inquiry_pin_is_lost_on_a_round_trip() {
+    use crate::assistant::request::MaxResponseBytes;
+
+    let mut partial = PartialAppConfig::new_test();
+    partial.assistant.request.max_response_bytes = Some(MaxResponseBytes::Bytes(4096));
+    partial
+        .conversation
+        .inquiry
+        .assistant
+        .request
+        .max_response_bytes = Some(MaxResponseBytes::Bytes(4096));
+
+    let config = AppConfig::from_partial_with_defaults(partial).expect("valid config");
+
+    // Round-trip, then raise only the assistant's ceiling.
+    let mut round_tripped = config.to_partial();
+    round_tripped.assistant.request.max_response_bytes = Some(MaxResponseBytes::Bytes(999_999));
+
+    let config = AppConfig::from_partial_with_defaults(round_tripped).expect("valid config");
+
+    assert_eq!(
+        config
+            .conversation
+            .inquiry
+            .assistant
+            .request
+            .max_response_bytes,
+        MaxResponseBytes::Bytes(999_999),
+        "the pin is indistinguishable from inheritance and follows the assistant"
+    );
+}
+
 /// An explicit inquiry value wins over the inherited assistant value.
 #[test]
 fn inquiry_request_override_wins_over_the_assistant() {

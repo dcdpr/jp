@@ -96,6 +96,11 @@ fn shell_command_line_keeps_program_raw() {
 ///
 /// This is the invariant that makes expanding-on-sub-key-assignment safe: if
 /// the two ever diverged, addressing a field would silently change the command.
+///
+/// The template spans are the cases that matter most: they are the only inputs
+/// where the shell split alone gives a different answer than
+/// [`CommandConfigOrString::command`], so an expansion that skipped the
+/// template-aware splitter would pass every other case here.
 #[test]
 fn expanding_a_shorthand_matches_the_command_it_describes() {
     for shorthand in [
@@ -104,6 +109,9 @@ fn expanding_a_shorthand_matches_the_command_it_describes() {
         r#"sh -c "ls -la""#,
         "code",
         "",
+        "just x {{ a | default('') }}",
+        "echo {% if x %}on{% endif %} tail",
+        "echo {# a note #}",
     ] {
         let expanded = CommandConfigOrString::from_partial(
             PartialCommandConfigOrString::Config(expand_shorthand(shorthand)),
