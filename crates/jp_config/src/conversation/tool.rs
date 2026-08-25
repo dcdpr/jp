@@ -1509,7 +1509,11 @@ impl Enable {
 /// The legacy strings `"on"`, `"off"`, `"always"` (= locked-on), and
 /// `"explicit"` (= off-unless-named) are still accepted on input.
 #[derive(Debug, Clone, PartialEq, Config)]
-#[config(rename_all = "snake_case", no_deserialize_derive)]
+#[config(
+    rename_all = "snake_case",
+    no_deserialize_derive,
+    schema_union_with = enable_input_shapes
+)]
 pub struct EnableConfig {
     /// Whether the tool is enabled.
     ///
@@ -1570,6 +1574,25 @@ impl PartialEnableConfig {
                 .unwrap_or_default(),
         }
     }
+}
+
+/// The non-table shapes `enable` accepts, for the schema.
+///
+/// The table form is described by the derived struct schema; these are the
+/// shorthands its hand-written `Deserialize` also accepts, which the derive
+/// cannot see.
+fn enable_input_shapes(schema: &schematic::SchemaBuilder) -> Vec<schematic::Schema> {
+    use schematic::schema::{BooleanType, EnumType, LiteralValue};
+
+    vec![
+        schema.nest().boolean(BooleanType::default()),
+        schema.nest().enumerable(EnumType::new([
+            LiteralValue::String("on".into()),
+            LiteralValue::String("off".into()),
+            LiteralValue::String("always".into()),
+            LiteralValue::String("explicit".into()),
+        ])),
+    ]
 }
 
 impl From<bool> for PartialEnableConfig {

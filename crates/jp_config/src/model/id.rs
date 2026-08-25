@@ -69,6 +69,10 @@ impl FillDefaults for PartialModelIdOrAliasConfig {
     fn fill_from(self, defaults: Self) -> Self {
         match (self, defaults) {
             (Self::Id(s), Self::Id(d)) => Self::Id(s.fill_from(d)),
+            // A value carrying no information takes the default whole, even
+            // across variants: an unset id filling from a config that names its
+            // model by alias has to end up with that alias.
+            (s, d) if s.is_empty() => d,
             (s, _) => s,
         }
     }

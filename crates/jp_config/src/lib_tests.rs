@@ -25,49 +25,385 @@ fn test_app_config_fields() {
     insta::assert_debug_snapshot!(AppConfig::fields());
 }
 
-/// Setting one field in the inquiry request block must not silently zero the
-/// rest of it.
-///
-/// `AssistantOverrideConfig::request` is a resolved `Option<RequestConfig>`, so
-/// the conversion has no per-field presence to preserve: every field the user
-/// did not set resolves to Rust's `Default` rather than the schematic default.
-/// This test pins that behavior so a reader of the resolution code knows the
-/// zeros are an artifact, not a user's choice.
+/// Setting one field in the inquiry request block leaves its siblings
+/// inheriting from the top-level assistant, rather than resolving to `0`.
 #[test]
-fn inquiry_request_override_zeroes_unset_fields() {
-    use crate::assistant::request::CachePolicy;
+fn inquiry_inherits_unset_request_fields_from_the_assistant() {
+    use crate::assistant::request::{CachePolicy, MaxResponseBytes, PartialRequestConfig};
 
     let mut partial = PartialAppConfig::new_test();
-    partial.assistant.request.max_response_bytes = Some(500_000);
+    partial.assistant.request.max_response_bytes = Some(MaxResponseBytes::Bytes(500_000));
+    partial.assistant.request.max_retries = Some(7);
 
     // Only a sibling field is set in the inquiry block.
-    partial.conversation.inquiry.assistant.request =
-        Some(crate::assistant::request::PartialRequestConfig {
-            cache: Some(CachePolicy::Off),
-            ..Default::default()
-        });
+    partial.conversation.inquiry.assistant.request = PartialRequestConfig {
+        cache: Some(CachePolicy::Off),
+        ..PartialRequestConfig::default()
+    };
 
     let config = AppConfig::from_partial_with_defaults(partial).expect("valid config");
+    let request = config.conversation.inquiry.assistant.request;
 
-    let request = config
+    assert_eq!(request.cache, CachePolicy::Off, "the set field survives");
+    assert_eq!(
+        request.max_response_bytes,
+        MaxResponseBytes::Bytes(500_000),
+        "an unset sibling inherits the assistant value"
+    );
+    assert_eq!(
+        request.max_retries, 7,
+        "inheritance covers every field in the block"
+    );
+
+    // The parent keeps its own value; the fill is one-directional.
+    assert_eq!(
+        config.assistant.request.max_response_bytes,
+        MaxResponseBytes::Bytes(500_000)
+    );
+}
+
+/// The mergeable collections inherit their entries, not just their metadata.
+///
+/// `MergeableVec::fill_from` keeps its own items by design, so filling the
+/// inquiry block from the assistant with it would leave the inquiry's lists
+/// empty and let the schematic defaults claim them.
+/// `build_sections` reads the inquiry config, so that silently drops a user's
+/// instructions and sections from every inquiry.
+#[test]
+fn inquiry_inherits_assistant_collections() {
+    use crate::assistant::{
+        instructions::PartialInstructionsConfig, sections::PartialSectionConfig,
+    };
+
+    let mut partial = PartialAppConfig::new_test();
+    partial.assistant.instructions = vec![PartialInstructionsConfig {
+        title: Some("House rules".to_owned()),
+        items: Some(vec!["Be concise".to_owned()]),
+        ..Default::default()
+    }]
+    .into();
+    partial.assistant.system_prompt_sections = vec![PartialSectionConfig {
+        content: Some("Context".to_owned()),
+        ..Default::default()
+    }]
+    .into();
+
+    let config = AppConfig::from_partial_with_defaults(partial).expect("valid config");
+    let inquiry = &config.conversation.inquiry.assistant;
+
+    assert_eq!(
+        inquiry.instructions.len(),
+        1,
+        "the inquiry inherits the assistant's instructions rather than the type defaults"
+    );
+    assert_eq!(
+        inquiry.instructions[0].title.as_deref(),
+        Some("House rules"),
+        "and inherits the user's entry, not a default one"
+    );
+    assert_eq!(
+        inquiry.system_prompt_sections.len(),
+        1,
+        "the inquiry inherits the assistant's prompt sections"
+    );
+}
+
+/// An inquiry that declares its own collections keeps them.
+#[test]
+fn an_explicit_inquiry_collection_wins_over_the_assistant() {
+    use crate::assistant::instructions::PartialInstructionsConfig;
+
+    let mut partial = PartialAppConfig::new_test();
+    partial.assistant.instructions = vec![PartialInstructionsConfig {
+        title: Some("Assistant rules".to_owned()),
+        ..Default::default()
+    }]
+    .into();
+    partial.conversation.inquiry.assistant.instructions = vec![PartialInstructionsConfig {
+        title: Some("Inquiry rules".to_owned()),
+        ..Default::default()
+    }]
+    .into();
+
+    let config = AppConfig::from_partial_with_defaults(partial).expect("valid config");
+    let inquiry = &config.conversation.inquiry.assistant;
+
+    assert_eq!(inquiry.instructions.len(), 1);
+    assert_eq!(
+        inquiry.instructions[0].title.as_deref(),
+        Some("Inquiry rules"),
+        "a declared list is not merged with the parent's"
+    );
+    assert_eq!(
+        config.assistant.instructions[0].title.as_deref(),
+        Some("Assistant rules"),
+        "and the parent keeps its own"
+    );
+}
+
+/// An inquiry value pinned to the same number as the assistant's does not
+/// survive a round-trip, and follows a later assistant-only change.
+///
+/// This records a known limitation rather than desired behavior.
+/// `to_partial` only has equality to work from, so it cannot tell a deliberate
+/// same-as-parent value from an inherited one.
+/// Dropping it is the lesser evil: recording every inherited value instead
+/// would stop `assistant` changes from ever reaching the inquiry, which is the
+/// far more common path (see
+/// `inquiry_inheritance_survives_a_partial_round_trip`).
+///
+/// Fixing it needs per-field presence to survive resolution.
+#[test]
+fn a_same_valued_inquiry_pin_is_lost_on_a_round_trip() {
+    use crate::assistant::request::MaxResponseBytes;
+
+    let mut partial = PartialAppConfig::new_test();
+    partial.assistant.request.max_response_bytes = Some(MaxResponseBytes::Bytes(4096));
+    partial
         .conversation
         .inquiry
         .assistant
         .request
-        .expect("the inquiry request block is set");
+        .max_response_bytes = Some(MaxResponseBytes::Bytes(4096));
 
-    assert_eq!(request.cache, CachePolicy::Off, "the set field survives");
+    let config = AppConfig::from_partial_with_defaults(partial).expect("valid config");
+
+    // Round-trip, then raise only the assistant's ceiling.
+    let mut round_tripped = config.to_partial();
+    round_tripped.assistant.request.max_response_bytes = Some(MaxResponseBytes::Bytes(999_999));
+
+    let config = AppConfig::from_partial_with_defaults(round_tripped).expect("valid config");
+
     assert_eq!(
-        request.max_response_bytes, 0,
-        "an unset field resolves to Rust's Default, not the schematic default"
+        config
+            .conversation
+            .inquiry
+            .assistant
+            .request
+            .max_response_bytes,
+        MaxResponseBytes::Bytes(999_999),
+        "the pin is indistinguishable from inheritance and follows the assistant"
+    );
+}
+
+/// An explicit inquiry value wins over the inherited assistant value.
+#[test]
+fn inquiry_request_override_wins_over_the_assistant() {
+    use crate::assistant::request::MaxResponseBytes;
+
+    let mut partial = PartialAppConfig::new_test();
+    partial.assistant.request.max_response_bytes = Some(MaxResponseBytes::Bytes(500_000));
+    partial
+        .conversation
+        .inquiry
+        .assistant
+        .request
+        .max_response_bytes = Some(MaxResponseBytes::Bytes(4096));
+
+    let config = AppConfig::from_partial_with_defaults(partial).expect("valid config");
+
+    assert_eq!(
+        config
+            .conversation
+            .inquiry
+            .assistant
+            .request
+            .max_response_bytes,
+        MaxResponseBytes::Bytes(4096)
     );
     assert_eq!(
-        request.max_retries, 0,
-        "the same applies to every other field in the block"
+        config.assistant.request.max_response_bytes,
+        MaxResponseBytes::Bytes(500_000)
+    );
+}
+
+/// Disabling the ceiling for inquiries alone survives inheritance.
+#[test]
+fn inquiry_can_disable_a_ceiling_the_assistant_sets() {
+    use crate::assistant::request::MaxResponseBytes;
+
+    let mut partial = PartialAppConfig::new_test();
+    partial.assistant.request.max_response_bytes = Some(MaxResponseBytes::Bytes(500_000));
+    partial
+        .conversation
+        .inquiry
+        .assistant
+        .request
+        .max_response_bytes = Some(MaxResponseBytes::Disabled);
+
+    let config = AppConfig::from_partial_with_defaults(partial).expect("valid config");
+
+    assert_eq!(
+        config
+            .conversation
+            .inquiry
+            .assistant
+            .request
+            .max_response_bytes,
+        MaxResponseBytes::Disabled,
+        "an explicit disable must not be overwritten by the inherited value"
+    );
+}
+
+/// A round-trip through `to_partial` must not freeze an inherited inquiry
+/// value.
+///
+/// `to_partial` is how a resolved config becomes a layer again (a stored
+/// conversation config, a `--cfg` baseline).
+/// If it recorded the inherited inquiry values verbatim, a later layer that
+/// changes `assistant` would no longer reach the inquiry, which is the
+/// inheritance silently stopping.
+#[test]
+fn inquiry_inheritance_survives_a_partial_round_trip() {
+    use crate::model::id::{ModelIdConfig, PartialModelIdOrAliasConfig, ProviderId};
+
+    let mut partial = PartialAppConfig::new_test();
+    partial.assistant.model.id = ModelIdConfig {
+        provider: ProviderId::Anthropic,
+        name: "first-model".parse().unwrap(),
+    }
+    .to_partial()
+    .into();
+
+    let config = AppConfig::from_partial_with_defaults(partial).expect("valid config");
+    assert_eq!(
+        config
+            .conversation
+            .inquiry
+            .assistant
+            .model
+            .id
+            .resolved()
+            .name
+            .as_ref(),
+        "first-model",
+        "the inquiry inherits the assistant model"
     );
 
-    // The parent keeps its own value; nothing merged into it.
-    assert_eq!(config.assistant.request.max_response_bytes, 500_000);
+    // Round-trip, then change only the assistant on a later layer.
+    let mut round_tripped = config.to_partial();
+    round_tripped.assistant.model.id = PartialModelIdOrAliasConfig::Id(
+        ModelIdConfig {
+            provider: ProviderId::Anthropic,
+            name: "second-model".parse().unwrap(),
+        }
+        .to_partial(),
+    );
+
+    let config = AppConfig::from_partial_with_defaults(round_tripped).expect("valid config");
+
+    assert_eq!(
+        config
+            .conversation
+            .inquiry
+            .assistant
+            .model
+            .id
+            .resolved()
+            .name
+            .as_ref(),
+        "second-model",
+        "the inquiry must follow the new assistant model, not the round-tripped copy"
+    );
+}
+
+/// An inquiry value the user genuinely set survives the same round-trip.
+#[test]
+fn an_explicit_inquiry_value_survives_a_partial_round_trip() {
+    use crate::assistant::request::MaxResponseBytes;
+
+    let mut partial = PartialAppConfig::new_test();
+    partial.assistant.request.max_response_bytes = Some(MaxResponseBytes::Bytes(500_000));
+    partial
+        .conversation
+        .inquiry
+        .assistant
+        .request
+        .max_response_bytes = Some(MaxResponseBytes::Bytes(4096));
+
+    let config = AppConfig::from_partial_with_defaults(partial).expect("valid config");
+    let config = AppConfig::from_partial_with_defaults(config.to_partial()).expect("valid config");
+
+    assert_eq!(
+        config
+            .conversation
+            .inquiry
+            .assistant
+            .request
+            .max_response_bytes,
+        MaxResponseBytes::Bytes(4096),
+        "an explicitly-set inquiry value is not mistaken for an inherited one"
+    );
+}
+
+/// A union that names an expanded form contributes both the shorthand path and
+/// the expanded keys; a union of distinct values contributes only its path.
+///
+/// `enable` accepts `true` or `{ state, allow_toggle }`, and `editor.cmd`
+/// accepts `"code --wait"` or `{ program, args }`.
+/// Both spell one value two ways, so every spelling is writable.
+/// `assistant.model.id` is either an id or an alias resolved through a lookup,
+/// which are different values rather than spellings of one, so it contributes
+/// only its own path.
+#[test]
+fn fields_follows_a_unions_expanded_form() {
+    let fields = AppConfig::fields();
+    let has = |key: &str| fields.contains(&key.to_owned());
+
+    assert!(
+        has("conversation.tools.*.enable"),
+        "the shorthand `enable = true` stays writable"
+    );
+    assert!(
+        has("conversation.tools.*.enable.state") && has("conversation.tools.*.enable.allow_toggle"),
+        "the expanded form contributes its keys"
+    );
+
+    assert!(
+        has("editor.cmd"),
+        "the shorthand `cmd = \"code\"` stays writable"
+    );
+    assert!(
+        has("editor.cmd.program") && has("editor.cmd.args") && has("editor.cmd.shell"),
+        "the table form contributes its keys"
+    );
+
+    assert!(has("assistant.model.id"), "an id-or-alias is a leaf");
+    assert!(
+        !has("assistant.model.id.provider"),
+        "an alias is not a spelling of an id, so its keys are not reported"
+    );
+}
+
+/// Every assignable sub-field of an optional nested config appears in
+/// `fields()`.
+///
+/// `Option<NestedConfig>` renders as a nullable union rather than a struct, so
+/// a walk that only descends into structs stops at the block and reports it as
+/// a leaf.
+/// `assign` routes into those sub-keys regardless, and `envs()` is derived from
+/// `fields()`, so the omission silently costs the env-var form of every key
+/// inside such a block.
+#[test]
+fn fields_descends_into_optional_nested_configs() {
+    let fields = AppConfig::fields();
+
+    for key in [
+        "conversation.title.generate.model.id",
+        "style.reasoning.summary_model.id",
+    ] {
+        assert!(
+            fields.contains(&key.to_owned()),
+            "{key} is assignable but missing from fields()"
+        );
+    }
+
+    // The block itself is no longer reported as a leaf: it has no value of its
+    // own to set.
+    assert!(
+        !fields.contains(&"conversation.title.generate.model".to_owned()),
+        "the containing block must not also appear as a leaf"
+    );
 }
 
 #[test]

@@ -41,7 +41,8 @@ fn test_inquiry_config(provider: MockProvider) -> InquiryConfig {
         model: test_model(),
         system_prompt: None,
         sections: vec![],
-        max_response_bytes: 1_048_576,
+        max_response_bytes: Some(1_048_576),
+        assistant: PartialAssistantConfig::default(),
     }
 }
 
@@ -151,6 +152,59 @@ async fn llm_backend_returns_answer() {
         .await;
 
     assert_eq!(result.unwrap(), json!(true));
+}
+
+/// The inquiry's own assistant settings reach the provider.
+///
+/// Providers read model parameters and the caching policy from the request's
+/// stream config, not from the fields `build_inquiry_backend` resolves, so
+/// without the config delta every key under
+/// `conversation.inquiry.assistant.model.parameters` is addressable,
+/// documented, and silently ignored.
+#[tokio::test]
+async fn llm_backend_applies_its_assistant_config_to_the_request() {
+    use jp_config::assistant::request::CachePolicy;
+
+    let inquiry_id = tool_call_inquiry_id("call_params", "confirm", 1);
+
+    let (provider, requests) = structured_provider(json!({ "answer": true })).capturing_requests();
+
+    let mut assistant = PartialAssistantConfig::default();
+    assistant.model.parameters.temperature = Some(0.125);
+    assistant.request.cache = Some(CachePolicy::Off);
+
+    let config = InquiryConfig {
+        assistant,
+        ..test_inquiry_config(provider)
+    };
+
+    let backend = LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![]);
+
+    backend
+        .inquire(
+            test_events(),
+            &inquiry_id,
+            "test_tool",
+            &test_question(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("the inquiry resolves");
+
+    let sent = requests.lock().expect("not poisoned");
+    let query = sent.first().expect("one request was sent");
+    let resolved = query.thread.events.config().expect("a valid config");
+
+    assert_eq!(
+        resolved.assistant.model.parameters.temperature,
+        Some(0.125),
+        "the inquiry's model parameters reach the provider"
+    );
+    assert_eq!(
+        resolved.assistant.request.cache,
+        CachePolicy::Off,
+        "and so does its caching policy"
+    );
 }
 
 #[tokio::test]
@@ -342,11 +396,12 @@ async fn llm_backend_uses_per_question_override() {
     );
 
     let override_config = InquiryConfig {
+        assistant: PartialAssistantConfig::default(),
         provider: Arc::new(structured_provider(json!({ "answer": true }))),
         model: test_model(),
         system_prompt: Some("Override prompt.".into()),
         sections: vec![],
-        max_response_bytes: 1_048_576,
+        max_response_bytes: Some(1_048_576),
     };
 
     let overrides = IndexMap::from([(("test_tool".into(), "confirm".into()), override_config)]);
@@ -436,6 +491,7 @@ fn visible_index_skips_inquiry_request() {
 async fn dedicated_model_backend_returns_answer() {
     let inquiry_id = tool_call_inquiry_id("call_dedicated", "confirm", 1);
     let config = InquiryConfig {
+        assistant: PartialAssistantConfig::default(),
         provider: Arc::new(structured_provider(json!({ "answer": true }))),
         model: ModelDetails::empty(ModelIdConfig {
             provider: ProviderId::Test,
@@ -443,7 +499,7 @@ async fn dedicated_model_backend_returns_answer() {
         }),
         system_prompt: Some("Answer concisely.".to_string()),
         sections: vec![],
-        max_response_bytes: 1_048_576,
+        max_response_bytes: Some(1_048_576),
     };
 
     let backend = LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![]);

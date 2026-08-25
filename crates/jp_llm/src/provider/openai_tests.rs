@@ -1586,7 +1586,7 @@ mod recorded {
 
     use chrono::{TimeZone as _, Utc};
     use jp_attachment::Attachment;
-    use jp_config::assistant::request::CachePolicy;
+    use jp_config::{AppConfig, assistant::request::CachePolicy};
     use jp_conversation::{ConversationStream, event::ChatResponse};
     use jp_test::{Result, function_name};
     use test_log::test;
@@ -1626,12 +1626,18 @@ mod recorded {
             return request;
         };
 
-        let mut base = (*thread.events.base_config()).clone();
-        base.assistant
+        // Routed through the partial and re-resolved rather than mutated in
+        // place: settings that inherit from `assistant` are filled during
+        // resolution, so an in-place edit would leave them on the old value.
+        let mut partial = thread.events.base_config().to_partial();
+        partial
+            .assistant
             .model
             .parameters
             .other
+            .get_or_insert_default()
             .insert(key.to_owned(), serde_json::Value::from(value).into());
+        let base = AppConfig::from_partial_with_defaults(partial).expect("a valid test config");
 
         let placeholder = ConversationStream::new(thread.events.base_config());
         let stream = std::mem::replace(&mut thread.events, placeholder);
@@ -1661,8 +1667,12 @@ mod recorded {
             return request;
         };
 
-        let mut base = (*thread.events.base_config()).clone();
-        base.assistant.request.cache = CachePolicy::Off;
+        // Routed through the partial and re-resolved rather than mutated in
+        // place: settings that inherit from `assistant` are filled during
+        // resolution, so an in-place edit would leave them on the old value.
+        let mut partial = thread.events.base_config().to_partial();
+        partial.assistant.request.cache = Some(CachePolicy::Off);
+        let base = AppConfig::from_partial_with_defaults(partial).expect("a valid test config");
 
         let placeholder = ConversationStream::new(thread.events.base_config());
         let stream = std::mem::replace(&mut thread.events, placeholder);

@@ -61,8 +61,8 @@ pub struct TitleRequest {
     /// `assistant.request.max_response_bytes`.
     /// A runaway response is cut off past this and surfaced as a non-retryable
     /// error rather than regenerated.
-    /// `0` disables the ceiling.
-    pub max_response_bytes: u32,
+    /// `None` leaves the response unbounded.
+    pub max_response_bytes: Option<u64>,
 }
 
 /// Resolve the model that conversation-title generation runs on.

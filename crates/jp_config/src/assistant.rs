@@ -164,6 +164,34 @@ impl FillDefaults for PartialAssistantConfig {
     }
 }
 
+impl PartialAssistantConfig {
+    /// Fill unset fields from a parent assistant config.
+    ///
+    /// Differs from [`FillDefaults::fill_from`] only in the mergeable
+    /// collections.
+    /// `MergeableVec::fill_from` keeps its own items and inherits just the
+    /// wrapper metadata, which is right for a defaults layer (a declared list
+    /// wins outright) and wrong for inheritance, where an undeclared list has
+    /// to take the parent's entries.
+    ///
+    /// An empty list counts as undeclared.
+    /// A `MergeableVec` carrying only metadata is not empty, so `--cfg
+    /// assistant.instructions.dedup=false` still inherits the parent's entries
+    /// and applies its own strategy to them.
+    #[must_use]
+    pub fn inherit_from(mut self, parent: Self) -> Self {
+        if self.instructions.is_empty() {
+            self.instructions = parent.instructions.clone();
+        }
+
+        if self.system_prompt_sections.is_empty() {
+            self.system_prompt_sections = parent.system_prompt_sections.clone();
+        }
+
+        self.fill_from(parent)
+    }
+}
+
 impl ToPartial for AssistantConfig {
     fn to_partial(&self) -> Self::Partial {
         let defaults = Self::Partial::default();
