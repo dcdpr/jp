@@ -38,6 +38,37 @@ fn exchange(message: &HostToPlugin) -> Vec<PluginToHost> {
         .collect()
 }
 
+/// Drive a full exchange: one message in, then a scripted reply to each request
+/// the plugin makes.
+///
+/// The plugin reads its replies from the same stream, so a composition is just
+/// more lines of input.
+fn exchange_with(message: &HostToPlugin, replies: &[HostToPlugin]) -> Vec<PluginToHost> {
+    let mut input = serde_json::to_string(message).unwrap() + "\n";
+    for reply in replies {
+        input.push_str(&serde_json::to_string(reply).unwrap());
+        input.push('\n');
+    }
+
+    let mut output = vec![];
+    run(input.as_bytes(), &mut output).unwrap();
+
+    String::from_utf8(output)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect()
+}
+
+/// A composed answer carrying `text`.
+fn composed(text: &str) -> HostToPlugin {
+    HostToPlugin::Composed(jp_plugin::message::ComposeResponse {
+        id: None,
+        text: Some(text.to_owned()),
+        values: vec![],
+    })
+}
+
 fn init(root: &Utf8Path, args: &[&str]) -> HostToPlugin {
     init_at(jp_plugin::PROTOCOL_VERSION, root, args)
 }
@@ -193,6 +224,52 @@ fn the_author_falls_back_through_jp_then_git_then_the_environment() {
     // passes for whichever branch happens to fire, which is how this test came
     // to fail on Windows. Covering them means having `resolve_author` take
     // those two values as arguments instead of reading them itself.
+}
+
+/// A `--body` given on the command line stays the description.
+///
+/// It used to seed the whole-ticket buffer, where a single line reads back as a
+/// title: the description became the summary and the ticket was filed with
+/// none.
+/// Only the title is asked for now, so the text keeps the field it was given
+/// for.
+#[test]
+fn an_explicit_body_is_not_read_back_as_the_title() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let messages = exchange_with(
+        &init(dir.path(), &["add", "bug", "--body", "Steps to reproduce"]),
+        &[composed("Header misaligned")],
+    );
+
+    // One prompt, and it asks for the title rather than the whole ticket.
+    let asked: Vec<&jp_plugin::message::ComposeRequest> = messages
+        .iter()
+        .filter_map(|message| match message {
+            PluginToHost::Compose(request) => Some(request),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(asked.len(), 1, "asked more than once: {messages:?}");
+    assert_eq!(asked[0].message, "Title");
+    assert!(
+        matches!(asked[0].mode, ComposeMode::Line { .. }),
+        "asked for a whole ticket, not a title: {:?}",
+        asked[0].mode
+    );
+
+    let filed = dir
+        .path()
+        .join(ticket::store::DEFAULT_DIR)
+        .join("0001-header-misaligned.md");
+    let ticket = std::fs::read_to_string(&filed).unwrap_or_else(|_| panic!("missing {filed}"));
+
+    assert!(ticket.contains("# T0001: Header misaligned"), "{ticket}");
+    assert!(
+        ticket.contains("Steps to reproduce"),
+        "the description was dropped: {ticket}"
+    );
 }
 
 #[test]

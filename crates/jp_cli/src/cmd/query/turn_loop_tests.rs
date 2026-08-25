@@ -1132,12 +1132,19 @@ impl PromptBackend for DelayedPromptBackend {
         initial_text: &str,
         edit_mode: ReplyEditMode,
         editor_escape: bool,
+        help: Option<&str>,
         output: Box<dyn Write + Send>,
     ) -> Result<ReplyOutcome, InquireError> {
         self.started.notify_one();
         std::thread::sleep(self.delay);
-        self.inner
-            .inline_reply(message, initial_text, edit_mode, editor_escape, output)
+        self.inner.inline_reply(
+            message,
+            initial_text,
+            edit_mode,
+            editor_escape,
+            help,
+            output,
+        )
     }
 
     fn text(

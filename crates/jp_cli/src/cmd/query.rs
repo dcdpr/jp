@@ -46,7 +46,7 @@
 //! [`ToolCallResponse`]: jp_conversation::event::ToolCallResponse
 //! [`TurnCoordinator`]: turn::coordinator::TurnCoordinator
 
-mod interrupt;
+pub(crate) mod interrupt;
 mod stream;
 pub(crate) mod tool;
 mod turn;

@@ -60,9 +60,12 @@ fn message_loop_ready_then_exit() {
     // No terminal in a test, so a compose request would be declined rather
     // than prompting; this exchange never asks for one.
     let printer = jp_printer::Printer::sink();
+    let prompts = jp_inquire::prompt::TerminalPromptBackend;
     let composer = Composer {
         printer: &printer,
+        prompts: &prompts,
         editor: None,
+        edit_mode: jp_inquire::ReplyEditMode::default(),
         is_tty: false,
     };
 

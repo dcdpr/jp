@@ -23,7 +23,10 @@ use jp_config::{
     },
 };
 use jp_editor::{EditOutcome, EditorBackend};
-use jp_inquire::{InlineOption, InlineReply, InlineSelect, ReplyOutcome};
+use jp_inquire::{
+    InlineOption, InlineSelect, ReplyEditMode, ReplyOutcome,
+    prompt::{PromptBackend, TerminalPromptBackend},
+};
 use jp_plugin::{
     PROTOCOL_VERSION,
     message::{
@@ -39,7 +42,10 @@ use serde_json::Value;
 use tracing::{debug, error, trace, warn};
 
 use super::registry;
-use crate::{Ctx, cmd, editor::report_editor_failure, signals::SignalRouter};
+use crate::{
+    Ctx, cmd, cmd::query::interrupt::reply_edit_mode, editor::report_editor_failure,
+    signals::SignalRouter,
+};
 
 /// Runs the prompts a plugin asks for.
 ///
@@ -48,7 +54,16 @@ use crate::{Ctx, cmd, editor::report_editor_failure, signals::SignalRouter};
 /// to read keys from, and only the host knows which editor `Ctrl+X` opens.
 pub(crate) struct Composer<'a> {
     printer: &'a Printer,
+
+    /// Renders the widgets, rather than the composer building them.
+    ///
+    /// Everything the widget owns — its keybindings, and the hints that
+    /// describe them — lives behind here, so a second caller cannot quietly
+    /// ship a reply buffer with the wrong edit mode or no key hints at all.
+    prompts: &'a dyn PromptBackend,
+
     editor: Option<Arc<dyn EditorBackend>>,
+    edit_mode: ReplyEditMode,
     is_tty: bool,
 }
 
@@ -148,14 +163,16 @@ impl Composer<'_> {
         let mut buffer = initial.to_owned();
 
         loop {
-            let mut reply = InlineReply::new(request.message.as_str())
-                .with_initial_text(buffer.as_str())
-                .with_editor_escape(self.editor.is_some());
-            if let Some(help) = &request.help {
-                reply = reply.with_help_message(help.as_str());
-            }
+            let outcome = self.prompts.inline_reply(
+                request.message.as_str(),
+                buffer.as_str(),
+                self.edit_mode,
+                self.editor.is_some(),
+                request.help.as_deref(),
+                Box::new(self.printer.owned_prompt_writer()),
+            );
 
-            match reply.prompt(Box::new(self.printer.owned_prompt_writer())) {
+            match outcome {
                 Ok(ReplyOutcome::Submit(text)) => return Some(text),
                 Ok(ReplyOutcome::Cancelled) => return None,
                 Ok(ReplyOutcome::OpenEditor { current_text }) => {
@@ -1075,9 +1092,13 @@ pub(crate) async fn run_external(args: &[String], ctx: &Ctx) -> cmd::Output {
 
     debug!(%binary, subcommand, "Dispatching to plugin.");
 
+    let prompts = TerminalPromptBackend;
     let composer = Composer {
         printer: &ctx.printer,
+        prompts: &prompts,
         editor: crate::editor::build_editor_backend(&config.editor),
+        // The configured mode, as every other inline reply in the CLI uses.
+        edit_mode: reply_edit_mode(config.editor.inline.edit_mode),
         is_tty: ctx.term.is_tty,
     };
 

@@ -371,9 +371,14 @@ fn compose_missing(
                 Some(kind) => kind,
                 None => pick_kind(stdin, stdout)?,
             };
-            let (title, body) = match title {
-                Some(title) => (title, body),
-                None => compose_ticket(Some(kind), body, stdin, stdout)?,
+            // A description given on the command line is a description, not a
+            // draft of the whole ticket. Composing from it would read its one
+            // line back as a title and file the ticket with no description at
+            // all, quietly turning an explicit `--body` into something else.
+            let (title, body) = match (title, body) {
+                (Some(title), body) => (title, body),
+                (None, Some(body)) => (ask_title(stdin, stdout)?, Some(body)),
+                (None, None) => compose_ticket(Some(kind), stdin, stdout)?,
             };
 
             Ok(Command::Add {
@@ -542,11 +547,28 @@ fn pick_kind(stdin: &mut impl BufRead, stdout: &mut impl Write) -> Result<Kind, 
         .map_err(|_| format!("`{chosen}` is not a kind."))
 }
 
+/// Ask for a one-line title on its own.
+///
+/// For when the description is already settled and only the summary is missing.
+fn ask_title(stdin: &mut impl BufRead, stdout: &mut impl Write) -> Result<String, String> {
+    let title = compose(stdin, stdout, ComposeRequest {
+        id: None,
+        message: "Title".to_owned(),
+        mode: ComposeMode::Line {
+            default: Some(UNTITLED.to_owned()),
+        },
+        help: None,
+    })?;
+
+    let title = title.trim();
+
+    Ok(if title.is_empty() { UNTITLED } else { title }.to_owned())
+}
+
 /// Compose a ticket's title and description, asking for the title separately
 /// when the text has no subject line.
 fn compose_ticket(
     kind: Option<Kind>,
-    initial: Option<String>,
     stdin: &mut impl BufRead,
     stdout: &mut impl Write,
 ) -> Result<(String, Option<String>), String> {
@@ -556,9 +578,7 @@ fn compose_ticket(
             || "New ticket".to_owned(),
             |kind| format!("New {kind} ticket"),
         ),
-        mode: ComposeMode::Buffer {
-            initial_text: initial,
-        },
+        mode: ComposeMode::Buffer { initial_text: None },
         help: Some("First line is the title, then a blank line, then the description.".to_owned()),
     })?;
 
@@ -566,22 +586,9 @@ fn compose_ticket(
         Composition::Empty => Err("Nothing to file.".to_owned()),
         Composition::Title(title) => Ok((title, None)),
         Composition::TitleAndBody { title, body } => Ok((title, Some(body))),
-        Composition::Body(body) => {
-            let title = compose(stdin, stdout, ComposeRequest {
-                id: None,
-                message: "Title".to_owned(),
-                mode: ComposeMode::Line {
-                    default: Some(UNTITLED.to_owned()),
-                },
-                help: None,
-            })?;
-            let title = title.trim();
-
-            Ok((
-                if title.is_empty() { UNTITLED } else { title }.to_owned(),
-                Some(body),
-            ))
-        }
+        // Prose with no subject line: the whole thing is the description, and
+        // the title has to be asked for on its own.
+        Composition::Body(body) => Ok((ask_title(stdin, stdout)?, Some(body))),
     }
 }
 
@@ -657,7 +664,11 @@ fn compose_many(
     }
 }
 
-/// Read a repository's open issues.
+/// Read every page of a repository's open issues.
+///
+/// All of them, not the first hundred: pull requests come back from this
+/// endpoint too and are dropped afterwards, so a page of them would otherwise
+/// read as a repository with no open issues at all.
 async fn fetch_open(owner: &str, repo: &str) -> Result<Vec<Issue>, String> {
     let mut builder = jp_github::Octocrab::builder();
     if let Some(token) = token() {
@@ -667,13 +678,25 @@ async fn fetch_open(owner: &str, repo: &str) -> Result<Vec<Issue>, String> {
         .build()
         .map_err(|error| format!("failed to create the GitHub client: {error}"))?;
 
-    client
-        .issues(owner, repo)
-        .list()
-        .per_page(PER_PAGE)
-        .send()
-        .await
-        .map_err(|error| format!("failed to list issues in {owner}/{repo}: {error}"))
+    let issues = client.issues(owner, repo);
+    let mut all = vec![];
+    for page in 1.. {
+        let batch = issues
+            .list()
+            .page(page)
+            .per_page(PER_PAGE)
+            .send()
+            .await
+            .map_err(|error| format!("failed to list issues in {owner}/{repo}: {error}"))?;
+
+        let short = batch.len() < usize::from(PER_PAGE);
+        all.extend(batch);
+        if short {
+            break;
+        }
+    }
+
+    Ok(all)
 }
 
 /// Ask the host to collect text, and wait for it.
