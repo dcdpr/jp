@@ -6,7 +6,7 @@ use clap::Parser as _;
 use indexmap::IndexMap;
 use jp_config::{
     AppConfig, PartialAppConfig, ToPartial,
-    conversation::tool::{AllowToggle, Enable, PartialEnableConfig, PartialToolConfig},
+    conversation::tool::{AllowToggle, Enable, PartialEnableConfig, PartialToolConfig, ResultMode},
     model::id::{ModelIdConfig, PartialModelIdConfig, ProviderId},
     util::build,
 };
@@ -890,6 +890,141 @@ fn test_tool_use_forces_a_tool_a_directive_disabled() {
         query.effective_tool_choice(&AppConfig::new_test()),
         ToolChoice::Function("implicitly_enabled_tool".into()),
         "`-u` still forces the tool for this turn"
+    );
+}
+
+#[test]
+fn test_builtin_config_merges_under_user_config() {
+    // A one-field user override keeps the built-in source, enable policy, and parameters.
+    let mut partial = make_partial_with_tools();
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("describe_tools".into(), PartialToolConfig {
+            result: Some(ResultMode::Ask),
+            ..Default::default()
+        });
+
+    let partial =
+        IntoPartialAppConfig::apply_cli_config(&Query::default(), None, partial, None).unwrap();
+
+    let tool = &partial.conversation.tools.tools["describe_tools"];
+    assert_eq!(tool.result, Some(ResultMode::Ask), "user field wins");
+    assert_eq!(
+        tool.source,
+        Some(ToolSource::Builtin { tool: None }),
+        "builtin source survives a partial user override"
+    );
+    assert!(
+        effective(&partial, "describe_tools").is_locked(),
+        "builtin enable policy survives a partial user override"
+    );
+    assert!(
+        tool.parameters.contains_key("tools"),
+        "builtin parameter schema survives a partial user override"
+    );
+}
+
+#[test]
+fn test_builtin_config_preserves_tool_order() {
+    // Tool order is the order tools are presented to the provider, so merging
+    // a builtin block must not move an existing entry to the end.
+    let mut partial = PartialAppConfig::default();
+    partial.conversation.tools.tools = IndexMap::from_iter([
+        ("describe_tools".into(), PartialToolConfig {
+            result: Some(ResultMode::Ask),
+            ..Default::default()
+        }),
+        ("zzz_last".into(), PartialToolConfig::default()),
+    ]);
+
+    let partial =
+        IntoPartialAppConfig::apply_cli_config(&Query::default(), None, partial, None).unwrap();
+
+    let names: Vec<&str> = partial
+        .conversation
+        .tools
+        .tools
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(names, vec!["describe_tools", "zzz_last"]);
+}
+
+/// The seam between merging built-in config under user config and validating
+/// `-u`.
+/// A table override sets only `state`, so `allow_toggle = never` survives from
+/// the built-in block and the tool ends up locked *off* rather than merely
+/// disabled.
+/// Forcing it is then refused, which is the documented meaning of the table
+/// form (RFD 083) but only became reachable once both halves landed.
+#[test]
+fn test_table_disabled_builtin_cannot_be_forced() {
+    let mut partial = make_partial_with_tools();
+    // `[conversation.tools.describe_tools] enable = { state = false }`
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("describe_tools".into(), PartialToolConfig {
+            enable: Some(PartialEnableConfig {
+                state: Some(false),
+                allow_toggle: None,
+            }),
+            ..Default::default()
+        });
+
+    let err = IntoPartialAppConfig::apply_cli_config(
+        &Query {
+            tool_use: Some(Some("describe_tools".into())),
+            ..Default::default()
+        },
+        None,
+        partial,
+        None,
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert_eq!(
+        err,
+        "cannot enable `describe_tools`: this tool is configured as locked-off"
+    );
+}
+
+/// The escape hatch for the above: the bool shorthand writes `allow_toggle =
+/// any` explicitly, so it overrides the built-in's policy as well as its state
+/// and the tool stays forceable.
+#[test]
+fn test_bool_disabled_builtin_can_still_be_forced() {
+    let mut partial = make_partial_with_tools();
+    // `[conversation.tools.describe_tools] enable = false`
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("describe_tools".into(), PartialToolConfig {
+            enable: Some(PartialEnableConfig::OFF),
+            ..Default::default()
+        });
+
+    let query = Query {
+        tool_use: Some(Some("describe_tools".into())),
+        ..Default::default()
+    };
+
+    let partial = IntoPartialAppConfig::apply_cli_config(&query, None, partial, None)
+        .expect("the bool shorthand leaves the tool forceable");
+
+    assert_eq!(
+        effective(&partial, "describe_tools").allow_toggle,
+        AllowToggle::Always,
+        "the shorthand overrides the built-in's toggle policy, not just its state"
+    );
+    assert_eq!(
+        query.effective_tool_choice(&AppConfig::new_test()),
+        ToolChoice::Function("describe_tools".into())
     );
 }
 
