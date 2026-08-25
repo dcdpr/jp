@@ -43,12 +43,12 @@ Only *positions* (indices into the conversation) are subject to the 1-based
 rule.
 A *count* — "how many turns" — is base-independent and is never shifted.
 
-| Kind                | Examples                                                                                        | Translated?                                          |
-| ------------------- | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| Position (absolute) | `--turn N`, `--from N`, `--to N`, DSL `N..M`                                                    | yes, `N` (1-based) → `N - 1` (0-based)               |
-| Position (from end) | `--turn -N`, `--from -N`, `--to -N`, `--keep-last -N`, DSL `-N`, config `keep_last = "-N"`       | yes, `-1` is the last turn (`-N` → `FromEnd(N - 1)`) |
-| Count               | `--first N`, `--last N`, `--keep-first N`, `--keep-last N`, config `keep_first = N`             | no                                                   |
-| Time                | `5h`, `2days`, `2026-01-01`, RFC 3339                                                           | resolved against timestamps, then snapped to a turn  |
+| Kind                | Examples                                                                                   | Translated?                                          |
+| ------------------- | ------------------------------------------------------------------------------------------ | ---------------------------------------------------- |
+| Position (absolute) | `--turn N`, `--from N`, `--to N`, DSL `N..M`                                               | yes, `N` (1-based) → `N - 1` (0-based)               |
+| Position (from end) | `--turn -N`, `--from -N`, `--to -N`, `--keep-last -N`, DSL `-N`, config `keep_last = "-N"` | yes, `-1` is the last turn (`-N` → `FromEnd(N - 1)`) |
+| Count               | `--first N`, `--last N`, `--keep-first N`, `--keep-last N`, config `keep_first = N`        | no                                                   |
+| Time                | `5h`, `2days`, `2026-01-01`, RFC 3339                                                      | resolved against timestamps, then snapped to a turn  |
 
 Two consequences worth calling out:
 
@@ -98,10 +98,10 @@ indirectly.
 On the CLI the distinction is between *selecting* and *protecting* rather than
 between value forms:
 
-| Flag                           | Answers          | Accepts                                                        |
-| ------------------------------ | ---------------- | -------------------------------------------------------------- |
-| `--from` / `--to`              | which turns      | a position (`5`, `-3`), a time, `last-compaction` (`--from`)    |
-| `--keep-first` / `--keep-last` | what to protect  | a count (`3`), a position (`-3`), a time, `last-compaction` (`--keep-first`) |
+| Flag                           | Answers         | Accepts                                                                      |
+| ------------------------------ | --------------- | ---------------------------------------------------------------------------- |
+| `--from` / `--to`              | which turns     | a position (`5`, `-3`), a time, `last-compaction` (`--from`)                 |
+| `--keep-first` / `--keep-last` | what to protect | a count (`3`), a position (`-3`), a time, `last-compaction` (`--keep-first`) |
 
 The two compose: the range flags name the selection, and the keep flags then
 protect turns at either end of it.
@@ -137,13 +137,13 @@ so it is half-open and uses distinct flag names (`--created-since` /
   `--turn`, `--from`/`--to`, and `--first`/`--last` are three ways of naming the
   base selection and are mutually exclusive:
 
-  | Selector       | Start bound       | End bound         |
-  | -------------- | ----------------- | ----------------- |
-  | `--turn N`     | `Absolute(N - 1)` | `Absolute(N - 1)` |
-  | `--turn -N`    | `FromEnd(N - 1)`  | `FromEnd(N - 1)`  |
-  | `--turn A..B`  | `Absolute(A - 1)` | `Absolute(B - 1)` |
-  | `--first N`    | `Absolute(0)`     | `Absolute(N - 1)` |
-  | `--last N`     | `FromEnd(N - 1)`  | `FromEnd(0)`      |
+  | Selector      | Start bound       | End bound         |
+  | ------------- | ----------------- | ----------------- |
+  | `--turn N`    | `Absolute(N - 1)` | `Absolute(N - 1)` |
+  | `--turn -N`   | `FromEnd(N - 1)`  | `FromEnd(N - 1)`  |
+  | `--turn A..B` | `Absolute(A - 1)` | `Absolute(B - 1)` |
+  | `--first N`   | `Absolute(0)`     | `Absolute(N - 1)` |
+  | `--last N`    | `FromEnd(N - 1)`  | `FromEnd(0)`      |
 
   Either end of `--turn A..B` may be a from-end position, and the two forms mix
   freely (`--turn 2..-1`).
