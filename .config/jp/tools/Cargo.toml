@@ -13,10 +13,12 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
+comfort = { workspace = true }
 jp_github = { workspace = true }
 jp_md = { workspace = true }
 jp_tool = { workspace = true }
 jp_workspace = { workspace = true }
+ticket = { workspace = true }
 
 base64 = { workspace = true, features = ["std"] }
 camino = { workspace = true }
@@ -27,8 +29,8 @@ crossbeam-channel = { workspace = true, features = ["std"] }
 crossterm = { workspace = true }
 duct = { workspace = true }
 fancy-regex = { workspace = true, features = ["perf", "std", "unicode"] }
+grep-matcher = { workspace = true }
 grep-printer = { workspace = true }
-grep-regex = { workspace = true }
 grep-searcher = { workspace = true }
 htmd = { workspace = true }
 ignore = { workspace = true }

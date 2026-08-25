@@ -215,8 +215,9 @@ The only output on stdout is the conversation ID.
 
 #### `jp conversation fork` (updated)
 
-`conversation fork` currently accepts `--activate`, `--from`, `--until`, and
-`--last` but does not support config overrides or print the new conversation ID.
+`conversation fork` accepts `--activate` plus the shared turn selector
+(`--from`/`--to`, `--turn`, `--first`/`--last`, `--keep-first`/`--keep-last`),
+but does not support config overrides or print the new conversation ID.
 This RFD adds both:
 
 ```sh

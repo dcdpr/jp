@@ -47,10 +47,11 @@ fn setup_ctx_with_config(
 ) -> (Ctx, ConversationId, SharedBuffer, SharedBuffer, Runtime) {
     let tmp = tempdir().unwrap();
     let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
-    let workspace = Workspace::new(tmp.path());
+    let workspace = Workspace::in_memory(tmp.path());
     let runtime = Runtime::new().unwrap();
 
     let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
         workspace,
         None,
         Runtime::new().unwrap(),
@@ -85,7 +86,7 @@ fn prints_user_message() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: None,
         compacted: false,
@@ -125,7 +126,7 @@ fn prints_reasoning_events_split_by_a_redacted_event_as_one_region() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: None,
         compacted: false,
@@ -157,7 +158,7 @@ fn prints_reasoning_separator_as_a_block_break() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: None,
         compacted: false,
@@ -183,7 +184,7 @@ fn prints_assistant_message() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: None,
         compacted: false,
@@ -212,7 +213,7 @@ fn prints_reasoning_full() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: None,
         compacted: false,
@@ -242,7 +243,7 @@ fn hides_reasoning_when_hidden() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: None,
         compacted: false,
@@ -274,7 +275,7 @@ fn truncates_reasoning() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: None,
         compacted: false,
@@ -315,7 +316,7 @@ fn prints_tool_call_and_result() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: None,
         compacted: false,
@@ -343,7 +344,7 @@ fn prints_structured_data() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: None,
         compacted: false,
@@ -374,7 +375,7 @@ fn structured_fence_is_closed_at_end_of_replay() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: None,
         compacted: false,
@@ -413,7 +414,7 @@ fn structured_response_followed_by_message_closes_fence_first() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: None,
         compacted: false,
@@ -462,7 +463,7 @@ fn prints_consecutive_structured_events_as_separate_fences() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: None,
         compacted: false,
@@ -502,7 +503,7 @@ fn structured_to_message_in_same_turn_closes_fence_first() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: None,
         compacted: false,
@@ -540,7 +541,7 @@ fn turn_separators_between_turns() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: None,
         compacted: false,
@@ -568,7 +569,7 @@ fn turn_header_shows_turn_number_and_relative_time() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: None,
         compacted: false,
@@ -623,7 +624,7 @@ fn turn_header_detail_on_assistant_first_turn() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: None,
         compacted: false,
@@ -653,7 +654,7 @@ fn prints_conversation_by_id() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: None,
         compacted: false,
@@ -676,7 +677,7 @@ fn empty_conversation_produces_no_content() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: None,
         compacted: false,
@@ -728,7 +729,7 @@ fn full_conversation_round_trip() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: None,
         compacted: false,
@@ -768,7 +769,7 @@ fn last_prints_only_last_turn() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(Some(1), None),
+        range: TurnSelection::from_last_turn(Some(1), None),
         current_config: false,
         style: None,
         compacted: false,
@@ -809,7 +810,7 @@ fn last_two_with_three_turns() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(Some(2), None),
+        range: TurnSelection::from_last_turn(Some(2), None),
         current_config: false,
         style: None,
         compacted: false,
@@ -838,7 +839,7 @@ fn last_exceeding_turn_count_prints_all() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(Some(5), None),
+        range: TurnSelection::from_last_turn(Some(5), None),
         current_config: false,
         style: None,
         compacted: false,
@@ -883,7 +884,7 @@ fn blank_line_between_tool_calls_and_message() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: None,
         compacted: false,
@@ -936,7 +937,7 @@ fn blank_line_between_message_and_tool_calls() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: None,
         compacted: false,
@@ -1005,7 +1006,7 @@ fn no_extra_blank_line_between_consecutive_tool_calls() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: None,
         compacted: false,
@@ -1042,7 +1043,7 @@ fn last_zero_prints_nothing() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(Some(0), None),
+        range: TurnSelection::from_last_turn(Some(0), None),
         current_config: false,
         style: None,
         compacted: false,
@@ -1077,7 +1078,7 @@ fn turn_prints_specific_turn() {
     // Print only turn 2.
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, Some(2)),
+        range: TurnSelection::from_last_turn(None, Some(2)),
         current_config: false,
         style: None,
         compacted: false,
@@ -1115,7 +1116,7 @@ fn turn_out_of_range_errors() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, Some(5)),
+        range: TurnSelection::from_last_turn(None, Some(5)),
         current_config: false,
         style: None,
         compacted: false,
@@ -1134,7 +1135,7 @@ fn turn_zero_errors() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, Some(0)),
+        range: TurnSelection::from_last_turn(None, Some(0)),
         current_config: false,
         style: None,
         compacted: false,
@@ -1179,7 +1180,7 @@ fn style_brief_hides_reasoning_and_tool_details() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: Some(PrintStyle::Brief),
         compacted: false,
@@ -1256,7 +1257,7 @@ fn style_chat_hides_reasoning_and_tool_calls() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: Some(PrintStyle::Chat),
         compacted: false,
@@ -1335,7 +1336,7 @@ fn style_user_shows_only_user_messages() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: Some(PrintStyle::User),
         compacted: false,
@@ -1380,7 +1381,7 @@ fn role_header_renders_user_label_from_author() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: None,
         compacted: false,
@@ -1405,7 +1406,7 @@ fn role_header_falls_back_to_user_label_without_author() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: None,
         compacted: false,
@@ -1430,7 +1431,7 @@ fn role_header_renders_assistant_label_with_model_suffix() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: None,
         compacted: false,
@@ -1476,7 +1477,7 @@ fn two_turns_with_model_switch() -> (Ctx, ConversationId, SharedBuffer, SharedBu
 fn print_with_style(style: Option<PrintStyle>, id: ConversationId) -> Print {
     Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style,
         compacted: false,
@@ -1549,7 +1550,7 @@ fn role_header_assistant_appears_once_per_turn() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: None,
         compacted: false,
@@ -1591,7 +1592,7 @@ fn role_header_assistant_emitted_before_first_tool_call() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: None,
         compacted: false,
@@ -1622,7 +1623,7 @@ fn role_header_does_not_emit_plain_hr_separator() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: None,
         compacted: false,
@@ -1672,7 +1673,7 @@ fn style_chat_separates_messages_across_hidden_reasoning() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: Some(PrintStyle::Chat),
         compacted: false,
@@ -1723,7 +1724,7 @@ fn style_chat_separates_messages_across_hidden_tool_call() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: Some(PrintStyle::Chat),
         compacted: false,
@@ -1784,7 +1785,7 @@ fn style_full_shows_reasoning_and_untruncated_results() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: Some(PrintStyle::Full),
         compacted: false,
@@ -1854,7 +1855,7 @@ fn replay_shades_tool_chrome_after_reasoning() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: None,
         compacted: false,
@@ -1903,7 +1904,7 @@ fn replay_does_not_shade_tool_chrome_when_extension_disabled() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: None,
         compacted: false,
@@ -1953,7 +1954,7 @@ fn replay_suppresses_tool_chrome_when_show_disabled() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: None,
         compacted: false,
@@ -2022,7 +2023,7 @@ fn replay_keeps_the_gap_after_a_result_when_reasoning_renders_nothing() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(None, None),
+        range: TurnSelection::from_last_turn(None, None),
         current_config: false,
         style: None,
         compacted: false,
@@ -2071,7 +2072,7 @@ fn replay_does_not_leak_reasoning_region_across_turns() {
 
     let print = Print {
         target: PositionalIds::from_targets(vec![ConversationTarget::Id(id)]),
-        range: TurnRange::from_last_turn(Some(2), None),
+        range: TurnSelection::from_last_turn(Some(2), None),
         current_config: true,
         style: None,
         compacted: false,

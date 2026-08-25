@@ -1,3 +1,5 @@
+//! Storage backends and on-disk formats for JP workspace data.
+
 pub mod backend;
 pub mod error;
 pub mod lock;
@@ -23,7 +25,38 @@ pub(crate) const METADATA_FILE: &str = "metadata.json";
 const EVENTS_FILE: &str = "events.json";
 const BASE_CONFIG_FILE: &str = "base_config.json";
 pub(crate) const CONVERSATIONS_DIR: &str = "conversations";
+
+/// Name prefix for a conversation directory being staged by an import.
+///
+/// Dot-prefixed so a leftover is invisible to conversation lookups and index
+/// scans, both of which match on the bare conversation dirname.
+const IMPORT_STAGING_PREFIX: &str = ".import-";
 pub(crate) const ARCHIVE_DIR: &str = ".archive";
+
+/// Build the staging directory name an import copies into.
+///
+/// The name is unique per attempt, so a copy can never land in a tree left by
+/// an earlier one.
+/// That matters because a merge would publish entries the source no longer has:
+/// `copy_dir_all` overwrites the files it copies but removes nothing, so
+/// anything surviving from an older generation would be renamed into place
+/// alongside the fresh copy.
+///
+/// The uniqueness suffix goes *after* the conversation dirname so the leading
+/// timestamp segment stays intact.
+/// The sanitize sweep identifies a leftover by parsing that segment, and can
+/// only take the conversation's lock (and so only reap the directory) while it
+/// stays parseable.
+fn import_staging_dirname(dirname: &str) -> String {
+    let nanos = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+
+    format!(
+        "{IMPORT_STAGING_PREFIX}{dirname}-{}-{nanos}",
+        std::process::id()
+    )
+}
 
 #[derive(Debug, Clone)]
 struct Storage {
@@ -61,17 +94,18 @@ impl Storage {
 
     /// Configure user-local storage for workspace `id` under `root`.
     ///
-    /// The silo is located by ID suffix, so every worktree and clone of a
-    /// workspace shares the single directory that already exists.
+    /// The user-workspace directory is located by ID suffix, so every worktree
+    /// and clone of a workspace shares the single directory that already
+    /// exists.
     /// When none does, a new `<slug>-<id>` directory is created: `slug`
     /// (typically the workspace directory name) is cosmetic, only ever names a
-    /// *new* silo, is never validated, and an absent or empty slug yields a
-    /// bare `<id>` directory.
+    /// *new* directory, is never validated, and an absent or empty slug yields
+    /// a bare `<id>` directory.
     ///
     /// Before wiring up the directory, a one-time migration runs: any sibling
-    /// silos for this workspace are merged in, and on first setup the
-    /// workspace's conversations are imported so a durable user-local copy
-    /// exists.
+    /// user-workspace directories for this workspace are merged in, and on
+    /// first setup the workspace's conversations are imported so a durable
+    /// user-local copy exists.
     pub fn with_user_storage(
         mut self,
         root: &Utf8Path,
@@ -79,7 +113,7 @@ impl Storage {
         id: impl Into<String>,
     ) -> Result<Self> {
         let id: String = id.into();
-        let (path, first_run) = resolve_user_dir(root, slug, &id);
+        let (path, first_run) = resolve_user_workspace_dir(root, slug, &id);
 
         migrate_user_storage(root, &id, &path, &self.root, first_run)?;
 
@@ -92,35 +126,26 @@ impl Storage {
             trace!(path = %path, "Created user storage directory.");
         }
 
-        // Point the `storage` symlink back at the current workspace root,
-        // repairing a link inherited from another worktree during migration.
-        let link = path.join("storage");
-        if link.is_symlink()
-            && fs::read_link(&link).is_ok_and(|target| target.as_path() != self.root.as_std_path())
-        {
-            trace!(link = %link, "Re-pointing user storage symlink to current workspace.");
-            remove_storage_symlink(&link)?;
-        }
-        if link.exists() {
-            if !link.is_symlink() {
-                return Err(Error::NotSymlink(link));
-            }
-        } else {
-            #[cfg(unix)]
-            std::os::unix::fs::symlink(&self.root, &link)?;
-            #[cfg(windows)]
-            std::os::windows::fs::symlink_dir(&self.root, &link)?;
-            #[cfg(not(any(unix, windows)))]
-            {
-                tracing::error!(
-                    "Unsupported platform, cannot create symlink. Disabling user storage."
-                );
-                return Ok(self);
-            }
-        }
-
         self.user = Some(path);
         Ok(self)
+    }
+
+    /// Attach the *existing* user-workspace directory for workspace `id`.
+    ///
+    /// Read-only counterpart of [`Self::with_user_storage`]: the directory is
+    /// located by the same ID-suffix rule, but nothing is created, no sibling
+    /// directories are merged, and no conversations are imported.
+    /// User storage stays disabled when the workspace has none yet, so reading
+    /// a workspace cannot mint user-local state for it.
+    #[must_use]
+    pub fn with_existing_user_storage(
+        mut self,
+        root: &Utf8Path,
+        slug: Option<&str>,
+        id: &str,
+    ) -> Self {
+        self.user = find_user_workspace_dir(root, slug, id).filter(|dir| dir.is_dir());
+        self
     }
 
     /// Returns the path to the storage directory.
@@ -233,7 +258,7 @@ impl Storage {
         // Bring any existing copy to the current directory name (e.g. after a
         // title change) and drop other stale copies for this id.
         reconcile_conversation_dir(id, conversations_dir, &conv_dir)?;
-        fs::create_dir_all(&conv_dir)?;
+        fs::create_dir_all(&conv_dir).map_err(|error| Error::write_failed(&conv_dir, error))?;
 
         let (base_config, events_json) = events
             .to_parts()
@@ -259,7 +284,7 @@ impl Storage {
     /// root that holds it.
     ///
     /// A projected conversation lives in both roots, so each copy is archived;
-    /// archiving only the first found would leave the other copy active.
+    /// archiving only the first found would leave the other copy live.
     /// Creates each archive directory if needed.
     pub fn archive_conversation(&self, id: &ConversationId) -> Result<()> {
         let mut archived = false;
@@ -295,7 +320,7 @@ impl Storage {
         }
     }
 
-    /// Move a conversation directory out of `.archive/` back to the active
+    /// Move a conversation directory out of `.archive/` back to the live
     /// conversations directory in every root that holds the archived copy.
     pub fn unarchive_conversation(&self, id: &ConversationId) -> Result<()> {
         let prefix = id.to_dirname(None);
@@ -577,39 +602,27 @@ impl Storage {
     }
 }
 
-/// Remove a `storage` symlink without following it.
+/// Resolve the user-workspace directory for workspace `id`.
 ///
-/// On Windows a directory symlink is a reparse-point directory and must be
-/// removed with `remove_dir`; `remove_file` returns "Access is denied".
-/// On Unix `remove_file` unlinks the symlink itself.
-fn remove_storage_symlink(link: &Utf8Path) -> io::Result<()> {
-    #[cfg(windows)]
-    {
-        fs::remove_dir(link)
-    }
-    #[cfg(not(windows))]
-    {
-        fs::remove_file(link)
-    }
-}
-
-/// Resolve the user-local silo directory for workspace `id`.
+/// The directory is located by ID suffix (`<id>` or `<slug>-<id>`), never by
+/// exact name, so every worktree and clone of a workspace shares the one
+/// directory that already exists regardless of the checkout it was cloned into.
+/// The returned flag is `true` when none exists yet and one must be created.
 ///
-/// Silos are located by ID suffix (`<id>` or `<slug>-<id>`), never by exact
-/// name, so every worktree and clone of a workspace shares the one silo that
-/// already exists regardless of the directory it was cloned into.
-/// The returned flag is `true` when no silo exists yet and one must be created.
+/// A new directory is named `<slug>-<id>` for human recognition; an absent or
+/// empty `slug` yields a bare `<id>` name.
+/// The slug only ever names a *new* directory: an existing one is reused as-is
+/// and never renamed.
 ///
-/// A new silo is named `<slug>-<id>` for human recognition; an absent or empty
-/// `slug` yields a bare `<id>` directory.
-/// The slug only ever names a *new* silo: an existing one is reused as-is and
-/// never renamed.
-///
-/// When several silos already exist (legacy per-worktree directories), the one
-/// whose name matches `<slug>-<id>` wins; otherwise the most recently modified
-/// silo does.
-fn resolve_user_dir(root: &Utf8Path, slug: Option<&str>, id: &str) -> (Utf8PathBuf, bool) {
-    if let Some(dir) = choose_canonical_user_dir(&matching_user_dirs(root, id), slug, id) {
+/// When several already exist (legacy per-worktree directories), the one whose
+/// name matches `<slug>-<id>` wins; otherwise the most recently modified one
+/// does.
+fn resolve_user_workspace_dir(
+    root: &Utf8Path,
+    slug: Option<&str>,
+    id: &str,
+) -> (Utf8PathBuf, bool) {
+    if let Some(dir) = find_user_workspace_dir(root, slug, id) {
         return (dir, false);
     }
 
@@ -620,8 +633,30 @@ fn resolve_user_dir(root: &Utf8Path, slug: Option<&str>, id: &str) -> (Utf8PathB
     (root.join(name), true)
 }
 
-/// List the user-local silo directories whose name resolves to workspace `id`.
-fn matching_user_dirs(root: &Utf8Path, id: &str) -> Vec<Utf8PathBuf> {
+/// The existing user-workspace directory for workspace `id`, when there is one.
+///
+/// Applies the same ID-suffix location rule as `Storage::with_user_storage`,
+/// and creates nothing: `None` means the workspace has no user-local state yet.
+/// `slug` only breaks ties between several existing directories (a legacy
+/// per-worktree layout), preferring an exact `<slug>-<id>` match.
+#[must_use]
+pub fn find_user_workspace_dir(
+    root: &Utf8Path,
+    slug: Option<&str>,
+    id: &str,
+) -> Option<Utf8PathBuf> {
+    choose_canonical_user_workspace_dir(&matching_user_workspace_dirs(root, id), slug, id)
+}
+
+/// List the user-workspace directories whose name resolves to workspace `id`.
+///
+/// Directories are matched by ID suffix (`<id>` or `<slug>-<id>`) — the same
+/// rule [`FsStorageBackend::with_user_storage`] uses to locate one — so
+/// callers resolving a workspace ID without a `Storage` at hand (e.g. `-w
+/// <id>`) agree with it on which directory belongs to the workspace.
+///
+/// [`FsStorageBackend::with_user_storage`]: backend::FsStorageBackend::with_user_storage
+pub fn matching_user_workspace_dirs(root: &Utf8Path, id: &str) -> Vec<Utf8PathBuf> {
     if !root.is_dir() {
         return vec![];
     }
@@ -637,13 +672,13 @@ fn matching_user_dirs(root: &Utf8Path, id: &str) -> Vec<Utf8PathBuf> {
         .collect()
 }
 
-/// Pick the canonical silo among existing matches, or `None` when there are
-/// none.
+/// Pick the canonical user-workspace directory among existing matches, or
+/// `None` when there are none.
 ///
 /// An exact `<slug>-<id>` match wins so a returning workspace keeps the
-/// directory it recognizes; otherwise the most recently modified silo does,
+/// directory it recognizes; otherwise the most recently modified one does,
 /// breaking mtime ties by name for determinism.
-fn choose_canonical_user_dir(
+fn choose_canonical_user_workspace_dir(
     dirs: &[Utf8PathBuf],
     slug: Option<&str>,
     id: &str,
@@ -661,10 +696,10 @@ fn choose_canonical_user_dir(
         .map(|(_, dir)| dir.clone())
 }
 
-/// Migrate user-local storage into the chosen silo.
+/// Migrate user-local storage into the chosen user-workspace directory.
 ///
-/// Merges any sibling silos for this workspace into `target` (kept as-is, never
-/// renamed).
+/// Merges any sibling directories for this workspace into `target` (kept as-is,
+/// never renamed).
 /// On the first run for a workspace it also imports the workspace's
 /// conversations so they gain a durable user-local copy.
 /// Later runs skip the import, leaving conversations committed by other
@@ -678,7 +713,7 @@ fn migrate_user_storage(
     workspace_root: &Utf8Path,
     first_run: bool,
 ) -> Result<()> {
-    merge_sibling_user_dirs(user_root, id, target)?;
+    merge_sibling_user_workspace_dirs(user_root, id, target)?;
 
     if first_run {
         adopt_conversations(workspace_root, target, false)?;
@@ -687,16 +722,21 @@ fn migrate_user_storage(
     Ok(())
 }
 
-/// Collapse every other silo for workspace `id` into `target`.
+/// Collapse every other user-workspace directory for workspace `id` into
+/// `target`.
 ///
-/// Sibling silos are matched by ID suffix, so legacy per-worktree directories
+/// Siblings are matched by ID suffix, so legacy per-worktree directories
 /// (`<name>-<id>`) and bare `<id>` directories alike are folded in,
 /// conversation-by-conversation (the most recently modified copy wins on
 /// conflict).
 /// `target` itself is skipped and never renamed; once it has absorbed a
 /// sibling's conversations and residual entries, the empty sibling is removed.
-fn merge_sibling_user_dirs(user_root: &Utf8Path, id: &str, target: &Utf8Path) -> Result<()> {
-    for dir in matching_user_dirs(user_root, id) {
+fn merge_sibling_user_workspace_dirs(
+    user_root: &Utf8Path,
+    id: &str,
+    target: &Utf8Path,
+) -> Result<()> {
+    for dir in matching_user_workspace_dirs(user_root, id) {
         if dir == *target {
             continue;
         }
@@ -704,9 +744,10 @@ fn merge_sibling_user_dirs(user_root: &Utf8Path, id: &str, target: &Utf8Path) ->
         trace!(sibling = %dir, target = %target, "Merging sibling user storage directory.");
         adopt_conversations(&dir, target, true)?;
 
-        // Move any remaining entries (e.g. `sessions`) the target lacks. The
-        // `storage` symlink is recreated by `with_user_storage`, conversations
-        // are handled above, and anything still here is dropped with the dir.
+        // Move any remaining entries (e.g. `sessions`, `roots`) the target
+        // lacks. Conversations are handled above; a legacy `storage` symlink
+        // is dropped with the dir (the roots registry replaces it, and a live
+        // checkout re-registers itself on its next run).
         let residual: Vec<(String, Utf8PathBuf)> = dir_entries(&dir)
             .filter_map(|entry| {
                 let name = entry.file_name().to_owned();
@@ -727,18 +768,18 @@ fn merge_sibling_user_dirs(user_root: &Utf8Path, id: &str, target: &Utf8Path) ->
 }
 
 /// Adopt every conversation under `src_root` into `dst_root`, covering both the
-/// active and archive partitions.
+/// live and archive partitions.
 ///
 /// With `move_src` the source directories are renamed into place; otherwise
 /// they are copied so the originals survive (used when importing workspace
 /// conversations, whose workspace copy must remain).
 fn adopt_conversations(src_root: &Utf8Path, dst_root: &Utf8Path, move_src: bool) -> Result<()> {
-    let src_active = src_root.join(CONVERSATIONS_DIR);
-    let dst_active = dst_root.join(CONVERSATIONS_DIR);
-    adopt_partition(&src_active, &dst_active, move_src)?;
+    let src_live = src_root.join(CONVERSATIONS_DIR);
+    let dst_live = dst_root.join(CONVERSATIONS_DIR);
+    adopt_partition(&src_live, &dst_live, move_src)?;
     adopt_partition(
-        &src_active.join(ARCHIVE_DIR),
-        &dst_active.join(ARCHIVE_DIR),
+        &src_live.join(ARCHIVE_DIR),
+        &dst_live.join(ARCHIVE_DIR),
         move_src,
     )?;
     Ok(())
@@ -817,6 +858,10 @@ fn remove_conversation_dirs(id: &ConversationId, conversations_dir: &Utf8Path) -
 /// name the upcoming write will use.
 /// A conversation already present in user-local, or one with no workspace copy,
 /// is left untouched.
+///
+/// The copy lands in a staging directory and is renamed into place, so the
+/// import is all-or-nothing: a failed or killed run leaves nothing that later
+/// runs can mistake for an imported conversation.
 fn import_external_copy(
     id: &ConversationId,
     title: Option<&str>,
@@ -832,16 +877,46 @@ fn import_external_copy(
         return Ok(());
     };
 
-    fs::create_dir_all(user_conversations)?;
-    copy_dir_all(
-        &workspace_conv,
-        &user_conversations.join(id.to_dirname(title)),
-    )
+    fs::create_dir_all(user_conversations)
+        .map_err(|error| Error::write_failed(user_conversations, error))?;
+
+    // Copying straight to the final name would leave a partial directory behind
+    // on failure. The next run then finds it, treats the import as already done
+    // and skips it forever, while its fresh mtime makes the loader prefer it
+    // over the intact workspace copy. Staging plus a rename makes the visible
+    // result atomic.
+    //
+    // The staging name is unique per attempt, so this copy cannot land in a tree
+    // an earlier attempt left behind. Reusing one name and clearing it first
+    // would make correctness depend on that removal succeeding: a partial
+    // failure leaves entries the source no longer has, and the rename publishes
+    // them.
+    let dirname = id.to_dirname(title);
+    let staging = user_conversations.join(import_staging_dirname(&dirname));
+    let target = user_conversations.join(&dirname);
+
+    // Both cleanups are best-effort: a leftover under a unique name is inert.
+    // It is never copied into, `find_normal_conversation_dir_path` cannot match
+    // it, and the sanitize sweep reaps it under the conversation's lock.
+    if let Err(error) = copy_dir_all(&workspace_conv, &staging) {
+        let _err = fs::remove_dir_all(&staging);
+        return Err(error);
+    }
+
+    if let Err(error) = fs::rename(&staging, &target) {
+        let _err = fs::remove_dir_all(&staging);
+        return Err(Error::write_failed(&target, error));
+    }
+
+    Ok(())
 }
 
 /// Recursively copy directory `src` into `dst`.
+///
+/// A failure names the destination path it was writing, and reports a full
+/// filesystem as [`Error::OutOfSpace`].
 fn copy_dir_all(src: &Utf8Path, dst: &Utf8Path) -> Result<()> {
-    fs::create_dir_all(dst)?;
+    fs::create_dir_all(dst).map_err(|error| Error::write_failed(dst, error))?;
     for entry in dir_entries(src) {
         let to = dst.join(entry.file_name());
         let is_dir = entry.file_type().is_ok_and(|ty| ty.is_dir());
@@ -849,7 +924,7 @@ fn copy_dir_all(src: &Utf8Path, dst: &Utf8Path) -> Result<()> {
         if is_dir {
             copy_dir_all(&from, &to)?;
         } else {
-            fs::copy(&from, &to)?;
+            fs::copy(&from, &to).map_err(|error| Error::write_failed(&to, error))?;
         }
     }
     Ok(())
@@ -934,7 +1009,7 @@ fn reconcile_conversation_dir(
             .into_iter()
             .find(|dir| dir != target)
     {
-        fs::rename(&src, target)?;
+        fs::rename(&src, target).map_err(|error| Error::write_failed(target, error))?;
     }
 
     for dir in conversation_dirs_for_id(conversations_dir, &prefix) {

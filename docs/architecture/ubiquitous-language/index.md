@@ -67,8 +67,16 @@ Configuration*, *LLM*, *Attachments*, *Tools & Plugins*, *Process*.
 A quick lookup for any defined term.
 Each entry links to the cluster where it lives.
 
+- **Active Conversation** → [Conversation › Active Conversation]
+- **Archived Conversation** → [Conversation › Archived Conversation]
+- **Label** → [Conversation › Label]
+- **Live Conversation** → [Conversation › Live Conversation]
 - **Turn** → [Conversation › Turn]
 
 [**Conversation**]: ./conversation.md
+[Conversation › Active Conversation]: ./conversation.md#active-conversation
+[Conversation › Archived Conversation]: ./conversation.md#archived-conversation
+[Conversation › Label]: ./conversation.md#label
+[Conversation › Live Conversation]: ./conversation.md#live-conversation
 [Conversation › Turn]: ./conversation.md#turn
 [legacy single-page glossary]: ../ubiquitous-language.md

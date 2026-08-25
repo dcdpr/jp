@@ -115,7 +115,11 @@ hedging language and filler.
 
 7. **Apply edits**: When the contributor asks you to apply changes to \
 an RFD, use `fs_modify_file` to make targeted edits. The user will be \
-asked to confirm each modification before it is applied.\
+asked to confirm each modification before it is applied.
+
+8. **Format before hashing**: Run `cargo_format` before computing an \
+RFD's hash for `docs/.vitepress/rfd-summaries.json` — `comfort` reflows \
+markdown paragraphs, so a hash taken first goes stale.\
 """
 
 [[assistant.system_prompt_sections]]

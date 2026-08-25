@@ -2,18 +2,18 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 
 import { normalizePriority } from '../loaders/rfd-priority.mjs'
+import { createSortable, isDev, loadBoard, saveBoard } from './board.mjs'
 
 const props = defineProps({
     entries: { type: Array, required: true },
-    // Raw board layout, in priority.json's shape: `planned` milestone groups,
-    // `backlog`, and `in_development`.
+    // Raw board layout, in priority.json's shape: `planned` milestone groups
+    // and `backlog`.
     priority: { type: Object, required: true },
 })
 
-// Dragging only exists on the dev server. SortableJS is dynamically imported
-// behind this flag (see onMounted), so the production bundle never includes it
-// and the list renders read-only — the client-facing view.
-const isDev = import.meta.env.DEV
+// Dragging only exists on the dev server (see `board.mjs`), so the production
+// bundle never includes SortableJS and the list renders read-only — the
+// client-facing view.
 
 const TERMINAL = new Set(['Implemented', 'Superseded', 'Abandoned'])
 
@@ -99,7 +99,13 @@ function buildRows(p) {
 }
 
 const items = ref([])
-const inDev = ref(new Set())
+
+// Which RFDs are being implemented. Read-only here: the flag is derived from
+// ticket state (a ticket carrying `Implements: NNN` in the In Progress column),
+// so the board reports it and never sets it.
+const inDev = computed(
+    () => new Set(props.entries.filter(e => e.inDevelopment).map(e => e.num))
+)
 // Initial board state from the build-time data. On the dev server the same
 // function rebuilds it from a fresh fetch on mount.
 applyPriority(props.priority)
@@ -113,7 +119,7 @@ const cutoffIndex = computed(() =>
     items.value.findIndex(r => r.marker && r.name === null)
 )
 
-const statusClass = status => 'rfd-badge--' + (status?.toLowerCase() ?? 'unknown')
+const statusClass = status => 'doc-badge--' + (status?.toLowerCase() ?? 'unknown')
 
 // Dev renders the whole list, including the draggable markers. The production
 // build shows the prioritised rows and their milestone lines above the
@@ -213,27 +219,9 @@ async function save() {
     const body = {
         planned,
         backlog: rows.slice(cut + 1).filter(r => !r.marker).map(r => r.num),
-        in_development: [...inDev.value].sort(),
     }
-    try {
-        const res = await fetch('/__rfd-priority', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify(body),
-        })
-        if (!res.ok) throw new Error(await res.text())
-        setNotice('Saved', 'ok', 2000)
-    } catch (err) {
-        setNotice(String(err.message || err), 'err', 6000)
-    }
-}
-
-function toggleDev(num) {
-    const next = new Set(inDev.value)
-    if (next.has(num)) next.delete(num)
-    else next.add(num)
-    inDev.value = next
-    save()
+    const error = await saveBoard('/__rfd-priority', body)
+    setNotice(error ?? 'Saved', error ? 'err' : 'ok', error ? 6000 : 2000)
 }
 
 // Briefly highlight a row after a jump, so it's clear where it landed.
@@ -464,19 +452,12 @@ function onEnd() {
 // refresh would otherwise show stale priorities. Production has no endpoint
 // and keeps the build-time data (correct for the static site).
 function applyPriority(raw) {
-    const p = normalizePriority(raw)
-    items.value = buildRows(p)
-    const onBoard = new Set(
-        items.value.filter(r => !r.marker).map(r => r.num)
-    )
-    inDev.value = new Set(p.inDevelopment.filter(num => onBoard.has(num)))
+    items.value = buildRows(normalizePriority(raw))
 }
 
 async function loadFreshPriority() {
-    try {
-        const res = await fetch('/__rfd-priority')
-        if (res.ok) applyPriority(await res.json())
-    } catch { /* keep the build-time data */ }
+    const fresh = await loadBoard('/__rfd-priority')
+    if (fresh) applyPriority(fresh)
 }
 
 onMounted(() => {
@@ -595,16 +576,12 @@ onBeforeUnmount(() => {
                     <div class="rfd-board-titlerow">
                         <span class="rfd-board-num">{{ rfd.num }}</span>
                         <a :href="rfd.path" target="_blank" rel="noopener" class="rfd-board-title">{{ rfd.title }}</a>
-                        <span v-if="inDev.has(rfd.num)" class="rfd-badge rfd-badge--indev">in development</span>
-                        <span class="rfd-badge" :class="statusClass(rfd.status)">{{ rfd.status }}</span>
-                        <span v-if="dragNum && requiredSet.has(rfd.num)" class="rfd-badge rfd-board-reqpill">required by RFD {{ dragNum }}</span>
+                        <span v-if="inDev.has(rfd.num)" class="doc-badge doc-badge--indev">in development</span>
+                        <span class="doc-badge" :class="statusClass(rfd.status)">{{ rfd.status }}</span>
+                        <span v-if="dragNum && requiredSet.has(rfd.num)" class="doc-badge rfd-board-reqpill">required by RFD {{ dragNum }}</span>
                     </div>
                     <div v-if="rfd.summary" class="rfd-board-summary">{{ rfd.summary }}</div>
                 </div>
-                <label v-if="isDev && rfd.status !== 'Draft'" class="rfd-board-devtoggle" title="Mark as in development">
-                    <input type="checkbox" :checked="inDev.has(rfd.num)" @change="toggleDev(rfd.num)" />
-                    dev
-                </label>
                 <span v-if="isDev" class="rfd-board-jump">
                     <button class="rfd-board-jump-btn" title="Move to top of section" @click="moveTo(rfd, 'top')">▲</button>
                     <button class="rfd-board-jump-btn" title="Move to bottom of section" @click="moveTo(rfd, 'bottom')">▼</button>

@@ -3,7 +3,8 @@ use std::fmt;
 use chrono::{DateTime, Utc};
 use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
-use jp_term::table::{DetailItem, DetailRow, details};
+use jp_term::table::{DetailItem, DetailRow, Details, details};
+use serde_json::json;
 
 use super::datetime::DateTimeFmt;
 
@@ -43,6 +44,9 @@ pub struct DetailsFmt {
     /// Display the timestamp of conversation expiration.
     pub expires_at: Option<DateTime<Utc>>,
 
+    /// Labels attached to the conversation.
+    pub labels: Vec<DetailItem>,
+
     /// Attachments associated with the conversation.
     pub attachments: Vec<DetailItem>,
 
@@ -68,6 +72,7 @@ impl DetailsFmt {
             last_message_at: None,
             last_activated_at: None,
             expires_at: None,
+            labels: vec![],
             attachments: vec![],
             compactions: vec![],
             pretty: true,
@@ -101,6 +106,12 @@ impl DetailsFmt {
     #[must_use]
     pub fn with_expires_at(mut self, expires_at: Option<DateTime<Utc>>) -> Self {
         self.expires_at = expires_at;
+        self
+    }
+
+    #[must_use]
+    pub fn with_labels(mut self, labels: Vec<DetailItem>) -> Self {
+        self.labels = labels;
         self
     }
 
@@ -159,9 +170,53 @@ impl DetailsFmt {
         self.title.as_deref()
     }
 
-    /// Return rows for a table displaying the conversation details.
+    /// The stable machine-readable payload for `jp c show`.
+    ///
+    /// Keys are a fixed contract, deliberately decoupled from the display
+    /// labels in [`Self::rows`]: labels can be reworded freely, these keys
+    /// cannot change without breaking consumers.
+    /// Fields the display hides stay present here — counts as `0`, unqueried
+    /// flags as `null` — so consumers can rely on key presence.
+    /// Timestamps are RFC 3339 in UTC; the display's derived forms ("Currently
+    /// Active", "On Deactivation") are projections of `active`,
+    /// `last_activated_at`, and `expires_at`.
     #[must_use]
-    pub fn rows(&self) -> Vec<DetailRow> {
+    pub fn json(&self) -> serde_json::Value {
+        json!({
+            "id": self.id.to_string(),
+            "title": self.title,
+            "assistant": self.assistant_name,
+            "active": self.active_conversation.map(|active| active == self.id),
+            "pinned": self.pinned,
+            "local": self.local,
+            "events": self.message_count,
+            "turns": self.turn_count,
+            "last_message_at": self.last_message_at,
+            "last_activated_at": self.last_activated_at,
+            "expires_at": self.expires_at,
+            "attachments": self
+                .attachments
+                .iter()
+                .map(|item| item.json.clone())
+                .collect::<Vec<_>>(),
+            "compactions": self
+                .compactions
+                .iter()
+                .map(|item| item.json.clone())
+                .collect::<Vec<_>>(),
+        })
+    }
+
+    /// Return the named fields of the conversation details view.
+    ///
+    /// Always [`Details::Fields`]: every row is a named property, so the JSON
+    /// form is an object whether or not the optional rows are present.
+    #[must_use]
+    pub fn rows(&self) -> Details {
+        Details::Fields(self.fields())
+    }
+
+    fn fields(&self) -> Vec<DetailRow> {
         let mut rows = vec![];
 
         rows.push(self.scalar("ID", self.id.to_string()));
@@ -222,6 +277,13 @@ impl DetailsFmt {
                 "No".to_string()
             };
             rows.push(self.scalar("Local", value));
+        }
+
+        if !self.labels.is_empty() {
+            rows.push(DetailRow::list(
+                self.styled_label("Labels"),
+                self.labels.clone(),
+            ));
         }
 
         if !self.attachments.is_empty() {

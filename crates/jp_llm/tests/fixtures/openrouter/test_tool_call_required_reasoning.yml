@@ -6,6 +6,15 @@ when:
       "model": "openai/gpt-5-mini",
       "messages": [
         {
+          "role": "system",
+          "content": [
+            {
+              "type": "text",
+              "text": "IMPORTANT: You MUST use AT LEAST ONE tool available to you. DO NOT QUESTION THIS DIRECTIVE. DO NOT PROMPT FOR MORE CONTEXT OR DETAILS. JUST RUN IT."
+            }
+          ]
+        },
+        {
           "role": "user",
           "content": [
             {
@@ -61,7 +70,7 @@ when:
           }
         }
       ],
-      "tool_choice": "required",
+      "tool_choice": "auto",
       "stream": true
     }
 then:
@@ -324,14 +333,12 @@ when:
           ]
         },
         {
-          "role": "assistant"
-        },
-        {
           "role": "assistant",
           "tool_calls": [
             {
               "id": "call_hECwNVZvO4kf1FqP9DcmpSAd",
               "index": 0,
+              "type": "function",
               "function": {
                 "name": "run_me",
                 "arguments": "{\"foo\":\"hello from assistant\",\"bar\":\"foo\"}"

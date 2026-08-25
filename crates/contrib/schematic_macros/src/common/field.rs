@@ -7,7 +7,7 @@ use syn::{Attribute, Expr, ExprPath, Field as NativeField, Type};
 
 use crate::{
     common::{FieldValue, PartialAttr, TypeInfo, extract_inner_type, macros::ContainerSerdeArgs},
-    utils::{extract_common_attrs, format_case, preserve_str_literal},
+    utils::{extract_common_attrs, format_case, parse_default},
 };
 
 // #[serde()]
@@ -42,7 +42,7 @@ pub struct FieldArgs {
     pub exclude: bool,
 
     // config
-    #[darling(with = preserve_str_literal, map = "Some")]
+    #[darling(with = parse_default)]
     pub default: Option<Expr>,
     #[cfg(feature = "env")]
     pub env: Option<String>,
@@ -58,6 +58,7 @@ pub struct FieldArgs {
 
     // serde
     pub alias: Option<String>,
+    pub deserialize_with: Option<String>,
     pub flatten: bool,
     pub rename: Option<String>,
     pub skip: bool,
@@ -82,7 +83,21 @@ pub struct Field<'l> {
 
 impl Field<'_> {
     pub fn from(field: &NativeField) -> Field<'_> {
-        let args = FieldArgs::from_attributes(&field.attrs).unwrap_or_default();
+        // Errors are fatal rather than defaulted: a mistyped or unknown key in
+        // schematic's own `#[setting]` / `#[schema]` attribute would otherwise
+        // silently discard every other key on the same field.
+        //
+        // `#[serde]` stays lenient. It is serde's namespace, not schematic's,
+        // and carries keys (`with`, `bound`, `default = "path"`) that
+        // `FieldSerdeArgs` deliberately does not model.
+        let args = FieldArgs::from_attributes(&field.attrs).unwrap_or_else(|error| {
+            let name = field
+                .ident
+                .as_ref()
+                .map_or_else(|| "<unnamed>".to_owned(), ToString::to_string);
+
+            panic!("Invalid `#[setting]` or `#[schema]` attribute on field `{name}`: {error}");
+        });
         let serde_args = FieldSerdeArgs::from_attributes(&field.attrs).unwrap_or_default();
 
         let partial_via_ty = args.partial_via.as_ref().map(|ep| {
@@ -305,6 +320,12 @@ impl Field<'_> {
 
             if self.args.skip_deserializing || self.serde_args.skip_deserializing {
                 meta.push(quote! { skip_deserializing });
+            } else if let Some(deserialize_with) = &self.args.deserialize_with {
+                // `deserialize_with` disables serde's implicit "missing
+                // `Option` field is `None`" handling, so the partial field
+                // needs an explicit default to stay optional.
+                meta.push(quote! { default });
+                meta.push(quote! { deserialize_with = #deserialize_with });
             }
         }
 

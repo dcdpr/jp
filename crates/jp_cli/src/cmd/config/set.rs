@@ -53,9 +53,9 @@ impl Set {
                 LockOutcome::ForkConversation(_) => unreachable!("fork not allowed"),
             };
 
-            let conv = lock.into_mut();
-            let id = conv.id();
-            conv.update_events(|events| events.add_config_delta(config_delta.clone()));
+            let id = lock.id();
+            lock.into_mut()
+                .update_events_and_flush(|events| events.add_config_delta(config_delta.clone()))?;
             ctx.printer
                 .println(format!("Set configuration in conversation {id}"));
         }

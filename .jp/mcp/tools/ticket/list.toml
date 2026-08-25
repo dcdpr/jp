@@ -1,0 +1,49 @@
+[conversation.tools.ticket_list]
+enable = false
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "List the tickets in the repository, ordered by id."
+description = """
+One line per ticket: id, status, kind, title, and comment count.
+
+Use it to find what is open before filing something new, and to resolve a title
+you half-remember into an id for `ticket_show`. Filter by status to read one
+column of the board.
+
+Files that don't parse as tickets are named at the end rather than skipped
+silently.
+"""
+
+examples = """
+Everything:
+```json
+{}
+```
+
+Only what is being worked on:
+```json
+{"status": "in progress"}
+```
+
+Only open bugs:
+```json
+{"status": "todo", "kind": "bug"}
+```
+"""
+
+[conversation.tools.ticket_list.style]
+parameters = "function_call"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.ticket_list.parameters.status]
+type = "string"
+required = false
+enum = ["todo", "in progress", "done"]
+summary = "Only tickets at this status."
+
+[conversation.tools.ticket_list.parameters.kind]
+type = "string"
+required = false
+enum = ["bug", "feature", "chore"]
+summary = "Only tickets of this kind."

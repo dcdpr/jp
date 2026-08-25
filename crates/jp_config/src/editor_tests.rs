@@ -152,6 +152,31 @@ fn command_cmd_table_forwards_appended_path() {
     assert_eq!(out, "<FILE>");
 }
 
+/// `editor.cmd` is never rendered as a template, but the string form still
+/// treats a minijinja span as atomic, so the span reaches the program as one
+/// argument instead of being torn into shell words.
+#[cfg(unix)]
+#[test]
+fn command_cmd_string_keeps_template_span_in_one_argument() {
+    let cfg = EditorConfig {
+        cmd: Some(string_cmd("printf '<%s>' {{ a b }}")),
+        envs: vec![],
+        inline: InlineEditorConfig::default(),
+    };
+
+    let out = cfg
+        .command()
+        .unwrap()
+        .before_spawn(|cmd| {
+            cmd.arg("FILE");
+            Ok(())
+        })
+        .read()
+        .unwrap();
+
+    assert_eq!(out, "<{{ a b }}><FILE>");
+}
+
 /// A missing program with `shell = false` is a spawn error, not a silent
 /// non-zero exit — this is the typo'd-`editor.cmd` case.
 #[cfg(unix)]

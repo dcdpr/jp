@@ -15,7 +15,11 @@ use serde_json::json;
 use tracing::warn;
 
 use crate::{
-    cmd::{ConversationLoadRequest, Error, Output, conversation_id::FlagIds},
+    cmd::{
+        ConversationLoadRequest, Error, Output,
+        conversation_id::FlagIds,
+        label::{self, LabelSelector},
+    },
     ctx::Ctx,
     output::print_json,
     shared::search::{
@@ -146,6 +150,14 @@ pub(crate) struct Grep {
     #[arg(long)]
     limit: Option<NonZeroUsize>,
 
+    /// Only search conversations carrying this label.
+    ///
+    /// `key=value` matches when the key holds that value, a bare `key` matches
+    /// any value.
+    /// Repeat the flag to require several; every selector must match.
+    #[arg(long = "label", value_name = "KEY[=VALUE]")]
+    labels: Vec<LabelSelector>,
+
     /// Restrict the search to specific parts of the conversation.
     ///
     /// Repeat the flag (`--scope user --scope assistant`) or comma-separate the
@@ -188,6 +200,18 @@ impl Grep {
         } else {
             handles.iter().map(ConversationHandle::id).collect()
         };
+
+        // Narrow the candidate set before any searching: reading a
+        // conversation's events costs far more than checking its metadata.
+        if !self.labels.is_empty() {
+            let matching: HashSet<_> = ctx
+                .workspace
+                .conversations()
+                .filter(|(_, c)| label::matches(&c.labels, &self.labels))
+                .map(|(id, _)| *id)
+                .collect();
+            ids.retain(|id| matching.contains(id));
+        }
 
         self.sort_ids(&mut ids, ctx);
 
