@@ -383,6 +383,46 @@ impl ConversationMut {
         f(&mut guard)
     }
 
+    /// Mutate conversation metadata and persist before returning.
+    ///
+    /// Consumes the scope, so the write has landed by the time this returns: a
+    /// caller can report the outcome without the result still being in flight,
+    /// and a failed write surfaces as an error rather than a confirmation the
+    /// user cannot trust.
+    /// The callback's value is forwarded on success.
+    ///
+    /// For one mutation this replaces `update_metadata` plus an explicit
+    /// [`flush`].
+    /// When several mutations belong to the same logical change, keep
+    /// [`update_metadata`] and flush once at the end: each call here persists
+    /// the whole conversation, so a loop of them writes once per iteration.
+    ///
+    /// [`flush`]: Self::flush
+    /// [`update_metadata`]: Self::update_metadata
+    pub fn update_metadata_and_flush<R>(
+        mut self,
+        f: impl FnOnce(&mut Conversation) -> R,
+    ) -> crate::error::Result<R> {
+        let value = self.update_metadata(f);
+        self.flush()?;
+        Ok(value)
+    }
+
+    /// Mutate the conversation event stream and persist before returning.
+    ///
+    /// Event-stream counterpart of [`update_metadata_and_flush`]; the same
+    /// one-write-per-call caveat applies.
+    ///
+    /// [`update_metadata_and_flush`]: Self::update_metadata_and_flush
+    pub fn update_events_and_flush<R>(
+        mut self,
+        f: impl FnOnce(&mut ConversationStream) -> R,
+    ) -> crate::error::Result<R> {
+        let value = self.update_events(f);
+        self.flush()?;
+        Ok(value)
+    }
+
     /// Mutate both metadata and events atomically through a callback.
     ///
     /// Both write guards are acquired for the duration of the callback.

@@ -663,7 +663,7 @@ impl Compact {
         let events_snapshot = conv.events().clone();
 
         if let Some(index) = self.reset {
-            return self.run_reset(ctx, &mut conv, &events_snapshot, index);
+            return self.run_reset(ctx, conv, &events_snapshot, index);
         }
 
         self.range.check_turn_range(events_snapshot.turn_count())?;
@@ -722,7 +722,7 @@ impl Compact {
     fn run_reset(
         &self,
         ctx: &Ctx,
-        conv: &mut ConversationMut,
+        conv: ConversationMut,
         events: &ConversationStream,
         index: Option<usize>,
     ) -> Output {
@@ -730,11 +730,7 @@ impl Compact {
             let count = if self.dry_run {
                 events.compactions().count()
             } else {
-                let removed = conv.update_events(ConversationStream::remove_compactions);
-                // Write before reporting, so a failed write is an error rather
-                // than a confirmation the user cannot trust.
-                conv.flush()?;
-                removed
+                conv.update_events_and_flush(ConversationStream::remove_compactions)?
             };
 
             ctx.printer.println(match (count, self.dry_run) {
@@ -753,10 +749,7 @@ impl Compact {
             return Ok(());
         }
 
-        conv.update_events(|stream| stream.remove_compaction(position));
-        // Write before reporting, so a failed write is an error rather than a
-        // confirmation the user cannot trust.
-        conv.flush()?;
+        conv.update_events_and_flush(|stream| stream.remove_compaction(position))?;
         ctx.printer
             .println(format!("Removed compaction {index} ({range})."));
 

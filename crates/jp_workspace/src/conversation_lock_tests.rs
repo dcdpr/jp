@@ -374,6 +374,53 @@ fn as_mut_mutations_visible_through_lock() {
 }
 
 #[test]
+fn update_metadata_and_flush_persists_before_it_returns() {
+    // The point of the consuming form: by the time the caller has the value,
+    // the write has landed, so reporting it cannot outrun the disk.
+    let (lock, mock) = test_lock_with_mock();
+
+    let returned = lock
+        .as_mut()
+        .update_metadata_and_flush(|m| {
+            m.title = Some("written".into());
+            m.title.clone()
+        })
+        .expect("the write succeeds");
+
+    assert_eq!(returned, Some("written".to_owned()));
+    assert_eq!(mock.writes().len(), 1);
+    assert_eq!(mock.writes()[0].1.title.as_deref(), Some("written"));
+}
+
+#[test]
+fn update_events_and_flush_propagates_a_failed_write() {
+    let (lock, _backend) = test_lock_with_failing_backend();
+
+    let error = lock
+        .as_mut()
+        .update_events_and_flush(|_| {})
+        .expect_err("the caller learns the write failed");
+
+    assert_eq!(
+        error.to_string(),
+        "Storage error: no space left on device while writing /data/conv/events.json"
+    );
+}
+
+#[test]
+fn a_scope_consumed_by_an_and_flush_update_is_not_left_dirty() {
+    // A successful call must leave nothing for the drop to re-write, or the
+    // one-write-per-call contract in the docs would be a lie.
+    let (lock, mock) = test_lock_with_mock();
+
+    lock.as_mut()
+        .update_metadata_and_flush(|m| m.title = Some("once".into()))
+        .expect("the write succeeds");
+
+    assert_eq!(mock.writes().len(), 1, "the drop must not write again");
+}
+
+#[test]
 fn no_persist_failure_recorded_on_a_healthy_backend() {
     let (lock, _mock) = test_lock_with_mock();
     {
