@@ -949,3 +949,48 @@ mod transform_schema {
         );
     }
 }
+
+mod stream_error_classification {
+    use gemini_client_rs::GeminiError;
+    use serde_json::json;
+
+    use crate::error::{StreamError, StreamErrorKind};
+
+    /// A Gemini API error carrying `status` and an error message.
+    fn api_error(status: u64, message: &str) -> GeminiError {
+        GeminiError::Api(json!({
+            "status": status,
+            "message": {"error": {"code": status, "message": message}},
+        }))
+    }
+
+    #[test]
+    fn oversized_input_is_a_context_window_error() {
+        let error = StreamError::from(api_error(
+            400,
+            "The input token count (1200000) exceeds the maximum number of tokens allowed \
+             (1048576).",
+        ));
+
+        assert_eq!(error.kind, StreamErrorKind::ContextWindowExceeded);
+        assert!(!error.is_retryable());
+    }
+
+    /// A 429 whose message reads like a window overflow must stay a retryable
+    /// rate limit: the status code is authoritative and the message heuristic
+    /// is only a fallback.
+    ///
+    /// The wording deliberately avoids the quota vocabulary, so the only thing
+    /// standing between this error and a fatal `ContextWindowExceeded` is the
+    /// status check.
+    #[test]
+    fn a_429_outranks_a_context_window_phrasing() {
+        let error = StreamError::from(api_error(
+            429,
+            "Rate limit reached: too many tokens per minute for this project. Retry shortly.",
+        ));
+
+        assert_eq!(error.kind, StreamErrorKind::RateLimit);
+        assert!(error.is_retryable());
+    }
+}

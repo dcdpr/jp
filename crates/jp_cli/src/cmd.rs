@@ -551,6 +551,18 @@ impl From<crate::error::Error> for Error {
                 ),
             ]
             .into(),
+            TitleGeneration { model, reason } => [
+                ("message", "Title generation failed".to_owned()),
+                ("model", model),
+                ("reason", reason),
+                (
+                    "suggestion",
+                    "Retry with a different model, e.g. `jp conversation title --model <model>`, \
+                     or set the title directly with `jp conversation edit --title \"...\"`."
+                        .to_owned(),
+                ),
+            ]
+            .into(),
             CliConfig(error) => {
                 [("message", "CLI Config error".to_owned()), ("error", error)].into()
             }

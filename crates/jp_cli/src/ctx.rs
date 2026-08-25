@@ -15,7 +15,10 @@ use jp_task::TaskHandler;
 use jp_workspace::{Workspace, session::Session};
 use tokio::runtime::{Handle, Runtime};
 
-use crate::{Globals, Result, bootstrap::ExecutionContext, signals::SignalRouter};
+use crate::{
+    Globals, Result, bootstrap::ExecutionContext, config_pipeline::ConfigResetEvents,
+    signals::SignalRouter,
+};
 
 /// Context for the CLI application
 pub(crate) struct Ctx {
@@ -54,6 +57,15 @@ pub(crate) struct Ctx {
     /// Routes OS signals: Ctrl-C escalation, scoped interrupt handlers, and the
     /// root shutdown token.
     pub(crate) signals: SignalRouter,
+
+    /// A `--cfg` reset keyword's persistence payload ([RFD 038]).
+    ///
+    /// `Some` when the invocation's `--cfg` list contained `NONE` or
+    /// `WORKSPACE`; the query command appends the corresponding events to a
+    /// continuing conversation's stream.
+    ///
+    /// [RFD 038]: https://jp.computer/rfd/038
+    pub(crate) config_reset: Option<ConfigResetEvents>,
 
     runtime: Runtime,
 
@@ -118,6 +130,7 @@ impl Ctx {
             mcp_client,
             task_handler: TaskHandler::default(),
             signals: SignalRouter::new(&runtime, escalation_cooldown),
+            config_reset: None,
             runtime,
 
             #[cfg(test)]

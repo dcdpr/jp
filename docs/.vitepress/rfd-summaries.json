@@ -196,7 +196,7 @@
     "summary": "Adds scripting ergonomics: shared config structs, `conversation new` command, `--no-activate` flag, and `--root-id` ancestry constraint."
   },
   "051-sub-agent-workflows.md": {
-    "hash": "dfda328626635792c345489714f59ff6d07b4e010c9da37e0b5e028713d689e6",
+    "hash": "75cefb8d7ca2579b9f1371ac230a9205635ed53543e827cb1d38030f9647095b",
     "summary": "Guide for building sub-agent workflows using local tools, config overlays, and conversation trees to delegate scoped tasks cheaply."
   },
   "052-workspace-data-store-sanitization.md": {
@@ -204,8 +204,8 @@
     "summary": "Introduces Workspace::sanitize() method that validates .jp data store, moves corrupt conversations to .trash/ with error explanations, and ensures four invariants before CLI commands run."
   },
   "053-auto-refresh-conversation-titles.md": {
-    "hash": "5d1c5c9e3f674780d3b34a01e8c8739e76eb121fa35a62a9ba8040fb7ae08592",
-    "summary": "Periodically auto-refresh stale conversation titles via background LLM calls with configurable thresholds, context windows, and legacy-conversation handling."
+    "hash": "3053a4c9a0ec2c42887a2ec80e4602ce25d6e71d7531c5c7b5ced1266e5e6dc0",
+    "summary": "Auto-refresh stale conversation titles periodically by re-running LLM generation when accumulated turns exceed a configured threshold."
   },
   "054-split-conversation-config-and-events.md": {
     "hash": "56fc95c6c22e284ae9d5b2d87cbee0cf4ded0ac4a7ef77ac4b2da32dfa943883",
@@ -288,11 +288,11 @@
     "summary": "Adds conversation archiving to JP, moving inactive conversations to a hidden partition while preserving them."
   },
   "038-config-reset-keywords.md": {
-    "hash": "9e3ec573727ac4dd94589dd82904fd0b6946eecd2da45bc354d92c71ce698984",
+    "hash": "0492ca03e690477c1a5c63a9beaa1f138c7cc964f4d3c3ccaf968dbed9dd3a73",
     "summary": "UPPERCASE keywords NONE and WORKSPACE reset config state; loader.reset entry setting provides local resets; ConfigDelta becomes enum to persist resets."
   },
   "079-config-sources-and-load-order.md": {
-    "hash": "4f02ce9e5d97a0573d9f408509498177337b9ea0c959a9cb369b5cc77dad5c12",
+    "hash": "f6dc6f90d9a17bd469d82db2b8c4998f43cd8d126e774dc117cc4a9337978321",
     "summary": "JP loads config from four implicit sources plus environment variables, with extends directives and inherit flags controlling precedence."
   },
   "074-eager-loading-with-command-declared-data-requirements.md": {
