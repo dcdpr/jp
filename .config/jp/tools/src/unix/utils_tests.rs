@@ -275,8 +275,8 @@ fn safe_path_reaches_runner() {
 /// rejects, or silently hides utilities it supports.
 #[test]
 fn tool_definition_enum_matches_allowlist() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../.jp/mcp/tools/unix/utils.toml");
-    let content = std::fs::read_to_string(&path)
+    let path = Path::new("../../../.jp/mcp/tools/unix/utils.toml");
+    let content = std::fs::read_to_string(path)
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
     let value: toml::Value = toml::from_str(&content).expect("valid TOML");
 
