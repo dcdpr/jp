@@ -1,11 +1,96 @@
 use std::{
     collections::{HashMap, HashSet},
+    fmt,
     rc::Rc,
+    str::FromStr,
 };
 
 use rusqlite::{Connection, types::Value};
 
 use crate::{Result, fts};
+
+/// A creation-date cutoff, in the shape SQLite renders a timestamp.
+///
+/// Either a whole day, `YYYY-MM-DD`, or an instant, `YYYY-MM-DD HH:MM:SS`.
+/// A day covers from midnight, since it is a prefix of every time on it.
+///
+/// The shape is checked rather than trusted because the comparison is lexical:
+/// `2026-08-1` sorts above `2026-08-09 ...` and below `2026-08-10 ...`, so an
+/// unpadded day reads as a cutoff nine days later than the one intended and
+/// still returns a plausible-looking answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Cutoff(String);
+
+impl Cutoff {
+    fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for Cutoff {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl FromStr for Cutoff {
+    type Err = CutoffError;
+
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        let trimmed = s.trim();
+        let invalid = || CutoffError(s.to_owned());
+
+        // Positions rather than a split: every separator and digit has to be
+        // where SQLite would put it, or the comparison silently means something
+        // else.
+        let digits_at = |range: std::ops::Range<usize>| {
+            trimmed
+                .get(range)
+                .is_some_and(|part| part.bytes().all(|b| b.is_ascii_digit()))
+        };
+        let char_at =
+            |index: usize, expected: char| trimmed.as_bytes().get(index) == Some(&(expected as u8));
+
+        let day = digits_at(0..4)
+            && char_at(4, '-')
+            && digits_at(5..7)
+            && char_at(7, '-')
+            && digits_at(8..10);
+        if !day {
+            return Err(invalid());
+        }
+
+        match trimmed.len() {
+            10 => Ok(Self(trimmed.to_owned())),
+            19 if char_at(10, ' ')
+                && digits_at(11..13)
+                && char_at(13, ':')
+                && digits_at(14..16)
+                && char_at(16, ':')
+                && digits_at(17..19) =>
+            {
+                Ok(Self(trimmed.to_owned()))
+            }
+            _ => Err(invalid()),
+        }
+    }
+}
+
+/// A cutoff the comparison can't be trusted with.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CutoffError(String);
+
+impl fmt::Display for CutoffError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "`{}` is not a date; write `YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS`, zero-padded.",
+            self.0
+        )
+    }
+}
+
+impl std::error::Error for CutoffError {}
 
 /// Controls which search backend to use.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -31,6 +116,9 @@ pub struct SearchParams {
 
     /// Only search notes with these IDs.
     pub ids: Vec<String>,
+
+    /// Only return notes created on or after this cutoff.
+    pub created_after: Option<Cutoff>,
 
     /// Maximum number of notes to return (default: 50).
     pub limit: usize,
@@ -59,6 +147,7 @@ impl Default for SearchParams {
             queries: vec![],
             tags: vec![],
             ids: vec![],
+            created_after: None,
             limit: 50,
             mode: SearchMode::default(),
             snippet_chars: 200,
@@ -83,6 +172,7 @@ impl SearchParams {
                 .collect(),
             tags: self.tags.clone(),
             ids: self.ids.clone(),
+            created_after: self.created_after.clone(),
             limit: self.limit,
             mode: self.mode,
             snippet_chars: self.snippet_chars,
@@ -109,6 +199,9 @@ pub struct SearchMatch {
 
     /// When the note was last modified, if known.
     pub updated_at: Option<String>,
+
+    /// When the note was created, if known.
+    pub created_at: Option<String>,
 
     /// 1-indexed line numbers in the note's content where the query matched.
     ///
@@ -160,11 +253,12 @@ impl SearchMatch {
         };
 
         let mut out = format!(
-            "<match note-id=\"{}\" title=\"{}\" tags=\"{}\" updated-at=\"{}\" \
+            "<match note-id=\"{}\" title=\"{}\" tags=\"{}\" created-at=\"{}\" updated-at=\"{}\" \
              total-hits=\"{}\"{archived_attr}>",
             xml_escape(&self.note_id),
             xml_escape(&self.title),
             xml_escape(&self.tags.join(" ")),
+            xml_escape(self.created_at.as_deref().unwrap_or("unknown")),
             xml_escape(self.updated_at.as_deref().unwrap_or("unknown")),
             self.total_hits,
         );
@@ -234,34 +328,31 @@ pub fn execute(conn: &Connection, cte: &str, params: &SearchParams) -> Result<Ve
 
 /// FTS5-based search with trigram fallback for substring matching.
 fn execute_fts(conn: &Connection, cte: &str, params: &SearchParams) -> Result<Vec<SearchMatch>> {
-    let allowed_ids = get_filtered_note_ids(conn, cte, &params.tags, &params.ids)?;
-
-    // Over-fetch when post-filtering by tags/IDs, since some results get
-    // removed.
-    let fetch_limit = if allowed_ids.is_some() {
-        params.limit.saturating_mul(4)
-    } else {
-        params.limit
-    };
+    // Narrowed inside the FTS query rather than after it, so `LIMIT` counts
+    // notes the caller can actually have.
+    //
+    // Filtering afterwards means the limit is spent on rows that are about to
+    // be dropped: relevance and creation date are uncorrelated, so a date
+    // cutoff over an old corpus can fill the whole page with excluded notes and
+    // leave one survivor. That survivor is non-empty, which stops `Auto` from
+    // falling back to LIKE, and the rest of the matches are never reported.
+    let allowed_ids = get_filtered_note_ids(conn, cte, params)?
+        .map(|ids| Rc::new(ids.into_iter().map(Value::from).collect::<Vec<_>>()));
 
     fts::setup_word_table(conn, cte)?;
-    let mut fts_results = fts::search_words(conn, &params.queries, fetch_limit)?;
+    let mut fts_results =
+        fts::search_words(conn, &params.queries, allowed_ids.clone(), params.limit)?;
 
     // Fall back to trigram for substring matching when word search finds
     // nothing.
     if fts_results.is_empty() {
-        match fts::setup_trigram_table(conn, cte)
-            .and_then(|()| fts::search_trigrams(conn, &params.queries, fetch_limit))
-        {
+        match fts::setup_trigram_table(conn, cte).and_then(|()| {
+            fts::search_trigrams(conn, &params.queries, allowed_ids.clone(), params.limit)
+        }) {
             Ok(trigram_results) => fts_results = trigram_results,
             Err(error) => tracing::debug!(%error, "Trigram fallback failed"),
         }
     }
-
-    if let Some(ref allowed) = allowed_ids {
-        fts_results.retain(|r| allowed.contains(&r.note_id));
-    }
-    fts_results.truncate(params.limit);
 
     let note_ids: Vec<String> = fts_results.iter().map(|r| r.note_id.clone()).collect();
     let meta = fetch_metadata(conn, cte, &note_ids)?;
@@ -276,26 +367,25 @@ fn execute_fts(conn: &Connection, cte: &str, params: &SearchParams) -> Result<Ve
         .collect())
 }
 
-/// Returns the set of note IDs permitted by tag and ID filters.
+/// Append the tag, ID, and date conditions shared by both search backends.
 ///
-/// Returns `None` when no filtering is needed.
-fn get_filtered_note_ids(
-    conn: &Connection,
-    cte: &str,
-    tags: &[String],
-    ids: &[String],
-) -> Result<Option<HashSet<String>>> {
-    if tags.is_empty() && ids.is_empty() {
-        return Ok(None);
-    }
-
-    rusqlite::vtab::array::load_module(conn)?;
-
-    let mut conditions = vec!["n.is_trashed = 0".to_string()];
-    let mut bind_values: Vec<Box<dyn rusqlite::types::ToSql>> = vec![];
-
-    if !tags.is_empty() {
-        let values = Rc::new(tags.iter().cloned().map(Value::from).collect::<Vec<_>>());
+/// Each condition binds its values positionally, so `conditions` and
+/// `bind_values` have to grow together and in step: the parameter index a
+/// condition names is the value's position in `bind_values`.
+fn push_filters(
+    params: &SearchParams,
+    conditions: &mut Vec<String>,
+    bind_values: &mut Vec<Box<dyn rusqlite::types::ToSql>>,
+) {
+    if !params.tags.is_empty() {
+        let values = Rc::new(
+            params
+                .tags
+                .iter()
+                .cloned()
+                .map(Value::from)
+                .collect::<Vec<_>>(),
+        );
         bind_values.push(Box::new(values));
         let idx = bind_values.len();
         conditions.push(format!(
@@ -306,16 +396,49 @@ fn get_filtered_note_ids(
                 GROUP BY nt.note_id
                 HAVING COUNT(DISTINCT t.name) = {}
             )",
-            tags.len()
+            params.tags.len()
         ));
     }
 
-    if !ids.is_empty() {
-        let values = Rc::new(ids.iter().cloned().map(Value::from).collect::<Vec<_>>());
+    if !params.ids.is_empty() {
+        let values = Rc::new(
+            params
+                .ids
+                .iter()
+                .cloned()
+                .map(Value::from)
+                .collect::<Vec<_>>(),
+        );
         bind_values.push(Box::new(values));
         let idx = bind_values.len();
         conditions.push(format!("n.id IN rarray(?{idx})"));
     }
+
+    if let Some(created_after) = &params.created_after {
+        bind_values.push(Box::new(created_after.as_str().to_owned()));
+        let idx = bind_values.len();
+        conditions.push(format!("n.created_at >= ?{idx}"));
+    }
+}
+
+/// Returns the set of note IDs permitted by the tag, ID, and date filters.
+///
+/// Returns `None` when no filtering is needed.
+fn get_filtered_note_ids(
+    conn: &Connection,
+    cte: &str,
+    params: &SearchParams,
+) -> Result<Option<HashSet<String>>> {
+    if params.tags.is_empty() && params.ids.is_empty() && params.created_after.is_none() {
+        return Ok(None);
+    }
+
+    rusqlite::vtab::array::load_module(conn)?;
+
+    let mut conditions = vec!["n.is_trashed = 0".to_string()];
+    let mut bind_values: Vec<Box<dyn rusqlite::types::ToSql>> = vec![];
+
+    push_filters(params, &mut conditions, &mut bind_values);
 
     let where_clause = conditions.join(" AND ");
     let sql = format!("{cte} SELECT n.id FROM notes n WHERE {where_clause}");
@@ -340,44 +463,7 @@ fn execute_like(conn: &Connection, cte: &str, params: &SearchParams) -> Result<V
     let mut conditions = vec!["n.is_trashed = 0".to_string()];
     let mut bind_values: Vec<Box<dyn rusqlite::types::ToSql>> = vec![];
 
-    // Tag filter
-    if !params.tags.is_empty() {
-        let values = Rc::new(
-            params
-                .tags
-                .iter()
-                .cloned()
-                .map(Value::from)
-                .collect::<Vec<_>>(),
-        );
-        bind_values.push(Box::new(values));
-        let idx = bind_values.len();
-        conditions.push(format!(
-            "n.id IN (
-                SELECT nt.note_id FROM note_tags nt
-                JOIN tags t ON t.id = nt.tag_id
-                WHERE t.name IN rarray(?{idx})
-                GROUP BY nt.note_id
-                HAVING COUNT(DISTINCT t.name) = {}
-            )",
-            params.tags.len()
-        ));
-    }
-
-    // ID filter
-    if !params.ids.is_empty() {
-        let values = Rc::new(
-            params
-                .ids
-                .iter()
-                .cloned()
-                .map(Value::from)
-                .collect::<Vec<_>>(),
-        );
-        bind_values.push(Box::new(values));
-        let idx = bind_values.len();
-        conditions.push(format!("n.id IN rarray(?{idx})"));
-    }
+    push_filters(params, &mut conditions, &mut bind_values);
 
     // Build scoring expression and WHERE filter for text queries.
     // Each query contributes a score:
@@ -426,7 +512,7 @@ fn execute_like(conn: &Connection, cte: &str, params: &SearchParams) -> Result<V
          SELECT n.id, n.title, n.content, ({score_expr}) AS score
          FROM notes n
          WHERE {where_clause}
-         ORDER BY score DESC
+         ORDER BY score DESC, n.created_at DESC
          LIMIT {limit}",
         limit = params.limit,
     );
@@ -455,9 +541,19 @@ fn execute_like(conn: &Connection, cte: &str, params: &SearchParams) -> Result<V
         matches.push(build_match(note.id, note.title, &content, m, params));
     }
 
-    // Secondary sort: within the same SQL score tier, notes with more
-    // content-level hits come first.
-    // (SQL already orders by score DESC, so this is a stable tiebreaker.)
+    // Hit count decides the final order, ahead of the score and creation date
+    // the SQL above sorted by.
+    //
+    // The sort is stable, so those survive wherever hit counts are equal — a
+    // queryless search being the case where they always are. Everywhere else
+    // this outranks them, which is not what the ranking formula documented on
+    // this function describes. Left as it is: `score` never reaches
+    // `SearchMatch`, so ordering by it here means carrying another field, and
+    // that is a change to ranking rather than to filtering.
+    //
+    // The SQL `LIMIT` runs before this, so which notes come back is still
+    // decided by score and creation date; only their order within the page is
+    // not.
     matches.sort_by_key(|m| std::cmp::Reverse(m.total_hits));
 
     Ok(matches)
@@ -493,6 +589,7 @@ fn build_match(
         title,
         tags: meta.map(|m| m.tags.clone()).unwrap_or_default(),
         updated_at: meta.and_then(|m| m.updated_at.clone()),
+        created_at: meta.and_then(|m| m.created_at.clone()),
         line_hits,
         total_hits,
         snippet,
@@ -611,10 +708,11 @@ fn make_snippet(line: &str, match_byte_pos: usize, max_chars: usize) -> String {
 struct NoteMeta {
     tags: Vec<String>,
     updated_at: Option<String>,
+    created_at: Option<String>,
     is_archived: bool,
 }
 
-/// Fetch tags and `updated_at` for a batch of note IDs in one query.
+/// Fetch tags and timestamps for a batch of note IDs in one query.
 fn fetch_metadata(
     conn: &Connection,
     cte: &str,
@@ -638,7 +736,7 @@ fn fetch_metadata(
 
     let sql = format!(
         "{cte}
-         SELECT n.id, n.updated_at, n.is_archived, t.name
+         SELECT n.id, n.updated_at, n.created_at, n.is_archived, t.name
          FROM notes n
          LEFT JOIN note_tags nt ON nt.note_id = n.id
          LEFT JOIN tags t ON t.id = nt.tag_id
@@ -653,16 +751,18 @@ fn fetch_metadata(
         Ok((
             row.get::<_, String>(0)?,
             row.get::<_, Option<String>>(1)?,
-            row.get::<_, Option<i64>>(2)?,
-            row.get::<_, Option<String>>(3)?,
+            row.get::<_, Option<String>>(2)?,
+            row.get::<_, Option<i64>>(3)?,
+            row.get::<_, Option<String>>(4)?,
         ))
     })?;
 
     for row in rows {
-        let (id, updated_at, is_archived, tag) = row?;
+        let (id, updated_at, created_at, is_archived, tag) = row?;
         let entry = out.entry(id).or_insert(NoteMeta {
             tags: vec![],
             updated_at,
+            created_at,
             is_archived: is_archived.unwrap_or(0) != 0,
         });
         if let Some(t) = tag {
