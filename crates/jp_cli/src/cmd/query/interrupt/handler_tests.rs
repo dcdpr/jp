@@ -100,14 +100,6 @@ impl PromptBackend for UnavailableBackend {
     ) -> Result<String, InquireError> {
         Err(InquireError::NotTTY)
     }
-
-    fn password(
-        &self,
-        _message: &str,
-        _writer: &mut dyn std::io::Write,
-    ) -> Result<String, InquireError> {
-        Err(InquireError::NotTTY)
-    }
 }
 
 /// A menu the user cancels with `Ctrl+C` is a request to get past it, so it
