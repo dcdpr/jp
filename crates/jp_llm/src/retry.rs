@@ -6,12 +6,8 @@ use futures::TryStreamExt as _;
 use tracing::{debug, warn};
 
 use crate::{
-    Provider, StreamError,
-    error::Result,
-    event::Event,
-    model::ModelDetails,
-    query::ChatQuery,
-    stream::{output_limit_bytes, with_output_limit},
+    Provider, StreamError, error::Result, event::Event, model::ModelDetails, query::ChatQuery,
+    stream::with_output_limit,
 };
 
 /// Configuration for resilient stream retries.
@@ -28,8 +24,8 @@ pub struct RetryConfig {
 
     /// Abort a response after it generates more than this many bytes.
     ///
-    /// `0` disables the ceiling.
-    pub max_response_bytes: u32,
+    /// `None` leaves the response unbounded.
+    pub max_response_bytes: Option<u64>,
 }
 
 impl Default for RetryConfig {
@@ -38,7 +34,7 @@ impl Default for RetryConfig {
             max_retries: 3,
             base_backoff_ms: 1000,
             max_backoff_secs: 30,
-            max_response_bytes: 1_048_576,
+            max_response_bytes: Some(1_048_576),
         }
     }
 }
@@ -52,7 +48,7 @@ impl RetryConfig {
     /// call that inherited a large `max_retries` would keep an unattended
     /// request alive far longer than the caller expects.
     #[must_use]
-    pub fn with_max_response_bytes(mut self, max_response_bytes: u32) -> Self {
+    pub fn with_max_response_bytes(mut self, max_response_bytes: Option<u64>) -> Self {
         self.max_response_bytes = max_response_bytes;
         self
     }
@@ -82,7 +78,7 @@ pub async fn collect_with_retry(
         // Bound a runaway response. These collect-style requests run with no
         // terminal attached (title generation, summarization, tool inquiries),
         // so nobody is watching to interrupt one that never stops.
-        let stream = match output_limit_bytes(config.max_response_bytes) {
+        let stream = match config.max_response_bytes {
             Some(max) => with_output_limit(stream, max),
             None => stream,
         };

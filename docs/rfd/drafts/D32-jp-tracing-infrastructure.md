@@ -748,10 +748,13 @@ Users familiar with `RUST_LOG` will recognize the format.
 - **Pretty-printing and `jp-log` command plugin.** A command plugin for
   pretty-printing log files as hierarchical trees is a separate effort, built on
   [RFD 072].
-- **OpenTelemetry export.** OTLP integration (for shipping traces to Jaeger,
-  Grafana, etc.) is out of scope.
-  The JSON log files with span IDs are sufficient for external tooling to
-  reconstruct traces.
+- **OpenTelemetry SDK and network export.** Depending on `opentelemetry`,
+  `opentelemetry_sdk`, or `tracing-opentelemetry`, and shipping telemetry to a
+  collector over OTLP/gRPC or OTLP/HTTP, is out of scope.
+  A single-user CLI has no collector to ship to, and the SDK's exporters,
+  batching processors, and runtime are cost without benefit here.
+  The *encoding* is a separate question — see [Log file
+  encoding](#log-file-encoding).
 - **Metrics.** Unlike Vector's `InternalEvent` system, this RFD does not add
   metric counters (request counts, error rates, token usage).
   If metrics become needed, the `Emit` trait can be extended to emit metrics
@@ -808,6 +811,38 @@ context for every event).
 With 6 spans on the critical path, this is negligible.
 If span count grows significantly, profiling should confirm the overhead remains
 acceptable.
+
+### Log file encoding
+
+The file layer's line shape is undecided.
+Today it is `tracing-subscriber`'s own JSON serialization, which is bespoke: any
+tool that reads it has to be written against it.
+
+The alternative is [OTLP JSON encoding][OTLP JSON], which is stable for traces,
+metrics, and logs, and which the [file exporter spec][OTLP file] stores as JSON
+Lines — the same shape the file layer already writes.
+Adopting the encoding does not require the OpenTelemetry SDK: it is a documented
+JSON mapping, and `jp_trace` already owns serialization.
+
+What it buys: `otel-tui --from-json-file` reads such a file directly,
+`otel-desktop-viewer` ingests it into DuckDB for SQL queries, and the
+collector's OTLP JSON File receiver bridges to Jaeger or Tempo.
+For an assistant querying its own traces, a standard schema with existing query
+tools beats a bespoke format with bespoke tooling.
+
+What it costs: OTLP JSON is verbose.
+Attributes are `[{key, value: {stringValue}}]` arrays rather than plain objects,
+and timestamps are nanosecond strings, so hand-reading the raw file and writing
+`jq` filters both get worse.
+The file-exporter spec is also still Development status, and it requires exactly
+one signal type per file, so spans and events would need separate files linked
+by `traceId` / `spanId`.
+
+The span waterfall that makes OTLP tooling worth having depends on this RFD's
+spans existing first, so the decision can follow Phase 2 rather than gate Phase
+1.
+What Phase 1 should avoid is foreclosing it: the file layer's writer should be
+JP-owned enough to swap the line shape without touching call sites.
 
 ### `caller.file` paths in release builds
 
@@ -903,6 +938,8 @@ Depends on Phase 1 and the chrome verbosity RFD.
 - `crates/jp_cli/src/lib.rs` — current `configure_logging` and `TracingGuard`.
 - `crates/jp_llm/src/provider.rs` — current `trace_to_tmpfile`.
 
+[OTLP JSON]: https://opentelemetry.io/docs/specs/otlp/#json-protobuf-encoding
+[OTLP file]: https://opentelemetry.io/docs/specs/otel/protocol/file-exporter/
 [RFD 048]: ../048-four-channel-output-model.md
 [RFD 072]: ../072-command-plugin-system.md
 [RFD D15]: D15-structured-logging-infrastructure.md

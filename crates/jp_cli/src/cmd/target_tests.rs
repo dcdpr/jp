@@ -12,7 +12,7 @@ use jp_workspace::{
 use super::*;
 
 fn workspace_with_conversation() -> (Workspace, ConversationId) {
-    let mut ws = Workspace::new(Utf8PathBuf::new());
+    let mut ws = Workspace::in_memory(Utf8PathBuf::new());
     let config = Arc::new(AppConfig::new_test());
     let id = ws.create_conversation(Conversation::default(), config);
     (ws, id)
@@ -26,7 +26,7 @@ fn make_id(secs: u64) -> ConversationId {
 /// A workspace whose session activated `previous` and then `active`, so the two
 /// session-scoped keywords resolve to different conversations.
 fn workspace_with_session_history() -> (Workspace, Session, ConversationId, ConversationId) {
-    let mut ws = Workspace::new(Utf8PathBuf::new());
+    let mut ws = Workspace::in_memory(Utf8PathBuf::new());
     let config = Arc::new(AppConfig::new_test());
     let previous = make_id(1000);
     let active = make_id(2000);
@@ -74,7 +74,7 @@ fn last_created_resolves() {
 
 #[test]
 fn last_activated_empty_workspace_returns_none() {
-    let ws = Workspace::new(Utf8PathBuf::new());
+    let ws = Workspace::in_memory(Utf8PathBuf::new());
     assert_eq!(
         resolve_default_id(DefaultConversationId::LastActivated, &ws, None),
         None
@@ -193,7 +193,7 @@ fn archived_keyword_errors_when_no_archived_conversations() {
 
 #[test]
 fn all_archived_empty_returns_error() {
-    let ws = Workspace::new(Utf8PathBuf::new());
+    let ws = Workspace::in_memory(Utf8PathBuf::new());
     let result = ConversationTarget::AllArchived.resolve(&ws, None);
     assert!(result.is_err());
 }
@@ -314,7 +314,7 @@ fn all_live_resolves_to_every_live_conversation() {
 
 #[test]
 fn all_live_empty_workspace_errors() {
-    let ws = Workspace::new(Utf8PathBuf::new());
+    let ws = Workspace::in_memory(Utf8PathBuf::new());
     assert!(ConversationTarget::AllLive.resolve(&ws, None).is_err());
 }
 

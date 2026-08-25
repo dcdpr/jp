@@ -15,10 +15,17 @@ use jp_task::TaskHandler;
 use jp_workspace::{Workspace, session::Session};
 use tokio::runtime::{Handle, Runtime};
 
-use crate::{Globals, Result, signals::SignalRouter};
+use crate::{
+    Globals, Result, bootstrap::ExecutionContext, config_pipeline::ConfigResetEvents,
+    signals::SignalRouter,
+};
 
 /// Context for the CLI application
 pub(crate) struct Ctx {
+    /// The bootstrap-resolved execution context: launch cwd, selected checkout
+    /// root, and the working directory for spawned children (RFD 087).
+    pub(crate) exec: ExecutionContext,
+
     /// The workspace.
     pub(crate) workspace: Workspace,
 
@@ -51,6 +58,15 @@ pub(crate) struct Ctx {
     /// root shutdown token.
     pub(crate) signals: SignalRouter,
 
+    /// A `--cfg` reset keyword's persistence payload ([RFD 038]).
+    ///
+    /// `Some` when the invocation's `--cfg` list contained `NONE` or
+    /// `WORKSPACE`; the query command appends the corresponding events to a
+    /// continuing conversation's stream.
+    ///
+    /// [RFD 038]: https://jp.computer/rfd/038
+    pub(crate) config_reset: Option<ConfigResetEvents>,
+
     runtime: Runtime,
 
     #[cfg(test)]
@@ -81,6 +97,7 @@ pub(crate) struct Term {
 impl Ctx {
     /// Create a new context with the given workspace
     pub(crate) fn new(
+        exec: ExecutionContext,
         workspace: Workspace,
         fs_backend: Option<Arc<FsStorageBackend>>,
         runtime: Runtime,
@@ -92,12 +109,14 @@ impl Ctx {
         let config = config.into();
         let escalation_cooldown =
             Duration::from_secs(config.interrupt.escalation_cooldown_secs.into());
-        let mcp_client = jp_mcp::Client::new(config.providers.mcp.clone());
+        let mcp_client = jp_mcp::Client::new(config.providers.mcp.clone())
+            .with_child_cwd(exec.child_cwd().map(|cwd| cwd.as_std_path().to_path_buf()));
 
         let is_tty = io::stdout().is_terminal();
         let width = printer.output_width().columns();
 
         Self {
+            exec,
             workspace,
             fs_backend,
             config,
@@ -111,6 +130,7 @@ impl Ctx {
             mcp_client,
             task_handler: TaskHandler::default(),
             signals: SignalRouter::new(&runtime, escalation_cooldown),
+            config_reset: None,
             runtime,
 
             #[cfg(test)]
@@ -169,11 +189,20 @@ impl Ctx {
 
     /// Activate and deactivate MCP servers based on the active conversation
     /// context.
-    pub(crate) async fn configure_active_mcp_servers(&mut self) -> Result<StartupSet> {
+    ///
+    /// `forced_tool` names a tool the turn runs even though it is disabled (`jp
+    /// query -u NAME`).
+    /// Its backing server has to start regardless of the tool's enable state,
+    /// or `tool_definitions` drops the tool again as unreachable and the forced
+    /// choice cannot be satisfied.
+    pub(crate) async fn configure_active_mcp_servers(
+        &mut self,
+        forced_tool: Option<&str>,
+    ) -> Result<StartupSet> {
         let mut server_ids = HashSet::new();
 
-        for (_name, cfg) in self.config.conversation.tools.iter() {
-            if !cfg.is_enabled() {
+        for (name, cfg) in self.config.conversation.tools.iter() {
+            if !cfg.is_enabled() && forced_tool != Some(name) {
                 continue;
             }
 

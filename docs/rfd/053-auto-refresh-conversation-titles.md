@@ -24,8 +24,8 @@ exchange.
 The user is left with a list of conversations whose titles no longer reflect
 what they contain.
 
-The user can already run `conversation edit --title` to manually regenerate a
-title, but this requires noticing the problem and taking action.
+The user can already run `conversation title` to manually regenerate a title,
+but this requires noticing the problem and taking action.
 Periodic automatic refresh should be transparent.
 
 The fix needs to be careful about cost.
@@ -139,7 +139,7 @@ The migration policy is conservative:
   The user (or a previous automatic generation) produced this title; without
   provenance the safe default is to leave it alone.
   A conversation enrolls into auto-refresh only after an explicit `conversation
-  edit --title` (no argument) records a watermark.
+  title` (or the bare `conversation edit --title`) records a watermark.
 - `title_generated_at_turn = None` and `title = None`: eligible.
   There is no title to overwrite, so auto-refresh proceeds with baseline `0`.
 
@@ -165,10 +165,12 @@ The affected surfaces:
 
 | Surface                              | Behavior                                |
 | ------------------------------------ | --------------------------------------- |
-| `conversation edit --title` (no arg) | Regenerates via LLM. Sets               |
+| `conversation title`                 | Regenerates via LLM. Sets               |
 |                                      | `title_generated_at_turn = Some(turn)`. |
 |                                      | No disable-delta — the user opted into  |
 |                                      | LLM-driven titling.                     |
+| `conversation edit --title` (no arg) | Delegates to `conversation title`, so   |
+|                                      | it behaves identically.                 |
 | `conversation edit --title "T"`      | Sets `title = Some("T")`, writes        |
 |                                      | disable-delta.                          |
 | `conversation edit --no-title`       | Clears title, writes disable-delta.     |
@@ -195,7 +197,7 @@ Concretely, this affects forks that retain a tail of the stream:
   The fork inherits the source's metadata via clone, so a source with
   `title_generated_at_turn = Some(k)` and `k > N` produces a fork whose
   watermark exceeds its own turn count.
-- `conversation fork --from/--until` similarly drops events.
+- `conversation fork --from/--to` similarly drops events.
 
 **The rule:** any operation that drops `turn_start` events from a stream clamps
 the resulting watermark to `min(watermark, new_turn_count)`.
@@ -380,7 +382,7 @@ keeping its perfectly good title.
 
 The `title_schema` and `title_instructions` helpers in `jp_llm::title` are
 shared by initial generation (`TitleGeneratorTask`), interactive regeneration
-(`conversation edit --title`), and the new refresh path.
+(`conversation title`), and the new refresh path.
 Adding `retain_current` unconditionally would let the LLM respond with "keep
 current" to the interactive regeneration path — which is the opposite of what
 the user asked for.
@@ -399,19 +401,17 @@ This scoping happens before any token-level checks.
 
 The title generation model may still have a smaller context window than those N
 turns require.
-The inquiry system already solves this problem: it estimates char-based token
-counts and drops older events to fit the model's context window.
+`jp_llm::window` handles that: `truncate_to_fit` estimates the stream's size in
+chars, compares it against a budget derived from the model's context window, and
+drops the oldest events until it fits.
+Each caller measures its own overhead with `estimate_overhead_chars`: the
+inquiry backend accounts for tools and attachments, while title generation only
+needs its instruction sections.
 
-The core truncation logic — estimate chars, compare to budget, drop oldest
-events, re-sanitize — is extracted from `jp_cli::cmd::query::tool::inquiry`
-into a shared utility (in `jp_llm` or `jp_conversation`) that both the inquiry
-backend and the title generator can use.
-Each caller computes its own overhead (the inquiry system accounts for tools,
-attachments, and cache-preserving granularity; the title generator only needs
-system prompt and title instructions).
-
+`jp_llm::title::generate` applies this to every title request, so the refresh
+path inherits it by calling that function rather than repeating the logic.
 The pipeline for each candidate is: scope to last `turn_context` turns \>
-estimate chars \> truncate if over budget \> send to LLM.
+truncate if over budget \> send to LLM.
 
 #### Sync (main thread)
 
@@ -569,14 +569,20 @@ may shift focus as the conversation evolves.
 
 ## Implementation Plan
 
-### Phase 0: Shared truncation utility (independent)
+### Phase 0: Shared truncation utility (implemented)
 
-- Extract the core truncation logic (estimate chars, compare to budget, drop
-  oldest events, re-sanitize) from `jp_cli::cmd::query::tool::inquiry` into a
-  shared utility in `jp_llm` or `jp_conversation`.
-- Update the inquiry backend to use the shared utility.
-- Update `TitleGeneratorTask::update_title` to truncate the event stream when
-  the title model's context window is smaller than the conversation.
+Shipped ahead of the rest of this RFD.
+The fitting logic lives in `jp_llm::window` (`truncate_to_fit`,
+`estimate_overhead_chars`, `estimate_chars`, `budget_chars`), and the inquiry
+backend, `jp_llm::title`, and the compaction summarizer all measure against it.
+
+Title generation itself moved into `jp_llm::title::generate`, shared by
+`TitleGeneratorTask` and `jp conversation title`, so Phase 5's refresh path gets
+context window fitting by calling that function.
+
+The summarizer uses the same measurements but not the same remedy: a summary
+stands in for every turn it covers, so `jp conversation compact --summarize`
+rejects a range that exceeds the window instead of shortening it.
 
 ### Phase 1: Configuration (independent)
 
@@ -610,8 +616,9 @@ may shift focus as the conversation evolves.
   - `query --title "..."`
   - `query --no-title`
   - `conversation fork --title "..."`
-- Update `conversation edit --title` (no argument) to set
-  `title_generated_at_turn = Some(current_turn_count)` after LLM generation.
+- Update `conversation title` to set `title_generated_at_turn =
+  Some(current_turn_count)` after LLM generation.
+  The bare `conversation edit --title` delegates there and inherits it.
 
 ### Phase 4: Title retention schema (independent)
 
@@ -622,7 +629,7 @@ may shift focus as the conversation evolves.
 - Add a companion function (or extend `extract_titles`) that returns the
   `retain_current` flag alongside the title list.
 
-### Phase 5: Task and spawn (depends on Phase 0, 1, 2, 3, 4)
+### Phase 5: Task and spawn (depends on Phase 1, 2, 3, 4)
 
 - Implement `TitleRefreshTask` with the full background pipeline: scan
   conversation IDs via `LoadBackend`, read metadata and turn counts, sort
@@ -648,6 +655,8 @@ Coverage for the high-risk paths, paired with the phases that introduce them:
 - `query --title`, `query --no-title`, `conversation edit --title "..."`,
   `conversation edit --no-title`, and `conversation fork --title "..."` each
   write the disable-delta and prevent future refresh.
+- `conversation title` does not write the disable-delta; the conversation stays
+  enrolled in refresh.
 - `conversation fork --last N` clamps `title_generated_at_turn` to the new turn
   count.
 - `--no-persist` does not spawn `TitleRefreshTask`.
@@ -656,7 +665,7 @@ Coverage for the high-risk paths, paired with the phases that introduce them:
 - A locked candidate is skipped at preflight without an LLM call.
 - `retain_current = true` advances the watermark without changing `title`.
 
-Phases 0, 1, 2, and 4 can be reviewed and merged independently.
+Phases 1, 2, and 4 can be reviewed and merged independently.
 Phase 3 depends on Phase 1.
 Phase 5 depends on all earlier phases.
 Phase 6 (tests) is paired with each phase as it lands.

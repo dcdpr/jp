@@ -68,14 +68,13 @@ fn git_stage_patch_impl<R: ProcessRunner>(
             return Ok("Changes not staged.".into());
         }
         None => {
-            return Ok(Outcome::NeedsInput {
-                question: Question::boolean(
-                    "stage_changes",
-                    "Do you want to stage the patch shown above?",
-                )
-                .with_preamble(combined)
-                .with_default(Value::Bool(true)),
-            });
+            let question = Question::boolean(
+                "stage_changes",
+                "Do you want to stage the patch shown above?",
+            )?
+            .with_preamble(combined)
+            .with_default(Value::Bool(true));
+            return Ok(Outcome::NeedsInput { question });
         }
     }
 

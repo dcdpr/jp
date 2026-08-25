@@ -48,13 +48,9 @@ impl DetailItem {
 }
 
 /// A labeled row in a key-value details view.
-///
-/// A `None` label produces a label-less row: a single value column in the
-/// pretty and markdown views.
-/// Listing commands use this to render a titled column of values without keys.
 #[derive(Debug, Clone)]
 pub struct DetailRow {
-    pub label: Option<String>,
+    pub label: String,
     pub value: DetailValue,
 }
 
@@ -63,7 +59,7 @@ impl DetailRow {
     #[must_use]
     pub fn scalar(label: impl Into<String>, value: impl Into<String>) -> Self {
         Self {
-            label: Some(label.into()),
+            label: label.into(),
             value: DetailValue::Scalar(value.into()),
         }
     }
@@ -72,17 +68,46 @@ impl DetailRow {
     #[must_use]
     pub fn list(label: impl Into<String>, values: Vec<DetailItem>) -> Self {
         Self {
-            label: Some(label.into()),
+            label: label.into(),
             value: DetailValue::List(values),
         }
     }
+}
 
-    /// A label-less single-value row.
+/// The body of a details view: either a record or a listing.
+///
+/// The variant fixes the JSON shape, so a command's output shape is a property
+/// of the command rather than of the data a given invocation happens to hold.
+/// A [`Fields`] view is always a JSON object and an [`Items`] view is always a
+/// JSON array, including when either is empty — a consumer never needs a
+/// fallback for a shape that changed under it.
+///
+/// The two are separate variants rather than one row type with an optional
+/// label so that a record cannot acquire an unlabeled row, or a listing a
+/// labeled one, which is what would make the shape data-dependent.
+///
+/// [`Fields`]: Details::Fields
+/// [`Items`]: Details::Items
+#[derive(Debug, Clone)]
+pub enum Details {
+    /// Named fields, keyed by label.
+    /// Renders as a JSON object.
+    Fields(Vec<DetailRow>),
+
+    /// An unnamed sequence.
+    /// Renders as a JSON array of each item's [`DetailItem::json`], so a
+    /// structured item survives the trip rather than collapsing to its display
+    /// text.
+    Items(Vec<DetailItem>),
+}
+
+impl Details {
+    /// Whether the view carries nothing to render.
     #[must_use]
-    pub fn bare(value: impl Into<String>) -> Self {
-        Self {
-            label: None,
-            value: DetailValue::Scalar(value.into()),
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self::Fields(rows) => rows.is_empty(),
+            Self::Items(items) => items.is_empty(),
         }
     }
 }
@@ -200,22 +225,34 @@ pub fn list_json(header: Row, rows: Vec<Row>) -> serde_json::Value {
     serde_json::Value::Array(items)
 }
 
-/// Render a key-value details table with no borders.
+/// Render a details view as a borderless table.
 #[must_use]
-pub fn details(title: Option<&str>, rows: Vec<DetailRow>) -> String {
+pub fn details(title: Option<&str>, body: Details) -> String {
     let mut buf = String::new();
 
     if let Some(title) = title {
         buf.push_str(title);
-        if !rows.is_empty() {
+        if !body.is_empty() {
             buf.push_str("\n\n");
         }
     }
 
     let mut table = Table::new();
     table.load_preset(EMPTY);
-    for row in rows {
-        table.add_row(detail_pretty_row(row));
+    match body {
+        Details::Fields(rows) => {
+            for row in rows {
+                table.add_row(detail_pretty_row(row));
+            }
+        }
+        // A listing has no key column, so each item is a single cell.
+        Details::Items(items) => {
+            for item in items {
+                let mut row = Row::new();
+                row.add_cell(Cell::new(item.text).set_alignment(CellAlignment::Left));
+                table.add_row(row);
+            }
+        }
     }
     buf.push_str(&table.trim_fmt());
 
@@ -245,30 +282,28 @@ fn detail_pretty_row(row: DetailRow) -> Row {
     };
 
     let mut r = Row::new();
-    if let Some(label) = row.label {
-        r.add_cell(Cell::new(label).set_alignment(CellAlignment::Right));
-    }
+    r.add_cell(Cell::new(row.label).set_alignment(CellAlignment::Right));
     r.add_cell(Cell::new(value).set_alignment(CellAlignment::Left));
     r
 }
 
 /// Render a key-value details table as a pipe-delimited markdown table.
 #[must_use]
-pub fn details_markdown(title: Option<&str>, rows: Vec<DetailRow>) -> String {
+pub fn details_markdown(title: Option<&str>, body: Details) -> String {
     let mut buf = String::new();
 
     if let Some(title) = title {
         buf.push_str(title);
-        if !rows.is_empty() {
+        if !body.is_empty() {
             buf.push('\n');
         }
     }
 
-    if rows.is_empty() {
+    if body.is_empty() {
         return buf;
     }
 
-    let md_rows = detail_markdown_rows(rows);
+    let md_rows = detail_markdown_rows(body);
     let row_refs: Vec<&Row> = md_rows.iter().collect();
     let col_count = max_columns(&row_refs);
     let widths = column_widths(&row_refs, col_count);
@@ -285,20 +320,26 @@ pub fn details_markdown(title: Option<&str>, rows: Vec<DetailRow>) -> String {
 /// A list value expands to one row per item: the label sits on the first item's
 /// row and continuation rows carry a blank label cell so the table stays
 /// aligned.
-fn detail_markdown_rows(rows: Vec<DetailRow>) -> Vec<Row> {
+fn detail_markdown_rows(body: Details) -> Vec<Row> {
     let mut out = Vec::new();
-    for row in rows {
-        match row.value {
-            DetailValue::Scalar(s) => out.push(md_row(row.label.as_deref(), &s)),
-            DetailValue::List(items) => {
-                for (idx, item) in items.iter().enumerate() {
-                    let label = match (row.label.as_deref(), idx) {
-                        (Some(label), 0) => Some(label),
-                        (Some(_), _) => Some(""),
-                        (None, _) => None,
-                    };
-                    out.push(md_row(label, &item.text));
+    match body {
+        Details::Fields(rows) => {
+            for row in rows {
+                match row.value {
+                    DetailValue::Scalar(s) => out.push(md_row(Some(&row.label), &s)),
+                    DetailValue::List(items) => {
+                        for (idx, item) in items.iter().enumerate() {
+                            let label = if idx == 0 { row.label.as_str() } else { "" };
+                            out.push(md_row(Some(label), &item.text));
+                        }
+                    }
                 }
+            }
+        }
+        // A listing has no key column.
+        Details::Items(items) => {
+            for item in items {
+                out.push(md_row(None, &item.text));
             }
         }
     }
@@ -314,32 +355,31 @@ fn md_row(label: Option<&str>, value: &str) -> Row {
     r
 }
 
-/// Render key-value details as JSON.
+/// Render a details view as JSON.
 ///
-/// A scalar value becomes a string; a list value becomes a JSON array.
+/// The [`Details`] variant fixes the shape of `details`, so it is the same for
+/// every invocation of a given command: [`Details::Fields`] is an object keyed
+/// by label, [`Details::Items`] is an array.
+/// An empty view keeps its variant's shape, so a consumer never meets `{}`
+/// where it expected `[]`.
+///
+/// A field's value keeps its own form: a scalar is a string, a list is an array
+/// of each item's [`DetailItem::json`], so structure survives the trip rather
+/// than collapsing to display text.
 #[must_use]
-pub fn details_json(title: Option<&str>, rows: Vec<DetailRow>) -> serde_json::Value {
-    let mut details = serde_json::Map::new();
-    for DetailRow { label, value } in rows {
-        match label {
-            Some(label) => {
-                details.insert(strip(&label), detail_json_value(value));
+pub fn details_json(title: Option<&str>, body: Details) -> serde_json::Value {
+    let details = match body {
+        Details::Fields(rows) => {
+            let mut map = serde_json::Map::new();
+            for DetailRow { label, value } in rows {
+                map.insert(strip(&label), detail_json_value(value));
             }
-            // A label-less row has no key of its own; emit each value as a key
-            // with an empty value, matching the label-less column rendering
-            // used by listing commands.
-            None => match value {
-                DetailValue::Scalar(s) => {
-                    details.insert(strip(&s), String::new().into());
-                }
-                DetailValue::List(items) => {
-                    for item in items {
-                        details.insert(strip(&item.text), String::new().into());
-                    }
-                }
-            },
+            serde_json::Value::Object(map)
         }
-    }
+        Details::Items(items) => {
+            serde_json::Value::Array(items.into_iter().map(|item| item.json).collect())
+        }
+    };
 
     serde_json::json!({
         "title": title,

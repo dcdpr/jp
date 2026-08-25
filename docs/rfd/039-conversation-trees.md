@@ -171,7 +171,8 @@ jp conversation fork <id>
 ```
 
 Creates a child conversation with `parent_id` set to `<id>` and copied events
-(filtered by `--from`, `--until`, `--last` as today).
+(filtered by the shared turn selector — `--from`/`--to`, `--turn`,
+`--first`/`--last` — as today).
 
 The `--activate` flag continues to work — it sets the fork as the active
 conversation.
@@ -260,7 +261,7 @@ The existing `--yes` flag (skip confirmation prompt) is orthogonal to the
 strategy flags.
 `--cascade --yes` deletes the tree without prompts.
 
-### `conversation fork` with `--from` / `--until` / `--last`
+### `conversation fork` with `--from` / `--to` / `--last`
 
 The current fork command supports time-based and count-based event filtering.
 These continue to work: the fork creates a child conversation with a filtered

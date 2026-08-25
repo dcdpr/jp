@@ -1,8 +1,12 @@
-use jp_config::providers::llm::LlmProviderConfig;
+use std::iter;
+
+use indexmap::IndexMap;
+use jp_config::{conversation::tool::ToolParameterConfig, providers::llm::LlmProviderConfig};
+use jp_conversation::event::{ToolCallRequest, ToolCallResponse};
 use jp_test::{Result, function_name};
 
 use super::*;
-use crate::test::TestRequest;
+use crate::{model::ReasoningDetails, test::TestRequest};
 
 macro_rules! test_all_models {
         ($($fn:ident),* $(,)?) => {
@@ -33,6 +37,348 @@ async fn sub_provider_event_metadata(model: &str, test_name: &str) -> Result {
 
     run_test(test_name, requests).await?;
 
+    Ok(())
+}
+
+/// Records an Opus 5 round trip with parallel tool calls through OpenRouter.
+///
+/// The follow-up request must preserve `type: "function"` on both calls.
+/// Without it, OpenRouter drops the tool results while translating to
+/// Anthropic's API and Opus rejects the remaining assistant message as
+/// unsupported prefill.
+#[test_log::test(tokio::test)]
+async fn test_anthropic_opus_5_parallel_tool_round_trip() -> Result {
+    let model_id: ModelIdConfig = "openrouter/anthropic/claude-opus-5".parse()?;
+    let mut model = ModelDetails::empty(model_id.clone());
+    model.context_window = Some(1_000_000);
+    model.max_output_tokens = Some(128_000);
+    model.reasoning = Some(ReasoningDetails::leveled(
+        false, true, true, true, true, true,
+    ));
+    model.structured_output = Some(true);
+
+    let response_model_id = model_id.clone();
+    let response_model = model.clone();
+    let requests = vec![
+        TestRequest::chat(ProviderId::Openrouter)
+            .model(model_id)
+            .model_details(model)
+            .enable_reasoning()
+            .tool(
+                "list_items",
+                iter::empty::<(&'static str, ToolParameterConfig)>(),
+            )
+            .tool(
+                "search_items",
+                iter::empty::<(&'static str, ToolParameterConfig)>(),
+            )
+            .chat_request(
+                "Call both list_items and search_items in parallel. Do not answer with text \
+                 before calling both tools.",
+            ),
+        TestRequest::func(move |history| {
+            let calls: Vec<_> = history
+                .iter()
+                .filter_map(|event| event.event.as_tool_call_request())
+                .collect();
+            let mut names: Vec<_> = calls.iter().map(|call| call.name.as_str()).collect();
+            names.sort_unstable();
+            assert_eq!(names, ["list_items", "search_items"]);
+
+            let mut request = TestRequest::chat(ProviderId::Openrouter)
+                .model(response_model_id)
+                .model_details(response_model)
+                .enable_reasoning();
+            for call in calls {
+                request = request.event(ToolCallResponse {
+                    id: call.id.clone(),
+                    result: Ok(format!("{} completed", call.name)),
+                });
+            }
+
+            Some(request)
+        }),
+    ];
+
+    run_test(function_name!(), requests).await
+}
+
+#[test]
+fn request_preserves_integer_tool_parameter_type() -> Result {
+    let request = TestRequest::chat(ProviderId::Openrouter)
+        .tool("fs_read_file", [("start_line", ToolParameterConfig {
+            kind: "integer".to_owned().into(),
+            required: false,
+            default: None,
+            summary: None,
+            description: None,
+            examples: None,
+            enumeration: vec![],
+            items: None,
+            properties: IndexMap::new(),
+        })])
+        .chat_request("Read README.md");
+    let TestRequest::Chat { model, query, .. } = request else {
+        unreachable!();
+    };
+
+    let (request, _, _) = create_request(&model, query)?;
+    let request = serde_json::to_value(request)?;
+
+    assert_eq!(
+        request["tools"][0]["function"],
+        serde_json::json!({
+            "name": "fs_read_file",
+            "strict": true,
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "start_line": {"type": ["integer", "null"]}
+                },
+                "additionalProperties": false,
+                "required": ["start_line"]
+            }
+        })
+    );
+    Ok(())
+}
+
+/// A tool-call finish closes the provider stream without ending the Turn.
+#[test]
+fn tool_call_finish_is_a_clean_completion() -> Result {
+    let tool_call: response::Choice = serde_json::from_value(serde_json::json!({
+        "finish_reason": null,
+        "native_finish_reason": null,
+        "delta": {
+            "role": "assistant",
+            "content": null,
+            "reasoning": null,
+            "tool_calls": [{
+                "index": 0,
+                "id": "call_1",
+                "function": {
+                    "name": "fs_read_file",
+                    "arguments": "{\"path\":\"README.md\",\"start_line\":\"1\"}"
+                }
+            }]
+        },
+        "error": null
+    }))?;
+    let finish: response::Choice = serde_json::from_value(serde_json::json!({
+        "finish_reason": "tool_calls",
+        "native_finish_reason": "tool_calls",
+        "delta": {
+            "role": null,
+            "content": null,
+            "reasoning": null,
+            "tool_calls": []
+        },
+        "error": null
+    }))?;
+    let mut state = AggregationState {
+        tool_call_indices: vec![],
+        aggregating_reasoning: false,
+        aggregating_message: false,
+        is_structured: false,
+    };
+
+    let events = map_event(tool_call, &mut state)
+        .into_iter()
+        .chain(map_event(finish, &mut state))
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+
+    assert_eq!(events, vec![
+        Event::tool_call_start(2, "call_1", "fs_read_file"),
+        Event::tool_call_args(2, r#"{"path":"README.md","start_line":"1"}"#),
+        Event::flush(2),
+        Event::Finished(event::FinishReason::Completed),
+    ]);
+    Ok(())
+}
+
+fn forced_tool_request(
+    reasoning: ReasoningDetails,
+    enable_reasoning: bool,
+) -> (request::ChatCompletion, Option<ForcedToolFallback>) {
+    let request = TestRequest::chat(ProviderId::Openrouter)
+        .tool_choice_fn("edit_file")
+        .tool(
+            "edit_file",
+            iter::empty::<(&'static str, ToolParameterConfig)>(),
+        )
+        .chat_request("Edit the file");
+    let request = if enable_reasoning {
+        request.enable_reasoning()
+    } else {
+        request
+    };
+    let TestRequest::Chat {
+        mut model, query, ..
+    } = request
+    else {
+        unreachable!();
+    };
+    model.reasoning = Some(reasoning);
+
+    let (request, _, fallback) = create_request(&model, query).unwrap();
+    (request, fallback)
+}
+
+#[test]
+fn forced_tool_with_disableable_reasoning_uses_hard_fallback() {
+    let reasoning = ReasoningDetails::leveled(false, true, true, true, true, false);
+    let (request, fallback) = forced_tool_request(reasoning, true);
+    let fallback = fallback.expect("reasoning with forced tool use needs a fallback");
+
+    assert_eq!(request.tool_choice, Some(tool::ToolChoice::Auto));
+    assert_eq!(fallback.strategy, ForceStrategy::DisableThinking);
+    assert!(matches!(
+        fallback.tool_choice,
+        tool::ToolChoice::Function(_)
+    ));
+    assert!(
+        serde_json::to_string(&request.messages)
+            .unwrap()
+            .contains("MUST call the tool named 'edit_file'")
+    );
+}
+
+#[test]
+fn forced_tool_with_mandatory_reasoning_uses_soft_retries() {
+    let reasoning = ReasoningDetails::leveled(false, true, true, true, true, false).always_on();
+    let (request, fallback) = forced_tool_request(reasoning, true);
+    let fallback = fallback.expect("mandatory reasoning needs a soft fallback");
+
+    assert_eq!(request.tool_choice, Some(tool::ToolChoice::Auto));
+    assert_eq!(fallback.strategy, ForceStrategy::EscalatingNudge {
+        remaining: SOFT_FORCE_MAX_RETRIES,
+    });
+}
+
+#[test]
+fn forced_tool_without_reasoning_stays_forced() {
+    let reasoning = ReasoningDetails::leveled(false, true, true, true, true, false);
+    let (request, fallback) = forced_tool_request(reasoning, false);
+
+    assert!(fallback.is_none());
+    assert!(matches!(
+        request.tool_choice,
+        Some(tool::ToolChoice::Function(_))
+    ));
+}
+
+#[test]
+fn hard_fallback_disables_reasoning_and_restores_tool_choice() {
+    let reasoning = ReasoningDetails::leveled(false, true, true, true, true, false);
+    let (request, fallback) = forced_tool_request(reasoning, true);
+    let fallback = fallback.unwrap();
+    let request = prepare_force_tool_retry_request(request, vec![], &fallback);
+
+    assert_eq!(
+        request.reasoning,
+        Some(request::Reasoning {
+            exclude: true,
+            effort: request::ReasoningEffort::None,
+        })
+    );
+    assert_eq!(request.tool_choice, Some(fallback.tool_choice));
+    assert!(
+        serde_json::to_string(&request.messages)
+            .unwrap()
+            .contains("You did not call the required tool")
+    );
+}
+
+#[test]
+fn soft_fallback_decrements_and_stops() {
+    let reasoning = ReasoningDetails::leveled(false, true, true, true, true, false).always_on();
+    let (request, fallback) = forced_tool_request(reasoning, true);
+    let fallback = fallback.unwrap();
+    let (request, next) =
+        prepare_soft_force_retry_request(request, vec![], &fallback, SOFT_FORCE_MAX_RETRIES);
+
+    assert_eq!(request.tool_choice, Some(tool::ToolChoice::Auto));
+    assert_eq!(next.unwrap().strategy, ForceStrategy::EscalatingNudge {
+        remaining: SOFT_FORCE_MAX_RETRIES - 1,
+    });
+
+    let (_, next) = prepare_soft_force_retry_request(request, vec![], &fallback, 1);
+    assert!(next.is_none());
+}
+
+#[test]
+fn parallel_tool_calls_share_one_assistant_message() -> Result {
+    let mut events = ConversationStream::new_test();
+    events.start_turn("Inspect the codebase");
+    events
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::reasoning(""))
+        .add_chat_response(ChatResponse::message("I'll inspect it."))
+        .add_tool_call_request(ToolCallRequest::new(
+            "call_1".to_owned(),
+            "fs_list_files".to_owned(),
+            Map::from_iter([("prefixes".to_owned(), serde_json::json!(["crates"]))]),
+        ))
+        .add_tool_call_request(ToolCallRequest::new(
+            "call_2".to_owned(),
+            "fs_grep_files".to_owned(),
+            Map::from_iter([("pattern".to_owned(), "hook".into())]),
+        ))
+        .add_tool_call_response(ToolCallResponse {
+            id: "call_1".to_owned(),
+            result: Ok("files".to_owned()),
+        })
+        .add_tool_call_response(ToolCallResponse {
+            id: "call_2".to_owned(),
+            result: Ok("matches".to_owned()),
+        })
+        .build()?;
+
+    let messages = serde_json::to_value(convert_events(events))?;
+
+    assert_eq!(
+        messages,
+        serde_json::json!([
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": "Inspect the codebase"}]
+            },
+            {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "I'll inspect it."}],
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "index": 0,
+                        "type": "function",
+                        "function": {
+                            "name": "fs_list_files",
+                            "arguments": "{\"prefixes\":[\"crates\"]}"
+                        }
+                    },
+                    {
+                        "id": "call_2",
+                        "index": 1,
+                        "type": "function",
+                        "function": {
+                            "name": "fs_grep_files",
+                            "arguments": "{\"pattern\":\"hook\"}"
+                        }
+                    }
+                ]
+            },
+            {
+                "role": "tool",
+                "content": "files",
+                "tool_call_id": "call_1"
+            },
+            {
+                "role": "tool",
+                "content": "matches",
+                "tool_call_id": "call_2"
+            }
+        ])
+    );
     Ok(())
 }
 
@@ -322,7 +668,6 @@ async fn run_test(
 ) -> Result {
     crate::test::run_chat_completion(
         test_name,
-        env!("CARGO_MANIFEST_DIR"),
         ProviderId::Openrouter,
         LlmProviderConfig::default(),
         requests.into_iter().collect(),

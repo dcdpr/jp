@@ -110,20 +110,31 @@ jp conversation compact --reset
 
 **Flags:**
 
-| Flag               | Default               | Description                             |
-| ------------------ | --------------------- | --------------------------------------- |
-| `--keep-first <N>` | from config           | Preserve the first N turns.             |
-| `--keep-last <N>`  | from config           | Preserve the last N turns.              |
-| `--from <bound>`   | start of conversation | Start of the compacted range            |
-|                    |                       | (inclusive). Overrides `--keep-first`.  |
-| `--to <bound>`     | end of conversation   | End of the compacted range (inclusive). |
-|                    |                       | Overrides `--keep-last`.                |
-| `--reasoning`      | from config           | Strip reasoning (thinking) blocks.      |
-| `--tools`          | from config           | Strip tool call arguments/responses.    |
-| `--summarize`      | from config           | Generate an LLM summary for the range.  |
-| `--dry-run`        | `false`               | Preview effects without applying.       |
-| `--reset`          | `false`               | Remove all compaction events from the   |
-|                    |                       | stream.                                 |
+| Flag                | Default               | Description                             |
+| ------------------- | --------------------- | --------------------------------------- |
+| `--keep-first <N>`  | from config           | Preserve the first N turns.             |
+| `--keep-last <N>`   | from config           | Preserve the last N turns.              |
+| `--from <bound>`    | start of conversation | Start of the compacted range            |
+|                     |                       | (inclusive). Overrides `--keep-first`.  |
+| `--to <bound>`      | end of conversation   | End of the compacted range (inclusive). |
+|                     |                       | Overrides `--keep-last`.                |
+| `--reasoning`       | from config           | Strip reasoning (thinking) blocks.      |
+| `--tools`           | from config           | Strip tool call arguments/responses.    |
+| `--summary [TEXT]`  | from config           | Replace the range with a summary:       |
+|                     |                       | generated with no value, or TEXT        |
+|                     |                       | verbatim with one.                      |
+| `--summary-context` | none                  | Extra guidance for the summarizer.      |
+|                     |                       | Only affects rules that generate one.   |
+| `--dry-run`         | `false`               | Preview effects without applying.       |
+| `--reset`           | `false`               | Remove all compaction events from the   |
+|                     |                       | stream.                                 |
+
+> [!TIP]
+> `--summary` was originally spelled `--summarize`, and its value meant
+> something different: it was passed to the summarizer as extra guidance rather
+> than used as the summary text.
+> A script still passing `--summarize TEXT` fails rather than silently storing
+> TEXT as the summary; that guidance now belongs to `--summary-context`.
 
 Range bounds accept several formats:
 
@@ -203,7 +214,7 @@ SPEC     = POLICIES [":" RANGE]
 POLICIES = POLICY ["+" POLICY]*
 POLICY   = "r" | "reasoning"
          | "t" | "tools"
-         | "s" | "summarize"
+         | "s" | "summary"       # "summarize" is accepted as an alias
 RANGE    = [BOUND] ".." [BOUND]    # explicit range (at least "..")
          | BOUND                    # single-bound shorthand
 BOUND    = INTEGER                 # >= 0: absolute turn index
@@ -971,6 +982,7 @@ Can proceed in parallel with Phases 3 and 4.
 - [Issue #57] — Make conversation management more powerful
 - [Multi-turn degradation paper][paper] — cited in Issue \#57
 
+[Indexing and Counting Conventions]: ../architecture/indexing-conventions.md
 [InternalEvent]: https://github.com/dcdpr/jp/blob/main/crates/jp_conversation/src/stream.rs
 [Issue #57]: https://github.com/dcdpr/jp/issues/57
 [RFD 011]: 011-system-notification-queue.md
