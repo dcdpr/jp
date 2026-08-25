@@ -14,7 +14,7 @@ use std::{io::Write as _, sync::Arc};
 
 use crossterm::style::Stylize as _;
 use jp_config::conversation::tool::{RunMode, ToolSource};
-use jp_conversation::event::{InquiryId, SelectOption};
+use jp_conversation::event::SelectOption;
 use jp_editor::{EditOutcome, EditorBackend};
 use jp_inquire::{InlineOption, ReplyEditMode, ReplyOutcome, prompt::PromptBackend};
 use jp_llm::tool::executor::PermissionInfo;
@@ -23,27 +23,6 @@ use jp_tool::AnswerType;
 use serde_json::Value;
 
 use crate::{Error, editor::report_editor_failure};
-
-/// Well-known question ID used for tool permission inquiries.
-pub const PERMISSION_QUESTION_ID: &str = "__permission__";
-
-/// Constructs a stable `InquiryId` for a tool's permission prompt.
-///
-/// Format: `"<tool_name>.__permission__"`.
-/// This is stable across different invocations of the same tool within a turn.
-#[must_use]
-pub fn permission_inquiry_id(tool_name: &str) -> InquiryId {
-    InquiryId::new(format!("{tool_name}.{PERMISSION_QUESTION_ID}"))
-}
-
-/// Constructs a stable `InquiryId` for a tool question.
-///
-/// Format: `"<tool_name>.<question_id>"`.
-/// This is stable across different invocations of the same tool within a turn.
-#[must_use]
-pub fn tool_question_inquiry_id(tool_name: &str, question_id: &str) -> InquiryId {
-    InquiryId::new(format!("{tool_name}.{question_id}"))
-}
 
 /// Result of a permission prompt.
 #[derive(Debug)]
@@ -502,6 +481,14 @@ impl ToolPrompter {
                 let answer = self
                     .prompt_backend
                     .text(&question.text, default_str, &mut writer)?;
+
+                Ok(QuestionResult {
+                    answer: Value::String(answer),
+                    persist_level: jp_tool::PersistLevel::None,
+                })
+            }
+            AnswerType::Secret => {
+                let answer = self.prompt_backend.password(&question.text, &mut writer)?;
 
                 Ok(QuestionResult {
                     answer: Value::String(answer),

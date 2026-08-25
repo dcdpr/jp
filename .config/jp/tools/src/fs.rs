@@ -12,7 +12,7 @@ mod list_files;
 mod modify_file;
 mod move_file;
 mod read_file;
-mod utils;
+pub(crate) mod utils;
 
 use create_file::fs_create_file;
 use delete_file::fs_delete_file;

@@ -1,10 +1,9 @@
 # RFD 038: Config Reset Keywords
 
-- **Status**: Accepted
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-08
-- **Required by**: [RFD 051], [RFD 070], [RFD 079]
 
 ## Summary
 
@@ -88,8 +87,9 @@ and additionally triggers a pre-pipeline gate: if `NONE` appears anywhere in the
 entirely.
 Only explicit `--cfg` values apply on top of program defaults.
 
-Required fields without defaults (for example `assistant.model.id`) must be
-supplied by subsequent explicit `--cfg` values.
+Required fields without defaults (for example `assistant.model.id` and
+`conversation.tools.defaults.run`) must be supplied by subsequent explicit
+`--cfg` values.
 Otherwise validation fails with a clear error indicating which fields are
 missing.
 
@@ -384,7 +384,8 @@ own `type` tag and break deserialization (the existing
 Wire shapes:
 
 ```json
-// Apply (unchanged from today; no `op` field).
+// Apply (unchanged from today; no `op` field is written, though an explicit
+// "apply" is accepted on read).
 {"type": "config_delta", "timestamp": "...", "delta": { /* ... */ }}
 
 // Reset (new).
@@ -392,10 +393,13 @@ Wire shapes:
 ```
 
 The `Apply` form is identical to today's on-disk shape.
-Legacy events (no `op` field) decode as `Apply` — no migration needed.
-`deserialize_config_delta` in `crates/jp_conversation/src/stream.rs` is updated
-to look for `op == "reset"` first and fall through to the legacy `Apply` parse
-otherwise.
+`deserialize_config_delta` in `crates/jp_conversation/src/stream.rs` matches the
+`op` field strictly: absent (which covers all legacy events, so no migration is
+needed) or `"apply"` decodes as `Apply`; `"reset"` decodes as `Reset`; any other
+value is a deserialization error.
+Rejecting unknown ops keeps the field open for future variants: an op written by
+a newer version fails loudly on older versions instead of being misread as an
+`Apply`.
 
 Fold semantics:
 
@@ -553,6 +557,13 @@ not at base resolution time.
 The current validation flow should already handle this (validation happens on
 the final merged config), but it needs verification.
 
+Phase 1 adds a related constraint for continuing conversations:
+`add_config_delta` suppresses empty `Apply` diffs by resolving the stream's
+current config, and that resolution fails between a `Reset` and whichever
+`Apply` restores the required fields.
+Phase 2 must append post-reset `Apply` events directly (or defer diffing) rather
+than routing them through the suppression path.
+
 ### `NONE` detection ordering
 
 Because `NONE`'s pre-scan gate affects implicit config loading, it must be
@@ -601,19 +612,20 @@ Promote `ConfigDelta` from a struct to an enum with `Apply` and `Reset` variants
   The outer `InternalEvent` wrapper continues to add `"type": "config_delta"`
   unchanged.
 - Update the hand-rolled `deserialize_config_delta` in
-  `crates/jp_conversation/src/stream.rs` to dispatch on `op == "reset"`.
-  Events without an `op` field (including all legacy events) decode as `Apply`.
+  `crates/jp_conversation/src/stream.rs` to dispatch on the `op` field: absent
+  (all legacy events) or `"apply"` decodes as `Apply`, `"reset"` decodes as
+  `Reset`, and any other value is a deserialization error.
 - Update `add_config_delta` in the same file: the existing destructure and
   empty-diff suppression apply only to `Apply`.
   `add_config_delta(Reset)` always appends — `Reset` events have no diff to
   suppress and their presence is the whole point.
-- Update the stream fold (in `config()`, `Iter`, `IterMut`, `IntoIter`, and the
-  `apply_config_delta` helper introduced by [RFD 070] Phase 1) to match on the
-  variant:
-  - `Apply`: existing merge + unset + claims logic.
-  - `Reset`: replace accumulated state with `PartialAppConfig::default()`; clear
-    any in-progress claims state.
-- Update [RFD 070]'s walk-back algorithm to terminate at `Reset` events.
+- Centralize the stream fold in a `fold_config_delta` helper shared by
+  `config()`, `Iter`, `IterMut`, and `IntoIter`, matching on the variant:
+  - `Apply`: existing merge logic.
+  - `Reset`: replace accumulated state with `PartialAppConfig::default()`.
+- [RFD 070] hooks into the same helper when it lands (it requires this RFD):
+  `Apply` gains unset and claims handling, `Reset` clears per-invocation claims
+  state, and its walk-back algorithm terminates at `Reset` events.
 - Add a common `timestamp()` accessor on `ConfigDelta` so call sites that only
   need the timestamp don't need to match on the variant.
 
@@ -623,12 +635,14 @@ Tests:
   serialize/deserialize (not just `deserialize_config_delta` in isolation),
   asserting the on-disk shape is `{"type":"config_delta","op":"reset",...}`.
 - `ConfigDelta::Apply` on-disk shape is unchanged from today.
-- Backward compat: legacy events without `op` decode as `Apply`.
+- Backward compat: legacy events without `op` decode as `Apply`, and an explicit
+  `op == "apply"` is accepted.
+- Unknown `op` values fail deserialization.
 - `add_config_delta(ConfigDelta::Reset(_))` always appends, even on a stream
   where adding an empty `Apply` would be suppressed.
 - Fold: stream `[Apply(dev), Reset, Apply(fresh)]` resolves to defaults + fresh.
 - `-C dev` walk-back after `[Apply(dev), Reset]` reports no matching claims
-  (`Reset` terminated the walk).
+  (`Reset` terminated the walk; implemented as part of [RFD 070]'s claims work).
 
 Can be merged independently.
 
@@ -729,7 +743,6 @@ Conversation-ID resolution is out of scope for this RFD (see
   partial-merge primitives.
 
 [RFD 008]: 008-ordered-tool-directives.md
-[RFD 051]: 051-sub-agent-workflows.md
 [RFD 054]: 054-split-conversation-config-and-events.md
 [RFD 070]: 070-negative-config-deltas.md
 [RFD 079]: 079-config-sources-and-load-order.md

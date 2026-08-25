@@ -43,12 +43,12 @@ Only *positions* (indices into the conversation) are subject to the 1-based
 rule.
 A *count* — "how many turns" — is base-independent and is never shifted.
 
-| Kind                | Examples                                                                            | Translated?                                          |
-| ------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------- |
-| Position (absolute) | `--turn N`, `--from N`, `--to N`, DSL `N..M`                                        | yes, `N` (1-based) → `N - 1` (0-based)               |
-| Position (from end) | `--turn -N`, `--from -N`, `--to -N`, DSL `-N`, config `keep_last = "-N"`            | yes, `-1` is the last turn (`-N` → `FromEnd(N - 1)`) |
-| Count               | `--first N`, `--last N`, `--keep-first N`, `--keep-last N`, config `keep_first = N` | no                                                   |
-| Duration            | `5h`, `2days`                                                                       | n/a (resolved against timestamps)                    |
+| Kind                | Examples                                                                                        | Translated?                                          |
+| ------------------- | ----------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| Position (absolute) | `--turn N`, `--from N`, `--to N`, DSL `N..M`                                                    | yes, `N` (1-based) → `N - 1` (0-based)               |
+| Position (from end) | `--turn -N`, `--from -N`, `--to -N`, `--keep-last -N`, DSL `-N`, config `keep_last = "-N"`       | yes, `-1` is the last turn (`-N` → `FromEnd(N - 1)`) |
+| Count               | `--first N`, `--last N`, `--keep-first N`, `--keep-last N`, config `keep_first = N`             | no                                                   |
+| Time                | `5h`, `2days`, `2026-01-01`, RFC 3339                                                           | resolved against timestamps, then snapped to a turn  |
 
 Two consequences worth calling out:
 
@@ -68,6 +68,10 @@ Two consequences worth calling out:
 - The attachment selector (`jp query --attach 'ID?a:RANGE'`) uses the same
   rules: 1-based, `-1` is the last turn, `A..B` inclusive.
   `a:-3` is one turn; `a:-3..` is the last three.
+
+- A bare integer in a position slot is always a turn number, never a year.
+  The accepted date formats all require separators, so `--from 2026` is turn
+  2026 and `--from 2026-01-01` is the date.
 
 - Ranges are written `A..B` and are **inclusive on both ends** — `1..5` is
   turns 1 through 5 (five turns).
@@ -91,43 +95,72 @@ runs once against a conversation the user is looking at.
 `RuleBound`'s `Serialize` refuses it, so it cannot reach a config file even
 indirectly.
 
-The CLI splits the same distinction across flags rather than values:
+On the CLI the distinction is between *selecting* and *protecting* rather than
+between value forms:
 
-| Flag                           | Answers        | Accepts                                                          |
-| ------------------------------ | -------------- | ---------------------------------------------------------------- |
-| `--keep-first` / `--keep-last` | how many turns | a count (`3`), a duration (`2h`)                                 |
-| `--from` / `--to`              | which turn     | a position (`5`, `-3`), a duration, `last-compaction` (`--from`) |
+| Flag                           | Answers          | Accepts                                                        |
+| ------------------------------ | ---------------- | -------------------------------------------------------------- |
+| `--from` / `--to`              | which turns      | a position (`5`, `-3`), a time, `last-compaction` (`--from`)    |
+| `--keep-first` / `--keep-last` | what to protect  | a count (`3`), a position (`-3`), a time, `last-compaction` (`--keep-first`) |
 
-Each keep flag is mutually exclusive with the bound flag on its side, so the two
-never compete.
-Passing a position to a keep flag is an error pointing at `--from`/`--to`,
-because `--keep-last 3` and `--keep-last -3` would otherwise look like the same
-request while naming turns one apart.
+The two compose: the range flags name the selection, and the keep flags then
+protect turns at either end of it.
+A bare `N` on a keep flag is a count, so `--keep-last 3` and `--keep-last -4`
+protect the same three turns.
+
+## A bound never splits a turn
+
+Every position form resolves to a whole turn, including the time-based ones.
+A time value is an *addressing mode for a turn*, not a cut point inside one:
+`--from <time>` starts at the first turn to begin after the cutoff, and `--to
+<time>` ends at (and includes) the turn that was running at the cutoff.
+
+This is why the range ends are inclusive rather than half-open.
+Half-open reads well for a continuous coordinate, but once a bound names a turn,
+"which turn" is inherently inclusive.
+The conversation-creation filter on `jp c rm` / `jp c archive` / `jp c use` is
+the opposite case — it compares raw timestamps and never snaps to anything —
+so it is half-open and uses distinct flag names (`--created-since` /
+`--created-before`).
 
 ## Where the translation lives
 
-- **CLI `--from`/`--to`/`--first`/`--last`/`--turn`**
-  (`jp_cli::cmd::turn_range`): `parse_bound` maps a 1-based absolute `N` to
-  `RangeBound::Absolute(N - 1)` and a from-end `-N` to `RangeBound::FromEnd(N -
-  1)`.
-  `--from last-compaction` is the only non-numeric bound, and it is start-only.
+- **CLI turn selection** (`jp_cli::cmd::turn_selection`): `parse_bound` maps a
+  1-based absolute `N` to `RangeBound::Absolute(N - 1)` and a from-end `-N` to
+  `RangeBound::FromEnd(N - 1)`.
   `--turn` endpoints go through `parse_turn_pos`, which produces the same two
   flavours (`TurnPos::Absolute` / `TurnPos::FromEnd`) holding the number as
   written; `TurnPos::to_range_bound` does the 1-based → 0-based shift.
-  `--first`/`--last`/`--turn` are complete selectors that set both bounds:
-  `--turn N` is `Absolute(N - 1)` on both ends (`--turn A..B` spans \`Absolute(A
+  `TurnSelection::resolve` then resolves every bound against the stream and
+  produces a `TurnSet` of inclusive 0-based windows.
 
-  - 1\)`through`Absolute(B - 1)` ),  `--first
-    N`is`Absolute(0)`through`Absolute(N - 1)` , and  `--last N`is`FromEnd(N -
-    1)\` through the last turn.
+  `--turn`, `--from`/`--to`, and `--first`/`--last` are three ways of naming the
+  base selection and are mutually exclusive:
+
+  | Selector       | Start bound       | End bound         |
+  | -------------- | ----------------- | ----------------- |
+  | `--turn N`     | `Absolute(N - 1)` | `Absolute(N - 1)` |
+  | `--turn -N`    | `FromEnd(N - 1)`  | `FromEnd(N - 1)`  |
+  | `--turn A..B`  | `Absolute(A - 1)` | `Absolute(B - 1)` |
+  | `--first N`    | `Absolute(0)`     | `Absolute(N - 1)` |
+  | `--last N`     | `FromEnd(N - 1)`  | `FromEnd(0)`      |
+
+  Either end of `--turn A..B` may be a from-end position, and the two forms mix
+  freely (`--turn 2..-1`).
+  `--first` and `--last` given together produce two windows and skip the turns
+  between them.
+
+- **Keep flags** (`jp_cli::cmd::turn_selection`): `keep_first_bound` /
+  `keep_last_bound` map `RuleBound::Absolute(N)` (the 1-based value parsed from
+  `@N`) to `RangeBound::Absolute(N - 1)`; the `RuleBound::Turns(N)` (count) arm
+  is untouched.
+  `TurnSelection::trim` then clamps each window to the turns those bounds leave
+  unprotected — it clamps rather than shifts, so a turn already outside the
+  window needs no protecting.
 
 - **Config `keep_first`/`keep_last` and the inline DSL**: `RuleBound`'s
   `FromStr` (`jp_config::conversation::compaction`) and `parse_dsl_bound`
   (`jp_cli::cmd::compact_flag`) both map `-N` to `RuleBound::FromEnd(N - 1)`.
-  `keep_first_to_bound` / `keep_last_to_bound`
-  (`jp_cli::cmd::conversation::compact`) then shift `Absolute(N)` to
-  `RangeBound::Absolute(N - 1)` and pass `FromEnd` through unchanged.
-  The `RuleBound::Turns(N)` (count) arm is untouched.
 
   The two parsers differ on a bare `N`: in config it is a count (`keep_first =
   5` keeps five turns), in the DSL it is a position (`5..` starts at turn 5).

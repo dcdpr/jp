@@ -1,0 +1,28 @@
+[conversation.tools.ticket_show]
+enable = false
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "Read one ticket: its metadata, description, and full discussion."
+description = """
+Print a ticket with its comments numbered, so a reply can name the comment it
+answers (`ticket_comment` takes that number as `re`).
+
+The whole discussion comes back in one call — there is no pagination, because a
+ticket that needs it should have been closed and split.
+"""
+
+examples = """
+```json
+{"id": "T-02wt0kx"}
+```
+"""
+
+[conversation.tools.ticket_show.style]
+parameters = "function_call"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.ticket_show.parameters.id]
+type = "string"
+required = true
+summary = "The ticket to read: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`."

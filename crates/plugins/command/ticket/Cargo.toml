@@ -1,0 +1,39 @@
+[package]
+name = "jp-ticket"
+description = "Track work items as markdown files."
+
+authors.workspace = true
+documentation.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license-file.workspace = true
+publish.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+# No `[package.metadata.jp-registry]`: this plugin serves the tickets in JP's
+# own repository, so it is deliberately absent from the published registry.
+# Install it with `cargo install --path .` and `jp` will find it on `$PATH`.
+
+[dependencies]
+jp_github = { workspace = true }
+jp_plugin = { workspace = true }
+ticket = { workspace = true }
+
+camino = { workspace = true }
+chrono = { workspace = true }
+clap = { workspace = true, features = ["derive", "error-context", "help", "std", "usage"] }
+serde = { workspace = true, features = ["std", "derive"] }
+serde_json = { workspace = true, features = ["std"] }
+tokio = { workspace = true }
+
+[dev-dependencies]
+camino-tempfile = { workspace = true }
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "jp-ticket"
+path = "src/main.rs"

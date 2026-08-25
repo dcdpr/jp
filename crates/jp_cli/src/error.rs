@@ -74,6 +74,14 @@ pub(crate) enum Error {
         source: Box<jp_llm::Error>,
     },
 
+    /// Reading an `@path` argument value from disk failed.
+    ///
+    /// The path and the underlying cause are both in the message because clap
+    /// renders a value-parser failure through `Display` alone and never walks
+    /// the cause chain.
+    #[error("cannot read '{path}': {source}")]
+    ArgFile { path: String, source: io::Error },
+
     #[error("{0} not found: {1}")]
     NotFound(&'static str, String),
 
@@ -171,6 +179,28 @@ pub(crate) enum Error {
     #[error("Compaction error: {0}")]
     Compaction(String),
 
+    /// A summary range would have to grow over text that cannot be re-derived.
+    ///
+    /// Turn numbers are 1-based, as displayed.
+    #[error(
+        "Summary for turns {from}..{to} overlaps an existing summary covering turns \
+         {required_from}..{required_to}"
+    )]
+    SummaryOverlap {
+        /// Whether the summary being created is the verbatim one.
+        ///
+        /// `false` means a generated summary is blocked by verbatim text
+        /// already covering part of the range.
+        authored: bool,
+        from: usize,
+        to: usize,
+        required_from: usize,
+        required_to: usize,
+    },
+
+    #[error("Label error: {0}")]
+    Label(String),
+
     /// The summarizer produced no usable summary.
     ///
     /// A dedicated variant so the failure names the model that produced
@@ -179,4 +209,13 @@ pub(crate) enum Error {
     /// different model.
     #[error("Summarization failed for {model}: {reason}")]
     Summarize { model: String, reason: String },
+
+    /// Title generation produced no usable title.
+    ///
+    /// A dedicated variant so the failure names the model that produced
+    /// nothing: a refusal or a schema the model couldn't satisfy is a property
+    /// of the model, not of the conversation, and the fix is to point
+    /// `conversation.title.generate.model` somewhere else.
+    #[error("Title generation failed for {model}: {reason}")]
+    TitleGeneration { model: String, reason: String },
 }

@@ -18,8 +18,11 @@ use futures::{
 use indexmap::IndexMap;
 use jp_attachment::Attachment;
 use jp_config::{
-    AppConfig, PartialConfig, assistant::tool_choice::ToolChoice,
-    conversation::tool::QuestionTarget, model::id::ProviderId, style::streaming::StreamingConfig,
+    AppConfig, PartialConfig, ToPartial as _,
+    assistant::{request::MaxResponseBytes, tool_choice::ToolChoice},
+    conversation::tool::QuestionTarget,
+    model::id::ProviderId,
+    style::streaming::StreamingConfig,
 };
 use jp_conversation::{
     ConversationStream,
@@ -31,7 +34,6 @@ use jp_llm::{
     error::StreamError,
     event::{Event, EventPart, FinishReason, ToolCallPart},
     model::ModelDetails,
-    output_limit_bytes,
     provider::get_provider,
     query::ChatQuery,
     tool::{InvocationContext, ToolDefinition, executor::Executor},
@@ -210,7 +212,7 @@ pub(super) async fn run_turn_loop(
         0 => None,
         secs => Some(Duration::from_secs(u64::from(secs))),
     };
-    let output_limit = output_limit_bytes(cfg.assistant.request.max_response_bytes);
+    let output_limit = cfg.assistant.request.max_response_bytes.bytes();
     let mut turn_coordinator = TurnCoordinator::new(
         printer.clone(),
         cfg.style.clone(),
@@ -881,43 +883,40 @@ async fn build_inquiry_backend(
     provider: Arc<dyn Provider>,
     attachments: Vec<Attachment>,
 ) -> Result<Arc<LlmInquiryBackend>, Error> {
-    let sections = build_sections(&cfg.assistant, !tools.is_empty());
-    let inquiry_override = &cfg.conversation.inquiry.assistant;
+    // Every field here is already resolved against the top-level assistant by
+    // `AppConfig::from_partial_with_defaults`, so an unset inquiry key carries
+    // the assistant's value rather than a placeholder to fall back from.
+    let inquiry_cfg = &cfg.conversation.inquiry.assistant;
+    let sections = build_sections(inquiry_cfg, !tools.is_empty());
+    let default_system_prompt = inquiry_cfg.system_prompt.clone();
+    let default_max_response_bytes = inquiry_cfg.request.max_response_bytes.bytes();
 
-    // Use the inquiry system prompt if configured, otherwise fall back to the
-    // parent assistant's system prompt.
-    let default_system_prompt = inquiry_override
-        .system_prompt
-        .clone()
-        .or_else(|| cfg.assistant.system_prompt.clone());
-
-    // Same fallback for the output ceiling: an inquiry can be held to a tighter
-    // (or looser) ceiling than the parent assistant.
-    //
-    // `AssistantOverrideConfig::request` is a resolved `RequestConfig`, so a
-    // block where the user set only a sibling field (say `cache`) arrives here
-    // with every other field at Rust's `Default` rather than its schematic
-    // default. A `0` therefore cannot be distinguished from "unset", and reading
-    // it as the ceiling's disable sentinel would silently drop the runaway guard
-    // for every inquiry. Treat it as "inherit" instead, matching the block's
-    // documented unset-means-inherit rule. A per-question override carries real
-    // `Option`s, so `0` still disables the ceiling there.
-    let default_max_response_bytes = inquiry_override
-        .request
-        .as_ref()
-        .map_or(0, |request| request.max_response_bytes);
-    let default_max_response_bytes = match default_max_response_bytes {
-        0 => cfg.assistant.request.max_response_bytes,
-        bytes => bytes,
-    };
+    // Carried as a partial so the per-question layer below can inherit from it
+    // without a second resolution pass, and so it can be applied to the
+    // request's stream as a config delta.
+    let default_assistant = inquiry_cfg.to_partial();
 
     // Track providers we've already constructed to avoid duplicates.
     let mut providers: IndexMap<ProviderId, Arc<dyn Provider>> = IndexMap::new();
 
-    // Build the default InquiryConfig from the global inquiry override
-    // merged with the parent assistant config.
-    let default_config = if let Some(inquiry_model_cfg) = inquiry_override.model.as_ref() {
-        let inquiry_model_id = inquiry_model_cfg.id.resolved();
+    // Inquiries reuse the caller's provider and model details unless the config
+    // points them at a different model than the assistant uses, in which case a
+    // second provider is constructed for it. Comparing against the assistant's
+    // configured id (rather than the passed-in details) keeps a CLI model
+    // override on the main request from being mistaken for an inquiry override.
+    let inquiry_model_id = inquiry_cfg.model.id.resolved();
+    let default_config = if inquiry_model_id == cfg.assistant.model.id.resolved() {
+        providers.insert(model.id.provider, Arc::clone(&provider));
+
+        InquiryConfig {
+            provider: Arc::clone(&provider),
+            model: model.clone(),
+            system_prompt: default_system_prompt,
+            sections: sections.clone(),
+            max_response_bytes: default_max_response_bytes,
+            assistant: default_assistant,
+        }
+    } else {
         // Attribute failures to the override: without this, e.g. a missing
         // API key environment variable renders identically to a main-model
         // failure and points the user at the wrong config.
@@ -959,16 +958,7 @@ async fn build_inquiry_backend(
             system_prompt: default_system_prompt,
             sections: sections.clone(),
             max_response_bytes: default_max_response_bytes,
-        }
-    } else {
-        providers.insert(model.id.provider, Arc::clone(&provider));
-
-        InquiryConfig {
-            provider: Arc::clone(&provider),
-            model: model.clone(),
-            system_prompt: default_system_prompt,
-            sections: sections.clone(),
-            max_response_bytes: default_max_response_bytes,
+            assistant: default_assistant,
         }
     };
 
@@ -1064,7 +1054,15 @@ async fn build_inquiry_overrides(
             let max_response_bytes = per_q
                 .request
                 .max_response_bytes
-                .unwrap_or(default_config.max_response_bytes);
+                .map_or(default_config.max_response_bytes, MaxResponseBytes::bytes);
+
+            // Everything the provider reads from the stream's config follows
+            // the same order, so the per-question partial inherits from the
+            // global inquiry one rather than from the bare defaults.
+            let assistant = per_q
+                .as_ref()
+                .clone()
+                .inherit_from(default_config.assistant.clone());
 
             overrides.insert((tool_name.to_owned(), question_id.clone()), InquiryConfig {
                 provider: inq_provider,
@@ -1072,6 +1070,7 @@ async fn build_inquiry_overrides(
                 system_prompt,
                 sections: default_config.sections.clone(),
                 max_response_bytes,
+                assistant,
             });
         }
     }

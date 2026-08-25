@@ -51,6 +51,15 @@ pub struct MacroArgs {
     pub serde: SerdeMeta,
     pub no_deserialize_derive: bool,
 
+    // Declare input shapes the derive cannot infer, for a type whose
+    // `Deserialize` accepts more than its fields describe (a struct that also
+    // deserializes from a bool, say).
+    //
+    // Names a `fn(&mut SchemaBuilder) -> Vec<Schema>`. The derived struct schema
+    // is unioned with the returned variants, so field names and doc comments
+    // are still described alongside the extra shapes.
+    pub schema_union_with: Option<ExprPath>,
+
     // Quick hack to avoid `is_untagged` to generate a custom Deserialize impl,
     // which ignores any custom serde tags on an enum.
     pub skip_custom_untagged_enum_deserialize_impl: bool,

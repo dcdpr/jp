@@ -1,10 +1,12 @@
 use std::sync::Arc;
 
+use assert_matches::assert_matches;
 use chrono::{DateTime, Utc};
+use clap::Parser as _;
 use indexmap::IndexMap;
 use jp_config::{
     AppConfig, PartialAppConfig, ToPartial,
-    conversation::tool::{AllowToggle, Enable, PartialEnableConfig, PartialToolConfig},
+    conversation::tool::{AllowToggle, Enable, PartialEnableConfig, PartialToolConfig, ResultMode},
     model::id::{ModelIdConfig, PartialModelIdConfig, ProviderId},
     util::build,
 };
@@ -20,13 +22,17 @@ use jp_llm::{
 };
 use jp_printer::{OutputFormat, Printer, SharedBuffer};
 use jp_term::width::display_width;
-use jp_workspace::{ConversationHandle, Workspace};
+use jp_workspace::{
+    ConversationHandle, Workspace,
+    session::{Session, SessionId, SessionSource},
+};
 use relative_path::RelativePathBuf;
 use serde_json::Value;
+use tokio::runtime::Runtime;
 
 use super::*;
 use crate::{
-    KeyValueOrPath,
+    Globals, KeyValueOrPath,
     cmd::target::{ConversationTarget, PickerFilter},
     config_pipeline::ConfigPipeline,
     signals::testing::detached_router,
@@ -75,6 +81,14 @@ fn effective(partial: &PartialAppConfig, name: &str) -> Enable {
         .effective(&defaults)
 }
 
+/// Query input carrying `text` as the inline query, with `--quote` unset.
+fn inline_query(text: &str) -> QueryInput {
+    QueryInput {
+        query: Some(vec![text.to_owned()]),
+        ..Default::default()
+    }
+}
+
 /// Helper to build directives from a list.
 fn directives(ds: Vec<ToolDirective>) -> ToolDirectives {
     ToolDirectives(ds)
@@ -112,7 +126,7 @@ fn build_query_config(
     query: &Query,
     handle: Option<&ConversationHandle>,
 ) -> AppConfig {
-    let pipeline = ConfigPipeline::new(base, cfg_args, Some(workspace), None).unwrap();
+    let pipeline = ConfigPipeline::new(cfg_args, Some(workspace), None, || Ok(base)).unwrap();
 
     let conversation_partial = handle.map(|handle| {
         query
@@ -537,8 +551,10 @@ fn test_named_enable_of_locked_off_tool_errors() {
     .unwrap_err()
     .to_string();
 
-    assert!(err.contains("network"), "unexpected error: {err}");
-    assert!(err.contains("locked-off"), "unexpected error: {err}");
+    assert_eq!(
+        err,
+        "cannot enable `network`: this tool is configured as locked-off"
+    );
 }
 
 #[test]
@@ -665,11 +681,359 @@ fn test_tool_use_accepts_locked_on_builtin() {
 }
 
 #[test]
+fn test_tool_use_forces_a_disabled_tool_for_one_turn() {
+    // `jp q -u explicitly_disabled_tool` runs that tool without a second flag:
+    // `tool_definitions` keeps a forced tool even while it is disabled, so the
+    // choice alone is enough and nothing has to be enabled in the config.
+    let query = Query {
+        tool_use: Some(Some("explicitly_disabled_tool".into())),
+        ..Default::default()
+    };
+
+    let partial =
+        IntoPartialAppConfig::apply_cli_config(&query, None, make_partial_with_tools(), None)
+            .unwrap();
+
+    assert_eq!(
+        query.effective_tool_choice(&AppConfig::new_test()),
+        ToolChoice::Function("explicitly_disabled_tool".into())
+    );
+    assert!(
+        !effective(&partial, "explicitly_disabled_tool").state,
+        "the force is invocation-scoped: the tool stays disabled in the config"
+    );
+}
+
+#[test]
+fn test_tool_use_accepts_an_if_named_tool() {
+    // `explicit_tool` is off with `allow_toggle = if_named`. A named force is
+    // exactly what its policy permits, so `-u` is accepted rather than refused.
+    let query = Query {
+        tool_use: Some(Some("explicit_tool".into())),
+        ..Default::default()
+    };
+
+    IntoPartialAppConfig::apply_cli_config(&query, None, make_partial_with_tools(), None)
+        .expect("an if_named tool accepts a named force");
+
+    assert_eq!(
+        query.effective_tool_choice(&AppConfig::new_test()),
+        ToolChoice::Function("explicit_tool".into())
+    );
+}
+
+#[test]
+fn test_tool_choice_without_a_flag_comes_from_config() {
+    // The other side of `effective_tool_choice`: with no `-u`/`-U`, the
+    // conversation's configured choice is what applies.
+    let mut cfg = AppConfig::new_test();
+    cfg.assistant.tool_choice = ToolChoice::Required;
+
+    assert_eq!(
+        Query::default().effective_tool_choice(&cfg),
+        ToolChoice::Required
+    );
+}
+
+#[test]
+fn test_tool_use_of_locked_off_tool_errors() {
+    // A locked-off tool cannot be forced: the refusal names the lock rather
+    // than claiming the tool does not exist.
+    let mut partial = make_partial_with_tools();
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("network".into(), PartialToolConfig {
+            enable: Some(PartialEnableConfig::LOCKED_OFF),
+            ..Default::default()
+        });
+
+    let err = IntoPartialAppConfig::apply_cli_config(
+        &Query {
+            tool_use: Some(Some("network".into())),
+            ..Default::default()
+        },
+        None,
+        partial,
+        None,
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert_eq!(
+        err,
+        "cannot enable `network`: this tool is configured as locked-off"
+    );
+}
+
+#[test]
+fn test_tool_use_of_unknown_tool_errors() {
+    let err = IntoPartialAppConfig::apply_cli_config(
+        &Query {
+            tool_use: Some(Some("no_such_tool".into())),
+            ..Default::default()
+        },
+        None,
+        make_partial_with_tools(),
+        None,
+    )
+    .unwrap_err()
+    .to_string();
+
+    // Pins the message this PR introduced: the old one said "any enabled
+    // tools", which a `contains("no_such_tool")` check could not tell apart.
+    assert_eq!(
+        err,
+        "tool choice 'no_such_tool' does not match any known tools"
+    );
+}
+
+#[test]
+fn test_tool_use_does_not_persist_into_partial_config() {
+    // `-u` binds one turn. Mirrors `no_title_does_not_persist_into_partial_config`:
+    // anything this flag writes into the partial would reach the conversation
+    // through `get_config_delta_from_cli` and force the tool on every later
+    // query.
+    let base = make_partial_with_tools();
+
+    let with_flag = IntoPartialAppConfig::apply_cli_config(
+        &Query {
+            tool_use: Some(Some("explicitly_disabled_tool".into())),
+            ..Default::default()
+        },
+        None,
+        base.clone(),
+        None,
+    )
+    .unwrap();
+    let without_flag =
+        IntoPartialAppConfig::apply_cli_config(&Query::default(), None, base, None).unwrap();
+
+    assert_eq!(with_flag.assistant.tool_choice, None);
+    assert_eq!(
+        effective(&with_flag, "explicitly_disabled_tool").state,
+        effective(&without_flag, "explicitly_disabled_tool").state,
+    );
+}
+
+#[test]
+fn test_no_tool_use_does_not_persist_into_partial_config() {
+    // `-U` is the single-turn counterpart of `-T`, so it must not write
+    // `tool_choice = none` into the conversation either.
+    let partial = IntoPartialAppConfig::apply_cli_config(
+        &Query {
+            no_tool_use: true,
+            ..Default::default()
+        },
+        None,
+        make_partial_with_tools(),
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(partial.assistant.tool_choice, None);
+
+    assert_eq!(
+        Query {
+            no_tool_use: true,
+            ..Default::default()
+        }
+        .effective_tool_choice(&AppConfig::new_test()),
+        ToolChoice::None,
+        "the flag still takes effect for this turn"
+    );
+}
+
+#[test]
+fn test_tool_directive_does_persist_into_partial_config() {
+    // The deliberate asymmetry: `-t` is the sticky flag. Enabling a tool has to
+    // reach the config, because that is the only way to make it stick, and
+    // `-T` is the documented undo.
+    let partial = IntoPartialAppConfig::apply_cli_config(
+        &Query {
+            tool_directives: directives(vec![ToolDirective::Enable(
+                "explicitly_disabled_tool".into(),
+            )]),
+            ..Default::default()
+        },
+        None,
+        make_partial_with_tools(),
+        None,
+    )
+    .unwrap();
+
+    assert!(effective(&partial, "explicitly_disabled_tool").state);
+}
+
+#[test]
+fn test_tool_use_forces_a_tool_a_directive_disabled() {
+    // `jp q -T my_tool -u my_tool`: the two no longer contradict. `-T` disables
+    // the tool durably, `-u` forces it for this turn only, and both hold.
+    let query = Query {
+        tool_directives: directives(vec![ToolDirective::Disable(
+            "implicitly_enabled_tool".into(),
+        )]),
+        tool_use: Some(Some("implicitly_enabled_tool".into())),
+        ..Default::default()
+    };
+
+    let partial =
+        IntoPartialAppConfig::apply_cli_config(&query, None, make_partial_with_tools(), None)
+            .unwrap();
+
+    assert!(
+        !effective(&partial, "implicitly_enabled_tool").state,
+        "`-T` still persists the disable"
+    );
+    assert_eq!(
+        query.effective_tool_choice(&AppConfig::new_test()),
+        ToolChoice::Function("implicitly_enabled_tool".into()),
+        "`-u` still forces the tool for this turn"
+    );
+}
+
+#[test]
+fn test_builtin_config_merges_under_user_config() {
+    // A one-field user override keeps the built-in source, enable policy, and parameters.
+    let mut partial = make_partial_with_tools();
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("describe_tools".into(), PartialToolConfig {
+            result: Some(ResultMode::Ask),
+            ..Default::default()
+        });
+
+    let partial =
+        IntoPartialAppConfig::apply_cli_config(&Query::default(), None, partial, None).unwrap();
+
+    let tool = &partial.conversation.tools.tools["describe_tools"];
+    assert_eq!(tool.result, Some(ResultMode::Ask), "user field wins");
+    assert_eq!(
+        tool.source,
+        Some(ToolSource::Builtin { tool: None }),
+        "builtin source survives a partial user override"
+    );
+    assert!(
+        effective(&partial, "describe_tools").is_locked(),
+        "builtin enable policy survives a partial user override"
+    );
+    assert!(
+        tool.parameters.contains_key("tools"),
+        "builtin parameter schema survives a partial user override"
+    );
+}
+
+#[test]
+fn test_builtin_config_preserves_tool_order() {
+    // Tool order is the order tools are presented to the provider, so merging
+    // a builtin block must not move an existing entry to the end.
+    let mut partial = PartialAppConfig::default();
+    partial.conversation.tools.tools = IndexMap::from_iter([
+        ("describe_tools".into(), PartialToolConfig {
+            result: Some(ResultMode::Ask),
+            ..Default::default()
+        }),
+        ("zzz_last".into(), PartialToolConfig::default()),
+    ]);
+
+    let partial =
+        IntoPartialAppConfig::apply_cli_config(&Query::default(), None, partial, None).unwrap();
+
+    let names: Vec<&str> = partial
+        .conversation
+        .tools
+        .tools
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(names, vec!["describe_tools", "zzz_last"]);
+}
+
+/// The seam between merging built-in config under user config and validating
+/// `-u`.
+/// A table override sets only `state`, so `allow_toggle = never` survives from
+/// the built-in block and the tool ends up locked *off* rather than merely
+/// disabled.
+/// Forcing it is then refused, which is the documented meaning of the table
+/// form (RFD 083) but only became reachable once both halves landed.
+#[test]
+fn test_table_disabled_builtin_cannot_be_forced() {
+    let mut partial = make_partial_with_tools();
+    // `[conversation.tools.describe_tools] enable = { state = false }`
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("describe_tools".into(), PartialToolConfig {
+            enable: Some(PartialEnableConfig {
+                state: Some(false),
+                allow_toggle: None,
+            }),
+            ..Default::default()
+        });
+
+    let err = IntoPartialAppConfig::apply_cli_config(
+        &Query {
+            tool_use: Some(Some("describe_tools".into())),
+            ..Default::default()
+        },
+        None,
+        partial,
+        None,
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert_eq!(
+        err,
+        "cannot enable `describe_tools`: this tool is configured as locked-off"
+    );
+}
+
+/// The escape hatch for the above: the bool shorthand writes `allow_toggle =
+/// any` explicitly, so it overrides the built-in's policy as well as its state
+/// and the tool stays forceable.
+#[test]
+fn test_bool_disabled_builtin_can_still_be_forced() {
+    let mut partial = make_partial_with_tools();
+    // `[conversation.tools.describe_tools] enable = false`
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("describe_tools".into(), PartialToolConfig {
+            enable: Some(PartialEnableConfig::OFF),
+            ..Default::default()
+        });
+
+    let query = Query {
+        tool_use: Some(Some("describe_tools".into())),
+        ..Default::default()
+    };
+
+    let partial = IntoPartialAppConfig::apply_cli_config(&query, None, partial, None)
+        .expect("the bool shorthand leaves the tool forceable");
+
+    assert_eq!(
+        effective(&partial, "describe_tools").allow_toggle,
+        AllowToggle::Always,
+        "the shorthand overrides the built-in's toggle policy, not just its state"
+    );
+    assert_eq!(
+        query.effective_tool_choice(&AppConfig::new_test()),
+        ToolChoice::Function("describe_tools".into())
+    );
+}
+
+#[test]
 fn query_model_override_is_persisted_as_config_delta() {
     let base_config = Arc::new(config_with_model(ProviderId::Anthropic, "base-model"));
     let conversation_id = make_id(1000);
 
-    let mut workspace = Workspace::new("/tmp/test");
+    let mut workspace = Workspace::in_memory("/tmp/test");
     workspace.create_conversation_with_id(
         conversation_id,
         Conversation::default(),
@@ -727,7 +1091,7 @@ fn query_cfg_sourced_compaction_persists_as_config_delta() {
     let base_config = Arc::new(config_with_model(ProviderId::Anthropic, "base-model"));
     let conversation_id = make_id(2000);
 
-    let mut workspace = Workspace::new("/tmp/test");
+    let mut workspace = Workspace::in_memory("/tmp/test");
     workspace.create_conversation_with_id(
         conversation_id,
         Conversation::default(),
@@ -753,6 +1117,141 @@ fn query_cfg_sourced_compaction_persists_as_config_delta() {
     assert!(
         !delta.conversation.compaction.rules.is_empty(),
         "compaction config from the config layers must persist as a conversation delta",
+    );
+}
+
+/// The `config_delta` events of a stream's serialized `events.json`.
+fn serialized_config_deltas(events: &ConversationStream) -> Vec<Value> {
+    let (_base, serialized) = events.clone().to_parts().unwrap();
+    serialized
+        .into_iter()
+        .filter(|event| event.get("type").and_then(Value::as_str) == Some("config_delta"))
+        .collect()
+}
+
+#[test]
+fn cfg_reset_none_appends_reset_then_post_apply() {
+    // `jp q --cfg=NONE --cfg=<post>` on a continuing conversation ([RFD 038]):
+    // the stream records `[Reset, Apply(post)]`, where `post` restores the
+    // required fields on top of program defaults.
+    let base_config = Arc::new(config_with_model(ProviderId::Anthropic, "base-model"));
+    let conversation_id = make_id(3000);
+
+    let mut workspace = Workspace::in_memory("/tmp/test");
+    workspace.create_conversation_with_id(
+        conversation_id,
+        Conversation::default(),
+        Arc::clone(&base_config),
+    );
+    let handle = workspace.acquire_conversation(&conversation_id).unwrap();
+    let lock = workspace.test_lock(handle);
+
+    let post = config_with_model(ProviderId::Openai, "fresh-model").to_partial();
+    let reset = ConfigResetEvents {
+        reset: ConfigReset::Defaults,
+        post: Box::new(post),
+    };
+
+    lock.as_mut()
+        .update_events(|events| persist_config_reset(events, reset, DateTime::<Utc>::UNIX_EPOCH));
+
+    let events = lock.events().clone();
+
+    // The stream resolves to the post-reset state, not the pre-reset base.
+    let merged = events.config().unwrap();
+    let model_id = merged.assistant.model.id.resolved();
+    assert_eq!(model_id.provider, ProviderId::Openai);
+    assert_eq!(model_id.name.as_ref(), "fresh-model");
+
+    // Wire shape: a `Reset` marker followed by a plain `Apply` (no `op`).
+    let deltas = serialized_config_deltas(&events);
+    assert_eq!(deltas.len(), 2, "expected [Reset, Apply], got {deltas:?}");
+    assert_eq!(deltas[0].get("op").and_then(Value::as_str), Some("reset"));
+    assert!(
+        deltas[1].get("op").is_none(),
+        "`Apply` writes no `op` field"
+    );
+}
+
+#[test]
+fn cfg_reset_workspace_appends_reset_then_workspace_apply() {
+    // `jp q --cfg=WORKSPACE` on a continuing conversation ([RFD 038]): the
+    // stream records `[Reset, Apply(workspace)]`, re-adopting the workspace's
+    // resolved config as of this invocation. No further `Apply` is written
+    // when nothing is layered on top.
+    let base_config = Arc::new(config_with_model(ProviderId::Anthropic, "base-model"));
+    let conversation_id = make_id(3001);
+
+    let mut workspace = Workspace::in_memory("/tmp/test");
+    workspace.create_conversation_with_id(
+        conversation_id,
+        Conversation::default(),
+        Arc::clone(&base_config),
+    );
+    let handle = workspace.acquire_conversation(&conversation_id).unwrap();
+    let lock = workspace.test_lock(handle);
+
+    let workspace_partial = config_with_model(ProviderId::Openai, "ws-model").to_partial();
+    let reset = ConfigResetEvents {
+        reset: ConfigReset::Workspace(Box::new(workspace_partial)),
+        post: Box::new(PartialAppConfig::default()),
+    };
+
+    lock.as_mut()
+        .update_events(|events| persist_config_reset(events, reset, DateTime::<Utc>::UNIX_EPOCH));
+
+    let events = lock.events().clone();
+
+    let merged = events.config().unwrap();
+    let model_id = merged.assistant.model.id.resolved();
+    assert_eq!(model_id.provider, ProviderId::Openai);
+    assert_eq!(model_id.name.as_ref(), "ws-model");
+
+    let deltas = serialized_config_deltas(&events);
+    assert_eq!(
+        deltas.len(),
+        2,
+        "empty post-reset state must not write a third event: {deltas:?}"
+    );
+    assert_eq!(deltas[0].get("op").and_then(Value::as_str), Some("reset"));
+    assert!(deltas[1].get("op").is_none());
+}
+
+#[test]
+fn cfg_reset_none_without_post_leaves_unresolvable_config() {
+    // A bare `jp q --cfg=NONE` on a continuing conversation records only the
+    // `Reset`. Program defaults lack required fields (`assistant.model.id`),
+    // so resolving the stream's config fails until a later `Apply` restores
+    // them — the intended escape-hatch semantics from [RFD 038].
+    let base_config = Arc::new(config_with_model(ProviderId::Anthropic, "base-model"));
+    let conversation_id = make_id(3002);
+
+    let mut workspace = Workspace::in_memory("/tmp/test");
+    workspace.create_conversation_with_id(
+        conversation_id,
+        Conversation::default(),
+        Arc::clone(&base_config),
+    );
+    let handle = workspace.acquire_conversation(&conversation_id).unwrap();
+    let lock = workspace.test_lock(handle);
+
+    let reset = ConfigResetEvents {
+        reset: ConfigReset::Defaults,
+        post: Box::new(PartialAppConfig::default()),
+    };
+
+    lock.as_mut()
+        .update_events(|events| persist_config_reset(events, reset, DateTime::<Utc>::UNIX_EPOCH));
+
+    let events = lock.events().clone();
+
+    let deltas = serialized_config_deltas(&events);
+    assert_eq!(deltas.len(), 1, "expected only the Reset: {deltas:?}");
+    assert_eq!(deltas[0].get("op").and_then(Value::as_str), Some("reset"));
+
+    assert!(
+        events.config().is_err(),
+        "program defaults alone must fail validation"
     );
 }
 
@@ -805,11 +1304,11 @@ async fn query_sequence_new_cfg_profile_then_model_override_persists_for_plain_q
         .into(),
     );
 
-    let mut workspace = Workspace::new(root);
+    let mut workspace = Workspace::in_memory(root);
 
     let query1 = Query {
         new_conversation: true,
-        query: Some(vec!["is this thing on?".to_owned()]),
+        input: inline_query("is this thing on?"),
         ..Default::default()
     };
     let cfg1 = build_query_config(
@@ -840,7 +1339,7 @@ async fn query_sequence_new_cfg_profile_then_model_override_persists_for_plain_q
     let handle2 = workspace.acquire_conversation(&conversation_id).unwrap();
     let query2 = Query {
         model: Some("gpt".to_owned()),
-        query: Some(vec!["are you there?".to_owned()]),
+        input: inline_query("are you there?"),
         ..Default::default()
     };
     let cfg2 = build_query_config(&workspace, base.clone(), &[], &query2, Some(&handle2));
@@ -856,7 +1355,7 @@ async fn query_sequence_new_cfg_profile_then_model_override_persists_for_plain_q
 
     let handle3 = workspace.acquire_conversation(&conversation_id).unwrap();
     let query3 = Query {
-        query: Some(vec!["plain query".to_owned()]),
+        input: inline_query("plain query"),
         ..Default::default()
     };
     let cfg3 = build_query_config(&workspace, base, &[], &query3, Some(&handle3));
@@ -949,7 +1448,7 @@ fn apply_title_override_no_title_clears_existing_title() {
     // conversation inherits the source's title via
     // `fork_conversation`, and `--no-title` is supposed to leave
     // the run with no title at all.
-    let mut workspace = Workspace::new("/tmp/test");
+    let mut workspace = Workspace::in_memory("/tmp/test");
     let lock = lock_with_title(&mut workspace, make_id(1000), Some("inherited"));
 
     apply_title_override(&lock, None, true);
@@ -962,7 +1461,7 @@ fn apply_title_override_no_title_clears_resumed_title() {
     // `--no-title` is symmetric with `--title T`: both write the
     // user's intent into `metadata.title`, regardless of whether
     // the conversation is new, forked, or resumed.
-    let mut workspace = Workspace::new("/tmp/test");
+    let mut workspace = Workspace::in_memory("/tmp/test");
     let lock = lock_with_title(&mut workspace, make_id(1001), Some("existing"));
 
     apply_title_override(&lock, None, true);
@@ -972,7 +1471,7 @@ fn apply_title_override_no_title_clears_resumed_title() {
 
 #[test]
 fn apply_title_override_title_overwrites_existing_title() {
-    let mut workspace = Workspace::new("/tmp/test");
+    let mut workspace = Workspace::in_memory("/tmp/test");
     let lock = lock_with_title(&mut workspace, make_id(1002), Some("old"));
 
     apply_title_override(&lock, Some("new"), false);
@@ -982,7 +1481,7 @@ fn apply_title_override_title_overwrites_existing_title() {
 
 #[test]
 fn apply_title_override_neither_flag_is_noop() {
-    let mut workspace = Workspace::new("/tmp/test");
+    let mut workspace = Workspace::in_memory("/tmp/test");
     let lock = lock_with_title(&mut workspace, make_id(1003), Some("keep"));
 
     apply_title_override(&lock, None, false);
@@ -1099,7 +1598,10 @@ fn edit_message_quote_without_editor_is_synthesized() {
     // inline.
     let config = AppConfig::new_test();
     let query = Query {
-        quote: true,
+        input: QueryInput {
+            quote: Some(true),
+            ..Default::default()
+        },
         no_edit: true,
         ..Default::default()
     };
@@ -1189,6 +1691,179 @@ fn picker_new_item_gated_by_bare_id_flag() {
         ..Default::default()
     };
     assert!(!bare_id.allows_new_from_picker());
+}
+
+/// The query words a parse produced, for comparison against a static slice.
+fn query_words(query: &Query) -> &[String] {
+    query.input.query.as_deref().unwrap_or_default()
+}
+
+#[test]
+fn bare_quote_uses_the_blockquote_prefix() {
+    let query = parse_query(&["--quote"]).unwrap();
+    assert_eq!(query.input.quote, Some(true));
+    assert!(query_words(&query).is_empty());
+}
+
+#[test]
+fn quote_true_is_the_same_as_a_bare_quote() {
+    let query = parse_query(&["--quote=true"]).unwrap();
+    assert_eq!(query.input.quote, Some(true));
+    assert!(query_words(&query).is_empty());
+}
+
+#[test]
+fn quote_false_still_quotes_but_drops_the_prefix() {
+    let query = parse_query(&["--quote=false"]).unwrap();
+    assert_eq!(query.input.quote, Some(false));
+    assert!(query_words(&query).is_empty());
+}
+
+#[test]
+fn quote_is_absent_when_not_given() {
+    let query = parse_query(&[]).unwrap();
+    assert_eq!(query.input.quote, None);
+}
+
+#[test]
+fn quote_takes_an_unattached_bool() {
+    let query = parse_query(&["--quote", "false"]).unwrap();
+    assert_eq!(query.input.quote, Some(false));
+    assert!(query_words(&query).is_empty());
+
+    let query = parse_query(&["--quote", "true"]).unwrap();
+    assert_eq!(query.input.quote, Some(true));
+    assert!(query_words(&query).is_empty());
+}
+
+#[test]
+fn quote_takes_an_unattached_bool_ahead_of_the_query() {
+    let query = parse_query(&["--quote", "false", "and", "now?"]).unwrap();
+    assert_eq!(query.input.quote, Some(false));
+    assert_eq!(query_words(&query), ["and".to_owned(), "now?".to_owned()]);
+}
+
+#[test]
+fn quote_does_not_swallow_a_following_flag() {
+    let query = parse_query(&["--quote", "--model", "foo"]).unwrap();
+    assert_eq!(query.input.quote, Some(true));
+    assert_eq!(query.model.as_deref(), Some("foo"));
+}
+
+#[test]
+fn quote_does_not_swallow_the_positional_query() {
+    let query = parse_query(&["--quote", "what about X?"]).unwrap();
+    assert_eq!(query.input.quote, Some(true));
+    assert_eq!(query_words(&query), ["what about X?".to_owned()]);
+}
+
+#[test]
+fn quote_only_takes_the_word_directly_after_it() {
+    // `false` is the query here: it sits before the flag, so it was never
+    // offered as the flag's value.
+    let query = parse_query(&["false", "--quote"]).unwrap();
+    assert_eq!(query.input.quote, Some(true));
+    assert_eq!(query_words(&query), ["false".to_owned()]);
+
+    // Same when another flag sits between the two.
+    let query = parse_query(&["--quote", "--model", "foo", "false"]).unwrap();
+    assert_eq!(query.input.quote, Some(true));
+    assert_eq!(query_words(&query), ["false".to_owned()]);
+}
+
+#[test]
+fn a_double_dash_shields_a_bool_from_quote() {
+    let query = parse_query(&["--quote", "--", "false"]).unwrap();
+    assert_eq!(query.input.quote, Some(true));
+    assert_eq!(query_words(&query), ["false".to_owned()]);
+}
+
+#[test]
+fn words_before_and_after_a_double_dash_form_one_query() {
+    let query = parse_query(&["why", "--", "--model", "foo"]).unwrap();
+    assert_eq!(query.input.quote, None);
+    assert_eq!(query_words(&query), [
+        "why".to_owned(),
+        "--model".to_owned(),
+        "foo".to_owned()
+    ]);
+}
+
+#[test]
+fn quote_with_an_attached_value_leaves_a_following_bool_in_the_query() {
+    // `--quote=false` has its value already, so the `true` after it is query
+    // text. Without the attached/bare distinction both forms would look
+    // identical here, since clap records the same index for either.
+    let query = parse_query(&["--quote=false", "true"]).unwrap();
+    assert_eq!(query.input.quote, Some(false));
+    assert_eq!(query_words(&query), ["true".to_owned()]);
+}
+
+#[test]
+fn quote_rejects_an_attached_non_boolean_value() {
+    assert!(parse_query(&["--quote=foo"]).is_err());
+}
+
+/// A stream whose last assistant message is a two-line reply.
+fn stream_with_assistant_reply() -> ConversationStream {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("question");
+    stream
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::message("line one\nline two"))
+        .build()
+        .unwrap();
+    stream
+}
+
+#[test]
+fn quote_false_seeds_the_message_verbatim() {
+    let mut request = ChatRequest::default();
+    assert!(seed_quoted_reply(
+        &mut request,
+        &stream_with_assistant_reply(),
+        false
+    ));
+
+    // The trailing blank line separates the seed from the reply the user is
+    // about to type below it.
+    assert_eq!(request.content, "line one\nline two\n\n");
+}
+
+#[test]
+fn quote_true_seeds_the_message_as_a_blockquote() {
+    let mut request = ChatRequest::default();
+    assert!(seed_quoted_reply(
+        &mut request,
+        &stream_with_assistant_reply(),
+        true
+    ));
+
+    assert_eq!(request.content, "> line one\n> line two\n\n");
+}
+
+#[test]
+fn quote_seeds_above_an_already_composed_request() {
+    let mut request = ChatRequest::from("and what about X?");
+    assert!(seed_quoted_reply(
+        &mut request,
+        &stream_with_assistant_reply(),
+        false
+    ));
+
+    assert_eq!(request.content, "line one\nline two\n\nand what about X?");
+}
+
+#[test]
+fn quote_leaves_the_request_untouched_without_an_assistant_message() {
+    let mut request = ChatRequest::from("only my words");
+    assert!(!seed_quoted_reply(
+        &mut request,
+        &ConversationStream::new_test(),
+        true
+    ));
+
+    assert_eq!(request.content, "only my words");
 }
 
 #[test]
@@ -1596,4 +2271,257 @@ fn mcp_startup_line_ultra_narrow_keeps_bounded_timer() {
     let visible = line.strip_prefix("\r\x1b[K").expect("control prefix");
     assert!(display_width(visible) <= 6, "must fit width: {line:?}");
     assert!(visible.contains("7.0s"), "timer must survive: {line:?}");
+}
+
+#[test]
+fn arg_file_path_recognizes_sigil() {
+    assert_eq!(arg_file_path("@notes.md"), Some("notes.md"));
+    assert_eq!(arg_file_path("@~/notes.md"), Some("~/notes.md"));
+    assert_eq!(arg_file_path("notes.md"), None);
+    assert_eq!(arg_file_path(""), None);
+}
+
+// A bare `@` is ordinary prose, not a reference to the empty path. Reading it
+// as a path is what made `jp q ... drop the @ entirely ...` fail.
+#[test]
+fn arg_file_path_ignores_bare_sigil() {
+    assert_eq!(arg_file_path("@"), None);
+    assert_eq!(arg_file_path("@ "), None);
+    assert_eq!(arg_file_path("@\t"), None);
+}
+
+#[test]
+fn query_file_path_only_for_single_value_query() {
+    let one = ["@notes.md".to_owned()];
+    assert_eq!(query_file_path(&one), Some("notes.md"));
+
+    let trailing = ["hello".to_owned(), "@notes.md".to_owned()];
+    assert_eq!(query_file_path(&trailing), None);
+
+    let leading = ["@notes.md".to_owned(), "extra".to_owned()];
+    assert_eq!(query_file_path(&leading), None);
+
+    let plain = ["hello".to_owned()];
+    assert_eq!(query_file_path(&plain), None);
+
+    assert_eq!(query_file_path(&[]), None);
+}
+
+#[test]
+fn read_arg_file_returns_file_contents() {
+    let dir = camino_tempfile::tempdir().unwrap();
+    let path = dir.path().join("notes.md");
+    std::fs::write(&path, "# Notes\n\nbody\n").unwrap();
+
+    assert_eq!(read_arg_file(path.as_str()).unwrap(), "# Notes\n\nbody\n");
+}
+
+/// Host for [`Query`]'s arguments, so tests can drive the real clap parser
+/// rather than constructing a [`Query`] the CLI could never produce.
+#[derive(clap::Parser)]
+struct QueryArgs {
+    #[command(flatten)]
+    query: Query,
+}
+
+/// Parse `jp query <args>`, always with `--no-edit` so no editor opens.
+fn parse_query(args: &[&str]) -> std::result::Result<Query, clap::Error> {
+    let argv = ["query", "--no-edit"]
+        .into_iter()
+        .chain(args.iter().copied());
+
+    QueryArgs::try_parse_from(argv).map(|parsed| parsed.query)
+}
+
+/// Build the request for `args`, with no piped stdin and an empty stream.
+///
+/// Runs the same two steps `run` does: resolve the query, then compose it.
+fn built_request(args: &[&str]) -> String {
+    built_request_against(args, &ConversationStream::new_test())
+}
+
+/// Build the request for `args` against `stream`, with no piped stdin.
+fn built_request_against(args: &[&str], stream: &ConversationStream) -> String {
+    let query = parse_query(args).unwrap();
+    let resolved = query.resolve_query().unwrap();
+
+    query
+        .build_conversation(
+            "",
+            resolved.as_deref(),
+            stream,
+            &AppConfig::new_test(),
+            Utf8Path::new("/tmp"),
+        )
+        .unwrap()
+        .chat_request
+        .expect("non-empty request")
+        .content
+}
+
+#[test]
+fn build_conversation_seeds_a_verbatim_quote_above_the_query() {
+    let built = built_request_against(
+        &["--quote=false", "and", "what", "about", "X?"],
+        &stream_with_assistant_reply(),
+    );
+
+    assert_eq!(built, "line one\nline two\n\nand what about X?");
+}
+
+#[test]
+fn build_conversation_seeds_a_blockquoted_quote_above_the_query() {
+    let built = built_request_against(
+        &["--quote", "and", "what", "about", "X?"],
+        &stream_with_assistant_reply(),
+    );
+
+    assert_eq!(built, "> line one\n> line two\n\nand what about X?");
+}
+
+#[test]
+fn build_conversation_reads_single_at_path_query() {
+    let dir = camino_tempfile::tempdir().unwrap();
+    let path = dir.path().join("notes.md");
+    std::fs::write(&path, "# Notes\n\nbody\n").unwrap();
+
+    assert_eq!(
+        built_request(&[format!("@{path}").as_str()]),
+        "# Notes\n\nbody\n"
+    );
+}
+
+// A bare `@` is the whole query: there is no path after the sigil, so it is
+// text. Reading it as the empty path is what aborted the query.
+#[test]
+fn build_conversation_keeps_lone_bare_sigil() {
+    assert_eq!(built_request(&["@"]), "@");
+}
+
+// The reported failure: a bare `@` mid-sentence was read as the empty path and
+// aborted the query before it was ever sent.
+#[test]
+fn build_conversation_keeps_bare_sigil_in_prose() {
+    assert_eq!(
+        built_request(&["we", "should", "drop", "the", "@", "entirely"]),
+        "we should drop the @ entirely"
+    );
+}
+
+// An `@path` that names a real file is still ordinary text when it is one word
+// of a longer query: only a single-value query reads from disk.
+#[test]
+fn build_conversation_keeps_at_path_word_in_multi_word_query() {
+    let dir = camino_tempfile::tempdir().unwrap();
+    let path = dir.path().join("notes.md");
+    std::fs::write(&path, "file contents").unwrap();
+
+    assert_eq!(
+        built_request(&["see", format!("@{path}").as_str()]),
+        format!("see @{path}")
+    );
+    // Leading position too: it is the value count that decides, not where the
+    // sigil sits.
+    assert_eq!(
+        built_request(&[format!("@{path}").as_str(), "is", "stale"]),
+        format!("@{path} is stale")
+    );
+}
+
+#[test]
+fn build_conversation_prepends_query_to_piped_stdin() {
+    let built = parse_query(&["look", "at", "this"])
+        .unwrap()
+        .build_conversation(
+            "piped payload",
+            Some("look at this"),
+            &ConversationStream::new_test(),
+            &AppConfig::new_test(),
+            Utf8Path::new("/tmp"),
+        )
+        .unwrap();
+
+    assert_eq!(
+        built.chat_request.unwrap().content,
+        "look at this\n\npiped payload"
+    );
+}
+
+// A query naming an unreadable file must fail before any conversation or
+// session state is touched. The read used to happen after the conversation was
+// created and recorded as the session's active one, so a typo'd path left an
+// empty conversation behind that the next query silently targeted.
+#[test]
+fn run_missing_at_path_query_leaves_conversation_and_session_untouched() {
+    let dir = camino_tempfile::tempdir().unwrap();
+    let missing = dir.path().join("missing.md");
+
+    let session = Session {
+        id: SessionId::new("jp-cli-query-test").unwrap(),
+        source: SessionSource::env("JP_SESSION"),
+    };
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let workspace = Workspace::in_memory("/tmp/jp-cli-query-test");
+    let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
+        workspace,
+        None,
+        Runtime::new().unwrap(),
+        Globals::default(),
+        AppConfig::new_test(),
+        Some(session.clone()),
+        printer,
+    );
+
+    let query = parse_query(&["--new", &format!("@{missing}")]).unwrap();
+    let result = Runtime::new()
+        .unwrap()
+        .block_on(query.run(&mut ctx, None, false));
+
+    let Err(error) = result else {
+        panic!("a query naming a missing file must fail");
+    };
+    // Pin that it failed on the unreadable path, not on something the test
+    // environment happens to be missing further down `run`.
+    assert_eq!(
+        error
+            .metadata
+            .iter()
+            .find(|(key, _)| key == "path")
+            .map(|(_, value)| value),
+        Some(&Value::from(missing.as_str())),
+    );
+
+    assert_eq!(ctx.workspace.conversations().count(), 0);
+    assert_eq!(ctx.workspace.session_active_conversation(&session), None);
+}
+
+#[test]
+fn resolve_query_missing_at_path_errors() {
+    let dir = camino_tempfile::tempdir().unwrap();
+    let path = dir.path().join("missing.md");
+    let query = parse_query(&[&format!("@{path}")]).unwrap();
+
+    let Err(error) = query.resolve_query() else {
+        panic!("a query naming a missing file must fail, not be sent verbatim");
+    };
+    assert_matches!(&error, Error::ArgFile { path: p, .. } if p == path.as_str());
+}
+
+#[test]
+fn read_arg_file_error_names_the_path() {
+    let dir = camino_tempfile::tempdir().unwrap();
+    let path = dir.path().join("missing.md");
+
+    let error = read_arg_file(path.as_str()).unwrap_err();
+
+    assert_matches!(&error, Error::ArgFile { path: p, .. } if p == path.as_str());
+    // The OS-supplied cause differs per platform, so pin the part we own: the
+    // path is in the message clap renders, which is what "IO error" dropped.
+    assert!(
+        error
+            .to_string()
+            .starts_with(&format!("cannot read '{path}': ")),
+        "unexpected message: {error}"
+    );
 }

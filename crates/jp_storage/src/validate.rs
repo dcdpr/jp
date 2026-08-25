@@ -6,8 +6,8 @@ use rayon::prelude::*;
 use tracing::{debug, trace};
 
 use crate::{
-    BASE_CONFIG_FILE, CONVERSATIONS_DIR, EVENTS_FILE, METADATA_FILE, Storage, dir_entries,
-    trash::trash_conversation, value::cleanup_tmp_files,
+    BASE_CONFIG_FILE, CONVERSATIONS_DIR, EVENTS_FILE, IMPORT_STAGING_PREFIX, METADATA_FILE,
+    Storage, dir_entries, trash::trash_conversation, value::cleanup_tmp_files,
 };
 
 /// Result of validating all conversation directories across storage roots.
@@ -128,6 +128,7 @@ impl Storage {
                 continue;
             }
 
+            self.cleanup_import_staging(&conversations_dir);
             validate_root(&conversations_dir, &mut result);
         }
 
@@ -138,6 +139,49 @@ impl Storage {
         );
 
         result
+    }
+
+    /// Remove leftover import staging directories from one `conversations/`
+    /// directory.
+    ///
+    /// A staging directory only survives a crash between an import's copy and
+    /// its rename, and holds nothing the workspace copy does not still have, so
+    /// removing one is pure disk hygiene: each import stages under a fresh name
+    /// and never reads a leftover.
+    ///
+    /// Each removal is made while holding the conversation's own lock.
+    /// Without it, this would race an import running under that lock in another
+    /// process: `copy_dir_all` recreates directories as it recurses, so a
+    /// mid-copy removal would leave the importer to rename an incomplete tree
+    /// into place.
+    /// A conversation whose lock is held is skipped entirely, and because the
+    /// sweep is only reclaiming disk space, skipping costs nothing but a delay
+    /// until the next run.
+    fn cleanup_import_staging(&self, conversations_dir: &Utf8Path) {
+        for entry in dir_entries(conversations_dir) {
+            let Some(dirname) = entry.file_name().strip_prefix(IMPORT_STAGING_PREFIX) else {
+                continue;
+            };
+            if !entry.path().is_dir() {
+                continue;
+            }
+
+            // An unparseable name cannot be tied to a lock, so leave it be
+            // rather than remove a directory whose owner is unknown.
+            let Ok(id) = ConversationId::try_from_dirname(dirname) else {
+                trace!(path = %entry.path(), "Skipping unparseable staging directory.");
+                continue;
+            };
+
+            let Ok(Some(_guard)) = self.try_lock_conversation(&id.to_string(), None) else {
+                trace!(%id, "Skipping staging directory: conversation is locked.");
+                continue;
+            };
+
+            let path = entry.into_path();
+            trace!(%path, "Removing leftover import staging directory.");
+            let _err = std::fs::remove_dir_all(path);
+        }
     }
 }
 
