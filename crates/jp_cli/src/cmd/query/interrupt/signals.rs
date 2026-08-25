@@ -17,7 +17,7 @@ use jp_inquire::{ReplyEditMode, prompt::PromptBackend};
 use jp_llm::event::{Event, FinishReason, apply_patches};
 use jp_printer::Printer;
 use tokio_util::sync::CancellationToken;
-use tracing::{info, trace};
+use tracing::{debug, info, trace};
 
 use super::handler::{InterruptAction, InterruptHandler};
 use crate::cmd::query::{
@@ -58,6 +58,11 @@ pub enum StreamingInterruptResult {
     /// and the turn is complete.
     /// The caller should begin a graceful shutdown.
     Escalate,
+
+    /// The menu could not be shown, so nothing was decided.
+    /// The caller leaves the stream as it was and leaves the press on the
+    /// signal router's escalation ladder.
+    PromptFailed,
 }
 
 /// Handle a Ctrl-C interrupt notification received during LLM streaming.
@@ -95,9 +100,19 @@ pub fn handle_streaming_interrupt(
     // polling instead.
     let is_resume = matches!(action, InterruptAction::Resume);
     let is_escalate = matches!(action, InterruptAction::Escalate);
+    debug!(
+        ?action,
+        llm_stream_finished, "Streaming interrupt resolved."
+    );
+
+    // A menu that never ran decided nothing, so the state machine is left
+    // untouched: no partial commit, no phase change.
+    if matches!(action, InterruptAction::PromptFailed) {
+        return StreamingInterruptResult::PromptFailed;
+    }
 
     // Delegate state transition to the turn coordinator
-    match turn_coordinator.handle_streaming_interrupt(action, conversation_stream) {
+    let result = match turn_coordinator.handle_streaming_interrupt(action, conversation_stream) {
         // Return without persisting this cycle (previous turn cycles
         // are already persisted).
         TurnPhase::Aborted => StreamingInterruptResult::Abort,
@@ -112,7 +127,10 @@ pub fn handle_streaming_interrupt(
         // All other phases break from loop, persist, then outer loop
         // decides.
         _ => StreamingInterruptResult::Break,
-    }
+    };
+
+    debug!(?result, phase = ?turn_coordinator.current_phase(), "Streaming interrupt handled.");
+    result
 }
 
 /// Handle a successful event from the LLM stream.
@@ -214,6 +232,11 @@ pub enum ToolInterruptResult {
     /// Cancel current execution and begin a graceful shutdown: the user
     /// cancelled the interrupt menu itself with Ctrl-C.
     Escalate,
+
+    /// The menu could not be shown, so nothing was decided.
+    /// The caller keeps waiting for the running tools and leaves the press on
+    /// the signal router's escalation ladder.
+    PromptFailed,
 }
 
 /// Handle a Ctrl-C interrupt notification received during tool execution.
@@ -249,11 +272,18 @@ pub fn handle_tool_interrupt(
 
     let action = InterruptHandler::with_backend(backend, editor, edit_mode)
         .handle_tool_interrupt(config, printer);
+    debug!(?action, "Tool interrupt resolved.");
+
+    // A menu that never ran decided nothing: the running tools are left alone
+    // and the state machine is not notified.
+    if matches!(action, InterruptAction::PromptFailed) {
+        return ToolInterruptResult::PromptFailed;
+    }
 
     // Notify the state machine (reserved for future state transitions).
     turn_coordinator.handle_tool_interrupt(&action);
 
-    match action {
+    let result = match action {
         InterruptAction::RestartTool => {
             info!("Restarting tool execution");
             cancellation_token.cancel();
@@ -269,7 +299,10 @@ pub fn handle_tool_interrupt(
             ToolInterruptResult::Escalate
         }
         _ => ToolInterruptResult::Continue,
-    }
+    };
+
+    debug!(?result, "Tool interrupt handled.");
+    result
 }
 
 #[cfg(test)]

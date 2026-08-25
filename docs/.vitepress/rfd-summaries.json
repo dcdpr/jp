@@ -172,7 +172,7 @@
     "summary": "Redesign `jp init` to generate schema-driven config with interactive model/mode selection and curated commented fields."
   },
   "045-layered-interrupt-handler-stack.md": {
-    "hash": "a097b20423e8776532d8821aafa40828f4a0fd0aea84bd32f1420e1926751c6a",
+    "hash": "6fadad9b4f536e5a3e0d6d6ff346433e9dc3ea988cde6d4cb60789c6bca0204d",
     "summary": "Replace JP's ad-hoc interrupt handling with a layered LIFO handler stack, routing OS signals through scoped notification channels."
   },
   "046-nested-workspace-projection.md": {
