@@ -68,6 +68,7 @@ impl PromptBackend for UnavailableBackend {
         _initial_text: &str,
         _edit_mode: ReplyEditMode,
         _editor_escape: bool,
+        _help: Option<&str>,
         _output: Box<dyn std::io::Write + Send>,
     ) -> Result<ReplyOutcome, InquireError> {
         Err(InquireError::NotTTY)
@@ -87,6 +88,14 @@ impl PromptBackend for UnavailableBackend {
         _message: &str,
         _options: Vec<String>,
         _default: Option<usize>,
+        _writer: &mut dyn std::io::Write,
+    ) -> Result<String, InquireError> {
+        Err(InquireError::NotTTY)
+    }
+
+    fn password(
+        &self,
+        _message: &str,
         _writer: &mut dyn std::io::Write,
     ) -> Result<String, InquireError> {
         Err(InquireError::NotTTY)

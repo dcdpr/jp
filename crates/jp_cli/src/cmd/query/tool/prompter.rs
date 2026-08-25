@@ -375,7 +375,7 @@ impl ToolPrompter {
             let output = self.printer.owned_prompt_writer();
             match self
                 .prompt_backend
-                .inline_reply(message, &text, self.edit_mode, true, output)
+                .inline_reply(message, &text, self.edit_mode, true, None, output)
                 .map_err(|error| Error::Editor(error.to_string()))?
             {
                 ReplyOutcome::Submit(content) => return Ok(InlineEditResult::Submitted(content)),
