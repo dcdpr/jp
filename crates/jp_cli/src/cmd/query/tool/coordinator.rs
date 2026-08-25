@@ -126,11 +126,14 @@ use crate::{
         },
     },
     render::tool::RenderOutcome,
-    signals::SignalRouter,
+    signals::{InterruptNotice, SignalRouter},
 };
 
 #[derive(Debug)]
 enum ExecutionEvent {
+    /// A Ctrl-C press delivered to this execution phase's interrupt handler.
+    Interrupt(InterruptNotice),
+
     ToolResult {
         index: usize,
         result: ExecutorResult,
@@ -169,9 +172,6 @@ enum ExecutionEvent {
         tool_id: String,
         response: ToolCallResponse,
     },
-
-    /// A Ctrl-C interrupt notification from the signal router.
-    Interrupt,
 
     ProgressTick {
         elapsed: Duration,
@@ -947,8 +947,12 @@ impl ToolCoordinator {
         // channel) or when the event channel closes.
         let interrupt_tx = event_tx.clone();
         tokio::spawn(async move {
-            while interrupt_rx.recv().await.is_some() {
-                if interrupt_tx.send(ExecutionEvent::Interrupt).await.is_err() {
+            while let Some(notice) = interrupt_rx.recv().await {
+                if interrupt_tx
+                    .send(ExecutionEvent::Interrupt(notice))
+                    .await
+                    .is_err()
+                {
                     break;
                 }
             }
@@ -1165,18 +1169,18 @@ impl ToolCoordinator {
                         event_tx.clone(),
                     );
                 }
-                ExecutionEvent::Interrupt => {
+                ExecutionEvent::Interrupt(notice) => {
                     if prompt_active {
                         // An active inline prompt owns the terminal; pass the
                         // interrupt down the handler stack instead of stacking
                         // the menu on top of the prompt.
-                        signals.decline();
+                        notice.decline();
                     } else {
                         if progress_shown {
                             tool_renderer.clear_progress();
                             progress_shown = false;
                         }
-                        match handle_tool_interrupt(
+                        let result = handle_tool_interrupt(
                             &cancellation_token,
                             turn_coordinator,
                             self.is_prompting(),
@@ -1185,11 +1189,33 @@ impl ToolCoordinator {
                             editor.clone(),
                             edit_mode,
                             &self.interrupt_config,
-                        ) {
-                            ToolInterruptResult::Continue => {}
-                            // A tool prompt is pending; let the next handler
-                            // down the stack take the interrupt.
-                            ToolInterruptResult::Declined => signals.decline(),
+                        );
+
+                        match result {
+                            // Answered by the menu: clear the ladder so the next
+                            // press opens it again instead of bypassing it.
+                            ToolInterruptResult::Continue
+                            | ToolInterruptResult::Restart
+                            | ToolInterruptResult::Cancelled { .. } => notice.handled(),
+
+                            // A pending tool prompt owns this press; hand it to
+                            // the next handler down with the ladder intact.
+                            ToolInterruptResult::Declined => notice.decline(),
+
+                            // An escalation is the user asking to get past the
+                            // menu, and a menu that could not run answered
+                            // nothing. Both leave the press on the ladder so it
+                            // still gets the user out.
+                            ToolInterruptResult::Escalate | ToolInterruptResult::PromptFailed => {}
+                        }
+
+                        match result {
+                            // Either the user chose to keep waiting, or the menu
+                            // could not be shown and nothing happened. A
+                            // declined press was already handed down the stack.
+                            ToolInterruptResult::Continue
+                            | ToolInterruptResult::PromptFailed
+                            | ToolInterruptResult::Declined => {}
                             ToolInterruptResult::Restart => {
                                 outcome.upgrade(ExecutionOutcome::Restart);
                             }
