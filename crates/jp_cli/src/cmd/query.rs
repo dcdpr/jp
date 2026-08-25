@@ -62,6 +62,7 @@ use std::{
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
+use chrono::{DateTime, Utc};
 use clap::{ArgAction, builder::TypedValueParser as _};
 use indexmap::IndexMap;
 use jp_attachment::Attachment;
@@ -86,6 +87,7 @@ use jp_config::{
 use jp_conversation::{
     Conversation, ConversationEvent, ConversationId, ConversationStream, Labels,
     event::{ChatRequest, ChatResponse},
+    stream::{ApplyDelta, ResetDelta},
     thread::{Thread, ThreadBuilder},
 };
 use jp_inquire::prompt::{PromptBackend, TerminalPromptBackend};
@@ -127,6 +129,7 @@ use crate::{
         label::resolve::{Resolver, Trigger},
         lock::{LockRequest, acquire_lock},
     },
+    config_pipeline::{ConfigReset, ConfigResetEvents},
     ctx::IntoPartialAppConfig,
     editor,
     error::{Error, Result},
@@ -344,9 +347,9 @@ impl Query {
         // 2. picker "start new": `start_new` is set, create a fresh conversation.
         // 3. --fork/--id/session: resolve an existing conversation, lock it.
         // 4. Lock contention: user picks "new" or "fork" from the prompt.
-        let lock = self.acquire_lock(ctx, handle, start_new).await?;
+        let (lock, fresh) = self.acquire_lock(ctx, handle, start_new).await?;
 
-        let result = self.run_locked(ctx, &lock, query).await;
+        let result = self.run_locked(ctx, &lock, query, fresh).await;
 
         // Every exit from the locked region lands here, which is what makes
         // this the one reliable drain point: a mutation scope that dropped
@@ -357,6 +360,9 @@ impl Query {
 
     /// Run the query against an already-locked conversation.
     ///
+    /// `fresh` is `true` when this run created the conversation, so no config
+    /// state predates its base config.
+    ///
     /// Errors propagate freely: the caller drains any persist failure the
     /// unwinding left behind.
     #[expect(clippy::too_many_lines)]
@@ -365,6 +371,7 @@ impl Query {
         ctx: &mut Ctx,
         lock: &ConversationLock,
         query: Option<String>,
+        fresh: bool,
     ) -> Output {
         let now = ctx.now();
         let cfg = ctx.config();
@@ -512,11 +519,31 @@ impl Query {
         // statement persisting the entire conversation on its own drop.
         let mut setup = lock.as_mut();
 
-        // Record the CLI-provided config delta (`--cfg`) now that the query is
-        // known to be non-empty. Recording it before the empty-query check
-        // would leave a config event behind for a query that was ultimately
-        // ignored.
-        if let Some(delta) = get_config_delta_from_cli(&cfg, lock)? {
+        // Persist config state changes into the conversation stream, now that
+        // the query is known to be non-empty. Recording them before the
+        // empty-query check would leave config events behind for a query that
+        // was ultimately ignored.
+        //
+        // A fresh conversation needs neither branch: its base config was
+        // written from this invocation's resolved config at creation time
+        // (that also absorbs any `--cfg` reset keyword, per [RFD 038]).
+        //
+        // A conversation carrying earlier config state — continuing or forked
+        // — records a `--cfg` reset keyword as its stream events, appended
+        // directly: between the `Reset` and whichever `Apply` restores the
+        // required fields the stream does not resolve to a valid config, so
+        // the empty-diff suppression path in `add_config_delta` cannot run.
+        //
+        // Without a reset keyword, any divergence between the stream's config
+        // and this invocation's resolved config is appended as a single
+        // suppression-checked `Apply` diff.
+        //
+        // [RFD 038]: https://jp.computer/rfd/038
+        if let Some(reset_events) = ctx.config_reset.take() {
+            if !fresh {
+                setup.update_events(|events| persist_config_reset(events, reset_events, now));
+            }
+        } else if let Some(delta) = get_config_delta_from_cli(&cfg, lock)? {
             setup.update_events(|events| events.add_config_delta(delta));
         }
 
@@ -695,26 +722,26 @@ impl Query {
     ///
     /// Returns [`Error::ArgFile`] if the named file cannot be read.
     fn resolve_query(&self) -> Result<Option<String>> {
-        let Some(values) = &self.input.query else {
-            return Ok(None);
-        };
+    let Some(values) = &self.input.query else {
+        return Ok(None);
+    };
 
-        let text = match query_file_path(values) {
-            Some(path) => read_arg_file(path)?,
-            None => values.join(" "),
-        };
+    let text = match query_file_path(values) {
+        Some(path) => read_arg_file(path)?,
+        None => values.join(" "),
+    };
 
-        Ok(Some(text))
-    }
+    Ok(Some(text))
+}
 
     /// Declare what conversations this command needs.
     pub(crate) fn conversation_load_request(&self) -> ConversationLoadRequest {
-        if self.is_new() {
-            return ConversationLoadRequest::none();
-        }
-
-        ConversationLoadRequest::explicit_or_session_with_config(&self.target)
+    if self.is_new() {
+        return ConversationLoadRequest::none();
     }
+
+    ConversationLoadRequest::explicit_or_session_with_config(&self.target)
+}
 
     /// Build the chat request for this query.
     ///
@@ -726,150 +753,150 @@ impl Query {
     ///
     /// [`TurnCoordinator::start_turn`]: turn::TurnCoordinator::start_turn
     fn build_conversation(
-        &self,
-        piped: &str,
-        query: Option<&str>,
-        stream: &ConversationStream,
-        config: &AppConfig,
-        conversation_root: &Utf8Path,
-    ) -> Result<BuiltConversation> {
-        let mut pending_trim = PendingStreamTrim::default();
+    &self,
+    piped: &str,
+    query: Option<&str>,
+    stream: &ConversationStream,
+    config: &AppConfig,
+    conversation_root: &Utf8Path,
+) -> Result<BuiltConversation> {
+    let mut pending_trim = PendingStreamTrim::default();
 
-        // If replaying, the events up-to-and-including the last `ChatRequest`
-        // are logically removed and the request is replayed. The removal is
-        // computed on a clone (`view`) and only committed to the durable
-        // stream at the turn-start commit point (see [`PendingStreamTrim`]):
-        // an empty query, an interrupt, or an error before the turn starts
-        // leaves the persisted stream untouched.
-        //
-        // If not replaying (or replaying but no chat request event exists), we
-        // create a new `ChatRequest` event, to populate with either the
-        // provided query, or the contents of the text editor.
-        let (view, mut chat_request) = if self.replay {
-            pending_trim.replay_turn = true;
-            let mut view = stream.clone();
-            let chat_request = view.trim_chat_request().unwrap_or_default();
-            (Cow::Owned(view), chat_request)
-        } else {
-            (Cow::Borrowed(stream), ChatRequest::default())
-        };
-        let view = view.as_ref();
+    // If replaying, the events up-to-and-including the last `ChatRequest`
+    // are logically removed and the request is replayed. The removal is
+    // computed on a clone (`view`) and only committed to the durable
+    // stream at the turn-start commit point (see [`PendingStreamTrim`]):
+    // an empty query, an interrupt, or an error before the turn starts
+    // leaves the persisted stream untouched.
+    //
+    // If not replaying (or replaying but no chat request event exists), we
+    // create a new `ChatRequest` event, to populate with either the
+    // provided query, or the contents of the text editor.
+    let (view, mut chat_request) = if self.replay {
+        pending_trim.replay_turn = true;
+        let mut view = stream.clone();
+        let chat_request = view.trim_chat_request().unwrap_or_default();
+        (Cow::Owned(view), chat_request)
+    } else {
+        (Cow::Borrowed(stream), ChatRequest::default())
+    };
+    let view = view.as_ref();
 
-        // If stdin contained data, we prepend it to the chat request.
-        if !piped.is_empty() {
-            let sep = if chat_request.is_empty() { "" } else { "\n\n" };
-            *chat_request = format!("{piped}{sep}{chat_request}");
-        }
+    // If stdin contained data, we prepend it to the chat request.
+    if !piped.is_empty() {
+        let sep = if chat_request.is_empty() { "" } else { "\n\n" };
+        *chat_request = format!("{piped}{sep}{chat_request}");
+    }
 
-        // If a query is provided, prepend it to the chat request. This is only
-        // relevant for replays, otherwise the chat request is still empty, so
-        // we replace it with the provided query.
-        if let Some(text) = query {
-            let sep = if chat_request.is_empty() { "" } else { "\n\n" };
-            *chat_request = format!("{text}{sep}{chat_request}");
-        }
+    // If a query is provided, prepend it to the chat request. This is only
+    // relevant for replays, otherwise the chat request is still empty, so
+    // we replace it with the provided query.
+    if let Some(text) = query {
+        let sep = if chat_request.is_empty() { "" } else { "\n\n" };
+        *chat_request = format!("{text}{sep}{chat_request}");
+    }
 
-        // If --quote is set, prepend the last assistant message so it sits at
-        // the top of the editor buffer. The user can then intersperse replies
-        // between the quoted lines (mutt-style inline reply). Missing message
-        // (e.g. brand new conversation) degrades to a warning and the editor
-        // opens with whatever else was seeded.
-        if let Some(prefixed) = self.input.quote
-            && !seed_quoted_reply(&mut chat_request, view, prefixed)
-        {
-            warn!("--quote: no prior assistant message in this conversation");
-        }
+    // If --quote is set, prepend the last assistant message so it sits at
+    // the top of the editor buffer. The user can then intersperse replies
+    // between the quoted lines (mutt-style inline reply). Missing message
+    // (e.g. brand new conversation) degrades to a warning and the editor
+    // opens with whatever else was seeded.
+    if let Some(prefixed) = self.input.quote
+        && !seed_quoted_reply(&mut chat_request, view, prefixed)
+    {
+        warn!("--quote: no prior assistant message in this conversation");
+    }
 
-        let (query_source, editor_provided_config) = self.edit_message(
-            &mut chat_request,
-            view,
-            &mut pending_trim,
-            !piped.is_empty(),
-            config,
-            conversation_root,
-        )?;
+    let (query_source, editor_provided_config) = self.edit_message(
+        &mut chat_request,
+        view,
+        &mut pending_trim,
+        !piped.is_empty(),
+        config,
+        conversation_root,
+    )?;
 
-        if self.template {
-            let mut env = Environment::empty();
-            env.set_undefined_behavior(UndefinedBehavior::SemiStrict);
-            env.add_template("query", &chat_request.content)?;
+    if self.template {
+        let mut env = Environment::empty();
+        env.set_undefined_behavior(UndefinedBehavior::SemiStrict);
+        env.add_template("query", &chat_request.content)?;
 
-            let tmpl = env.get_template("query")?;
-            // TODO: supported nested variables
-            for var in tmpl.undeclared_variables(false) {
-                if config.template.values.contains_key(&var) {
-                    continue;
-                }
-
-                return Err(Error::TemplateUndefinedVariable(var));
+        let tmpl = env.get_template("query")?;
+        // TODO: supported nested variables
+        for var in tmpl.undeclared_variables(false) {
+            if config.template.values.contains_key(&var) {
+                continue;
             }
 
-            *chat_request = tmpl.render(&config.template.values)?;
+            return Err(Error::TemplateUndefinedVariable(var));
         }
 
-        Ok(BuiltConversation {
-            query_source,
-            editor_provided_config,
-            pending_trim,
-            chat_request: (!chat_request.is_empty()).then_some(chat_request),
-        })
+        *chat_request = tmpl.render(&config.template.values)?;
     }
+
+    Ok(BuiltConversation {
+        query_source,
+        editor_provided_config,
+        pending_trim,
+        chat_request: (!chat_request.is_empty()).then_some(chat_request),
+    })
+}
 
     /// Create a new conversation and return an exclusive lock.
     async fn create_new_conversation(&self, ctx: &mut Ctx) -> Result<ConversationLock> {
-        let cfg = ctx.config();
+    let cfg = ctx.config();
 
-        // Resolved before the conversation exists so a rule that needs
-        // confirmation, and finds no terminal to ask on, aborts without leaving
-        // a half-labelled conversation behind.
-        let prompts = TerminalPromptBackend;
-        // A rule that produced no values names no label on a fresh
-        // conversation: there is nothing here for it to replace.
-        let labels: Labels = label_resolver(ctx, &cfg, &prompts)
-            .automatic(Trigger::New)
-            .await?
-            .into_iter()
-            .collect();
+    // Resolved before the conversation exists so a rule that needs
+    // confirmation, and finds no terminal to ask on, aborts without leaving
+    // a half-labelled conversation behind.
+    let prompts = TerminalPromptBackend;
+    // A rule that produced no values names no label on a fresh
+    // conversation: there is nothing here for it to replace.
+    let labels: Labels = label_resolver(ctx, &cfg, &prompts)
+        .automatic(Trigger::New)
+        .await?
+        .into_iter()
+        .collect();
 
-        let ws = &mut ctx.workspace;
-        let projection = if self.is_local(&cfg.conversation) {
-            Projection::LocalOnly
-        } else {
-            Projection::Projected
-        };
-        let lock = ws.create_and_lock_conversation_with_projection(
-            Conversation {
-                labels,
-                ..Conversation::default()
-            },
-            cfg.clone(),
-            ctx.session.as_ref(),
-            projection,
-        )?;
-        let id = lock.id();
+    let ws = &mut ctx.workspace;
+    let projection = if self.is_local(&cfg.conversation) {
+        Projection::LocalOnly
+    } else {
+        Projection::Projected
+    };
+    let lock = ws.create_and_lock_conversation_with_projection(
+        Conversation {
+            labels,
+            ..Conversation::default()
+        },
+        cfg.clone(),
+        ctx.session.as_ref(),
+        projection,
+    )?;
+    let id = lock.id();
 
-        if let Some(duration) = self.expires_in_duration() {
-            let mut conv = lock.as_mut();
-            conv.update_metadata(|m| {
-                m.expires_at = chrono::Duration::from_std(duration)
-                    .ok()
-                    .and_then(|v| id.timestamp().checked_add_signed(v));
-            });
-            conv.flush()?;
-        }
-
-        debug!(
-            id = id.to_string(),
-            local = self.is_local(&cfg.conversation),
-            expires_in = self.expires_in_duration().map_or_else(
-                || "when inactive".to_owned(),
-                |v| humantime::format_duration(v).to_string()
-            ),
-            "Creating new conversation."
-        );
-
-        Ok(lock)
+    if let Some(duration) = self.expires_in_duration() {
+        let mut conv = lock.as_mut();
+        conv.update_metadata(|m| {
+            m.expires_at = chrono::Duration::from_std(duration)
+                .ok()
+                .and_then(|v| id.timestamp().checked_add_signed(v));
+        });
+        conv.flush()?;
     }
+
+    debug!(
+        id = id.to_string(),
+        local = self.is_local(&cfg.conversation),
+        expires_in = self.expires_in_duration().map_or_else(
+            || "when inactive".to_owned(),
+            |v| humantime::format_duration(v).to_string()
+        ),
+        "Creating new conversation."
+    );
+
+    Ok(lock)
+}
 
     // Open the editor for the query, if requested.
     fn edit_message(
@@ -1028,8 +1055,8 @@ impl Query {
     /// command line).
     /// A plain inline query needs no echo — the user just typed it.
     fn should_echo_request(&self, source: QuerySource) -> bool {
-        source != QuerySource::Inline || self.replay
-    }
+    source != QuerySource::Inline || self.replay
+}
 
     /// Returns `true` if editing is explicitly disabled.
     ///
@@ -1039,8 +1066,8 @@ impl Query {
     /// This can be used for example when requesting a tool call without needing
     /// additional context to be provided.
     fn force_no_edit(&self) -> bool {
-        self.no_edit
-    }
+    self.no_edit
+}
 
     /// Returns `true` if editing is explicitly enabled.
     ///
@@ -1049,8 +1076,8 @@ impl Query {
     /// In either case the editor should be opened, regardless of whether a
     /// query is provided as an argument.
     fn force_edit(&self) -> bool {
-        !self.force_no_edit() && (self.edit || self.input.quote.is_some())
-    }
+    !self.force_no_edit() && (self.edit || self.input.quote.is_some())
+}
 
     #[must_use]
     fn is_local(&self, cfg: &ConversationConfig) -> bool {
@@ -1073,8 +1100,8 @@ impl Query {
     /// which parses to an empty value and lands on the picker — so it gates
     /// the item just like the other two.
     pub(crate) fn allows_new_from_picker(&self) -> bool {
-        self.fork.is_none() && !self.replay && self.target.ids().is_empty()
-    }
+    self.fork.is_none() && !self.replay && self.target.ids().is_empty()
+}
 
     #[must_use]
     fn expires_in_duration(&self) -> Option<Duration> {
@@ -1088,74 +1115,84 @@ impl Query {
     /// Applies all compaction rules from the resolved config and appends the
     /// compaction events to the conversation.
     async fn apply_pre_query_compaction(
-        &self,
-        lock: &ConversationLock,
-        cfg: &AppConfig,
-    ) -> Result<()> {
-        let events = lock.events().clone();
+    &self,
+    lock: &ConversationLock,
+    cfg: &AppConfig,
+) -> Result<()> {
+    let events = lock.events().clone();
 
-        // The inline DSL plan never enters the config; assemble the effective
-        // rules from the resolved config rules plus any `-k SPEC` here.
-        let rules = self
-            .compact
-            .effective_rules(&cfg.conversation.compaction.rules)
-            .map_err(|e| Error::Compaction(e.to_string()))?;
+    // The inline DSL plan never enters the config; assemble the effective
+    // rules from the resolved config rules plus any `-k SPEC` here.
+    let rules = self
+        .compact
+        .effective_rules(&cfg.conversation.compaction.rules)
+        .map_err(|e| Error::Compaction(e.to_string()))?;
 
-        let compactions = super::conversation::compact::build_compaction_events(
-            &events,
-            cfg,
-            &rules,
-            crate::cmd::turn_range::Bound::Default,
-            crate::cmd::turn_range::Bound::Default,
-            // `--compact` on a query is a quick adjunct; apply it silently so
-            // compaction details don't clutter the query output.
-            None,
-        )
-        .await?;
+    let compactions = super::conversation::compact::build_compaction_events(
+        &events,
+        cfg,
+        &rules,
+        // `--compact` on a query applies the configured rules to the whole
+        // conversation; there are no turn-selection flags to honour.
+        &crate::cmd::turn_selection::TurnSelection::default(),
+        // `--compact` on a query is a quick adjunct; apply it silently so
+        // compaction details don't clutter the query output.
+        None,
+    )
+    .await?;
 
-        super::conversation::compact::apply_compactions(&lock.as_mut(), compactions);
+    super::conversation::compact::apply_compactions(&lock.as_mut(), compactions);
 
-        Ok(())
-    }
+    Ok(())
+}
 
+    /// Resolve the target conversation and return its exclusive lock.
+    ///
+    /// The second element is `true` when the conversation was freshly created
+    /// by this call: its base config is this invocation's resolved config, so
+    /// no config state predates it.
+    /// Forks return `false` — a fork copies the source's base config and
+    /// events, and therefore carries config state from before this invocation.
     async fn acquire_lock(
-        &self,
-        ctx: &mut Ctx,
-        handle: Option<ConversationHandle>,
-        start_new: bool,
-    ) -> Result<ConversationLock> {
-        // Handle --new: create a fresh conversation.
-        if self.is_new() {
-            return self.create_new_conversation(ctx).await;
+    &self,
+    ctx: &mut Ctx,
+    handle: Option<ConversationHandle>,
+    start_new: bool,
+) -> Result<(ConversationLock, bool)> {
+    // Handle --new: create a fresh conversation.
+    if self.is_new() {
+        return Ok((self.create_new_conversation(ctx).await?, true));
+    }
+
+    // Handle the picker's "start a new conversation" choice. It carries no
+    // target, so any flag that needs one is unsatisfiable; refuse loudly
+    // rather than silently dropping it. The same predicate gates the offer.
+    if start_new {
+        if !self.allows_new_from_picker() {
+            return Err(Error::NewConflictsWithTarget);
         }
+        return Ok((self.create_new_conversation(ctx).await?, true));
+    }
 
-        // Handle the picker's "start a new conversation" choice. It carries no
-        // target, so any flag that needs one is unsatisfiable; refuse loudly
-        // rather than silently dropping it. The same predicate gates the offer.
-        if start_new {
-            if !self.allows_new_from_picker() {
-                return Err(Error::NewConflictsWithTarget);
-            }
-            return self.create_new_conversation(ctx).await;
-        }
+    let handle = handle.ok_or(Error::NoConversationTarget)?;
 
-        let handle = handle.ok_or(Error::NoConversationTarget)?;
+    // Handle --fork: fork the conversation before locking.
+    if let Some(fork_turns) = &self.fork {
+        return Ok((fork_conversation(ctx, &handle, *fork_turns).await?, false));
+    }
 
-        // Handle --fork: fork the conversation before locking.
-        if let Some(fork_turns) = &self.fork {
-            return fork_conversation(ctx, &handle, *fork_turns).await;
-        }
+    let req = LockRequest::from_ctx(handle, ctx)
+        .allow_new(true)
+        .allow_fork(true);
 
-        let req = LockRequest::from_ctx(handle, ctx)
-            .allow_new(true)
-            .allow_fork(true);
-
-        match acquire_lock(req).await? {
-            LockOutcome::Acquired(lock) => Ok(lock),
-            LockOutcome::NewConversation => self.create_new_conversation(ctx).await,
-            LockOutcome::ForkConversation(handle) => fork_conversation(ctx, &handle, None).await,
+    match acquire_lock(req).await? {
+        LockOutcome::Acquired(lock) => Ok((lock, false)),
+        LockOutcome::NewConversation => Ok((self.create_new_conversation(ctx).await?, true)),
+        LockOutcome::ForkConversation(handle) => {
+            Ok((fork_conversation(ctx, &handle, None).await?, false))
         }
     }
+}
 }
 
 /// Wait for background MCP server startups to complete.
@@ -1735,6 +1772,34 @@ fn apply_title_override(lock: &ConversationLock, title: Option<&str>, no_title: 
             m.title = None;
         });
     }
+}
+
+/// Append a `--cfg` reset keyword's events to a conversation stream.
+///
+/// Persists the reset-then-layer sequence from [RFD 038]: a [`ResetDelta`]
+/// marking the reset point, then the workspace partial for `WORKSPACE` resets,
+/// then whatever state this invocation layered on top of the reset point.
+/// Empty layers are skipped by [`ConversationStream::add_config_reset`], which
+/// also documents why the sequence bypasses diff-suppression.
+///
+/// [RFD 038]: https://jp.computer/rfd/038
+fn persist_config_reset(
+    events: &mut ConversationStream,
+    reset: ConfigResetEvents,
+    timestamp: DateTime<Utc>,
+) {
+    let mut layers = Vec::with_capacity(2);
+
+    if let ConfigReset::Workspace(delta) = reset.reset {
+        layers.push(ApplyDelta { timestamp, delta });
+    }
+
+    layers.push(ApplyDelta {
+        timestamp,
+        delta: reset.post,
+    });
+
+    events.add_config_reset(ResetDelta { timestamp }, layers);
 }
 
 fn get_config_delta_from_cli(

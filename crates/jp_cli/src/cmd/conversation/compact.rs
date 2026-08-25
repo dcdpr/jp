@@ -1,17 +1,15 @@
 use std::{env, fs, path::PathBuf};
 
-use chrono::Utc;
 use jp_config::{
     PartialAppConfig,
     conversation::compaction::{
         CompactionConfig, CompactionRuleConfig, PartialCompactionRuleConfig, PartialSummaryConfig,
-        ReasoningMode, RuleBound, ToolCallsMode,
+        ReasoningMode, ToolCallsMode,
     },
 };
 use jp_conversation::{
-    Compaction, CompactionRange, ConversationStream, RangeBound, ReasoningPolicy, SummaryPolicy,
-    ToolCallPolicy,
-    compaction::{extend_summary_range, resolve_range},
+    Compaction, CompactionRange, ConversationStream, ReasoningPolicy, SummaryPolicy,
+    ToolCallPolicy, compaction::extend_summary_range,
 };
 use jp_workspace::{ConversationHandle, ConversationMut, Workspace};
 use tracing::warn;
@@ -22,7 +20,9 @@ use crate::{
         conversation_id::PositionalIds,
         lock::{LockOutcome, LockRequest, acquire_lock},
         query::apply_model,
-        turn_range::{Bound, TurnRange},
+        turn_selection::{
+            Bound, BoundWindow, TurnSelection, keep_first_bound, keep_last_bound, resolve_window,
+        },
     },
     ctx::{Ctx, IntoPartialAppConfig},
     format::compaction_policy_label,
@@ -33,32 +33,16 @@ pub(crate) struct Compact {
     #[command(flatten)]
     target: PositionalIds<true, true>,
 
-    /// Preserve the first N turns (or turns within a duration).
-    ///
-    /// Accepts a turn count (e.g. `2`) or a duration (e.g. `5h`).
-    /// Composes with `--first M`: the pair compacts the first M turns minus the
-    /// preserved prefix, e.g. `--keep-first 1 --first 16` compacts turns 2
-    /// through 16.
-    #[arg(long, conflicts_with_all = ["from", "last", "turn"])]
-    keep_first: Option<RuleBound>,
-
-    /// Preserve the last N turns (or turns within a duration).
-    ///
-    /// Accepts a turn count (e.g. `3`) or a duration (e.g. `2h`).
-    /// Composes with `--last M`: the pair compacts the last M turns minus the
-    /// preserved suffix, e.g. `--keep-last 2 --last 16` compacts the 14 turns
-    /// before the final 2.
-    #[arg(long, conflicts_with_all = ["to", "first", "turn"])]
-    keep_last: Option<RuleBound>,
-
     /// Which turns to compact.
     ///
-    /// `--from`/`--to` bound the compacted range directly (overriding
-    /// `--keep-first`/`--keep-last`); `--first N`/`--last N` compact the first
-    /// or last N turns; `--turn N` compacts a single turn, or `--turn A..B` an
+    /// `--from`/`--to` bound the compacted range; `--first N`/`--last N`
+    /// compact the first or last N turns (both together compact each window and
+    /// skip the middle); `--turn N` compacts a single turn, or `--turn A..B` an
     /// inclusive range (e.g. `1..5` is turns 1-5).
+    /// `--keep-first`/`--keep-last` protect turns at either end from whichever
+    /// range is selected.
     #[command(flatten)]
-    range: TurnRange,
+    range: TurnSelection,
 
     /// Strip reasoning (thinking) blocks from the compacted range.
     #[arg(short, long, conflicts_with = "compact")]
@@ -139,34 +123,6 @@ pub(crate) struct Compact {
 }
 
 impl Compact {
-    /// Reject flag combinations clap cannot express.
-    ///
-    /// `--keep-first N --first M` means "compact the first M turns, minus the
-    /// first N" (and `--keep-last`/`--last` the mirror image at the end): with
-    /// N greater than M the preserved turns swallow the whole selection, so the
-    /// pair is rejected rather than silently selecting nothing.
-    /// Only count-based bounds are comparable up front; durations and the other
-    /// bound forms resolve against the stream and may legitimately come up
-    /// empty.
-    fn validate(&self) -> Result<(), String> {
-        if let (Some(RuleBound::Turns(keep)), Some(first)) = (&self.keep_first, self.range.first())
-            && *keep > first
-        {
-            return Err(format!(
-                "--keep-first {keep} is greater than --first {first}: nothing would remain to \
-                 compact"
-            ));
-        }
-        if let (Some(RuleBound::Turns(keep)), Some(last)) = (&self.keep_last, self.range.last())
-            && *keep > last
-        {
-            return Err(format!(
-                "--keep-last {keep} is greater than --last {last}: nothing would remain to compact"
-            ));
-        }
-        Ok(())
-    }
-
     /// Returns `true` if any dedicated policy flag is set.
     ///
     /// Policy flags (`--reasoning`/`--tools`/`--summarize`) build a single
@@ -314,7 +270,8 @@ fn resolve_reset_index(
     ))
 }
 
-/// Resolve the turn range a single rule would compact.
+/// Resolve the turn range a single rule would compact within one selected
+/// window.
 ///
 /// `range_stream` is the baseline for resolving bounds, including
 /// `AfterLastCompaction` (`--from last-compaction`): it must be the stream as
@@ -333,38 +290,77 @@ fn resolve_rule_range(
     range_stream: &ConversationStream,
     overlap_stream: &ConversationStream,
     rule: &CompactionRuleConfig,
-    from_override: Bound,
-    to_override: Bound,
+    window: &BoundWindow,
+    selection: &TurnSelection,
 ) -> Option<CompactionRange> {
-    // A CLI override (`--from`/`--to`/`--keep-first`/`--keep-last`) takes
-    // precedence; otherwise fall back to the rule's own bound. Either side
-    // resolving to `Empty` means nothing is compacted.
-    let from = match from_override {
-        Bound::Default => keep_first_to_bound(&rule.keep_first, range_stream),
-        other => other,
+    // The rule's own `keep_first`/`keep_last` fills a side the selection left
+    // open, unless the matching CLI keep flag is set: an explicit
+    // `--keep-first` replaces the configured bound rather than stacking on top
+    // of it.
+    let from = match (&window.from, selection.keep_first()) {
+        (Bound::Default, None) => keep_first_bound(&rule.keep_first, range_stream),
+        (side, _) => side.clone(),
     };
-    let to = match to_override {
-        Bound::Default => keep_last_to_bound(&rule.keep_last, range_stream),
-        other => other,
-    };
-
-    let from = match from {
-        Bound::Empty => return None,
-        Bound::Default => None,
-        Bound::At(b) => Some(b),
-    };
-    let to = match to {
-        Bound::Empty => return None,
-        Bound::Default => None,
-        Bound::At(b) => Some(b),
+    let to = match (&window.to, selection.keep_last()) {
+        (Bound::Default, None) => keep_last_bound(&rule.keep_last, range_stream),
+        (side, _) => side.clone(),
     };
 
-    let range = resolve_range(range_stream, from, to)?;
+    let resolved = resolve_window(&BoundWindow { from, to }, range_stream)?;
+    let trimmed = selection.trim(resolved, range_stream)?;
+    let range = CompactionRange {
+        from_turn: trimmed.from,
+        to_turn: trimmed.to,
+    };
+
     Some(if rule.summary.is_some() {
         extend_summary_range(overlap_stream, range)
     } else {
         range
     })
+}
+
+/// Resolve every selected window into the ranges one rule will compact.
+///
+/// A summary rule's range grows to subsume any summary it touches
+/// ([`extend_summary_range`]), so two windows that started out disjoint can
+/// extend onto each other — or onto the same pre-existing summary — and end
+/// up overlapping or identical.
+/// Coalescing here, before any text is generated, keeps one region from being
+/// compacted twice and one summary from being generated only to be immediately
+/// superseded by the next.
+///
+/// Sorting by start turn first makes a single left-to-right sweep enough:
+/// extending the open range as it goes absorbs transitive chains (A touches B,
+/// B touches C) without a second pass.
+fn plan_rule_ranges(
+    range_stream: &ConversationStream,
+    overlap_stream: &ConversationStream,
+    rule: &CompactionRuleConfig,
+    windows: &[BoundWindow],
+    selection: &TurnSelection,
+) -> Vec<CompactionRange> {
+    let mut ranges: Vec<CompactionRange> = windows
+        .iter()
+        .filter_map(|window| {
+            resolve_rule_range(range_stream, overlap_stream, rule, window, selection)
+        })
+        .collect();
+
+    ranges.sort_by_key(|r| (r.from_turn, r.to_turn));
+
+    let mut merged: Vec<CompactionRange> = Vec::with_capacity(ranges.len());
+    for range in ranges {
+        match merged.last_mut() {
+            // Intersection only: two abutting ranges are distinct regions, and
+            // for a summary rule two adjacent summaries are legal.
+            Some(last) if range.from_turn <= last.to_turn => {
+                last.to_turn = last.to_turn.max(range.to_turn);
+            }
+            _ => merged.push(range),
+        }
+    }
+    merged
 }
 
 /// Generate the summary text (if any) and assemble a [`Compaction`] for an
@@ -406,14 +402,14 @@ async fn build_compaction_for_range(
 
 /// Build compaction events from the given resolved rules.
 ///
-/// Each rule produces one `Compaction` event.
-/// Runtime range overrides (`--from`/`--to`) apply to every rule.
+/// Each rule produces one `Compaction` event per selected window, so a disjoint
+/// selection (`--first N --last M`) compacts each window separately and leaves
+/// the turns between them untouched.
 pub(crate) async fn build_compaction_events(
     events: &ConversationStream,
     cfg: &jp_config::AppConfig,
     rules: &[CompactionRuleConfig],
-    from_override: Bound,
-    to_override: Bound,
+    selection: &TurnSelection,
     printer: Option<&jp_printer::Printer>,
 ) -> crate::Result<Vec<Compaction>> {
     // Two distinct baselines:
@@ -427,21 +423,15 @@ pub(crate) async fn build_compaction_events(
     // - `overlap` accumulates the compactions generated so far, so a later
     //   summary rule's overlap extension sees earlier summaries in this same
     //   invocation and can't be appended unextended.
+    let windows = selection.windows(events);
     let mut overlap = events.clone();
     let mut compactions = Vec::new();
     for rule in rules {
-        let Some(range) = resolve_rule_range(
-            events,
-            &overlap,
-            rule,
-            from_override.clone(),
-            to_override.clone(),
-        ) else {
-            continue;
-        };
-        let compaction = build_compaction_for_range(events, cfg, rule, range, printer).await?;
-        overlap.add_compaction(compaction.clone());
-        compactions.push(compaction);
+        for range in plan_rule_ranges(events, &overlap, rule, &windows, selection) {
+            let compaction = build_compaction_for_range(events, cfg, rule, range, printer).await?;
+            overlap.add_compaction(compaction.clone());
+            compactions.push(compaction);
+        }
     }
 
     Ok(compactions)
@@ -603,52 +593,6 @@ fn kept_line(verb: &str, from: usize, to: usize) -> String {
     }
 }
 
-/// Convert a `keep_first` rule bound to a `from` [`Bound`].
-fn keep_first_to_bound(bound: &RuleBound, events: &ConversationStream) -> Bound {
-    match bound {
-        // "Keep first N" means compaction starts at turn N.
-        RuleBound::Turns(n) => Bound::At(RangeBound::Absolute(*n)),
-        // `Absolute` is the 1-based user value; the stream is 0-based.
-        RuleBound::Absolute(n) => Bound::At(RangeBound::Absolute(n.saturating_sub(1))),
-        RuleBound::FromEnd(n) => Bound::At(RangeBound::FromEnd(*n)),
-        RuleBound::Duration(d) => {
-            // Preserve the opening `d` window: start compacting at the first
-            // turn after `conversation_start + d`. A window covering the whole
-            // conversation preserves everything.
-            let Some(first) = events.iter().next() else {
-                return Bound::Empty;
-            };
-            let Ok(d) = chrono::Duration::from_std(*d) else {
-                return Bound::Empty;
-            };
-            match events.turn_at_time(first.event.timestamp + d) {
-                Some(turn) => Bound::At(RangeBound::Absolute(turn.index() + 1)),
-                None => Bound::At(RangeBound::Absolute(0)),
-            }
-        }
-        RuleBound::AfterLastCompaction => Bound::At(RangeBound::AfterLastCompaction),
-    }
-}
-
-/// Convert a `keep_last` rule bound to a `to` [`Bound`].
-fn keep_last_to_bound(bound: &RuleBound, events: &ConversationStream) -> Bound {
-    match bound {
-        // "Keep last N" means compaction stops N turns before the end.
-        RuleBound::Turns(n) | RuleBound::FromEnd(n) => Bound::At(RangeBound::FromEnd(*n)),
-        // `Absolute` is the 1-based user value; the stream is 0-based.
-        RuleBound::Absolute(n) => Bound::At(RangeBound::Absolute(n.saturating_sub(1))),
-        RuleBound::Duration(d) => {
-            // Compact turns older than the last `d` window. A window covering
-            // the whole conversation preserves everything → nothing to compact.
-            match events.turn_at_time(Utc::now() - *d) {
-                Some(turn) => Bound::At(RangeBound::Absolute(turn.index())),
-                None => Bound::Empty,
-            }
-        }
-        RuleBound::AfterLastCompaction => Bound::Default,
-    }
-}
-
 /// Build a `Compaction` event from mechanical policies (no summary).
 fn build_mechanical_compaction(
     from_turn: usize,
@@ -688,7 +632,18 @@ impl Compact {
     }
 
     pub(crate) async fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
-        self.validate()?;
+        self.range.validate()?;
+
+        // Reject an out-of-range `--turn` against every target before compacting
+        // any of them, so a bad endpoint on the last conversation can't leave the
+        // earlier ones already compacted.
+        // `compact_one` re-checks against the locked snapshot, which is the
+        // authoritative count if a concurrent writer appends in between.
+        for handle in &handles {
+            self.range
+                .check_turn_range(ctx.workspace.events(handle)?.turn_count())?;
+        }
+
         for handle in handles {
             self.compact_one(ctx, handle).await?;
         }
@@ -711,18 +666,7 @@ impl Compact {
             return self.run_reset(ctx, &mut conv, &events_snapshot, index);
         }
 
-        // `--last 0` explicitly selects no turns.
-        if self.range.is_empty() {
-            ctx.printer.println("Nothing to compact.");
-            return Ok(());
-        }
-
-        // `--turn` names specific turns; an out-of-range endpoint is an error
-        // rather than an empty/clamped range (matching `print`).
-        let count = events_snapshot.turn_count();
-        if let Some(n) = self.range.turn_out_of_range(count) {
-            return Err(format!("turn {n} out of range (conversation has {count} turns)").into());
-        }
+        self.range.check_turn_range(events_snapshot.turn_count())?;
 
         // The effective rules combine the configured rules with any policy
         // flags / inline DSL (replace, or append under bare `--compact`).
@@ -730,14 +674,8 @@ impl Compact {
             .effective_rules(&cfg)
             .map_err(|e| crate::error::Error::Compaction(e.to_string()))?;
 
-        // Range overrides (`--from`/`--to`/`--keep-first`/`--keep-last`) are
-        // resolved at runtime (they need the stream for duration and "last"
-        // resolution) and apply on top of every active rule.
-        let from_override = self.resolve_from(&events_snapshot);
-        let to_override = self.resolve_to(&events_snapshot);
-
         if self.dry_run {
-            Self::preview_compaction(ctx, &events_snapshot, &rules, &from_override, &to_override);
+            Self::preview_compaction(ctx, &events_snapshot, &rules, &self.range);
             return Ok(());
         }
 
@@ -745,8 +683,7 @@ impl Compact {
             &events_snapshot,
             &cfg,
             &rules,
-            from_override,
-            to_override,
+            &self.range,
             Some(&ctx.printer),
         )
         .await?;
@@ -836,45 +773,40 @@ impl Compact {
         ctx: &Ctx,
         events_snapshot: &ConversationStream,
         rules: &[CompactionRuleConfig],
-        from_override: &Bound,
-        to_override: &Bound,
+        selection: &TurnSelection,
     ) {
         // Range resolution uses the original snapshot for every rule, while
         // `overlap` accumulates this run's summaries so later summary rules
         // preview the same (possibly extended) ranges as the real run.
+        let windows = selection.windows(events_snapshot);
         let mut overlap = events_snapshot.clone();
         let mut new_segments = Vec::new();
         for rule in rules {
-            let Some(range) = resolve_rule_range(
-                events_snapshot,
-                &overlap,
-                rule,
-                from_override.clone(),
-                to_override.clone(),
-            ) else {
-                continue;
-            };
-            let label = if rule.summary.is_some() {
-                Some("summary".to_owned())
-            } else {
-                compaction_policy_label(&build_mechanical_compaction(
-                    range.from_turn,
-                    range.to_turn,
-                    rule,
-                ))
-            };
-            new_segments.push(TimelineSegment {
-                from: range.from_turn,
-                to: range.to_turn,
-                label,
-                existing: false,
-            });
-            if rule.summary.is_some() {
-                overlap.add_compaction(
-                    Compaction::new(range.from_turn, range.to_turn).with_summary(SummaryPolicy {
-                        summary: String::new(),
-                    }),
-                );
+            for range in plan_rule_ranges(events_snapshot, &overlap, rule, &windows, selection) {
+                let label = if rule.summary.is_some() {
+                    Some("summary".to_owned())
+                } else {
+                    compaction_policy_label(&build_mechanical_compaction(
+                        range.from_turn,
+                        range.to_turn,
+                        rule,
+                    ))
+                };
+                new_segments.push(TimelineSegment {
+                    from: range.from_turn,
+                    to: range.to_turn,
+                    label,
+                    existing: false,
+                });
+                if rule.summary.is_some() {
+                    overlap.add_compaction(
+                        Compaction::new(range.from_turn, range.to_turn).with_summary(
+                            SummaryPolicy {
+                                summary: String::new(),
+                            },
+                        ),
+                    );
+                }
             }
         }
 
@@ -891,56 +823,6 @@ impl Compact {
         let last_turn = events_snapshot.turn_count().saturating_sub(1);
         for line in timeline_lines(&segments, last_turn, true) {
             ctx.printer.println(line);
-        }
-    }
-
-    /// Resolve the `from` range override.
-    ///
-    /// The shared selector (`--from`/`--last`/`--turn`) takes precedence; when
-    /// none is set it falls back to `--keep-first`, and to [`Bound::Default`]
-    /// when that is also unset.
-    /// `--first` is the exception: it composes with `--keep-first`, which then
-    /// supplies the start of the range while `--first` caps its end (via
-    /// [`resolve_to`]).
-    ///
-    /// [`resolve_to`]: Self::resolve_to
-    fn resolve_from(&self, events: &ConversationStream) -> Bound {
-        if let Some(bound) = &self.keep_first
-            && self.range.first().is_some()
-        {
-            return keep_first_to_bound(bound, events);
-        }
-        match self.range.resolve_from(events) {
-            Bound::Default => match &self.keep_first {
-                Some(bound) => keep_first_to_bound(bound, events),
-                None => Bound::Default,
-            },
-            other => other,
-        }
-    }
-
-    /// Resolve the `to` range override.
-    ///
-    /// The shared selector (`--to`/`--turn`) takes precedence; when none is set
-    /// it falls back to `--keep-last`, and to [`Bound::Default`] when that is
-    /// also unset.
-    /// `--last` is the exception: it composes with `--keep-last`, which then
-    /// supplies the end of the range while `--last` sets its start (via
-    /// [`resolve_from`]).
-    ///
-    /// [`resolve_from`]: Self::resolve_from
-    fn resolve_to(&self, events: &ConversationStream) -> Bound {
-        if let Some(bound) = &self.keep_last
-            && self.range.last().is_some()
-        {
-            return keep_last_to_bound(bound, events);
-        }
-        match self.range.resolve_to(events) {
-            Bound::Default => match &self.keep_last {
-                Some(bound) => keep_last_to_bound(bound, events),
-                None => Bound::Default,
-            },
-            other => other,
         }
     }
 }

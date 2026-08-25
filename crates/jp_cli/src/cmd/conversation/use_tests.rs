@@ -146,7 +146,7 @@ fn run_with_contention_skips_metadata_bump() {
     );
 }
 
-// --- Filter mode (`--grep`, `--from`, `--until`) ----------------------------
+// --- Filter mode (`--grep`, `--created-since`, `--created-before`) ----------
 //
 // Filter mode resolves handles internally instead of going through the
 // standard pipeline. These tests exercise the N=1 short-circuit path that
@@ -287,8 +287,8 @@ fn filter_range_narrows_then_grep_matches() {
         target: PositionalIds::from_targets(vec![]),
         grep: Some("shared-marker".into()),
         range: CreationRange {
-            from: Some(cutoff),
-            until: None,
+            since: Some(cutoff),
+            before: None,
         },
     };
     cmd.run(&mut ctx, vec![]).unwrap();
@@ -319,10 +319,10 @@ fn filter_mode_skips_standard_resolution() {
         target: PositionalIds::from_targets(vec![]),
         grep: None,
         range: CreationRange {
-            from: Some(TimeThreshold::from(
+            since: Some(TimeThreshold::from(
                 Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
             )),
-            until: None,
+            before: None,
         },
     };
     assert!(cmd.conversation_load_request().targets.is_none());
