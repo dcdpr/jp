@@ -895,9 +895,7 @@ fn test_tool_use_forces_a_tool_a_directive_disabled() {
 
 #[test]
 fn test_builtin_config_merges_under_user_config() {
-    // A user overriding one field of a builtin keeps the rest of the builtin's
-    // block. Before the merge-under fix, the one-field partial replaced the
-    // whole entry and the tool lost its `source`, `enable`, and parameters.
+    // A one-field user override keeps the built-in source, enable policy, and parameters.
     let mut partial = make_partial_with_tools();
     partial
         .conversation
