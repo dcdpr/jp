@@ -568,6 +568,40 @@ impl From<crate::error::Error> for Error {
             )]
             .into(),
             Compaction(error) => [("message", "Compaction error".into()), ("error", error)].into(),
+            SummaryOverlap {
+                authored,
+                from,
+                to,
+                required_from,
+                required_to,
+            } => [
+                ("message", "Summary overlap".to_owned()),
+                (
+                    "reason",
+                    if authored {
+                        format!(
+                            "A summary cannot be nested inside or split across another one, so \
+                             your text for turns {from}..{to} would have to stand in for turns \
+                             {required_from}..{required_to} as well."
+                        )
+                    } else {
+                        format!(
+                            "Summarizing turns {from}..{to} would have to grow to turns \
+                             {required_from}..{required_to}, replacing a summary you wrote by \
+                             hand with a generated one."
+                        )
+                    },
+                ),
+                (
+                    "suggestion",
+                    format!(
+                        "Re-run with `--from {required_from} --to {required_to}` to cover the \
+                         whole range, or `jp conversation compact --reset` to drop the existing \
+                         compactions first."
+                    ),
+                ),
+            ]
+            .into(),
             Label(error) => [("message", "Label error".into()), ("error", error)].into(),
             Summarize { model, reason } => [
                 ("message", "Summarization failed".to_owned()),

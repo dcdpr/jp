@@ -5,25 +5,40 @@ fn parse_policy_only() {
     assert_eq!("s".parse::<CompactSpec>().unwrap(), CompactSpec {
         reasoning: false,
         tools: None,
-        summarize: true,
+        summary: true,
         range: None,
     });
     assert_eq!("r+t=strip".parse::<CompactSpec>().unwrap(), CompactSpec {
         reasoning: true,
         tools: Some(ToolCallsMode::Strip),
-        summarize: false,
+        summary: false,
         range: None,
     });
     assert_eq!(
-        "reasoning+tools=strip+summarize"
+        "reasoning+tools=strip+summary"
             .parse::<CompactSpec>()
             .unwrap(),
         CompactSpec {
             reasoning: true,
             tools: Some(ToolCallsMode::Strip),
-            summarize: true,
+            summary: true,
             range: None,
         }
+    );
+}
+
+#[test]
+fn summarize_is_accepted_as_an_alias_for_summary() {
+    // Specs written against the older spelling keep parsing.
+    assert_eq!(
+        "summarize:..-3".parse::<CompactSpec>().unwrap(),
+        "summary:..-3".parse::<CompactSpec>().unwrap()
+    );
+
+    // Either spelling still rejects a value, naming the canonical one.
+    assert_eq!(
+        "summarize=x".parse::<CompactSpec>().unwrap_err(),
+        "`summary` does not take a value"
     );
 }
 
@@ -48,7 +63,7 @@ fn parse_tool_mode_with_range() {
     assert_eq!("t=sres:..-3".parse::<CompactSpec>().unwrap(), CompactSpec {
         reasoning: false,
         tools: Some(ToolCallsMode::StripResponses),
-        summarize: false,
+        summary: false,
         range: Some(DslRange {
             from: None,
             to: Some(RuleBound::FromEnd(3)),
@@ -61,7 +76,7 @@ fn parse_with_range() {
     assert_eq!("s:..-3".parse::<CompactSpec>().unwrap(), CompactSpec {
         reasoning: false,
         tools: None,
-        summarize: true,
+        summary: true,
         range: Some(DslRange {
             from: None,
             to: Some(RuleBound::FromEnd(3)),
@@ -72,7 +87,7 @@ fn parse_with_range() {
         CompactSpec {
             reasoning: true,
             tools: Some(ToolCallsMode::Strip),
-            summarize: false,
+            summary: false,
             range: Some(DslRange {
                 from: Some(RuleBound::Absolute(5)),
                 to: Some(RuleBound::FromEnd(3)),
@@ -82,7 +97,7 @@ fn parse_with_range() {
     assert_eq!("s:..".parse::<CompactSpec>().unwrap(), CompactSpec {
         reasoning: false,
         tools: None,
-        summarize: true,
+        summary: true,
         range: Some(DslRange {
             from: None,
             to: None,
@@ -91,7 +106,7 @@ fn parse_with_range() {
     assert_eq!("r:5..".parse::<CompactSpec>().unwrap(), CompactSpec {
         reasoning: true,
         tools: None,
-        summarize: false,
+        summary: false,
         range: Some(DslRange {
             from: Some(RuleBound::Absolute(5)),
             to: None,
@@ -131,7 +146,7 @@ fn parse_single_number_shorthand() {
     assert_eq!("s:-3".parse::<CompactSpec>().unwrap(), CompactSpec {
         reasoning: false,
         tools: None,
-        summarize: true,
+        summary: true,
         range: Some(DslRange {
             from: None,
             to: Some(RuleBound::FromEnd(3)),
@@ -141,7 +156,7 @@ fn parse_single_number_shorthand() {
     assert_eq!("r:5".parse::<CompactSpec>().unwrap(), CompactSpec {
         reasoning: true,
         tools: None,
-        summarize: false,
+        summary: false,
         range: Some(DslRange {
             from: Some(RuleBound::Absolute(5)),
             to: None,

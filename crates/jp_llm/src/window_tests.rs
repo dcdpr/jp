@@ -154,9 +154,11 @@ fn truncate_measures_the_projected_stream() {
     for i in 0..50 {
         events = events.with_turn(format!("turn {i}: {}", "x".repeat(1000)));
     }
-    events.add_compaction(Compaction::new(0, 48).with_summary(SummaryPolicy {
-        summary: "A short summary of the first 49 turns.".to_owned(),
-    }));
+    events.add_compaction(
+        Compaction::new(0, 48).with_summary(SummaryPolicy::generated(
+            "A short summary of the first 49 turns.",
+        )),
+    );
 
     // ~50k chars raw, but the projection is the summary pair plus the last turn.
     let raw_chars = estimate_chars(&events);
