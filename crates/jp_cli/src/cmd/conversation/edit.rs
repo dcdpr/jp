@@ -291,6 +291,10 @@ impl Edit {
             } else if self.no_expires_at {
                 conv.update_metadata(|m| m.expires_at = None);
             }
+
+            // Write before reporting success, so a failed write is an error
+            // rather than a confirmation the user cannot trust.
+            conv.flush()?;
         }
 
         ctx.printer.println("Conversation(s) updated.");

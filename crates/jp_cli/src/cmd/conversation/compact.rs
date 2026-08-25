@@ -659,11 +659,11 @@ impl Compact {
         };
 
         let cfg = ctx.config();
-        let conv = lock.into_mut();
+        let mut conv = lock.into_mut();
         let events_snapshot = conv.events().clone();
 
         if let Some(index) = self.reset {
-            return self.run_reset(ctx, &conv, &events_snapshot, index);
+            return self.run_reset(ctx, conv, &events_snapshot, index);
         }
 
         self.range.check_turn_range(events_snapshot.turn_count())?;
@@ -702,6 +702,9 @@ impl Compact {
             &conv.id().to_string(),
         ));
         apply_compactions(&conv, compactions);
+        // Write before reporting the timeline, so a failed write is an error
+        // rather than a confirmation the user cannot trust.
+        conv.flush()?;
         for line in timeline_lines(&segments, last_turn, false) {
             ctx.printer.println(line);
         }
@@ -719,7 +722,7 @@ impl Compact {
     fn run_reset(
         &self,
         ctx: &Ctx,
-        conv: &ConversationMut,
+        conv: ConversationMut,
         events: &ConversationStream,
         index: Option<usize>,
     ) -> Output {
@@ -727,7 +730,7 @@ impl Compact {
             let count = if self.dry_run {
                 events.compactions().count()
             } else {
-                conv.update_events(ConversationStream::remove_compactions)
+                conv.update_events_and_flush(ConversationStream::remove_compactions)?
             };
 
             ctx.printer.println(match (count, self.dry_run) {
@@ -746,7 +749,7 @@ impl Compact {
             return Ok(());
         }
 
-        conv.update_events(|stream| stream.remove_compaction(position));
+        conv.update_events_and_flush(|stream| stream.remove_compaction(position))?;
         ctx.printer
             .println(format!("Removed compaction {index} ({range})."));
 

@@ -190,7 +190,8 @@ impl Label {
 
             let applied = lock
                 .as_mut()
-                .update_metadata(|m| label::apply(&mut m.labels, &change));
+                .update_metadata_and_flush(|m| label::apply(&mut m.labels, &change))?;
+
             label::report_missing(&ctx.printer, lock.id(), &applied.missing);
 
             report.record(&applied.changes);

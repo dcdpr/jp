@@ -26,6 +26,7 @@ use std::{
 };
 
 use camino::{FromPathBufError, Utf8Path, Utf8PathBuf};
+use conversation_lock::PersistFailures;
 pub use conversation_lock::{ConversationLock, ConversationMut, LockResult};
 pub use error::Error;
 use error::Result;
@@ -89,6 +90,13 @@ pub struct Workspace {
 
     /// The in-memory state of the workspace.
     state: State,
+
+    /// Drop-time persistence failures recorded by conversation scopes.
+    ///
+    /// Lives here rather than on a [`ConversationLock`] so a failure recorded
+    /// while a cancelled future unwinds is still reachable after the lock is
+    /// gone.
+    persist_failures: PersistFailures,
 }
 
 impl Workspace {
@@ -143,6 +151,7 @@ impl Workspace {
             sessions: backend,
             fs: None,
             state: State::default(),
+            persist_failures: PersistFailures::default(),
         }
     }
 
@@ -233,6 +242,18 @@ impl Workspace {
     #[must_use]
     pub fn root(&self) -> &Utf8Path {
         &self.root
+    }
+
+    /// Take the drop-time persist failure recorded by any conversation scope.
+    ///
+    /// The drain of last resort: a scope that dropped while a cancelled future
+    /// unwound recorded its failure here, and the lock it came from is already
+    /// gone.
+    /// Yields each failure once, so draining here after a
+    /// [`ConversationLock::take_persist_failure`] does not report it twice.
+    #[must_use]
+    pub fn take_persist_failure(&self) -> Option<Error> {
+        self.persist_failures.lock().take()
     }
 
     /// Set the persist backend.
@@ -588,6 +609,7 @@ impl Workspace {
             Arc::clone(&self.persist),
             lock_guard,
             projection,
+            Arc::clone(&self.persist_failures),
         ))
     }
 
@@ -715,6 +737,7 @@ impl Workspace {
             Arc::clone(&self.persist),
             lock_guard,
             projection,
+            Arc::clone(&self.persist_failures),
         )))
     }
 
@@ -911,6 +934,7 @@ impl Workspace {
             Arc::clone(&self.persist),
             Box::new(NoopLockGuard),
             projection,
+            Arc::clone(&self.persist_failures),
         )
     }
 }

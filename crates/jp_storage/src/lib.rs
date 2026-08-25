@@ -25,7 +25,38 @@ pub(crate) const METADATA_FILE: &str = "metadata.json";
 const EVENTS_FILE: &str = "events.json";
 const BASE_CONFIG_FILE: &str = "base_config.json";
 pub(crate) const CONVERSATIONS_DIR: &str = "conversations";
+
+/// Name prefix for a conversation directory being staged by an import.
+///
+/// Dot-prefixed so a leftover is invisible to conversation lookups and index
+/// scans, both of which match on the bare conversation dirname.
+const IMPORT_STAGING_PREFIX: &str = ".import-";
 pub(crate) const ARCHIVE_DIR: &str = ".archive";
+
+/// Build the staging directory name an import copies into.
+///
+/// The name is unique per attempt, so a copy can never land in a tree left by
+/// an earlier one.
+/// That matters because a merge would publish entries the source no longer has:
+/// `copy_dir_all` overwrites the files it copies but removes nothing, so
+/// anything surviving from an older generation would be renamed into place
+/// alongside the fresh copy.
+///
+/// The uniqueness suffix goes *after* the conversation dirname so the leading
+/// timestamp segment stays intact.
+/// The sanitize sweep identifies a leftover by parsing that segment, and can
+/// only take the conversation's lock (and so only reap the directory) while it
+/// stays parseable.
+fn import_staging_dirname(dirname: &str) -> String {
+    let nanos = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+
+    format!(
+        "{IMPORT_STAGING_PREFIX}{dirname}-{}-{nanos}",
+        std::process::id()
+    )
+}
 
 #[derive(Debug, Clone)]
 struct Storage {
@@ -227,7 +258,7 @@ impl Storage {
         // Bring any existing copy to the current directory name (e.g. after a
         // title change) and drop other stale copies for this id.
         reconcile_conversation_dir(id, conversations_dir, &conv_dir)?;
-        fs::create_dir_all(&conv_dir)?;
+        fs::create_dir_all(&conv_dir).map_err(|error| Error::write_failed(&conv_dir, error))?;
 
         let (base_config, events_json) = events
             .to_parts()
@@ -827,6 +858,10 @@ fn remove_conversation_dirs(id: &ConversationId, conversations_dir: &Utf8Path) -
 /// name the upcoming write will use.
 /// A conversation already present in user-local, or one with no workspace copy,
 /// is left untouched.
+///
+/// The copy lands in a staging directory and is renamed into place, so the
+/// import is all-or-nothing: a failed or killed run leaves nothing that later
+/// runs can mistake for an imported conversation.
 fn import_external_copy(
     id: &ConversationId,
     title: Option<&str>,
@@ -842,16 +877,46 @@ fn import_external_copy(
         return Ok(());
     };
 
-    fs::create_dir_all(user_conversations)?;
-    copy_dir_all(
-        &workspace_conv,
-        &user_conversations.join(id.to_dirname(title)),
-    )
+    fs::create_dir_all(user_conversations)
+        .map_err(|error| Error::write_failed(user_conversations, error))?;
+
+    // Copying straight to the final name would leave a partial directory behind
+    // on failure. The next run then finds it, treats the import as already done
+    // and skips it forever, while its fresh mtime makes the loader prefer it
+    // over the intact workspace copy. Staging plus a rename makes the visible
+    // result atomic.
+    //
+    // The staging name is unique per attempt, so this copy cannot land in a tree
+    // an earlier attempt left behind. Reusing one name and clearing it first
+    // would make correctness depend on that removal succeeding: a partial
+    // failure leaves entries the source no longer has, and the rename publishes
+    // them.
+    let dirname = id.to_dirname(title);
+    let staging = user_conversations.join(import_staging_dirname(&dirname));
+    let target = user_conversations.join(&dirname);
+
+    // Both cleanups are best-effort: a leftover under a unique name is inert.
+    // It is never copied into, `find_normal_conversation_dir_path` cannot match
+    // it, and the sanitize sweep reaps it under the conversation's lock.
+    if let Err(error) = copy_dir_all(&workspace_conv, &staging) {
+        let _err = fs::remove_dir_all(&staging);
+        return Err(error);
+    }
+
+    if let Err(error) = fs::rename(&staging, &target) {
+        let _err = fs::remove_dir_all(&staging);
+        return Err(Error::write_failed(&target, error));
+    }
+
+    Ok(())
 }
 
 /// Recursively copy directory `src` into `dst`.
+///
+/// A failure names the destination path it was writing, and reports a full
+/// filesystem as [`Error::OutOfSpace`].
 fn copy_dir_all(src: &Utf8Path, dst: &Utf8Path) -> Result<()> {
-    fs::create_dir_all(dst)?;
+    fs::create_dir_all(dst).map_err(|error| Error::write_failed(dst, error))?;
     for entry in dir_entries(src) {
         let to = dst.join(entry.file_name());
         let is_dir = entry.file_type().is_ok_and(|ty| ty.is_dir());
@@ -859,7 +924,7 @@ fn copy_dir_all(src: &Utf8Path, dst: &Utf8Path) -> Result<()> {
         if is_dir {
             copy_dir_all(&from, &to)?;
         } else {
-            fs::copy(&from, &to)?;
+            fs::copy(&from, &to).map_err(|error| Error::write_failed(&to, error))?;
         }
     }
     Ok(())
@@ -944,7 +1009,7 @@ fn reconcile_conversation_dir(
             .into_iter()
             .find(|dir| dir != target)
     {
-        fs::rename(&src, target)?;
+        fs::rename(&src, target).map_err(|error| Error::write_failed(target, error))?;
     }
 
     for dir in conversation_dirs_for_id(conversations_dir, &prefix) {
