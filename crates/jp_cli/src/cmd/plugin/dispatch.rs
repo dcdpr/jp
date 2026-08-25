@@ -205,11 +205,15 @@ impl Composer<'_> {
 ///
 /// `binary` is the path to the plugin executable.
 /// `args` are the remaining CLI arguments to forward.
+/// `child_cwd` is the bootstrap-resolved working directory for the child (RFD
+/// 087): `Some` when JP operates on a workspace other than the launch cwd's
+/// own, `None` to inherit the process cwd.
 pub(crate) fn run_plugin(
     name: &str,
     binary: &Utf8Path,
     args: &[String],
     workspace: &Workspace,
+    child_cwd: Option<&Utf8Path>,
     storage_path: Option<&Utf8Path>,
     user_storage_path: Option<&Utf8Path>,
     config: &Arc<AppConfig>,
@@ -251,6 +255,13 @@ pub(crate) fn run_plugin(
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+
+    // The root-as-working-directory invariant (RFD 087): when JP operates on
+    // a workspace other than the launch cwd's own, plugins run as if launched
+    // from the selected workspace root.
+    if let Some(cwd) = child_cwd {
+        cmd.current_dir(cwd);
+    }
 
     // Prevent the child from receiving SIGINT/SIGTERM directly. The host
     // sends `Shutdown` over the protocol instead, giving the plugin a
@@ -301,7 +312,13 @@ pub(crate) fn run_plugin(
     let shutdown_handle = thread::spawn(move || {
         let interrupted = futures::executor::block_on(async {
             tokio::select! {
-                notified = interrupt_rx.recv() => notified.is_some(),
+                // Asking the plugin to shut down acts on the press, so it
+                // leaves the escalation ladder; a further press then reaches
+                // the router with a fresh count.
+                notified = interrupt_rx.recv() => notified.is_some_and(|notice| {
+                    notice.handled();
+                    true
+                }),
                 () = shutdown_token.cancelled() => true,
             }
         });
@@ -480,6 +497,7 @@ fn handle_list_conversations(workspace: &Workspace, req_id: Option<String>) -> H
             id: id.as_deciseconds().to_string(),
             title: meta.title.clone(),
             last_activated_at: meta.last_activated_at,
+            pinned_at: meta.pinned_at,
             events_count: meta.events_count,
         })
         .collect();
@@ -612,6 +630,7 @@ fn is_process_alive(pid: u32) -> bool {
     unsafe { libc::kill(libc::pid_t::from(pid.cast_signed()), 0) == 0 }
 }
 
+/// Check if a process is still alive by PID.
 #[cfg(windows)]
 fn is_process_alive(pid: u32) -> bool {
     use windows_sys::Win32::{
@@ -644,6 +663,10 @@ fn kill_child(pid: u32) {
     debug!(pid, "Sent SIGKILL to plugin after grace period.");
 }
 
+/// Terminate a child process by PID.
+///
+/// Used as a last resort when the plugin doesn't exit within the grace period
+/// after receiving `Shutdown`.
 #[cfg(windows)]
 fn kill_child(pid: u32) {
     use windows_sys::Win32::{
@@ -1107,6 +1130,7 @@ pub(crate) async fn run_external(args: &[String], ctx: &Ctx) -> cmd::Output {
         &binary,
         plugin_args,
         &ctx.workspace,
+        ctx.exec.child_cwd(),
         ctx.storage_path(),
         ctx.user_storage_path(),
         &config,

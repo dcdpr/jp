@@ -28,6 +28,7 @@
 
 use std::sync::Arc;
 
+use inquire::InquireError;
 use jp_config::{
     editor::InlineEditMode,
     interrupt::{
@@ -41,6 +42,7 @@ use jp_inquire::{
     prompt::{PromptBackend, TerminalPromptBackend},
 };
 use jp_printer::Printer;
+use tracing::{debug, warn};
 
 use crate::editor::report_editor_failure;
 
@@ -49,6 +51,36 @@ pub(crate) fn reply_edit_mode(mode: InlineEditMode) -> ReplyEditMode {
     match mode {
         InlineEditMode::Emacs => ReplyEditMode::Emacs,
         InlineEditMode::Vi => ReplyEditMode::Vi,
+    }
+}
+
+/// Why an interrupt prompt returned without a selection.
+enum PromptExit {
+    /// The user pressed `Ctrl+C` on the prompt, asking to get past it.
+    Cancelled,
+
+    /// The prompt could not be rendered or read at all.
+    Unavailable,
+}
+
+/// Classify and record a prompt that returned without a selection.
+///
+/// The distinction decides whether the press escalates.
+/// A cancelled prompt is the user asking out, so it does.
+/// A prompt that could not run answered nothing, so escalating on it would end
+/// the run on a decision the user never made; the press stays on the router's
+/// escalation ladder instead, and a second one gets them out through the ladder
+/// rather than through this prompt.
+fn classify_prompt_exit(prompt: &str, error: &InquireError) -> PromptExit {
+    match error {
+        InquireError::OperationCanceled | InquireError::OperationInterrupted => {
+            debug!(prompt, %error, "Interrupt prompt cancelled.");
+            PromptExit::Cancelled
+        }
+        _ => {
+            warn!(prompt, %error, "Interrupt prompt unavailable.");
+            PromptExit::Unavailable
+        }
     }
 }
 
@@ -111,6 +143,13 @@ pub enum InterruptAction {
     /// The streaming path commits partial content before completing; the tool
     /// path cancels the running tools.
     Escalate,
+
+    /// The menu could not be shown or read, so nothing was decided.
+    ///
+    /// The caller leaves the work as it was and leaves the press on the signal
+    /// router's escalation ladder, so a second press gets the user out through
+    /// the router instead of relying on this menu.
+    PromptFailed,
 }
 
 /// Outcome of collecting a reply from the user.
@@ -183,6 +222,9 @@ impl<P: PromptBackend> InterruptHandler<P> {
     /// returns to the menu, while a configured (menu-less) `reply` resumes.
     /// Cancelling the menu itself with `Ctrl+C` escalates: the caller should
     /// commit partial content and begin a graceful shutdown.
+    /// A menu that cannot be shown at all yields
+    /// [`InterruptAction::PromptFailed`] rather than an escalation, leaving the
+    /// press on the router's escalation ladder.
     pub fn handle_streaming_interrupt(
         &self,
         config: &StreamingInterruptConfig,
@@ -190,6 +232,12 @@ impl<P: PromptBackend> InterruptHandler<P> {
         stream_alive: bool,
     ) -> InterruptAction {
         let menu = config.action == StreamingInterruptAction::Prompt;
+        debug!(
+            action = ?config.action,
+            menu,
+            stream_alive,
+            "Handling streaming interrupt."
+        );
 
         loop {
             let choice = match config.action {
@@ -212,7 +260,12 @@ impl<P: PromptBackend> InterruptHandler<P> {
                     // escalation, not a "continue".
                     match selected {
                         Ok(choice) => choice,
-                        Err(_) => return InterruptAction::Escalate,
+                        Err(error) => {
+                            return match classify_prompt_exit("streaming_menu", &error) {
+                                PromptExit::Cancelled => InterruptAction::Escalate,
+                                PromptExit::Unavailable => InterruptAction::PromptFailed,
+                            };
+                        }
                     }
                 }
                 StreamingInterruptAction::Continue => 'c',
@@ -271,6 +324,7 @@ impl<P: PromptBackend> InterruptHandler<P> {
         printer: &Printer,
     ) -> InterruptAction {
         let menu = config.action == ToolInterruptAction::Prompt;
+        debug!(action = ?config.action, menu, "Handling tool interrupt.");
 
         loop {
             let choice = match config.action {
@@ -293,7 +347,12 @@ impl<P: PromptBackend> InterruptHandler<P> {
                     // escalation, not a "continue".
                     match selected {
                         Ok(choice) => choice,
-                        Err(_) => return InterruptAction::Escalate,
+                        Err(error) => {
+                            return match classify_prompt_exit("tool_menu", &error) {
+                                PromptExit::Cancelled => InterruptAction::Escalate,
+                                PromptExit::Unavailable => InterruptAction::PromptFailed,
+                            };
+                        }
                     }
                 }
                 ToolInterruptAction::Continue => 'c',
@@ -460,7 +519,13 @@ impl<P: PromptBackend> InterruptHandler<P> {
                 // Whitespace counts as blank so the tool path reaches its canned
                 // rejection rather than sending a blank-looking reply.
                 Ok(ReplyOutcome::Submit(_)) => return ReplyResult::Empty,
-                Ok(ReplyOutcome::Cancelled) | Err(_) => return ReplyResult::Cancelled,
+                Ok(ReplyOutcome::Cancelled) => return ReplyResult::Cancelled,
+                Err(error) => {
+                    // Both classifications back out to the caller's menu; only
+                    // the log line differs.
+                    let _unused = classify_prompt_exit("inline_reply", &error);
+                    return ReplyResult::Cancelled;
+                }
             }
         }
     }

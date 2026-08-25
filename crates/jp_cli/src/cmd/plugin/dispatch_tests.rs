@@ -55,7 +55,7 @@ fn message_loop_ready_then_exit() {
     // We can't easily construct a Workspace for a unit test without a temp dir,
     // but this test only exercises ready + exit (no workspace queries). We
     // construct a minimal in-memory workspace.
-    let ws = jp_workspace::Workspace::new("/tmp/jp-test-plugin");
+    let ws = jp_workspace::Workspace::in_memory("/tmp/jp-test-plugin");
 
     // No terminal in a test, so a compose request would be declined rather
     // than prompting; this exchange never asks for one.

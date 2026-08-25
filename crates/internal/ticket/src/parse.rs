@@ -13,12 +13,12 @@
 
 use std::ops::Range;
 
-use crate::{Comment, Metadata, ParseError, Ticket, TicketId};
+use crate::{Comment, Metadata, ParseError, Ticket};
 
 /// Read a ticket document.
 pub fn document(source: &str) -> Result<Ticket, ParseError> {
     let doc = Doc::new(source);
-    let (id, title) = doc.title()?;
+    let title = doc.title()?;
     let header = doc.metadata_range().ok_or(ParseError::MissingMetadata)?;
     let metadata = metadata(header.clone().filter_map(|i| meta_line(doc.lines[i])))?;
 
@@ -39,7 +39,6 @@ pub fn document(source: &str) -> Result<Ticket, ParseError> {
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(Ticket {
-        id,
         title,
         metadata,
         description,
@@ -56,6 +55,16 @@ pub fn comment_count(source: &str) -> usize {
     Doc::new(source).boundaries().len()
 }
 
+/// The title from a document's `# Title` heading.
+///
+/// Tolerant of a malformed header, like [`comment_count`], so a caller that
+/// only needs to name a ticket doesn't have to be able to read the rest of it.
+/// Returns `None` when the first non-empty line isn't a level-one heading.
+#[must_use]
+pub fn title(source: &str) -> Option<String> {
+    Doc::new(source).title().ok()
+}
+
 /// The line range of the metadata block that follows the title heading.
 ///
 /// Returns `None` when the heading is missing, or when the first thing after it
@@ -66,10 +75,15 @@ pub fn metadata_range(source: &str) -> Option<Range<usize>> {
 }
 
 /// Split a `- **Key**: Value` line into its key and value.
+///
+/// A leading `\` on the value is dropped: a markdown formatter escapes a value
+/// that opens with `#`, and `\#1` means the reference `#1`.
 #[must_use]
 pub fn meta_line(line: &str) -> Option<(&str, &str)> {
     let (key, value) = line.strip_prefix("- **")?.split_once("**:")?;
-    Some((key.trim(), value.trim()))
+    let value = value.trim();
+
+    Some((key.trim(), value.strip_prefix('\\').unwrap_or(value)))
 }
 
 /// A line of five or more dashes at column zero: the shape that opens a
@@ -95,20 +109,18 @@ impl<'a> Doc<'a> {
         Self { lines, fenced }
     }
 
-    /// The id and title from the `# T0042: Title` heading.
-    fn title(&self) -> Result<(TicketId, String), ParseError> {
-        let line = self
-            .lines
+    /// The title from the `# Title` heading.
+    ///
+    /// A ticket's id is not in its document — it lives in the filename, so
+    /// there is exactly one place that names the ticket and nothing to keep in
+    /// step.
+    fn title(&self) -> Result<String, ParseError> {
+        self.lines
             .iter()
             .find(|line| !line.trim().is_empty())
-            .ok_or(ParseError::MissingTitle)?;
-
-        let (id, title) = line
-            .strip_prefix("# ")
-            .and_then(|rest| rest.split_once(':'))
-            .ok_or(ParseError::MissingTitle)?;
-
-        Ok((id.parse()?, title.trim().to_owned()))
+            .and_then(|line| line.strip_prefix("# "))
+            .map(|title| title.trim().to_owned())
+            .ok_or(ParseError::MissingTitle)
     }
 
     fn metadata_range(&self) -> Option<Range<usize>> {

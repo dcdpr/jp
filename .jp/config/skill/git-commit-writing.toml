@@ -1,5 +1,5 @@
 extends = [
-    "../knowledge/conventional-commit.toml",
+    "../knowledge/commit-message.toml",
 ]
 
 [[assistant.system_prompt_sections]]

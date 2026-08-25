@@ -183,23 +183,34 @@ fn generate_enum_schema(
         .iter()
         .all(|v| matches!(v.value.fields, Fields::Unit));
     let mut default_index = None;
+    let mut expanded_index = None;
+    let mut variants_types = Vec::with_capacity(variants.len());
 
-    let variants_types = variants
-        .iter()
-        .enumerate()
-        .filter_map(|(i, v)| {
-            if v.is_default() {
-                default_index = Some(i);
-            }
+    // Both indices address the emitted variant list, so they count emitted
+    // variants rather than declared ones: an excluded variant ahead of them
+    // would otherwise shift every later index by one.
+    for variant in variants {
+        if variant.is_excluded() {
+            continue;
+        }
 
-            if v.is_excluded() {
-                None
-            } else {
-                Some(v.generate_schema_type(is_all_unit_enum))
-            }
-        })
-        .collect::<Vec<_>>();
+        let index = variants_types.len();
 
+        if variant.is_default() {
+            default_index = Some(index);
+        }
+
+        if variant.args.expanded {
+            expanded_index = Some(index);
+        }
+
+        variants_types.push(variant.generate_schema_type(is_all_unit_enum));
+    }
+
+    let expanded = expanded_index.map_or_else(
+        || quote! {},
+        |index| quote! { union = union.with_expanded_index(#index); },
+    );
     let default_index = map_option_argument_quote(default_index);
 
     if is_all_unit_enum {
@@ -217,12 +228,16 @@ fn generate_enum_schema(
         quote! {
             #deprecated
             #description
-            schema.union(UnionType::from_schemas(
+
+            let mut union = UnionType::from_schemas(
                 [
                     #(#variants_types),*
                 ],
                 #default_index,
-            ))
+            );
+            #expanded
+
+            schema.union(union)
         }
     }
 }

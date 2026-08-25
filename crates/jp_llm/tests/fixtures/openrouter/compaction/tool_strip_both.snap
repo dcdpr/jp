@@ -15,9 +15,6 @@ expression: request
       ]
     },
     {
-      "role": "assistant"
-    },
-    {
       "role": "assistant",
       "content": [
         {
@@ -41,9 +38,10 @@ expression: request
         {
           "id": "call_1",
           "index": 0,
+          "type": "function",
           "function": {
             "name": "read_file",
-            "arguments": null
+            "arguments": "{}"
           }
         }
       ]

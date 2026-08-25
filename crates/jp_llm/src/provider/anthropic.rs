@@ -34,7 +34,7 @@ use super::{Provider, trace_to_tmpfile};
 use crate::{
     error::{
         Error, Result, StreamError, StreamErrorKind, extract_retry_from_text,
-        looks_like_quota_error,
+        looks_like_context_window_error, looks_like_quota_error,
     },
     event::{Event, EventMatcher, EventPart, EventPatch, FinishReason, PatchAction, ToolCallPart},
     event_builder::EventBuilder,
@@ -2454,6 +2454,17 @@ impl From<AnthropicError> for StreamError {
                     ),
                 )
                 .with_source(error)
+            }
+
+            // An oversized prompt is the same size on the next attempt, so it
+            // is classified rather than left to the generic fallback below.
+            E::Api(ref api_error)
+                if api_error
+                    .message
+                    .as_deref()
+                    .is_some_and(looks_like_context_window_error) =>
+            {
+                StreamError::context_window_exceeded(error.to_string()).with_source(error)
             }
 
             error => StreamError::other(error.to_string()).with_source(error),

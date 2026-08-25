@@ -19,6 +19,7 @@ serde = { workspace = true, features = ["std", "derive"] }
 [dev-dependencies]
 camino-tempfile = { workspace = true }
 indoc = { workspace = true }
+serde_json = { workspace = true, features = ["std"] }
 
 [lints]
 workspace = true

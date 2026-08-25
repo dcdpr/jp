@@ -25,6 +25,6 @@ pub use load::{
 };
 pub use lock::{ConversationLockGuard, LockBackend};
 pub use memory::InMemoryStorageBackend;
-pub use null::{NoopLockGuard, NullLockBackend, NullPersistBackend};
+pub use null::{NoopLockGuard, NullLockBackend, NullPersistBackend, ReadOnlySessionBackend};
 pub use persist::{PersistBackend, Projection};
 pub use session::SessionBackend;

@@ -3,14 +3,21 @@
 //! This crate provides data models and storage operations for the JP workspace,
 //! a CLI tool for managing LLM-assisted code conversations with fine-grained
 //! control over context and behavior.
+//!
+//! Session identity, the per-session active-workspace store, and the roots
+//! registry (RFD 087) live in [`session`], [`session_store`], and [`roots`].
+//! The session store is user-global (above any checkout); the roots registry
+//! maps a workspace ID to its live checkouts on disk.
 
 mod conversation_lock;
 mod error;
 mod handle;
 mod id;
+pub mod roots;
 mod sanitize;
 pub mod session;
 pub(crate) mod session_mapping;
+pub mod session_store;
 mod state;
 
 use std::{
@@ -19,6 +26,7 @@ use std::{
 };
 
 use camino::{FromPathBufError, Utf8Path, Utf8PathBuf};
+use conversation_lock::PersistFailures;
 pub use conversation_lock::{ConversationLock, ConversationMut, LockResult};
 pub use error::Error;
 use error::Result;
@@ -28,8 +36,8 @@ use jp_config::AppConfig;
 use jp_conversation::{Conversation, ConversationId, ConversationStream};
 use jp_storage::{
     backend::{
-        ConversationFilter, ConversationIndexEntry, InMemoryStorageBackend, LoadBackend,
-        LockBackend, NullPersistBackend, PersistBackend, Projection, SessionBackend,
+        ConversationFilter, ConversationIndexEntry, FsStorageBackend, InMemoryStorageBackend,
+        LoadBackend, LockBackend, NullPersistBackend, PersistBackend, Projection, SessionBackend,
         StoragePresence,
     },
     lock::LockInfo,
@@ -42,6 +50,20 @@ use tracing::{debug, trace, warn};
 use crate::session::Session;
 
 const APPLICATION: &str = "jp";
+
+/// The directory a workspace stores its data in, relative to the workspace
+/// root.
+pub const DEFAULT_STORAGE_DIR: &str = ".jp";
+
+/// Whether opening a workspace may write to disk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Access {
+    /// Materialize user-local storage and repair the stored workspace ID.
+    ReadWrite,
+
+    /// Wire only what already exists, and write nothing.
+    ReadOnly,
+}
 
 #[derive(Debug)]
 pub struct Workspace {
@@ -63,8 +85,18 @@ pub struct Workspace {
     /// Backend for session-to-conversation mapping storage.
     sessions: Arc<dyn SessionBackend>,
 
+    /// The filesystem backend, for workspaces opened from disk.
+    fs: Option<Arc<FsStorageBackend>>,
+
     /// The in-memory state of the workspace.
     state: State,
+
+    /// Drop-time persistence failures recorded by conversation scopes.
+    ///
+    /// Lives here rather than on a [`ConversationLock`] so a failure recorded
+    /// while a cancelled future unwinds is still reachable after the lock is
+    /// gone.
+    persist_failures: PersistFailures,
 }
 
 impl Workspace {
@@ -87,23 +119,25 @@ impl Workspace {
         }
     }
 
-    /// Creates a new workspace with the given root directory.
+    /// Creates a workspace with the given root directory, backed by memory.
     ///
-    /// The workspace starts with in-memory backends (no filesystem
-    /// persistence).
-    /// Call [`with_backend`] to wire in a storage backend.
+    /// Nothing is read from or written to disk.
+    /// Call [`with_backend`] to wire in a storage backend, or [`open`] to open
+    /// a workspace that already exists on disk.
     ///
+    /// [`open`]: Self::open
     /// [`with_backend`]: Self::with_backend
-    pub fn new(root: impl Into<Utf8PathBuf>) -> Self {
-        Self::new_with_id(root, id::Id::new())
+    pub fn in_memory(root: impl Into<Utf8PathBuf>) -> Self {
+        Self::in_memory_with_id(root, id::Id::new())
     }
 
-    /// Creates a new workspace with the given root directory and ID.
+    /// Creates a workspace with the given root directory and ID, backed by
+    /// memory.
     ///
     /// All four backend slots are wired to a single shared
     /// [`InMemoryStorageBackend`], so data written through one trait is visible
     /// through the others.
-    pub fn new_with_id(root: impl Into<Utf8PathBuf>, id: id::Id) -> Self {
+    pub fn in_memory_with_id(root: impl Into<Utf8PathBuf>, id: id::Id) -> Self {
         let root = root.into();
         trace!(root = %root, id = %id, "Initializing Workspace.");
 
@@ -115,14 +149,111 @@ impl Workspace {
             loader: backend.clone(),
             locker: backend.clone(),
             sessions: backend,
+            fs: None,
             state: State::default(),
+            persist_failures: PersistFailures::default(),
         }
+    }
+
+    /// Open the workspace containing `dir`, wiring filesystem and user-local
+    /// storage.
+    ///
+    /// Walks up from `dir` until a [`DEFAULT_STORAGE_DIR`] directory is found,
+    /// and wires both that store and the workspace's user-local silo under
+    /// [`user_data_dir`].
+    /// Conversations live in either root, so both are needed to see all of
+    /// them.
+    ///
+    /// The conversation index is not populated, so [`conversations`] is empty
+    /// until [`load_conversation_index`] is called.
+    /// Call [`sanitize`] before that: it repairs the backing store, and
+    /// indexing an unrepaired store carries the damage into the index.
+    ///
+    /// Opening writes to disk: the user-local silo is created if missing, its
+    /// `storage` symlink is repointed at this workspace root, and the workspace
+    /// ID is persisted back to the store.
+    /// A store whose ID file is missing, unreadable, or malformed is assigned a
+    /// fresh ID.
+    ///
+    /// Returns [`Error::WorkspaceNotFound`] when neither `dir` nor any of its
+    /// parents holds a store.
+    ///
+    /// [`conversations`]: Self::conversations
+    /// [`load_conversation_index`]: Self::load_conversation_index
+    /// [`sanitize`]: Self::sanitize
+    pub fn open(dir: &Utf8Path) -> Result<Self> {
+        Self::open_inner(dir, DEFAULT_STORAGE_DIR, Access::ReadWrite)
+    }
+
+    /// Open the workspace containing `dir` without writing anything to disk.
+    ///
+    /// User-local storage is wired only when its directory already exists, and
+    /// the stored workspace ID is left untouched, so reading a workspace cannot
+    /// mint state for it.
+    /// Use this to report on a workspace, and [`open`] for the one a command
+    /// runs against.
+    ///
+    /// [`open`]: Self::open
+    pub fn open_read_only(dir: &Utf8Path) -> Result<Self> {
+        Self::open_inner(dir, DEFAULT_STORAGE_DIR, Access::ReadOnly)
+    }
+
+    fn open_inner(dir: &Utf8Path, storage_dir: &str, access: Access) -> Result<Self> {
+        trace!(dir = %dir, storage_dir, ?access, "Finding workspace.");
+        let root = Self::find_root(dir.to_path_buf(), storage_dir)
+            .ok_or_else(|| Error::WorkspaceNotFound(dir.to_path_buf()))?;
+        trace!(root = %root, "Found workspace root.");
+
+        let storage = root.join(storage_dir);
+        trace!(storage = %storage, "Initializing workspace storage.");
+
+        let id = Id::load(&storage)
+            .transpose()
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        trace!(%id, "Loaded unique workspace ID.");
+
+        let user_root = user_data_dir()?.join("workspace");
+        // The workspace directory name slugs a freshly created user-workspace
+        // directory so users can recognize it; an existing one is reused by ID
+        // regardless of its slug.
+        let slug = root.file_name();
+        let backend = FsStorageBackend::new(&storage)?;
+        let backend = match access {
+            Access::ReadWrite => backend.with_user_storage(&user_root, slug, id.to_string())?,
+            Access::ReadOnly => {
+                backend.with_existing_user_storage(&user_root, slug, &id.to_string())
+            }
+        };
+        let fs = Arc::new(backend);
+
+        let mut workspace = Self::in_memory_with_id(root, id).with_backend(fs.clone());
+        workspace.fs = Some(fs);
+
+        if access == Access::ReadWrite {
+            workspace.id().store(&storage)?;
+        }
+
+        Ok(workspace)
     }
 
     /// Get the root path of the workspace.
     #[must_use]
     pub fn root(&self) -> &Utf8Path {
         &self.root
+    }
+
+    /// Take the drop-time persist failure recorded by any conversation scope.
+    ///
+    /// The drain of last resort: a scope that dropped while a cancelled future
+    /// unwound recorded its failure here, and the lock it came from is already
+    /// gone.
+    /// Yields each failure once, so draining here after a
+    /// [`ConversationLock::take_persist_failure`] does not report it twice.
+    #[must_use]
+    pub fn take_persist_failure(&self) -> Option<Error> {
+        self.persist_failures.lock().take()
     }
 
     /// Set the persist backend.
@@ -151,6 +282,31 @@ impl Workspace {
     pub fn with_sessions(mut self, sessions: Arc<dyn SessionBackend>) -> Self {
         self.sessions = sessions;
         self
+    }
+
+    /// The filesystem storage backend, for workspaces opened from disk.
+    ///
+    /// `None` for workspaces built with [`in_memory`], including those that had
+    /// a filesystem backend wired in through [`with_backend`].
+    ///
+    /// [`in_memory`]: Self::in_memory
+    /// [`with_backend`]: Self::with_backend
+    #[must_use]
+    pub fn fs_storage(&self) -> Option<&Arc<FsStorageBackend>> {
+        self.fs.as_ref()
+    }
+
+    /// The backend session-to-conversation mappings are read from and written
+    /// to.
+    ///
+    /// Set by [`with_sessions`] or [`with_backend`]; an in-memory workspace
+    /// keeps its mappings for the lifetime of the backend.
+    ///
+    /// [`with_backend`]: Self::with_backend
+    /// [`with_sessions`]: Self::with_sessions
+    #[must_use]
+    pub fn sessions(&self) -> &Arc<dyn SessionBackend> {
+        &self.sessions
     }
 
     /// Set all four backends from a single implementation.
@@ -453,6 +609,7 @@ impl Workspace {
             Arc::clone(&self.persist),
             lock_guard,
             projection,
+            Arc::clone(&self.persist_failures),
         ))
     }
 
@@ -580,6 +737,7 @@ impl Workspace {
             Arc::clone(&self.persist),
             lock_guard,
             projection,
+            Arc::clone(&self.persist_failures),
         )))
     }
 
@@ -776,6 +934,7 @@ impl Workspace {
             Arc::clone(&self.persist),
             Box::new(NoopLockGuard),
             projection,
+            Arc::clone(&self.persist_failures),
         )
     }
 }
@@ -788,9 +947,12 @@ fn maybe_init_conversation(
         return;
     }
 
-    let Ok(meta) = loader.load_conversation_metadata(id) else {
-        warn!(%id, "Failed to load conversation metadata. Skipping.");
-        return;
+    let meta = match loader.load_conversation_metadata(id) {
+        Ok(meta) => meta,
+        Err(error) => {
+            warn!(%id, %error, cause = %error.kind(), "Failed to load conversation metadata. Skipping.");
+            return;
+        }
     };
 
     if let Err(error) = cell.set(Arc::new(RwLock::new(meta))) {
@@ -806,9 +968,12 @@ fn maybe_init_events(
         return;
     }
 
-    let Ok(stream) = loader.load_conversation_stream(id) else {
-        warn!(%id, "Failed to load conversation events. Skipping.");
-        return;
+    let stream = match loader.load_conversation_stream(id) {
+        Ok(stream) => stream,
+        Err(error) => {
+            warn!(%id, %error, cause = %error.kind(), "Failed to load conversation events. Skipping.");
+            return;
+        }
     };
 
     if let Err(error) = cell.set(Arc::new(RwLock::new(stream))) {

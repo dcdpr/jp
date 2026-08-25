@@ -1,4 +1,4 @@
-use jp_tool::Context;
+use camino::Utf8Path;
 use serde_json::{Value, from_str};
 
 use super::MAX_DIAGNOSTIC_BYTES;
@@ -43,14 +43,14 @@ struct TestFailure {
 }
 
 pub(crate) async fn cargo_test(
-    ctx: &Context,
+    root: &Utf8Path,
     package: Option<String>,
     testname: Option<String>,
     backtrace: Option<bool>,
     checksum_freshness: bool,
 ) -> ToolResult {
     cargo_test_impl(
-        ctx,
+        root,
         package,
         testname,
         backtrace.unwrap_or(false),
@@ -60,7 +60,7 @@ pub(crate) async fn cargo_test(
 }
 
 fn cargo_test_impl<R: ProcessRunner>(
-    ctx: &Context,
+    root: &Utf8Path,
     package: Option<String>,
     testname: Option<String>,
     backtrace: bool,
@@ -100,7 +100,7 @@ fn cargo_test_impl<R: ProcessRunner>(
             "--message-format=libtest-json-plus",
             &test_name,
         ],
-        &ctx.root,
+        root,
         &env,
     )?;
 

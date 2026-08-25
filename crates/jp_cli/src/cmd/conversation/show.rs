@@ -5,8 +5,11 @@ use jp_workspace::ConversationHandle;
 use crate::{
     cmd::{ConversationLoadRequest, Output, conversation_id::PositionalIds},
     ctx::Ctx,
-    format::{attachment_detail_item, compaction_detail_item, conversation::DetailsFmt},
-    output::print_details,
+    format::{
+        attachment_detail_item, compaction_detail_item, conversation::DetailsFmt,
+        label_detail_items,
+    },
+    output::{print_details, print_json},
 };
 
 #[derive(Debug, clap::Args)]
@@ -40,6 +43,8 @@ impl Show {
                 attachments.push(attachment_detail_item(&attachment.to_url()?));
             }
 
+            let labels = label_detail_items(&conversation.labels);
+
             let compactions = events.compactions().map(compaction_detail_item).collect();
 
             let details = DetailsFmt::new(id)
@@ -52,11 +57,18 @@ impl Show {
                 .with_local_flag(local)
                 .with_active_conversation(active_id.unwrap_or(id))
                 .with_expires_at(conversation.expires_at)
+                .with_labels(labels)
                 .with_attachments(attachments)
                 .with_compactions(compactions)
                 .with_pretty_printing(ctx.printer.pretty_printing_enabled());
 
-            print_details(&ctx.printer, details.title.as_deref(), details.rows());
+            // The two views carry different things: the payload is a stable
+            // snake_case contract, the rows are Title Case prose.
+            if ctx.printer.format().is_json() {
+                print_json(&ctx.printer, &details.json());
+            } else {
+                print_details(&ctx.printer, details.title.as_deref(), details.rows());
+            }
         }
         Ok(())
     }

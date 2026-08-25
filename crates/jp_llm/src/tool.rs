@@ -27,7 +27,7 @@ use tokio::{
     process::Command,
 };
 use tokio_util::sync::CancellationToken;
-use tracing::{info, trace, warn};
+use tracing::{error, info, trace, warn};
 
 use crate::error::ToolError;
 
@@ -281,6 +281,32 @@ pub enum CommandResult {
         /// Whether the process exited successfully.
         success: bool,
     },
+
+    /// Tool emitted a well-formed `needs_input` whose question id is invalid
+    /// (empty, or contains a `.`, which is reserved as the inquiry-id
+    /// separator).
+    ///
+    /// Surfaced as a tool-level error so the malformed inquiry is dropped
+    /// before any inquiry event is constructed.
+    InvalidInquiry {
+        /// The offending question id, for the diagnostic trace.
+        question_id: String,
+    },
+
+    /// Tool emitted a payload shaped like a `needs_input` outcome (top-level
+    /// `"type": "needs_input"`) that failed to deserialize for a reason other
+    /// than an invalid question id: a field with the wrong shape, a missing
+    /// field, or a local-tool binary emitting an older wire protocol than this
+    /// build parses.
+    ///
+    /// Surfaced as a tool-level error rather than [`Self::RawOutput`] so a
+    /// protocol mismatch is loud, instead of silently handing the raw JSON to
+    /// the model as tool output.
+    MalformedInquiry {
+        /// The deserialization error, for the diagnostic trace and the
+        /// model-facing message.
+        detail: String,
+    },
 }
 
 impl CommandResult {
@@ -331,6 +357,29 @@ impl CommandResult {
                     })
                     .to_string())
                 }
+            }
+            Self::InvalidInquiry { question_id } => {
+                error!(
+                    tool = name,
+                    question_id = %question_id,
+                    "tool produced an invalid inquiry: question id must be non-empty and must not \
+                     contain '.'"
+                );
+                Err(
+                    "tool produced an invalid inquiry: question id must be non-empty and must not \
+                     contain '.'"
+                        .to_owned(),
+                )
+            }
+            Self::MalformedInquiry { detail } => {
+                error!(
+                    tool = name,
+                    %detail,
+                    "tool produced a malformed inquiry that could not be parsed"
+                );
+                Err(format!(
+                    "tool '{name}' produced a malformed inquiry that could not be parsed: {detail}"
+                ))
             }
             Self::NeedsInput(_) => {
                 unreachable!("NeedsInput should be handled by the caller")
@@ -572,11 +621,49 @@ fn parse_command_output(stdout: &[u8], stderr: &[u8], success: bool) -> CommandR
             }
         }
         Ok(Outcome::NeedsInput { question }) => CommandResult::NeedsInput(question),
-        Err(_) => CommandResult::RawOutput {
-            stdout: stdout_str.into_owned(),
-            stderr: String::from_utf8_lossy(stderr).into_owned(),
-            success,
-        },
+        // A payload shaped like a `needs_input` outcome that fails to
+        // deserialize must become a tool-level error, not `RawOutput`:
+        // silently handing the raw JSON to the model hides the failure (a
+        // stale local-tool binary emitting an older wire shape than this build
+        // parses, an invalid question id, a missing field) and leaves the
+        // model to invent an explanation. Output that is not an `Outcome` at
+        // all stays `RawOutput`.
+        Err(error) => {
+            let value = serde_json::from_str::<Value>(&stdout_str).ok();
+            let is_needs_input = value
+                .as_ref()
+                .and_then(|v| v.get("type"))
+                .and_then(Value::as_str)
+                == Some("needs_input");
+
+            if !is_needs_input {
+                return CommandResult::RawOutput {
+                    stdout: stdout_str.into_owned(),
+                    stderr: String::from_utf8_lossy(stderr).into_owned(),
+                    success,
+                };
+            }
+
+            let question_id = value
+                .as_ref()
+                .and_then(|v| v.get("question"))
+                .and_then(|q| q.get("id"))
+                .and_then(Value::as_str);
+
+            match question_id {
+                // The id itself is the problem: empty, or containing the `.`
+                // reserved as the inquiry-id separator (`QuestionId` rejects
+                // both).
+                Some(id) if id.is_empty() || id.contains('.') => CommandResult::InvalidInquiry {
+                    question_id: id.to_owned(),
+                },
+                // Some other field failed to parse (wrong shape, missing
+                // field, protocol skew).
+                _ => CommandResult::MalformedInquiry {
+                    detail: error.to_string(),
+                },
+            }
+        }
     }
 }
 
@@ -606,6 +693,14 @@ pub struct ToolDefinition {
 }
 
 impl ToolDefinition {
+    /// Coerce JSON-encoded argument strings to non-string schema types.
+    ///
+    /// Strings stay unchanged when the schema accepts strings or their contents
+    /// do not parse to a declared type.
+    pub fn coerce_arguments(&self, arguments: &mut Map<String, Value>) {
+        coerce_parameter_types(arguments, &self.parameters);
+    }
+
     /// Execute the tool without any interactive prompts.
     ///
     /// This is a pure execution method that runs the tool's underlying command
@@ -676,6 +771,10 @@ impl ToolDefinition {
         access: Option<&jp_tool::AccessPolicy>,
         invocation: &InvocationContext,
     ) -> Result<ExecutionOutcome, ToolError> {
+        let mut arguments = arguments;
+        if let Some(arguments) = arguments.as_object_mut() {
+            self.coerce_arguments(arguments);
+        }
         info!(tool = %self.name, arguments = ?arguments, "Executing tool.");
 
         match config.source() {
@@ -704,8 +803,8 @@ impl ToolDefinition {
                 )
                 .await
             }
-            ToolSource::Builtin { .. } => {
-                self.execute_builtin(id, &arguments, answers, builtin_executors)
+            ToolSource::Builtin { tool } => {
+                self.execute_builtin(id, &arguments, answers, tool.as_deref(), builtin_executors)
                     .await
             }
         }
@@ -836,17 +935,23 @@ impl ToolDefinition {
     }
 
     /// Execute a builtin tool and return the outcome.
+    ///
+    /// `source_name` is the implementation named by `source =
+    /// "builtin.<name>"`, which the registry is keyed on.
+    /// When absent, the implementation shares the tool's own name.
     async fn execute_builtin(
         &self,
         id: String,
         arguments: &Value,
         answers: &IndexMap<String, Value>,
+        source_name: Option<&str>,
         builtin_executors: &builtin::BuiltinExecutors,
     ) -> Result<ExecutionOutcome, ToolError> {
+        let name = source_name.unwrap_or(&self.name);
         let executor = builtin_executors
-            .get(&self.name)
+            .get(name)
             .ok_or_else(|| ToolError::NotFound {
-                name: self.name.clone(),
+                name: name.to_owned(),
             })?;
 
         let outcome = executor.execute(arguments, answers).await;
@@ -972,6 +1077,58 @@ pub(crate) fn split_description(text: &str) -> (String, Option<String>) {
 
     // Single long line, no period — return as-is.
     (text.to_owned(), None)
+}
+
+fn coerce_parameter_types(
+    arguments: &mut Map<String, Value>,
+    parameters: &IndexMap<String, ToolParameterConfig>,
+) {
+    for (name, config) in parameters {
+        let Some(value) = arguments.get_mut(name) else {
+            continue;
+        };
+
+        coerce_parameter_value(value, config);
+    }
+}
+
+fn coerce_parameter_value(value: &mut Value, config: &ToolParameterConfig) {
+    if let Value::String(raw) = value
+        && !config.kind.has_type("string")
+        && let Ok(parsed) = serde_json::from_str(raw)
+        && parameter_accepts_value(&parsed, &config.kind)
+    {
+        *value = parsed;
+    }
+
+    match value {
+        Value::Object(arguments) if !config.properties.is_empty() => {
+            coerce_parameter_types(arguments, &config.properties);
+        }
+        Value::Array(values) => {
+            let Some(items) = config.items.as_deref() else {
+                return;
+            };
+            for value in values {
+                coerce_parameter_value(value, items);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn parameter_accepts_value(value: &Value, types: &OneOrManyTypes) -> bool {
+    match value {
+        Value::Null => types.has_type("null"),
+        Value::Bool(_) => types.has_type("boolean"),
+        Value::Number(number) => {
+            types.has_type("number")
+                || (types.has_type("integer") && (number.is_i64() || number.is_u64()))
+        }
+        Value::String(_) => types.has_type("string"),
+        Value::Array(_) => types.has_type("array"),
+        Value::Object(_) => types.has_type("object"),
+    }
 }
 
 /// Fill in configured default values for missing parameters.

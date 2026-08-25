@@ -25,7 +25,7 @@ fn test_session() -> Session {
 
 /// Build a workspace with a conversation that the session has activated.
 fn workspace_with_active_conversation(id: ConversationId) -> (Workspace, Session) {
-    let mut ws = Workspace::new("/tmp/jp-cli-archive-test");
+    let mut ws = Workspace::in_memory("/tmp/jp-cli-archive-test");
     ws.create_conversation_with_id(id, Conversation::default(), Arc::new(AppConfig::new_test()));
 
     let session = test_session();
@@ -117,8 +117,8 @@ fn inactive_since_returns_no_load_request() {
 fn from_returns_no_load_request() {
     let cmd = Archive {
         range: CreationRange {
-            from: Some("1d".parse().unwrap()),
-            until: None,
+            since: Some("1d".parse().unwrap()),
+            before: None,
         },
         ..empty_archive()
     };
@@ -131,8 +131,8 @@ fn from_returns_no_load_request() {
 fn until_returns_no_load_request() {
     let cmd = Archive {
         range: CreationRange {
-            from: None,
-            until: Some("1d".parse().unwrap()),
+            since: None,
+            before: Some("1d".parse().unwrap()),
         },
         ..empty_archive()
     };
@@ -168,8 +168,8 @@ fn matches_inactive_since_uses_last_activated_at() {
 fn matches_filters_and_compose() {
     let cmd = Archive {
         range: CreationRange {
-            from: Some(ts(1000).into()),
-            until: Some(ts(2000).into()),
+            since: Some(ts(1000).into()),
+            before: Some(ts(2000).into()),
         },
         inactive_since: Some(ts(5000).into()),
         ..empty_archive()
@@ -206,7 +206,7 @@ fn make_conversation(last_activated_secs: i64) -> Conversation {
 }
 
 fn workspace_with(conversations: &[(ConversationId, Conversation)]) -> Workspace {
-    let mut ws = Workspace::new("/tmp/jp-cli-archive-resolve-test");
+    let mut ws = Workspace::in_memory("/tmp/jp-cli-archive-resolve-test");
     let config = Arc::new(AppConfig::new_test());
     for (id, conv) in conversations {
         ws.create_conversation_with_id(*id, conv.clone(), config.clone());
@@ -234,8 +234,8 @@ fn resolve_filtered_composes_range_and_inactive_since() {
 
     let cmd = Archive {
         range: CreationRange {
-            from: Some(ts(1000).into()),
-            until: Some(ts(2000).into()),
+            since: Some(ts(1000).into()),
+            before: Some(ts(2000).into()),
         },
         inactive_since: Some(ts(5000).into()),
         ..empty_archive()

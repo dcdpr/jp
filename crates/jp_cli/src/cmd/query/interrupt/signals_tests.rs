@@ -3,7 +3,7 @@ use std::sync::Arc;
 use assert_matches::assert_matches;
 use jp_config::{
     AppConfig,
-    assistant::request::{CachePolicy, RequestConfig},
+    assistant::request::{CachePolicy, MaxResponseBytes, RequestConfig},
 };
 use jp_conversation::{
     ConversationEvent, ConversationStream,
@@ -46,7 +46,7 @@ fn make_retry_state(max_retries: u32) -> StreamRetryState {
         base_backoff_ms: 1,
         max_backoff_secs: 1,
         stream_idle_timeout_secs: 120,
-        max_response_bytes: 1_048_576,
+        max_response_bytes: MaxResponseBytes::default(),
         cache: CachePolicy::default(),
     };
     StreamRetryState::new(config, false)

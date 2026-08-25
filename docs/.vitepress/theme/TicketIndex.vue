@@ -102,7 +102,7 @@ async function submit() {
 async function remove(ticket) {
     const ok = window.confirm(
         `Delete ${ticket.id} — ${ticket.title}?\n\n`
-        + `This removes the file. The number stays retired.`,
+        + `This removes the file. A later ticket in the same time bucket can draw the id again.`,
     )
     if (!ok) return
 

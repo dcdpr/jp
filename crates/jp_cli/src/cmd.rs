@@ -4,12 +4,14 @@ mod config;
 mod conversation;
 pub(crate) mod conversation_id;
 mod init;
+pub(crate) mod label;
 mod lock;
 pub(crate) mod plugin;
 mod query;
 pub(crate) mod target;
 pub(crate) mod time;
-pub(crate) mod turn_range;
+pub(crate) mod turn_selection;
+pub(crate) mod workspace;
 
 use std::{fmt, num::NonZeroU8};
 
@@ -19,7 +21,7 @@ use serde_json::Value;
 pub(crate) use target::ConversationLoadRequest;
 
 use super::cmd::conversation_id::format_target_help;
-use crate::{Ctx, ctx::IntoPartialAppConfig};
+use crate::{Ctx, bootstrap::WorkspaceRequirement, ctx::IntoPartialAppConfig};
 
 #[derive(Debug, clap::Subcommand)]
 #[command(disable_help_subcommand = true, allow_external_subcommands = true)]
@@ -49,6 +51,10 @@ pub(crate) enum Commands {
 
     /// Manage plugins.
     Plugin(plugin::PluginManagement),
+
+    /// Manage workspaces.
+    #[command(visible_alias = "w", alias = "workspaces")]
+    Workspace(workspace::Workspace),
 
     /// External plugin subcommand (`jp-<name>` on $PATH or registry).
     #[command(external_subcommand)]
@@ -83,7 +89,9 @@ impl Commands {
             }
             Commands::Plugin(args) => args.run(ctx).await,
             Commands::External(args) => plugin::dispatch::run_external(&args, ctx).await,
-            Commands::Init(_) => unreachable!("handled before workspace initialization"),
+            Commands::Init(_) | Commands::Workspace(_) => {
+                unreachable!("handled before workspace initialization")
+            }
         }
     }
 
@@ -98,7 +106,27 @@ impl Commands {
             | Commands::Attachment(_)
             | Commands::AttachmentAdd(_)
             | Commands::Plugin(_)
+            | Commands::Workspace(_)
             | Commands::External(_) => ConversationLoadRequest::none(),
+        }
+    }
+
+    /// Declare what this command needs from the workspace bootstrap (RFD 087).
+    ///
+    /// The workspace-level analog of [`Self::conversation_load_request`]: the
+    /// bootstrap step only runs workspace resolution when the command asks for
+    /// it.
+    pub(crate) fn workspace_requirement(&self) -> WorkspaceRequirement {
+        match self {
+            Commands::Init(_) => WorkspaceRequirement::None,
+            Commands::Workspace(args) => args.workspace_requirement(),
+            Commands::Query(_)
+            | Commands::Config(_)
+            | Commands::Conversation(_)
+            | Commands::Attachment(_)
+            | Commands::AttachmentAdd(_)
+            | Commands::Plugin(_)
+            | Commands::External(_) => WorkspaceRequirement::Load,
         }
     }
 
@@ -120,6 +148,7 @@ impl Commands {
             Commands::Init(_) => "init",
             Commands::Conversation(_) => "conversation",
             Commands::Plugin(_) => "plugin",
+            Commands::Workspace(_) => "workspace",
             Commands::External(args) => {
                 // Use first arg as the command name (it's the subcommand name).
                 // Clap puts the subcommand name as the first element.
@@ -152,6 +181,7 @@ impl IntoPartialAppConfig for Commands {
             Commands::Config(_)
             | Commands::Init(_)
             | Commands::Plugin(_)
+            | Commands::Workspace(_)
             | Commands::External(_) => Ok(partial),
         }
     }
@@ -173,12 +203,35 @@ impl IntoPartialAppConfig for Commands {
             | Commands::Conversation(_)
             | Commands::Init(_)
             | Commands::Plugin(_)
+            | Commands::Workspace(_)
             | Commands::External(_) => Ok(partial),
         }
     }
 }
 
 pub(crate) type Output = std::result::Result<(), Error>;
+
+/// Fold a drained persist failure into a command's result.
+///
+/// With no failure the result passes through.
+/// A failure on an otherwise successful run becomes the error, so an unsaved
+/// conversation cannot exit zero.
+/// Alongside an existing error the failure is attached as metadata: the two can
+/// be independent (a provider error and a full disk), and the primary error is
+/// the more specific diagnostic.
+/// That error stops counting as an expected outcome, because a run that could
+/// not save is broken however it was going to exit.
+pub(crate) fn fold_persist_failure(result: Output, persist: Option<jp_workspace::Error>) -> Output {
+    match (result, persist) {
+        (result, None) => result,
+        (Ok(()), Some(persist)) => Err(Error::from(crate::error::Error::Workspace(persist))),
+        (Err(mut error), Some(persist)) => {
+            error.push_metadata("persist_failure", persist.to_string());
+            error.expected = false;
+            Err(error)
+        }
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub(crate) struct Error {
@@ -241,6 +294,14 @@ impl Error {
     pub(crate) fn expected(mut self) -> Self {
         self.expected = true;
         self
+    }
+
+    /// Append a metadata entry, rendered under the error's message.
+    ///
+    /// Used to attach a secondary fact to an error that already has a more
+    /// specific message of its own.
+    pub(super) fn push_metadata(&mut self, key: &str, value: impl Into<Value>) {
+        self.metadata.push((key.to_owned(), value.into()));
     }
 }
 
@@ -507,6 +568,41 @@ impl From<crate::error::Error> for Error {
             )]
             .into(),
             Compaction(error) => [("message", "Compaction error".into()), ("error", error)].into(),
+            SummaryOverlap {
+                authored,
+                from,
+                to,
+                required_from,
+                required_to,
+            } => [
+                ("message", "Summary overlap".to_owned()),
+                (
+                    "reason",
+                    if authored {
+                        format!(
+                            "A summary cannot be nested inside or split across another one, so \
+                             your text for turns {from}..{to} would have to stand in for turns \
+                             {required_from}..{required_to} as well."
+                        )
+                    } else {
+                        format!(
+                            "Summarizing turns {from}..{to} would have to grow to turns \
+                             {required_from}..{required_to}, replacing a summary you wrote by \
+                             hand with a generated one."
+                        )
+                    },
+                ),
+                (
+                    "suggestion",
+                    format!(
+                        "Re-run with `--from {required_from} --to {required_to}` to cover the \
+                         whole range, or `jp conversation compact --reset` to drop the existing \
+                         compactions first."
+                    ),
+                ),
+            ]
+            .into(),
+            Label(error) => [("message", "Label error".into()), ("error", error)].into(),
             Summarize { model, reason } => [
                 ("message", "Summarization failed".to_owned()),
                 ("model", model),
@@ -515,6 +611,18 @@ impl From<crate::error::Error> for Error {
                     "suggestion",
                     "Retry with a different summarizer model, e.g. `jp conversation compact \
                      --model <model>`, or raise `max_tokens` for the current one."
+                        .to_owned(),
+                ),
+            ]
+            .into(),
+            TitleGeneration { model, reason } => [
+                ("message", "Title generation failed".to_owned()),
+                ("model", model),
+                ("reason", reason),
+                (
+                    "suggestion",
+                    "Retry with a different model, e.g. `jp conversation title --model <model>`, \
+                     or set the title directly with `jp conversation edit --title \"...\"`."
                         .to_owned(),
                 ),
             ]
@@ -732,6 +840,11 @@ impl From<jp_workspace::Error> for Error {
             ]
             .into(),
             MissingStorage => [("message", "Missing storage directory".into())].into(),
+            WorkspaceNotFound(path) => [
+                ("message", "No workspace found".into()),
+                ("path", path.to_string().into()),
+            ]
+            .into(),
             LockFailed(id) => [(
                 "message",
                 format!("Failed to lock conversation {id}").into(),
@@ -776,9 +889,22 @@ impl From<jp_storage::Error> for Error {
                 ("path", path.to_string().into()),
             ]
             .into(),
-            Error::NotSymlink(path) => [
-                ("message", "Path is not a symlink.".into()),
+            Error::OutOfSpace { path, source } => [
+                ("message", "No space left on device".into()),
                 ("path", path.to_string().into()),
+                ("error", source.to_string().into()),
+                (
+                    "suggestion",
+                    "Free up disk space and re-run. Anything after the last successful write was \
+                     not saved."
+                        .into(),
+                ),
+            ]
+            .into(),
+            Error::WriteFailed { path, source } => [
+                ("message", "Failed to write file".into()),
+                ("path", path.to_string().into()),
+                ("error", source.to_string().into()),
             ]
             .into(),
             Error::ConversationNotFound(id) => [
@@ -837,3 +963,7 @@ impl From<jp_id::Error> for Error {
         Self::from(metadata)
     }
 }
+
+#[cfg(test)]
+#[path = "cmd_tests.rs"]
+mod tests;

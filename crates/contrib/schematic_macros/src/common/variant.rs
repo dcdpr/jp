@@ -34,6 +34,13 @@ pub struct VariantArgs {
     pub nested: bool,
     pub required: bool,
     pub empty: bool,
+
+    /// Mark this variant as the form the enum's other variants abbreviate.
+    ///
+    /// Populates `UnionType::expanded_index`, so a schema consumer resolving
+    /// nested keys knows to follow this variant's fields.
+    pub expanded: bool,
+
     #[darling(with = preserve_str_literal, map = "Some")]
     pub is_empty: Option<Expr>,
 

@@ -101,8 +101,8 @@ storage; all conversations are workspace-only.
 Today, user-local storage is keyed by both the worktree directory name and
 workspace ID: `~/.local/share/jp/workspace/<name>-<id>/`, looked up by exact
 name.
-This means each worktree gets its own user-local silo, and removing a worktree
-orphans its silo.
+This means each worktree gets its own user-workspace directory, and removing a
+worktree orphans it.
 
 This RFD keys user-local storage on the workspace ID, while keeping a
 human-recognizable directory name:
@@ -111,31 +111,32 @@ human-recognizable directory name:
 ~/.local/share/jp/workspace/<slug>-<id>/conversations/
 ```
 
-The silo is *located* by ID suffix, never by exact name: JP scans
-`~/.local/share/jp/workspace/` for a directory named `<id>` or ending in
+The user-workspace directory is *located* by ID suffix, never by exact name: JP
+scans `~/.local/share/jp/workspace/` for a directory named `<id>` or ending in
 `-<id>`.
 Because a workspace ID is a fixed-length `[0-9a-z]` string (it never contains
 `-`), the suffix match is unambiguous.
-All worktrees and clones for the same repository therefore share the single silo
-that already exists, regardless of the directory each was cloned into.
+All worktrees and clones for the same repository therefore share the single
+user-workspace directory that already exists, regardless of the directory each
+was cloned into.
 This aligns with [RFD 020], which already places session mappings and locks
 under the same per-workspace directory.
 
-`<slug>` names a *newly created* silo only, so the user can recognize it among
-sibling directories.
+`<slug>` names a *newly created* directory only, so the user can recognize it
+among sibling directories.
 It is the workspace directory name (a clone into `~/code/my-project` yields
 `my-project-<id>`), is never validated, and may be absent — an absent or empty
 slug yields a bare `<id>` directory.
-Once a silo exists it is **never renamed**: a later clone with a different
-directory name reuses the existing silo as-is rather than re-slugging it.
+Once the directory exists it is **never renamed**: a later clone with a
+different directory name reuses it as-is rather than re-slugging it.
 
 The `with_user_storage` method on `Storage` takes the optional slug alongside
 the ID.
 The rename-on-mismatch logic is replaced by a one-time migration that folds any
-sibling silos for the workspace into the chosen one.
+sibling user-workspace directories for the workspace into the chosen one.
 When several already exist (legacy `<name>-<id>` per-worktree directories), the
-silo matching the current slug wins, else the most recently modified; the winner
-is never renamed and the rest are merged in.
+directory matching the current slug wins, else the most recently modified; the
+winner is never renamed and the rest are merged in.
 
 The same migration imports existing workspace conversations into the shared
 user-local store.
@@ -577,8 +578,8 @@ adding durability.
 
 ### Migration of existing user-local directories
 
-Collapsing sibling silos into one needs to handle the case where multiple
-worktrees have already created separate user-local directories (e.g.,
+Collapsing sibling user-workspace directories into one needs to handle the case
+where multiple worktrees have already created separate directories (e.g.,
 `main-otvo8` and `feature-a-otvo8`).
 JP picks one survivor — the slug match if present, else the most recently
 modified — and merges the others into it without renaming the survivor or
@@ -638,11 +639,11 @@ same conversation the existing single-root loader would surface duplicate IDs.
 
 ### Phase 1: Shared User-Local Storage
 
-Locate the user-local silo by workspace-ID suffix and name a newly created one
-`<slug>-<id>` (slug optional; bare `<id>` when absent).
+Locate the user-workspace directory by workspace-ID suffix and name a newly
+created one `<slug>-<id>` (slug optional; bare `<id>` when absent).
 Add migration logic to fold existing per-worktree user-local directories into
-the chosen silo, preferring the slug match else the most recently modified, and
-never renaming the survivor.
+the chosen directory, preferring the slug match else the most recently modified,
+and never renaming the survivor.
 Import existing workspace conversations (active and archive partitions) into
 user-local storage so pre-RFD workspace-only conversations become durable before
 dual-write is enabled.
