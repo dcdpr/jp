@@ -860,6 +860,53 @@ fn keep_last_composes_with_last() {
 }
 
 #[test]
+fn from_end_bounds_agree_across_flags_and_dsl() {
+    // `-3` is the third turn from the end wherever it is written. Over 10 turns
+    // that is index 7, so every spelling compacts through index 7 inclusive and
+    // leaves the final two alone.
+    //
+    // The start differs by design: `--to` leaves `keep_first` to the config
+    // default (1, preserving the genesis turn), while the DSL's explicit open
+    // start (`..-3`) asks for the whole front of the conversation.
+    //
+    // `--keep-last 2` is the count that names the same end: preserving two
+    // trailing turns stops one turn earlier than the position `-3` suggests to
+    // a reader who expects the numbers to match.
+    let mut stream = ConversationStream::new_test();
+    for t in 0..10 {
+        stream.start_turn(format!("turn {t}"));
+    }
+
+    let cfg = AppConfig::new_test();
+    for (args, expected) in [
+        (vec!["--to=-3", "-r"], (1, 7)),
+        (vec!["-k", "r:..-3"], (0, 7)),
+        // The count that preserves the same two trailing turns.
+        (vec!["--keep-last", "2", "-r"], (1, 7)),
+    ] {
+        let compact = parse_compact(&args);
+        let rules = compact.effective_rules(&cfg).unwrap();
+
+        let compactions = runtime()
+            .block_on(build_compaction_events(
+                &stream,
+                &cfg,
+                &rules,
+                &compact.range,
+                Some(&Printer::sink()),
+            ))
+            .unwrap();
+
+        assert_eq!(compactions.len(), 1, "{args:?}");
+        assert_eq!(
+            (compactions[0].from_turn, compactions[0].to_turn),
+            expected,
+            "{args:?}"
+        );
+    }
+}
+
+#[test]
 fn first_and_last_compact_two_windows_and_skip_the_middle() {
     // `--first 2 --last 2` over 8 turns compacts turns 1-2 and 7-8, leaving the
     // four turns between them raw. Each window becomes its own compaction event.

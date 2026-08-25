@@ -107,8 +107,10 @@ impl clap::Args for CompactFlag {
                      LLM summary\n- `t` / `tools` (or `t=MODE`): strip tool calls; bare strips \
                      both, or MODE is one of `strip`/`s`, `strip-requests`/`sreq`, \
                      `strip-responses`/`sres`, `omit`/`o`\n\nRange: FROM..TO (1-based, inclusive \
-                     on both ends, so 1..5 is turns 1-5), single number, or .. for \
-                     all\n\nExamples: s:..-3, r+t, t=sreq:5..-3, r:-20",
+                     on both ends, so 1..5 is turns 1-5), single number, or .. for all\n\nA \
+                     negative bound counts from the end, where -1 is the last turn: ..-3 compacts \
+                     through the third turn from the end, leaving the final two \
+                     alone\n\nExamples: s:..-3, r+t, t=sreq:5..-3, r:-20",
                 )
                 .action(ArgAction::Append)
                 .num_args(0..=1)
@@ -268,13 +270,16 @@ impl FromStr for CompactSpec {
 }
 
 /// Parse one DSL range bound: a positive integer is a 1-based absolute turn
-/// index, a negative integer is an offset from the end.
+/// index, a negative integer counts back from the last turn (`-1`).
 fn parse_dsl_bound(s: &str) -> Result<RuleBound, String> {
     if let Some(rest) = s.strip_prefix('-') {
-        let n = rest
+        let n: usize = rest
             .parse()
             .map_err(|_| format!("invalid bound '-{rest}'"))?;
-        Ok(RuleBound::FromEnd(n))
+        if n == 0 {
+            return Err("from-end offsets are 1-based; use `-1` for the last turn".to_owned());
+        }
+        Ok(RuleBound::FromEnd(n - 1))
     } else {
         let n: usize = s.parse().map_err(|_| format!("invalid bound '{s}'"))?;
         if n == 0 {
@@ -302,8 +307,8 @@ fn parse_dsl_range(s: &str) -> Result<DslRange, String> {
         return Ok(DslRange { from, to });
     }
 
-    // Single-number shorthand: positive `N` = `N..` (keep first N), negative
-    // `-N` = `..-N` (keep last N).
+    // Single-number shorthand: positive `N` = `N..` (compact from turn N on),
+    // negative `-N` = `..-N` (compact through the Nth turn from the end).
     match parse_dsl_bound(s)? {
         bound @ RuleBound::FromEnd(_) => Ok(DslRange {
             from: None,

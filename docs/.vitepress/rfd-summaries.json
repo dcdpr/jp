@@ -248,7 +248,7 @@
     "summary": "Extend config wizard with frecency-based field ordering using CLI usage tracking data."
   },
   "064-non-destructive-conversation-compaction.md": {
-    "hash": "3759906457b9d3b6f885f3bdad8f87889700501f3b00ae540a32e445eb8b118b",
+    "hash": "b6e9db87220c3626310fe0fffe255936347a04169853ae2b861ca4afe08767d1",
     "summary": "Non-destructive conversation compaction through overlay events that project reduced views without mutating stored data."
   },
   "065-typed-resource-model-for-attachments.md": {

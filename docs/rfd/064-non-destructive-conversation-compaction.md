@@ -158,8 +158,16 @@ as integers.
 > The two `5`/`-3` examples above describe the original 0-based behavior; see
 > [Indexing and Counting Conventions] for the current rule.
 >
-> The `last` keyword is now spelled `last-compaction` (with `last` kept as a
-> deprecated alias) and is accepted only for `--from`.
+> The `last` keyword is now spelled `last-compaction` and is accepted only for
+> `--from`.
+>
+> The DSL section below is subject to the same rule, and its bounds are
+> described in the original 0-based, count-flavoured terms throughout.
+> Read every DSL bound as 1-based, and `-N` as *the Nth turn from the end*
+> rather than a number of turns to keep: `s:..-3` compacts through the third
+> turn from the end, leaving the final two, and `s:..-4` is the spelling that
+> keeps the last three.
+> `keep_last = 3` remains the count that keeps three.
 
 `--reset` removes all `InternalEvent::Compaction` variants from the stream,
 restoring the raw event history.
@@ -721,8 +729,10 @@ Each rule in the array defines a single compaction operation:
 | `tool_calls` | mode string       | —       | Strip or omit tool calls.       |
 | `summary`    | table             | —       | Generate an LLM summary.        |
 
-`keep_first` and `keep_last` accept a positive integer (turn count) or a
-duration string (e.g. `"5h"`).
+`keep_first` and `keep_last` accept a turn count, a duration string (e.g.
+`"5h"`), or a from-end position (e.g. `"-4"`); `keep_first` also accepts
+`"last-compaction"`.
+See [Indexing and Counting Conventions] for which bounds are legal where.
 
 `tool_calls` accepts: `"strip"` (both), `"strip-responses"`, `"strip-requests"`,
 `"omit"`.
