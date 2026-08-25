@@ -632,16 +632,15 @@ fn pick_ticket(
 ) -> Result<TicketId, String> {
     let entries = store::list(dir).map_err(|error| error.to_string())?;
 
+    // The id travels with the entry, not the document: the filename carries it.
+    // So the entry has to be kept alongside its ticket rather than mapped away.
     let options: Vec<ComposeOption> = entries
         .iter()
-        .filter_map(|entry| entry.ticket.as_ref().ok())
-        .filter(|ticket| !open_only || ticket.metadata.status != Status::Done)
-        .map(|ticket| ComposeOption {
-            value: ticket.id.to_string(),
-            label: format!(
-                "{}  {:<12} {}",
-                ticket.id, ticket.metadata.status, ticket.title
-            ),
+        .filter_map(|entry| entry.ticket.as_ref().ok().map(|ticket| (entry.id, ticket)))
+        .filter(|(_, ticket)| !open_only || ticket.metadata.status != Status::Done)
+        .map(|(id, ticket)| ComposeOption {
+            value: id.to_string(),
+            label: format!("{}  {:<12} {}", id, ticket.metadata.status, ticket.title),
         })
         .collect();
 

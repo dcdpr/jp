@@ -339,16 +339,19 @@ fn an_explicit_body_is_not_read_back_as_the_title() {
         asked[0].mode
     );
 
-    let filed = dir
-        .path()
-        .join(ticket::store::DEFAULT_DIR)
-        .join("0001-header-misaligned.md");
-    let ticket = std::fs::read_to_string(&filed).unwrap_or_else(|_| panic!("missing {filed}"));
+    // Read back through the store rather than by filename: the id is allocated,
+    // so the path is not something the test gets to predict.
+    let entries = ticket::store::list(&dir.path().join(ticket::store::DEFAULT_DIR)).unwrap();
+    let [entry] = entries.as_slice() else {
+        panic!("expected exactly one ticket, got {entries:?}");
+    };
+    let filed = entry.ticket.as_ref().expect("a well-formed ticket");
 
-    assert!(ticket.contains("# T0001: Header misaligned"), "{ticket}");
-    assert!(
-        ticket.contains("Steps to reproduce"),
-        "the description was dropped: {ticket}"
+    assert_eq!(filed.title, "Header misaligned");
+    assert_eq!(
+        filed.description.trim(),
+        "Steps to reproduce",
+        "the description should be the text `--body` supplied"
     );
 }
 
