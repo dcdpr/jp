@@ -49,8 +49,8 @@ fn positional_multi_no_args() {
 
 #[test]
 fn positional_multi_one_keyword() {
-    let cmd = TestPositionalMulti::try_parse_from(["test-positional-multi", "latest"]).unwrap();
-    assert_eq!(cmd.target.ids(), &[ConversationTarget::Latest]);
+    let cmd = TestPositionalMulti::try_parse_from(["test-positional-multi", "recent"]).unwrap();
+    assert_eq!(cmd.target.ids(), &[ConversationTarget::Recent]);
 }
 
 #[test]
@@ -94,7 +94,7 @@ fn positional_multi_multiple_ids() {
 #[test]
 fn positional_multi_rejects_keyword_in_multi() {
     let err =
-        TestPositionalMulti::try_parse_from(["test-positional-multi", "latest", "jp-c17000000000"]);
+        TestPositionalMulti::try_parse_from(["test-positional-multi", "recent", "jp-c17000000000"]);
     assert!(err.is_err());
 }
 
@@ -106,8 +106,8 @@ fn positional_single_no_args() {
 
 #[test]
 fn positional_single_one_keyword() {
-    let cmd = TestPositionalSingle::try_parse_from(["test-positional-single", "latest"]).unwrap();
-    assert_eq!(cmd.target.ids(), &[ConversationTarget::Latest]);
+    let cmd = TestPositionalSingle::try_parse_from(["test-positional-single", "recent"]).unwrap();
+    assert_eq!(cmd.target.ids(), &[ConversationTarget::Recent]);
 }
 
 #[test]
@@ -142,8 +142,8 @@ fn flag_multi_bare_flag_is_picker() {
 
 #[test]
 fn flag_multi_keyword() {
-    let cmd = TestFlagMulti::try_parse_from(["test-flag-multi", "--id", "latest"]).unwrap();
-    assert_eq!(cmd.target.ids(), &[ConversationTarget::Latest]);
+    let cmd = TestFlagMulti::try_parse_from(["test-flag-multi", "--id", "recent"]).unwrap();
+    assert_eq!(cmd.target.ids(), &[ConversationTarget::Recent]);
 }
 
 #[test]
@@ -184,7 +184,7 @@ fn flag_multi_session_keyword() {
 
 #[test]
 fn flag_multi_rejects_keyword_in_multi() {
-    let err = TestFlagMulti::try_parse_from(["test-flag-multi", "--id", "latest,jp-c17000000000"]);
+    let err = TestFlagMulti::try_parse_from(["test-flag-multi", "--id", "recent,jp-c17000000000"]);
     assert!(err.is_err());
 }
 
@@ -204,8 +204,8 @@ fn flag_single_bare_is_picker() {
 
 #[test]
 fn flag_single_keyword() {
-    let cmd = TestFlagSingle::try_parse_from(["test-flag-single", "--id", "latest"]).unwrap();
-    assert_eq!(cmd.target.ids(), &[ConversationTarget::Latest]);
+    let cmd = TestFlagSingle::try_parse_from(["test-flag-single", "--id", "recent"]).unwrap();
+    assert_eq!(cmd.target.ids(), &[ConversationTarget::Recent]);
 }
 
 #[test]
@@ -217,18 +217,22 @@ fn flag_single_rejects_session() {
 #[test]
 fn keyword_aliases() {
     for (input, expected) in [
-        ("l", ConversationTarget::Latest),
-        ("latest", ConversationTarget::Latest),
+        ("r", ConversationTarget::Recent),
+        ("recent", ConversationTarget::Recent),
         ("n", ConversationTarget::Newest),
         ("newest", ConversationTarget::Newest),
         ("s", ConversationTarget::SessionPrevious),
         ("session", ConversationTarget::SessionPrevious),
-        ("p", ConversationTarget::LatestPinned),
-        ("pinned", ConversationTarget::LatestPinned),
+        ("p", ConversationTarget::RecentPinned),
+        ("pinned", ConversationTarget::RecentPinned),
         ("+session", ConversationTarget::AllSession),
         ("+s", ConversationTarget::AllSession),
         ("+pinned", ConversationTarget::AllPinned),
         ("+p", ConversationTarget::AllPinned),
+        (".", ConversationTarget::SessionActive),
+        ("active", ConversationTarget::SessionActive),
+        ("+l", ConversationTarget::AllLive),
+        ("+live", ConversationTarget::AllLive),
         (
             "?p",
             ConversationTarget::Picker(PickerFilter {
@@ -285,6 +289,53 @@ fn positional_session_single_rejects_multi_target_pinned() {
 }
 
 #[test]
+fn positional_session_single_rejects_multi_target_live() {
+    let err = TestPositionalSessionSingle::try_parse_from(["test-positional-session-single", "+l"]);
+    assert!(err.is_err());
+}
+
+#[test]
+fn positional_session_single_accepts_active() {
+    let cmd = TestPositionalSessionSingle::try_parse_from(["test-positional-session-single", "."])
+        .unwrap();
+    assert_eq!(cmd.target.ids(), &[ConversationTarget::SessionActive]);
+}
+
+#[test]
+fn positional_single_rejects_active_without_session_support() {
+    let err = TestPositionalSingle::try_parse_from(["test-positional-single", "active"]);
+    assert!(err.is_err());
+}
+
+#[test]
+fn flag_multi_accepts_all_live_and_active() {
+    let cmd = TestFlagMulti::try_parse_from(["test-flag-multi", "--id", "+l"]).unwrap();
+    assert_eq!(cmd.target.ids(), &[ConversationTarget::AllLive]);
+
+    let cmd = TestFlagMulti::try_parse_from(["test-flag-multi", "-i", "."]).unwrap();
+    assert_eq!(cmd.target.ids(), &[ConversationTarget::SessionActive]);
+}
+
+/// `--id` takes an optional value, which changes how clap binds a value to it.
+/// All three spellings must reach the same target.
+#[test]
+fn flag_multi_value_attaches_to_short_and_long_forms() {
+    for args in [
+        ["test-flag-multi", "-i."].as_slice(),
+        ["test-flag-multi", "-i", "."].as_slice(),
+        ["test-flag-multi", "--id=."].as_slice(),
+        ["test-flag-multi", "--id", "."].as_slice(),
+    ] {
+        let cmd = TestFlagMulti::try_parse_from(args).unwrap();
+        assert_eq!(
+            cmd.target.ids(),
+            &[ConversationTarget::SessionActive],
+            "failed for args: {args:?}"
+        );
+    }
+}
+
+#[test]
 fn help_text_with_session_mentions_session() {
     let cmd = TestPositionalMulti::command();
     let arg = cmd.get_arguments().find(|a| a.get_id() == "id").unwrap();
@@ -300,6 +351,61 @@ fn help_text_without_session_omits_session_keyword() {
     assert!(
         !long.contains("session"),
         "long_help should not mention session: {long}"
+    );
+}
+
+/// The keyword table is user-visible output — it lands in `--help` and in the
+/// hint printed when a command resolves no target.
+/// Pinned exactly so a new row can't silently break the column alignment.
+#[test]
+fn target_help_table() {
+    insta::assert_snapshot!(format_target_help(true, true, false), @r#"
+    Conversation Targeting
+
+    Use a conversation ID (e.g. jp-c17761673600), a keyword, or any text to
+    fuzzy-search by title.
+
+    Interactive Filter/Picker:
+      ?                             select from all
+      ?p, ?pinned                   select from pinned
+      ?s, ?session                  select from session
+
+    Conversation Aliases:
+      ., active                     target the session's active conversation
+      r, recent                     target most recently activated in workspace
+      n, newest                     target newest created
+      p, pinned                     target most recently pinned
+      s, session                    target the session's previous conversation
+
+    Multi-Target Keywords:
+      +l, +live                     target all live conversations
+      +p, +pinned                   target all pinned
+      +s, +session                  target all activated in session
+      -                             read IDs from stdin, one per line
+    "#);
+}
+
+#[test]
+fn help_text_lists_active_and_all_live_keywords() {
+    let cmd = TestPositionalMulti::command();
+    let arg = cmd.get_arguments().find(|a| a.get_id() == "id").unwrap();
+    let long = arg.get_long_help().unwrap().to_string();
+    assert!(long.contains("., active"), "missing active row: {long}");
+    assert!(long.contains("+l, +live"), "missing live row: {long}");
+}
+
+/// The active keyword needs session state to resolve, so a command that doesn't
+/// support session targets must not advertise it.
+#[test]
+fn help_text_without_session_omits_active_keyword() {
+    let cmd = TestPositionalSingle::command();
+    let arg = cmd.get_arguments().find(|a| a.get_id() == "id").unwrap();
+    let long = arg.get_long_help().unwrap().to_string();
+    // Matched on the row prefix, not the bare word: the "Interactive
+    // Filter/Picker" heading also ends in "active".
+    assert!(
+        !long.contains("., active"),
+        "should omit active row: {long}"
     );
 }
 

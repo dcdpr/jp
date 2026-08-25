@@ -9,7 +9,10 @@ use jp_id::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::error::{Error, Result};
+use crate::{
+    error::{Error, Result},
+    labels::Labels,
+};
 
 /// A sequence of events between the user and LLM.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -68,6 +71,16 @@ pub struct Conversation {
     )]
     pub expires_at: Option<DateTime<Utc>>,
 
+    /// Key-value annotations attached to the conversation.
+    ///
+    /// Labels are set from the CLI (`--label`) or produced from the
+    /// `conversation.labels` config rules, and are used to find conversations
+    /// by the context they were created in.
+    /// Keys match `[A-Za-z0-9_-]+`; a key holds a set of values, and a bare
+    /// label is stored as the empty value.
+    #[serde(default, skip_serializing_if = "Labels::is_empty")]
+    pub labels: Labels,
+
     /// The time of the last event, or `None` if the conversation is empty.
     #[serde(skip)]
     pub last_event_at: Option<DateTime<Utc>>,
@@ -85,6 +98,7 @@ impl Default for Conversation {
             pinned_at: None,
             archived_at: None,
             expires_at: None,
+            labels: Labels::default(),
             last_event_at: None,
             events_count: 0,
         }

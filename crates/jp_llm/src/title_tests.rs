@@ -1,4 +1,371 @@
+use std::sync::{Arc, Mutex};
+
+use chrono::{DateTime, Utc};
+use jp_config::{
+    PartialAppConfig,
+    assistant::request::CachePolicy,
+    model::{
+        id::{ModelIdConfig, Name, ProviderId},
+        parameters::ReasoningConfig,
+    },
+};
+use jp_conversation::{Compaction, EventKind, SummaryPolicy, event::ChatResponse};
+
 use super::*;
+use crate::{
+    event::{Event, FinishReason},
+    provider::mock::MockProvider,
+};
+
+fn model_id(name: &str) -> ModelIdConfig {
+    ModelIdConfig {
+        provider: ProviderId::Test,
+        name: name.parse().expect("valid model name"),
+    }
+}
+
+fn model_config(name: &str) -> ModelConfig {
+    ModelConfig {
+        id: ModelIdOrAliasConfig::Id(model_id(name)),
+        parameters: ParametersConfig::default(),
+    }
+}
+
+/// A provider that answers with one title, plus the log of what it received.
+fn title_provider(context_window: Option<u32>) -> (MockProvider, Arc<Mutex<Vec<ChatQuery>>>) {
+    MockProvider::new(vec![
+        Event::structured(0, json!({"titles": ["A Title"]}).to_string()),
+        Event::flush(0),
+        Event::Finished(FinishReason::Completed),
+    ])
+    .with_model(ModelDetails {
+        context_window,
+        ..ModelDetails::empty(model_id("mock"))
+    })
+    .capturing_requests()
+}
+
+async fn details(provider: &MockProvider) -> ModelDetails {
+    provider
+        .model_details(&"mock".parse::<Name>().unwrap())
+        .await
+        .unwrap()
+}
+
+/// A conversation of `turns` turns, each roughly 1000 chars.
+fn long_conversation(turns: usize) -> ConversationStream {
+    let mut events = ConversationStream::new_test();
+    for i in 0..turns {
+        events = events.with_turn(format!("turn {i}: {}", "x".repeat(1000)));
+    }
+    events
+}
+
+/// The reported failure: a conversation grown on a large-window model, titled
+/// by a model with a small one.
+///
+/// The assertion is on the size of what was sent rather than on a turn count:
+/// fitting shrinks to a target fraction of the window, and which turn the
+/// cutoff lands on shifts with the size of the instruction sections.
+/// Without fitting this request carries ~200k chars into a 3k char window.
+#[tokio::test]
+async fn generate_shrinks_a_conversation_past_the_window() {
+    const WINDOW: u32 = 1000;
+
+    let (provider, requests) = title_provider(Some(WINDOW));
+    let details = details(&provider).await;
+    let conversation = long_conversation(200);
+    let original_chars = window::estimate_chars(&conversation);
+
+    let titles = title_generate(&provider, &details, conversation).await;
+    assert_eq!(titles, ["A Title"]);
+
+    let sent = requests.lock().unwrap();
+    assert_eq!(sent.len(), 1);
+
+    let sent_chars = window::estimate_chars(&sent[0].thread.events);
+    let window_chars = WINDOW as usize * window::CHARS_PER_TOKEN;
+    assert!(
+        original_chars > window_chars * 50,
+        "fixture must be far past the window, was {original_chars} chars"
+    );
+    assert!(
+        sent_chars < window_chars,
+        "sent {sent_chars} chars into a {window_chars} char window"
+    );
+}
+
+/// A conversation that accumulated `max_tokens` must not impose it on a title
+/// model that leaves the parameter unset.
+///
+/// A config delta cannot express "unset", so overriding the model through one
+/// would carry the conversation's 64000 into a request the title model may not
+/// accept.
+/// The assertion is on the effective config of what was sent, not on the
+/// `ModelConfig` handed in.
+#[tokio::test]
+async fn generate_does_not_inherit_conversation_parameters() {
+    let (provider, requests) = title_provider(Some(1_000_000));
+    let details = details(&provider).await;
+
+    let mut events = long_conversation(2);
+    let mut delta = PartialAppConfig::empty();
+    delta.assistant.model.parameters.max_tokens = Some(64_000);
+    delta.assistant.model.parameters.temperature = Some(1.5);
+    events.add_config_delta(delta);
+
+    title_generate(&provider, &details, events).await;
+
+    let sent = requests.lock().unwrap();
+    let parameters = sent[0]
+        .thread
+        .events
+        .config()
+        .expect("merged config")
+        .assistant
+        .model
+        .parameters;
+
+    assert_eq!(parameters.max_tokens, None);
+    assert_eq!(parameters.temperature, None);
+}
+
+/// Replacing the model must not revert everything else the conversation
+/// configured.
+///
+/// Providers read more than the model off this config: both Anthropic and
+/// OpenAI read `assistant.request.cache`, so a conversation that turned caching
+/// off would silently start writing to the provider cache again.
+#[tokio::test]
+async fn generate_keeps_non_model_settings_from_the_conversation() {
+    let (provider, requests) = title_provider(Some(1_000_000));
+    let details = details(&provider).await;
+
+    let mut events = long_conversation(2);
+    let mut delta = PartialAppConfig::empty();
+    delta.assistant.request.cache = Some(CachePolicy::Off);
+    events.add_config_delta(delta);
+
+    title_generate(&provider, &details, events).await;
+
+    let sent = requests.lock().unwrap();
+    let config = sent[0].thread.events.config().expect("merged config");
+    assert_eq!(config.assistant.request.cache, CachePolicy::Off);
+}
+
+/// The same guarantee on the path where fitting empties the stream.
+///
+/// A single oversized turn against a small-window title model leaves no chat
+/// request, and `truncate_to_fit` then drops every conversation event.
+/// The request is still built from the stream's effective config, so the delta
+/// has to survive that emptying.
+#[tokio::test]
+async fn generate_keeps_non_model_settings_when_fitting_empties_the_stream() {
+    let (provider, requests) = title_provider(Some(1000));
+    let details = details(&provider).await;
+
+    let mut events = ConversationStream::new_test().with_turn("q".repeat(3000));
+    let mut delta = PartialAppConfig::empty();
+    delta.assistant.request.cache = Some(CachePolicy::Off);
+    events.add_config_delta(delta);
+
+    title_generate(&provider, &details, events).await;
+
+    let sent = requests.lock().unwrap();
+    let config = sent[0].thread.events.config().expect("merged config");
+    assert_eq!(config.assistant.request.cache, CachePolicy::Off);
+
+    // The turn really was dropped, so this is the emptying path and not a
+    // request that happened to fit.
+    assert_eq!(sent[0].thread.events.turn_count(), 1);
+}
+
+/// The prompt cache identity providers derive from `created_at` survives the
+/// rebase.
+///
+/// A fresh timestamp would miss the cache on every request, including each
+/// `More...` batch re-sending the same conversation prefix.
+#[tokio::test]
+async fn generate_preserves_the_conversation_cache_identity() {
+    let (provider, requests) = title_provider(Some(1_000_000));
+    let details = details(&provider).await;
+
+    let created_at = "2026-01-02T03:04:05Z"
+        .parse::<DateTime<Utc>>()
+        .expect("valid timestamp");
+    let events = long_conversation(2).with_created_at(created_at);
+
+    title_generate(&provider, &details, events).await;
+
+    let sent = requests.lock().unwrap();
+    assert_eq!(sent[0].thread.events.created_at, created_at);
+}
+
+/// The title model's own parameters do reach the request.
+#[tokio::test]
+async fn generate_applies_the_title_model_parameters() {
+    let (provider, requests) = title_provider(Some(1_000_000));
+    let details = details(&provider).await;
+
+    let mut model = model_config("mock");
+    model.parameters.max_tokens = Some(256);
+
+    generate(&provider, &details, TitleRequest {
+        events: long_conversation(2),
+        model,
+        count: 1,
+        rejected: vec![],
+        max_response_bytes: 1_048_576,
+    })
+    .await
+    .expect("title generation succeeds");
+
+    let sent = requests.lock().unwrap();
+    let config = sent[0].thread.events.config().expect("merged config");
+    assert_eq!(config.assistant.model.parameters.max_tokens, Some(256));
+    assert_eq!(config.assistant.model.id.resolved(), &model_id("mock"));
+}
+
+#[tokio::test]
+async fn generate_keeps_a_conversation_that_fits() {
+    let (provider, requests) = title_provider(Some(1_000_000));
+    let details = details(&provider).await;
+
+    title_generate(&provider, &details, long_conversation(3)).await;
+
+    // The three original turns plus the appended title request.
+    let sent = requests.lock().unwrap();
+    assert_eq!(sent[0].thread.events.turn_count(), 4);
+}
+
+/// A stored summary reaches the provider even when no window forces fitting.
+///
+/// The rebuild that replaces the assistant model carries conversation events
+/// only, so the overlay has to be resolved before it runs or the summary is
+/// silently swapped back for the raw turns it covers.
+#[tokio::test]
+async fn generate_keeps_a_summary_when_the_window_is_unknown() {
+    let (provider, requests) = title_provider(None);
+    let details = details(&provider).await;
+
+    let mut events = long_conversation(20);
+    events.add_compaction(
+        Compaction::new(0, 18).with_summary(SummaryPolicy::generated(
+            "A short summary of the first 19 turns.",
+        )),
+    );
+
+    title_generate(&provider, &details, events).await;
+
+    let sent = requests.lock().unwrap();
+    let messages: Vec<String> = sent[0]
+        .thread
+        .events
+        .iter()
+        .filter_map(|e| match &e.event.kind {
+            EventKind::ChatResponse(ChatResponse::Message { message }) => Some(message.clone()),
+            _ => None,
+        })
+        .collect();
+
+    assert!(
+        messages
+            .iter()
+            .any(|m| m == "A short summary of the first 19 turns."),
+        "the summary must reach the provider, got {messages:?}"
+    );
+}
+
+/// Providers that don't report a window (local llama.cpp, Ollama) leave the
+/// conversation untouched: there is no budget to measure against.
+#[tokio::test]
+async fn generate_keeps_everything_when_the_window_is_unknown() {
+    let (provider, requests) = title_provider(None);
+    let details = details(&provider).await;
+
+    title_generate(&provider, &details, long_conversation(200)).await;
+
+    let sent = requests.lock().unwrap();
+    assert_eq!(sent[0].thread.events.turn_count(), 201);
+}
+
+async fn title_generate(
+    provider: &MockProvider,
+    details: &ModelDetails,
+    events: ConversationStream,
+) -> Vec<String> {
+    generate(provider, details, TitleRequest {
+        events,
+        model: model_config("mock"),
+        count: 1,
+        rejected: vec![],
+        max_response_bytes: 1_048_576,
+    })
+    .await
+    .expect("title generation succeeds")
+}
+
+#[test]
+fn resolve_model_falls_back_to_the_assistant_model() {
+    let mut config = AppConfig::new_test();
+    config.assistant.model.id = ModelIdOrAliasConfig::Id(model_id("big-model"));
+    config.conversation.title.generate.model = None;
+
+    let model = resolve_model(&config, None);
+    assert_eq!(model.id.resolved(), &model_id("big-model"));
+}
+
+#[test]
+fn resolve_model_prefers_the_configured_title_model() {
+    let mut config = AppConfig::new_test();
+    config.assistant.model.id = ModelIdOrAliasConfig::Id(model_id("big-model"));
+    config.conversation.title.generate.model = Some(model_config("cheap-model"));
+
+    let model = resolve_model(&config, None);
+    assert_eq!(model.id.resolved(), &model_id("cheap-model"));
+}
+
+#[test]
+fn resolve_model_override_outranks_the_configured_title_model() {
+    let mut config = AppConfig::new_test();
+    config.conversation.title.generate.model = Some(model_config("cheap-model"));
+
+    let override_id = ModelIdOrAliasConfig::Id(model_id("chosen-model"));
+    let model = resolve_model(&config, Some(&override_id));
+    assert_eq!(model.id.resolved(), &model_id("chosen-model"));
+}
+
+/// A title is a short factual summary; without an explicit setting it must not
+/// inherit the conversation's reasoning budget.
+#[test]
+fn resolve_model_defaults_reasoning_to_low_effort() {
+    let mut config = AppConfig::new_test();
+    config.assistant.model.parameters.reasoning =
+        Some(ReasoningConfig::Custom(CustomReasoningConfig {
+            effort: ReasoningEffort::Max,
+            exclude: false,
+        }));
+
+    let model = resolve_model(&config, None);
+    assert_eq!(
+        model.parameters.reasoning,
+        Some(ReasoningConfig::Custom(CustomReasoningConfig {
+            effort: ReasoningEffort::Low,
+            exclude: true,
+        }))
+    );
+}
+
+#[test]
+fn resolve_model_keeps_an_explicit_reasoning_setting() {
+    let mut config = AppConfig::new_test();
+    let mut title_model = model_config("cheap-model");
+    title_model.parameters.reasoning = Some(ReasoningConfig::Off);
+    config.conversation.title.generate.model = Some(title_model);
+
+    let model = resolve_model(&config, None);
+    assert_eq!(model.parameters.reasoning, Some(ReasoningConfig::Off));
+}
 
 #[test]
 fn title_schema_has_correct_structure() {

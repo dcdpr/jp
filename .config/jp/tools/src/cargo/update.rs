@@ -1,6 +1,6 @@
 use std::fs;
 
-use jp_tool::Context;
+use camino::Utf8Path;
 use serde::Deserialize;
 
 use crate::util::{
@@ -59,12 +59,12 @@ impl PackageSpec {
     }
 }
 
-pub(crate) async fn cargo_update(ctx: &Context, packages: OneOrMany<PackageSpec>) -> ToolResult {
-    cargo_update_impl(ctx, &packages, &DuctProcessRunner)
+pub(crate) async fn cargo_update(root: &Utf8Path, packages: OneOrMany<PackageSpec>) -> ToolResult {
+    cargo_update_impl(root, &packages, &DuctProcessRunner)
 }
 
 fn cargo_update_impl<R: ProcessRunner>(
-    ctx: &Context,
+    root: &Utf8Path,
     packages: &[PackageSpec],
     runner: &R,
 ) -> ToolResult {
@@ -84,7 +84,7 @@ fn cargo_update_impl<R: ProcessRunner>(
         }
     }
 
-    let lockfile = ctx.root.join(LOCKFILE);
+    let lockfile = root.join(LOCKFILE);
     let before = fs::read_to_string(&lockfile).ok();
 
     // One invocation per package: `--precise` binds to the whole invocation,
@@ -99,7 +99,7 @@ fn cargo_update_impl<R: ProcessRunner>(
             args.push(version);
         }
 
-        let ProcessOutput { stderr, status, .. } = runner.run("cargo", &args, &ctx.root)?;
+        let ProcessOutput { stderr, status, .. } = runner.run("cargo", &args, root)?;
 
         let stripped = strip_ansi_escapes::strip_str(stderr);
         let report = stripped.trim();

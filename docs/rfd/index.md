@@ -22,10 +22,10 @@ RFDs] page.
 
 <script setup>
 import { data } from '../.vitepress/loaders/rfds.data.js'
-import RfdIndex from '../.vitepress/theme/RfdIndex.vue'
+import DocIndex from '../.vitepress/theme/DocIndex.vue'
 </script>
 
-<RfdIndex :entries="data" />
+<DocIndex :entries="data" />
 
 [RFD 001]: ./001-jp-rfd-process
 [draft RFDs]: ./drafts/

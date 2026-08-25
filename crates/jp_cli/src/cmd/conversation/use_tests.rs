@@ -41,7 +41,7 @@ fn test_session() -> Session {
 /// conversation whose `last_activated_at` is pinned to
 /// `ORIGINAL_LAST_ACTIVATED`.
 fn setup(id: ConversationId) -> Ctx {
-    let mut workspace = Workspace::new("/tmp/jp-cli-use-test");
+    let mut workspace = Workspace::in_memory("/tmp/jp-cli-use-test");
     workspace.create_conversation_with_id(
         id,
         Conversation {
@@ -53,6 +53,7 @@ fn setup(id: ConversationId) -> Ctx {
 
     let (printer, _, _) = Printer::memory(OutputFormat::TextPretty);
     let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
         workspace,
         None,
         Runtime::new().unwrap(),
@@ -145,14 +146,14 @@ fn run_with_contention_skips_metadata_bump() {
     );
 }
 
-// --- Filter mode (`--grep`, `--from`, `--until`) ----------------------------
+// --- Filter mode (`--grep`, `--created-since`, `--created-before`) ----------
 //
 // Filter mode resolves handles internally instead of going through the
 // standard pipeline. These tests exercise the N=1 short-circuit path that
 // can be driven without the interactive picker.
 
 fn setup_multi(entries: Vec<(ConversationId, Conversation, Vec<ConversationEvent>)>) -> Ctx {
-    let mut workspace = Workspace::new("/tmp/jp-cli-use-filter-test");
+    let mut workspace = Workspace::in_memory("/tmp/jp-cli-use-filter-test");
     let config = Arc::new(AppConfig::new_test());
 
     for (id, conversation, _) in &entries {
@@ -161,6 +162,7 @@ fn setup_multi(entries: Vec<(ConversationId, Conversation, Vec<ConversationEvent
 
     let (printer, _, _) = Printer::memory(OutputFormat::TextPretty);
     let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
         workspace,
         None,
         Runtime::new().unwrap(),
@@ -285,8 +287,8 @@ fn filter_range_narrows_then_grep_matches() {
         target: PositionalIds::from_targets(vec![]),
         grep: Some("shared-marker".into()),
         range: CreationRange {
-            from: Some(cutoff),
-            until: None,
+            since: Some(cutoff),
+            before: None,
         },
     };
     cmd.run(&mut ctx, vec![]).unwrap();
@@ -317,10 +319,10 @@ fn filter_mode_skips_standard_resolution() {
         target: PositionalIds::from_targets(vec![]),
         grep: None,
         range: CreationRange {
-            from: Some(TimeThreshold::from(
+            since: Some(TimeThreshold::from(
                 Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
             )),
-            until: None,
+            before: None,
         },
     };
     assert!(cmd.conversation_load_request().targets.is_none());
