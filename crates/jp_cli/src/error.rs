@@ -179,6 +179,25 @@ pub(crate) enum Error {
     #[error("Compaction error: {0}")]
     Compaction(String),
 
+    /// A summary range would have to grow over text that cannot be re-derived.
+    ///
+    /// Turn numbers are 1-based, as displayed.
+    #[error(
+        "Summary for turns {from}..{to} overlaps an existing summary covering turns \
+         {required_from}..{required_to}"
+    )]
+    SummaryOverlap {
+        /// Whether the summary being created is the verbatim one.
+        ///
+        /// `false` means a generated summary is blocked by verbatim text
+        /// already covering part of the range.
+        authored: bool,
+        from: usize,
+        to: usize,
+        required_from: usize,
+        required_to: usize,
+    },
+
     #[error("Label error: {0}")]
     Label(String),
 
