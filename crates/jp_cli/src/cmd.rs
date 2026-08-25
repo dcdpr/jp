@@ -548,14 +548,32 @@ impl From<crate::error::Error> for Error {
                     expected: false,
                 };
             }
-            NoConversationTarget => {
-                let help = super::cmd::conversation_id::format_target_help(true, true, true);
+            NoConversationSelected => {
                 return Self {
                     code: NonZeroU8::new(1).expect("non-zero"),
-                    message: Some(format!(
-                        "No conversation targeted.\n\nUse --id=<target> to target a conversation, \
-                         or --new to start a new one.\n\n{help}"
-                    )),
+                    message: Some("No conversation selected.".to_owned()),
+                    metadata: vec![],
+                    disable_persistence: false,
+                    // Declining the picker is a choice, not a broken run, so
+                    // failure-only diagnostics stay quiet.
+                    expected: true,
+                };
+            }
+            NoConversationTarget {
+                session,
+                multi,
+                allow_new,
+            } => {
+                let help = format_target_help(session, multi, true);
+                let hint = if allow_new {
+                    "Name a conversation with an ID or a keyword, or use --new to start a fresh \
+                     one."
+                } else {
+                    "Name a conversation with an ID or a keyword."
+                };
+                return Self {
+                    code: NonZeroU8::new(1).expect("non-zero"),
+                    message: Some(format!("No conversation targeted.\n\n{hint}\n\n{help}")),
                     metadata: vec![],
                     disable_persistence: false,
                     expected: false,

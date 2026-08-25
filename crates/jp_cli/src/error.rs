@@ -166,8 +166,28 @@ pub(crate) enum Error {
     #[error("Timed out waiting for lock on conversation {0}")]
     LockTimeout(ConversationId),
 
+    /// The interactive picker ran and came back with nothing.
+    ///
+    /// The user declined it, or submitted a multi-select without choosing
+    /// anything.
+    /// Distinct from [`NoConversationTarget`]: the grammar was used correctly
+    /// and the picker did appear, so re-teaching the keywords is noise.
+    ///
+    /// [`NoConversationTarget`]: Self::NoConversationTarget
+    #[error("No conversation selected")]
+    NoConversationSelected,
+
+    /// No conversation could be resolved, and the picker was unavailable.
+    ///
+    /// The flags mirror what the failing command accepts, so the keyword help
+    /// printed alongside describes that command rather than the union of every
+    /// command's grammar.
     #[error("No conversation targeted")]
-    NoConversationTarget,
+    NoConversationTarget {
+        session: bool,
+        multi: bool,
+        allow_new: bool,
+    },
 
     #[error("Cannot start a new conversation together with --fork, --replay, or --id")]
     NewConflictsWithTarget,

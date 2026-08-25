@@ -1,4 +1,4 @@
-# T0014: Ctrl-C during streaming ended the run without showing the interrupt menu
+# Ctrl-C during streaming ended the run without showing the interrupt menu
 
 - **Status**: Todo
 - **Kind**: Bug
