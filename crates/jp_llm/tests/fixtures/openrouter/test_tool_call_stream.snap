@@ -41,9 +41,7 @@ expression: v
             },
         ),
         Finished(
-            Other(
-                String("tool_calls"),
-            ),
+            Completed,
         ),
     ],
     [

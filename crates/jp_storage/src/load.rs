@@ -114,11 +114,11 @@ impl Storage {
         filter: ConversationFilter,
     ) -> Vec<ConversationIndexEntry> {
         let partition = |root: &Utf8Path| -> Utf8PathBuf {
-            let active = root.join(CONVERSATIONS_DIR);
+            let live = root.join(CONVERSATIONS_DIR);
             if filter.archived {
-                active.join(ARCHIVE_DIR)
+                live.join(ARCHIVE_DIR)
             } else {
-                active
+                live
             }
         };
 
@@ -145,6 +145,19 @@ impl Storage {
         entries.sort_by_key(|entry| entry.id);
         entries
     }
+}
+
+/// The conversation IDs projected in a checkout's storage directory.
+///
+/// A bare directory scan of the active (non-archived) partition: no workspace
+/// construction, no user-local merge, no registry writes.
+/// `jp w show` uses this to union checkout-only conversations across a
+/// workspace's sibling roots without paying a full workspace load per root —
+/// one loaded checkout already contributes every user-local conversation, so
+/// the siblings can only add conversations that live in their projection alone.
+#[must_use]
+pub fn projected_conversation_ids(storage_dir: &Utf8Path) -> Vec<ConversationId> {
+    scan_conversation_ids(&storage_dir.join(CONVERSATIONS_DIR))
 }
 
 /// Scan a single conversations directory for IDs.

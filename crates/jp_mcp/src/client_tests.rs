@@ -147,7 +147,7 @@ async fn startup_timeout_attaches_stderr_tail() {
         startup_timeout_secs: 1,
     });
 
-    let error = Client::create_client(&McpServerId::new("slow"), &config)
+    let error = Client::create_client(&McpServerId::new("slow"), &config, None)
         .await
         .expect_err("a server that never completes the handshake must time out");
 
@@ -181,7 +181,7 @@ async fn zero_startup_timeout_disables_timeout() {
         startup_timeout_secs: 0,
     });
 
-    let error = Client::create_client(&McpServerId::new("instant"), &config)
+    let error = Client::create_client(&McpServerId::new("instant"), &config, None)
         .await
         .expect_err("a child that exits without a handshake fails initialization");
 

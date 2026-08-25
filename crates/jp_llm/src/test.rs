@@ -4,14 +4,12 @@ use chrono::{TimeZone as _, Utc};
 use futures::TryStreamExt as _;
 use jp_attachment::Attachment;
 use jp_config::{
-    AppConfig, Config as _, PartialAppConfig, ToPartial as _,
+    AppConfig, PartialAppConfig, ToPartial as _,
     assistant::tool_choice::ToolChoice,
     conversation::tool::ToolParameterConfig,
     model::{
-        id::{ModelIdConfig, ModelIdOrAliasConfig, Name, PartialModelIdOrAliasConfig, ProviderId},
-        parameters::{
-            PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningConfig, ReasoningEffort,
-        },
+        id::{ModelIdConfig, Name, PartialModelIdConfig, PartialModelIdOrAliasConfig, ProviderId},
+        parameters::{PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningEffort},
     },
     providers::llm::LlmProviderConfig,
 };
@@ -96,12 +94,22 @@ impl TestRequest {
             query: ChatQuery {
                 thread: ThreadBuilder::new()
                     .with_events({
-                        let mut config = AppConfig::new_test();
-                        config.assistant.model.parameters.reasoning = Some(ReasoningConfig::Off);
-                        config.assistant.model.id = ModelIdOrAliasConfig::Id(ModelIdConfig {
-                            provider,
-                            name: "test".parse().unwrap(),
-                        });
+                        // Set on the partial and resolved once, rather than
+                        // mutating a resolved config: settings that inherit
+                        // from `assistant` (such as `conversation.inquiry`)
+                        // are filled during resolution and would otherwise
+                        // keep the pre-mutation model.
+                        let mut partial = PartialAppConfig::new_test();
+                        partial.assistant.model.parameters.reasoning =
+                            Some(PartialReasoningConfig::Off);
+                        partial.assistant.model.id =
+                            PartialModelIdOrAliasConfig::Id(PartialModelIdConfig {
+                                provider: Some(provider),
+                                name: Some("test".parse().unwrap()),
+                            });
+                        let config = AppConfig::from_partial_with_defaults(partial)
+                            .expect("a valid test config");
+
                         ConversationStream::new(config.into())
                             .with_created_at(Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap())
                     })
@@ -178,11 +186,13 @@ impl TestRequest {
         // Set on the base config directly. The test infra rebuilds the stream
         // via clear/extend which drops trailing ConfigDeltas (those placed
         // after the last event in the stream).
-        let mut base = (*thread.events.base_config()).clone();
-        base.assistant.model.parameters.reasoning = reasoning
-            .map(|r| ReasoningConfig::from_partial(r, vec![]))
-            .transpose()
-            .expect("valid reasoning config");
+        //
+        // Routed through the partial and re-resolved rather than mutated in
+        // place: settings that inherit from `assistant` are filled during
+        // resolution, so an in-place edit would leave them on the old value.
+        let mut partial = thread.events.base_config().to_partial();
+        partial.assistant.model.parameters.reasoning = reasoning;
+        let base = AppConfig::from_partial_with_defaults(partial).expect("a valid test config");
 
         let placeholder = ConversationStream::new(thread.events.base_config());
         let stream = std::mem::replace(&mut thread.events, placeholder);

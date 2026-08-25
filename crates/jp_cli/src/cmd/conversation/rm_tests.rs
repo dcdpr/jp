@@ -26,7 +26,7 @@ fn empty_rm() -> Rm {
 }
 
 fn workspace_with_conversations(ids: &[ConversationId]) -> Workspace {
-    let mut ws = Workspace::new("/tmp/jp-cli-rm-test");
+    let mut ws = Workspace::in_memory("/tmp/jp-cli-rm-test");
     let config = Arc::new(AppConfig::new_test());
     for id in ids {
         ws.create_conversation_with_id(*id, Conversation::default(), config.clone());
@@ -38,8 +38,8 @@ fn workspace_with_conversations(ids: &[ConversationId]) -> Workspace {
 fn load_request_is_none_when_range_set() {
     let cmd = Rm {
         range: CreationRange {
-            from: Some(ts(1000).into()),
-            until: None,
+            since: Some(ts(1000).into()),
+            before: None,
         },
         ..empty_rm()
     };
@@ -47,8 +47,8 @@ fn load_request_is_none_when_range_set() {
 
     let cmd = Rm {
         range: CreationRange {
-            from: None,
-            until: Some(ts(1000).into()),
+            since: None,
+            before: Some(ts(1000).into()),
         },
         ..empty_rm()
     };
@@ -78,8 +78,8 @@ fn resolve_filtered_half_open_range_returns_only_in_range_ids() {
 
     let cmd = Rm {
         range: CreationRange {
-            from: Some(ts(1000).into()),
-            until: Some(ts(2000).into()),
+            since: Some(ts(1000).into()),
+            before: Some(ts(2000).into()),
         },
         ..empty_rm()
     };
@@ -104,8 +104,8 @@ fn resolve_filtered_from_only_includes_from_inclusive() {
 
     let cmd = Rm {
         range: CreationRange {
-            from: Some(ts(1000).into()),
-            until: None,
+            since: Some(ts(1000).into()),
+            before: None,
         },
         ..empty_rm()
     };
@@ -130,8 +130,8 @@ fn resolve_filtered_until_only_excludes_until_exclusive() {
 
     let cmd = Rm {
         range: CreationRange {
-            from: None,
-            until: Some(ts(2000).into()),
+            since: None,
+            before: Some(ts(2000).into()),
         },
         ..empty_rm()
     };
@@ -153,8 +153,8 @@ fn resolve_filtered_empty_when_nothing_matches() {
 
     let cmd = Rm {
         range: CreationRange {
-            from: Some(ts(1000).into()),
-            until: Some(ts(2000).into()),
+            since: Some(ts(1000).into()),
+            before: Some(ts(2000).into()),
         },
         ..empty_rm()
     };

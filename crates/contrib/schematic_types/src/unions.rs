@@ -19,6 +19,23 @@ pub struct UnionType {
     )]
     pub default_index: Option<usize>,
 
+    /// Index of the variant the other variants are shorthand spellings of.
+    ///
+    /// Set when a union describes one value written several ways, so a consumer
+    /// can find the form that names the value's parts: a tool's `enable`
+    /// accepts `true` or `{ state, allow_toggle }`, and the table is the
+    /// expanded form of the bool.
+    ///
+    /// Left unset when the variants are genuinely different values rather than
+    /// spellings of one.
+    /// A model id is either an id or an alias resolved through a lookup, and
+    /// neither expands into the other.
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub expanded_index: Option<usize>,
+
     pub partial: bool,
 
     pub operator: UnionOperator,
@@ -56,6 +73,23 @@ impl UnionType {
                 .collect(),
             ..UnionType::default()
         }
+    }
+
+    /// Mark which variant the others are shorthand spellings of.
+    ///
+    /// See [`Self::expanded_index`].
+    #[must_use]
+    pub fn with_expanded_index(mut self, index: usize) -> Self {
+        self.expanded_index = Some(index);
+        self
+    }
+
+    /// The variant the others are shorthand spellings of, if any.
+    #[must_use]
+    pub fn expanded_variant(&self) -> Option<&Schema> {
+        self.expanded_index
+            .and_then(|index| self.variants_types.get(index))
+            .map(AsRef::as_ref)
     }
 
     #[must_use]
