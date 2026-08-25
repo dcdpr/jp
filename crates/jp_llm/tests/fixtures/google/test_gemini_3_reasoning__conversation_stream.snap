@@ -223,6 +223,7 @@ expression: v
         "assistant": {
           "model": {
             "id": {
+              "provider": "google",
               "name": "gemini-3-pro-preview"
             }
           }

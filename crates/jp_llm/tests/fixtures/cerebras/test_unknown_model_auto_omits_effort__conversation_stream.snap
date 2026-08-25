@@ -220,6 +220,7 @@ expression: v
         "assistant": {
           "model": {
             "id": {
+              "provider": "cerebras",
               "name": "gemma-4-31b"
             }
           }

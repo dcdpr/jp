@@ -223,6 +223,7 @@ expression: v
         "assistant": {
           "model": {
             "id": {
+              "provider": "anthropic",
               "name": "claude-opus-4-6"
             }
           }
