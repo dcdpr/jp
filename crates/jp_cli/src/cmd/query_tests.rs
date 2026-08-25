@@ -954,6 +954,82 @@ fn test_builtin_config_preserves_tool_order() {
     assert_eq!(names, vec!["describe_tools", "zzz_last"]);
 }
 
+/// The seam between merging built-in config under user config and validating
+/// `-u`.
+/// A table override sets only `state`, so `allow_toggle = never` survives from
+/// the built-in block and the tool ends up locked *off* rather than merely
+/// disabled.
+/// Forcing it is then refused, which is the documented meaning of the table
+/// form (RFD 083) but only became reachable once both halves landed.
+#[test]
+fn test_table_disabled_builtin_cannot_be_forced() {
+    let mut partial = make_partial_with_tools();
+    // `[conversation.tools.describe_tools] enable = { state = false }`
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("describe_tools".into(), PartialToolConfig {
+            enable: Some(PartialEnableConfig {
+                state: Some(false),
+                allow_toggle: None,
+            }),
+            ..Default::default()
+        });
+
+    let err = IntoPartialAppConfig::apply_cli_config(
+        &Query {
+            tool_use: Some(Some("describe_tools".into())),
+            ..Default::default()
+        },
+        None,
+        partial,
+        None,
+    )
+    .unwrap_err()
+    .to_string();
+
+    assert_eq!(
+        err,
+        "cannot enable `describe_tools`: this tool is configured as locked-off"
+    );
+}
+
+/// The escape hatch for the above: the bool shorthand writes `allow_toggle =
+/// any` explicitly, so it overrides the built-in's policy as well as its state
+/// and the tool stays forceable.
+#[test]
+fn test_bool_disabled_builtin_can_still_be_forced() {
+    let mut partial = make_partial_with_tools();
+    // `[conversation.tools.describe_tools] enable = false`
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("describe_tools".into(), PartialToolConfig {
+            enable: Some(PartialEnableConfig::OFF),
+            ..Default::default()
+        });
+
+    let query = Query {
+        tool_use: Some(Some("describe_tools".into())),
+        ..Default::default()
+    };
+
+    let partial = IntoPartialAppConfig::apply_cli_config(&query, None, partial, None)
+        .expect("the bool shorthand leaves the tool forceable");
+
+    assert_eq!(
+        effective(&partial, "describe_tools").allow_toggle,
+        AllowToggle::Always,
+        "the shorthand overrides the built-in's toggle policy, not just its state"
+    );
+    assert_eq!(
+        query.effective_tool_choice(&AppConfig::new_test()),
+        ToolChoice::Function("describe_tools".into())
+    );
+}
+
 #[test]
 fn query_model_override_is_persisted_as_config_delta() {
     let base_config = Arc::new(config_with_model(ProviderId::Anthropic, "base-model"));
