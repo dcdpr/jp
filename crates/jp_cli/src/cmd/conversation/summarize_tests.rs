@@ -267,6 +267,22 @@ fn completed_stream_without_text_is_unusable() {
 }
 
 #[test]
+fn completed_stream_with_only_whitespace_is_unusable() {
+    // `EventBuilder::handle_flush` drops a whitespace-only message, so a stream
+    // carrying nothing but a newline arrives here with no message at all and
+    // takes the same path as one that never produced text.
+    //
+    // This pins the composed behavior across that boundary, not a check in
+    // `summarize_events`: no input can make `summary` non-empty and blank.
+    let events = stream_with_text(" \n", FinishReason::Completed);
+
+    assert_eq!(
+        summarize_events(events),
+        StreamOutcome::Unusable("the model returned an empty response".to_owned())
+    );
+}
+
+#[test]
 fn truncated_stream_is_unusable_even_though_it_produced_text() {
     // A max-tokens stream normally carries partial text. Returning it would
     // store a truncated summary over the range it replaces, dropping whatever

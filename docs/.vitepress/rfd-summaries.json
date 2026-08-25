@@ -248,7 +248,7 @@
     "summary": "Extend config wizard with frecency-based field ordering using CLI usage tracking data."
   },
   "064-non-destructive-conversation-compaction.md": {
-    "hash": "41a1c7dfc2b427ff0fd0ca2bd62b369e679eca1bf648506d1bd917ac874bf386",
+    "hash": "3759906457b9d3b6f885f3bdad8f87889700501f3b00ae540a32e445eb8b118b",
     "summary": "Non-destructive conversation compaction through overlay events that project reduced views without mutating stored data."
   },
   "065-typed-resource-model-for-attachments.md": {
@@ -268,7 +268,7 @@
     "summary": "Automatically retry forced tool calls with reasoning disabled if the model ignores soft-force directives."
   },
   "069-guard-scoped-persistence-for-conversations.md": {
-    "hash": "19eae2427dbd5a7952b03406e1bf51b985e315786297e64fd659c252e3e5038e",
+    "hash": "15ef78674300a43b4ba7eeac9ab29415314b560933e8b5d84949e8b7a4c49871",
     "summary": "Guard-scoped persistence: ConversationMut auto-persists on drop while holding cross-process file lock, with callback-based writes and explicit flush for checkpoints."
   },
   "072-command-plugin-system.md": {

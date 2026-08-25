@@ -144,9 +144,13 @@ impl Fork {
             })
             .await?;
 
+            // One mutable scope for both post-fork mutations, so they share a
+            // single write at the closing flush.
+            let mut conv = lock.as_mut();
+
             if self.compact.should_compact() {
                 let cfg = ctx.config();
-                let events_snapshot = lock.events().clone();
+                let events_snapshot = conv.events().clone();
                 let rules = self
                     .compact
                     .effective_rules(&cfg.conversation.compaction.rules)
@@ -164,16 +168,20 @@ impl Fork {
                 )
                 .await?;
                 for compaction in compactions {
-                    lock.as_mut()
-                        .update_events(|events| events.add_compaction(compaction));
+                    conv.update_events(|events| events.add_compaction(compaction));
                 }
             }
 
             if let Some(title) = &self.title {
-                lock.as_mut().update_metadata(|m| {
+                conv.update_metadata(|m| {
                     m.title = Some(title.clone());
                 });
             }
+
+            // Write before reporting success, so a failed write is an error
+            // rather than a confirmation the user cannot trust.
+            conv.flush()?;
+            drop(conv);
 
             if self.activate
                 && let Some(session) = &ctx.session

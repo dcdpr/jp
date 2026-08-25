@@ -108,8 +108,63 @@ pub enum ReasoningPolicy {
 /// `ChatRequest`/`ChatResponse` pair containing the summary text.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SummaryPolicy {
-    /// The summary text, generated at compaction-creation time.
+    /// The summary text, fixed at compaction-creation time.
     pub summary: String,
+
+    /// Where the text came from.
+    #[serde(default, skip_serializing_if = "SummarySource::is_generated")]
+    pub source: SummarySource,
+}
+
+impl SummaryPolicy {
+    /// A summary produced by a model reading the raw events in the range.
+    #[must_use]
+    pub fn generated(summary: impl Into<String>) -> Self {
+        Self {
+            summary: summary.into(),
+            source: SummarySource::Generated,
+        }
+    }
+
+    /// A summary supplied verbatim by the user.
+    #[must_use]
+    pub fn authored(summary: impl Into<String>) -> Self {
+        Self {
+            summary: summary.into(),
+            source: SummarySource::Authored,
+        }
+    }
+}
+
+/// Where a summary's text came from.
+///
+/// A generated summary can be re-derived: widen its range, ask the model again,
+/// and the new text covers the new range.
+/// Authored text cannot be re-derived, so anything that would grow its range
+/// has to involve the user (see [`extend_summary_range`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SummarySource {
+    /// Produced by a model reading the raw events in the range.
+    #[default]
+    Generated,
+
+    /// Supplied verbatim by the user.
+    Authored,
+}
+
+impl SummarySource {
+    /// Whether the text was produced by a model.
+    #[must_use]
+    pub const fn is_generated(&self) -> bool {
+        matches!(self, Self::Generated)
+    }
+
+    /// Whether the text was supplied verbatim by the user.
+    #[must_use]
+    pub const fn is_authored(&self) -> bool {
+        matches!(self, Self::Authored)
+    }
 }
 
 /// Policy for handling tool call request/response pairs during compaction.
@@ -158,6 +213,28 @@ pub struct CompactionRange {
     pub to_turn: usize,
 }
 
+/// A summary range that would have to grow over text nobody can re-derive.
+///
+/// Returned by [`extend_summary_range`]; see there for when the extension is
+/// refused.
+/// Turn indices are 0-based, matching [`CompactionRange`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SummaryOverlap {
+    /// The range the caller asked to summarize.
+    pub requested: CompactionRange,
+
+    /// The union of `requested` and every summary range it touches.
+    ///
+    /// Summarizing this range instead is what resolves the overlap.
+    pub required: CompactionRange,
+
+    /// Whether the summary being created is the authored one.
+    ///
+    /// `false` means a generated summary is blocked by authored text already
+    /// covering part of `required`.
+    pub new_is_authored: bool,
+}
+
 /// Extend a summary compaction range to fully subsume any partially overlapping
 /// existing summary compactions in the stream.
 ///
@@ -176,40 +253,65 @@ pub struct CompactionRange {
 /// The extension repeats until stable, handling transitive chains (A overlaps
 /// B, B overlaps C → extend to cover all three).
 ///
-/// Only considers existing compactions that have `summary: Some(...)`.
+/// Only considers existing compactions that have `summary: Some(...)`; a
+/// mechanical compaction over the same turns is left alone, since a summary
+/// supersedes it at projection time without discarding it.
 /// Returns the input range unchanged if no summary overlaps it.
 ///
 /// Call this before generating the summary text so the summarizer reads events
 /// for the full refreshed range.
-#[must_use]
+///
+/// # Errors
+///
+/// Growing the range is only a safe automatic repair while every summary
+/// involved is [`Generated`], because generating again re-reads the raw events
+/// for whatever the range grew to.
+/// [`Authored`] text has no such fallback: widening it would leave the user's
+/// words standing in for turns they never described, and widening *over* it
+/// would replace those words with generated text.
+/// So when growth is required and either side is authored, this returns a
+/// [`SummaryOverlap`] naming the range that resolves it, leaving the choice to
+/// the caller.
+///
+/// Growth that isn't required is never refused: a range that already covers
+/// every summary it touches is exactly what the caller asked for.
+///
+/// [`Authored`]: SummarySource::Authored
+/// [`Generated`]: SummarySource::Generated
 pub fn extend_summary_range(
     stream: &crate::ConversationStream,
     range: CompactionRange,
-) -> CompactionRange {
+    source: SummarySource,
+) -> Result<CompactionRange, SummaryOverlap> {
     let mut from = range.from_turn;
     let mut to = range.to_turn;
+    let mut touches_authored = false;
 
     // Repeat until stable — extension may expose new overlaps.
     loop {
         let mut changed = false;
 
         for c in stream.compactions() {
-            if c.summary.is_none() {
+            let Some(summary) = c.summary.as_ref() else {
                 continue;
-            }
+            };
 
             // Grow to the union of any summary we touch (partial overlap *or*
             // containment), so adding a contained summary refreshes the whole
             // enclosing range instead of nesting inside it.
             let intersects = from <= c.to_turn && to >= c.from_turn;
-            if intersects {
-                let new_from = from.min(c.from_turn);
-                let new_to = to.max(c.to_turn);
-                if new_from != from || new_to != to {
-                    from = new_from;
-                    to = new_to;
-                    changed = true;
-                }
+            if !intersects {
+                continue;
+            }
+
+            touches_authored |= summary.source.is_authored();
+
+            let new_from = from.min(c.from_turn);
+            let new_to = to.max(c.to_turn);
+            if new_from != from || new_to != to {
+                from = new_from;
+                to = new_to;
+                changed = true;
             }
         }
 
@@ -218,10 +320,24 @@ pub fn extend_summary_range(
         }
     }
 
-    CompactionRange {
+    let required = CompactionRange {
         from_turn: from,
         to_turn: to,
+    };
+
+    if required == range {
+        return Ok(range);
     }
+
+    if source.is_authored() || touches_authored {
+        return Err(SummaryOverlap {
+            requested: range,
+            required,
+            new_is_authored: source.is_authored(),
+        });
+    }
+
+    Ok(required)
 }
 
 /// Resolve user-specified range bounds against a conversation stream.

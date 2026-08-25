@@ -249,9 +249,11 @@ async fn generate_keeps_a_summary_when_the_window_is_unknown() {
     let details = details(&provider).await;
 
     let mut events = long_conversation(20);
-    events.add_compaction(Compaction::new(0, 18).with_summary(SummaryPolicy {
-        summary: "A short summary of the first 19 turns.".to_owned(),
-    }));
+    events.add_compaction(
+        Compaction::new(0, 18).with_summary(SummaryPolicy::generated(
+            "A short summary of the first 19 turns.",
+        )),
+    );
 
     title_generate(&provider, &details, events).await;
 

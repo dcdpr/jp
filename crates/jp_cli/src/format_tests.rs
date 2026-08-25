@@ -74,9 +74,7 @@ fn compaction_detail_item_summary_takes_precedence_over_mechanical_label() {
     // fields (e.g. from an older DSL rule); summary must still win the label.
     let compaction = Compaction::new(0, 4)
         .with_reasoning(ReasoningPolicy::Strip)
-        .with_summary(SummaryPolicy {
-            summary: "the gist of it".to_owned(),
-        });
+        .with_summary(SummaryPolicy::generated("the gist of it"));
 
     let item = compaction_detail_item(&compaction);
 
