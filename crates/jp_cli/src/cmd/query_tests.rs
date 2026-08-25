@@ -6,7 +6,10 @@ use clap::Parser as _;
 use indexmap::IndexMap;
 use jp_config::{
     AppConfig, PartialAppConfig, ToPartial,
-    conversation::tool::{AllowToggle, Enable, PartialEnableConfig, PartialToolConfig, ResultMode},
+    conversation::tool::{
+        AllowToggle, Enable, PartialCommandConfigOrString, PartialEnableConfig, PartialToolConfig,
+        ResultMode, RunMode,
+    },
     model::id::{ModelIdConfig, PartialModelIdConfig, ProviderId},
     util::build,
 };
@@ -926,6 +929,52 @@ fn test_builtin_config_merges_under_user_config() {
     );
 }
 
+/// Naming a tool after a built-in shadows it rather than replacing it: the
+/// user's `source` and `command` win, and every field they leave unset comes
+/// from the built-in's block.
+/// That includes `run = "unattended"`, so a shadowing local command runs
+/// without a confirmation prompt unless the user sets `run` themselves.
+/// RFD 083 calls this out as user-owned consequences, not a blocked
+/// configuration; this test pins it so the behavior cannot drift silently.
+#[test]
+fn test_builtin_config_merges_under_a_shadowing_local_tool() {
+    let mut partial = make_partial_with_tools();
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("describe_tools".into(), PartialToolConfig {
+            source: Some(ToolSource::Local { tool: None }),
+            command: Some(PartialCommandConfigOrString::String(
+                "my-describe-tools".to_owned(),
+            )),
+            ..Default::default()
+        });
+
+    let partial =
+        IntoPartialAppConfig::apply_cli_config(&Query::default(), None, partial, None).unwrap();
+
+    let tool = &partial.conversation.tools.tools["describe_tools"];
+    assert_eq!(
+        tool.source,
+        Some(ToolSource::Local { tool: None }),
+        "the user's source wins, so their executor runs"
+    );
+    assert_eq!(
+        tool.run,
+        Some(RunMode::Unattended),
+        "an unset `run` comes from the built-in, not from the global default"
+    );
+    assert!(
+        tool.parameters.contains_key("tools"),
+        "an unset `parameters` keeps the built-in's schema"
+    );
+    assert!(
+        effective(&partial, "describe_tools").is_locked(),
+        "an unset `enable` keeps the built-in's locked-on policy"
+    );
+}
+
 #[test]
 fn test_builtin_config_preserves_tool_order() {
     // Tool order is the order tools are presented to the provider, so merging
@@ -948,6 +997,7 @@ fn test_builtin_config_preserves_tool_order() {
         .tools
         .keys()
         .map(String::as_str)
+        .filter(|name| matches!(*name, "describe_tools" | "zzz_last"))
         .collect();
     assert_eq!(names, vec!["describe_tools", "zzz_last"]);
 }
