@@ -438,7 +438,11 @@ impl ConversationStream {
             fold_config_delta(&mut partial, delta)?;
         }
 
-        AppConfig::from_partial_with_defaults(partial).map_err(Into::into)
+        // `build`, not the bare conversion: a delta can introduce a model alias
+        // that the base config never had, and reading an unresolved alias panics.
+        // `build` is also what orders instructions and prompt sections, which the
+        // rest of the system assumes has happened.
+        jp_config::util::build(partial).map_err(Into::into)
     }
 
     /// Removes all events from the end of the stream, until a [`ChatRequest`]
@@ -1708,8 +1712,7 @@ impl FromIterator<ConversationEventWithConfig> for Result<ConversationStream, St
             return Err(StreamError::FromEmptyIterator);
         };
 
-        let mut stream =
-            ConversationStream::new(AppConfig::from_partial_with_defaults(config)?.into());
+        let mut stream = ConversationStream::new(jp_config::util::build(config)?.into());
         stream.push(first_event);
         stream.extend(events);
 
@@ -1782,7 +1785,7 @@ impl ConversationStream {
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(Self {
-            base_config: AppConfig::from_partial_with_defaults(base_config)?.into(),
+            base_config: jp_config::util::build(base_config)?.into(),
             events,
             created_at: Utc::now(),
         })
@@ -1862,6 +1865,21 @@ pub enum StreamError {
     /// An error occurred for the stream [`AppConfig`].
     #[error(transparent)]
     Config(#[from] jp_config::ConfigError),
+
+    /// Building the stream's [`AppConfig`] failed.
+    ///
+    /// Covers everything `jp_config::util::build` does: filling defaults,
+    /// converting and validating the partial, resolving model aliases, and
+    /// ordering instructions and prompt sections.
+    /// Conversion and validation failures arrive here too, wrapped as
+    /// `jp_config::Error::Schematic`; an alias that resolves to nothing is the
+    /// most common cause.
+    ///
+    /// [`Config`] covers the earlier step: merging deltas into the partial.
+    ///
+    /// [`Config`]: Self::Config
+    #[error(transparent)]
+    BuildConfig(#[from] jp_config::Error),
 
     /// A JSON serialization or deserialization error.
     #[error(transparent)]

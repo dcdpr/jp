@@ -369,7 +369,9 @@ impl AppConfig {
     ///
     /// Returns an error if `default_values` fails, if the partial is missing
     /// required fields, or if the resolved configuration fails validation.
-    pub fn from_partial_with_defaults(mut partial: PartialAppConfig) -> Result<Self, ConfigError> {
+    pub(crate) fn from_partial_with_defaults(
+        mut partial: PartialAppConfig,
+    ) -> Result<Self, ConfigError> {
         // Inquiry settings inherit from the top-level assistant. This runs
         // before the `#[setting(default)]` layer below, so an unset inquiry
         // field takes the user's configured assistant value rather than the

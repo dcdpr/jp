@@ -4591,7 +4591,7 @@ async fn inquiry_ceiling_survives_a_sibling_only_request_override() {
         ..PartialRequestConfig::default()
     };
 
-    let config = AppConfig::from_partial_with_defaults(partial).expect("valid config");
+    let config = jp_config::util::build(partial).expect("valid config");
 
     let provider: Arc<dyn Provider> = Arc::new(MockProvider::new(vec![]));
     let model = inquiry_mock_model();
@@ -4622,7 +4622,7 @@ async fn inquiry_ceiling_can_be_disabled_independently() {
         .request
         .max_response_bytes = Some(MaxResponseBytes::Disabled);
 
-    let config = AppConfig::from_partial_with_defaults(partial).expect("valid config");
+    let config = jp_config::util::build(partial).expect("valid config");
 
     let provider: Arc<dyn Provider> = Arc::new(MockProvider::new(vec![]));
     let model = inquiry_mock_model();
