@@ -207,7 +207,9 @@ fn a_background_task_persist_failure_is_recorded_after_the_command_finished() {
     let cfg = AppConfig::new_test();
     let task = Box::new(jp_task::task::TitleGeneratorTask {
         conversation_id: id,
-        model_id: cfg.assistant.model.id.resolved().clone(),
+        // The same resolution `TitleGeneratorTask::new` performs, minus its
+        // provider preflight, which would fail without credentials.
+        model: jp_llm::title::resolve_model(&cfg, None),
         providers: cfg.providers.llm.clone(),
         events: jp_conversation::ConversationStream::new_test(),
         title: Some("generated".into()),
