@@ -297,14 +297,22 @@ pub(crate) struct Query {
     /// The tool to use.
     ///
     /// If a value is provided, the tool matching the value will be used.
+    /// The named tool runs for this query even when it is disabled, so it does
+    /// not have to be enabled separately; a tool whose policy locks it off is
+    /// refused.
     ///
-    /// Note that this setting is *not* persisted across queries.
+    /// This applies to a single query and is *not* persisted: the next query
+    /// forces nothing, and a tool that was disabled stays disabled.
     /// To persist tool choice behavior, set the `assistant.tool_choice` field
     /// in a configuration file.
     #[arg(short = 'u', long = "tool-use")]
     tool_use: Option<Option<String>>,
 
     /// Disable tool use by the assistant.
+    ///
+    /// This applies to a single query and is *not* persisted.
+    /// To keep tools off, use `--no-tool`, which disables them for every future
+    /// query on the conversation.
     #[arg(short = 'U', long = "no-tool-use")]
     no_tool_use: bool,
 
@@ -414,7 +422,13 @@ impl Query {
             self.apply_pre_query_compaction(lock, &cfg).await?;
         }
 
-        let mcp_servers_handle = ctx.configure_active_mcp_servers().await?;
+        // `-u`/`-U` never enter the config, so the turn's choice is resolved
+        // from the flags here and carried through to the tool list and the turn
+        // loop.
+        let tool_choice = self.effective_tool_choice(&cfg);
+        let forced_tool = tool_choice.function_name();
+
+        let mcp_servers_handle = ctx.configure_active_mcp_servers(forced_tool).await?;
 
         let conv_title = lock.metadata().title.clone();
 
@@ -618,7 +632,6 @@ impl Query {
         )
         .await?;
 
-        let forced_tool = cfg.assistant.tool_choice.function_name();
         let tools =
             tool_definitions(cfg.conversation.tools.iter(), &ctx.mcp_client, forced_tool).await?;
 
@@ -660,7 +673,7 @@ impl Query {
                 ctx.term.is_tty,
                 &thread.attachments,
                 lock,
-                cfg.assistant.tool_choice.clone(),
+                tool_choice.clone(),
                 &tools,
                 ctx.printer.clone(),
                 approvals,
@@ -1639,11 +1652,13 @@ impl clap::Args for ToolDirectives {
                 .help("The tool(s) to enable")
                 .long_help(
                     "The tool(s) to enable.\n\nIf an existing tool is configured with a matching \
-                     name, it will be enabled for the duration of the query.\n\nIf no arguments \
-                     are provided, all configured tools will be enabled.\n\nYou can provide this \
-                     flag multiple times to enable multiple tools. Flags are evaluated \
-                     left-to-right, so `--no-tools --tool=write` first disables everything, then \
-                     re-enables only 'write'.",
+                     name, it is enabled for this query and every later one on the conversation; \
+                     use `--no-tool` to turn it back off.\n\nTo run a disabled tool just once, \
+                     use `--tool-use NAME` instead.\n\nIf no arguments are provided, all \
+                     configured tools will be enabled.\n\nYou can provide this flag multiple \
+                     times to enable multiple tools. Flags are evaluated left-to-right, so \
+                     `--no-tools --tool=write` first disables everything, then re-enables only \
+                     'write'.",
                 )
                 .action(ArgAction::Append)
                 .num_args(0..=1)
@@ -1658,7 +1673,10 @@ impl clap::Args for ToolDirectives {
                 .long_help(
                     "Disable tool(s).\n\nIf provided without a value, all enabled tools will be \
                      disabled, otherwise pass the argument multiple times to disable one or more \
-                     tools.\n\nFlags are evaluated left-to-right together with `--tool`.",
+                     tools.\n\nThe change applies to this query and every later one on the \
+                     conversation; use `--tool` to turn tools back on. To suppress tools for a \
+                     single query, use `--no-tool-use`.\n\nFlags are evaluated left-to-right \
+                     together with `--tool`.",
                 )
                 .action(ArgAction::Append)
                 .num_args(0..=1)
@@ -1841,7 +1859,7 @@ impl IntoPartialAppConfig for Query {
             no_edit: _,
             input: _,
             tool_use,
-            no_tool_use,
+            no_tool_use: _,
             parameters,
             hide_reasoning,
             hide_tool_calls,
@@ -1870,11 +1888,7 @@ impl IntoPartialAppConfig for Query {
         }
 
         apply_enable_tools(&mut partial, tool_directives, merged_config)?;
-        apply_tool_use(
-            &mut partial,
-            tool_use.as_ref().map(|v| v.as_deref()),
-            *no_tool_use,
-        )?;
+        validate_tool_use(&partial, tool_use.as_ref().map(|v| v.as_deref()))?;
         apply_attachments(&mut partial, attachments, workspace)?;
         apply_mounts(&mut partial, mount, workspace, merged_config)?;
         apply_reasoning(&mut partial, reasoning.as_ref(), *no_reasoning);
@@ -2059,6 +2073,30 @@ fn effective_enable(
     }
 }
 
+impl Query {
+    /// The tool choice for this turn.
+    ///
+    /// `-u`/`-U` are invocation-scoped, so they are read here rather than
+    /// written into the config: forcing a tool binds this turn and no other.
+    /// With neither flag, the conversation's configured `assistant.tool_choice`
+    /// applies.
+    ///
+    /// `-t`/`-T` are the durable counterparts and do reach the config, through
+    /// [`apply_enable_tools`].
+    fn effective_tool_choice(&self, cfg: &AppConfig) -> ToolChoice {
+        if self.no_tool_use {
+            return ToolChoice::None;
+        }
+
+        match self.tool_use.as_ref().map(|v| v.as_deref()) {
+            None => cfg.assistant.tool_choice.clone(),
+            Some(None | Some("true")) => ToolChoice::Required,
+            Some(Some("false")) => ToolChoice::None,
+            Some(Some(name)) => ToolChoice::Function(name.to_owned()),
+        }
+    }
+}
+
 /// Apply a single tool directive to one tool's partial `enable`.
 ///
 /// `scope` identifies the directive kind (bulk vs named) and `desired_state` is
@@ -2104,50 +2142,46 @@ fn apply_directive_to_tool(
     Ok(())
 }
 
-/// Apply the CLI tool use configuration to the partial configuration.
+/// Reject a `-u NAME` the turn could not honour.
 ///
-/// NOTE: This has to run *after* `apply_enable_tools` because it will return an
-/// error if the tool of choice is not enabled.
-fn apply_tool_use(
-    partial: &mut PartialAppConfig,
+/// Writes nothing: `-u`/`-U` bind a single turn, so the choice is read from the
+/// flags at query time (see [`Query::effective_tool_choice`]) rather than
+/// layered into the conversation's config.
+///
+/// Forcing a tool implies running it even when it is disabled, which
+/// [`tool_definitions`] already allows.
+/// A tool whose `allow_toggle` policy locks it off cannot be forced, and naming
+/// it here surfaces that before MCP boot and the editor, instead of leaving the
+/// tool to be dropped silently from the tool list later.
+fn validate_tool_use(
+    partial: &PartialAppConfig,
     tool_choice: Option<Option<&str>>,
-    no_tool_choice: bool,
 ) -> BoxedResult<()> {
-    if no_tool_choice || matches!(tool_choice, Some(Some("false"))) {
-        partial.assistant.tool_choice = Some(ToolChoice::None);
+    let Some(Some(name)) = tool_choice else {
+        return Ok(());
+    };
+
+    if name == "true" || name == "false" {
         return Ok(());
     }
 
-    let Some(tool) = tool_choice else {
-        return Ok(());
+    let defaults = partial
+        .conversation
+        .tools
+        .defaults
+        .enable
+        .clone()
+        .unwrap_or_default();
+
+    let Some(tool) = partial.conversation.tools.tools.get(name) else {
+        return Err(format!("tool choice '{name}' does not match any known tools").into());
     };
 
-    partial.assistant.tool_choice = match tool {
-        None | Some("true") => Some(ToolChoice::Required),
-        Some(v) => {
-            let defaults = partial
-                .conversation
-                .tools
-                .defaults
-                .enable
-                .clone()
-                .unwrap_or_default();
-            if !partial
-                .conversation
-                .tools
-                .tools
-                .iter()
-                .filter(|(_, cfg)| effective_enable(cfg.enable.as_ref(), &defaults).state)
-                .any(|(name, _)| name == v)
-            {
-                return Err(format!("tool choice '{v}' does not match any enabled tools").into());
-            }
-
-            Some(ToolChoice::Function(v.to_owned()))
-        }
-    };
-
-    Ok(())
+    // Probe a copy so the flip is discarded: this only asks whether the policy
+    // would permit it, and `apply_directive_to_tool` stays the single place
+    // that decides what a locked tool refuses. A tool already enabled is a
+    // no-op there, so a locked-*on* tool (e.g. a builtin) stays selectable.
+    apply_directive_to_tool(name, &mut tool.clone(), &defaults, ToggleScope::Named, true)
 }
 
 /// Apply the CLI attachments to the partial configuration.

@@ -189,11 +189,20 @@ impl Ctx {
 
     /// Activate and deactivate MCP servers based on the active conversation
     /// context.
-    pub(crate) async fn configure_active_mcp_servers(&mut self) -> Result<StartupSet> {
+    ///
+    /// `forced_tool` names a tool the turn runs even though it is disabled (`jp
+    /// query -u NAME`).
+    /// Its backing server has to start regardless of the tool's enable state,
+    /// or `tool_definitions` drops the tool again as unreachable and the forced
+    /// choice cannot be satisfied.
+    pub(crate) async fn configure_active_mcp_servers(
+        &mut self,
+        forced_tool: Option<&str>,
+    ) -> Result<StartupSet> {
         let mut server_ids = HashSet::new();
 
-        for (_name, cfg) in self.config.conversation.tools.iter() {
-            if !cfg.is_enabled() {
+        for (name, cfg) in self.config.conversation.tools.iter() {
+            if !cfg.is_enabled() && forced_tool != Some(name) {
                 continue;
             }
 
