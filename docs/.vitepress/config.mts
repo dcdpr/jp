@@ -5,6 +5,7 @@ import { dirname, posix, resolve } from 'node:path'
 import { defineConfig } from 'vitepress'
 import abnfGrammar from './grammars/abnf.tmLanguage.json'
 import { joinMultilineInlineCode } from './join-inline-code.mjs'
+import { rfdRedirectServer, writeRfdRedirects } from './rfd-redirects.mjs'
 
 // Rewrite relative links that climb above the docs root to absolute GitHub
 // URLs. The repo tree is the parent of the docs root, so any link resolving
@@ -184,17 +185,17 @@ const ticketBoardWriter = {
         const readTickets = () => {
             const tickets = new Map()
             for (const name of readdirSync(dir)) {
-                if (!/^\d{4}-.+\.md$/.test(name)) continue
+                if (!/^[0-9a-z]{7}-.+\.md$/.test(name)) continue
                 const file = resolve(dir, name)
                 const content = readFileSync(file, 'utf-8')
                 const field = (key) =>
                     content.match(new RegExp(`^- \\*\\*${key}\\*\\*:\\s*(.+)`, 'm'))?.[1]?.trim()
                         ?? null
-                const id = `T${name.slice(0, 4)}`
+                const id = `T-${name.slice(0, 7)}`
                 tickets.set(id, {
                     id,
                     file,
-                    title: content.match(/^# T\d+:\s*(.+)/m)?.[1]?.trim() ?? name,
+                    title: content.match(/^# (.+)/m)?.[1]?.trim() ?? name,
                     status: field('Status'),
                     kind: field('Kind'),
                     blockedBy: field('Blocked by'),
@@ -480,9 +481,17 @@ export default defineConfig({
             const content = readFileSync(src, 'utf-8')
             writeFileSync(dest, content.startsWith(BOM) ? content : BOM + content)
         }
+
+        writeRfdRedirects(siteConfig)
     },
     vite: {
-        plugins: [serveMarkdownAsUtf8, rfdPriorityWriter, ticketBoardWriter, ticketWriter],
+        plugins: [
+            serveMarkdownAsUtf8,
+            rfdRedirectServer,
+            rfdPriorityWriter,
+            ticketBoardWriter,
+            ticketWriter,
+        ],
         // The priority board persists itself by writing `rfd/.priority.json` via
         // the dev middleware above. It isn't part of the module graph, so it
         // must not trigger a dev-server reload — the board owns its in-memory

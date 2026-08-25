@@ -28,11 +28,12 @@ fn setup(id: ConversationId) -> (Ctx, SharedBuffer, Utf8TempDir) {
     fs.write_test_conversation(&id, &Conversation::default());
 
     let config = AppConfig::new_test();
-    let mut workspace = Workspace::new(tmp.path()).with_backend(fs.clone());
+    let mut workspace = Workspace::in_memory(tmp.path()).with_backend(fs.clone());
     workspace.load_conversation_index();
 
     let (printer, out, _err) = Printer::memory(OutputFormat::Text);
     let ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
         workspace,
         Some(fs),
         Runtime::new().unwrap(),

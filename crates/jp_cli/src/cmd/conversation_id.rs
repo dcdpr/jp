@@ -51,12 +51,12 @@ impl<const SESSION: bool, const MULTI: bool> PositionalIds<SESSION, MULTI> {
 /// - `SESSION`: accept the `session` keyword
 /// - `MULTI`: accept multiple IDs via comma separation or repeated `--id`
 #[derive(Debug, Default)]
-pub(crate) struct FlagIds<const SESSION: bool, const MULTI: bool> {
+pub(crate) struct FlagIds<const SESSION: bool, const MULTI: bool, const GLOBAL: bool = false> {
     ids: Vec<ConversationTarget>,
 }
 
 #[cfg(test)]
-impl<const SESSION: bool, const MULTI: bool> FlagIds<SESSION, MULTI> {
+impl<const SESSION: bool, const MULTI: bool, const GLOBAL: bool> FlagIds<SESSION, MULTI, GLOBAL> {
     pub fn from_targets(ids: Vec<ConversationTarget>) -> Self {
         Self { ids }
     }
@@ -88,7 +88,9 @@ impl<const SESSION: bool, const MULTI: bool> ConversationIds for PositionalIds<S
     }
 }
 
-impl<const SESSION: bool, const MULTI: bool> ConversationIds for FlagIds<SESSION, MULTI> {
+impl<const SESSION: bool, const MULTI: bool, const GLOBAL: bool> ConversationIds
+    for FlagIds<SESSION, MULTI, GLOBAL>
+{
     fn ids(&self) -> &[ConversationTarget] {
         &self.ids
     }
@@ -137,7 +139,9 @@ impl<const SESSION: bool, const MULTI: bool> FromArgMatches for PositionalIds<SE
     }
 }
 
-impl<const SESSION: bool, const MULTI: bool> clap::Args for FlagIds<SESSION, MULTI> {
+impl<const SESSION: bool, const MULTI: bool, const GLOBAL: bool> clap::Args
+    for FlagIds<SESSION, MULTI, GLOBAL>
+{
     fn augment_args(cmd: Command) -> Command {
         let mut arg = Arg::new("id")
             .short('i')
@@ -153,6 +157,13 @@ impl<const SESSION: bool, const MULTI: bool> clap::Args for FlagIds<SESSION, MUL
             arg = arg.action(ArgAction::Append).value_delimiter(',');
         }
 
+        // A global arg is accepted on either side of a subcommand, so
+        // `jp c label --id=X add k=v` and `jp c label add --id=X k=v` mean the
+        // same thing.
+        if GLOBAL {
+            arg = arg.global(true);
+        }
+
         cmd.arg(arg)
     }
 
@@ -161,7 +172,9 @@ impl<const SESSION: bool, const MULTI: bool> clap::Args for FlagIds<SESSION, MUL
     }
 }
 
-impl<const SESSION: bool, const MULTI: bool> FromArgMatches for FlagIds<SESSION, MULTI> {
+impl<const SESSION: bool, const MULTI: bool, const GLOBAL: bool> FromArgMatches
+    for FlagIds<SESSION, MULTI, GLOBAL>
+{
     fn from_arg_matches(matches: &ArgMatches) -> Result<Self, clap::Error> {
         let ids = read_ids(matches);
         validate_multi::<MULTI>(&ids)?;
@@ -184,7 +197,7 @@ fn read_ids(matches: &ArgMatches) -> Vec<ConversationTarget> {
 }
 
 /// When multiple values are provided, only literal conversation IDs are allowed
-/// — keywords like `last`, `session`, etc. are rejected.
+/// — keywords like `recent` and `session`, and pickers, are rejected.
 fn validate_multi<const MULTI: bool>(ids: &[ConversationTarget]) -> Result<(), clap::Error> {
     if !MULTI && ids.len() > 1 {
         return Err(clap::Error::raw(
@@ -217,6 +230,7 @@ fn validate_multi<const MULTI: bool>(ids: &[ConversationTarget]) -> Result<(), c
                 ConversationTarget::AllLive
                     | ConversationTarget::AllSession
                     | ConversationTarget::AllPinned
+                    | ConversationTarget::AllArchived
             ) {
                 let kw = target.keyword_name().expect("multi-target has keyword");
                 return Err(clap::Error::raw(
@@ -227,15 +241,17 @@ fn validate_multi<const MULTI: bool>(ids: &[ConversationTarget]) -> Result<(), c
         }
     }
 
-    if ids.len() > 1 {
-        for target in ids {
-            if let Some(kw) = target.keyword_name() {
-                return Err(clap::Error::raw(
-                    clap::error::ErrorKind::InvalidValue,
-                    format!("keywords are not supported when multiple IDs are given; got '{kw}'\n"),
-                ));
-            }
-        }
+    // Anything that isn't a literal ID resolves to a set of its own, which
+    // can't be meaningfully unioned with hand-listed IDs. Tested against `Id`
+    // rather than against the keywords: a picker (bare `?` or free text) has no
+    // keyword name, and letting it through leaves `resolve_targets` with a
+    // mixed list it has no rule for.
+    if ids.len() > 1 && ids.iter().any(|t| !matches!(t, ConversationTarget::Id(_))) {
+        return Err(clap::Error::raw(
+            clap::error::ErrorKind::InvalidValue,
+            "only literal conversation IDs can be combined; keywords, pickers, and free-text \
+             searches must be used on their own\n",
+        ));
     }
 
     Ok(())

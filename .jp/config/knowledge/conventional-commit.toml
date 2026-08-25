@@ -113,7 +113,7 @@ items = [
     """,
     """\
     chore: Changes to the project's own development workflow, with no effect on JP's behaviour \
-    (example scopes: tools, personas, knowledge, justfile)\
+    (example scopes: tools, personas, knowledge, justfile, tickets)\
     """,
     """\
     ci: Changes to our CI configuration files and scripts (example scopes: github-actions, travis)\
@@ -134,7 +134,9 @@ items = [
     perf: A code change that improves performance\
     """,
     """\
-    refactor: A code change that has no impact on the user experience\
+    refactor: A code change that has no impact on the user experience. Reach for `chore` instead \
+    when the change is to tooling JP's users never run, even if it adds or removes behaviour \
+    there\
     """,
     """\
     test: Adding missing tests or correcting existing tests\

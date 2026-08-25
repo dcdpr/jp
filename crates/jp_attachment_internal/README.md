@@ -44,11 +44,12 @@ Selects which turns to include. 1-based; negative values count from the end.
 
 - (omitted) — last turn only (`-1`)
 - `N` — turn `N`
-- `-N` — last `N` turns
+- `-N` — the `N`th turn from the end (`-1` is the last turn)
 - `N..M` — turns `N` through `M` (inclusive)
 - `N..` — from turn `N` to the end
 - `..M` — first `M` turns
-- `-N..` — last `N` turns (same as `-N`)
+- `-N..` — last `N` turns
+- `..-N` — everything up to and including the `N`th turn from the end
 - `..` — all turns
 
 #### Raw mode

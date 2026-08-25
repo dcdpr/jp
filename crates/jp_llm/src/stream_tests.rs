@@ -9,10 +9,7 @@ use std::{
 use futures::{StreamExt as _, future, stream};
 use serde_json::Map;
 
-use super::{
-    output_limit_bytes, with_idle_timeout, with_idle_timeout_at, with_output_limit,
-    with_tool_call_keepalive,
-};
+use super::{with_idle_timeout, with_idle_timeout_at, with_output_limit, with_tool_call_keepalive};
 use crate::{
     StreamError, StreamErrorKind,
     event::{Event, EventPart, FinishReason},
@@ -239,18 +236,6 @@ async fn repeated_tool_call_openings_reach_the_ceiling() {
     assert!(
         wrapped.next().await.is_none(),
         "stream ends after the output limit fires"
-    );
-}
-
-#[test]
-fn output_ceiling_of_zero_is_disabled() {
-    // `0` means "no ceiling" at the config layer. Both call sites route through
-    // this translation so they cannot drift on what `0` means.
-    assert!(output_limit_bytes(0).is_none(), "zero disables the ceiling");
-    assert_eq!(
-        output_limit_bytes(512),
-        Some(512),
-        "a non-zero ceiling is used as-is"
     );
 }
 

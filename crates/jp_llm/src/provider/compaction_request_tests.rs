@@ -132,11 +132,9 @@ fn snapshot(
         ChatQuery::from(thread),
     )?;
 
-    let path = format!(
-        "{}/tests/fixtures/{}/compaction",
-        env!("CARGO_MANIFEST_DIR"),
-        provider.as_str(),
-    );
+    let path = jp_test::fixtures_dir()
+        .join(provider.as_str())
+        .join("compaction");
 
     insta::with_settings!({ snapshot_path => path, prepend_module_to_snapshot => false }, {
         insta::assert_json_snapshot!(name, request);
@@ -161,12 +159,9 @@ fn reasoning_strip(provider: ProviderId, name: &str) -> Result {
 /// carrying a pre-computed summary; the trailing turn survives.
 fn summary(provider: ProviderId, name: &str) -> Result {
     snapshot(provider, name, |stream| {
-        stream.add_compaction(
-            Compaction::new(0, 2).with_summary(SummaryPolicy {
-                summary: "Earlier: the user asked about France's capital and had their notes read."
-                    .to_owned(),
-            }),
-        );
+        stream.add_compaction(Compaction::new(0, 2).with_summary(SummaryPolicy::generated(
+            "Earlier: the user asked about France's capital and had their notes read.",
+        )));
     })
 }
 
@@ -219,14 +214,14 @@ fn tool_omit(provider: ProviderId, name: &str) -> Result {
 /// shared turn, so turn 0 keeps summary A and turns 1-2 resolve to summary B.
 fn summary_overlap(provider: ProviderId, name: &str) -> Result {
     snapshot(provider, name, |stream| {
-        let mut a = Compaction::new(0, 1).with_summary(SummaryPolicy {
-            summary: "Summary A: France's capital and the start of the notes lookup.".to_owned(),
-        });
+        let mut a = Compaction::new(0, 1).with_summary(SummaryPolicy::generated(
+            "Summary A: France's capital and the start of the notes lookup.",
+        ));
         a.timestamp = ts();
 
-        let mut b = Compaction::new(1, 2).with_summary(SummaryPolicy {
-            summary: "Summary B: the notes lookup and Germany's capital.".to_owned(),
-        });
+        let mut b = Compaction::new(1, 2).with_summary(SummaryPolicy::generated(
+            "Summary B: the notes lookup and Germany's capital.",
+        ));
         b.timestamp = ts() + Duration::seconds(1);
 
         stream.add_compaction(a);

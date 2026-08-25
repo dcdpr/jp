@@ -69,7 +69,7 @@ fn rule_bound_deserializes_from_integer_and_string() {
         RuleBound::Turns(3)
     );
     assert_eq!(
-        serde_json::from_value::<RuleBound>(serde_json::json!("last")).unwrap(),
+        serde_json::from_value::<RuleBound>(serde_json::json!("last-compaction")).unwrap(),
         RuleBound::AfterLastCompaction
     );
     assert!(matches!(
@@ -79,30 +79,45 @@ fn rule_bound_deserializes_from_integer_and_string() {
 }
 
 #[test]
-fn rule_bound_after_last_compaction_is_canonical_with_alias() {
-    // `last-compaction` is canonical; `last` is a deprecated input alias.
-    // Serialization always emits the canonical form.
+fn rule_bound_after_last_compaction_round_trips() {
     assert_eq!(
         "last-compaction".parse::<RuleBound>().unwrap(),
-        RuleBound::AfterLastCompaction
-    );
-    assert_eq!(
-        "last".parse::<RuleBound>().unwrap(),
         RuleBound::AfterLastCompaction
     );
     assert_eq!(
         RuleBound::AfterLastCompaction.to_string(),
         "last-compaction"
     );
+
+    // `last` alone is a duration-shaped input and no longer names the marker.
+    assert!("last".parse::<RuleBound>().is_err());
 }
 
 #[test]
-fn rule_bound_absolute_is_one_based_and_rejects_zero() {
-    // `@N` is a 1-based absolute position; `@0` is invalid input, not an alias
-    // for the first turn.
-    assert_eq!("@1".parse::<RuleBound>().unwrap(), RuleBound::Absolute(1));
-    assert_eq!("@5".parse::<RuleBound>().unwrap(), RuleBound::Absolute(5));
-    assert!("@0".parse::<RuleBound>().is_err());
+fn rule_bound_from_end_is_one_based_and_rejects_zero() {
+    // `-1` is the last turn, matching `--from -1` / `--to -1` / `--turn -1`.
+    assert_eq!("-1".parse::<RuleBound>().unwrap(), RuleBound::FromEnd(0));
+    assert_eq!("-3".parse::<RuleBound>().unwrap(), RuleBound::FromEnd(2));
+    assert!("-0".parse::<RuleBound>().is_err());
+
+    // The written form round-trips through the stored 0-based offset.
+    assert_eq!(RuleBound::FromEnd(0).to_string(), "-1");
+    assert_eq!(RuleBound::FromEnd(2).to_string(), "-3");
+}
+
+#[test]
+fn rule_bound_rejects_absolute_turns() {
+    // A config rule applies to every conversation, so an absolute turn has no
+    // spelling here — not as input, and not on the way back out.
+    assert!("@1".parse::<RuleBound>().is_err());
+    assert!("@5".parse::<RuleBound>().is_err());
+
+    let err = serde_json::to_value(RuleBound::Absolute(5)).unwrap_err();
+    assert_eq!(
+        err.to_string(),
+        "absolute turn `@5` cannot be stored in a config rule; use a turn count, a duration, or a \
+         from-end position like `-3`"
+    );
 }
 
 #[test]

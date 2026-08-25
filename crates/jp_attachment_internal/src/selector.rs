@@ -86,7 +86,7 @@ impl Range {
     pub const fn last() -> Self {
         Self {
             start: Some(-1),
-            end: None,
+            end: Some(-1),
         }
     }
 
@@ -141,9 +141,6 @@ impl fmt::Display for Range {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match (self.start, self.end) {
             (None, None) => f.write_str(".."),
-            // Negative left-open ranges use the `-N` shorthand so the round-
-            // trip matches what the user wrote (`a:-3` not `a:-3..`).
-            (Some(s), None) if s < 0 => write!(f, "{s}"),
             (Some(s), None) => write!(f, "{s}.."),
             (None, Some(e)) => write!(f, "..{e}"),
             (Some(s), Some(e)) if s == e => write!(f, "{s}"),
@@ -256,19 +253,12 @@ fn parse_range(s: &str) -> Result<Range, String> {
         return Ok(Range { start, end });
     }
 
-    // Shorthand: single signed index.
+    // Shorthand: a single signed index selects that one turn.
     let n = parse_signed_index(s, "turn")?;
-    if n < 0 {
-        Ok(Range {
-            start: Some(n),
-            end: None,
-        })
-    } else {
-        Ok(Range {
-            start: Some(n),
-            end: Some(n),
-        })
-    }
+    Ok(Range {
+        start: Some(n),
+        end: Some(n),
+    })
 }
 
 fn parse_signed_bound(s: &str, label: &str) -> Result<Option<i64>, String> {

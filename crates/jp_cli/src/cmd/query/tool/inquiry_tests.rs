@@ -2,13 +2,15 @@ use std::collections::HashMap;
 
 use jp_config::model::id::{ModelIdConfig, ProviderId};
 use jp_conversation::{
-    ConversationStream,
-    event::{InquiryQuestion, InquiryRequest, InquirySource, ToolCallRequest, ToolCallResponse},
+    ConversationStream, EventKind,
+    event::{
+        ChatResponse, InquiryQuestion, InquiryRequest, InquirySource, ToolCallRequest,
+        ToolCallResponse,
+    },
 };
 use jp_llm::{
     event::{Event, FinishReason},
     provider::mock::MockProvider,
-    tool::ToolDocs,
 };
 
 use super::*;
@@ -39,12 +41,13 @@ fn test_inquiry_config(provider: MockProvider) -> InquiryConfig {
         model: test_model(),
         system_prompt: None,
         sections: vec![],
-        max_response_bytes: 1_048_576,
+        max_response_bytes: Some(1_048_576),
+        assistant: PartialAssistantConfig::default(),
     }
 }
 
 fn test_question() -> Question {
-    Question::boolean("confirm", "Create backup?")
+    Question::boolean("confirm", "Create backup?").unwrap()
 }
 
 fn test_events() -> ConversationStream {
@@ -54,21 +57,21 @@ fn test_events() -> ConversationStream {
 #[test]
 fn test_tool_call_inquiry_id() {
     assert_eq!(
-        tool_call_inquiry_id("call_abc123", "apply_changes"),
-        "call_abc123.apply_changes"
+        tool_call_inquiry_id("call_abc123", "apply_changes", 1),
+        "call_abc123.apply_changes.1"
     );
 }
 
 #[test]
 fn test_tool_call_inquiry_id_unique_per_question() {
-    let id_a = tool_call_inquiry_id("call_1", "confirm");
-    let id_b = tool_call_inquiry_id("call_1", "reason");
+    let id_a = tool_call_inquiry_id("call_1", "confirm", 1);
+    let id_b = tool_call_inquiry_id("call_1", "reason", 1);
     assert_ne!(id_a, id_b);
 }
 
 #[test]
 fn test_create_inquiry_schema_boolean() {
-    let question = Question::boolean("q1", "Confirm?");
+    let question = Question::boolean("q1", "Confirm?").unwrap();
 
     let schema = create_inquiry_schema(&question);
 
@@ -88,11 +91,9 @@ fn test_create_inquiry_schema_boolean() {
 
 #[test]
 fn test_create_inquiry_schema_select() {
-    let question = Question::select("q2", "Choose one").with_options(vec![
-        "A".to_string(),
-        "B".to_string(),
-        "C".to_string(),
-    ]);
+    let question = Question::select("q2", "Choose one")
+        .unwrap()
+        .with_options(vec!["A".to_string(), "B".to_string(), "C".to_string()]);
 
     let schema = create_inquiry_schema(&question);
     let props = schema.get("properties").and_then(Value::as_object).unwrap();
@@ -108,7 +109,7 @@ fn test_create_inquiry_schema_select() {
 
 #[test]
 fn test_create_inquiry_schema_text() {
-    let question = Question::text("q3", "Enter text");
+    let question = Question::text("q3", "Enter text").unwrap();
 
     let schema = create_inquiry_schema(&question);
     let props = schema.get("properties").and_then(Value::as_object).unwrap();
@@ -123,7 +124,7 @@ fn test_create_inquiry_schema_text() {
 
 #[test]
 fn test_create_inquiry_schema_stable_across_ids() {
-    let question = Question::boolean("q1", "Confirm?");
+    let question = Question::boolean("q1", "Confirm?").unwrap();
 
     let schema_a = create_inquiry_schema(&question);
     let schema_b = create_inquiry_schema(&question);
@@ -132,7 +133,7 @@ fn test_create_inquiry_schema_stable_across_ids() {
 
 #[tokio::test]
 async fn llm_backend_returns_answer() {
-    let inquiry_id = tool_call_inquiry_id("call_abc", "confirm");
+    let inquiry_id = tool_call_inquiry_id("call_abc", "confirm", 1);
     let config = InquiryConfig {
         system_prompt: Some("You are a helpful assistant.".to_string()),
         ..test_inquiry_config(structured_provider(json!({ "answer": true })))
@@ -153,9 +154,62 @@ async fn llm_backend_returns_answer() {
     assert_eq!(result.unwrap(), json!(true));
 }
 
+/// The inquiry's own assistant settings reach the provider.
+///
+/// Providers read model parameters and the caching policy from the request's
+/// stream config, not from the fields `build_inquiry_backend` resolves, so
+/// without the config delta every key under
+/// `conversation.inquiry.assistant.model.parameters` is addressable,
+/// documented, and silently ignored.
+#[tokio::test]
+async fn llm_backend_applies_its_assistant_config_to_the_request() {
+    use jp_config::assistant::request::CachePolicy;
+
+    let inquiry_id = tool_call_inquiry_id("call_params", "confirm", 1);
+
+    let (provider, requests) = structured_provider(json!({ "answer": true })).capturing_requests();
+
+    let mut assistant = PartialAssistantConfig::default();
+    assistant.model.parameters.temperature = Some(0.125);
+    assistant.request.cache = Some(CachePolicy::Off);
+
+    let config = InquiryConfig {
+        assistant,
+        ..test_inquiry_config(provider)
+    };
+
+    let backend = LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![]);
+
+    backend
+        .inquire(
+            test_events(),
+            &inquiry_id,
+            "test_tool",
+            &test_question(),
+            CancellationToken::new(),
+        )
+        .await
+        .expect("the inquiry resolves");
+
+    let sent = requests.lock().expect("not poisoned");
+    let query = sent.first().expect("one request was sent");
+    let resolved = query.thread.events.config().expect("a valid config");
+
+    assert_eq!(
+        resolved.assistant.model.parameters.temperature,
+        Some(0.125),
+        "the inquiry's model parameters reach the provider"
+    );
+    assert_eq!(
+        resolved.assistant.request.cache,
+        CachePolicy::Off,
+        "and so does its caching policy"
+    );
+}
+
 #[tokio::test]
 async fn llm_backend_returns_error_on_missing_structured_data() {
-    let inquiry_id = tool_call_inquiry_id("call_1", "confirm");
+    let inquiry_id = tool_call_inquiry_id("call_1", "confirm", 1);
     let config = test_inquiry_config(MockProvider::with_message("I don't know"));
     let backend = LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![]);
 
@@ -174,8 +228,29 @@ async fn llm_backend_returns_error_on_missing_structured_data() {
 
 #[tokio::test]
 async fn llm_backend_returns_error_on_answer_extraction_failure() {
-    let inquiry_id = tool_call_inquiry_id("call_1", "confirm");
+    let inquiry_id = tool_call_inquiry_id("call_1", "confirm", 1);
     let config = test_inquiry_config(structured_provider(json!({ "unrelated": true })));
+    let backend = LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![]);
+
+    let result = backend
+        .inquire(
+            test_events(),
+            &inquiry_id,
+            "test_tool",
+            &test_question(),
+            CancellationToken::new(),
+        )
+        .await;
+
+    assert!(matches!(result, Err(InquiryError::AnswerExtraction { .. })));
+}
+
+#[tokio::test]
+async fn llm_backend_returns_error_on_null_answer() {
+    // A provider returning `{"answer": null}` must fail extraction rather
+    // than produce an `Answered { answer: Null }` record.
+    let inquiry_id = tool_call_inquiry_id("call_1", "confirm", 1);
+    let config = test_inquiry_config(structured_provider(json!({ "answer": null })));
     let backend = LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![]);
 
     let result = backend
@@ -195,7 +270,7 @@ async fn llm_backend_returns_error_on_answer_extraction_failure() {
 async fn llm_backend_returns_cancelled_when_token_is_already_cancelled() {
     let config = test_inquiry_config(structured_provider(json!({ "answer": true })));
     let backend = LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![]);
-    let inquiry_id = tool_call_inquiry_id("call_1", "confirm");
+    let inquiry_id = tool_call_inquiry_id("call_1", "confirm", 1);
 
     let token = CancellationToken::new();
     token.cancel();
@@ -215,9 +290,10 @@ async fn llm_backend_returns_cancelled_when_token_is_already_cancelled() {
 
 #[tokio::test]
 async fn llm_backend_passes_select_question() {
-    let inquiry_id = tool_call_inquiry_id("call_sel", "choose");
-    let question =
-        Question::select("choose", "Pick one").with_options(vec!["A".to_string(), "B".to_string()]);
+    let inquiry_id = tool_call_inquiry_id("call_sel", "choose", 1);
+    let question = Question::select("choose", "Pick one")
+        .unwrap()
+        .with_options(vec!["A".to_string(), "B".to_string()]);
     let config = test_inquiry_config(structured_provider(json!({ "answer": "B" })));
     let backend = LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![]);
 
@@ -236,8 +312,8 @@ async fn llm_backend_passes_select_question() {
 
 #[tokio::test]
 async fn llm_backend_passes_text_question() {
-    let inquiry_id = tool_call_inquiry_id("call_txt", "reason");
-    let question = Question::text("reason", "Why?");
+    let inquiry_id = tool_call_inquiry_id("call_txt", "reason", 1);
+    let question = Question::text("reason", "Why?").unwrap();
     let config = test_inquiry_config(structured_provider(json!({ "answer": "Because reasons" })));
     let backend = LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![]);
 
@@ -256,7 +332,7 @@ async fn llm_backend_passes_text_question() {
 
 #[tokio::test]
 async fn mock_backend_returns_configured_answer() {
-    let inquiry_id = tool_call_inquiry_id("call_1", "confirm");
+    let inquiry_id = tool_call_inquiry_id("call_1", "confirm", 1);
     let backend = MockInquiryBackend::new(HashMap::from([(inquiry_id.clone(), json!(true))]));
 
     let result = backend
@@ -291,7 +367,7 @@ async fn mock_backend_returns_error_for_unknown_inquiry() {
 
 #[tokio::test]
 async fn mock_backend_ignores_cancellation_token() {
-    let inquiry_id = tool_call_inquiry_id("call_1", "confirm");
+    let inquiry_id = tool_call_inquiry_id("call_1", "confirm", 1);
     let backend = MockInquiryBackend::new(HashMap::from([(inquiry_id.clone(), json!(42))]));
 
     // Even with a cancelled token, mock returns immediately.
@@ -313,18 +389,19 @@ async fn mock_backend_ignores_cancellation_token() {
 
 #[tokio::test]
 async fn llm_backend_uses_per_question_override() {
-    let inquiry_id = tool_call_inquiry_id("call_1", "confirm");
+    let inquiry_id = tool_call_inquiry_id("call_1", "confirm", 1);
     let default_config = test_inquiry_config(
         // Default provider returns wrong data (would fail extraction).
         structured_provider(json!({ "unrelated": true })),
     );
 
     let override_config = InquiryConfig {
+        assistant: PartialAssistantConfig::default(),
         provider: Arc::new(structured_provider(json!({ "answer": true }))),
         model: test_model(),
         system_prompt: Some("Override prompt.".into()),
         sections: vec![],
-        max_response_bytes: 1_048_576,
+        max_response_bytes: Some(1_048_576),
     };
 
     let overrides = IndexMap::from([(("test_tool".into(), "confirm".into()), override_config)]);
@@ -410,148 +487,11 @@ fn visible_index_skips_inquiry_request() {
     ));
 }
 
-#[test]
-fn overhead_empty_inputs() {
-    assert_eq!(estimate_fixed_overhead_chars(None, &[], &[], &[]), 0);
-}
-
-#[test]
-fn overhead_system_prompt() {
-    let prompt = "You are a helpful assistant.";
-    let result = estimate_fixed_overhead_chars(Some(prompt), &[], &[], &[]);
-    assert_eq!(result, prompt.len());
-}
-
-#[test]
-fn overhead_sections() {
-    let section = SectionConfig::default()
-        .with_tag("instruction")
-        .with_title("Testing")
-        .with_content("Do the thing.");
-    let rendered_len = section.render().len();
-
-    let result = estimate_fixed_overhead_chars(None, &[section], &[], &[]);
-    assert_eq!(result, rendered_len);
-}
-
-#[test]
-fn overhead_text_attachments() {
-    let attachment = Attachment::text("file.rs", "fn main() {}");
-    let result = estimate_fixed_overhead_chars(None, &[], &[attachment], &[]);
-    assert_eq!(result, "fn main() {}".len());
-}
-
-#[test]
-fn overhead_binary_attachments_ignored() {
-    let attachment = Attachment::binary("img.png", vec![0u8; 1000], "image/png");
-    let result = estimate_fixed_overhead_chars(None, &[], &[attachment], &[]);
-    assert_eq!(result, 0);
-}
-
-#[test]
-fn overhead_tool_definitions() {
-    let tool = ToolDefinition {
-        name: "grep_files".to_string(),
-        docs: ToolDocs {
-            summary: Some("Search files.".to_string()),
-            ..Default::default()
-        },
-        parameters: IndexMap::new(),
-    };
-    let result = estimate_fixed_overhead_chars(None, &[], &[], &[tool]);
-    // name + description + serialized schema
-    assert!(result > 0);
-    assert!(result > "grep_files".len() + "Search files.".len());
-}
-
-#[test]
-fn overhead_combines_all_sources() {
-    let prompt = "Be helpful.";
-    let section = SectionConfig::default().with_content("Rule 1.");
-    let attachment = Attachment::text("f.txt", "hello world");
-    let tool = ToolDefinition {
-        name: "t".to_string(),
-        docs: ToolDocs::default(),
-        parameters: IndexMap::new(),
-    };
-
-    let combined = estimate_fixed_overhead_chars(
-        Some(prompt),
-        std::slice::from_ref(&section),
-        std::slice::from_ref(&attachment),
-        std::slice::from_ref(&tool),
-    );
-
-    let sum = estimate_fixed_overhead_chars(Some(prompt), &[], &[], &[])
-        + estimate_fixed_overhead_chars(None, std::slice::from_ref(&section), &[], &[])
-        + estimate_fixed_overhead_chars(None, &[], std::slice::from_ref(&attachment), &[])
-        + estimate_fixed_overhead_chars(None, &[], &[], std::slice::from_ref(&tool));
-
-    assert_eq!(combined, sum);
-}
-
-#[test]
-fn budget_subtracts_overhead() {
-    let no_overhead = token_budget(1000, 0);
-    let with_overhead = token_budget(1000, 500);
-    assert_eq!(no_overhead - 500, with_overhead);
-}
-
-#[test]
-fn budget_saturates_at_zero() {
-    // Overhead larger than total budget shouldn't underflow.
-    assert_eq!(token_budget(100, 999_999), 0);
-}
-
-#[test]
-fn target_subtracts_overhead() {
-    let no_overhead = token_target(1000, 0);
-    let with_overhead = token_target(1000, 500);
-    assert_eq!(no_overhead - 500, with_overhead);
-}
-
-#[test]
-fn truncate_no_op_when_within_budget() {
-    let mut events = ConversationStream::new_test().with_turn("short");
-    let count_before = events.len();
-    // Large context window, no overhead => no truncation.
-    truncate_to_fit(&mut events, 100_000, 0);
-    assert_eq!(events.len(), count_before);
-}
-
-#[test]
-fn truncate_triggers_with_overhead() {
-    // Build a stream that fits in the raw budget but not after subtracting
-    // overhead. Each turn adds ~20 chars ("message N" is ~9 chars for
-    // request + response).
-    let mut events = ConversationStream::new_test();
-    for i in 0..50 {
-        events = events.with_turn(format!("message {i} with some padding text here"));
-    }
-
-    let total_chars = estimate_chars(&events);
-    let count_before = events.len();
-
-    // Pick a context window where total_chars fits at 90% but not after
-    // subtracting a large overhead.
-    #[expect(clippy::cast_possible_truncation)]
-    let max_tokens = ((total_chars * 100) / (CHARS_PER_TOKEN * OVERHEAD_FACTOR) + 100) as u32;
-
-    // Without overhead, no truncation.
-    let mut no_overhead = events.clone();
-    truncate_to_fit(&mut no_overhead, max_tokens, 0);
-    assert_eq!(no_overhead.len(), count_before);
-
-    // With overhead eating most of the budget, truncation should happen.
-    let overhead = token_budget(max_tokens, 0) - 100;
-    truncate_to_fit(&mut events, max_tokens, overhead);
-    assert!(events.len() < count_before);
-}
-
 #[tokio::test]
 async fn dedicated_model_backend_returns_answer() {
-    let inquiry_id = tool_call_inquiry_id("call_dedicated", "confirm");
+    let inquiry_id = tool_call_inquiry_id("call_dedicated", "confirm", 1);
     let config = InquiryConfig {
+        assistant: PartialAssistantConfig::default(),
         provider: Arc::new(structured_provider(json!({ "answer": true }))),
         model: ModelDetails::empty(ModelIdConfig {
             provider: ProviderId::Test,
@@ -559,7 +499,7 @@ async fn dedicated_model_backend_returns_answer() {
         }),
         system_prompt: Some("Answer concisely.".to_string()),
         sections: vec![],
-        max_response_bytes: 1_048_576,
+        max_response_bytes: Some(1_048_576),
     };
 
     let backend = LlmInquiryBackend::new(config, IndexMap::new(), vec![], vec![]);

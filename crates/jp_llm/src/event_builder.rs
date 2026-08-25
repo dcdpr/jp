@@ -40,7 +40,40 @@ use jp_conversation::{
 use serde_json::{Map, Value};
 use tracing::warn;
 
-use crate::event::{EventPart, ToolCallPart};
+use crate::event::{Event, EventPart, ToolCallPart};
+
+/// Extract the structured JSON payload from a completed list of stream events.
+///
+/// Structured output arrives as separate chunks; running the list through an
+/// [`EventBuilder`] concatenates and parses them into a single value rather
+/// than leaving a sequence of string fragments.
+///
+/// Returns `None` when the response carried no structured data.
+#[must_use]
+pub fn structured_data(events: Vec<Event>) -> Option<Value> {
+    let mut builder = EventBuilder::new();
+    let mut flushed = Vec::new();
+
+    for event in events {
+        match event {
+            Event::Part {
+                index,
+                part,
+                metadata,
+            } => builder.handle_part(index, part, metadata),
+            Event::Flush { index, metadata } => {
+                flushed.extend(builder.handle_flush(index, metadata));
+            }
+            Event::Finished(_) => flushed.extend(builder.drain()),
+            Event::Patch(_) | Event::KeepAlive => {}
+        }
+    }
+
+    flushed
+        .into_iter()
+        .filter_map(ConversationEvent::into_chat_response)
+        .find_map(ChatResponse::into_structured_data)
+}
 
 /// Accumulates streamed events into complete [`ConversationEvent`]s.
 pub struct EventBuilder {

@@ -1,5 +1,6 @@
 use comfy_table::{Cell, Row};
 use jp_printer::{OutputFormat, Printer};
+use jp_term::table::DetailRow;
 use serde_json::json;
 
 use super::*;
@@ -23,7 +24,7 @@ fn table_text_pretty_renders_unicode_box() {
     let header = row(&["Name", "Age"]);
     let rows = vec![row(&["Alice", "30"]), row(&["Bob", "25"])];
 
-    print_table(&printer, header, rows, false);
+    print_table(&printer, header, rows, false, &json!([]));
     let output = flush_stdout(&printer, &out);
 
     // Unicode box-drawing uses these characters
@@ -38,7 +39,7 @@ fn table_text_renders_markdown_pipes() {
     let header = row(&["Name", "Age"]);
     let rows = vec![row(&["Alice", "30"])];
 
-    print_table(&printer, header, rows, false);
+    print_table(&printer, header, rows, false, &json!([]));
     let output = flush_stdout(&printer, &out);
 
     assert!(output.contains("| Name"), "expected markdown table header");
@@ -47,40 +48,47 @@ fn table_text_renders_markdown_pipes() {
 }
 
 #[test]
-fn table_json_returns_compact_array() {
+fn table_json_emits_payload_not_rows() {
     let (printer, out, _) = Printer::memory(OutputFormat::Json);
+    // Display rows and JSON payload deliberately disagree: the payload is
+    // the contract, the rows are presentation.
     let header = row(&["Name", "Age"]);
-    let rows = vec![row(&["Alice", "30"])];
+    let rows = vec![row(&["Alice (30)", ""])];
+    let payload = json!([{"name": "Alice", "age": 30}]);
 
-    print_table(&printer, header, rows, false);
+    print_table(&printer, header, rows, false, &payload);
     let output = flush_stdout(&printer, &out);
 
     let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
-    assert_eq!(parsed, json!([{"Name": "Alice", "Age": "30"}]));
+    assert_eq!(parsed, payload);
+    assert!(
+        !output.contains("Alice (30)"),
+        "display text must not leak into JSON"
+    );
     // Compact: no interior newlines
     assert!(!output.trim().contains('\n'), "expected single-line JSON");
 }
 
 #[test]
-fn table_json_pretty_returns_indented_array() {
+fn table_json_pretty_returns_indented_payload() {
     let (printer, out, _) = Printer::memory(OutputFormat::JsonPretty);
     let header = row(&["Id"]);
     let rows = vec![row(&["abc"])];
 
-    print_table(&printer, header, rows, false);
+    print_table(&printer, header, rows, false, &json!([{"id": "abc"}]));
     let output = flush_stdout(&printer, &out);
 
     let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
-    assert_eq!(parsed, json!([{"Id": "abc"}]));
+    assert_eq!(parsed, json!([{"id": "abc"}]));
     assert!(output.contains("\n  "), "expected indented JSON");
 }
 
 #[test]
-fn table_empty_rows() {
+fn table_empty_payload() {
     let (printer, out, _) = Printer::memory(OutputFormat::Json);
     let header = row(&["X"]);
 
-    print_table(&printer, header, vec![], false);
+    print_table(&printer, header, vec![], false, &json!([]));
     let output = flush_stdout(&printer, &out);
 
     let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
@@ -90,7 +98,7 @@ fn table_empty_rows() {
 #[test]
 fn details_text_pretty_with_title() {
     let (printer, out, _) = Printer::memory(OutputFormat::TextPretty);
-    let rows = vec![DetailRow::scalar("Key", "Value")];
+    let rows = Details::Fields(vec![DetailRow::scalar("Key", "Value")]);
 
     print_details(&printer, Some("My Title"), rows);
     let output = flush_stdout(&printer, &out);
@@ -103,7 +111,7 @@ fn details_text_pretty_with_title() {
 #[test]
 fn details_text_renders_markdown() {
     let (printer, out, _) = Printer::memory(OutputFormat::Text);
-    let rows = vec![DetailRow::scalar("color", "red")];
+    let rows = Details::Fields(vec![DetailRow::scalar("color", "red")]);
 
     print_details(&printer, None, rows);
     let output = flush_stdout(&printer, &out);
@@ -114,27 +122,9 @@ fn details_text_renders_markdown() {
 }
 
 #[test]
-fn details_json_compact() {
-    let (printer, out, _) = Printer::memory(OutputFormat::Json);
-    let rows = vec![
-        DetailRow::scalar("name", "jp"),
-        DetailRow::scalar("version", "1.0"),
-    ];
-
-    print_details(&printer, Some("info"), rows);
-    let output = flush_stdout(&printer, &out);
-
-    let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
-    assert_eq!(parsed["title"], "info");
-    assert_eq!(parsed["details"]["name"], "jp");
-    assert_eq!(parsed["details"]["version"], "1.0");
-    assert!(!output.trim().contains('\n'), "expected compact JSON");
-}
-
-#[test]
 fn details_json_pretty_is_indented() {
     let (printer, out, _) = Printer::memory(OutputFormat::JsonPretty);
-    let rows = vec![DetailRow::scalar("k", "v")];
+    let rows = Details::Fields(vec![DetailRow::scalar("k", "v")]);
 
     print_details(&printer, None, rows);
     let output = flush_stdout(&printer, &out);
@@ -142,18 +132,6 @@ fn details_json_pretty_is_indented() {
     let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
     assert_eq!(parsed["details"]["k"], "v");
     assert!(output.contains("\n  "), "expected indented JSON");
-}
-
-#[test]
-fn details_no_title_json() {
-    let (printer, out, _) = Printer::memory(OutputFormat::Json);
-    let rows = vec![DetailRow::scalar("a", "b")];
-
-    print_details(&printer, None, rows);
-    let output = flush_stdout(&printer, &out);
-
-    let parsed: serde_json::Value = serde_json::from_str(output.trim()).unwrap();
-    assert!(parsed["title"].is_null());
 }
 
 #[test]

@@ -11,7 +11,7 @@ use crate::{
     fill::FillDefaults,
     model::{
         id::{ModelIdOrAliasConfig, PartialModelIdOrAliasConfig},
-        parameters::{ParametersConfig, PartialParametersConfig},
+        parameters::{ParametersConfig, PartialParametersConfig, deserialize_collecting_other},
     },
     partial::ToPartial,
 };
@@ -31,7 +31,9 @@ pub struct ModelConfig {
     /// The model parameters.
     ///
     /// Configuration for model parameters such as temperature, max tokens, etc.
-    #[setting(nested)]
+    /// Parameters JP does not model are collected into `parameters.other` and
+    /// forwarded to the provider as written.
+    #[setting(nested, deserialize_with = "deserialize_collecting_other")]
     pub parameters: ParametersConfig,
 }
 

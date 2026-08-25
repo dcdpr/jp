@@ -137,8 +137,8 @@ fn assert_segmentation_equivalent(document: &str, name: &str) {
 
 #[test]
 fn fixtures_cross_validate_against_comrak() {
-    let glob_pattern = format!("{}/tests/fixtures/*.md", env!("CARGO_MANIFEST_DIR"));
-    let paths: Vec<_> = glob::glob(&glob_pattern)
+    let glob_pattern = "tests/fixtures/*.md";
+    let paths: Vec<_> = glob::glob(glob_pattern)
         .expect("valid glob pattern")
         .filter_map(Result::ok)
         .collect();

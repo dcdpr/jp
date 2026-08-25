@@ -1,6 +1,7 @@
 //! Configuration utilities.
 
 use std::{
+    collections::HashMap,
     ffi::OsStr,
     fs,
     path::{Path, PathBuf},
@@ -9,11 +10,11 @@ use std::{
 use camino::Utf8Path;
 use glob::glob;
 use indexmap::IndexMap;
-use schematic::{ConfigLoader, MergeError, MergeResult, PartialConfig, TransformResult};
+use schematic::{ConfigLoader, MergeError, MergeResult, PartialConfig};
 use tracing::{debug, error, info, trace, warn};
 
 use crate::{
-    AppConfig, BoxedError, PartialAppConfig, error::Error,
+    AppConfig, BoxedError, PartialAppConfig, error::Error, loader::PartialLoaderConfig,
     types::extending_path::ExtendingRelativePath,
 };
 
@@ -163,21 +164,8 @@ pub fn find_file_in_load_path(
 ///
 /// # Errors
 ///
-/// See `load_config_file_at_path`.
+/// See [`resolve_extends_graph`].
 pub fn load_partial_at_path<P: Into<PathBuf>>(path: P) -> Result<Option<PartialAppConfig>, Error> {
-    // Cycle and depth guarding for `extends` chains is implemented lazily: we
-    // maintain a DFS ancestor stack (see [`ExtendsStack`]), pushing the
-    // canonicalized path of each file before recursing into its `extends` and
-    // popping on the way out. Re-entry into a file already on the stack is a
-    // cycle.
-    //
-    // Future direction: resolve the full `extends` DAG eagerly before any
-    // `ConfigLoader` work happens. Walk each file once to read its `extends`,
-    // expand globs, canonicalize, and build a graph of participating files.
-    // Cycles would then be caught statically (with clearer diagnostics), and
-    // the resolved graph would give `--explain` (RFD 060) a natural home for
-    // per-file provenance. Until then, the lazy approach below keeps the
-    // change surface small and relies on the depth cap as a backstop.
     load_partial_at_path_with_max_depth(path, MAX_EXTENDS_DEPTH)
 }
 
@@ -191,15 +179,44 @@ fn load_partial_at_path_with_max_depth<P: Into<PathBuf>>(
     path: P,
     max_depth: u8,
 ) -> Result<Option<PartialAppConfig>, Error> {
-    let mut loader = ConfigLoader::<AppConfig>::new();
     let mut stack = ExtendsStack::new(max_depth);
-    match load_config_file_at_path(path, &mut loader, false, &mut stack) {
+    let mut entries = Vec::new();
+
+    match resolve_extends_graph(path, false, &mut stack, &mut entries) {
         Ok(()) => {}
         Err(Error::Schematic(schematic::ConfigError::MissingFile(_))) => return Ok(None),
         Err(error) => return Err(error),
     }
 
+    let mut loader = ConfigLoader::<AppConfig>::new();
+    for entry in dedup_keep_last(entries) {
+        if entry.optional {
+            loader.file_optional(&entry.path)?;
+        } else {
+            loader.file(&entry.path)?;
+        }
+    }
+
     loader.load_partial(&()).map(Some).map_err(Into::into)
+}
+
+/// Read the `[loader]` section from the config file at `path`, without
+/// resolving its `extends` tree.
+///
+/// Loader directives steer how the declaring entry itself is loaded, so only
+/// the file's own section counts: a `[loader]` section in a file reached
+/// through `extends` must not affect the entry ([RFD 038]).
+///
+/// # Errors
+///
+/// Can error if the file cannot be read or parsed.
+///
+/// [RFD 038]: https://jp.computer/rfd/038
+pub fn load_loader_directives<P: AsRef<Path>>(path: P) -> Result<PartialLoaderConfig, Error> {
+    Ok(ConfigLoader::<AppConfig>::new()
+        .file(path.as_ref())?
+        .load_partial(&())?
+        .loader)
 }
 
 /// Load a partial configuration from a file at `path`, walking upwards until
@@ -307,19 +324,43 @@ pub fn build(partial: PartialAppConfig) -> Result<AppConfig, Error> {
     Ok(config)
 }
 
-/// Open a configuration file at `path`, if it exists.
+/// One config file in a resolved `extends` graph.
+struct ExtendsEntry {
+    /// Path to the file, with a valid extension resolved.
+    path: PathBuf,
+
+    /// Canonicalized path, used to recognize the same file reached through more
+    /// than one `extends` branch.
+    canonical: PathBuf,
+
+    /// Whether the loader tolerates the file going missing.
+    ///
+    /// True for every file reached through `extends`, false for the file the
+    /// walk started from.
+    optional: bool,
+}
+
+/// Walk the `extends` graph rooted at `path`, collecting every file to load in
+/// merge order (least specific first).
 ///
-/// If the file does not exist, the same file name is used but with one of the
+/// A file reached through several branches appears once per branch; use
+/// [`dedup_keep_last`] to reduce the result to one entry per file.
+///
+/// If the file does not exist, the same file name is retried with each of the
 /// valid `VALID_CONFIG_FILE_EXTS` extensions.
 ///
 /// # Errors
 ///
-/// Can error if file parsing fails, or if partial validation fails.
-fn load_config_file_at_path<P: Into<PathBuf>>(
+/// Returns [`Error::ExtendsCycle`] if a file extends itself through any chain,
+/// [`Error::ExtendsDepthExceeded`] if nesting exceeds `stack`'s cap, and a
+/// [`schematic::ConfigError::MissingFile`] if `path` does not resolve to a
+/// file.
+/// Parse failures in any visited file propagate.
+fn resolve_extends_graph<P: Into<PathBuf>>(
     path: P,
-    loader: &mut ConfigLoader<AppConfig>,
     optional: bool,
     stack: &mut ExtendsStack,
+    entries: &mut Vec<ExtendsEntry>,
 ) -> Result<(), Error> {
     let mut path: PathBuf = path.into();
 
@@ -340,20 +381,20 @@ fn load_config_file_at_path<P: Into<PathBuf>>(
     // canonicalization fails we fall back to the raw path; the depth cap in
     // `ExtendsStack` protects against cycles slipping through in that case.
     let canonical = fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
-    stack.try_push(canonical)?;
-    let result = load_config_file_with_extends(&path, loader, optional, stack);
+    stack.try_push(canonical.clone())?;
+    let result = resolve_extends_of(&path, canonical, optional, stack, entries);
     stack.pop();
     result
 }
 
-/// Load a configuration file at `path`, assuming it exists.
-///
-/// If the file configures `extends`, those will be loaded as well.
-fn load_config_file_with_extends(
+/// Resolve the `extends` declarations of the file at `path`, then record the
+/// file itself between its `before` and `after` extensions.
+fn resolve_extends_of(
     path: &Path,
-    loader: &mut ConfigLoader<AppConfig>,
+    canonical: PathBuf,
     optional: bool,
     stack: &mut ExtendsStack,
+    entries: &mut Vec<ExtendsEntry>,
 ) -> Result<(), Error> {
     let root = path.parent().map(Path::to_path_buf);
 
@@ -365,25 +406,25 @@ fn load_config_file_with_extends(
         .flatten()
         .partition(ExtendingRelativePath::is_before);
 
-    load_optional_paths(before, root.as_deref(), loader, stack)?;
+    resolve_extended_paths(before, root.as_deref(), stack, entries)?;
 
-    if optional {
-        loader.file_optional(path)?;
-    } else {
-        loader.file(path)?;
-    }
+    entries.push(ExtendsEntry {
+        path: path.to_path_buf(),
+        canonical,
+        optional,
+    });
 
-    load_optional_paths(after, root.as_deref(), loader, stack)?;
+    resolve_extended_paths(after, root.as_deref(), stack, entries)?;
 
     Ok(())
 }
 
-/// Load the optional paths.
-fn load_optional_paths(
+/// Resolve a list of `extends` declarations, expanding globs.
+fn resolve_extended_paths(
     extends: impl IntoIterator<Item = ExtendingRelativePath>,
     root: Option<&Path>,
-    loader: &mut ConfigLoader<AppConfig>,
     stack: &mut ExtendsStack,
+    entries: &mut Vec<ExtendsEntry>,
 ) -> Result<(), Error> {
     for path in extends {
         let Some(root) = &root else {
@@ -410,23 +451,44 @@ fn load_optional_paths(
                 }
             };
 
-            load_config_file_at_path(&path, loader, true, stack)?;
+            resolve_extends_graph(&path, true, stack, entries)?;
         }
     }
 
     Ok(())
 }
 
-/// Order-preserving dedup for use as `transform = vec_dedup`.
-#[expect(clippy::trivially_copy_pass_by_ref, clippy::unnecessary_wraps)]
-pub(crate) fn vec_dedup<T: PartialEq>(v: Vec<T>, _: &()) -> TransformResult<Vec<T>> {
-    let mut seen = Vec::with_capacity(v.len());
-    for item in v {
-        if !seen.contains(&item) {
-            seen.push(item);
-        }
+/// Reduce a resolved `extends` graph to one entry per file, keeping each file's
+/// last position.
+///
+/// A file reached through two `extends` branches is loaded once.
+/// Loading it twice re-applies `append` and `prepend` merge strategies,
+/// duplicating prompt text, sections, instructions, and attachments.
+///
+/// The last position is kept rather than the first so that an `extends` array
+/// keeps its declared precedence: in `extends = ["a.toml", "b.toml"]` where
+/// `a.toml` also extends `b.toml`, `b.toml`'s values still override `a.toml`'s.
+fn dedup_keep_last(entries: Vec<ExtendsEntry>) -> Vec<ExtendsEntry> {
+    let mut last_index: HashMap<PathBuf, usize> = HashMap::with_capacity(entries.len());
+    for (index, entry) in entries.iter().enumerate() {
+        last_index.insert(entry.canonical.clone(), index);
     }
-    Ok(seen)
+
+    entries
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, entry)| {
+            if last_index.get(&entry.canonical) == Some(&index) {
+                return Some(entry);
+            }
+
+            debug!(
+                path = %entry.path.display(),
+                "Skipping repeat visit to extended configuration file."
+            );
+            None
+        })
+        .collect()
 }
 
 /// Merge [`IndexMap`]s of nested [`PartialConfig`]s.
