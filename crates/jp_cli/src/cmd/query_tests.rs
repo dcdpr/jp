@@ -551,8 +551,10 @@ fn test_named_enable_of_locked_off_tool_errors() {
     .unwrap_err()
     .to_string();
 
-    assert!(err.contains("network"), "unexpected error: {err}");
-    assert!(err.contains("locked-off"), "unexpected error: {err}");
+    assert_eq!(
+        err,
+        "cannot enable `network`: this tool is configured as locked-off"
+    );
 }
 
 #[test]
@@ -679,48 +681,57 @@ fn test_tool_use_accepts_locked_on_builtin() {
 }
 
 #[test]
-fn test_tool_use_enables_a_disabled_tool() {
-    // `-u NAME` implies `-t NAME`: naming a tool for forced use also selects
-    // it, so `jp q -u explicitly_disabled_tool` does not need a second flag.
-    let partial = IntoPartialAppConfig::apply_cli_config(
-        &Query {
-            tool_use: Some(Some("explicitly_disabled_tool".into())),
-            ..Default::default()
-        },
-        None,
-        make_partial_with_tools(),
-        None,
-    )
-    .unwrap();
+fn test_tool_use_forces_a_disabled_tool_for_one_turn() {
+    // `jp q -u explicitly_disabled_tool` runs that tool without a second flag:
+    // `tool_definitions` keeps a forced tool even while it is disabled, so the
+    // choice alone is enough and nothing has to be enabled in the config.
+    let query = Query {
+        tool_use: Some(Some("explicitly_disabled_tool".into())),
+        ..Default::default()
+    };
 
-    assert!(effective(&partial, "explicitly_disabled_tool").state);
+    let partial =
+        IntoPartialAppConfig::apply_cli_config(&query, None, make_partial_with_tools(), None)
+            .unwrap();
+
     assert_eq!(
-        partial.assistant.tool_choice,
-        Some(ToolChoice::Function("explicitly_disabled_tool".into()))
+        query.effective_tool_choice(&AppConfig::new_test()),
+        ToolChoice::Function("explicitly_disabled_tool".into())
+    );
+    assert!(
+        !effective(&partial, "explicitly_disabled_tool").state,
+        "the force is invocation-scoped: the tool stays disabled in the config"
     );
 }
 
 #[test]
-fn test_tool_use_enables_an_if_named_tool() {
-    // `explicit_tool` is off with `allow_toggle = if_named`. A named directive
-    // is exactly what its policy accepts, so `-u` reaches it.
-    let partial = IntoPartialAppConfig::apply_cli_config(
-        &Query {
-            tool_use: Some(Some("explicit_tool".into())),
-            ..Default::default()
-        },
-        None,
-        make_partial_with_tools(),
-        None,
-    )
-    .unwrap();
+fn test_tool_use_accepts_an_if_named_tool() {
+    // `explicit_tool` is off with `allow_toggle = if_named`. A named force is
+    // exactly what its policy permits, so `-u` is accepted rather than refused.
+    let query = Query {
+        tool_use: Some(Some("explicit_tool".into())),
+        ..Default::default()
+    };
 
-    let enable = effective(&partial, "explicit_tool");
-    assert!(enable.state);
+    IntoPartialAppConfig::apply_cli_config(&query, None, make_partial_with_tools(), None)
+        .expect("an if_named tool accepts a named force");
+
     assert_eq!(
-        enable.allow_toggle,
-        AllowToggle::IfNamed,
-        "the toggle policy survives a forced enable"
+        query.effective_tool_choice(&AppConfig::new_test()),
+        ToolChoice::Function("explicit_tool".into())
+    );
+}
+
+#[test]
+fn test_tool_choice_without_a_flag_comes_from_config() {
+    // The other side of `effective_tool_choice`: with no `-u`/`-U`, the
+    // conversation's configured choice is what applies.
+    let mut cfg = AppConfig::new_test();
+    cfg.assistant.tool_choice = ToolChoice::Required;
+
+    assert_eq!(
+        Query::default().effective_tool_choice(&cfg),
+        ToolChoice::Required
     );
 }
 
@@ -750,8 +761,10 @@ fn test_tool_use_of_locked_off_tool_errors() {
     .unwrap_err()
     .to_string();
 
-    assert!(err.contains("network"), "unexpected error: {err}");
-    assert!(err.contains("locked-off"), "unexpected error: {err}");
+    assert_eq!(
+        err,
+        "cannot enable `network`: this tool is configured as locked-off"
+    );
 }
 
 #[test]
@@ -768,7 +781,116 @@ fn test_tool_use_of_unknown_tool_errors() {
     .unwrap_err()
     .to_string();
 
-    assert!(err.contains("no_such_tool"), "unexpected error: {err}");
+    // Pins the message this PR introduced: the old one said "any enabled
+    // tools", which a `contains("no_such_tool")` check could not tell apart.
+    assert_eq!(
+        err,
+        "tool choice 'no_such_tool' does not match any known tools"
+    );
+}
+
+#[test]
+fn test_tool_use_does_not_persist_into_partial_config() {
+    // `-u` binds one turn. Mirrors `no_title_does_not_persist_into_partial_config`:
+    // anything this flag writes into the partial would reach the conversation
+    // through `get_config_delta_from_cli` and force the tool on every later
+    // query.
+    let base = make_partial_with_tools();
+
+    let with_flag = IntoPartialAppConfig::apply_cli_config(
+        &Query {
+            tool_use: Some(Some("explicitly_disabled_tool".into())),
+            ..Default::default()
+        },
+        None,
+        base.clone(),
+        None,
+    )
+    .unwrap();
+    let without_flag =
+        IntoPartialAppConfig::apply_cli_config(&Query::default(), None, base, None).unwrap();
+
+    assert_eq!(with_flag.assistant.tool_choice, None);
+    assert_eq!(
+        effective(&with_flag, "explicitly_disabled_tool").state,
+        effective(&without_flag, "explicitly_disabled_tool").state,
+    );
+}
+
+#[test]
+fn test_no_tool_use_does_not_persist_into_partial_config() {
+    // `-U` is the single-turn counterpart of `-T`, so it must not write
+    // `tool_choice = none` into the conversation either.
+    let partial = IntoPartialAppConfig::apply_cli_config(
+        &Query {
+            no_tool_use: true,
+            ..Default::default()
+        },
+        None,
+        make_partial_with_tools(),
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(partial.assistant.tool_choice, None);
+
+    assert_eq!(
+        Query {
+            no_tool_use: true,
+            ..Default::default()
+        }
+        .effective_tool_choice(&AppConfig::new_test()),
+        ToolChoice::None,
+        "the flag still takes effect for this turn"
+    );
+}
+
+#[test]
+fn test_tool_directive_does_persist_into_partial_config() {
+    // The deliberate asymmetry: `-t` is the sticky flag. Enabling a tool has to
+    // reach the config, because that is the only way to make it stick, and
+    // `-T` is the documented undo.
+    let partial = IntoPartialAppConfig::apply_cli_config(
+        &Query {
+            tool_directives: directives(vec![ToolDirective::Enable(
+                "explicitly_disabled_tool".into(),
+            )]),
+            ..Default::default()
+        },
+        None,
+        make_partial_with_tools(),
+        None,
+    )
+    .unwrap();
+
+    assert!(effective(&partial, "explicitly_disabled_tool").state);
+}
+
+#[test]
+fn test_tool_use_forces_a_tool_a_directive_disabled() {
+    // `jp q -T my_tool -u my_tool`: the two no longer contradict. `-T` disables
+    // the tool durably, `-u` forces it for this turn only, and both hold.
+    let query = Query {
+        tool_directives: directives(vec![ToolDirective::Disable(
+            "implicitly_enabled_tool".into(),
+        )]),
+        tool_use: Some(Some("implicitly_enabled_tool".into())),
+        ..Default::default()
+    };
+
+    let partial =
+        IntoPartialAppConfig::apply_cli_config(&query, None, make_partial_with_tools(), None)
+            .unwrap();
+
+    assert!(
+        !effective(&partial, "implicitly_enabled_tool").state,
+        "`-T` still persists the disable"
+    );
+    assert_eq!(
+        query.effective_tool_choice(&AppConfig::new_test()),
+        ToolChoice::Function("implicitly_enabled_tool".into()),
+        "`-u` still forces the tool for this turn"
+    );
 }
 
 #[test]
