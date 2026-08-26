@@ -14,7 +14,7 @@ use jp_config::interrupt::{StreamingInterruptConfig, ToolInterruptConfig};
 use jp_conversation::ConversationStream;
 use jp_editor::EditorBackend;
 use jp_inquire::{ReplyEditMode, prompt::PromptBackend};
-use jp_llm::event::{Event, FinishReason, apply_patches};
+use jp_llm::event::{Event, FinishReason, record_patches};
 use jp_printer::Printer;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, trace};
@@ -157,7 +157,7 @@ pub fn handle_llm_event(
     // in the conversation stream. This can be handled directly instead of
     // passing through the turn coordinator.
     if let Event::Patch(patches) = event {
-        let count = apply_patches(conversation_stream, &patches);
+        let count = record_patches(conversation_stream, &patches);
         let shrinks = patches.iter().all(|patch| patch.action.shrinks_stream());
         retry_state.record_patch(count, shrinks);
 

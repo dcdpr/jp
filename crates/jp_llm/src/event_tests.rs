@@ -5,7 +5,7 @@ use jp_conversation::{
     event::{ChatRequest, ChatResponse},
 };
 
-use super::{EventMatcher, EventPatch, PatchAction, apply_patches};
+use super::{EventMatcher, EventPatch, PatchAction, record_patches};
 
 /// A stream holding one assistant response per `(key, value)` metadata pair.
 ///
@@ -32,8 +32,15 @@ fn remove_matching(key: &str, value: &str) -> EventPatch {
     }
 }
 
-/// The metadata keys left on each event, in stream order.
+/// The metadata keys left on each event of the *projected* stream, in order.
+///
+/// Patches are recorded as overlays, so the stored events keep their metadata
+/// and the removal only shows up once the stream is projected for a request.
+/// Reading the raw stream here would report every patch as a no-op.
 fn metadata_keys(stream: &ConversationStream) -> Vec<String> {
+    let mut stream = stream.clone();
+    stream.apply_projection();
+
     stream
         .iter()
         .map(|e| {
@@ -50,7 +57,7 @@ fn metadata_keys(stream: &ConversationStream) -> Vec<String> {
 #[test]
 fn removing_a_matched_field_counts_once() {
     let mut stream = stream_with_metadata(&[("signature", "stale")]);
-    let count = apply_patches(&mut stream, &[remove_matching("signature", "stale")]);
+    let count = record_patches(&mut stream, &[remove_matching("signature", "stale")]);
 
     assert_eq!(count, 1);
     assert_eq!(metadata_keys(&stream), vec!["", "", ""]);
@@ -59,7 +66,7 @@ fn removing_a_matched_field_counts_once() {
 #[test]
 fn a_patch_matching_nothing_counts_zero() {
     let mut stream = stream_with_metadata(&[("signature", "fresh")]);
-    let count = apply_patches(&mut stream, &[remove_matching("signature", "stale")]);
+    let count = record_patches(&mut stream, &[remove_matching("signature", "stale")]);
 
     assert_eq!(count, 0);
     assert_eq!(metadata_keys(&stream), vec!["", "", "signature"]);
@@ -79,7 +86,7 @@ fn a_match_that_removes_an_absent_field_counts_zero() {
         action: PatchAction::RemoveMetadata("some_other_key".to_owned()),
     };
 
-    let count = apply_patches(&mut stream, &[patch]);
+    let count = record_patches(&mut stream, &[patch]);
 
     assert_eq!(count, 0);
     assert_eq!(metadata_keys(&stream), vec!["", "", "signature"]);
@@ -91,11 +98,11 @@ fn each_patch_removes_only_its_own_match() {
     // second signature still present and untouched by the first pass.
     let mut stream = stream_with_metadata(&[("signature", "one"), ("signature", "two")]);
 
-    let first = apply_patches(&mut stream, &[remove_matching("signature", "one")]);
+    let first = record_patches(&mut stream, &[remove_matching("signature", "one")]);
     assert_eq!(first, 1);
     assert_eq!(metadata_keys(&stream), vec!["", "", "", "signature"]);
 
-    let second = apply_patches(&mut stream, &[remove_matching("signature", "two")]);
+    let second = record_patches(&mut stream, &[remove_matching("signature", "two")]);
     assert_eq!(second, 1);
     assert_eq!(metadata_keys(&stream), vec!["", "", "", ""]);
 }
@@ -107,6 +114,46 @@ fn re_applying_a_spent_patch_counts_zero() {
     let mut stream = stream_with_metadata(&[("signature", "stale")]);
     let patch = remove_matching("signature", "stale");
 
-    assert_eq!(apply_patches(&mut stream, slice::from_ref(&patch)), 1);
-    assert_eq!(apply_patches(&mut stream, slice::from_ref(&patch)), 0);
+    assert_eq!(record_patches(&mut stream, slice::from_ref(&patch)), 1);
+    assert_eq!(record_patches(&mut stream, slice::from_ref(&patch)), 0);
+}
+
+/// A repair must not destroy stored metadata.
+///
+/// The signature a patch strips is only invalid for the provider that rejected
+/// it; another provider, or the same one on a different model, may still accept
+/// it.
+/// Recording the repair as an overlay keeps the stored event intact and removes
+/// the metadata only from the projection used to build a request.
+#[test]
+fn recording_a_patch_leaves_the_stored_event_untouched() {
+    let mut stream = stream_with_metadata(&[("signature", "stale")]);
+
+    assert_eq!(
+        record_patches(&mut stream, &[remove_matching("signature", "stale")]),
+        1
+    );
+
+    let stored: Vec<String> = stream
+        .iter()
+        .map(|e| {
+            e.event
+                .metadata
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .collect();
+
+    assert_eq!(
+        stored,
+        vec!["", "", "signature"],
+        "the raw stream still carries the signature"
+    );
+    assert_eq!(
+        metadata_keys(&stream),
+        vec!["", "", ""],
+        "the projected stream does not"
+    );
 }

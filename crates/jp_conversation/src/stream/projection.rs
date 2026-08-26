@@ -56,6 +56,38 @@ impl TurnOrigin {
     }
 }
 
+/// Apply every patch overlay to the events it matches, then drop the overlays.
+///
+/// Runs before compaction so both the compacting and non-compacting paths see
+/// patched metadata.
+/// Matching is by metadata value rather than position, so applying every
+/// overlay to every event is equivalent to applying each one to the events that
+/// preceded it, and stays correct when compaction reorders or replaces turns.
+fn apply_overlays(events: &mut Vec<InternalEvent>) {
+    let patches: Vec<_> = events
+        .iter()
+        .filter_map(|e| match e {
+            InternalEvent::Overlay(overlay) => Some(overlay.patches.clone()),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+
+    if patches.is_empty() {
+        return;
+    }
+
+    for event in events.iter_mut() {
+        if let InternalEvent::Event(conv_event) = event {
+            for patch in &patches {
+                patch.apply(&mut conv_event.metadata);
+            }
+        }
+    }
+
+    events.retain(|e| !matches!(e, InternalEvent::Overlay(_)));
+}
+
 /// Resolved compaction policies for a single turn.
 struct TurnPolicy {
     /// Summary covering this turn.
@@ -107,6 +139,8 @@ struct ResolvedSummary {
 ///
 /// [`Compaction`]: crate::Compaction
 pub(super) fn apply(events: &mut Vec<InternalEvent>) -> Vec<TurnOrigin> {
+    apply_overlays(events);
+
     let compactions: Vec<_> = events
         .iter()
         .filter_map(|e| match e {
@@ -162,7 +196,8 @@ pub(super) fn apply(events: &mut Vec<InternalEvent>) -> Vec<TurnOrigin> {
             }
             // Compaction events are consumed by projection — they've been
             // applied and should not survive into the projected stream.
-            InternalEvent::Compaction(_) => {}
+            // Patch overlays were consumed by `apply_overlays` above.
+            InternalEvent::Compaction(_) | InternalEvent::Overlay(_) => {}
             InternalEvent::Event(conv_event) => {
                 let Some(policy) = policies.get(turn) else {
                     projected.push(InternalEvent::Event(conv_event));
@@ -294,6 +329,7 @@ pub(super) fn assign_turn_indices(events: &[InternalEvent]) -> Vec<usize> {
             }
             InternalEvent::ConfigDelta(_)
             | InternalEvent::Compaction(_)
+            | InternalEvent::Overlay(_)
             | InternalEvent::Unknown(_) => {
                 indices.push(turn);
             }

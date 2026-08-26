@@ -11,7 +11,7 @@ use jp_conversation::{
 };
 use jp_llm::{
     Provider,
-    event::{Event, EventPatch, FinishReason, apply_patches},
+    event::{Event, EventPatch, FinishReason, record_patches},
     event_builder::EventBuilder,
     model::ModelDetails,
     provider,
@@ -206,7 +206,7 @@ async fn summarize_stream(
         // The patches target events in the local range stream, so applying them
         // here leaves the stored conversation untouched: repairing the user's
         // history is the query loop's job, not a side effect of summarizing.
-        let applied = apply_patches(&mut stream, &patches);
+        let applied = record_patches(&mut stream, &patches);
         if applied == 0 {
             return Err(Error::Summarize {
                 model: model_id.to_string(),

@@ -1,4 +1,4 @@
-use jp_conversation::ConversationStream;
+use jp_conversation::{ConversationStream, OverlayAction, OverlayMatcher, OverlayPatch};
 use serde_json::{Map, Value};
 
 /// Represents a completed event from the LLM.
@@ -58,12 +58,10 @@ pub enum Event {
     /// applied to the conversation stream itself so that the error doesn't show
     /// up again in the future.
     ///
-    /// Callers apply these with [`apply_patches`], which mutates the stream
-    /// in-place.
-    /// This is a known deviation from the append-only stream principle (RFD
-    /// 064).
-    /// When RFD 064's overlay/projection infrastructure lands, patches should
-    /// be stored as stream events and applied at projection time instead.
+    /// Callers record these with [`record_patches`], which appends an overlay
+    /// to the stream rather than rewriting the events it targets.
+    /// The stored history stays byte-identical; the patches take effect when
+    /// the stream is projected for a request.
     Patch(Vec<EventPatch>),
 
     /// The response was finished.
@@ -202,53 +200,41 @@ impl PatchAction {
     }
 }
 
-/// Apply provider-issued patches to the events already in `stream`, returning
-/// how many events it changed.
+/// Record provider-issued patches against `stream`, returning how many events
+/// they change in the projected stream.
 ///
-/// A return value of `0` means `stream` is byte-identical to what it was, so
-/// resending a request built from it would hit the same provider complaint.
-/// A patch whose matcher hits an event that does not carry the field the action
-/// removes counts as no change: matching alone is not progress.
+/// The patches are appended as an overlay: the stored events keep their
+/// metadata, and the removal happens when the stream is projected to build a
+/// request.
+/// A repair made for one provider therefore does not destroy metadata another
+/// provider or model could still use, and the conversation stays an append-only
+/// log.
 ///
-/// NOTE: This mutates events in place, which deviates from the append-only
-/// principle established in RFD 064 (non-destructive compaction).
-/// It is acceptable because the targets are opaque provider metadata
-/// (cryptographic signatures), not user-visible content, and the
-/// overlay/projection infrastructure from RFD 064 does not exist yet.
-/// Once RFD 064 lands, this should migrate to an append-only patch event that
-/// the projection layer applies at request-build time.
-pub fn apply_patches(stream: &mut ConversationStream, patches: &[EventPatch]) -> usize {
-    let mut count = 0;
+/// A return value of `0` means the projection is unchanged, so resending a
+/// request built from it would hit the same provider complaint.
+/// That happens when the patches match nothing, when a matched event does not
+/// carry the field the action removes, or when an earlier overlay already
+/// removed it: matching alone is not progress.
+pub fn record_patches(stream: &mut ConversationStream, patches: &[EventPatch]) -> usize {
+    stream.add_overlay(patches.iter().map(OverlayPatch::from).collect())
+}
 
-    for event in stream.iter_mut() {
-        for patch in patches {
-            let matched = match &patch.matcher {
-                EventMatcher::MetadataValue { key, value } => event
-                    .event
-                    .metadata
-                    .get(key)
-                    .and_then(|v| v.as_str())
-                    .is_some_and(|v| v == value),
-            };
-
-            if !matched {
-                continue;
-            }
-
-            // The matcher key and the action key are independent, so a matched
-            // patch can still be a no-op. Only an actual removal is progress —
-            // callers use the count to decide whether resending is worthwhile.
-            let mutated = match &patch.action {
-                PatchAction::RemoveMetadata(key) => event.event.metadata.remove(key).is_some(),
-            };
-
-            if mutated {
-                count += 1;
-            }
+impl From<&EventPatch> for OverlayPatch {
+    fn from(patch: &EventPatch) -> Self {
+        Self {
+            matcher: match &patch.matcher {
+                EventMatcher::MetadataValue { key, value } => OverlayMatcher::MetadataValue {
+                    key: key.clone(),
+                    value: value.clone(),
+                },
+            },
+            action: match &patch.action {
+                PatchAction::RemoveMetadata(key) => {
+                    OverlayAction::RemoveMetadata { key: key.clone() }
+                }
+            },
         }
     }
-
-    count
 }
 
 impl Event {
