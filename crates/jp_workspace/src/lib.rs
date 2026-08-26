@@ -351,11 +351,6 @@ impl Workspace {
     /// [`sanitize`]: Self::sanitize
     pub fn load_conversation_index(&mut self) {
         trace!("Loading conversation index.");
-        let entries = self
-            .loader
-            .load_conversation_index(ConversationFilter::default());
-
-        debug!(count = entries.len(), "Loaded conversation index.");
 
         // Conversations created here and not yet written, carried across the
         // reload.
@@ -370,12 +365,28 @@ impl Workspace {
         // asking whether *we* have written it: a conversation that was written and
         // then deleted by another process is also absent, and that one has to be
         // forgotten. The flag is set by whatever wrote it, under the lock.
-        let unwritten: Vec<ConversationId> = self
+        //
+        // Read before the scan, because a lock on another thread can write in
+        // between: a conversation that becomes written after this point is found
+        // by the scan below, while one that becomes written after the scan is
+        // carried across and corrected by the next reload. Reading afterwards
+        // instead leaves a write that lands between the two invisible to both.
+        let candidates: Vec<ConversationId> = self
             .state
             .written
             .iter()
             .filter(|(_, written)| !written.load(atomic::Ordering::Relaxed))
             .map(|(id, _)| *id)
+            .collect();
+
+        let entries = self
+            .loader
+            .load_conversation_index(ConversationFilter::default());
+
+        debug!(count = entries.len(), "Loaded conversation index.");
+
+        let unwritten: Vec<ConversationId> = candidates
+            .into_iter()
             .filter(|id| !entries.iter().any(|entry| entry.id == *id))
             .collect();
 

@@ -1,5 +1,5 @@
 use jp_conversation::Error as ConversationError;
-use jp_storage::backend::Projection;
+use jp_storage::backend::StoragePresence;
 use jp_workspace::ConversationHandle;
 
 use crate::{
@@ -28,11 +28,8 @@ impl Show {
 
         for handle in handles {
             let id = handle.id();
-            let local = ctx
-                .workspace
-                .conversation_presence(&id)
-                .map(Projection::from)
-                == Some(Projection::LocalOnly);
+            let local =
+                ctx.workspace.conversation_presence(&id) == Some(StoragePresence::UserLocalOnly);
             let conversation = ctx.workspace.metadata(&handle)?;
             let events = ctx.workspace.events(&handle)?;
 

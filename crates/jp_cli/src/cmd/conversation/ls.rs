@@ -2,7 +2,7 @@ use chrono::{DateTime, FixedOffset, Local, Utc};
 use comfy_table::{Cell, CellAlignment, Row};
 use crossterm::style::{Color, Stylize as _};
 use jp_conversation::{Conversation, ConversationId};
-use jp_storage::backend::{Projection, StoragePresence};
+use jp_storage::backend::StoragePresence;
 use jp_term::{
     osc::hyperlink,
     table::list,
@@ -185,10 +185,7 @@ impl Ls {
             workspace
                 .archived_conversations()
                 .filter_map(|(id, c, presence)| {
-                    // Derived through `Projection` rather than compared: a
-                    // conversation not yet written is still destined for one root
-                    // or both, and the indicator should say which.
-                    let local = Projection::from(presence) == Projection::LocalOnly;
+                    let local = presence == StoragePresence::UserLocalOnly;
                     let external = presence == StoragePresence::WorkspaceOnly;
                     matches_filters(&id, &c, local).then(|| to_details(id, &c, local, external))
                 })
@@ -198,7 +195,7 @@ impl Ls {
                 .conversations()
                 .filter_map(|(id, c)| {
                     let presence = workspace.conversation_presence(id);
-                    let local = presence.map(Projection::from) == Some(Projection::LocalOnly);
+                    let local = presence == Some(StoragePresence::UserLocalOnly);
                     let external = presence == Some(StoragePresence::WorkspaceOnly);
                     matches_filters(id, &c, local).then(|| to_details(*id, &c, local, external))
                 })
