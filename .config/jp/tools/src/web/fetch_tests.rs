@@ -1,4 +1,66 @@
+use assert_matches::assert_matches;
+use jp_tool::Outcome;
+use serde_json::json;
+
 use super::*;
+
+mod headless_gate {
+    use super::*;
+
+    fn options(value: &Value) -> Map<String, Value> {
+        value.as_object().cloned().unwrap_or_default()
+    }
+
+    async fn fetch_headless(options: &Map<String, Value>) -> Outcome {
+        let url = Url::parse("https://example.com").unwrap();
+
+        web_fetch(url, false, None, true, options)
+            .await
+            .expect("gate answers without failing the tool")
+    }
+
+    #[tokio::test]
+    async fn refused_when_the_option_is_absent() {
+        // No browser is located and no request is made: the refusal happens
+        // before either, which is what keeps this test hermetic.
+        assert_matches!(fetch_headless(&options(&json!({}))).await, Outcome::Error { message, .. } => {
+            assert_eq!(message, HEADLESS_DISABLED);
+        });
+    }
+
+    #[tokio::test]
+    async fn refused_when_the_option_is_explicitly_false() {
+        let options = options(&json!({ "allow_headless": false }));
+
+        assert_matches!(fetch_headless(&options).await, Outcome::Error { message, .. } => {
+            assert_eq!(message, HEADLESS_DISABLED);
+        });
+    }
+
+    #[tokio::test]
+    async fn unparseable_options_refuse_rather_than_open_up() {
+        // Malformed options fall back to the defaults, and the default is off.
+        let options = options(&json!({ "strategy": "nonsense" }));
+
+        assert_matches!(fetch_headless(&options).await, Outcome::Error { message, .. } => {
+            assert_eq!(message, HEADLESS_DISABLED);
+        });
+    }
+
+    #[tokio::test]
+    async fn a_plain_fetch_is_unaffected_by_the_option() {
+        // The gate only guards the `headless` argument; leaving it off must not
+        // change how an ordinary fetch is dispatched.
+        let url = Url::parse("https://github.com/foo/bar/issues/42").unwrap();
+        let outcome = web_fetch(url, false, None, false, &options(&json!({})))
+            .await
+            .unwrap();
+
+        assert_matches!(outcome, Outcome::Error { message, .. } => {
+            assert!(message.contains("github_issues"));
+        });
+    }
+}
 
 mod is_binary {
     use super::*;
