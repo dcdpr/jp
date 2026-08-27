@@ -184,7 +184,7 @@
     "summary": "Add `jp conversation edit` (opens directory in $EDITOR) and `jp conversation path` (prints conversation filesystem path)."
   },
   "048-four-channel-output-model.md": {
-    "hash": "38f68ad549fbc9416b3014ddc5b67b17da4aea9d2b15a61e4d621d8faf647f3f",
+    "hash": "b2290752abd8662a7ef62e904a9f6b38339164dc23d9fffe2cca12bb8d9527a0",
     "summary": "Separate JP output into four channels: stdout for responses, stderr for chrome, /dev/tty for prompts, log file for tracing."
   },
   "049-non-interactive-mode-and-detached-prompt-policy.md": {
@@ -359,10 +359,6 @@
     "hash": "2f2a3694924055b6abf1a6e5a40af4759861017e172e1c94798dda2c3f7557e2",
     "summary": "JP gains Anthropic subscription auth with automatic fallback to API key billing when quotas exhaust."
   },
-  "091-printer-owned-status-line.md": {
-    "hash": "0e3e054a3170e2cadfc3e3410fcbd6cc72e8e6261ebfcb4c39314d66ad1031cd",
-    "summary": "Centralize ephemeral status-line rendering in the printer's worker thread to eliminate cross-site ordering bugs."
-  },
   "092-predictable-and-responsive-interrupt-escalation.md": {
     "hash": "04132add4db5ee2b02339cea46a42ae794cd2b93043499dc9c1336cf3a71cdbf",
     "summary": "Hardened interrupt model with predictable three-rung escalation, menus at every stage, and watchdog-bounded graceful shutdown."
@@ -410,5 +406,9 @@
   "103-multi-value-conversation-labels.md": {
     "hash": "1c9a52e7756e2b35badcb201f11f4bf625421849532602355980ebdbef7c65ca",
     "summary": "Multi-valued labels replacing single-valued ones; add/set/rm verbs, set-membership filtering, config list-values, removes --label from query/fork."
+  },
+  "091-printer-owned-status-region.md": {
+    "hash": "0a9080f22b1bc652c31996dc9f8d5ead2fd2e7a12d1d22ea843e43fc6c5b6d98",
+    "summary": "Consolidates nine ephemeral terminal indicators into a printer-owned status region primitive, showing live child-process output with multi-row windows and standardized chrome lifecycle."
   }
 }

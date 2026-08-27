@@ -409,7 +409,7 @@ independent keys within it.
   This RFD builds the slot and the turn loop it would need, but adds only the
   interrupt-menu writer.
 - **Composing without pausing output.** Rendering assistant output while taking
-  line input needs a printer-owned status line ([RFD 091]).
+  line input needs a printer-owned status region ([RFD 091]).
   Silence during compose is the intended behavior here, not a limitation to fix.
 - **Assistant-initiated messages.** [RFD 083] and [RFD 094] cover the assistant
   addressing the user mid-turn; unrelated mechanism.
@@ -509,6 +509,6 @@ The entry names which loop is which: the turn loop runs Turns within a Run,
 [RFD 076]: ../076-tool-access-grants.md
 [RFD 083]: ../083-built-in-ask_user-tool-for-assistant-initiated-inquiries.md
 [RFD 088]: ../088-unified-editor-service-and-inline-reply-widget.md
-[RFD 091]: ../091-printer-owned-status-line.md
+[RFD 091]: ../091-printer-owned-status-region.md
 [RFD 093]: ../093-inline-first-query-composition.md
 [RFD 094]: ../094-built-in-tell_user-tool-for-mid-turn-user-addressed-messages.md
