@@ -1609,6 +1609,7 @@ fn edit_message_synthesizes_when_no_edit_without_query() {
             false,
             &config,
             root,
+            &Printer::sink(),
         )
         .unwrap();
     assert_eq!(source, QuerySource::Synthesized);
@@ -1629,6 +1630,7 @@ fn edit_message_synthesizes_when_no_edit_without_query() {
             false,
             &config,
             root,
+            &Printer::sink(),
         )
         .unwrap();
     assert_eq!(source, QuerySource::Synthesized);
@@ -1667,6 +1669,7 @@ fn edit_message_quote_without_editor_is_synthesized() {
             false,
             &config,
             Utf8Path::new("/tmp"),
+            &Printer::sink(),
         )
         .unwrap();
     assert_eq!(source, QuerySource::Synthesized);
@@ -1699,6 +1702,7 @@ fn edit_message_skips_editor_when_no_edit_with_piped_stdin() {
             true,
             &config,
             root,
+            &Printer::sink(),
         )
         .unwrap();
 
@@ -2402,6 +2406,7 @@ fn built_request_against(args: &[&str], stream: &ConversationStream) -> String {
             stream,
             &AppConfig::new_test(),
             Utf8Path::new("/tmp"),
+            &Printer::sink(),
         )
         .unwrap()
         .chat_request
@@ -2488,6 +2493,7 @@ fn build_conversation_prepends_query_to_piped_stdin() {
             &ConversationStream::new_test(),
             &AppConfig::new_test(),
             Utf8Path::new("/tmp"),
+            &Printer::sink(),
         )
         .unwrap();
 

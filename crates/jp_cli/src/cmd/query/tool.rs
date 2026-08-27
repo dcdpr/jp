@@ -15,4 +15,4 @@ pub(crate) use executor::TerminalExecutorSource;
 pub(crate) use pending::{PendingEntry, PendingTools, build_execution_plan};
 pub(crate) use prompter::ToolPrompter;
 
-pub(crate) use crate::{render::ToolRenderer, timer::spawn_line_timer};
+pub(crate) use crate::render::ToolRenderer;

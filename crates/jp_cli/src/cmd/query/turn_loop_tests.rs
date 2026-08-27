@@ -55,7 +55,7 @@ use jp_llm::{
         },
     },
 };
-use jp_printer::{OutputFormat, Printer};
+use jp_printer::{OutputFormat, Printer, TerminalCapability};
 use jp_storage::backend::FsStorageBackend;
 use jp_tool::Question;
 use jp_workspace::Workspace;
@@ -3166,7 +3166,8 @@ async fn test_waiting_indicator_shows_during_delay() {
             .unwrap();
 
         let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
-        let printer = Arc::new(printer);
+        // The status region only renders against a terminal it has to itself.
+        let printer = Arc::new(printer.with_terminal(TerminalCapability::interactive(Some(80))));
         let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
@@ -3177,7 +3178,7 @@ async fn test_waiting_indicator_shows_during_delay() {
             &router,
             &mcp_client,
             root,
-            true, // is_tty = true to enable the indicator
+            true, // is_tty
             &[],
             &lock,
             ToolChoice::Auto,
@@ -3266,7 +3267,7 @@ async fn test_waiting_indicator_survives_keep_alive_and_shows_status() {
             .unwrap();
 
         let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
-        let printer = Arc::new(printer);
+        let printer = Arc::new(printer.with_terminal(TerminalCapability::interactive(Some(80))));
         let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
@@ -3277,7 +3278,7 @@ async fn test_waiting_indicator_survives_keep_alive_and_shows_status() {
             &router,
             &mcp_client,
             root,
-            true, // is_tty = true to enable the indicator
+            true, // is_tty
             &[],
             &lock,
             ToolChoice::Auto,
@@ -3380,7 +3381,7 @@ async fn test_waiting_indicator_cleared_before_retry_notice() {
             .unwrap();
 
         let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
-        let printer = Arc::new(printer);
+        let printer = Arc::new(printer.with_terminal(TerminalCapability::interactive(Some(80))));
         let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
@@ -3415,10 +3416,10 @@ async fn test_waiting_indicator_cleared_before_retry_notice() {
         );
         // Set only when a non-rendering event reaches a live indicator:
         // proves the keep-alive did not tear the indicator down before the
-        // error arrived. The clear-before-notice ordering itself is enforced
-        // structurally by `LineTimer::finish` awaiting the timer task; it is
-        // not asserted here because the notice writes its own `\r\x1b[K`
-        // prefix, making the two clears indistinguishable in the buffer.
+        // error arrived. The clear-before-notice ordering itself is the
+        // printer's erase-before-write rule; it is not asserted here because
+        // the notice writes its own `\r\x1b[K` prefix, making the two clears
+        // indistinguishable in the buffer.
         assert!(
             chrome.contains("(receiving response data)"),
             "Indicator should survive the keep-alive on the error path.\nChrome:\n{chrome}"
@@ -3464,8 +3465,10 @@ async fn test_waiting_indicator_not_shown_when_disabled() {
             .await
             .unwrap();
 
-        let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
-        let printer = Arc::new(printer);
+        let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
+        // A terminal is available; `show = false` is what turns the indicator
+        // off, so the region must stay inert on its own.
+        let printer = Arc::new(printer.with_terminal(TerminalCapability::interactive(Some(80))));
         let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
@@ -3492,15 +3495,15 @@ async fn test_waiting_indicator_not_shown_when_disabled() {
         .unwrap();
 
         printer.flush();
-        let output = out.lock();
 
-        // Should NOT contain waiting indicator
+        let chrome = err.lock();
         assert!(
-            !output.contains("Waiting…"),
-            "Output should NOT contain waiting indicator when disabled.\nOutput:\n{output}"
+            !chrome.contains("Waiting…"),
+            "Chrome should NOT contain the waiting indicator when disabled.\nChrome:\n{chrome}"
         );
+        drop(chrome);
 
-        // But should contain the response
+        let output = out.lock();
         assert!(
             output.contains("Quick response"),
             "Output should contain LLM response.\nOutput:\n{output}"
@@ -3540,7 +3543,8 @@ async fn test_waiting_indicator_not_shown_for_non_tty() {
             .await
             .unwrap();
 
-        let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+        // The default capability models a piped stderr.
+        let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
@@ -3568,12 +3572,90 @@ async fn test_waiting_indicator_not_shown_for_non_tty() {
         .unwrap();
 
         printer.flush();
-        let output = out.lock();
 
-        // Should NOT contain waiting indicator for non-TTY
+        let chrome = err.lock();
         assert!(
-            !output.contains("Waiting…"),
-            "Output should NOT contain waiting indicator for non-TTY.\nOutput:\n{output}"
+            !chrome.contains("Waiting…"),
+            "Chrome should NOT contain the waiting indicator without a \
+             terminal.\nChrome:\n{chrome}"
+        );
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_waiting_indicator_follows_stderr_not_stdout() {
+    // The indicator is stderr chrome, so its gate is stderr's tty-ness. With
+    // `jp query 2>file` on an interactive stdout, no `\r\x1b[K` bytes may reach
+    // the redirected stream.
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let mut config = AppConfig::new_test();
+        config.style.streaming.progress.show = true;
+        config.style.streaming.progress.delay_secs = 0;
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+
+        let chat_request = ChatRequest::from("Hello");
+
+        let provider: Arc<dyn Provider> = Arc::new(DelayedMockProvider::new(
+            Duration::from_millis(200),
+            "Redirected-stderr response",
+        ));
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        // Stderr is redirected (the default, non-interactive capability) even
+        // though stdout is a terminal.
+        let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let mcp_client = jp_mcp::Client::default();
+        let router = detached_router();
+
+        run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &router,
+            &mcp_client,
+            root,
+            true, // is_tty: stdout *is* a terminal
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &[],
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
+            chat_request.clone(),
+            InvocationContext::default(),
+            PendingStreamTrim::default(),
+        )
+        .await
+        .unwrap();
+
+        printer.flush();
+
+        let chrome = err.lock();
+        assert!(
+            !chrome.contains("Waiting…"),
+            "A redirected stderr must not receive the indicator.\nChrome:\n{chrome}"
+        );
+        assert!(
+            !chrome.contains('\r'),
+            "A redirected stderr must not receive cursor control.\nChrome:\n{chrome}"
         );
     }))
     .await;

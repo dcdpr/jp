@@ -1151,7 +1151,7 @@ pub(crate) async fn run_external(args: &[String], ctx: &Ctx) -> cmd::Output {
     let composer = Composer {
         printer: &ctx.printer,
         prompts: &prompts,
-        editor: crate::editor::build_editor_backend(&config.editor),
+        editor: crate::editor::build_editor_backend(&config.editor, &ctx.printer),
         // The configured mode, as every other inline reply in the CLI uses.
         edit_mode: reply_edit_mode(config.editor.inline.edit_mode),
         is_tty: ctx.term.is_tty,

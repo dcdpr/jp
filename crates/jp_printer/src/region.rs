@@ -214,7 +214,12 @@ impl StatusRegion {
     }
 
     /// A handle that renders nothing.
-    pub(crate) const fn inert() -> Self {
+    ///
+    /// For clients with their own enable switch — a `style.*.show` config key,
+    /// say — so a disabled indicator is the same inert handle a disabled
+    /// terminal produces, rather than an `Option` every call site unwraps.
+    #[must_use]
+    pub const fn inert() -> Self {
         Self { region: None }
     }
 
@@ -222,6 +227,18 @@ impl StatusRegion {
     #[must_use]
     pub const fn is_active(&self) -> bool {
         self.region.is_some()
+    }
+
+    /// Release the claim, erasing the region's rows.
+    ///
+    /// The handle goes inert: later calls on it do nothing, and dropping it
+    /// releases nothing further.
+    /// Equivalent to dropping the handle, for a caller that holds it in a
+    /// binding it cannot drop yet.
+    pub fn release(&mut self) {
+        if let Some(region) = self.region.take() {
+            region.send(RegionCommand::Release { id: region.id });
+        }
     }
 
     /// Replace the detail passed to the region's format closure.
@@ -255,9 +272,7 @@ impl StatusRegion {
 
 impl Drop for StatusRegion {
     fn drop(&mut self) {
-        if let Some(region) = &self.region {
-            region.send(RegionCommand::Release { id: region.id });
-        }
+        self.release();
     }
 }
 

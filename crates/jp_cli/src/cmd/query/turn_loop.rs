@@ -39,7 +39,7 @@ use jp_llm::{
     tool::{InvocationContext, ToolDefinition, executor::Executor},
     with_idle_timeout, with_output_limit,
 };
-use jp_printer::{ErrChannel, Printer};
+use jp_printer::{ErrChannel, Printer, RegionStyle, StatusRegion};
 use jp_workspace::{ConversationLock, ConversationMut};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -59,7 +59,6 @@ use super::{
         PendingEntry, PendingTools, ToolCallDecision, ToolCallState, ToolCoordinator, ToolPrompter,
         ToolRenderer, build_execution_plan,
         inquiry::{InquiryBackend, InquiryConfig, LlmInquiryBackend},
-        spawn_line_timer,
     },
     turn::{Action, CommittedEvent, TurnCoordinator, TurnPhase, TurnState},
 };
@@ -72,7 +71,6 @@ use crate::{
     error::Error,
     render::metadata::set_rendered_arguments,
     signals::{InterruptNotice, SignalRouter},
-    timer::LineTimer,
 };
 
 /// Events produced by the merged streaming loop sources.
@@ -116,29 +114,26 @@ where
     }
 }
 
-/// Spawns a waiting indicator task that prints elapsed time and an optional
-/// status detail to the terminal.
+/// Claim the status region that shows how long the provider has been silent.
 ///
-/// Returns `None` if the indicator is disabled (not a TTY or config says no).
-fn spawn_waiting_indicator(
-    printer: Arc<Printer>,
-    config: &StreamingConfig,
-    is_tty: bool,
-) -> Option<LineTimer> {
-    if !is_tty {
-        return None;
+/// The row reads `⏱ Waiting… 4.2s (sending request)`, appearing once
+/// `style.streaming.progress.delay_secs` has passed and ticking until the
+/// region is released.
+/// Returns an inert region when `style.streaming.progress.show` is off, or when
+/// the terminal cannot carry one.
+fn claim_waiting_region(printer: &Printer, config: &StreamingConfig) -> StatusRegion {
+    if !config.progress.show {
+        return StatusRegion::inert();
     }
 
-    spawn_line_timer(
-        printer,
-        config.progress.show,
+    printer.status_region(RegionStyle::new(
         Duration::from_secs(u64::from(config.progress.delay_secs)),
         Duration::from_millis(u64::from(config.progress.interval_ms)),
-        |secs, status| match status {
-            Some(detail) => format!("\r\x1b[K⏱ Waiting… {secs:.1}s ({detail})"),
-            None => format!("\r\x1b[K⏱ Waiting… {secs:.1}s"),
+        |secs, detail| match detail {
+            Some(detail) => format!("⏱ Waiting… {secs:.1}s ({detail})"),
+            None => format!("⏱ Waiting… {secs:.1}s"),
         },
-    )
+    ))
 }
 
 /// Whether a streaming-loop event leaves the waiting indicator running.
@@ -146,11 +141,10 @@ fn spawn_waiting_indicator(
 /// Keep-alive pings, history patches, and part-less flushes produce no terminal
 /// output, so the indicator stays up through them.
 /// Everything else (content parts, finish, stream errors, signals, preparing
-/// ticks) is about to write to the terminal and must finish the indicator
-/// first.
+/// ticks) is about to write to the terminal and releases the indicator first.
 ///
 /// A `Flush` that commits content is always preceded by a `Part` for the same
-/// index, which already finished the indicator; only a part-less flush — which
+/// index, which already released the indicator; only a part-less flush — which
 /// commits nothing — can reach a live indicator.
 fn event_keeps_waiting_indicator(event: &StreamingLoopEvent) -> bool {
     match event {
@@ -263,7 +257,7 @@ pub(super) async fn run_turn_loop(
     // executing (tool question prompts) phases.
     let prompter = Arc::new(ToolPrompter::with_prompt_backend(
         printer.clone(),
-        build_editor_backend(&cfg.editor),
+        build_editor_backend(&cfg.editor, &printer),
         prompt_backend.clone(),
         reply_edit_mode(cfg.editor.inline.edit_mode),
     ));
@@ -320,14 +314,11 @@ pub(super) async fn run_turn_loop(
                     tool_choice: tool_choice.clone(),
                 };
 
-                // Start waiting indicator BEFORE the HTTP request. Dropping
-                // the handle cancels the indicator if we exit early (error
-                // from the provider call, break, return).
-                let mut waiting =
-                    spawn_waiting_indicator(printer.clone(), &cfg.style.streaming, is_tty);
-                if let Some(timer) = &waiting {
-                    timer.set_status("sending request");
-                }
+                // Claim the waiting region BEFORE the HTTP request. Dropping
+                // the handle erases the row if we exit early (error from the
+                // provider call, break, return).
+                let mut waiting = claim_waiting_region(&printer, &cfg.style.streaming);
+                waiting.set_detail("sending request");
 
                 // Build the three event sources for the streaming loop.
                 //
@@ -344,9 +335,7 @@ pub(super) async fn run_turn_loop(
                     .chat_completion_stream(model, query)
                     .await
                     .map_err(|e| map_llm_error(e, vec![]))?;
-                if let Some(timer) = &waiting {
-                    timer.set_status("waiting for first tokens");
-                }
+                waiting.set_detail("waiting for first tokens");
                 let raw_stream = match idle_timeout {
                     Some(idle) => with_idle_timeout(raw_stream, idle),
                     None => raw_stream,
@@ -403,15 +392,13 @@ pub(super) async fn run_turn_loop(
 
                 while let Some(event) = streams.next().await {
                     // The indicator survives events that render nothing and is
-                    // finished on the first event that can write to the
-                    // terminal. `finish` awaits the task so its line clear
-                    // completes before we render any content.
+                    // released on the first event that can write to the
+                    // terminal. The printer erases the row before that write
+                    // lands, so no ordering is owed here.
                     if event_keeps_waiting_indicator(&event) {
-                        if let Some(timer) = &waiting {
-                            timer.set_status("receiving response data");
-                        }
-                    } else if let Some(timer) = waiting.take() {
-                        timer.finish().await;
+                        waiting.set_detail("receiving response data");
+                    } else {
+                        waiting.release();
                     }
 
                     match event {
@@ -429,7 +416,7 @@ pub(super) async fn run_turn_loop(
                                     stream,
                                     &printer,
                                     prompt_backend.as_ref(),
-                                    build_editor_backend(&cfg.editor),
+                                    build_editor_backend(&cfg.editor, &printer),
                                     reply_edit_mode(cfg.editor.inline.edit_mode),
                                     &cfg.interrupt.streaming,
                                     !llm_alive,
@@ -508,7 +495,7 @@ pub(super) async fn run_turn_loop(
                                                     stream,
                                                     &printer,
                                                     prompt_backend.as_ref(),
-                                                    build_editor_backend(&cfg.editor),
+                                                    build_editor_backend(&cfg.editor, &printer),
                                                     reply_edit_mode(cfg.editor.inline.edit_mode),
                                                     &cfg.interrupt.streaming,
                                                     true,
@@ -757,7 +744,7 @@ pub(super) async fn run_turn_loop(
                     let unavailable = tool_coordinator.prepare(restart_calls);
                     let restart_prompter = ToolPrompter::with_prompt_backend(
                         printer.clone(),
-                        build_editor_backend(&cfg.editor),
+                        build_editor_backend(&cfg.editor, &printer),
                         prompt_backend.clone(),
                         reply_edit_mode(cfg.editor.inline.edit_mode),
                     );
@@ -836,7 +823,7 @@ pub(super) async fn run_turn_loop(
                         &mut turn_state,
                         &printer,
                         prompt_backend.as_ref(),
-                        build_editor_backend(&cfg.editor),
+                        build_editor_backend(&cfg.editor, &printer),
                         reply_edit_mode(cfg.editor.inline.edit_mode),
                         Arc::clone(&inquiry_backend),
                         &conv,

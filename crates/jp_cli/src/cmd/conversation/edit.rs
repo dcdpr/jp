@@ -118,7 +118,8 @@ impl Edit {
     /// rather than prompting.
     fn run_open_editor(self, ctx: &mut Ctx, handles: &[ConversationHandle]) -> Output {
         let config = ctx.config();
-        let editor = build_editor_backend(&config.editor).ok_or(Error::MissingEditor)?;
+        let editor =
+            build_editor_backend(&config.editor, &ctx.printer).ok_or(Error::MissingEditor)?;
 
         let fs = ctx
             .fs_backend

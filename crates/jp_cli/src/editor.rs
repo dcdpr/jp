@@ -25,15 +25,55 @@ use crate::{
     error::{Error, Result},
 };
 
+/// The result type of the [`EditorBackend`] trait methods.
+///
+/// Named to keep the crate's own [`Result`] alias visible in this module.
+type EditorResult<T> = std::result::Result<T, EditorError>;
+
 /// Build a terminal editor backend from the resolved editor configuration.
 ///
 /// Returns `None` when no editor command resolves: neither `editor.cmd` is set
 /// nor does a configured editor environment variable point at an installed
 /// binary.
-pub(crate) fn build_editor_backend(config: &EditorConfig) -> Option<Arc<dyn EditorBackend>> {
-    config
-        .command()
-        .map(|cmd| Arc::new(TerminalEditorBackend::new(cmd)) as Arc<dyn EditorBackend>)
+///
+/// Every edit run through the returned backend suspends the printer's status
+/// region for its duration, so the editor owns the terminal alone.
+pub(crate) fn build_editor_backend(
+    config: &EditorConfig,
+    printer: &Printer,
+) -> Option<Arc<dyn EditorBackend>> {
+    config.command().map(|cmd| {
+        Arc::new(SuspendingEditor {
+            inner: Arc::new(TerminalEditorBackend::new(cmd)),
+            printer: printer.clone(),
+        }) as Arc<dyn EditorBackend>
+    })
+}
+
+/// An editor backend that hands the terminal over for the length of an edit.
+///
+/// The editor is a child process painting the screen directly, outside every
+/// stream the printer serializes.
+/// Suspending erases any status region and blocks redraws until the child
+/// exits, so the printer's worker never writes into the editor's display.
+struct SuspendingEditor {
+    /// The backend that actually spawns the editor.
+    inner: Arc<dyn EditorBackend>,
+
+    /// The printer whose status region is suspended around each edit.
+    printer: Printer,
+}
+
+impl EditorBackend for SuspendingEditor {
+    fn edit_text(&self, content: &str) -> EditorResult<(EditOutcome, String)> {
+        let _pause = self.printer.suspend_status();
+        self.inner.edit_text(content)
+    }
+
+    fn edit_file(&self, req: EditRequest<'_>) -> EditorResult<EditOutcome> {
+        let _pause = self.printer.suspend_status();
+        self.inner.edit_file(req)
+    }
 }
 
 /// Surface an editor failure that JP recovered from rather than aborting.
