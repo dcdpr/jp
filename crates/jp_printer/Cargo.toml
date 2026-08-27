@@ -13,6 +13,9 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
+jp_term = { workspace = true }
+
+crossterm = { workspace = true }
 parking_lot = { workspace = true }
 serde_json = { workspace = true, features = ["std"] }
 strip-ansi-escapes = { workspace = true }

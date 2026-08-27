@@ -2567,6 +2567,8 @@ dependencies = [
 name = "jp_printer"
 version = "0.1.0"
 dependencies = [
+ "crossterm",
+ "jp_term",
  "parking_lot",
  "serde_json",
  "strip-ansi-escapes",

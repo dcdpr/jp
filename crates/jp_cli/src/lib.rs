@@ -496,9 +496,24 @@ fn detect_output_width(declared: Option<u16>) -> OutputWidth {
         })
 }
 
+/// Build the printer for this invocation.
+///
+/// Beyond the resolved output format, it carries the width output is laid out
+/// against and whether stderr is free for the printer to own ephemeral status
+/// rows on.
+fn build_printer(globals: &Globals, format: OutputFormat) -> Printer {
+    Printer::terminal(format)
+        .with_output_width(detect_output_width(globals.width))
+        .with_stderr_logging(logs_to_stderr(
+            globals.verbose,
+            globals.quiet,
+            globals.log_file.as_deref(),
+            globals.log.as_deref(),
+        ))
+}
+
 fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
-    let printer =
-        Printer::terminal(format).with_output_width(detect_output_width(cli.globals.width));
+    let printer = build_printer(&cli.globals, format);
 
     // `jp workspace` runs on a dedicated pre-workspace path: selecting or
     // inspecting a workspace must work from outside every workspace —
@@ -1266,6 +1281,24 @@ impl TracingGuard {
     }
 }
 
+/// Whether a tracing layer writes to stderr for this invocation.
+///
+/// `-v` implies stderr output (the user wants to see logs), `--log-file=-` and
+/// `--log` are explicit opt-ins (otherwise `--log` would silently do nothing
+/// without also passing `-v`), and `--quiet` suppresses it regardless.
+///
+/// By default tracing goes only to the log file: stderr is reserved for chrome
+/// (progress indicators, tool headers), which keeps `2> chrome.log` clean of
+/// tracing noise and leaves the printer free to own ephemeral rows there.
+fn logs_to_stderr(
+    verbose: u8,
+    quiet: bool,
+    log_file: Option<&str>,
+    log_filter: Option<&str>,
+) -> bool {
+    !quiet && (verbose > 0 || log_filter.is_some() || log_file.is_some_and(|f| f == "-"))
+}
+
 fn configure_logging(
     verbose: u8,
     quiet: bool,
@@ -1336,18 +1369,7 @@ fn configure_logging(
     let registry = tracing_subscriber::registry().with(file_layer);
 
     // Stderr layer: only enabled when the user asks for it.
-    //
-    // By default, tracing goes only to the log file. Stderr is reserved for
-    // chrome (progress indicators, tool headers). This keeps `2> chrome.log`
-    // clean of tracing noise.
-    //
-    // `-v` implies stderr output (the user wants to see logs).
-    // `--log-file=-` is an explicit opt-in.
-    // `--log` is an explicit opt-in (otherwise the flag would silently do
-    // nothing without also passing `-v`).
-    // `--quiet` suppresses stderr output regardless.
-    let log_to_stderr =
-        !quiet && (verbose > 0 || log_filter.is_some() || log_file.is_some_and(|f| f == "-"));
+    let log_to_stderr = logs_to_stderr(verbose, quiet, log_file, log_filter);
 
     if log_to_stderr {
         let mut term_filter: Vec<_> = match more {

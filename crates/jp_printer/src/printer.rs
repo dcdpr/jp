@@ -6,7 +6,7 @@ use std::{
     sync::{
         Arc,
         atomic::{AtomicU64, AtomicUsize, Ordering},
-        mpsc::{self, Receiver, Sender},
+        mpsc::{self, Receiver, RecvTimeoutError, Sender},
     },
     thread::{self, JoinHandle},
     time::Duration,
@@ -15,7 +15,14 @@ use std::{
 use parking_lot::{Condvar, Mutex};
 use tracing::error;
 
-use crate::{ansi::AnsiStripper, typewriter::VisibleCharsIterator};
+use crate::{
+    ansi::AnsiStripper,
+    region::{
+        RegionCommand, RegionStack, RegionStyle, StatusRegion, SuspendGuard, TerminalCapability,
+        next_region_id,
+    },
+    typewriter::VisibleCharsIterator,
+};
 
 /// A shared buffer that can be written to.
 pub type SharedBuffer = Arc<Mutex<String>>;
@@ -70,6 +77,10 @@ pub struct Printer {
     /// where there is no width to lay content out against.
     output_width: OutputWidth,
 
+    /// What the chrome channel (stderr) can do, which decides whether status
+    /// regions render and how wide their rows may be.
+    terminal: TerminalCapability,
+
     /// The worker thread handle.
     worker_handle: Arc<Mutex<Option<JoinHandle<()>>>>,
 
@@ -88,6 +99,7 @@ impl Clone for Printer {
             format: self.format,
             has_tty: self.has_tty,
             output_width: self.output_width,
+            terminal: self.terminal,
             worker_handle: self.worker_handle.clone(),
             delay_control: self.delay_control.clone(),
         }
@@ -125,6 +137,7 @@ impl Printer {
                     tty,
                     rx,
                     delay_control,
+                    regions: RegionStack::new(),
                 };
                 worker.run();
             })
@@ -135,6 +148,7 @@ impl Printer {
             format,
             has_tty,
             output_width: OutputWidth::Unknown,
+            terminal: TerminalCapability::default(),
             worker_handle: Arc::new(Mutex::new(Some(handle))),
             delay_control,
         }
@@ -160,16 +174,112 @@ impl Printer {
         self.output_width
     }
 
+    /// Declare what the chrome channel (stderr) can do.
+    ///
+    /// Decides whether [`Self::status_region`] renders anything and how wide
+    /// its rows may be.
+    /// [`Self::terminal`] measures the real terminal; pass an explicit
+    /// capability to model one that isn't there.
+    ///
+    /// Call before the printer is shared; clones inherit the value.
+    #[must_use]
+    pub const fn with_terminal(mut self, terminal: TerminalCapability) -> Self {
+        self.terminal = terminal;
+        self
+    }
+
+    /// Record whether a tracing layer writes to stderr.
+    ///
+    /// Live logs on stderr are a persistent stream the printer does not own, so
+    /// it cannot guarantee an ephemeral row is erased before they land: status
+    /// regions stay off while this is set.
+    ///
+    /// Call before the printer is shared; clones inherit the value.
+    #[must_use]
+    pub const fn with_stderr_logging(mut self, active: bool) -> Self {
+        self.terminal = self.terminal.with_stderr_logging(active);
+        self
+    }
+
+    /// Claim a status region.
+    ///
+    /// The worker draws the region's row, ticks its elapsed time, and erases it
+    /// before any printer-managed write reaches the terminal.
+    /// Dropping the returned handle releases the claim and erases the row.
+    ///
+    /// Returns an inert handle when regions are disabled — a non-pretty
+    /// format, a stderr that isn't a terminal, or live logs on stderr.
+    #[must_use]
+    pub fn status_region(&self, style: RegionStyle) -> StatusRegion {
+        if !self.terminal.permits_regions(self.format) {
+            return StatusRegion::inert();
+        }
+
+        let id = next_region_id();
+        self.send(Command::Region(RegionCommand::Claim {
+            id,
+            style,
+            columns: self.terminal.columns(),
+        }));
+
+        StatusRegion::new(id, self.tx.clone())
+    }
+
+    /// Suspend status-region rendering until the returned guard drops.
+    ///
+    /// Blocks until the worker has erased any drawn region and entered the
+    /// suspended state, so a caller handing the terminal to a writer outside
+    /// the printer — an external `$EDITOR`, say — knows the rows are gone
+    /// before the child paints.
+    /// Returns immediately when regions are disabled.
+    #[must_use]
+    pub fn suspend_status(&self) -> SuspendGuard {
+        self.suspend_regions(true)
+    }
+
+    /// Enqueue a suspension, optionally waiting for the worker to apply it.
+    fn suspend_regions(&self, blocking: bool) -> SuspendGuard {
+        if !self.terminal.permits_regions(self.format) {
+            return SuspendGuard::inert();
+        }
+
+        let (ack, wait) = if blocking {
+            let (tx, rx) = mpsc::channel();
+            (Some(tx), Some(rx))
+        } else {
+            (None, None)
+        };
+
+        if self
+            .tx
+            .send(Command::Region(RegionCommand::Suspend { ack }))
+            .is_err()
+        {
+            return SuspendGuard::inert();
+        }
+
+        if let Some(rx) = wait {
+            let _ = rx.recv();
+        }
+
+        SuspendGuard::new(self.tx.clone())
+    }
+
     /// Create a new printer that writes to the terminal (stdout/stderr).
     ///
     /// If `/dev/tty` (Unix) or `CONOUT$` (Windows) is available, it is opened
     /// for interactive prompt output.
     /// This allows prompts to render on the terminal even when stdout and
     /// stderr are redirected.
+    ///
+    /// The chrome channel's capabilities are measured here — stderr's tty-ness
+    /// and the terminal's width — so status regions know whether they may
+    /// render.
     #[must_use]
     pub fn terminal(format: OutputFormat) -> Self {
         let tty = open_tty().map(|f| Box::new(f) as Box<dyn io::Write + Send>);
         Self::new(io::stdout(), io::stderr(), tty, format)
+            .with_terminal(TerminalCapability::detect())
     }
 
     /// Create a new printer that silently discards all output.
@@ -300,15 +410,27 @@ impl Printer {
     ///
     /// Prefers the TTY (`/dev/tty`) if available, falling back to `out`.
     /// This ensures prompts always render somewhere visible.
+    ///
+    /// Status-region rendering is suspended for the writer's lifetime: a prompt
+    /// session is a run of small writes with the widget owning the cursor in
+    /// between, and a redraw landing between them corrupts it.
     #[must_use]
-    pub const fn prompt_writer(&self) -> PrinterWriter<'_> {
-        PrinterWriter {
-            printer: self,
-            target: if self.has_tty {
-                PrintTarget::Tty
-            } else {
-                PrintTarget::Out
+    pub fn prompt_writer(&self) -> PromptWriter<'_> {
+        PromptWriter {
+            writer: PrinterWriter {
+                printer: self,
+                target: self.prompt_target(),
             },
+            _suspension: self.suspend_regions(false),
+        }
+    }
+
+    /// The stream interactive prompts render on.
+    const fn prompt_target(&self) -> PrintTarget {
+        if self.has_tty {
+            PrintTarget::Tty
+        } else {
+            PrintTarget::Out
         }
     }
 
@@ -326,11 +448,8 @@ impl Printer {
     pub fn owned_prompt_writer(&self) -> Box<dyn io::Write + Send> {
         Box::new(OwnedPrinterWriter {
             tx: self.tx.clone(),
-            target: if self.has_tty {
-                PrintTarget::Tty
-            } else {
-                PrintTarget::Out
-            },
+            target: self.prompt_target(),
+            _suspension: self.suspend_regions(false),
         })
     }
 
@@ -484,6 +603,15 @@ impl ErrChannel {
     pub fn flush(&self) {
         self.printer.flush();
     }
+
+    /// Claim a status region on the chrome channel.
+    ///
+    /// The chrome-facing counterpart of [`Printer::status_region`], so a
+    /// renderer that must not reach stdout can still own ephemeral rows.
+    #[must_use]
+    pub fn status_region(&self, style: RegionStyle) -> StatusRegion {
+        self.printer.status_region(style)
+    }
 }
 
 /// A writer wrapper for [`Printer`] that implements [`fmt::Write`].
@@ -534,6 +662,36 @@ impl io::Write for PrinterWriter<'_> {
     }
 }
 
+/// A writer for interactive prompt output that suspends status regions.
+///
+/// Region rows are erased when the writer is acquired and no redraw lands until
+/// it drops, so a widget owning the cursor between writes is never interrupted.
+/// Returned by [`Printer::prompt_writer`].
+#[derive(Debug)]
+pub struct PromptWriter<'a> {
+    /// The underlying writer, targeting the TTY or `out`.
+    writer: PrinterWriter<'a>,
+
+    /// Holds the suspension for the writer's lifetime.
+    _suspension: SuspendGuard,
+}
+
+impl fmt::Write for PromptWriter<'_> {
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        self.writer.write_str(s)
+    }
+}
+
+impl io::Write for PromptWriter<'_> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        io::Write::write(&mut self.writer, buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        io::Write::flush(&mut self.writer)
+    }
+}
+
 /// An owned writer targeting one of the [`Printer`]'s streams.
 ///
 /// Returned (boxed) by [`Printer::owned_prompt_writer`].
@@ -546,6 +704,9 @@ struct OwnedPrinterWriter {
 
     /// The target output stream.
     target: PrintTarget,
+
+    /// Holds the status-region suspension for the writer's lifetime.
+    _suspension: SuspendGuard,
 }
 
 impl io::Write for OwnedPrinterWriter {
@@ -588,14 +749,38 @@ struct Worker<O, E> {
 
     /// Shared with the [`Printer`] to interrupt typewriter sleeps.
     delay_control: Arc<DelayControl>,
+
+    /// The claimed status regions and the rows currently painted for them.
+    regions: RegionStack,
 }
 
 impl<O: io::Write, E: io::Write> Worker<O, E> {
     /// Run the worker thread.
+    ///
+    /// Blocks on the command channel while no region is claimed, and wakes on
+    /// the active region's tick interval while one is.
+    /// Any drawn region is erased before the loop exits, whether it ends on a
+    /// `Shutdown` or on a disconnected channel.
     fn run(&mut self) {
-        while let Ok(cmd) = self.rx.recv() {
+        loop {
+            let cmd = match self.regions.tick_after() {
+                Some(timeout) => match self.rx.recv_timeout(timeout) {
+                    Ok(cmd) => cmd,
+                    Err(RecvTimeoutError::Timeout) => {
+                        self.regions.redraw(&mut self.err);
+                        continue;
+                    }
+                    Err(RecvTimeoutError::Disconnected) => break,
+                },
+                None => match self.rx.recv() {
+                    Ok(cmd) => cmd,
+                    Err(_) => break,
+                },
+            };
+
             match cmd {
                 Command::Print(task) => self.process_task(&task),
+                Command::Region(cmd) => self.regions.apply(cmd, &mut self.err),
                 Command::Flush(tx) => {
                     // We don't need to do anything specific to flush out/err
                     // because we flush after every write in `process_task`. We
@@ -611,6 +796,8 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
                 Command::Shutdown => break,
             }
         }
+
+        self.regions.erase(&mut self.err);
     }
 
     /// Drain all pending commands, printing instantly.
@@ -623,6 +810,7 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
         while let Ok(cmd) = self.rx.try_recv() {
             match cmd {
                 Command::Print(task) => self.process_task_instant(&task),
+                Command::Region(cmd) => self.regions.apply(cmd, &mut self.err),
                 Command::Flush(tx) => {
                     let _ = tx.send(());
                 }
@@ -637,6 +825,17 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
 
     /// Process a print task instantly, ignoring typewriter delays.
     fn process_task_instant(&mut self, task: &PrintTask) {
+        if task.content.is_empty() {
+            return;
+        }
+
+        self.regions.erase(&mut self.err);
+        self.write_task_instant(task);
+        self.regions.redraw(&mut self.err);
+    }
+
+    /// Write a print task's content in one shot.
+    fn write_task_instant(&mut self, task: &PrintTask) {
         let writer: &mut dyn io::Write = match task.target {
             PrintTarget::Out => &mut self.out,
             PrintTarget::Err => &mut self.err,
@@ -660,7 +859,22 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
     }
 
     /// Process a single print task.
+    ///
+    /// Any drawn region is erased before the content lands and redrawn once it
+    /// has, so a stale row can never sit above output.
+    /// Empty-content tasks write nothing and leave the region alone.
     fn process_task(&mut self, task: &PrintTask) {
+        if task.content.is_empty() {
+            return;
+        }
+
+        self.regions.erase(&mut self.err);
+        self.write_task(task);
+        self.regions.redraw(&mut self.err);
+    }
+
+    /// Write a print task's content, honoring its typewriter pacing.
+    fn write_task(&mut self, task: &PrintTask) {
         let PrintTask {
             content,
             mode,
@@ -956,9 +1170,19 @@ impl<T: Printable> PrintableExt for T {}
 
 /// A command to be executed by the printer worker.
 #[derive(Debug)]
-enum Command {
+#[expect(
+    clippy::redundant_pub_crate,
+    reason = "`pub use printer::*` in lib.rs would re-export a `pub` variant of this"
+)]
+pub(crate) enum Command {
     /// Print a task.
     Print(PrintTask),
+
+    /// Change the worker's status regions.
+    ///
+    /// Region updates share the print channel so they stay ordered with the
+    /// writes the worker has to erase them around.
+    Region(RegionCommand),
 
     /// Flush the printer.
     ///

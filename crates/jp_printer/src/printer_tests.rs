@@ -459,6 +459,275 @@ fn bounded_latency_controller_drains_large_queue_quickly() {
     );
 }
 
+/// A memory printer that behaves as if stderr were an 80-column terminal.
+fn region_printer() -> (Printer, SharedBuffer, SharedBuffer) {
+    let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = printer.with_terminal(TerminalCapability::interactive(Some(80)));
+
+    (printer, out, err)
+}
+
+/// A region that is due the moment it is claimed.
+fn waiting_style() -> RegionStyle {
+    RegionStyle::new(Duration::ZERO, Duration::from_millis(10), |_, detail| {
+        detail.map_or_else(|| "waiting".to_owned(), |d| format!("waiting: {d}"))
+    })
+}
+
+#[test]
+fn a_claimed_region_draws_on_the_chrome_channel() {
+    let (printer, out, err) = region_printer();
+
+    let region = printer.status_region(waiting_style());
+    printer.flush();
+
+    assert!(region.is_active());
+    assert_eq!(*err.lock(), "\r\x1b[Kwaiting");
+    assert!(out.lock().is_empty(), "a region is chrome, never stdout");
+}
+
+#[test]
+fn regions_are_inert_without_an_interactive_stderr() {
+    // The default capability models a piped stderr, which is what every
+    // memory and sink printer gets.
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+
+    let region = printer.status_region(waiting_style());
+    region.set_detail("still nothing");
+    printer.flush();
+
+    assert!(!region.is_active());
+    assert!(err.lock().is_empty());
+}
+
+#[test]
+fn regions_are_inert_in_a_non_pretty_format() {
+    let (printer, _out, err) = Printer::memory(OutputFormat::Text);
+    let printer = printer.with_terminal(TerminalCapability::interactive(Some(80)));
+
+    let region = printer.status_region(waiting_style());
+    printer.flush();
+
+    assert!(!region.is_active());
+    assert!(err.lock().is_empty());
+}
+
+#[test]
+fn regions_are_inert_while_logs_go_to_stderr() {
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = printer
+        .with_terminal(TerminalCapability::interactive(Some(80)))
+        .with_stderr_logging(true);
+
+    let region = printer.status_region(waiting_style());
+    printer.flush();
+
+    assert!(!region.is_active());
+    assert!(err.lock().is_empty());
+}
+
+#[test]
+fn dropping_the_handle_erases_the_row() {
+    let (printer, _out, err) = region_printer();
+
+    let region = printer.status_region(waiting_style());
+    printer.flush();
+    drop(region);
+    printer.flush();
+
+    assert_eq!(*err.lock(), "\r\x1b[Kwaiting\r\x1b[K");
+}
+
+#[test]
+fn chrome_writes_erase_the_region_and_redraw_after_it() {
+    let (printer, _out, err) = region_printer();
+
+    let _region = printer.status_region(waiting_style());
+    printer.flush();
+    printer.eprintln("a persistent line");
+    printer.flush();
+
+    assert_eq!(
+        *err.lock(),
+        "\r\x1b[Kwaiting\r\x1b[Ka persistent line\n\r\x1b[Kwaiting"
+    );
+}
+
+#[test]
+fn stdout_writes_erase_the_region_and_redraw_after_it() {
+    let (printer, out, err) = region_printer();
+
+    let _region = printer.status_region(waiting_style());
+    printer.flush();
+    printer.println("an answer");
+    printer.flush();
+
+    assert_eq!(*out.lock(), "an answer\n");
+    assert_eq!(*err.lock(), "\r\x1b[Kwaiting\r\x1b[K\r\x1b[Kwaiting");
+}
+
+#[test]
+fn an_empty_print_leaves_the_region_alone() {
+    let (printer, _out, err) = region_printer();
+
+    let _region = printer.status_region(waiting_style());
+    printer.flush();
+    printer.print("");
+    printer.flush();
+
+    assert_eq!(*err.lock(), "\r\x1b[Kwaiting");
+}
+
+#[test]
+fn setting_a_detail_repaints_the_row() {
+    let (printer, _out, err) = region_printer();
+
+    let region = printer.status_region(waiting_style());
+    printer.flush();
+    region.detail().set("bookworm");
+    printer.flush();
+
+    assert_eq!(*err.lock(), "\r\x1b[Kwaiting\r\x1b[Kwaiting: bookworm");
+}
+
+#[test]
+fn a_row_background_survives_the_regions_own_erase() {
+    let (printer, _out, err) = region_printer();
+
+    let region = printer.status_region(waiting_style());
+    region.background().set("48;5;236");
+    printer.flush();
+    drop(region);
+    printer.flush();
+
+    assert_eq!(
+        *err.lock(),
+        "\r\x1b[Kwaiting\r\x1b[48;5;236m\x1b[Kwaiting\x1b[49m\r\x1b[48;5;236m\x1b[K\x1b[49m"
+    );
+}
+
+#[test]
+fn the_region_ticks_on_its_own() {
+    let (printer, _out, err) = region_printer();
+
+    let _region = printer.status_region(RegionStyle::new(
+        Duration::ZERO,
+        Duration::from_millis(10),
+        |secs, _| format!("{secs:.1}s"),
+    ));
+    thread::sleep(Duration::from_millis(150));
+    printer.flush();
+
+    let frames = err.lock().matches("\r\x1b[K").count();
+    assert!(
+        frames >= 2,
+        "the worker must redraw without being prompted; saw {frames} frame(s)"
+    );
+}
+
+#[test]
+fn a_delayed_region_stays_hidden() {
+    let (printer, _out, err) = region_printer();
+
+    let _region = printer.status_region(RegionStyle::new(
+        Duration::from_mins(1),
+        Duration::from_millis(10),
+        |_, _| "too soon".to_owned(),
+    ));
+    printer.flush();
+
+    assert!(err.lock().is_empty());
+}
+
+#[test]
+fn claims_stack_and_releasing_the_top_re_exposes_the_one_below() {
+    let (printer, _out, err) = region_printer();
+
+    let _outer = printer.status_region(waiting_style());
+    printer.flush();
+
+    let inner = printer.status_region(RegionStyle::new(
+        Duration::ZERO,
+        Duration::from_millis(10),
+        |_, _| "running tool".to_owned(),
+    ));
+    printer.flush();
+    assert_eq!(*err.lock(), "\r\x1b[Kwaiting\r\x1b[K\r\x1b[Krunning tool");
+
+    err.lock().clear();
+    drop(inner);
+    printer.flush();
+
+    assert_eq!(*err.lock(), "\r\x1b[K\r\x1b[Kwaiting");
+}
+
+#[test]
+fn a_prompt_writer_suspends_the_region_for_its_lifetime() {
+    let (printer, _out, err) = region_printer();
+
+    let region = printer.status_region(waiting_style());
+    printer.flush();
+    err.lock().clear();
+
+    {
+        let _prompt = printer.prompt_writer();
+        printer.flush();
+        // Nothing repaints while a widget owns the cursor, not even a detail
+        // update the client pushes mid-prompt.
+        region.detail().set("bookworm");
+        printer.flush();
+        assert_eq!(*err.lock(), "\r\x1b[K");
+    }
+
+    printer.flush();
+    assert_eq!(*err.lock(), "\r\x1b[K\r\x1b[Kwaiting: bookworm");
+}
+
+#[test]
+fn suspend_status_erases_before_it_returns() {
+    let (printer, _out, err) = region_printer();
+
+    let _region = printer.status_region(waiting_style());
+    printer.flush();
+    err.lock().clear();
+
+    // No flush: the guard only returns once the worker has applied the
+    // suspension, which is what makes it safe to hand the terminal to a child
+    // process.
+    let guard = printer.suspend_status();
+    assert_eq!(*err.lock(), "\r\x1b[K");
+
+    drop(guard);
+    printer.flush();
+    assert_eq!(*err.lock(), "\r\x1b[K\r\x1b[Kwaiting");
+}
+
+#[test]
+fn shutdown_erases_the_region() {
+    let (printer, _out, err) = region_printer();
+
+    let _region = printer.status_region(waiting_style());
+    printer.flush();
+    printer.shutdown();
+
+    assert_eq!(*err.lock(), "\r\x1b[Kwaiting\r\x1b[K");
+}
+
+#[test]
+fn rows_are_bounded_to_the_terminal_width() {
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = printer.with_terminal(TerminalCapability::interactive(Some(8)));
+
+    let _region = printer.status_region(RegionStyle::new(
+        Duration::ZERO,
+        Duration::from_millis(10),
+        |_, _| "far too wide for this terminal".to_owned(),
+    ));
+    printer.flush();
+
+    assert_eq!(*err.lock(), "\r\x1b[Kfar too ");
+}
+
 #[test]
 fn static_behavior_preserved_when_max_latency_unset() {
     // Without max_latency, the worker uses the per-task cap directly.
