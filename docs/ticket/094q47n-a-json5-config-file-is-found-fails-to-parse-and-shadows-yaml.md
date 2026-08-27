@@ -30,13 +30,16 @@ So `ConfigFile` can read JSON5 while the implicit-loading path cannot.
 ## Options
 
 1. **Drop `json5` from both probe lists.** Two constants, `util.rs:22` and
-   `fs.rs:18`. A `.json5` file then goes unnoticed rather than breaking the
-   directory it sits in. Smallest fix.
+   `fs.rs:18`.
+   A `.json5` file then goes unnoticed rather than breaking the directory it
+   sits in.
+   Smallest fix.
 2. **Register a JSON5 format in schematic.** `serde_json5` is already a
-   dependency. Makes the probe list honest instead of trimming it.
+   dependency.
+   Makes the probe list honest instead of trimming it.
 3. **Add `jsonc` to the probe list.** The reverse gap: `config.jsonc` parses
-   fine but is never found, so it is only reachable through an explicit
-   `--cfg @path.jsonc`.
+   fine but is never found, so it is only reachable through an explicit `--cfg
+   @path.jsonc`.
 
 Pick 1 or 2 depending on whether JSON5 is worth supporting; 3 closes the
 opposite mismatch either way.

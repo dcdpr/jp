@@ -117,7 +117,8 @@ toml, json, json5, yaml, yml
 **`.json5` is probed but cannot be parsed.** The loader recognizes TOML, JSON,
 JSONC, and YAML only, so a `config.json5` file is found and then fails to load.
 Because `json5` is probed before `yaml`, it also shadows a `config.yaml` sibling
-in the same directory. Do not name your configuration files `.json5`.
+in the same directory.
+Do not name your configuration files `.json5`.
 
 #### Stopping The Chain
 
@@ -184,9 +185,9 @@ For example, to set the `max_tokens` model parameter, use
 `JP_CFG_ASSISTANT_MODEL_PARAMETERS_MAX_TOKENS`.
 
 **The `CFG_` part matters.** It keeps configuration options separate from JP's
-other environment variables. `JP_CFG_EDITOR_ENVS` sets the `editor.envs`
-configuration option; `JP_EDITOR` names the editor JP opens, and is not a
-configuration option at all.
+other environment variables.
+`JP_CFG_EDITOR_ENVS` sets the `editor.envs` configuration option; `JP_EDITOR`
+names the editor JP opens, and is not a configuration option at all.
 
 Run `jp config show` to list every configuration key.
 The matching variable is the key uppercased, with `.` replaced by `_`, prefixed
@@ -347,8 +348,8 @@ The two keywords are therefore mutually exclusive: `NONE` skips the loading step
 that `WORKSPACE` restores, so combining them fails with an error.
 
 Both are matched exactly, before any other resolution.
-To load a file literally named `NONE`, use the `@` prefix or a path-style
-prefix such as `./NONE`.
+To load a file literally named `NONE`, use the `@` prefix or a path-style prefix
+such as `./NONE`.
 
 When you use a reset keyword on a continuing conversation, the reset is recorded
 in the conversation's event stream, so later turns see the same configuration.
@@ -401,8 +402,8 @@ configuration specified in other sources.
 jp config show [--defaults] [--themes]
 ```
 
-Without flags, prints a commented TOML skeleton of every available
-configuration key:
+Without flags, prints a commented TOML skeleton of every available configuration
+key:
 
 ```bash
 $ jp config show
@@ -445,11 +446,12 @@ Set configuration in /home/you/project/.jp/config.toml
 Pick a different file with `--user-global`, `--user-workspace`, or `--cwd`.
 
 The target file must already exist, and must be TOML.
-Writing to a JSON or YAML configuration file fails with `format-preserving
-merge is only supported for TOML files`.
+Writing to a JSON or YAML configuration file fails with `format-preserving merge
+is only supported for TOML files`.
 
 With `--id`, the values are appended to a conversation's event stream instead of
-a file. See [Conversation Configuration](#conversation-configuration).
+a file.
+See [Conversation Configuration](#conversation-configuration).
 
 ### Format
 

@@ -20,15 +20,17 @@ user-global, cwd); with one it formats that one.
 
 1. **Remove the flag.** A bare `jp config fmt` already formats every
    configuration file that applies to the workspace, which is what `--all`
-   promises. Subtractive, no behavior change.
+   promises.
+   Subtractive, no behavior change.
 2. **Make the default narrow and `--all` broad.** Format only the workspace file
    by default, matching `jp config set`, and require `--all` for the other
-   three. This is what the flag's name implies, and it would make `fmt`'s
-   default consistent with `set`'s.
+   three.
+   This is what the flag's name implies, and it would make `fmt`'s default
+   consistent with `set`'s.
 
-Option 1 is the safer call. Option 2 silently shrinks what an existing
-`jp config fmt --check` in CI verifies, and the broad default is the more useful
-one for a formatter.
+Option 1 is the safer call.
+Option 2 silently shrinks what an existing `jp config fmt --check` in CI
+verifies, and the broad default is the more useful one for a formatter.
 
 ## Context
 
