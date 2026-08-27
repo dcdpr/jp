@@ -6,8 +6,22 @@
 //! appended to the stream, and applied when the stream is projected for a
 //! request.
 //!
-//! The stored history stays byte-identical, so a repair made for one provider
-//! or model does not destroy metadata another one could still use.
+//! The stored history stays byte-identical, so the events remain available for
+//! inspection, export, and any later feature that wants the original metadata.
+//!
+//! Overlays carry no provider or model scope, and apply to every request built
+//! from the conversation.
+//! That is deliberate.
+//! The rejections seen in practice come from content changing underneath a
+//! signature — a hand-edited stream, a trimmed tool call — which invalidates
+//! it for every model that would validate it, so applying the repair narrowly
+//! would leave the conversation unsendable again as soon as the model changed.
+//! Scoping would also put provider identity into this crate, which the mirror
+//! below exists to avoid.
+//!
+//! Should a rejection ever prove specific to one model rather than to the
+//! content, [`EventOverlay`] can gain an optional scope without changing what
+//! is already stored.
 //!
 //! These types mirror the provider-facing vocabulary in `jp_llm`.
 //! The duplication is deliberate: the conversation crate owns what is

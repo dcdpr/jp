@@ -154,30 +154,33 @@ pub fn handle_llm_event(
     retry_state: &mut StreamRetryState,
 ) -> (LoopAction, CommittedEvent) {
     // `Patch` is a side-channel instruction from the provider to fix bad events
-    // in the conversation stream. This can be handled directly instead of
-    // passing through the turn coordinator.
+    // in the conversation. This can be handled directly instead of passing
+    // through the turn coordinator.
     if let Event::Patch(patches) = event {
         let count = record_patches(conversation_stream, &patches);
-        let shrinks = patches.iter().all(|patch| patch.action.shrinks_stream());
+        let shrinks = patches
+            .iter()
+            .all(|patch| patch.action.shrinks_projection());
         retry_state.record_patch(count, shrinks);
 
         if !shrinks {
-            // A patch set that can grow the stream gives no guarantee the repair
-            // loop ends, so the rebuild below is refused whatever it changed.
+            // A patch set that can grow the projection gives no guarantee the
+            // repair loop ends, so the rebuild below is refused whatever it
+            // changed.
             tracing::warn!(
                 patches = patches.len(),
-                "History patches include an action that may not shrink the conversation stream."
+                "History patches include an action that may not shrink the projected conversation."
             );
         }
 
         if count > 0 {
-            tracing::debug!(count, "Applied history patches to conversation stream.");
+            tracing::debug!(count, "Recorded history patch overlay.");
         } else {
             // The rebuilt request would be byte-identical, so the rebuild that
             // follows is refused below rather than resent.
             tracing::warn!(
                 patches = patches.len(),
-                "History patches matched no events in the conversation stream."
+                "History patches change no events in the projected conversation."
             );
         }
 

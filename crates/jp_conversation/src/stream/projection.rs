@@ -1,6 +1,13 @@
-//! Compaction projection logic.
+//! Projection logic.
 //!
-//! Transforms a conversation event stream by applying compaction overlays.
+//! Transforms a conversation event stream by applying the overlays appended to
+//! it, in two passes:
+//!
+//! 1. Patch overlays rewrite metadata on the events they match.
+//! 2. Compaction overlays reduce what a range of turns contributes.
+//!
+//! Patches run first so both the compacting and non-compacting paths see the
+//! same patched metadata.
 //! The original events are consumed and a new projected event list is produced.
 //!
 //! See [`apply`] for the entry point.
@@ -60,9 +67,16 @@ impl TurnOrigin {
 ///
 /// Runs before compaction so both the compacting and non-compacting paths see
 /// patched metadata.
-/// Matching is by metadata value rather than position, so applying every
-/// overlay to every event is equivalent to applying each one to the events that
-/// preceded it, and stays correct when compaction reorders or replaces turns.
+///
+/// Matching is by metadata value and spans the whole stream, not only the
+/// events recorded before the overlay.
+/// That is deliberate: an overlay has to survive compaction replacing turns and
+/// pruning removing them, so it cannot be anchored to a position.
+/// The consequence is that an event recorded later carrying the same `(key,
+/// value)` is patched too.
+/// The values matched are opaque provider signatures, unique per reasoning
+/// block, so in practice an overlay recorded for one event cannot collide with
+/// another.
 fn apply_overlays(events: &mut Vec<InternalEvent>) {
     let patches: Vec<_> = events
         .iter()

@@ -676,17 +676,19 @@ impl ConversationStream {
         })
     }
 
-    /// Apply compaction projection to the stream.
+    /// Apply projection to the stream.
     ///
-    /// Reads all compaction overlays and transforms the event list so that the
-    /// projected view reflects the compaction policies.
+    /// Reads all patch overlays and compaction overlays and transforms the
+    /// event list so that the projected view reflects both: patches rewrite
+    /// metadata on the events they match, compactions reduce what a range of
+    /// turns contributes.
     /// After this call, the stream's conversation events represent what the LLM
     /// should see.
     ///
     /// Returns one [`TurnOrigin`] per resulting turn, in turn order, mapping
     /// each projected turn back to the raw turn number(s) it represents.
-    /// When no compaction events are present the events are left unchanged and
-    /// every turn maps to its own index.
+    /// When the stream carries neither patch overlays nor compactions, the
+    /// events are left unchanged and every turn maps to its own index.
     ///
     /// This method is called by [`Thread::into_parts()`] before provider
     /// visibility filtering.
