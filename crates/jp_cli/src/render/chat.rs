@@ -44,10 +44,8 @@ use jp_md::{
     },
     theme,
 };
-use jp_printer::{OutputWidth, PrintableExt as _, Printer};
+use jp_printer::{OutputWidth, PrintableExt as _, Printer, RegionStyle, StatusRegion};
 use tracing::warn;
-
-use crate::timer::{LineTimer, spawn_line_timer};
 
 /// The kind of content last pushed into the renderer.
 ///
@@ -128,8 +126,8 @@ pub struct ChatRenderer {
     reasoning_chars_count: usize,
     /// State for the current streaming fenced code block, if any.
     code_block: Option<CodeBlockState>,
-    /// Active reasoning timer, used by `Timer` display mode.
-    reasoning_timer: Option<LineTimer>,
+    /// Active reasoning timer region, used by `Timer` display mode.
+    reasoning_timer: StatusRegion,
     /// The blank-line separator owed before the next rendered content, if any.
     ///
     /// Raised by a rendered reasoning block and by the tool-call boundary a
@@ -172,7 +170,7 @@ impl ChatRenderer {
             last_response_kind: None,
             reasoning_chars_count: 0,
             code_block: None,
-            reasoning_timer: None,
+            reasoning_timer: StatusRegion::inert(),
             pending_separator: None,
             fixups: Fixups::llm_quirks(),
             para_source: String::new(),
@@ -363,18 +361,16 @@ impl ChatRenderer {
                 // that no later content ever "earns" back. Use the timer
                 // token itself for re-entry detection instead of
                 // `last_content_kind`.
-                if self.reasoning_timer.is_none() {
+                if !self.reasoning_timer.is_active() {
                     self.flush();
 
-                    self.reasoning_timer = spawn_line_timer(
-                        self.printer.clone(),
-                        self.printer.pretty_printing_enabled(),
+                    self.reasoning_timer = self.printer.status_region(RegionStyle::new(
                         Duration::from_millis(300),
                         Duration::from_millis(100),
-                        |secs, _status| {
-                            format!("\r\x1b[K\x1b[2m\u{23f1} Reasoning\u{2026} {secs:.1}s\x1b[22m")
+                        |secs, _detail| {
+                            format!("\x1b[2m\u{23f1} Reasoning\u{2026} {secs:.1}s\x1b[22m")
                         },
-                    );
+                    ));
                 }
             }
 
@@ -752,13 +748,10 @@ impl ChatRenderer {
 
     /// Cancel the reasoning timer if one is running.
     ///
-    /// Dropping the handle cancels the background task; the synchronous clear
-    /// here guarantees the line is gone before the caller's next write, since
-    /// this method cannot await the task's own asynchronous clear.
+    /// Releasing the region erases its row; the printer also erases it ahead of
+    /// whatever the caller renders next, so no ordering is owed here.
     fn cancel_reasoning_timer(&mut self) {
-        if self.reasoning_timer.take().is_some() {
-            self.printer.erase_line();
-        }
+        self.reasoning_timer.release();
     }
 
     /// Whether rendering `content` as reasoning supplies its own separation
