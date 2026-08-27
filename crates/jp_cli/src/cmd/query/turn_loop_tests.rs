@@ -6833,7 +6833,9 @@ async fn test_refused_rebuild_clears_the_retry_line() {
             .unwrap();
 
         let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
-        let printer = Arc::new(printer);
+        // The notice only takes a status region on a terminal; elsewhere it is
+        // a persistent line with nothing to retire.
+        let printer = Arc::new(printer.with_terminal(TerminalCapability::interactive(Some(80))));
         let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
@@ -6870,12 +6872,12 @@ async fn test_refused_rebuild_clears_the_retry_line() {
             chrome.contains("retrying (1/"),
             "the first cycle should have written a retry notice.\nChrome:\n{chrome}"
         );
-        // The notice writes its own `\r\x1b[K` prefix, so occurrences cannot be
-        // counted. What distinguishes a retired line is that the erase is the
+        // Every region frame starts with `\r\x1b[K`, so occurrences cannot be
+        // counted. What distinguishes a retired notice is that the erase is the
         // last thing written, leaving the terminal clean for the final error.
         assert!(
             chrome.ends_with("\r\x1b[K"),
-            "the retry line must be retired before the turn aborts.\nChrome:\n{chrome:?}"
+            "the retry notice must be retired before the turn aborts.\nChrome:\n{chrome:?}"
         );
     }))
     .await;

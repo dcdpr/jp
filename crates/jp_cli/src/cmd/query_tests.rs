@@ -23,7 +23,7 @@ use jp_llm::{
     provider::mock::MockProvider,
     tool::{InvocationContext, builtin::BuiltinExecutors, executor::ExecutorSource},
 };
-use jp_printer::{OutputFormat, Printer, SharedBuffer};
+use jp_printer::{OutputFormat, Printer, SharedBuffer, TerminalCapability};
 use jp_term::width::display_width;
 use jp_workspace::{
     ConversationHandle, Workspace,
@@ -2125,15 +2125,9 @@ async fn await_mcp_servers_drains_all_startups() {
         pending: vec![McpServerId::new("bookworm"), McpServerId::new("grizzly")],
     };
 
-    await_mcp_servers(
-        startup,
-        immediate_mcp_startup_config(),
-        Arc::new(printer),
-        false,
-        None,
-    )
-    .await
-    .expect("all startups succeed");
+    await_mcp_servers(startup, immediate_mcp_startup_config(), Arc::new(printer))
+        .await
+        .expect("all startups succeed");
 }
 
 #[tokio::test]
@@ -2147,15 +2141,9 @@ async fn await_mcp_servers_propagates_startup_error() {
         pending: vec![McpServerId::new("bookworm")],
     };
 
-    let error = await_mcp_servers(
-        startup,
-        immediate_mcp_startup_config(),
-        Arc::new(printer),
-        false,
-        None,
-    )
-    .await
-    .expect_err("a failed required server must fail the wait");
+    let error = await_mcp_servers(startup, immediate_mcp_startup_config(), Arc::new(printer))
+        .await
+        .expect_err("a failed required server must fail the wait");
 
     assert_eq!(error.message.as_deref(), Some("MCP error"));
 }
@@ -2163,7 +2151,7 @@ async fn await_mcp_servers_propagates_startup_error() {
 #[tokio::test(flavor = "multi_thread")]
 async fn await_mcp_servers_shows_and_clears_timer_line() {
     let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
-    let printer = Arc::new(printer);
+    let printer = Arc::new(printer.with_terminal(TerminalCapability::interactive(Some(80))));
 
     // Hold the startup window open until the test releases it, so the timer
     // is guaranteed to tick while the server is still "starting".
@@ -2182,8 +2170,6 @@ async fn await_mcp_servers_shows_and_clears_timer_line() {
         startup,
         immediate_mcp_startup_config(),
         printer.clone(),
-        true,
-        None,
     ));
 
     // Let a few ticks land before releasing the startup.
@@ -2226,7 +2212,7 @@ async fn wait_for_frame(err: &SharedBuffer, needle: &str) {
 #[tokio::test(flavor = "multi_thread")]
 async fn await_mcp_servers_redraws_as_servers_finish() {
     let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
-    let printer = Arc::new(printer);
+    let printer = Arc::new(printer.with_terminal(TerminalCapability::interactive(Some(80))));
 
     // Two independently-released tasks: releasing `bookworm` first makes
     // `grizzly` the deterministic survivor of the mid-drain redraw.
@@ -2250,8 +2236,6 @@ async fn await_mcp_servers_redraws_as_servers_finish() {
         startup,
         immediate_mcp_startup_config(),
         printer.clone(),
-        true,
-        None,
     ));
 
     // Advance on the rendered frames, not the clock: wait until each frame is
@@ -2291,12 +2275,12 @@ async fn await_mcp_servers_redraws_as_servers_finish() {
 fn mcp_startup_line_renders_full_when_it_fits() {
     assert_eq!(
         mcp_startup_line(4.2, Some("MCP server bookworm"), Some(80)),
-        "\r\x1b[K⏱ Starting MCP server bookworm… 4.2s"
+        "⏱ Starting MCP server bookworm… 4.2s"
     );
     // Unknown width leaves the line unbounded.
     assert_eq!(
         mcp_startup_line(4.2, Some("MCP server bookworm"), None),
-        "\r\x1b[K⏱ Starting MCP server bookworm… 4.2s"
+        "⏱ Starting MCP server bookworm… 4.2s"
     );
 }
 
@@ -2311,9 +2295,7 @@ fn mcp_startup_line_truncation_preserves_timer_suffix() {
 
     assert!(line.ends_with(" 12.3s"), "suffix must survive: {line:?}");
     assert!(line.contains('…'), "server list must truncate: {line:?}");
-    // The visible text (control prefix stripped) must fit the declared width.
-    let visible = line.strip_prefix("\r\x1b[K").expect("control prefix");
-    assert!(display_width(visible) <= 30, "must fit width: {line:?}");
+    assert!(display_width(&line) <= 30, "must fit width: {line:?}");
 }
 
 // A terminal too narrow for even the prefix and suffix still keeps a moving
@@ -2322,9 +2304,8 @@ fn mcp_startup_line_truncation_preserves_timer_suffix() {
 fn mcp_startup_line_ultra_narrow_keeps_bounded_timer() {
     let line = mcp_startup_line(7.0, Some("MCP server bookworm"), Some(6));
 
-    let visible = line.strip_prefix("\r\x1b[K").expect("control prefix");
-    assert!(display_width(visible) <= 6, "must fit width: {line:?}");
-    assert!(visible.contains("7.0s"), "timer must survive: {line:?}");
+    assert!(display_width(&line) <= 6, "must fit width: {line:?}");
+    assert!(line.contains("7.0s"), "timer must survive: {line:?}");
 }
 
 #[test]

@@ -24,7 +24,7 @@ fn make_retry_state(max_retries: u32) -> StreamRetryState {
         max_response_bytes: MaxResponseBytes::default(),
         cache: CachePolicy::default(),
     };
-    StreamRetryState::new(config, false)
+    StreamRetryState::new(config)
 }
 
 fn make_turn_coordinator() -> TurnCoordinator {
@@ -105,7 +105,7 @@ fn backoff_uses_retry_after_when_present() {
         max_response_bytes: MaxResponseBytes::default(),
         cache: CachePolicy::default(),
     };
-    let state = StreamRetryState::new(config, false);
+    let state = StreamRetryState::new(config);
     let err = StreamError::rate_limit(Some(Duration::from_secs(42)));
     assert_eq!(state.backoff_duration(&err), Duration::from_secs(42));
 }
@@ -401,7 +401,7 @@ async fn interrupt_during_backoff_cuts_wait_short() {
         max_response_bytes: MaxResponseBytes::default(),
         cache: CachePolicy::default(),
     };
-    let mut retry_state = StreamRetryState::new(config, false);
+    let mut retry_state = StreamRetryState::new(config);
     let mut turn_coordinator = make_turn_coordinator();
     let (_ws, lock) = make_test_lock();
     let conv = lock.as_mut();

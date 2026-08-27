@@ -49,7 +49,7 @@ fn make_retry_state(max_retries: u32) -> StreamRetryState {
         max_response_bytes: MaxResponseBytes::default(),
         cache: CachePolicy::default(),
     };
-    StreamRetryState::new(config, false)
+    StreamRetryState::new(config)
 }
 
 /// The metadata a provider patch targets in these tests.

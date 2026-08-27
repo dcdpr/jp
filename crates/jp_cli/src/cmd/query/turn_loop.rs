@@ -202,7 +202,7 @@ pub(super) async fn run_turn_loop(
     let (_turn_interrupt_guard, mut turn_interrupt_rx) = signals.push_handler();
 
     let mut turn_state = TurnState::default();
-    let mut stream_retry = StreamRetryState::new(cfg.assistant.request, is_tty);
+    let mut stream_retry = StreamRetryState::new(cfg.assistant.request);
     let idle_timeout = match cfg.assistant.request.stream_idle_timeout_secs {
         0 => None,
         secs => Some(Duration::from_secs(u64::from(secs))),
@@ -558,7 +558,6 @@ pub(super) async fn run_turn_loop(
                             };
                             if !received_provider_event && advances_cycle {
                                 received_provider_event = true;
-                                stream_retry.clear_line(&printer);
                                 stream_retry.reset();
                             }
 
@@ -612,11 +611,10 @@ pub(super) async fn run_turn_loop(
                                 // end, which the refusal describes.
                                 LoopAction::RebuildRefused(refusal) => {
                                     // A repair cycle renders nothing, so no event
-                                    // reached the clear above. Retire any retry
-                                    // line before the commit below flushes
-                                    // buffered output, which would otherwise land
-                                    // after the parked cursor.
-                                    stream_retry.clear_line(&printer);
+                                    // reached the reset above. Retire the notice
+                                    // here, or the abort below leaves it on
+                                    // screen.
+                                    stream_retry.retire_notice();
                                     commit_partial_response(
                                         &mut turn_coordinator,
                                         &conv,

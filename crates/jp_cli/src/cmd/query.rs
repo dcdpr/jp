@@ -100,7 +100,7 @@ use jp_llm::{
     },
 };
 use jp_mcp::{StartupSet, id::McpServerId};
-use jp_printer::Printer;
+use jp_printer::{Printer, RegionStyle, StatusRegion};
 use jp_storage::backend::Projection;
 use jp_task::task::TitleGeneratorTask;
 use jp_term::width::{display_width, truncate_to_width};
@@ -138,7 +138,6 @@ use crate::{
     parser::AttachmentUrlOrPath,
     render::TurnView,
     signals::SignalRouter,
-    timer::spawn_line_timer,
 };
 
 type BoxedResult<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -635,8 +634,6 @@ impl Query {
             mcp_servers_handle,
             cfg.style.mcp_startup.clone(),
             ctx.printer.clone(),
-            ctx.term.is_tty,
-            ctx.term.width,
         )
         .await?;
 
@@ -1224,63 +1221,61 @@ impl Query {
 
 /// Wait for background MCP server startups to complete.
 ///
-/// Shows a single aggregate timer line on stderr once the wait exceeds the
+/// Shows a single aggregate status row on stderr once the wait exceeds the
 /// configured delay, updating the listed server names as startups finish.
-/// Servers that finish within the delay never trigger the line.
+/// Servers that finish within the delay never trigger the row.
 ///
-/// Returns the first startup error, after clearing the timer line so the error
-/// renders on a clean row.
-///
-/// `width` bounds the rendered line to the terminal so a long server list wraps
-/// no further than one row, keeping the timer's single-row clear on finish
-/// sufficient.
-/// `None` leaves the line unbounded (unknown width).
+/// Returns the first startup error; the row is erased on the way out, so the
+/// error renders on a clean line.
 async fn await_mcp_servers(
     mut startup: StartupSet,
     config: McpStartupConfig,
     printer: Arc<Printer>,
-    is_tty: bool,
-    width: Option<u16>,
 ) -> std::result::Result<(), cmd::Error> {
     if startup.joins.is_empty() {
         return Ok(());
     }
 
-    let timer = spawn_line_timer(
-        printer,
-        config.show && is_tty,
-        Duration::from_secs(config.delay_secs.into()),
-        Duration::from_millis(config.interval_ms.into()),
-        move |secs, status| mcp_startup_line(secs, status, width),
-    );
-    if let Some(timer) = &timer {
-        timer.set_status(mcp_startup_status(&startup.pending));
-    }
+    let region = claim_mcp_startup_region(&printer, &config);
+    region.set_detail(mcp_startup_status(&startup.pending));
 
-    let result = loop {
+    loop {
         match startup.joins.join_next().await {
             None => break Ok(()),
             Some(Err(error)) => break Err(error.into()),
             Some(Ok(Err(error))) => break Err(error.into()),
             Some(Ok(Ok(id))) => {
                 startup.pending.retain(|pending| pending != &id);
-                if let Some(timer) = &timer
-                    && !startup.pending.is_empty()
-                {
-                    timer.set_status(mcp_startup_status(&startup.pending));
+                if !startup.pending.is_empty() {
+                    region.set_detail(mcp_startup_status(&startup.pending));
                 }
             }
         }
-    };
-
-    if let Some(timer) = timer {
-        timer.finish().await;
     }
-
-    result
 }
 
-/// Render the MCP startup timer line for `secs` elapsed and `status`, bounding
+/// Claim the status region for the MCP server startup wait.
+///
+/// Returns an inert region when `style.mcp_startup.show` is off, or when the
+/// terminal cannot carry one.
+fn claim_mcp_startup_region(printer: &Printer, config: &McpStartupConfig) -> StatusRegion {
+    if !config.show {
+        return StatusRegion::inert();
+    }
+
+    // The row bounds itself rather than letting the region cut its tail: the
+    // elapsed time lives at the end, and a long server list would take it with
+    // it.
+    let columns = printer.chrome_columns();
+
+    printer.status_region(RegionStyle::new(
+        Duration::from_secs(config.delay_secs.into()),
+        Duration::from_millis(config.interval_ms.into()),
+        move |secs, detail| mcp_startup_line(secs, detail, columns),
+    ))
+}
+
+/// Render the MCP startup status row for `secs` elapsed and `status`, bounding
 /// the visible text to `width` columns when known.
 ///
 /// Truncation falls on the server-list fragment only: the ` ⏱ Starting  `
@@ -1288,11 +1283,10 @@ async fn await_mcp_servers(
 /// elapsed time keeps moving even when a long list overflows.
 /// A terminal too narrow for even the prefix and suffix falls back to a bounded
 /// `⏱ {secs:.1}s`.
-/// The leading `\r\x1b[K` control prefix stays outside the width budget.
 fn mcp_startup_line(secs: f64, status: Option<&str>, width: Option<u16>) -> String {
     let status = status.unwrap_or("MCP servers");
     let full = format!("⏱ Starting {status}… {secs:.1}s");
-    let line = match width {
+    match width {
         Some(w) if display_width(&full) > usize::from(w) => {
             let w = usize::from(w);
             let prefix = "⏱ Starting ";
@@ -1306,8 +1300,7 @@ fn mcp_startup_line(secs: f64, status: Option<&str>, width: Option<u16>) -> Stri
             }
         }
         _ => full,
-    };
-    format!("\r\x1b[K{line}")
+    }
 }
 
 /// Render the pending-server fragment for the MCP startup timer line.

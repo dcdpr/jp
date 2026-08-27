@@ -201,6 +201,17 @@ impl Printer {
         self
     }
 
+    /// The column count of the chrome channel's terminal, when it is known.
+    ///
+    /// Status-region rows are bounded to it automatically; a client only needs
+    /// this to lay out a row it wants cut somewhere other than the tail.
+    /// Distinct from [`Self::output_width`], which describes stdout: chrome
+    /// keeps rendering on a terminal stderr even when stdout is redirected.
+    #[must_use]
+    pub const fn chrome_columns(&self) -> Option<u16> {
+        self.terminal.columns()
+    }
+
     /// Claim a status region.
     ///
     /// The worker draws the region's row, ticks its elapsed time, and erases it

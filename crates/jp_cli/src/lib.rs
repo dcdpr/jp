@@ -48,7 +48,7 @@ use jp_config::{
         load_partials_with_inheritance, log_load_diagnostics,
     },
 };
-use jp_printer::{OutputFormat, OutputWidth, Printer};
+use jp_printer::{OutputFormat, OutputWidth, Printer, RegionStyle};
 use jp_storage::backend::{
     FsStorageBackend, NullLockBackend, NullPersistBackend, ReadOnlySessionBackend,
 };
@@ -68,7 +68,6 @@ use crate::{
         target::resolve_request,
     },
     config_pipeline::{ConfigPipeline, ConfigReset, ConfigResetEvents},
-    timer::{LineTimer, spawn_line_timer},
 };
 
 static WORKER_THREADS: AtomicUsize = AtomicUsize::new(0);
@@ -751,22 +750,15 @@ async fn drain_background_tasks(
     let cancel = ctx.task_handler.cancel_token();
     let printer = ctx.printer.clone();
     let shutdown = ctx.signals.shutdown_token();
-    let show_chrome = ctx.term.is_tty;
     // The shutdown token only cancels once; after acting on it, stop
     // selecting on it so the loop doesn't spin on a completed future.
     let mut shutdown_watched = true;
 
-    let mut timer = if show_chrome {
-        spawn_line_timer(
-            printer.clone(),
-            true,
-            Duration::from_secs(1),
-            Duration::from_millis(100),
-            |secs, _status| format!("\r\x1b[K⏱ Finishing background tasks… {secs:.1}s"),
-        )
-    } else {
-        None
-    };
+    let mut region = printer.status_region(RegionStyle::new(
+        Duration::from_secs(1),
+        Duration::from_millis(100),
+        |secs, _detail| format!("⏱ Finishing background tasks… {secs:.1}s"),
+    ));
 
     let sync_fut = ctx
         .task_handler
@@ -780,36 +772,26 @@ async fn drain_background_tasks(
             // command, or arriving mid-drain) cancels background tasks.
             () = shutdown.cancelled(), if shutdown_watched => {
                 shutdown_watched = false;
-                stop_drain_timer(timer.take()).await;
+                region.release();
 
                 cancel.cancel();
-                if show_chrome {
-                    timer = spawn_line_timer(
-                        printer.clone(),
-                        true,
-                        Duration::ZERO,
-                        Duration::from_millis(100),
-                        |secs, _status| {
-                            format!(
-                                "\r\x1b[K⏱ Cancelling background tasks… {:.1}s",
-                                (2.0 - secs).max(0.0),
-                            )
-                        },
-                    );
-                }
+                region = printer.status_region(RegionStyle::new(
+                    Duration::ZERO,
+                    Duration::from_millis(100),
+                    |secs, _detail| {
+                        format!(
+                            "⏱ Cancelling background tasks… {:.1}s",
+                            (2.0 - secs).max(0.0),
+                        )
+                    },
+                ));
             }
             result = &mut sync_fut => break result,
         }
     };
 
-    stop_drain_timer(timer).await;
+    region.release();
     result
-}
-
-async fn stop_drain_timer(timer: Option<LineTimer>) {
-    if let Some(timer) = timer {
-        timer.finish().await;
-    }
 }
 
 /// Check if the current invocation is a root-level help request (`jp -h`).

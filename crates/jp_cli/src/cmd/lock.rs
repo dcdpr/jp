@@ -6,23 +6,20 @@
 //! On timeout (or ctrl-c), interactive terminals get a prompt; non-interactive
 //! environments get `LockTimeout`.
 //!
-//! While polling, a timer indicator is shown (controlled by [`LockWaitConfig`])
+//! While polling, a status region is shown (controlled by [`LockWaitConfig`])
 //! so the user sees immediate feedback.
-//! The timer is cleared before the interactive prompt appears.
+//! It is released before the interactive prompt appears.
 //!
 //! The prompt options are controlled by [`LockRequest::allow_new`] and
 //! [`LockRequest::allow_fork`].
 //! When both are false, only "Continue waiting" and "Cancel" are shown.
 
-use std::{
-    sync::Arc,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
 use inquire::Select;
 use jp_config::style::lock_wait::LockWaitConfig;
 use jp_conversation::ConversationId;
-use jp_printer::Printer;
+use jp_printer::{Printer, RegionStyle, StatusRegion};
 use jp_storage::lock::LockInfo;
 use jp_workspace::{ConversationHandle, ConversationLock, LockResult, Workspace, session::Session};
 
@@ -30,7 +27,6 @@ use crate::{
     ctx::Ctx,
     error::{Error, Result},
     signals::SignalRouter,
-    timer::{LineTimer, spawn_line_timer},
 };
 
 /// Result of attempting to acquire a conversation lock.
@@ -98,8 +94,8 @@ impl<'a> LockRequest<'a> {
 /// The available options depend on `allow_new` and `allow_fork`.
 /// In non-interactive environments, fails with `LockTimeout`.
 ///
-/// While polling, a `\r`-based timer line shows how long the CLI has been
-/// waiting, giving the user immediate visual feedback.
+/// While polling, a status region counts down how much of the wait is left,
+/// giving the user immediate visual feedback.
 pub(crate) async fn acquire_lock(mut r: LockRequest<'_>) -> Result<LockOutcome> {
     let id = r.handle.id();
     let timeout = Duration::from_secs(u64::from(r.lock_wait.timeout_secs));
@@ -113,7 +109,7 @@ pub(crate) async fn acquire_lock(mut r: LockRequest<'_>) -> Result<LockOutcome> 
     };
 
     let holder = lock_holder_description(r.workspace, id);
-    let timer = spawn_lock_timer(r.printer, &r.lock_wait, &holder, timeout);
+    let mut region = claim_lock_region(r.printer, &r.lock_wait, &holder, timeout);
 
     // While waiting, a Ctrl-C press skips straight to the contention prompt.
     // The guard drops before the prompt shows, so a press while the prompt is
@@ -125,7 +121,7 @@ pub(crate) async fn acquire_lock(mut r: LockRequest<'_>) -> Result<LockOutcome> 
         tokio::select! {
             biased;
             Some(notice) = interrupt_rx.recv() => {
-                cancel_timer(timer).await;
+                region.release();
                 drop(interrupt_guard);
                 // The press is answered by the contention prompt below, so it
                 // no longer counts toward the escalation ladder: a press after
@@ -139,14 +135,14 @@ pub(crate) async fn acquire_lock(mut r: LockRequest<'_>) -> Result<LockOutcome> 
 
         r.handle = match r.workspace.lock_conversation(r.handle, r.session)? {
             LockResult::Acquired(lock) => {
-                cancel_timer(timer).await;
+                region.release();
                 return Ok(LockOutcome::Acquired(lock));
             }
             LockResult::AlreadyLocked(handle) => handle,
         };
 
         if start.elapsed() >= timeout {
-            cancel_timer(timer).await;
+            region.release();
             drop(interrupt_guard);
             return prompt_contention(r).await;
         }
@@ -166,7 +162,7 @@ async fn prompt_contention(r: LockRequest<'_>) -> Result<LockOutcome> {
     }
     options.push("Cancel");
 
-    let selected = Select::new(&msg, options).prompt_with_writer(&mut r.printer.err_writer())?;
+    let selected = Select::new(&msg, options).prompt_with_writer(&mut r.printer.prompt_writer())?;
 
     match selected {
         "Continue waiting" => Box::pin(acquire_lock(r)).await,
@@ -203,34 +199,29 @@ fn lock_holder_description(workspace: &Workspace, id: ConversationId) -> String 
     }
 }
 
-// ---------------------------------------------------------------------------
-// Lock-wait timer (delegates to the shared spawn_line_timer infrastructure)
-// ---------------------------------------------------------------------------
-
-type Timer = Option<LineTimer>;
-
-fn spawn_lock_timer(
+/// Claim the status region that counts down the remaining wait.
+///
+/// Returns an inert region when `style.lock_wait.show` is off, or when the
+/// terminal cannot carry one.
+fn claim_lock_region(
     printer: &Printer,
     config: &LockWaitConfig,
     holder: &str,
     timeout: Duration,
-) -> Timer {
+) -> StatusRegion {
+    if !config.show {
+        return StatusRegion::inert();
+    }
+
     let holder = holder.to_owned();
     let total = timeout.as_secs_f64();
-    spawn_line_timer(
-        Arc::new(printer.clone()),
-        config.show,
+
+    printer.status_region(RegionStyle::new(
         Duration::from_secs(u64::from(config.delay_secs)),
         Duration::from_millis(u64::from(config.interval_ms)),
-        move |elapsed, _status| {
+        move |elapsed, _detail| {
             let remaining = (total - elapsed).max(0.0);
-            format!("\r\x1b[K⏱ Pending conversation lock {holder} ({remaining:.1}s)")
+            format!("⏱ Pending conversation lock {holder} ({remaining:.1}s)")
         },
-    )
-}
-
-async fn cancel_timer(timer: Timer) {
-    if let Some(timer) = timer {
-        timer.finish().await;
-    }
+    ))
 }
