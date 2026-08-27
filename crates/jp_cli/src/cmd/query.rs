@@ -465,7 +465,14 @@ impl Query {
             pending_trim,
             chat_request,
         } = lock.with_events(|stream| {
-            self.build_conversation(&piped, query.as_deref(), stream, &cfg, &conversation_path)
+            self.build_conversation(
+                &piped,
+                query.as_deref(),
+                stream,
+                &cfg,
+                &conversation_path,
+                &ctx.printer,
+            )
         })?;
 
         let Some(mut chat_request) = chat_request else {
@@ -790,6 +797,7 @@ impl Query {
         stream: &ConversationStream,
         config: &AppConfig,
         conversation_root: &Utf8Path,
+        printer: &Printer,
     ) -> Result<BuiltConversation> {
         let mut pending_trim = PendingStreamTrim::default();
 
@@ -845,6 +853,7 @@ impl Query {
             !piped.is_empty(),
             config,
             conversation_root,
+            printer,
         )?;
 
         if self.template {
@@ -938,6 +947,7 @@ impl Query {
         piped: bool,
         config: &AppConfig,
         conversation_root: &Utf8Path,
+        printer: &Printer,
     ) -> Result<(QuerySource, PartialAppConfig)> {
         // If there is no query provided, but the user explicitly requested not
         // to open the editor, we populate the query with a default message,
@@ -991,7 +1001,7 @@ impl Query {
             return Ok((source, PartialAppConfig::empty()));
         }
 
-        let backend = match editor::build_editor_backend(&config.editor) {
+        let backend = match editor::build_editor_backend(&config.editor, printer) {
             None if !request.is_empty() => {
                 return Ok((source, PartialAppConfig::empty()));
             }
