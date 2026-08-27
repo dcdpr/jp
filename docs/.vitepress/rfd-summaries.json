@@ -359,9 +359,9 @@
     "hash": "2f2a3694924055b6abf1a6e5a40af4759861017e172e1c94798dda2c3f7557e2",
     "summary": "JP gains Anthropic subscription auth with automatic fallback to API key billing when quotas exhaust."
   },
-  "091-printer-owned-status-line.md": {
-    "hash": "654e340514f57e8b195ff9c71e7e7ad070f5edde925ae8bd4e9c71de307f2af1",
-    "summary": "Centralize ephemeral status-line rendering in the printer's worker thread to eliminate cross-site ordering bugs."
+  "091-printer-owned-status-region.md": {
+    "hash": "0a9080f22b1bc652c31996dc9f8d5ead2fd2e7a12d1d22ea843e43fc6c5b6d98",
+    "summary": "Consolidates nine ephemeral terminal indicators into a printer-owned status region primitive, showing live child-process output with multi-row windows and standardized chrome lifecycle."
   },
   "092-predictable-and-responsive-interrupt-escalation.md": {
     "hash": "04132add4db5ee2b02339cea46a42ae794cd2b93043499dc9c1336cf3a71cdbf",
