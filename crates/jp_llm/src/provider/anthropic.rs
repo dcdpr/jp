@@ -867,8 +867,11 @@ fn is_tool_result_message(msg: &types::Message) -> bool {
 /// The cost is the rest of that turn's reasoning, which buys a repair that
 /// converges in one round per broken turn instead of one round per message.
 ///
-/// When the error carries no usable position, [`fallback_thinking_block`] picks
-/// where to look based on `rejection`.
+/// When the error carries no usable position — unparseable, unresolvable, or
+/// resolving into a turn with no native thinking — [`fallback_thinking_block`]
+/// picks where to look based on `rejection`.
+/// Both paths yield a turn, and the patch set is always that whole turn, so no
+/// route through this function can emit the partial rewrite the API refuses.
 ///
 /// Returns `None` if no thinking block can be located.
 fn build_thinking_patches(
@@ -877,14 +880,14 @@ fn build_thinking_patches(
     rejection: ThinkingRejection,
 ) -> Option<Vec<EventPatch>> {
     let api_position = parse_signature_error_position(error.message());
-    let (msg_idx, content_idx) = api_position
+    let msg_idx = api_position
         .and_then(|(turn, flat)| resolve_turn_position(&request.messages, turn, flat))
-        .or_else(|| fallback_thinking_block(request, rejection))?;
-
-    debug!(
-        ?api_position,
-        msg_idx, content_idx, "Located the thinking block rejected by the API."
-    );
+        .map(|(msg_idx, _)| msg_idx)
+        // A position can resolve into a turn that holds no native thinking, if
+        // our turn model disagrees with the one the API reports against. Treat
+        // that like an unusable position rather than patching nothing.
+        .filter(|&msg_idx| !turn_thinking_blocks(request, msg_idx).is_empty())
+        .or_else(|| fallback_thinking_block(request, rejection).map(|(msg_idx, _)| msg_idx))?;
 
     let patches: Vec<EventPatch> = turn_thinking_blocks(request, msg_idx)
         .into_iter()
@@ -892,15 +895,14 @@ fn build_thinking_patches(
         .map(|(key, value)| thinking_patch(key, value))
         .collect();
 
-    if !patches.is_empty() {
-        return Some(patches);
-    }
+    debug!(
+        ?api_position,
+        msg_idx,
+        patches = patches.len(),
+        "Located the turn rejected by the API."
+    );
 
-    // The located position held no thinking block.
-    let (msg_idx, content_idx) = fallback_thinking_block(request, rejection)?;
-    let (key, value) = identify_thinking_block(request, msg_idx, content_idx)?;
-
-    Some(vec![thinking_patch(key, value)])
+    (!patches.is_empty()).then_some(patches)
 }
 
 /// Where to look for the offending thinking block when the error carries no

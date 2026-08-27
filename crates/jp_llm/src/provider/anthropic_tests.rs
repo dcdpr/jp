@@ -2964,6 +2964,40 @@ mod thinking_signature_recovery {
         ]);
     }
 
+    /// A position can parse and resolve, yet land in a turn carrying no native
+    /// thinking — our turn model disagreeing with the one the API reports
+    /// against.
+    /// The repair falls back to a turn that does carry thinking, and still
+    /// downgrades the whole of it: emitting a single patch there would be the
+    /// partial rewrite the API refuses, costing another round.
+    #[test]
+    fn position_resolving_into_a_thinkingless_turn_still_downgrades_a_whole_turn() {
+        let request = request(vec![
+            msg(MessageRole::User, vec![make_text("first")]),
+            // Turn 1: resolvable, but text only.
+            msg(MessageRole::Assistant, vec![make_text("plain answer")]),
+            msg(MessageRole::User, vec![make_text("second")]),
+            msg(MessageRole::Assistant, vec![
+                make_thinking("t_a", "sig_a"),
+                make_thinking("t_b", "sig_b"),
+                make_text("answer"),
+            ]),
+        ]);
+
+        // Flat index 0 of turn 1 is the text block in messages[1].
+        let error = StreamError::other(
+            "api error: invalid_request_error: messages.1.content.0: `thinking` or \
+             `redacted_thinking` blocks in the latest assistant message cannot be modified.",
+        );
+
+        let patches = patches_for(&request, &error).unwrap();
+
+        assert_eq!(patch_targets(&patches), [
+            ("anthropic_thinking_signature", "sig_a"),
+            ("anthropic_thinking_signature", "sig_b"),
+        ]);
+    }
+
     /// A conversation left half-downgraded by an earlier one-block-at-a-time
     /// repair is unsendable: the message holds native thinking blocks next to
     /// the `<think>` text that replaced its siblings.
