@@ -9,7 +9,8 @@ The following tools help you with this:
 
 - web_fetch: Read the contents of a web page. Automatically tries the `.md` variant of a URL \
   first; falls back to HTML. Supports listing and extracting sections by heading ID for both \
-  markdown and HTML sources.
+  markdown and HTML sources. Pass `headless: true` to render client-side pages in a browser \
+  when a plain fetch comes back empty.
 - fs_list_files: List the files in the project.
 - fs_grep_files: Search through the project's files.
 - fs_grep_user_docs: Search through the project's documentation.

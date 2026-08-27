@@ -77,6 +77,22 @@ pub(super) async fn fetch(
         return Ok(truncate(&body, SUMMARIZE_THRESHOLD).into());
     }
 
+    render(url, body, list_sections, sections).await
+}
+
+/// Turn an HTML document into the tool's output.
+///
+/// With `list_sections`, returns the anchor listing instead of the content.
+/// With `sections`, returns only those anchors' content.
+/// Otherwise the whole document is converted to markdown, narrowed to `url`'s
+/// fragment when it has one, and summarized or truncated if it exceeds the size
+/// threshold.
+pub(super) async fn render(
+    url: &Url,
+    body: String,
+    list_sections: bool,
+    sections: Option<Vec<String>>,
+) -> ToolResult {
     if list_sections {
         return Ok(format_section_listing(&body).into());
     }
