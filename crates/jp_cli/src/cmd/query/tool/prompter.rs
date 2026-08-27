@@ -509,7 +509,7 @@ impl ToolPrompter {
     fn prompt_boolean_git_style(
         &self,
         question: &jp_tool::Question,
-        writer: &mut jp_printer::PrinterWriter<'_>,
+        writer: &mut jp_printer::PromptWriter<'_>,
     ) -> Result<QuestionResult, Error> {
         let options = vec![
             InlineOption::new('y', "yes, just this once"),

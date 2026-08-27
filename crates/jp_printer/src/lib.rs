@@ -29,6 +29,10 @@
 
 mod ansi;
 mod printer;
+mod region;
 mod typewriter;
 
 pub use printer::*;
+pub use region::{
+    RegionStyle, RowBackground, StatusDetail, StatusRegion, SuspendGuard, TerminalCapability,
+};
