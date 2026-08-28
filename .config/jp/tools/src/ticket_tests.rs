@@ -607,10 +607,15 @@ fn show_renders_metadata_and_the_description() {
         json!({ "id": id.to_string() }),
     ));
 
+    // Fenced as markdown: the terminal renderer keys syntax highlighting off
+    // the leading fence.
     assert!(
-        out.starts_with(&format!("# {id}: Tool call header misaligned\n")),
+        out.starts_with(&format!(
+            "```markdown\n# {id}: Tool call header misaligned\n"
+        )),
         "{out}"
     );
+    assert!(out.ends_with("\n```"), "{out}");
     assert!(
         out.contains(&format!(
             "- **Path**: docs/ticket/{}tool-call-header-misaligned.md",
