@@ -327,6 +327,14 @@ a:hover {
     border-radius: 8px;
 }
 
+/* One column of directories inside the form's own column, so they are spaced
+   against each other rather than against the fields around them. */
+.new-conversation .config-named {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
 /* One block per load-path directory: the directory is the namespace, and its
    files are the choices within it. */
 .new-conversation fieldset {
@@ -642,6 +650,12 @@ html.ready .loading-veil {
     border-radius: var(--radius);
 }
 
+/* The dialog holds focus on open so the keyboard stays down, and a container
+   that can only be focused that way has no ring to draw. */
+.config-modal:focus {
+    outline: none;
+}
+
 .config-modal::backdrop {
     background: rgb(0 0 0 / 0.4);
 }
@@ -668,7 +682,16 @@ html.ready .loading-veil {
     display: flex;
     flex-direction: column;
     gap: 12px;
-    max-height: 50vh;
+}
+
+/* Only the named configurations scroll. The assignment rows above them are two
+   fields and a button, and scrolling them out of reach to make room for a list
+   of personas is not a trade worth making. */
+.config-groups .config-named {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: 40vh;
     overflow-y: auto;
 }
 
@@ -714,6 +737,65 @@ html.ready .loading-veil {
     color: #ffffff;
     background: var(--accent);
     border-color: var(--accent);
+}
+
+/* A value assigned directly, as `--cfg key=value` does.
+
+   Two fields rather than one that expects an `=`: the key is a config path with
+   its own completions and the value is free text, and joining them is the
+   server's job either way. */
+.config-pairs {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.config-pair {
+    display: flex;
+    gap: 6px;
+}
+
+.config-pairs input[type="text"] {
+    /* Without this a long placeholder sets the minimum width and the row
+       overflows the dialog rather than sharing what it has. */
+    min-width: 0;
+    flex: 1;
+    padding: 8px 10px;
+    /* Inherits the body's 16px, which is also the size below which iOS zooms
+       the page on focus. Denser would suit a dialog, and costs a zoom. */
+    font: inherit;
+    color: var(--fg);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+/* The key is a dotted path and the value is usually a word, so the key gets the
+   room. */
+.config-pairs input[name="cfg_key"] {
+    flex: 1.5;
+}
+
+/* Two classes deep on purpose. The new-conversation form styles every button it
+   contains as its Start button, and this one is not that. */
+.config-pair .config-add {
+    flex: none;
+    width: 32px;
+    padding: 0;
+    font: inherit;
+    font-size: 1.1rem;
+    font-weight: 400;
+    line-height: 1;
+    color: var(--fg-muted);
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    cursor: pointer;
+}
+
+.config-pair .config-add:hover {
+    color: var(--fg);
+    background: var(--bg-alt);
 }
 
 /* Nothing here skips rendering.
@@ -919,6 +1001,44 @@ html.ready .loading-veil {
   color: var(--fg);
   opacity: 1;
   background: var(--bg-alt);
+}
+
+/* Sized for a thumb where there is one.
+
+   Keyed on the pointer rather than the window width: a narrow desktop window is
+   still driven by a mouse, and 44px of chrome there is 44px of conversation
+   nobody asked to give up. */
+@media (pointer: coarse) {
+  .composer-tools {
+    gap: 4px;
+  }
+
+  .composer-tools button {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+  }
+
+  .composer-tools button svg {
+    width: 20px;
+    height: 20px;
+  }
+
+  /* The label is shown on hover, which a touch screen reports as the state a
+     tap leaves behind. It would sit over the row until something else was
+     tapped. */
+  .composer-tools button::after {
+    content: none;
+  }
+
+  .config-pairs input[type="text"] {
+    min-height: 44px;
+  }
+
+  .config-pair .config-add {
+    width: 44px;
+    min-height: 44px;
+  }
 }
 
 /* Marks a configuration choice waiting to be applied. */
