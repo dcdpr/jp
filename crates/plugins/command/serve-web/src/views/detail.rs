@@ -4,7 +4,7 @@ use maud::{Markup, PreEscaped, html};
 
 use crate::{
     render::{self, RenderedEvent},
-    views::layout,
+    views::{configs, layout},
 };
 
 /// Render the conversation's messages.
@@ -144,16 +144,18 @@ fn navigate_icon() -> Markup {
 ///
 /// A native dialog: the backdrop, focus trapping and Escape are the element's
 /// job, and doing them by hand is how they end up subtly wrong.
+///
+/// The dialog takes focus itself on open.
+/// Left to the element, focus goes to the first field inside it, which on a
+/// touch device raises the keyboard over the dialog before the reader has asked
+/// for it.
+/// `tabindex` is what makes the dialog a focus target of its own.
 fn config_modal() -> Markup {
     html! {
-        dialog id="config-modal" class="config-modal" {
+        dialog id="config-modal" class="config-modal" tabindex="-1" autofocus {
             form method="dialog" class="config-form" {
                 h2 { "Configuration" }
-                p class="config-note" {
-                    "Applies from the next message onward, as "
-                    code { "jp q --cfg" }
-                    " does."
-                }
+                p class="config-note" { "Applies from the next message onward." }
 
                 // Filled when the dialog is first opened, so the page does not pay
                 // for a list most visits never look at.
@@ -340,6 +342,41 @@ pub(crate) fn pending(content: &str) -> Markup {
     }
 }
 
+/// Where the reply will appear, which is where its progress belongs.
+///
+/// Filled by the poller while a turn runs, and again when one fails; rendered
+/// here too, so a reload during a turn doesn't look idle for a second.
+/// `stoppable` says whether the turn is this server's to interrupt: an
+/// interrupt reaches its own host, and a turn started in a terminal belongs to
+/// a process this cannot signal.
+fn status_row(id: &str, running: bool, stoppable: bool) -> Markup {
+    html! {
+        div id="status" class="composer-status" {
+            @if running {
+                span class="composer-working" role="status" aria-label="Working" {
+                    i {} i {} i {}
+                }
+
+                @if stoppable {
+                    form
+                        class="composer-stop"
+                        method="post"
+                        action={ "/conversations/" (id) "/interrupt" }
+                    {
+                        button type="submit" title="Stop" aria-label="Stop" {
+                            (stop_icon())
+                        }
+                    }
+                } @else {
+                    span class="composer-hint" {
+                        "Another process is running this turn."
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Render the conversation detail page.
 ///
 /// `running` shows the working indicator from the first paint, so a reload
@@ -347,12 +384,15 @@ pub(crate) fn pending(content: &str) -> Markup {
 /// `stoppable` says whether the turn is this server's to interrupt.
 /// `first` is the index `events` starts at and `total` how many there are, so
 /// the page knows whether older ones exist and where to ask for them.
+/// `settled` is the first index that can still change, which the page sends
+/// back with each poll so an entry that changes after it was drawn is redrawn.
 pub(crate) fn render(
     id: &str,
     title: &str,
     events: &[RenderedEvent],
     first: usize,
     total: usize,
+    settled: usize,
     running: bool,
     stoppable: bool,
 ) -> Markup {
@@ -411,7 +451,7 @@ pub(crate) fn render(
                 // Replaced wholesale by the poller when the count changes.
                 // `first` is where this window starts and `count` where it ends;
                 // older events are fetched when the reader scrolls back to them.
-                div id="messages" data-first=(first) data-count=(total) {
+                div id="messages" data-first=(first) data-count=(total) data-settled=(settled) {
                     (messages(events))
                 }
 
@@ -419,35 +459,7 @@ pub(crate) fn render(
                 // transcript yet. The poller fills and clears it.
                 div id="pending" {}
 
-                // Where the reply will appear, which is where its progress
-                // belongs. Filled by the poller while a turn runs, and again when
-                // one fails.
-                div id="status" class="composer-status" {
-                    @if running {
-                        span class="composer-working" role="status" aria-label="Working" {
-                            i {} i {} i {}
-                        }
-                        @if !stoppable {
-                            span class="composer-hint" {
-                                "Another process is running this turn."
-                            }
-                        }
-                        // Only when this server is the one running the turn: an
-                        // interrupt reaches its own host, and a turn started in a
-                        // terminal belongs to a process this cannot signal.
-                        @if stoppable {
-                            form
-                                class="composer-stop"
-                                method="post"
-                                action={ "/conversations/" (id) "/interrupt" }
-                            {
-                                button type="submit" title="Stop" aria-label="Stop" {
-                                    (stop_icon())
-                                }
-                            }
-                        }
-                    }
-                }
+                (status_row(id, running, stoppable))
 
                 // What "the end" means, for scrolling to it.
                 //
@@ -514,6 +526,7 @@ pub(crate) fn render(
 
         }
 
+        script { (PreEscaped(configs::SCRIPT)) }
         script { (PreEscaped(LIVE_SCRIPT)) }
     })
 }
@@ -529,3 +542,7 @@ pub(crate) fn render(
 /// The poll URL is derived from the page's own path, which keeps this a static
 /// string: no per-page formatting, and nothing interpolated into a script tag.
 const LIVE_SCRIPT: &str = include_str!("detail.js");
+
+#[cfg(test)]
+#[path = "detail_tests.rs"]
+mod tests;

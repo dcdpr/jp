@@ -20,6 +20,17 @@ const box = document.getElementById('messages');
 // reader scrolls back to them.
 const older = () => Number(box.dataset.first) > 0;
 let loadingOlder = false;
+
+// The index from which this page's copy of the transcript is provisional.
+//
+// A tool call is drawn when it is requested and gains its result later, so the
+// entry on the page is not final the moment it appears. The server's own
+// boundary has moved past it by the time the result lands — the next call in the
+// batch is the one waiting — so what reaches back for the entry that changed is
+// this page remembering how far back its own copy went provisional.
+//
+// Zero when the page cannot say, which asks for everything it holds.
+let settledFloor = Number(box.dataset.settled) || 0;
 const pending = document.getElementById('pending');
 const status = document.getElementById('status');
 const composer = document.getElementById('composer');
@@ -217,6 +228,42 @@ function trackKeyboard() {
   requestAnimationFrame(step);
 }
 
+// Keep `--kb` true for as long as the keyboard could be up.
+//
+// The burst above runs only when iOS reports a viewport change, and iOS does not
+// always report one: focus moved by script in particular can raise the keyboard
+// without a single `resize` or `scroll`. `--kb` then stays at zero, the dock
+// stays at the bottom of the layout viewport, and the composer is behind the
+// keyboard with nothing scheduled to notice.
+//
+// Sampling for as long as the field holds focus removes the dependency: whatever
+// iOS announces or does not, the height is read every frame and written when it
+// moves. A frame in which nothing moved costs one subtraction and a comparison.
+//
+// Deliberately not scrolling: that is the burst's job, and doing it every frame
+// for the life of a focus would fight the reader scrolling by hand.
+let watching = false;
+
+function watchKeyboard() {
+  if (watching) return;
+  watching = true;
+
+  const step = () => {
+    // Kept going after blur until the keyboard has finished retracting, which is
+    // the half that puts the dock back down.
+    if (document.activeElement !== input && keyboardInset() === 0) {
+      watching = false;
+      fitApp();
+      return;
+    }
+
+    fitApp();
+    requestAnimationFrame(step);
+  };
+
+  requestAnimationFrame(step);
+}
+
 // `resize` on the visual viewport reports the keyboard taking space; `scroll`
 // reports it being panned. The window's own `resize` covers the keyboard closing,
 // which iOS does not always report on the visual viewport at all.
@@ -348,13 +395,15 @@ input.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') input.blur();
 });
 
-// Which configurations the next message runs under.
+// What the next message runs under: configurations chosen by name, and values
+// assigned directly.
 //
 // Kept here rather than on the server: nothing is applied until a message is
 // sent, so this is a choice in progress, not state the conversation has.
 const configModal = document.getElementById('config-modal');
 const configGroups = document.getElementById('config-groups');
 let chosenConfigs = new Set();
+let chosenPairs = [];
 let configsLoaded = false;
 
 document.getElementById('open-config').addEventListener('click', async () => {
@@ -370,6 +419,8 @@ document.getElementById('open-config').addEventListener('click', async () => {
   }
 });
 
+// The chooser is rendered by the server, which is what keeps it identical to the
+// one on the new-conversation page: same grouping, same headings, same fields.
 async function loadConfigs() {
   if (configsLoaded) return;
 
@@ -377,47 +428,8 @@ async function loadConfigs() {
     const r = await fetch('/configs');
     if (!r.ok) throw new Error(r.status);
 
-    const entries = await r.json();
+    configGroups.innerHTML = await r.text();
     configsLoaded = true;
-    configGroups.textContent = '';
-
-    if (entries.length === 0) {
-      const empty = document.createElement('p');
-      empty.className = 'config-note';
-      empty.textContent = 'No configurations found on the load paths.';
-      configGroups.append(empty);
-      return;
-    }
-
-    // Grouped by namespace, relying on the host's sort by segment: entries in one
-    // namespace share a prefix, so they arrive together.
-    let group = null;
-    let namespace = null;
-
-    for (const entry of entries) {
-      if (group === null || entry.namespace !== namespace) {
-        namespace = entry.namespace;
-        group = document.createElement('fieldset');
-        const legend = document.createElement('legend');
-        legend.textContent = namespace || 'General';
-        group.append(legend);
-        configGroups.append(group);
-      }
-
-      const label = document.createElement('label');
-      label.className = 'config-option';
-
-      const box = document.createElement('input');
-      box.type = 'checkbox';
-      box.value = entry.segment;
-      box.checked = chosenConfigs.has(entry.segment);
-
-      const name = document.createElement('span');
-      name.textContent = entry.name;
-
-      label.append(box, name);
-      group.append(label);
-    }
   } catch (e) {
     configGroups.textContent = '';
     const failed = document.createElement('p');
@@ -427,15 +439,55 @@ async function loadConfigs() {
   }
 }
 
-// Cancel leaves the previous choice alone; apply replaces it with what is ticked.
+// The assignments that have been filled in, in the order they were written.
+function readPairs() {
+  return Array.from(configGroups.querySelectorAll('.config-pair'))
+    .map(row => Array.from(row.querySelectorAll('input')).map(field => field.value))
+    .filter(([key]) => key.trim() !== '')
+    .map(([key, value]) => [key.trim(), value]);
+}
+
+// Put the applied choice back into the form.
+//
+// A cancelled dialog must not leave its edits on screen: reopening it would show
+// ticks and rows that no message is going to run under.
+function writeChoice() {
+  configGroups.querySelectorAll('input[type=checkbox]').forEach((tick) => {
+    tick.checked = chosenConfigs.has(tick.value);
+  });
+
+  const rows = configGroups.querySelector('.config-pairs');
+  const first = rows && rows.querySelector('.config-pair');
+  if (!first) return;
+
+  rows.querySelectorAll('.config-pair').forEach((row, i) => { if (i > 0) row.remove(); });
+
+  // One row per applied assignment, and the spare to write the next one in.
+  chosenPairs.concat([['', '']]).forEach(([key, value], i) => {
+    const row = i === 0 ? first : first.cloneNode(true);
+    const fields = row.querySelectorAll('input');
+    fields[0].value = key;
+    fields[1].value = value;
+    if (i > 0) rows.append(row);
+  });
+}
+
+// Cancel puts the previous choice back; apply takes what is in the form.
 configModal.addEventListener('close', () => {
-  if (configModal.returnValue !== 'apply') return;
+  if (configModal.returnValue === 'apply') {
+    chosenConfigs = new Set(
+      Array.from(configGroups.querySelectorAll('input[type=checkbox]:checked'))
+        .map(tick => tick.value),
+    );
+    chosenPairs = readPairs();
+  } else {
+    writeChoice();
+  }
 
-  chosenConfigs = new Set(
-    Array.from(configGroups.querySelectorAll('input:checked')).map(box => box.value),
+  document.getElementById('open-config').classList.toggle(
+    'active',
+    chosenConfigs.size > 0 || chosenPairs.length > 0,
   );
-
-  document.getElementById('open-config').classList.toggle('active', chosenConfigs.size > 0);
 });
 
 // A larger field for a longer reply.
@@ -903,8 +955,8 @@ setTimeout(() => document.documentElement.classList.add('ready'), 3000);
 // focus and on blur, and iOS may report nothing until it has finished. Without the
 // blur half, the column stays at its keyboard-open height after the keyboard has
 // gone.
-input.addEventListener('focus', () => { fitInput(); trackKeyboard(); });
-input.addEventListener('blur', () => { fitInput(); trackKeyboard(); });
+input.addEventListener('focus', () => { fitInput(); trackKeyboard(); watchKeyboard(); });
+input.addEventListener('blur', () => { fitInput(); trackKeyboard(); watchKeyboard(); });
 
 // Pre-emptively, before iOS snapshots the page with the field still focused.
 addEventListener('pagehide', blurField);
@@ -1148,6 +1200,12 @@ composer.addEventListener('submit', async (event) => {
         });
         // One entry per choice: the same shape `--cfg` takes, repeated.
         for (const segment of chosenConfigs) params.append('cfg', segment);
+        // Sent as the two fields a row posts rather than joined here, so the
+        // server reads an assignment the same way whichever form it came from.
+        for (const [key, value] of chosenPairs) {
+          params.append('cfg_key', key);
+          params.append('cfg_value', value);
+        }
         return params;
       })(),
     });
@@ -1303,7 +1361,9 @@ async function poll() {
     // it has not changed. Rendering it is the whole conversation's markdown, and
     // most polls change nothing.
     const r = await fetch(
-      url + '?count=' + box.dataset.count + '&client=' + encodeURIComponent(clientId),
+      url + '?count=' + box.dataset.count
+        + '&settled=' + settledFloor
+        + '&client=' + encodeURIComponent(clientId),
     );
     if (!r.ok || seq !== pollSeq) return;
     const d = await r.json();
@@ -1347,8 +1407,9 @@ async function poll() {
         // Usually that is nothing but new events on the end. It is more when the
         // tail is still moving: a tool call shows its request first and its result
         // later, and the entry that has to change is one the page already holds.
-        // With calls running in parallel that reaches back to the earliest one
-        // still waiting, so settled calls after it are rewritten too.
+        // `from` reaches back to the earliest entry this page drew provisionally,
+        // so a call that has resolved since is rewritten along with everything
+        // after it.
         //
         // Open blocks are captured across the whole transcript, not just the part
         // being kept: the replaced events come back in the same order, so their
@@ -1363,6 +1424,11 @@ async function poll() {
         restoreBlocks(open);
       }
     }
+
+    // Where this page's copy goes provisional from here on. Everything from
+    // `from` upward has just been redrawn, so the server's boundary is also this
+    // page's.
+    settledFloor = d.settled;
 
     // The message reached the transcript, so the field can let go of it.
     if (clearWhenLanded !== null && d.count > clearWhenLanded) {
