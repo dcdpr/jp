@@ -15,24 +15,37 @@ const MAX_EXPANDED_BYTES: usize = 100_000;
 
 pub(crate) async fn cargo_expand(
     root: &Utf8Path,
+    profile: Option<&str>,
     item: String,
     package: Option<String>,
     checksum_freshness: bool,
 ) -> ToolResult {
-    cargo_expand_impl(root, &item, package, checksum_freshness, &DuctProcessRunner)
+    cargo_expand_impl(
+        root,
+        profile,
+        &item,
+        package,
+        checksum_freshness,
+        &DuctProcessRunner,
+    )
 }
 
 fn cargo_expand_impl<R: ProcessRunner>(
     root: &Utf8Path,
+    profile: Option<&str>,
     item: &str,
     package: Option<String>,
     checksum_freshness: bool,
     runner: &R,
 ) -> ToolResult {
     let package = package.map(|v| format!("--package={v}"));
+    let profile_arg = profile.map(|name| format!("--profile={name}"));
     let mut args = vec!["--quiet", "expand", "--color=never"];
     if let Some(package) = package.as_deref() {
         args.push(package);
+    }
+    if let Some(profile) = profile_arg.as_deref() {
+        args.push(profile);
     }
     args.push(item);
 

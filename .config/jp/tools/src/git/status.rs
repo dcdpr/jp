@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8Path;
 use serde_json::{Map, Value};
 
 use super::env_from_options;
@@ -25,9 +25,9 @@ struct StatusEntry {
     path: String,
 }
 
-pub(crate) async fn git_status(root: Utf8PathBuf, options: &Map<String, Value>) -> ToolResult {
+pub(crate) async fn git_status(root: &Utf8Path, options: &Map<String, Value>) -> ToolResult {
     let env = env_from_options(options);
-    git_status_impl(&root, &DuctProcessRunner, &env)
+    git_status_impl(root, &DuctProcessRunner, &env)
 }
 
 fn git_status_impl<R: ProcessRunner>(

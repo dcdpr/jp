@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
-use jp_tool::{Context, Outcome, Question};
+use camino::Utf8Path;
+use jp_tool::{Action, Outcome, Question};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 
@@ -20,17 +21,19 @@ pub struct PatchTarget {
 }
 
 pub(crate) async fn git_stage_patch(
-    ctx: Context,
+    root: &Utf8Path,
+    action: &Action,
     answers: &Map<String, Value>,
     patches: OneOrMany<PatchTarget>,
     options: &Map<String, Value>,
 ) -> ToolResult {
     let env = super::env_from_options(options);
-    git_stage_patch_impl(&ctx, answers, &patches, &DuctProcessRunner, &env)
+    git_stage_patch_impl(root, action, answers, &patches, &DuctProcessRunner, &env)
 }
 
 fn git_stage_patch_impl<R: ProcessRunner>(
-    ctx: &Context,
+    root: &Utf8Path,
+    action: &Action,
     answers: &Map<String, Value>,
     patches: &[PatchTarget],
     runner: &R,
@@ -41,7 +44,7 @@ fn git_stage_patch_impl<R: ProcessRunner>(
     let mut errors: Vec<String> = vec![];
 
     for target in patches {
-        match build_file_patch(ctx, &target.path, &target.ids, runner, env) {
+        match build_file_patch(root, &target.path, &target.ids, runner, env) {
             Ok(patch) => built.push((&target.path, patch)),
             Err(error) => errors.push(format!("{}: {error}", target.path)),
         }
@@ -58,7 +61,7 @@ fn git_stage_patch_impl<R: ProcessRunner>(
         .collect::<Vec<_>>()
         .join("\n");
 
-    if ctx.action.is_format_arguments() {
+    if action.is_format_arguments() {
         return Ok(combined.into());
     }
 
@@ -82,7 +85,7 @@ fn git_stage_patch_impl<R: ProcessRunner>(
     let mut staged: Vec<&str> = vec![];
 
     for (path, patch) in &built {
-        match apply_patch_to_index(patch, &ctx.root, runner, env) {
+        match apply_patch_to_index(patch, root, runner, env) {
             Ok(()) => staged.push(path),
             Err(error) => errors.push(format!("{path}: {error}")),
         }
@@ -106,7 +109,7 @@ fn git_stage_patch_impl<R: ProcessRunner>(
 }
 
 fn build_file_patch<R: ProcessRunner>(
-    ctx: &Context,
+    root: &Utf8Path,
     path: &str,
     requested_ids: &[String],
     runner: &R,
@@ -119,7 +122,7 @@ fn build_file_patch<R: ProcessRunner>(
         stdout,
         stderr,
         status,
-    } = runner.run_with_env("git", &["ls-files", "--", path], &ctx.root, env)?;
+    } = runner.run_with_env("git", &["ls-files", "--", path], root, env)?;
 
     if !status.is_success() {
         return Err(format!("Failed to check tracking status: {stderr}").into());
@@ -141,14 +144,14 @@ fn build_file_patch<R: ProcessRunner>(
                 "/dev/null",
                 path,
             ],
-            &ctx.root,
+            root,
             env,
         )?
     } else {
         runner.run_with_env(
             "git",
             &["diff-files", "-p", "--minimal", "--unified=0", "--", path],
-            &ctx.root,
+            root,
             env,
         )?
     };
