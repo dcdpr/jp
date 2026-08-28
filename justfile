@@ -1359,6 +1359,11 @@ rfd-supersede NNN MMM:
     ' "$new_file" > "${new_file}.tmp"
     mv "${new_file}.tmp" "$new_file"
 
+    # The superseded RFD is no longer work to prioritise; the replacement
+    # carries it. Whether MMM belongs on the board is a call for whoever
+    # reorders it, so only the old id is dropped.
+    just _rfd-priority-remove "$old_num"
+
     echo "${old_file}: Superseded by RFD ${new_num}"
     echo "${new_file}: Supersedes RFD ${old_num}"
 
@@ -2047,6 +2052,10 @@ rfd-promote NNN: _install-jp _install-comfort _install-ticket
             done
         fi
 
+        # The board ranks open work; this RFD is done. Drop it so `rfd-list`
+        # and the web board stop counting it as planned.
+        just _rfd-priority-remove "$rfd_id"
+
         echo "${file}: Accepted -> Implemented"
     fi
 
@@ -2281,18 +2290,88 @@ _rfd-priority-rewrite OLD NEW:
         | .backlog = ((.backlog // []) | sub_id)
     ' "$priority_file" > "${priority_file}.tmp" && mv "${priority_file}.tmp" "$priority_file"
 
+# Internal: drop RFD ids from the priority board.
+#
+# IDS are canonical ids (`045`, `D12`), space-separated. Each is removed from
+# every list that can hold it: the `planned` milestone groups, `backlog`, and
+# the legacy flat `order`. Ids the board doesn't mention are ignored, so this is
+# safe to call unconditionally. A missing board file is a no-op.
+[private]
+_rfd-priority-remove +IDS:
+    #!/usr/bin/env sh
+    set -eu
+
+    priority_file="docs/rfd/.priority.json"
+    [ -f "$priority_file" ] || exit 0
+    ids=$(printf '%s\n' {{IDS}})
+    jq --arg ids "$ids" '
+        ($ids | split("\n") | map(select(. != ""))) as $drop
+        | def prune: map(select(. as $id | ($drop | index($id)) == null));
+        (if .planned then .planned |= map(.ids |= prune) else . end)
+        | (if .order then .order |= prune else . end)
+        | .backlog = ((.backlog // []) | prune)
+    ' "$priority_file" > "${priority_file}.tmp" && mv "${priority_file}.tmp" "$priority_file"
+
+# Drop terminal RFDs from the priority board.
+#
+# The board ranks work that is still open, so an Implemented, Superseded, or
+# Abandoned RFD has no place on it and the docs build rejects one that lingers.
+# `rfd-promote`, `rfd-abandon`, and `rfd-supersede` prune the id as they change
+# the status; this recipe is the repair path for a status edited by hand.
+[group('rfd')]
+rfd-board-prune:
+    #!/usr/bin/env sh
+    set -eu
+
+    priority_file="docs/rfd/.priority.json"
+    if [ ! -f "$priority_file" ]; then
+        echo "No priority board at ${priority_file}; nothing to prune."
+        exit 0
+    fi
+
+    # Both id spaces: the board ranks published RFDs and drafts alike, and a
+    # draft can be abandoned.
+    stale=""
+    for file in docs/rfd/[0-9][0-9][0-9]-*.md docs/rfd/drafts/D[0-9][0-9]-*.md; do
+        [ -f "$file" ] || continue
+        basename_f=$(basename "$file")
+        case "$basename_f" in 000-*) continue ;; esac
+
+        status=$(sed -n 's/^- \*\*Status\*\*: \([A-Za-z]*\).*/\1/p' "$file" | head -1)
+        case "$status" in
+            Implemented|Superseded|Abandoned) ;;
+            *) continue ;;
+        esac
+
+        num=${basename_f%%-*}
+        if jq -e --arg n "$num" \
+                '[.planned[]?.ids[]?, .order[]?, .backlog[]?] | index($n) != null' \
+                "$priority_file" > /dev/null; then
+            stale="${stale} ${num}"
+        fi
+    done
+
+    if [ -z "$stale" ]; then
+        echo "Priority board is clean."
+        exit 0
+    fi
+
+    just _rfd-priority-remove $stale
+    echo "Pruned from the priority board:${stale}"
+
 # Mark an RFD as abandoned with the given reason.
+#
+# Accepts: a permanent number (41, 041) or a draft ID (D01). A draft the author
+# has decided not to pursue can be abandoned when the rationale is worth keeping
+# as a record, or simply deleted when it isn't (see RFD 001).
 [group('rfd')]
 rfd-abandon NNN +REASON:
     #!/usr/bin/env sh
     set -eu
 
-    n=$(echo "{{NNN}}" | sed 's/^0*//')
-    num=$(printf "%03d" "${n:-0}")
-    file=$(ls docs/rfd/${num}-*.md 2>/dev/null | head -1)
-    if [ -z "$file" ]; then
-        echo "No RFD found with number ${num}." >&2; exit 1
-    fi
+    out=$(just _rfd-resolve "{{NNN}}") || exit 1
+    rfd_id="${out%% *}"
+    file="${out#* }"
 
     current=$(sed -n 's/^- \*\*Status\*\*: \([A-Za-z]*\).*/\1/p' "$file" | head -1)
     case "$current" in
@@ -2309,6 +2388,9 @@ rfd-abandon NNN +REASON:
         { print }
     ' "$file" > "${file}.tmp"
     mv "${file}.tmp" "$file"
+
+    # An abandoned RFD is no longer work to prioritise.
+    just _rfd-priority-remove "$rfd_id"
 
     # Remind the user to close the tracking issue if one exists.
     tracking=$(sed -n 's/^- \*\*Tracking Issue\*\*: \[#\([0-9]*\)\].*/\1/p' "$file" | head -1)
@@ -2328,7 +2410,7 @@ rfd-abandon NNN +REASON:
         for r in $(echo "$required_by_line" | grep -oE 'RFD (D[0-9]+|[0-9]{3})' | awk '{print $2}'); do
             echo "  RFD ${r}" >&2
         done
-        echo "Their dependency on RFD ${num} is now broken — review and update." >&2
+        echo "Their dependency on RFD ${rfd_id} is now broken — review and update." >&2
     fi
 
 # Generate or update AI summaries for RFD documents.
