@@ -854,17 +854,24 @@ fn is_tool_result_message(msg: &types::Message) -> bool {
 /// On the next request rebuild, [`convert_event`] will fall through to the
 /// `<think>` tag path for events that no longer carry a signature.
 ///
-/// A block anywhere in the final assistant turn downgrades every thinking and
-/// redacted-thinking block in the message holding it.
-/// Anthropic treats that whole turn as one assistant message and requires its
+/// A rejected block downgrades every thinking and redacted-thinking block in
+/// the whole assistant turn holding it.
+/// Anthropic treats that turn as one assistant message and requires its
 /// thinking blocks back exactly as generated, so rewriting a subset is rejected
-/// with `thinking blocks ... cannot be modified`; rewriting all of a message's
-/// blocks leaves text and tool use, which the API accepts.
-/// Blocks in earlier turns are downgraded individually, keeping the rest of
-/// their reasoning native.
+/// with `thinking blocks ... cannot be modified`; rewriting all of them leaves
+/// text and tool use, which the API accepts.
 ///
-/// When the error carries no usable position, [`fallback_thinking_block`] picks
-/// where to look based on `rejection`.
+/// This applies to any turn, not only the newest.
+/// Models that retain prior turns' thinking validate those turns too, so a
+/// partial rewrite anywhere is refused.
+/// The cost is the rest of that turn's reasoning, which buys a repair that
+/// converges in one round per broken turn instead of one round per message.
+///
+/// When the error carries no usable position — unparseable, unresolvable, or
+/// resolving into a turn with no native thinking — [`fallback_thinking_block`]
+/// picks where to look based on `rejection`.
+/// Both paths yield a turn, and the patch set is always that whole turn, so no
+/// route through this function can emit the partial rewrite the API refuses.
 ///
 /// Returns `None` if no thinking block can be located.
 fn build_thinking_patches(
@@ -873,39 +880,29 @@ fn build_thinking_patches(
     rejection: ThinkingRejection,
 ) -> Option<Vec<EventPatch>> {
     let api_position = parse_signature_error_position(error.message());
-    let (msg_idx, content_idx) = api_position
+    let msg_idx = api_position
         .and_then(|(turn, flat)| resolve_turn_position(&request.messages, turn, flat))
-        .or_else(|| fallback_thinking_block(request, rejection))?;
+        .map(|(msg_idx, _)| msg_idx)
+        // A position can resolve into a turn that holds no native thinking, if
+        // our turn model disagrees with the one the API reports against. Treat
+        // that like an unusable position rather than patching nothing.
+        .filter(|&msg_idx| !turn_thinking_blocks(request, msg_idx).is_empty())
+        .or_else(|| fallback_thinking_block(request, rejection).map(|(msg_idx, _)| msg_idx))?;
 
-    debug!(
-        ?api_position,
-        msg_idx, content_idx, "Located the thinking block rejected by the API."
-    );
-
-    let in_final_turn =
-        last_assistant_turn(&request.messages).is_some_and(|turn| turn.contains(&msg_idx));
-
-    let content_indices = if in_final_turn {
-        thinking_block_indices(request, msg_idx)
-    } else {
-        vec![content_idx]
-    };
-
-    let patches: Vec<EventPatch> = content_indices
+    let patches: Vec<EventPatch> = turn_thinking_blocks(request, msg_idx)
         .into_iter()
-        .filter_map(|idx| identify_thinking_block(request, msg_idx, idx))
+        .filter_map(|(mi, ci)| identify_thinking_block(request, mi, ci))
         .map(|(key, value)| thinking_patch(key, value))
         .collect();
 
-    if !patches.is_empty() {
-        return Some(patches);
-    }
+    debug!(
+        ?api_position,
+        msg_idx,
+        patches = patches.len(),
+        "Located the turn rejected by the API."
+    );
 
-    // The located position held no thinking block.
-    let (msg_idx, content_idx) = fallback_thinking_block(request, rejection)?;
-    let (key, value) = identify_thinking_block(request, msg_idx, content_idx)?;
-
-    Some(vec![thinking_patch(key, value)])
+    (!patches.is_empty()).then_some(patches)
 }
 
 /// Where to look for the offending thinking block when the error carries no
@@ -984,6 +981,48 @@ fn last_assistant_turn(messages: &[types::Message]) -> Option<RangeInclusive<usi
         .map_or(0, |idx| idx + 1);
 
     Some(start..=end)
+}
+
+/// Messages that make up the assistant turn containing `msg_idx`.
+///
+/// The turn begins right after the most recent user message before `msg_idx`
+/// that is not purely tool results, and ends just before the next such message
+/// (or at the end of the request).
+/// This is the span Anthropic reports as a single logical message in error
+/// positions, so it is also the unit a repair has to rewrite whole.
+fn assistant_turn_containing(messages: &[types::Message], msg_idx: usize) -> RangeInclusive<usize> {
+    let starts_turn =
+        |msg: &types::Message| msg.role == types::MessageRole::User && !is_tool_result_message(msg);
+
+    let start = messages[..msg_idx]
+        .iter()
+        .rposition(starts_turn)
+        .map_or(0, |idx| idx + 1);
+
+    let end = messages
+        .iter()
+        .enumerate()
+        .skip(msg_idx + 1)
+        .find(|(_, msg)| starts_turn(msg))
+        .map_or(messages.len(), |(idx, _)| idx)
+        .saturating_sub(1);
+
+    start..=end
+}
+
+/// Every thinking and redacted-thinking block in the assistant turn containing
+/// `msg_idx`, as `(msg_idx, content_idx)` pairs in request order.
+fn turn_thinking_blocks(
+    request: &types::CreateMessagesRequest,
+    msg_idx: usize,
+) -> Vec<(usize, usize)> {
+    assistant_turn_containing(&request.messages, msg_idx)
+        .flat_map(|mi| {
+            thinking_block_indices(request, mi)
+                .into_iter()
+                .map(move |ci| (mi, ci))
+        })
+        .collect()
 }
 
 /// Content indices of every thinking and redacted-thinking block in one
@@ -2278,6 +2317,12 @@ fn convert_event(
                 types::MessageContent::RedactedThinking { data }
             } else {
                 match response {
+                    // A signed-but-textless thinking block whose signature a
+                    // repair patch removed has nothing left to send. Drop it
+                    // rather than emit an empty `<think></think>` pair.
+                    ChatResponse::Reasoning { reasoning } if reasoning.trim().is_empty() => {
+                        return None;
+                    }
                     // Reasoning from other providers - wrap in <think> tags.
                     ChatResponse::Reasoning { reasoning } => think_tag_text(&reasoning),
                     ChatResponse::Message { message } => {
