@@ -1,3 +1,4 @@
+use camino::Utf8Path;
 use jp_tool::Capability;
 use serde_json::Value;
 
@@ -6,6 +7,7 @@ use crate::{
     util::{
         ToolResult, error,
         root::{CARGO_MANIFEST, configured_root, note_root, resolve_root},
+        runner::{DuctProcessRunner, ProcessOutput, ProcessRunner},
         unknown_tool,
     },
 };
@@ -58,6 +60,12 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
         Err(message) => return error(message),
     };
 
+    if root != ctx.root
+        && let Err(message) = ensure_workspace_root(&root, &DuctProcessRunner)
+    {
+        return error(message);
+    }
+
     // Cargo profile to build under, set via `options.profile`. A profile of its
     // own gives these tools their own directory under `target/`, which is the
     // only way to keep their artifacts, fingerprints and build lock apart from
@@ -74,6 +82,16 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
             ));
         }
     };
+
+    // `format` and `update` never compile, and `install_tools` builds through a
+    // recipe that pins its own profile. Accepting the option for them would
+    // promise a target directory of its own and hand back the shared one, which
+    // is the outcome the option exists to avoid.
+    if profile.is_some() && !matches!(subcommand, "check" | "expand" | "test") {
+        return error(format!(
+            "The `profile` tool option has no effect on `cargo_{subcommand}`."
+        ));
+    }
 
     let outcome = match subcommand {
         "check" => {
@@ -117,6 +135,69 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
     }
 
     note_root(outcome, &root, "cargo")
+}
+
+/// Refuse a redirected root that cargo treats as a member of a larger
+/// workspace.
+///
+/// The manifest check that precedes this one only proves a `Cargo.toml` is
+/// present, and a member has one too.
+/// Cargo resolves the workspace from that manifest, so a member root puts
+/// `cargo check` and `cargo test` on `--workspace`, `cargo fmt` on `--all`, and
+/// `cargo update` on the enclosing lockfile — reaching a project the caller
+/// never named and the access policy never covered.
+///
+/// # Errors
+///
+/// Returns an error naming both directories when they differ, and when cargo
+/// cannot resolve the workspace at all.
+fn ensure_workspace_root<R: ProcessRunner>(root: &Utf8Path, runner: &R) -> Result<(), String> {
+    // Cargo is asked rather than the manifest parsed, so this answer cannot
+    // drift from the one the build commands themselves will resolve.
+    let ProcessOutput {
+        stdout,
+        stderr,
+        status,
+    } = runner
+        .run(
+            "cargo",
+            &[
+                "locate-project",
+                "--workspace",
+                "--message-format=plain",
+                "--manifest-path",
+                root.join("Cargo.toml").as_str(),
+            ],
+            root,
+        )
+        .map_err(|error| format!("Could not resolve the cargo workspace of `{root}`: {error}"))?;
+
+    if !status.is_success() {
+        return Err(format!(
+            "The `root` option resolved to `{root}`, whose cargo workspace could not be resolved: \
+             {}",
+            stderr.trim()
+        ));
+    }
+
+    let located = Utf8Path::new(stdout.trim());
+    let workspace = located.parent().unwrap_or(located);
+    // `root` arrives canonicalized, so the comparison only holds if this side is
+    // too. A path cargo reports for a directory that has since gone is left as
+    // printed, and fails the comparison below.
+    let workspace = workspace
+        .canonicalize_utf8()
+        .unwrap_or_else(|_| workspace.to_owned());
+
+    if workspace == root {
+        return Ok(());
+    }
+
+    Err(format!(
+        "The `root` option resolved to `{root}`, which is a member of the cargo workspace at \
+         `{workspace}`. Cargo would operate on that workspace instead. Name the workspace root, \
+         and scope the command with the `package` argument."
+    ))
 }
 
 /// Capabilities a cargo subcommand needs on the directory it runs in.

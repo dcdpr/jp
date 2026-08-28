@@ -6,8 +6,11 @@ use jp_tool::{AccessPolicy, Action, Capability, Context, FsRule, Outcome};
 use pretty_assertions::assert_eq;
 use serde_json::{Map, json};
 
-use super::{Tool, required_capabilities, run};
-use crate::util::root::{CARGO_MANIFEST, resolve_root};
+use super::{Tool, ensure_workspace_root, required_capabilities, run};
+use crate::util::{
+    root::{CARGO_MANIFEST, resolve_root},
+    runner::MockProcessRunner,
+};
 
 /// Create `relative` under `root` as a cargo package.
 ///
@@ -103,6 +106,102 @@ fn building_subcommands_declare_every_capability() {
             );
         }
     }
+}
+
+/// Build a runner that answers one `cargo locate-project` for `root` with
+/// `workspace` as the manifest it resolves to.
+fn locate_project(root: &Utf8Path, workspace: &Utf8Path) -> MockProcessRunner {
+    MockProcessRunner::builder()
+        .expect("cargo")
+        .args(&[
+            "locate-project",
+            "--workspace",
+            "--message-format=plain",
+            "--manifest-path",
+            root.join("Cargo.toml").as_str(),
+        ])
+        .returns_success(format!("{}\n", workspace.join("Cargo.toml")))
+}
+
+/// A member has a manifest, so the marker check clears it, but cargo resolves
+/// the workspace from that manifest: `--workspace`, `--all` and the lockfile
+/// would all land on the enclosing project instead.
+#[test]
+fn a_workspace_member_is_refused() {
+    let dir = tempdir().unwrap();
+    let member = package_dir(dir.path(), "crates/game");
+    let workspace = dir.path().canonicalize_utf8().unwrap();
+
+    let runner = locate_project(&member, &workspace);
+
+    let error = ensure_workspace_root(&member, &runner).unwrap_err();
+
+    assert!(error.contains("crates/game"), "got: {error}");
+    assert!(error.contains(workspace.as_str()), "got: {error}");
+    assert!(
+        error.contains("member of the cargo workspace"),
+        "got: {error}"
+    );
+}
+
+#[test]
+fn a_workspace_root_is_accepted() {
+    let dir = tempdir().unwrap();
+    let root = dir.path().canonicalize_utf8().unwrap();
+    fs::write(root.join("Cargo.toml"), "[workspace]\n").unwrap();
+
+    let runner = locate_project(&root, &root);
+
+    ensure_workspace_root(&root, &runner).unwrap();
+}
+
+/// Falling through on a manifest cargo cannot read would hand the question back
+/// to the build command, which answers it by walking up.
+#[test]
+fn a_workspace_cargo_cannot_resolve_is_refused() {
+    let dir = tempdir().unwrap();
+    let root = dir.path().canonicalize_utf8().unwrap();
+
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_error("error: failed to parse manifest");
+
+    let error = ensure_workspace_root(&root, &runner).unwrap_err();
+
+    assert!(error.contains("failed to parse manifest"), "got: {error}");
+}
+
+/// `cargo_install_tools` builds through `just install-tools`, whose recipe pins
+/// its own profile, so the option cannot be honored there.
+/// Ignoring it would put the build back in the shared target directory —
+/// taking the lock and rewriting the fingerprints a concurrent build relies on
+/// — and report success.
+#[tokio::test]
+async fn a_profile_on_a_subcommand_that_cannot_use_it_fails_the_invocation() {
+    let dir = tempdir().unwrap();
+    let ctx = Context {
+        root: dir.path().to_owned(),
+        action: Action::Run,
+        access: None,
+        workspace_id: "test".into(),
+        conversation_id: "test".into(),
+    };
+    let tool = Tool {
+        name: "cargo_install_tools".to_owned(),
+        arguments: Map::new(),
+        answers: Map::new(),
+        options: Map::from_iter([("profile".to_owned(), json!("agent"))]),
+    };
+
+    // Returns before `just` is spawned, so no process fixture is needed.
+    let Outcome::Error { message, .. } = run(ctx, tool).await.unwrap() else {
+        panic!("expected an error outcome");
+    };
+
+    assert!(
+        message.contains("no effect on `cargo_install_tools`"),
+        "got: {message}"
+    );
 }
 
 /// `Tool::option_or` reports a malformed value as an absent one, which would

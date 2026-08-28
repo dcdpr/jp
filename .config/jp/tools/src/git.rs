@@ -182,20 +182,34 @@ fn required_capabilities(subcommand: &str) -> &'static [Capability] {
     }
 }
 
-/// Extract environment variables from the `env` tool option.
+/// Build the environment for a git subprocess.
 ///
-/// Returns a list of (key, value) pairs that should be passed to git
-/// subprocesses.
-/// This allows callers (e.g. integration tests) to inject env vars like
-/// `GIT_CONFIG_GLOBAL` to isolate git from host config.
+/// Starts from the defaults every git invocation gets, then appends the pairs
+/// in the `env` tool option, which lets a caller (an integration test injecting
+/// `GIT_CONFIG_GLOBAL` to isolate git from host config) both add variables and
+/// override a default: the runner applies the pairs in order, so a later entry
+/// wins.
 fn env_from_options(options: &Map<String, Value>) -> Vec<(&str, &str)> {
-    options
-        .get("env")
-        .and_then(Value::as_object)
-        .map(|m| {
-            m.iter()
-                .filter_map(|(k, v)| v.as_str().map(|s| (k.as_str(), s)))
-                .collect()
-        })
-        .unwrap_or_default()
+    // Reading commands refresh `.git/index` as they go, which takes a lock and
+    // rewrites the file — a write from a command declared read-only. Dropping
+    // the optional lock leaves the declaration honest. Commands that need a
+    // lock to do their job at all, `commit` and `apply`, still take one.
+    let mut env = vec![("GIT_OPTIONAL_LOCKS", "0")];
+
+    env.extend(
+        options
+            .get("env")
+            .and_then(Value::as_object)
+            .into_iter()
+            .flat_map(|m| {
+                m.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.as_str(), s)))
+            }),
+    );
+
+    env
 }
+
+#[cfg(test)]
+#[path = "git_tests.rs"]
+mod tests;
