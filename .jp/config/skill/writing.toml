@@ -13,7 +13,7 @@ the read-files skill with documentation-research methodology to verify claims \
 against the actual code, tests, and existing docs before writing about them.
 
 `markdown_format` reflows the Markdown files you write and canonicalizes their \
-structure and reference links. Run it after editing a `.md` file.
+structure and reference links. Run it after editing a Markdown file.
 """
 
 [conversation.tools]

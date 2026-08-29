@@ -65,6 +65,24 @@ fn explicit_paths_replace_the_workspace_scope() {
     assert_eq!(result.unwrap_content(), "No files to format.");
 }
 
+// An empty list is the caller selecting nothing, which must not widen into
+// the whole workspace the way an omitted `paths` does.
+#[test]
+fn an_empty_path_list_is_refused_without_running_comfort() {
+    let (_dir, ctx) = ctx();
+    let runner = MockProcessRunner::never_called();
+
+    let result = markdown_format_impl(&ctx, Some(paths(&[])), &runner).unwrap();
+    match result {
+        Outcome::Error { message, .. } => assert_eq!(
+            message,
+            "`paths` is empty. Name the files or directories to format, or omit `paths` entirely \
+             to format every Markdown file in the workspace."
+        ),
+        _ => panic!("Expected Outcome::Error, got: {result:?}"),
+    }
+}
+
 #[test]
 fn a_directory_is_passed_through_for_comfort_to_walk() {
     let (dir, ctx) = ctx();
@@ -165,6 +183,32 @@ fn comfort_failure_is_reported() {
         Outcome::Error { message, .. } => {
             assert_eq!(message, "comfort failed: comfort: parse error");
         }
+        _ => panic!("Expected Outcome::Error, got: {result:?}"),
+    }
+}
+
+// `comfort` writes each file as it goes, so a mid-run failure leaves the
+// files it already reported on disk. Dropping that list reports the failure
+// as though nothing had changed.
+#[test]
+fn a_failure_names_the_files_already_reformatted() {
+    let (_dir, ctx) = ctx();
+    let stdout = format!("{root}/docs/usage.md\n{root}/README.md\n", root = ctx.root);
+    let runner = MockProcessRunner::builder()
+        .expect("comfort")
+        .returns(ProcessOutput {
+            stdout,
+            stderr: "comfort: failed to read docs/broken.md".to_owned(),
+            status: ExitCode::from_code(1),
+        });
+
+    let result = markdown_format_impl(&ctx, None, &runner).unwrap();
+    match result {
+        Outcome::Error { message, .. } => assert_eq!(
+            message,
+            "comfort failed: comfort: failed to read docs/broken.md\n\nAlready reformatted before \
+             the failure:\n- README.md\n- docs/usage.md"
+        ),
         _ => panic!("Expected Outcome::Error, got: {result:?}"),
     }
 }

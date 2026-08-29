@@ -9,8 +9,9 @@ description = """
 Runs `comfort` over Markdown files with the same flags CI enforces, so a \
 formatted file is one CI accepts.
 
-This covers `.md` files only — RFDs, tickets, READMEs, the docs site. Markdown \
-inside Rust doc comments is `cargo_format`'s job.
+This covers standalone Markdown files (`.md` and `.markdown`) — RFDs, tickets, \
+READMEs, the docs site. Markdown inside Rust doc comments is `cargo_format`'s \
+job.
 """
 
 examples = """

@@ -1,7 +1,7 @@
 //! The `markdown_format` tool: reflow standalone Markdown files with `comfort`.
 //!
-//! Covers the `.md` files that live outside Rust sources — RFDs, tickets,
-//! READMEs, the docs site.
+//! Covers the standalone Markdown files (`.md` and `.markdown`) that live
+//! outside Rust sources — RFDs, tickets, READMEs, the docs site.
 //! Doc comments inside `.rs` files are `cargo_format`'s territory.
 //!
 //! The `comfort` flags match the `fmt-markdown-ci` recipe in the justfile, so a
@@ -21,7 +21,7 @@ use crate::{
     },
 };
 
-/// Cap for the formatted-file listing embedded in a tool result.
+/// Cap for each chunk of `comfort` output embedded in a tool result.
 ///
 /// A workspace-wide run after a broad edit can touch hundreds of files, and the
 /// head of the list is what the reader needs.
@@ -47,9 +47,21 @@ fn markdown_format_impl<R: ProcessRunner>(
     paths: Option<OneOrMany<String>>,
     runner: &R,
 ) -> ToolResult {
-    let selected = match select_paths(ctx, paths.unwrap_or_default().as_slice()) {
-        Ok(selected) => selected,
-        Err(message) => return error(message),
+    // An omitted `paths` means the whole workspace; an empty list means the
+    // caller selected nothing, and silently widening that to every Markdown
+    // file in the workspace rewrites files nobody asked about.
+    let selected = match paths {
+        None => vec![],
+        Some(paths) if paths.as_slice().is_empty() => {
+            return error(
+                "`paths` is empty. Name the files or directories to format, or omit `paths` \
+                 entirely to format every Markdown file in the workspace.",
+            );
+        }
+        Some(paths) => match select_paths(ctx, paths.as_slice()) {
+            Ok(selected) => selected,
+            Err(message) => return error(message),
+        },
     };
 
     let mut args = vec![
@@ -72,44 +84,50 @@ fn markdown_format_impl<R: ProcessRunner>(
         status,
     } = runner.run("comfort", &args, &ctx.root)?;
 
+    let changed = changed_files(&stdout, ctx.root.as_str());
+
     if !status.is_success() {
-        return error(format!(
-            "comfort failed: {}",
-            truncate(&stderr, MAX_LISTING_BYTES)
-        ));
-    }
-
-    // Workspace runs report absolute paths; strip the root so the listing reads
-    // the way the rest of the tools spell a path.
-    let mut files: BTreeSet<String> = BTreeSet::new();
-    for line in stdout.lines() {
-        let trimmed = line.trim();
-        if !trimmed.is_empty() {
-            files.insert(
-                trimmed
-                    .trim_start_matches(ctx.root.as_str())
-                    .trim_start_matches('/')
-                    .to_owned(),
-            );
+        let mut message = format!("comfort failed: {}", truncate(&stderr, MAX_LISTING_BYTES));
+        if !changed.is_empty() {
+            // `comfort` writes each file as it goes, so whatever it reported
+            // before it stopped is already on disk.
+            message.push_str("\n\nAlready reformatted before the failure:\n- ");
+            message.push_str(&truncate(&changed.join("\n- "), MAX_LISTING_BYTES));
         }
+        return error(message);
     }
 
-    if files.is_empty() {
+    if changed.is_empty() {
         Ok("No files to format.".into())
     } else {
-        let listing = files.into_iter().collect::<Vec<_>>().join("\n- ");
         Ok(format!(
             "Formatted files:\n- {}",
-            truncate(&listing, MAX_LISTING_BYTES)
+            truncate(&changed.join("\n- "), MAX_LISTING_BYTES)
         )
         .into())
     }
 }
 
-/// Validate each requested path and return its workspace-relative form.
+/// The files `comfort` reported as changed, deduplicated and sorted.
 ///
-/// An empty request yields an empty selection, which the caller turns into a
-/// whole-workspace run.
+/// Workspace runs report absolute paths; the root is stripped so the listing
+/// reads the way the rest of the tools spell a path.
+fn changed_files(stdout: &str, root: &str) -> Vec<String> {
+    stdout
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(|line| {
+            line.trim_start_matches(root)
+                .trim_start_matches('/')
+                .to_owned()
+        })
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+/// Validate each requested path and return its workspace-relative form.
 ///
 /// `comfort` walks a directory and filters it down to Markdown extensions, but
 /// takes a named file as-is whatever its extension — so a file that isn't
