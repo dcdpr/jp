@@ -45,6 +45,7 @@ struct TestFailure {
 pub(crate) async fn cargo_test(
     root: &Utf8Path,
     rustflags: &str,
+    profile: Option<&str>,
     package: Option<String>,
     testname: Option<String>,
     backtrace: Option<bool>,
@@ -53,6 +54,7 @@ pub(crate) async fn cargo_test(
     cargo_test_impl(
         root,
         rustflags,
+        profile,
         package,
         testname,
         backtrace.unwrap_or(false),
@@ -64,6 +66,7 @@ pub(crate) async fn cargo_test(
 fn cargo_test_impl<R: ProcessRunner>(
     root: &Utf8Path,
     rustflags: &str,
+    profile: Option<&str>,
     package: Option<String>,
     testname: Option<String>,
     backtrace: bool,
@@ -72,6 +75,8 @@ fn cargo_test_impl<R: ProcessRunner>(
 ) -> ToolResult {
     let test_name = testname.unwrap_or_default();
     let package = package.map_or("--workspace".to_owned(), |v| format!("--package={v}"));
+    // `--profile` selects a nextest profile; the cargo one has its own flag.
+    let profile_arg = profile.map(|name| format!("--cargo-profile={name}"));
 
     let mut env = vec![
         ("NEXTEST_EXPERIMENTAL_LIBTEST_JSON", "1"),
@@ -86,27 +91,28 @@ fn cargo_test_impl<R: ProcessRunner>(
         env.push(("CARGO_UNSTABLE_CHECKSUM_FRESHNESS", "true"));
     }
 
-    let ProcessOutput { stdout, stderr, .. } = runner.run_with_env(
-        "cargo",
-        &[
-            "nextest",
-            "run",
-            &package,
-            // Once to still print any compilation errors.
-            "--cargo-quiet",
-            // Run all tests, even if one fails.
-            "--no-fail-fast",
-            // Dense output for better LLM readability.
-            "--hide-progress-bar",
-            "--final-status-level=none",
-            "--status-level=fail",
-            // JSON output to be parsed by the tool.
-            "--message-format=libtest-json-plus",
-            &test_name,
-        ],
-        root,
-        &env,
-    )?;
+    let mut args = vec![
+        "nextest",
+        "run",
+        package.as_str(),
+        // Once to still print any compilation errors.
+        "--cargo-quiet",
+        // Run all tests, even if one fails.
+        "--no-fail-fast",
+        // Dense output for better LLM readability.
+        "--hide-progress-bar",
+        "--final-status-level=none",
+        "--status-level=fail",
+        // JSON output to be parsed by the tool.
+        "--message-format=libtest-json-plus",
+    ];
+    if let Some(profile) = profile_arg.as_deref() {
+        args.push(profile);
+    }
+    // The filter is positional, so it stays last.
+    args.push(&test_name);
+
+    let ProcessOutput { stdout, stderr, .. } = runner.run_with_env("cargo", &args, root, &env)?;
 
     let mut total_tests = 0;
     let mut ran_tests = 0;

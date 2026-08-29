@@ -30,12 +30,18 @@ pub trait PromptBackend: Send + Sync {
     /// open the external editor; pass `false` to present an inline-only widget.
     /// `output` is the owned stream the widget renders to (the caller's
     /// `/dev/tty` target).
+    ///
+    /// `help` is extra guidance for the task at hand, shown after the widget's
+    /// own key hints rather than instead of them.
+    /// The keys belong to the widget, so it is the widget's business to
+    /// advertise them and no caller's business to remember to.
     fn inline_reply(
         &self,
         message: &str,
         initial_text: &str,
         edit_mode: ReplyEditMode,
         editor_escape: bool,
+        help: Option<&str>,
         output: Box<dyn Write + Send>,
     ) -> Result<ReplyOutcome, InquireError>;
 
@@ -55,6 +61,9 @@ pub trait PromptBackend: Send + Sync {
         default: Option<usize>,
         writer: &mut dyn Write,
     ) -> Result<String, InquireError>;
+
+    /// Display a single-line no-echo input prompt for a secret value.
+    fn password(&self, message: &str, writer: &mut dyn Write) -> Result<String, InquireError>;
 }
 
 /// Blanket impl for references, enabling `&dyn PromptBackend` to work.
@@ -75,9 +84,17 @@ impl<P: PromptBackend + ?Sized> PromptBackend for &P {
         initial_text: &str,
         edit_mode: ReplyEditMode,
         editor_escape: bool,
+        help: Option<&str>,
         output: Box<dyn Write + Send>,
     ) -> Result<ReplyOutcome, InquireError> {
-        (*self).inline_reply(message, initial_text, edit_mode, editor_escape, output)
+        (*self).inline_reply(
+            message,
+            initial_text,
+            edit_mode,
+            editor_escape,
+            help,
+            output,
+        )
     }
 
     fn text(
@@ -97,6 +114,10 @@ impl<P: PromptBackend + ?Sized> PromptBackend for &P {
         writer: &mut dyn Write,
     ) -> Result<String, InquireError> {
         (*self).select(message, options, default, writer)
+    }
+
+    fn password(&self, message: &str, writer: &mut dyn Write) -> Result<String, InquireError> {
+        (*self).password(message, writer)
     }
 }
 
@@ -125,13 +146,24 @@ impl PromptBackend for TerminalPromptBackend {
         initial_text: &str,
         edit_mode: ReplyEditMode,
         editor_escape: bool,
+        help: Option<&str>,
         output: Box<dyn Write + Send>,
     ) -> Result<ReplyOutcome, InquireError> {
-        let help = if editor_escape {
+        let keys = if editor_escape {
             "Enter to send · Alt+Enter for newline · Ctrl+X to edit in $EDITOR"
         } else {
             "Enter to send · Alt+Enter for newline"
         };
+
+        // The caller's guidance first, since it says what to write; the keys
+        // after, since they say how. Appended rather than substituted: a caller
+        // with something to add must not silently cost the reader the only
+        // description of the keys the widget responds to.
+        let help = match help {
+            Some(extra) => format!("{extra} · {keys}"),
+            None => keys.to_owned(),
+        };
+
         InlineReply::new(message)
             .with_initial_text(initial_text)
             .with_edit_mode(edit_mode)
@@ -166,6 +198,12 @@ impl PromptBackend for TerminalPromptBackend {
         }
         prompt.prompt_with_writer(writer)
     }
+
+    fn password(&self, message: &str, writer: &mut dyn Write) -> Result<String, InquireError> {
+        inquire::Password::new(message)
+            .without_confirmation()
+            .prompt_with_writer(writer)
+    }
 }
 
 /// Mock prompt backend for testing.
@@ -180,6 +218,7 @@ pub struct MockPromptBackend {
     reply_outcomes: Mutex<VecDeque<ReplyOutcome>>,
     text_responses: Mutex<VecDeque<String>>,
     select_responses: Mutex<VecDeque<String>>,
+    password_responses: Mutex<VecDeque<String>>,
 }
 
 impl MockPromptBackend {
@@ -223,6 +262,15 @@ impl MockPromptBackend {
         *self.select_responses.lock() = responses.into_iter().map(Into::into).collect();
         self
     }
+
+    #[must_use]
+    pub fn with_password_responses(
+        self,
+        responses: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        *self.password_responses.lock() = responses.into_iter().map(Into::into).collect();
+        self
+    }
 }
 
 impl PromptBackend for MockPromptBackend {
@@ -245,6 +293,7 @@ impl PromptBackend for MockPromptBackend {
         _initial_text: &str,
         _edit_mode: ReplyEditMode,
         _editor_escape: bool,
+        _help: Option<&str>,
         _output: Box<dyn Write + Send>,
     ) -> Result<ReplyOutcome, InquireError> {
         self.reply_outcomes
@@ -273,6 +322,13 @@ impl PromptBackend for MockPromptBackend {
         _writer: &mut dyn Write,
     ) -> Result<String, InquireError> {
         self.select_responses
+            .lock()
+            .pop_front()
+            .ok_or(InquireError::OperationCanceled)
+    }
+
+    fn password(&self, _message: &str, _writer: &mut dyn Write) -> Result<String, InquireError> {
+        self.password_responses
             .lock()
             .pop_front()
             .ok_or(InquireError::OperationCanceled)

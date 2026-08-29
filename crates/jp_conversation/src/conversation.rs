@@ -1,6 +1,6 @@
 //! Defines the Conversation structure.
 
-use std::{collections::BTreeMap, fmt, str::FromStr};
+use std::{fmt, str::FromStr};
 
 use chrono::{DateTime, Utc};
 use jp_id::{
@@ -9,7 +9,10 @@ use jp_id::{
 };
 use serde::{Deserialize, Serialize};
 
-use crate::error::{Error, Result};
+use crate::{
+    error::{Error, Result},
+    labels::Labels,
+};
 
 /// A sequence of events between the user and LLM.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -73,9 +76,10 @@ pub struct Conversation {
     /// Labels are set from the CLI (`--label`) or produced from the
     /// `conversation.labels` config rules, and are used to find conversations
     /// by the context they were created in.
-    /// Keys match `[A-Za-z0-9_-]+`; a bare label is stored with an empty value.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub labels: BTreeMap<String, String>,
+    /// Keys match `[A-Za-z0-9_-]+`; a key holds a set of values, and a bare
+    /// label is stored as the empty value.
+    #[serde(default, skip_serializing_if = "Labels::is_empty")]
+    pub labels: Labels,
 
     /// The time of the last event, or `None` if the conversation is empty.
     #[serde(skip)]
@@ -94,7 +98,7 @@ impl Default for Conversation {
             pinned_at: None,
             archived_at: None,
             expires_at: None,
-            labels: BTreeMap::new(),
+            labels: Labels::default(),
             last_event_at: None,
             events_count: 0,
         }

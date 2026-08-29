@@ -12,7 +12,7 @@ fn request_config(stream_idle_timeout_secs: u32) -> RequestConfig {
         base_backoff_ms: 1000,
         max_backoff_secs: 60,
         stream_idle_timeout_secs,
-        max_response_bytes: 1_048_576,
+        max_response_bytes: MaxResponseBytes::default(),
         cache: CachePolicy::default(),
     }
 }
@@ -55,13 +55,93 @@ fn test_request_config_assign() {
 
     let kv = KvAssignment::try_from_cli("max_response_bytes", "4096").unwrap();
     p.assign(kv).unwrap();
-    assert_eq!(p.max_response_bytes, Some(4096));
+    assert_eq!(p.max_response_bytes, Some(MaxResponseBytes::Bytes(4096)));
 
-    // `0` is the documented way to disable the ceiling, so it must survive
-    // assignment rather than being treated as "unset".
+    let kv = KvAssignment::try_from_cli("max_response_bytes", "disabled").unwrap();
+    p.assign(kv).unwrap();
+    assert_eq!(p.max_response_bytes, Some(MaxResponseBytes::Disabled));
+
+    // `0` disables the ceiling, matching the sibling settings that spell "off"
+    // that way.
     let kv = KvAssignment::try_from_cli("max_response_bytes", "0").unwrap();
     p.assign(kv).unwrap();
-    assert_eq!(p.max_response_bytes, Some(0));
+    assert_eq!(p.max_response_bytes, Some(MaxResponseBytes::Disabled));
+}
+
+/// Every documented spelling works through the JSON assignment path too.
+///
+/// `KEY=false` arrives as a string and parses via `FromStr`, but `KEY:=false`
+/// arrives as a JSON bool.
+/// Accepting only the former makes an advertised value depend on which
+/// assignment syntax the user reaches for.
+#[test]
+fn max_response_bytes_accepts_a_json_bool() {
+    let mut p = PartialRequestConfig::default();
+
+    let kv = KvAssignment::try_from_cli("max_response_bytes:", "false").unwrap();
+    p.assign(kv).unwrap();
+    assert_eq!(p.max_response_bytes, Some(MaxResponseBytes::Disabled));
+
+    let kv = KvAssignment::try_from_cli("max_response_bytes:", "true").unwrap();
+    p.assign(kv).unwrap();
+    assert_eq!(p.max_response_bytes, Some(MaxResponseBytes::default()));
+
+    // The number and string arms still work through the same helper.
+    let kv = KvAssignment::try_from_cli("max_response_bytes:", "4096").unwrap();
+    p.assign(kv).unwrap();
+    assert_eq!(p.max_response_bytes, Some(MaxResponseBytes::Bytes(4096)));
+
+    let kv = KvAssignment::try_from_cli("max_response_bytes:", "\"disabled\"").unwrap();
+    p.assign(kv).unwrap();
+    assert_eq!(p.max_response_bytes, Some(MaxResponseBytes::Disabled));
+}
+
+#[test]
+fn max_response_bytes_round_trips_through_json() {
+    for (value, expected) in [
+        ("4096", MaxResponseBytes::Bytes(4096)),
+        ("0", MaxResponseBytes::Disabled),
+        ("\"disabled\"", MaxResponseBytes::Disabled),
+        ("\"off\"", MaxResponseBytes::Disabled),
+        ("false", MaxResponseBytes::Disabled),
+    ] {
+        let parsed: MaxResponseBytes = serde_json::from_str(value).expect(value);
+        assert_eq!(parsed, expected, "parsing {value}");
+
+        // Re-serializing and re-parsing must land on the same value, so a
+        // stored conversation config keeps its meaning.
+        let encoded = serde_json::to_string(&parsed).expect("serializes");
+        let reparsed: MaxResponseBytes = serde_json::from_str(&encoded).expect(&encoded);
+        assert_eq!(reparsed, expected, "round-tripping {value} via {encoded}");
+    }
+}
+
+#[test]
+fn max_response_bytes_rejects_a_nonsense_value() {
+    let err = "banana".parse::<MaxResponseBytes>().unwrap_err();
+    assert!(err.contains("expected a byte count"), "got: {err}");
+}
+
+/// `0` disables the ceiling on every input path.
+///
+/// A zero-byte ceiling would abort every response before its first event, so no
+/// path may produce `Bytes(0)`.
+#[test]
+fn zero_disables_the_ceiling() {
+    assert_eq!(MaxResponseBytes::from_bytes(0), MaxResponseBytes::Disabled);
+    assert_eq!(
+        "0".parse::<MaxResponseBytes>().unwrap(),
+        MaxResponseBytes::Disabled
+    );
+    assert_eq!(
+        serde_json::from_str::<MaxResponseBytes>("0").unwrap(),
+        MaxResponseBytes::Disabled
+    );
+    assert_eq!(
+        MaxResponseBytes::from_bytes(0).bytes(),
+        None,
+        "a disabled ceiling never yields a zero byte limit"
+    );
 }
 
 #[test]

@@ -1,4 +1,4 @@
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8Path;
 use serde_json::{Map, Value};
 
 use crate::{
@@ -10,12 +10,12 @@ use crate::{
 };
 
 pub(crate) async fn git_commit(
-    root: Utf8PathBuf,
+    root: &Utf8Path,
     message: String,
     options: &Map<String, Value>,
 ) -> ToolResult {
     let env = super::env_from_options(options);
-    git_commit_impl(&root, &message, &DuctProcessRunner, &env)
+    git_commit_impl(root, &message, &DuctProcessRunner, &env)
 }
 
 fn git_commit_impl<R: ProcessRunner>(

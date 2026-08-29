@@ -14,13 +14,7 @@ fn id_for(hunk: &str) -> String {
 #[test]
 fn stage_single_file() {
     let dir = tempdir().unwrap();
-    let ctx = Context {
-        root: dir.path().to_owned(),
-        action: Action::Run,
-        access: None,
-        workspace_id: "test".into(),
-        conversation_id: "test".into(),
-    };
+    let root = dir.path();
 
     let mut answers = serde_json::Map::new();
     answers.insert("stage_changes".to_string(), json!(true));
@@ -52,7 +46,8 @@ fn stage_single_file() {
         ids: vec![id].into(),
     }];
 
-    let result = git_stage_patch_impl(&ctx, &answers, &patches, &runner, &[]).unwrap();
+    let result =
+        git_stage_patch_impl(root, &Action::Run, &answers, &patches, &runner, &[]).unwrap();
 
     assert_eq!(result.into_content().unwrap(), "Patch applied.");
 }
@@ -60,13 +55,7 @@ fn stage_single_file() {
 #[test]
 fn stage_non_last_hunk_of_multi_hunk_diff() {
     let dir = tempdir().unwrap();
-    let ctx = Context {
-        root: dir.path().to_owned(),
-        action: Action::Run,
-        access: None,
-        workspace_id: "test".into(),
-        conversation_id: "test".into(),
-    };
+    let root = dir.path();
 
     let mut answers = serde_json::Map::new();
     answers.insert("stage_changes".to_string(), json!(true));
@@ -94,20 +83,15 @@ fn stage_non_last_hunk_of_multi_hunk_diff() {
         ids: vec![id_for("@@ -1 +1 @@\n-aaa\n+AAA")].into(),
     }];
 
-    let result = git_stage_patch_impl(&ctx, &answers, &patches, &runner, &[]).unwrap();
+    let result =
+        git_stage_patch_impl(root, &Action::Run, &answers, &patches, &runner, &[]).unwrap();
     assert_eq!(result.into_content().unwrap(), "Patch applied.");
 }
 
 #[test]
 fn stale_id_is_rejected_with_helpful_message() {
     let dir = tempdir().unwrap();
-    let ctx = Context {
-        root: dir.path().to_owned(),
-        action: Action::Run,
-        access: None,
-        workspace_id: "test".into(),
-        conversation_id: "test".into(),
-    };
+    let root = dir.path();
 
     let mut answers = serde_json::Map::new();
     answers.insert("stage_changes".to_string(), json!(true));
@@ -127,7 +111,8 @@ fn stale_id_is_rejected_with_helpful_message() {
         ids: vec!["deadbeefcafe".to_string()].into(),
     }];
 
-    let err = git_stage_patch_impl(&ctx, &answers, &patches, &runner, &[]).unwrap_err();
+    let err =
+        git_stage_patch_impl(root, &Action::Run, &answers, &patches, &runner, &[]).unwrap_err();
     let msg = err.to_string();
     assert!(msg.contains("not found"), "got: {msg}");
     assert!(msg.contains("Re-run `git_list_patches`"), "got: {msg}");
@@ -137,13 +122,7 @@ fn stale_id_is_rejected_with_helpful_message() {
 #[test]
 fn partial_failure_stages_what_it_can() {
     let dir = tempdir().unwrap();
-    let ctx = Context {
-        root: dir.path().to_owned(),
-        action: Action::Run,
-        access: None,
-        workspace_id: "test".into(),
-        conversation_id: "test".into(),
-    };
+    let root = dir.path();
 
     let mut answers = serde_json::Map::new();
     answers.insert("stage_changes".to_string(), json!(true));
@@ -195,7 +174,8 @@ fn partial_failure_stages_what_it_can() {
         },
     ];
 
-    let result = git_stage_patch_impl(&ctx, &answers, &patches, &runner, &[]).unwrap();
+    let result =
+        git_stage_patch_impl(root, &Action::Run, &answers, &patches, &runner, &[]).unwrap();
     let content = result.into_content().unwrap();
 
     assert!(content.contains("Staged: good.rs"), "got: {content}");
@@ -208,13 +188,7 @@ fn ids_resolve_in_file_order_regardless_of_request_order() {
     // patch or `git apply` rejects it. Confirm this holds even when the
     // agent requests them in reverse order.
     let dir = tempdir().unwrap();
-    let ctx = Context {
-        root: dir.path().to_owned(),
-        action: Action::Run,
-        access: None,
-        workspace_id: "test".into(),
-        conversation_id: "test".into(),
-    };
+    let root = dir.path();
 
     let mut answers = serde_json::Map::new();
     answers.insert("stage_changes".to_string(), json!(true));
@@ -242,7 +216,8 @@ fn ids_resolve_in_file_order_regardless_of_request_order() {
         ids: vec![id_second, id_first].into(),
     }];
 
-    let result = git_stage_patch_impl(&ctx, &answers, &patches, &runner, &[]).unwrap();
+    let result =
+        git_stage_patch_impl(root, &Action::Run, &answers, &patches, &runner, &[]).unwrap();
     assert_eq!(result.into_content().unwrap(), "Patch applied.");
     // The mock will panic on drop if the apply call wasn't made — implies
     // the patch was assembled successfully in file order.

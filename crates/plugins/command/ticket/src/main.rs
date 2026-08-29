@@ -18,8 +18,8 @@ use chrono::{Local, SecondsFormat, Utc};
 use clap::{CommandFactory, Parser, Subcommand};
 use jp_github::models::issues::{Comment as IssueComment, Issue};
 use jp_plugin::message::{
-    DescribeResponse, ExitMessage, HostToPlugin, InitMessage, LogMessage, PluginToHost,
-    PrintMessage,
+    ComposeMode, ComposeOption, ComposeRequest, DescribeResponse, ExitMessage, HostToPlugin,
+    InitMessage, LogMessage, PluginToHost, PrintMessage,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -271,13 +271,17 @@ fn run(mut stdin: impl BufRead, mut stdout: impl Write) -> Result<(), String> {
         HostToPlugin::Describe => send_describe(&mut stdout),
         HostToPlugin::Init(init) => {
             send(&mut stdout, &PluginToHost::Ready)?;
-            handle_command(&init, &mut stdout)
+            handle_command(&init, &mut stdin, &mut stdout)
         }
         other => Err(format!("expected init or describe, got: {other:?}")),
     }
 }
 
-fn handle_command(init: &InitMessage, stdout: &mut impl Write) -> Result<(), String> {
+fn handle_command(
+    init: &InitMessage,
+    stdin: &mut impl BufRead,
+    stdout: &mut impl Write,
+) -> Result<(), String> {
     let parsed = Args::try_parse_from(
         std::iter::once("jp ticket".to_owned()).chain(with_show_alias(&init.args)),
     );
@@ -294,7 +298,10 @@ fn handle_command(init: &InitMessage, stdout: &mut impl Write) -> Result<(), Str
 
     let dir = resolve_dir(&init.workspace.root, args.dir.as_deref());
 
-    let command = args.command;
+    let command = match compose_missing(&dir, args.command, stdin, stdout) {
+        Ok(command) => command,
+        Err(message) => return send_exit(stdout, 1, Some(&message)),
+    };
 
     match execute(&dir, command, &init.config) {
         Ok(output) => {
@@ -317,12 +324,423 @@ fn handle_command(init: &InitMessage, stdout: &mut impl Write) -> Result<(), Str
     }
 }
 
+/// How composed text divides into a title and a body.
+#[derive(Debug, PartialEq, Eq)]
+enum Composition {
+    /// Nothing to file.
+    Empty,
+    /// One line: a title on its own.
+    Title(String),
+    /// A title, a blank line, and the rest.
+    TitleAndBody { title: String, body: String },
+    /// Prose that runs from the first line into the second, so all of it is
+    /// body and the title has to be asked for separately.
+    Body(String),
+}
+
+impl Composition {
+    /// Read composed text the way a commit message reads: subject, blank line,
+    /// then the rest.
+    ///
+    /// Text that runs straight on from the first line has no subject, so it is
+    /// all body.
+    /// Trailing blank lines never change the reading.
+    fn read(text: &str) -> Self {
+        let text = text.trim_end();
+        let mut lines = text.lines();
+
+        let Some(first) = lines.next().map(str::trim).filter(|line| !line.is_empty()) else {
+            return Self::Empty;
+        };
+
+        match lines.next() {
+            None => Self::Title(first.to_owned()),
+            Some(second) if !second.trim().is_empty() => Self::Body(text.to_owned()),
+            Some(_) => {
+                let body = lines.collect::<Vec<_>>().join("\n").trim().to_owned();
+                if body.is_empty() {
+                    Self::Title(first.to_owned())
+                } else {
+                    Self::TitleAndBody {
+                        title: first.to_owned(),
+                        body,
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Title used when the composed text is all body and the user names nothing.
+const UNTITLED: &str = "untitled";
+
+/// Ask the user for anything the command line didn't carry.
+///
+/// Composition runs through the host: the plugin's stdin is this protocol, so
+/// the host owns the terminal and the editor the `Ctrl+X` escape opens.
+fn compose_missing(
+    dir: &Utf8Path,
+    command: Command,
+    stdin: &mut impl BufRead,
+    stdout: &mut impl Write,
+) -> Result<Command, String> {
+    match command {
+        Command::Add {
+            kind,
+            title,
+            author,
+            body,
+            implements,
+        } if kind.is_none() || title.is_none() => {
+            // Kind first: it frames what you're about to write. The title is
+            // read out of the composed text, or asked for last.
+            let kind = match kind {
+                Some(kind) => kind,
+                None => pick_kind(stdin, stdout)?,
+            };
+            // A description given on the command line is a description, not a
+            // draft of the whole ticket. Composing from it would read its one
+            // line back as a title and file the ticket with no description at
+            // all, quietly turning an explicit `--body` into something else.
+            let (title, body) = match (title, body) {
+                (Some(title), body) => (title, body),
+                (None, Some(body)) => (ask_title(stdin, stdout)?, Some(body)),
+                (None, None) => compose_ticket(Some(kind), stdin, stdout)?,
+            };
+
+            Ok(Command::Add {
+                kind: Some(kind),
+                title: Some(title),
+                author,
+                body,
+                implements,
+            })
+        }
+
+        Command::Comment {
+            id: None,
+            author,
+            re,
+            body,
+        } => compose_missing(
+            dir,
+            Command::Comment {
+                id: Some(pick_ticket(dir, stdin, stdout, "Comment on", false)?),
+                author,
+                re,
+                body,
+            },
+            stdin,
+            stdout,
+        ),
+
+        // A comment has no title, so the whole buffer is its body.
+        Command::Comment {
+            id: Some(id),
+            author,
+            re,
+            body: None,
+        } => {
+            let body = compose(stdin, stdout, ComposeRequest {
+                id: None,
+                message: format!("Comment on {id}"),
+                mode: ComposeMode::Buffer { initial_text: None },
+                help: None,
+            })?;
+
+            Ok(Command::Comment {
+                id: Some(id),
+                author,
+                re,
+                body: Some(body),
+            })
+        }
+
+        // Closing offers only what is still open.
+        Command::Close { id: None } => Ok(Command::Close {
+            id: Some(pick_ticket(dir, stdin, stdout, "Close", true)?),
+        }),
+
+        Command::Show { id: None, json } => Ok(Command::Show {
+            id: Some(pick_ticket(dir, stdin, stdout, "Show", false)?),
+            json,
+        }),
+
+        Command::Edit {
+            id: None,
+            title,
+            body,
+            kind,
+            status,
+        } => Ok(Command::Edit {
+            id: Some(pick_ticket(dir, stdin, stdout, "Edit", false)?),
+            title,
+            body,
+            kind,
+            status,
+        }),
+
+        Command::Delete { id: None } => Ok(Command::Delete {
+            id: Some(pick_ticket(dir, stdin, stdout, "Delete", false)?),
+        }),
+
+        Command::Promote { id: None, to } => Ok(Command::Promote {
+            id: Some(pick_ticket(dir, stdin, stdout, "Promote", true)?),
+            to,
+        }),
+
+        // Importing several at once is the common case after a triage sweep.
+        Command::Import {
+            numbers,
+            repo,
+            kind,
+        } if numbers.is_empty() => Ok(Command::Import {
+            numbers: pick_issues(&repo, stdin, stdout)?,
+            repo,
+            kind,
+        }),
+
+        other => Ok(other),
+    }
+}
+
+/// Ask which of a repository's open issues to import.
+fn pick_issues(
+    repo: &str,
+    stdin: &mut impl BufRead,
+    stdout: &mut impl Write,
+) -> Result<Vec<u64>, String> {
+    let (owner, name) = repo
+        .split_once('/')
+        .ok_or_else(|| format!("`{repo}` is not an `owner/name` pair."))?;
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|error| format!("failed to start the async runtime: {error}"))?;
+    let issues = runtime.block_on(fetch_open(owner, name))?;
+
+    let options: Vec<ComposeOption> = issues
+        .iter()
+        // A pull request is an issue on this endpoint, and isn't importable.
+        .filter(|issue| issue.pull_request.is_none())
+        .map(|issue| ComposeOption {
+            value: issue.number.to_string(),
+            label: format!("#{:<5} {}", issue.number, issue.title),
+        })
+        .collect();
+
+    if options.is_empty() {
+        return Err(format!("No open issues in {repo}."));
+    }
+
+    let chosen = compose_many(stdin, stdout, ComposeRequest {
+        id: None,
+        message: format!("Import from {repo}"),
+        mode: ComposeMode::MultiSelect { options },
+        help: Some("Space to select, Enter to import.".to_owned()),
+    })?;
+
+    chosen
+        .iter()
+        .map(|value| {
+            value
+                .parse()
+                .map_err(|_| format!("`{value}` is not an issue number."))
+        })
+        .collect()
+}
+
+/// Ask which kind of work a ticket describes.
+fn pick_kind(stdin: &mut impl BufRead, stdout: &mut impl Write) -> Result<Kind, String> {
+    let chosen = compose(stdin, stdout, ComposeRequest {
+        id: None,
+        message: "Kind of work".to_owned(),
+        mode: ComposeMode::Select {
+            options: [Kind::Bug, Kind::Feature, Kind::Chore]
+                .into_iter()
+                .map(|kind| ComposeOption {
+                    value: kind.to_string(),
+                    label: kind.to_string(),
+                })
+                .collect(),
+            default: None,
+        },
+        help: None,
+    })?;
+
+    chosen
+        .parse()
+        .map_err(|_| format!("`{chosen}` is not a kind."))
+}
+
+/// Ask for a one-line title on its own.
+///
+/// For when the description is already settled and only the summary is missing.
+fn ask_title(stdin: &mut impl BufRead, stdout: &mut impl Write) -> Result<String, String> {
+    let title = compose(stdin, stdout, ComposeRequest {
+        id: None,
+        message: "Title".to_owned(),
+        mode: ComposeMode::Line {
+            default: Some(UNTITLED.to_owned()),
+        },
+        help: None,
+    })?;
+
+    let title = title.trim();
+
+    Ok(if title.is_empty() { UNTITLED } else { title }.to_owned())
+}
+
+/// Compose a ticket's title and description, asking for the title separately
+/// when the text has no subject line.
+fn compose_ticket(
+    kind: Option<Kind>,
+    stdin: &mut impl BufRead,
+    stdout: &mut impl Write,
+) -> Result<(String, Option<String>), String> {
+    let composed = compose(stdin, stdout, ComposeRequest {
+        id: None,
+        message: kind.map_or_else(
+            || "New ticket".to_owned(),
+            |kind| format!("New {kind} ticket"),
+        ),
+        mode: ComposeMode::Buffer { initial_text: None },
+        help: Some("First line is the title, then a blank line, then the description.".to_owned()),
+    })?;
+
+    match Composition::read(&composed) {
+        Composition::Empty => Err("Nothing to file.".to_owned()),
+        Composition::Title(title) => Ok((title, None)),
+        Composition::TitleAndBody { title, body } => Ok((title, Some(body))),
+        // Prose with no subject line: the whole thing is the description, and
+        // the title has to be asked for on its own.
+        Composition::Body(body) => Ok((ask_title(stdin, stdout)?, Some(body))),
+    }
+}
+
+/// Ask which ticket to act on.
+///
+/// `open_only` drops the closed ones, for the actions that only make sense on
+/// live work.
+fn pick_ticket(
+    dir: &Utf8Path,
+    stdin: &mut impl BufRead,
+    stdout: &mut impl Write,
+    verb: &str,
+    open_only: bool,
+) -> Result<TicketId, String> {
+    let entries = store::list(dir).map_err(|error| error.to_string())?;
+
+    // The id travels with the entry, not the document: the filename carries it.
+    // So the entry has to be kept alongside its ticket rather than mapped away.
+    let options: Vec<ComposeOption> = entries
+        .iter()
+        .filter_map(|entry| entry.ticket.as_ref().ok().map(|ticket| (entry.id, ticket)))
+        .filter(|(_, ticket)| !open_only || ticket.metadata.status != Status::Done)
+        .map(|(id, ticket)| ComposeOption {
+            value: id.to_string(),
+            label: format!("{}  {:<12} {}", id, ticket.metadata.status, ticket.title),
+        })
+        .collect();
+
+    if options.is_empty() {
+        return Err("No tickets to choose from.".to_owned());
+    }
+
+    let chosen = compose(stdin, stdout, ComposeRequest {
+        id: None,
+        message: format!("{verb} which ticket?"),
+        mode: ComposeMode::Select {
+            options,
+            default: None,
+        },
+        help: None,
+    })?;
+
+    chosen
+        .parse()
+        .map_err(|_| format!("`{chosen}` is not a ticket id."))
+}
+
 /// Take a value the composer fills in interactively, or explain its absence.
 ///
 /// Reached only when there was no terminal to ask on, since every one of these
 /// is prompted for otherwise.
 fn required<T>(value: Option<T>, what: &str) -> Result<T, String> {
     value.ok_or_else(|| format!("No {what} given, and no terminal to ask for one."))
+}
+
+/// Ask the host for several values at once, and wait for them.
+fn compose_many(
+    stdin: &mut impl BufRead,
+    stdout: &mut impl Write,
+    request: ComposeRequest,
+) -> Result<Vec<String>, String> {
+    send(stdout, &PluginToHost::Compose(request))?;
+
+    match read_message(stdin)? {
+        HostToPlugin::Composed(response) if response.values.is_empty() => {
+            Err("Nothing selected.".to_owned())
+        }
+        HostToPlugin::Composed(response) => Ok(response.values),
+        HostToPlugin::Error(error) => Err(error.message),
+        HostToPlugin::Shutdown => Err("Interrupted.".to_owned()),
+        other => Err(format!("expected a composed response, got: {other:?}")),
+    }
+}
+
+/// Read every page of a repository's open issues.
+///
+/// All of them, not the first hundred: pull requests come back from this
+/// endpoint too and are dropped afterwards, so a page of them would otherwise
+/// read as a repository with no open issues at all.
+async fn fetch_open(owner: &str, repo: &str) -> Result<Vec<Issue>, String> {
+    let mut builder = jp_github::Octocrab::builder();
+    if let Some(token) = token() {
+        builder = builder.personal_token(token);
+    }
+    let client = builder
+        .build()
+        .map_err(|error| format!("failed to create the GitHub client: {error}"))?;
+
+    let issues = client.issues(owner, repo);
+    let mut all = vec![];
+    for page in 1.. {
+        let batch = issues
+            .list()
+            .page(page)
+            .per_page(PER_PAGE)
+            .send()
+            .await
+            .map_err(|error| format!("failed to list issues in {owner}/{repo}: {error}"))?;
+
+        let short = batch.len() < usize::from(PER_PAGE);
+        all.extend(batch);
+        if short {
+            break;
+        }
+    }
+
+    Ok(all)
+}
+
+/// Ask the host to collect text, and wait for it.
+fn compose(
+    stdin: &mut impl BufRead,
+    stdout: &mut impl Write,
+    request: ComposeRequest,
+) -> Result<String, String> {
+    send(stdout, &PluginToHost::Compose(request))?;
+
+    match read_message(stdin)? {
+        HostToPlugin::Composed(response) => response
+            .text
+            .ok_or_else(|| "Nothing composed; run it again with the text as arguments.".to_owned()),
+        HostToPlugin::Error(error) => Err(error.message),
+        HostToPlugin::Shutdown => Err("Interrupted.".to_owned()),
+        other => Err(format!("expected a composed response, got: {other:?}")),
+    }
 }
 
 /// Read `jp ticket T-02wt0kx` as `jp ticket show T-02wt0kx`.

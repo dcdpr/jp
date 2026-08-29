@@ -24,6 +24,67 @@ fn workspace_with_fs(root: impl Into<Utf8PathBuf>, fs: &FsStorageBackend) -> Wor
     Workspace::in_memory(root).with_backend(Arc::new(fs.clone()))
 }
 
+/// Persistence backend whose every write fails with a full disk.
+#[derive(Debug)]
+struct AlwaysFullBackend;
+
+impl jp_storage::backend::PersistBackend for AlwaysFullBackend {
+    fn write(
+        &self,
+        _id: &ConversationId,
+        _metadata: &Conversation,
+        _events: &ConversationStream,
+        _projection: jp_storage::backend::Projection,
+    ) -> std::result::Result<(), jp_storage::Error> {
+        Err(jp_storage::Error::write_failed(
+            Utf8Path::new("/data/conv/events.json"),
+            std::io::Error::from(std::io::ErrorKind::StorageFull),
+        ))
+    }
+
+    fn remove(&self, _id: &ConversationId) -> std::result::Result<(), jp_storage::Error> {
+        Ok(())
+    }
+
+    fn archive(&self, _id: &ConversationId) -> std::result::Result<(), jp_storage::Error> {
+        Ok(())
+    }
+
+    fn unarchive(&self, _id: &ConversationId) -> std::result::Result<(), jp_storage::Error> {
+        Ok(())
+    }
+}
+
+#[test]
+fn workspace_drains_a_persist_failure_left_by_a_dropped_lock() {
+    // The teardown path for a cancelled command future: everything the run held
+    // is dropped without any drain running, so the workspace is the only place
+    // left that can still report the conversation was not saved.
+    let mut workspace = Workspace::in_memory("root").with_persist(Arc::new(AlwaysFullBackend));
+    let config = Arc::new(AppConfig::new_test());
+
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), config, None)
+        .unwrap();
+    {
+        let conv = lock.as_mut();
+        conv.update_metadata(|m| m.title = Some("unsaved".into()));
+    }
+    drop(lock);
+
+    let error = workspace
+        .take_persist_failure()
+        .expect("the workspace still holds the failure");
+    assert_eq!(
+        error.to_string(),
+        "Storage error: no space left on device while writing /data/conv/events.json"
+    );
+    assert!(
+        workspace.take_persist_failure().is_none(),
+        "the failure is reported once"
+    );
+}
+
 #[test]
 fn conversation_presence_reflects_creation_intent() {
     let mut ws = Workspace::in_memory("root");
@@ -1020,7 +1081,7 @@ fn open_errors_when_no_store_exists_above_dir() {
     fs::create_dir_all(&dir).unwrap();
 
     assert_eq!(
-        Workspace::open_with_storage_dir(&dir, ".jp-no-such-store").unwrap_err(),
+        Workspace::open_inner(&dir, ".jp-no-such-store", Access::ReadWrite).unwrap_err(),
         Error::WorkspaceNotFound(dir)
     );
 }

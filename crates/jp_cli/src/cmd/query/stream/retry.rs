@@ -33,7 +33,11 @@ use jp_printer::Printer;
 use jp_workspace::ConversationMut;
 use tracing::{error, warn};
 
-use crate::{cmd::query::turn::TurnCoordinator, error::Error, signals::SignalRouter};
+use crate::{
+    cmd::query::turn::TurnCoordinator,
+    error::Error,
+    signals::{InterruptNotice, SignalRouter},
+};
 
 /// How many provider-requested rebuilds a turn may attempt in a row.
 ///
@@ -319,7 +323,10 @@ pub enum StreamErrorOutcome {
     /// A Ctrl-C arrived during the backoff wait.
     /// The wait was cut short and the retry notification line cleared; the
     /// caller should run the streaming interrupt flow (the stream is dead).
-    Interrupted,
+    ///
+    /// The press is carried out unresolved: only the caller, which runs the
+    /// menu, knows whether it was answered.
+    Interrupted(InterruptNotice),
 }
 
 /// Single source of truth for handling stream errors during LLM streaming.
@@ -382,16 +389,16 @@ pub async fn handle_stream_error(
     // immediately instead of after the wait.
     let delay = retry_state.backoff_duration(&error);
     let (interrupt_guard, mut interrupt_rx) = signals.push_handler();
-    let interrupted = tokio::select! {
+    let notice = tokio::select! {
         biased;
-        Some(()) = interrupt_rx.recv() => true,
-        () = tokio::time::sleep(delay) => false,
+        notice = interrupt_rx.recv() => notice,
+        () = tokio::time::sleep(delay) => None,
     };
     drop(interrupt_guard);
 
-    if interrupted {
+    if let Some(notice) = notice {
         retry_state.clear_line(printer);
-        return StreamErrorOutcome::Interrupted;
+        return StreamErrorOutcome::Interrupted(notice);
     }
 
     StreamErrorOutcome::Retry

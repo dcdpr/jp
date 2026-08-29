@@ -241,6 +241,12 @@ fn reader_loop(reader: impl BufRead, inner: &Inner, shutdown_tx: &watch::Sender<
                 warn!("Unexpected message after startup");
             }
 
+            // This plugin never asks the host to compose, so an answer to one
+            // belongs to a request that isn't ours.
+            HostToPlugin::Composed(_) => {
+                warn!("Received a compose response without having asked to compose");
+            }
+
             // Response messages — dispatch to the pending request.
             msg @ (HostToPlugin::Conversations(_)
             | HostToPlugin::Events(_)

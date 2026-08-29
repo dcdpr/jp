@@ -5,7 +5,7 @@ use crate::{
     cmd::{
         ConversationLoadRequest, Output,
         conversation_id::{ConversationIds as _, PositionalIds},
-        target::{ConversationTarget, PickerFilter, resolve_archived_picker},
+        target::{ConversationTarget, PickerFilter, TargetGrammar, resolve_archived_picker},
     },
     ctx::Ctx,
 };
@@ -58,10 +58,14 @@ impl Unarchive {
                 return Ok(vec![]);
             }
 
-            let id = resolve_archived_picker(&ctx.workspace, &PickerFilter {
-                archived: true,
-                ..Default::default()
-            })?;
+            let id = resolve_archived_picker(
+                &ctx.workspace,
+                &PickerFilter {
+                    archived: true,
+                    ..Default::default()
+                },
+                TargetGrammar::from_args(&self.target, false),
+            )?;
             return Ok(vec![id]);
         }
 

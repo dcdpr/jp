@@ -59,6 +59,9 @@ pub struct MockProvider {
     /// `None` means every request replays `events`.
     batches: Option<Arc<Mutex<VecDeque<Vec<Event>>>>>,
 
+    /// Requests received so far, when capture is enabled.
+    requests: Option<Arc<Mutex<Vec<ChatQuery>>>>,
+
     /// Model details to return.
     model: ModelDetails,
 }
@@ -74,6 +77,7 @@ impl MockProvider {
         Self {
             events,
             batches: None,
+            requests: None,
             model: Self::default_model(),
         }
     }
@@ -95,6 +99,7 @@ impl MockProvider {
         Self {
             events: vec![],
             batches: Some(Arc::new(Mutex::new(batches.into()))),
+            requests: None,
             model: Self::default_model(),
         }
     }
@@ -158,6 +163,17 @@ impl MockProvider {
         ])
     }
 
+    /// Record every request this provider receives.
+    ///
+    /// Returns the provider alongside the shared log, so a test can assert on
+    /// what was actually sent rather than only on what came back.
+    #[must_use]
+    pub fn capturing_requests(mut self) -> (Self, Arc<Mutex<Vec<ChatQuery>>>) {
+        let requests = Arc::new(Mutex::new(vec![]));
+        self.requests = Some(Arc::clone(&requests));
+        (self, requests)
+    }
+
     /// Set custom model details for this provider.
     #[must_use]
     pub fn with_model(mut self, model: ModelDetails) -> Self {
@@ -202,8 +218,12 @@ impl Provider for MockProvider {
     async fn chat_completion_stream(
         &self,
         _model: &ModelDetails,
-        _query: ChatQuery,
+        query: ChatQuery,
     ) -> Result<EventStream> {
+        if let Some(requests) = &self.requests {
+            requests.lock().expect("mock requests lock").push(query);
+        }
+
         let events = match &self.batches {
             None => self.events.clone(),
             Some(batches) => batches

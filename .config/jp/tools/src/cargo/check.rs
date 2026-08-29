@@ -12,12 +12,14 @@ use crate::util::{
 pub(crate) async fn cargo_check(
     root: &Utf8Path,
     rustflags: &str,
+    profile: Option<&str>,
     package: Option<String>,
     checksum_freshness: bool,
 ) -> ToolResult {
     cargo_check_impl(
         root,
         rustflags,
+        profile,
         package.as_deref(),
         checksum_freshness,
         &DuctProcessRunner,
@@ -27,11 +29,13 @@ pub(crate) async fn cargo_check(
 fn cargo_check_impl<R: ProcessRunner>(
     root: &Utf8Path,
     rustflags: &str,
+    profile: Option<&str>,
     package: Option<&str>,
     checksum_freshness: bool,
     runner: &R,
 ) -> ToolResult {
     let clippy_scope = package.map_or("--workspace".to_owned(), |v| format!("--package={v}"));
+    let profile_arg = profile.map(|name| format!("--profile={name}"));
 
     let mut env = vec![("RUSTFLAGS", rustflags)];
     if checksum_freshness {
@@ -42,21 +46,21 @@ fn cargo_check_impl<R: ProcessRunner>(
         env.push(("CARGO_UNSTABLE_CHECKSUM_FRESHNESS", "true"));
     }
 
-    let ProcessOutput { stderr, status, .. } = runner.run_with_env(
-        "cargo",
-        &[
-            "clippy",
-            "--color=never",
-            &clippy_scope,
-            "--quiet",
-            "--all-targets",
-            // Matches `just lint-ci`. Code behind an optional feature is not
-            // compiled without this, so its lints surface only on CI.
-            "--all-features",
-        ],
-        root,
-        &env,
-    )?;
+    let mut args = vec![
+        "clippy",
+        "--color=never",
+        clippy_scope.as_str(),
+        "--quiet",
+        "--all-targets",
+        // Matches `just lint-ci`. Code behind an optional feature is not
+        // compiled without this, so its lints surface only on CI.
+        "--all-features",
+    ];
+    if let Some(profile) = profile_arg.as_deref() {
+        args.push(profile);
+    }
+
+    let ProcessOutput { stderr, status, .. } = runner.run_with_env("cargo", &args, root, &env)?;
 
     if !status.is_success() {
         return error(format!(

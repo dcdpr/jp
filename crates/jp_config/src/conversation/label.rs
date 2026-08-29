@@ -1,20 +1,22 @@
 //! Label rules for conversations.
 //!
-//! Labels are `key=value` annotations stored on a conversation.
+//! Labels annotate a conversation with a set of values per key.
 //! This section declares the *rules* that produce them; the map key is the
 //! label key.
 //!
 //! ```toml
 //! [conversation.labels]
 //! team = "platform"
+//! crate = ["jp_config", "jp_llm"]
 //!
 //! [conversation.labels.stage]
 //! value = "review"
 //! apply_on = { new = true, fork = true }
 //! ```
 //!
-//! A command-shaped value runs at the workspace root and its trimmed stdout
-//! becomes the label value:
+//! A command-shaped value runs at the workspace root and produces one value per
+//! line of its stdout; empty lines are dropped, and a command that writes
+//! nothing produces no label:
 //!
 //! ```toml
 //! [conversation.labels.branch]
@@ -22,14 +24,31 @@
 //! apply_on = { new = true, fork = true }
 //! ```
 //!
+//! A rule that fails to resolve is reported and skipped, and naming it as an
+//! alias is an error.
+//! `optional = true` silences both, for a label that only applies where it can
+//! be produced.
+//!
 //! A label key starts with an ASCII letter, followed by any number of letters,
 //! digits, underscores, and hyphens.
+//!
+//! Assigned from the command line, a comma separates values, and the JSON form
+//! names a value that contains one:
+//!
+//! ```sh
+//! jp --cfg 'conversation.labels.crate=jp_config,jp_llm'   # two values
+//! jp --cfg 'conversation.labels.branch:="feat,exp"'       # one value
+//! ```
+
+use std::slice;
 
 use schematic::{Config, ConfigEnum};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
+    assignment::{
+        AssignKeyValue, AssignResult, KvAssignment, KvAssignmentError as AssignError, missing_key,
+    },
     delta::{PartialConfigDelta, delta_opt},
     fill::FillDefaults,
     partial::{ToPartial, partial_opt},
@@ -76,15 +95,22 @@ pub fn validate_key(key: &str) -> Result<(), String> {
 
 /// A label declaration.
 ///
-/// Either a bare value (`team = "platform"`) or a table with the full set of
-/// options (`team = { value = "platform", apply_on = { fork = true } }`).
+/// Either a bare value (`team = "platform"`), a list of values (`crate =
+/// ["jp_config", "jp_llm"]`), or a table with the full set of options (`team =
+/// { value = "platform", apply_on = { fork = true } }`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Config)]
 #[config(rename_all = "snake_case", serde(untagged))]
 #[serde(untagged)]
 pub enum LabelConfig {
-    /// Shorthand for a static label value, using the defaults for every other
+    /// Shorthand for a single static value, using the defaults for every other
     /// option.
     Static(String),
+
+    /// Shorthand for several static values, using the defaults for every other
+    /// option.
+    ///
+    /// An empty list produces no label.
+    List(Vec<String>),
 
     /// The full form, with `value`, `apply_on`, and `run`.
     #[setting(nested)]
@@ -96,9 +122,11 @@ impl LabelConfig {
     #[must_use]
     pub fn value(&self) -> LabelValueRef<'_> {
         match self {
-            Self::Static(value) => LabelValueRef::Static(value),
+            Self::Static(value) => LabelValueRef::Values(slice::from_ref(value)),
+            Self::List(values) => LabelValueRef::Values(values),
             Self::Object(object) => match &object.value {
-                LabelValue::Static(value) => LabelValueRef::Static(value),
+                LabelValue::Static(value) => LabelValueRef::Values(slice::from_ref(value)),
+                LabelValue::List(values) => LabelValueRef::Values(values),
                 LabelValue::Command(command) => LabelValueRef::Command(&command.cmd),
             },
         }
@@ -108,7 +136,7 @@ impl LabelConfig {
     #[must_use]
     pub fn apply_on(&self) -> ApplyOn {
         match self {
-            Self::Static(_) => ApplyOn::default(),
+            Self::Static(_) | Self::List(_) => ApplyOn::default(),
             Self::Object(object) => object.apply_on,
         }
     }
@@ -117,8 +145,17 @@ impl LabelConfig {
     #[must_use]
     pub fn run(&self) -> LabelRunMode {
         match self {
-            Self::Static(_) => LabelRunMode::default(),
+            Self::Static(_) | Self::List(_) => LabelRunMode::default(),
             Self::Object(object) => object.run,
+        }
+    }
+
+    /// Whether a failure to produce this label is silently ignored.
+    #[must_use]
+    pub const fn optional(&self) -> bool {
+        match self {
+            Self::Static(_) | Self::List(_) => false,
+            Self::Object(object) => object.optional,
         }
     }
 }
@@ -127,10 +164,10 @@ impl LabelConfig {
 /// forms into one shape.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LabelValueRef<'a> {
-    /// A literal value, used as-is.
-    Static(&'a str),
+    /// Literal values, used as they are written.
+    Values(&'a [String]),
 
-    /// A command whose trimmed stdout becomes the value.
+    /// A command producing one value per line of stdout.
     Command(&'a CommandConfigOrString),
 }
 
@@ -140,8 +177,16 @@ pub enum LabelValueRef<'a> {
 pub struct LabelObject {
     /// The label's value.
     ///
-    /// A string is used literally.
+    /// A string is used literally, and a list of strings produces one value per
+    /// entry.
+    /// An empty list produces no label.
     /// Defaults to an empty value, which renders as a bare label.
+    ///
+    /// On the command line a comma separates values, as it does for every other
+    /// list setting: `--cfg 'conversation.labels.crate=jp_config,jp_llm'` names
+    /// two.
+    /// Use the JSON form for a value that contains a comma: `--cfg
+    /// 'conversation.labels.branch:="feat,exp"'`.
     #[setting(nested)]
     #[serde(default)]
     pub value: LabelValue,
@@ -163,6 +208,20 @@ pub struct LabelObject {
     #[setting(default)]
     #[serde(default)]
     pub run: LabelRunMode,
+
+    /// Whether to skip the label without a message when it can't be produced.
+    ///
+    /// Defaults to `false`, where a failing rule prints a warning, and naming
+    /// it with `--label=:key` fails the command.
+    /// Set to `true` for a label that only applies in some checkouts: a command
+    /// that exits non-zero, or one that can't be confirmed because there is no
+    /// terminal, then drops the label and nothing is printed.
+    ///
+    /// Naming a `run = "deny"` rule with `--label=:key` still fails, because
+    /// that rule can never produce a value.
+    #[setting(default)]
+    #[serde(default)]
+    pub optional: bool,
 }
 
 /// How a label's value is produced.
@@ -173,7 +232,12 @@ pub enum LabelValue {
     /// A literal value: `value = "review"`.
     Static(String),
 
-    /// A command whose trimmed stdout becomes the value.
+    /// Several literal values: `value = ["jp_config", "jp_llm"]`.
+    ///
+    /// An empty list produces no label.
+    List(Vec<String>),
+
+    /// A command producing one value per line of stdout.
     #[setting(nested)]
     Command(LabelCommand),
 }
@@ -193,6 +257,9 @@ pub struct LabelCommand {
     /// Either a string that is split into program and arguments (`cmd = "git
     /// rev-parse --abbrev-ref HEAD"`) or a table with `program`, `args`, and
     /// `shell`.
+    ///
+    /// Each line of stdout becomes one value; empty lines are dropped, so a
+    /// command that writes nothing produces no label.
     #[setting(nested)]
     pub cmd: CommandConfigOrString,
 }
@@ -251,15 +318,63 @@ pub enum LabelRunMode {
 impl AssignKeyValue for PartialLabelConfig {
     fn assign(&mut self, kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
-            "" => *self = kv.try_object_or_from_str()?,
+            // An object is the full form; anything else names values, read the
+            // way every list-shaped setting reads an assignment: a comma
+            // separates, a JSON array is taken element-wise, and `:+=` adds to
+            // what the key already names.
+            "" if kv.is_json_object() => *self = kv.try_object_or_from_str()?,
+            // Naming values on a rule that already has a full form lands on its
+            // `value`, so `apply_on` and `run` survive the assignment.
+            "" if matches!(self, Self::Object(_)) => {
+                let Self::Object(object) = self else {
+                    unreachable!("matched above")
+                };
+                object.value.assign(kv)?;
+            }
+            "" => *self = Self::List(assign_values(self.values(), kv)?),
             _ => match self {
-                Self::Static(_) => return missing_key(&kv),
+                Self::Static(_) | Self::List(_) => return missing_key(&kv),
                 Self::Object(object) => object.assign(kv)?,
             },
         }
 
         Ok(())
     }
+}
+
+impl PartialLabelConfig {
+    /// Take the values named so far, leaving none behind.
+    ///
+    /// A scalar counts as one value, so `:+=` adds to it rather than replacing
+    /// it; the empty scalar is the unset default rather than a value to keep.
+    fn values(&mut self) -> Vec<String> {
+        match self {
+            Self::List(values) => std::mem::take(values),
+            Self::Static(value) if !value.is_empty() => vec![std::mem::take(value)],
+            _ => vec![],
+        }
+    }
+}
+
+impl PartialLabelValue {
+    /// Take the values named so far, leaving none behind.
+    ///
+    /// A scalar counts as one value, so `:+=` adds to it rather than replacing
+    /// it; the empty scalar is the unset default rather than a value to keep.
+    fn values(&mut self) -> Vec<String> {
+        match self {
+            Self::List(values) => std::mem::take(values),
+            Self::Static(value) if !value.is_empty() => vec![std::mem::take(value)],
+            _ => vec![],
+        }
+    }
+}
+
+/// Apply an assignment on top of the values a rule already names.
+fn assign_values(mut values: Vec<String>, kv: KvAssignment) -> Result<Vec<String>, AssignError> {
+    kv.try_vec_of_strings(&mut values)?;
+
+    Ok(values)
 }
 
 impl PartialConfigDelta for PartialLabelConfig {
@@ -275,6 +390,7 @@ impl ToPartial for LabelConfig {
     fn to_partial(&self) -> Self::Partial {
         match self {
             Self::Static(value) => Self::Partial::Static(value.clone()),
+            Self::List(values) => Self::Partial::List(values.clone()),
             Self::Object(object) => Self::Partial::Object(object.to_partial()),
         }
     }
@@ -295,6 +411,7 @@ impl AssignKeyValue for PartialLabelObject {
             _ if kv.p("value") => self.value.assign(kv)?,
             _ if kv.p("apply_on") => self.apply_on.assign(kv)?,
             "run" => self.run = kv.try_some_from_str()?,
+            "optional" => self.optional = kv.try_some_bool()?,
             _ => return missing_key(&kv),
         }
 
@@ -308,6 +425,7 @@ impl PartialConfigDelta for PartialLabelObject {
             value: self.value.delta(next.value),
             apply_on: self.apply_on.delta(next.apply_on),
             run: delta_opt(self.run.as_ref(), next.run),
+            optional: delta_opt(self.optional.as_ref(), next.optional),
         }
     }
 }
@@ -318,6 +436,7 @@ impl FillDefaults for PartialLabelObject {
             value: self.value,
             apply_on: self.apply_on.fill_from(defaults.apply_on),
             run: self.run.or(defaults.run),
+            optional: self.optional.or(defaults.optional),
         }
     }
 }
@@ -330,6 +449,7 @@ impl ToPartial for LabelObject {
             value: self.value.to_partial(),
             apply_on: self.apply_on.to_partial(),
             run: partial_opt(&self.run, defaults.run),
+            optional: partial_opt(&self.optional, defaults.optional),
         }
     }
 }
@@ -337,9 +457,10 @@ impl ToPartial for LabelObject {
 impl AssignKeyValue for PartialLabelValue {
     fn assign(&mut self, kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
-            "" => *self = kv.try_object_or_from_str()?,
+            "" if kv.is_json_object() => *self = kv.try_object_or_from_str()?,
+            "" => *self = Self::List(assign_values(self.values(), kv)?),
             _ => match self {
-                Self::Static(_) => return missing_key(&kv),
+                Self::Static(_) | Self::List(_) => return missing_key(&kv),
                 Self::Command(command) => command.assign(kv)?,
             },
         }
@@ -361,6 +482,7 @@ impl ToPartial for LabelValue {
     fn to_partial(&self) -> Self::Partial {
         match self {
             Self::Static(value) => Self::Partial::Static(value.clone()),
+            Self::List(values) => Self::Partial::List(values.clone()),
             Self::Command(command) => Self::Partial::Command(command.to_partial()),
         }
     }

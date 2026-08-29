@@ -20,12 +20,11 @@ use comfort::{
     DEFAULT_MAX_WIDTH,
     format::{FormatOptions, format_markdown_with},
 };
-use jp_md::format::Formatter;
 use serde_json::Value;
 
 use crate::{
     Context, Tool,
-    util::{ToolResult, error, unknown_tool},
+    util::{ToolResult, error, preview, unknown_tool},
 };
 
 /// The handle tickets and comments written by the assistant carry.
@@ -246,7 +245,13 @@ fn show(root: &Utf8Path, id: TicketId) -> ToolResult {
     };
 
     match entry.ticket {
-        Ok(ticket) => Ok(render_ticket(entry.id, &ticket, &relative(root, &entry.path)).into()),
+        Ok(ticket) => {
+            let rendered = render_ticket(entry.id, &ticket, &relative(root, &entry.path));
+            // The terminal keys syntax highlighting off a leading code fence,
+            // so the fence is what gets a ticket displayed as markdown rather
+            // than as a flat wall of text.
+            Ok(format!("```markdown\n{}\n```", rendered.trim_end()).into())
+        }
         Err(problem) => error(format!("{id} is not a well-formed ticket: {problem}")),
     }
 }
@@ -307,28 +312,6 @@ fn relative(root: &Utf8Path, path: &Utf8Path) -> String {
         .unwrap_or(path)
         .as_str()
         .replace(MAIN_SEPARATOR, "/")
-}
-
-/// Style a document for the terminal as a tool-call preview.
-///
-/// The document is quoted first, so the transcript carries a marker down the
-/// whole preview and the reader can see where the ticket ends and the
-/// conversation resumes.
-/// Falls back to the unstyled source if the markdown can't be formatted.
-fn preview(document: &str) -> String {
-    let mut quoted = String::with_capacity(document.len() * 2);
-    for line in document.lines() {
-        quoted.push('>');
-        if !line.is_empty() {
-            quoted.push(' ');
-            quoted.push_str(line);
-        }
-        quoted.push('\n');
-    }
-
-    Formatter::new()
-        .format_terminal(&quoted)
-        .unwrap_or_else(|_| quoted.clone())
 }
 
 /// Render the board as one line per ticket.

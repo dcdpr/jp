@@ -66,9 +66,9 @@ fn roundtrip_summary_compaction() {
         timestamp: Utc.with_ymd_and_hms(2025, 1, 15, 12, 0, 0).unwrap(),
         from_turn: 0,
         to_turn: 10,
-        summary: Some(SummaryPolicy {
-            summary: "Set up a Rust project with error handling.".into(),
-        }),
+        summary: Some(SummaryPolicy::generated(
+            "Set up a Rust project with error handling.",
+        )),
         reasoning: None,
         tool_calls: None,
     };
@@ -134,14 +134,41 @@ fn reasoning_policy_roundtrip() {
 
 #[test]
 fn summary_policy_roundtrip() {
-    let policy = SummaryPolicy {
-        summary: "This is a summary of the conversation.".into(),
-    };
+    let policy = SummaryPolicy::generated("This is a summary of the conversation.");
     let json = serde_json::to_value(&policy).unwrap();
     assert_eq!(json["summary"], "This is a summary of the conversation.");
 
     let deserialized: SummaryPolicy = serde_json::from_value(json).unwrap();
     assert_eq!(policy, deserialized);
+}
+
+#[test]
+fn generated_summary_omits_source_from_json() {
+    let json = serde_json::to_value(SummaryPolicy::generated("text")).unwrap();
+    let obj = json.as_object().unwrap();
+
+    // Generated is the overwhelmingly common case and the pre-`source` shape,
+    // so it stays off the wire.
+    assert!(!obj.contains_key("source"));
+}
+
+#[test]
+fn authored_summary_roundtrip() {
+    let policy = SummaryPolicy::authored("I wrote this myself.");
+    let json = serde_json::to_value(&policy).unwrap();
+    assert_eq!(json["source"], "authored");
+
+    let deserialized: SummaryPolicy = serde_json::from_value(json).unwrap();
+    assert_eq!(policy, deserialized);
+}
+
+#[test]
+fn summary_stored_without_a_source_loads_as_generated() {
+    // Every compaction written before `source` existed was model-generated.
+    let json = serde_json::json!({ "summary": "stored by an older build" });
+    let policy: SummaryPolicy = serde_json::from_value(json).unwrap();
+
+    assert_eq!(policy, SummaryPolicy::generated("stored by an older build"));
 }
 
 // ---------------------------------------------------------------------------
@@ -153,12 +180,26 @@ fn summary_compaction(from: usize, to: usize, hour: u32) -> Compaction {
         timestamp: Utc.with_ymd_and_hms(2025, 1, 1, hour, 0, 0).unwrap(),
         from_turn: from,
         to_turn: to,
-        summary: Some(SummaryPolicy {
-            summary: format!("summary {from}-{to}"),
-        }),
+        summary: Some(SummaryPolicy::generated(format!("summary {from}-{to}"))),
         reasoning: None,
         tool_calls: None,
     }
+}
+
+fn authored_compaction(from: usize, to: usize, hour: u32) -> Compaction {
+    Compaction {
+        timestamp: Utc.with_ymd_and_hms(2025, 1, 1, hour, 0, 0).unwrap(),
+        from_turn: from,
+        to_turn: to,
+        summary: Some(SummaryPolicy::authored(format!("authored {from}-{to}"))),
+        reasoning: None,
+        tool_calls: None,
+    }
+}
+
+/// Extend a generated summary over `stream`, expecting no refusal.
+fn extend_generated(stream: &ConversationStream, range: CompactionRange) -> CompactionRange {
+    extend_summary_range(stream, range, SummarySource::Generated).unwrap()
 }
 
 /// Build a stream with `n` turns.
@@ -187,7 +228,7 @@ fn extend_no_existing_summaries() {
         from_turn: 3,
         to_turn: 7,
     };
-    let result = extend_summary_range(&stream, range);
+    let result = extend_generated(&stream, range);
     assert_eq!(result, range, "No existing summaries → unchanged");
 }
 
@@ -200,7 +241,7 @@ fn extend_no_overlap() {
         from_turn: 5,
         to_turn: 8,
     };
-    let result = extend_summary_range(&stream, range);
+    let result = extend_generated(&stream, range);
     assert_eq!(result, range, "Disjoint ranges → unchanged");
 }
 
@@ -215,7 +256,7 @@ fn extend_partial_overlap_right() {
         from_turn: 3,
         to_turn: 7,
     };
-    let result = extend_summary_range(&stream, range);
+    let result = extend_generated(&stream, range);
     assert_eq!(result, CompactionRange {
         from_turn: 3,
         to_turn: 9
@@ -233,7 +274,7 @@ fn extend_partial_overlap_left() {
         from_turn: 3,
         to_turn: 8,
     };
-    let result = extend_summary_range(&stream, range);
+    let result = extend_generated(&stream, range);
     assert_eq!(result, CompactionRange {
         from_turn: 0,
         to_turn: 8
@@ -250,7 +291,7 @@ fn extend_new_fully_contains_old() {
         from_turn: 0,
         to_turn: 8,
     };
-    let result = extend_summary_range(&stream, range);
+    let result = extend_generated(&stream, range);
     assert_eq!(result, range);
 }
 
@@ -266,7 +307,7 @@ fn extend_old_fully_contains_new() {
         from_turn: 3,
         to_turn: 5,
     };
-    let result = extend_summary_range(&stream, range);
+    let result = extend_generated(&stream, range);
     assert_eq!(result, CompactionRange {
         from_turn: 0,
         to_turn: 9
@@ -287,7 +328,7 @@ fn extend_transitive_chain() {
         from_turn: 3,
         to_turn: 7,
     };
-    let result = extend_summary_range(&stream, range);
+    let result = extend_generated(&stream, range);
     assert_eq!(result, CompactionRange {
         from_turn: 0,
         to_turn: 15
@@ -311,6 +352,122 @@ fn extend_ignores_mechanical_compactions() {
         from_turn: 3,
         to_turn: 7,
     };
-    let result = extend_summary_range(&stream, range);
+    let result = extend_generated(&stream, range);
     assert_eq!(result, range, "Mechanical compactions should be ignored");
+}
+
+// ---------------------------------------------------------------------------
+// Authored summaries block automatic extension
+// ---------------------------------------------------------------------------
+
+#[test]
+fn authored_summary_refuses_to_widen_over_an_existing_summary() {
+    let mut stream = stream_with_turns(10);
+    stream.add_compaction(summary_compaction(5, 9, 10));
+
+    // Widening 3..7 to 3..9 would leave the user's text standing in for turns
+    // 8 and 9, which they never wrote about.
+    let range = CompactionRange {
+        from_turn: 3,
+        to_turn: 7,
+    };
+    let error = extend_summary_range(&stream, range, SummarySource::Authored).unwrap_err();
+
+    assert_eq!(error, SummaryOverlap {
+        requested: range,
+        required: CompactionRange {
+            from_turn: 3,
+            to_turn: 9
+        },
+        new_is_authored: true,
+    });
+}
+
+#[test]
+fn authored_summary_covering_the_whole_overlap_is_accepted() {
+    let mut stream = stream_with_turns(10);
+    stream.add_compaction(summary_compaction(3, 5, 10));
+
+    // 0..8 already subsumes the existing summary, so nothing has to grow and
+    // the authored text covers exactly the turns the user asked for.
+    let range = CompactionRange {
+        from_turn: 0,
+        to_turn: 8,
+    };
+    let result = extend_summary_range(&stream, range, SummarySource::Authored).unwrap();
+
+    assert_eq!(result, range);
+}
+
+#[test]
+fn authored_summary_with_no_overlap_at_all_is_accepted() {
+    let mut stream = stream_with_turns(10);
+    stream.add_compaction(summary_compaction(0, 2, 10));
+
+    let range = CompactionRange {
+        from_turn: 5,
+        to_turn: 8,
+    };
+    let result = extend_summary_range(&stream, range, SummarySource::Authored).unwrap();
+
+    assert_eq!(result, range);
+}
+
+#[test]
+fn generated_summary_refuses_to_widen_over_authored_text() {
+    let mut stream = stream_with_turns(10);
+    stream.add_compaction(authored_compaction(0, 4, 10));
+
+    // Extending 3..8 to 0..8 would replace hand-written text with generated
+    // text, beyond the range the user named.
+    let range = CompactionRange {
+        from_turn: 3,
+        to_turn: 8,
+    };
+    let error = extend_summary_range(&stream, range, SummarySource::Generated).unwrap_err();
+
+    assert_eq!(error, SummaryOverlap {
+        requested: range,
+        required: CompactionRange {
+            from_turn: 0,
+            to_turn: 8
+        },
+        new_is_authored: false,
+    });
+}
+
+#[test]
+fn authored_text_anywhere_in_a_transitive_chain_blocks_extension() {
+    let mut stream = stream_with_turns(20);
+    // Only C is authored, and it is reached only after two rounds of growth.
+    stream.add_compaction(summary_compaction(0, 5, 10));
+    stream.add_compaction(summary_compaction(4, 10, 11));
+    stream.add_compaction(authored_compaction(9, 15, 12));
+
+    let range = CompactionRange {
+        from_turn: 3,
+        to_turn: 7,
+    };
+    let error = extend_summary_range(&stream, range, SummarySource::Generated).unwrap_err();
+
+    assert_eq!(error.required, CompactionRange {
+        from_turn: 0,
+        to_turn: 15
+    });
+}
+
+#[test]
+fn generated_summary_covering_authored_text_exactly_is_accepted() {
+    let mut stream = stream_with_turns(10);
+    stream.add_compaction(authored_compaction(3, 5, 10));
+
+    // The user named a range that already subsumes their own summary, so
+    // replacing it is explicit rather than incidental.
+    let range = CompactionRange {
+        from_turn: 0,
+        to_turn: 9,
+    };
+    let result = extend_summary_range(&stream, range, SummarySource::Generated).unwrap();
+
+    assert_eq!(result, range);
 }

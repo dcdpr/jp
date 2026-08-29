@@ -3,14 +3,21 @@
 //! This crate provides data models and storage operations for the JP workspace,
 //! a CLI tool for managing LLM-assisted code conversations with fine-grained
 //! control over context and behavior.
+//!
+//! Session identity, the per-session active-workspace store, and the roots
+//! registry (RFD 087) live in [`session`], [`session_store`], and [`roots`].
+//! The session store is user-global (above any checkout); the roots registry
+//! maps a workspace ID to its live checkouts on disk.
 
 mod conversation_lock;
 mod error;
 mod handle;
 mod id;
+pub mod roots;
 mod sanitize;
 pub mod session;
 pub(crate) mod session_mapping;
+pub mod session_store;
 mod state;
 
 use std::{
@@ -19,6 +26,7 @@ use std::{
 };
 
 use camino::{FromPathBufError, Utf8Path, Utf8PathBuf};
+use conversation_lock::PersistFailures;
 pub use conversation_lock::{ConversationLock, ConversationMut, LockResult};
 pub use error::Error;
 use error::Result;
@@ -47,6 +55,16 @@ const APPLICATION: &str = "jp";
 /// root.
 pub const DEFAULT_STORAGE_DIR: &str = ".jp";
 
+/// Whether opening a workspace may write to disk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Access {
+    /// Materialize user-local storage and repair the stored workspace ID.
+    ReadWrite,
+
+    /// Wire only what already exists, and write nothing.
+    ReadOnly,
+}
+
 #[derive(Debug)]
 pub struct Workspace {
     /// The root directory of the workspace.
@@ -72,6 +90,13 @@ pub struct Workspace {
 
     /// The in-memory state of the workspace.
     state: State,
+
+    /// Drop-time persistence failures recorded by conversation scopes.
+    ///
+    /// Lives here rather than on a [`ConversationLock`] so a failure recorded
+    /// while a cancelled future unwinds is still reachable after the lock is
+    /// gone.
+    persist_failures: PersistFailures,
 }
 
 impl Workspace {
@@ -126,6 +151,7 @@ impl Workspace {
             sessions: backend,
             fs: None,
             state: State::default(),
+            persist_failures: PersistFailures::default(),
         }
     }
 
@@ -156,17 +182,24 @@ impl Workspace {
     /// [`load_conversation_index`]: Self::load_conversation_index
     /// [`sanitize`]: Self::sanitize
     pub fn open(dir: &Utf8Path) -> Result<Self> {
-        Self::open_with_storage_dir(dir, DEFAULT_STORAGE_DIR)
+        Self::open_inner(dir, DEFAULT_STORAGE_DIR, Access::ReadWrite)
     }
 
-    /// Open the workspace containing `dir`, looking for a store named
-    /// `storage_dir`.
+    /// Open the workspace containing `dir` without writing anything to disk.
     ///
-    /// Behaves exactly like [`open`], which uses [`DEFAULT_STORAGE_DIR`].
+    /// User-local storage is wired only when its directory already exists, and
+    /// the stored workspace ID is left untouched, so reading a workspace cannot
+    /// mint state for it.
+    /// Use this to report on a workspace, and [`open`] for the one a command
+    /// runs against.
     ///
     /// [`open`]: Self::open
-    fn open_with_storage_dir(dir: &Utf8Path, storage_dir: &str) -> Result<Self> {
-        trace!(dir = %dir, storage_dir, "Finding workspace.");
+    pub fn open_read_only(dir: &Utf8Path) -> Result<Self> {
+        Self::open_inner(dir, DEFAULT_STORAGE_DIR, Access::ReadOnly)
+    }
+
+    fn open_inner(dir: &Utf8Path, storage_dir: &str, access: Access) -> Result<Self> {
+        trace!(dir = %dir, storage_dir, ?access, "Finding workspace.");
         let root = Self::find_root(dir.to_path_buf(), storage_dir)
             .ok_or_else(|| Error::WorkspaceNotFound(dir.to_path_buf()))?;
         trace!(root = %root, "Found workspace root.");
@@ -182,19 +215,25 @@ impl Workspace {
         trace!(%id, "Loaded unique workspace ID.");
 
         let user_root = user_data_dir()?.join("workspace");
-        // The workspace directory name slugs a freshly created silo so users can
-        // recognize it; an existing silo is reused by ID regardless of its slug.
+        // The workspace directory name slugs a freshly created user-workspace
+        // directory so users can recognize it; an existing one is reused by ID
+        // regardless of its slug.
         let slug = root.file_name();
-        let fs = Arc::new(FsStorageBackend::new(&storage)?.with_user_storage(
-            &user_root,
-            slug,
-            id.to_string(),
-        )?);
+        let backend = FsStorageBackend::new(&storage)?;
+        let backend = match access {
+            Access::ReadWrite => backend.with_user_storage(&user_root, slug, id.to_string())?,
+            Access::ReadOnly => {
+                backend.with_existing_user_storage(&user_root, slug, &id.to_string())
+            }
+        };
+        let fs = Arc::new(backend);
 
         let mut workspace = Self::in_memory_with_id(root, id).with_backend(fs.clone());
         workspace.fs = Some(fs);
 
-        workspace.id().store(&storage)?;
+        if access == Access::ReadWrite {
+            workspace.id().store(&storage)?;
+        }
 
         Ok(workspace)
     }
@@ -203,6 +242,18 @@ impl Workspace {
     #[must_use]
     pub fn root(&self) -> &Utf8Path {
         &self.root
+    }
+
+    /// Take the drop-time persist failure recorded by any conversation scope.
+    ///
+    /// The drain of last resort: a scope that dropped while a cancelled future
+    /// unwound recorded its failure here, and the lock it came from is already
+    /// gone.
+    /// Yields each failure once, so draining here after a
+    /// [`ConversationLock::take_persist_failure`] does not report it twice.
+    #[must_use]
+    pub fn take_persist_failure(&self) -> Option<Error> {
+        self.persist_failures.lock().take()
     }
 
     /// Set the persist backend.
@@ -558,6 +609,7 @@ impl Workspace {
             Arc::clone(&self.persist),
             lock_guard,
             projection,
+            Arc::clone(&self.persist_failures),
         ))
     }
 
@@ -685,6 +737,7 @@ impl Workspace {
             Arc::clone(&self.persist),
             lock_guard,
             projection,
+            Arc::clone(&self.persist_failures),
         )))
     }
 
@@ -881,6 +934,7 @@ impl Workspace {
             Arc::clone(&self.persist),
             Box::new(NoopLockGuard),
             projection,
+            Arc::clone(&self.persist_failures),
         )
     }
 }
@@ -893,9 +947,12 @@ fn maybe_init_conversation(
         return;
     }
 
-    let Ok(meta) = loader.load_conversation_metadata(id) else {
-        warn!(%id, "Failed to load conversation metadata. Skipping.");
-        return;
+    let meta = match loader.load_conversation_metadata(id) {
+        Ok(meta) => meta,
+        Err(error) => {
+            warn!(%id, %error, cause = %error.kind(), "Failed to load conversation metadata. Skipping.");
+            return;
+        }
     };
 
     if let Err(error) = cell.set(Arc::new(RwLock::new(meta))) {
@@ -911,9 +968,12 @@ fn maybe_init_events(
         return;
     }
 
-    let Ok(stream) = loader.load_conversation_stream(id) else {
-        warn!(%id, "Failed to load conversation events. Skipping.");
-        return;
+    let stream = match loader.load_conversation_stream(id) {
+        Ok(stream) => stream,
+        Err(error) => {
+            warn!(%id, %error, cause = %error.kind(), "Failed to load conversation events. Skipping.");
+            return;
+        }
     };
 
     if let Err(error) = cell.set(Arc::new(RwLock::new(stream))) {

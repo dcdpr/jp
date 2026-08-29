@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8Path;
 use serde_json::{Map, Value};
 
 use super::diff_filter::{
@@ -15,7 +15,7 @@ use crate::util::{
 const MAX_LINES: usize = 500;
 
 pub(crate) async fn git_diff_commit(
-    root: Utf8PathBuf,
+    root: &Utf8Path,
     revision: String,
     paths: OneOrMany<String>,
     pattern: Option<String>,
@@ -43,7 +43,7 @@ pub(crate) async fn git_diff_commit(
     }
 
     git_diff_commit_impl(
-        &root,
+        root,
         &revision,
         &paths,
         pattern.as_deref(),

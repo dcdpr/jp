@@ -3,7 +3,11 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 import { field, unescapeTitle } from './metadata.mjs'
-import { checkMilestones, normalizePriority } from './rfd-priority.mjs'
+import {
+    checkMilestones,
+    normalizePriority,
+    TERMINAL_STATUSES,
+} from './rfd-priority.mjs'
 import { inDevelopmentRfds, loadTickets } from './ticket-shared.mjs'
 
 // Shared parsing and validation for the RFD data loaders.
@@ -129,20 +133,14 @@ export function loadPriority(path) {
     return normalizePriority(raw)
 }
 
-// Statuses that take an RFD off the priority board. The board is the active
-// backlog the client prioritizes (Discussion, Accepted); everything else is
-// done or dead.
-export const TERMINAL_STATUSES = new Set([
-    'Implemented',
-    'Superseded',
-    'Abandoned',
-])
-
 // Annotate each entry with its board position and milestone. `priority` is the
 // index in the combined `order` + `backlog` list (lower = higher priority) or
-// `null` when the RFD hasn't been placed yet. `milestone` is the name of the
-// planned group the RFD sits in, or `null` (unassigned, backlogged, or
-// unplaced). Status is left untouched so the view can drop terminal RFDs itself.
+// `null` when the RFD holds no position. `milestone` is the name of the planned
+// group the RFD sits in, or `null` (unassigned, backlogged, or unplaced).
+//
+// A terminal RFD holds no position whatever the board file says. The file goes
+// stale as soon as a status changes, so membership is settled here, once, for
+// every surface.
 export function mergePriority(entries, priority) {
     const combined = [...priority.order, ...(priority.backlog ?? [])]
     const rank = new Map(combined.map((num, i) => [num, i]))
@@ -151,8 +149,9 @@ export function mergePriority(entries, priority) {
         for (const num of group.ids) milestoneOf.set(num, group.milestone)
     }
     for (const entry of entries) {
-        entry.priority = rank.has(entry.num) ? rank.get(entry.num) : null
-        entry.milestone = milestoneOf.get(entry.num) ?? null
+        const placed = !TERMINAL_STATUSES.has(entry.status) && rank.has(entry.num)
+        entry.priority = placed ? rank.get(entry.num) : null
+        entry.milestone = placed ? (milestoneOf.get(entry.num) ?? null) : null
     }
 }
 
@@ -180,11 +179,10 @@ export function mergeDependencies(entries, graph) {
     }
 }
 
-// Reject board entries that don't match a known published RFD. Numbers are
-// never reused, so an unknown id is real corruption (a hand-edit typo, or a
-// stale id), not the expected churn of an RFD becoming Implemented. Terminal
-// ids lingering in `order` are tolerated: they fall off on the next save and
-// the view filters them out meanwhile.
+// Reject board entries that don't match a known RFD. Numbers are never reused,
+// so an unknown id is real corruption: a hand-edit typo, or an id whose file
+// went away. A terminal RFD still listed on the board is a separate, milder
+// problem — see `checkTerminalOnBoard`.
 export function checkPriority(entries, priority) {
     const known = new Set(entries.map(e => e.num))
     const unknown = [
@@ -198,6 +196,33 @@ export function checkPriority(entries, priority) {
     return `Unknown RFD ids in priority board: ${ids}.\n\n` +
         `\`docs/rfd/.priority.json\` references RFDs that don't exist. Fix the ` +
         `ids or remove them (the board UI rewrites this file on save).`
+}
+
+// Reject terminal RFDs listed on the priority board.
+//
+// The board ranks open work, so an Implemented, Superseded, or Abandoned RFD has
+// no place on it. `graph` supplies the statuses and must span every id space the
+// board can hold — drafts included, since a draft can be abandoned. Ids it
+// doesn't know are left to `checkPriority`.
+//
+// This is an error rather than a warning because the board file is what a human
+// reads and reorders: nothing renders a stale id, so nothing else would ever
+// point it out.
+export function checkTerminalOnBoard(graph, priority) {
+    const placed = [...priority.order, ...(priority.backlog ?? [])]
+    const terminal = [...new Set(placed)]
+        .filter(num => TERMINAL_STATUSES.has(graph.get(num)?.status))
+        .sort()
+
+    if (terminal.length === 0) return null
+
+    const report = terminal
+        .map(num => `  ${num} (${graph.get(num).status})`)
+        .join('\n')
+    return `Terminal RFDs on the priority board:\n${report}\n\n` +
+        `The board ranks work that is still open. Run ` +
+        `\`just rfd-board-prune\` to drop these from ` +
+        `\`docs/rfd/.priority.json\`.`
 }
 
 // Each id (`NNN` or `DNN`) must map to exactly one file. Once drafts left the

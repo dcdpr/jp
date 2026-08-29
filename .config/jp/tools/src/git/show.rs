@@ -1,6 +1,6 @@
 use std::fmt::{self, Write};
 
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8Path;
 use serde_json::{Map, Value};
 
 use super::env_from_options;
@@ -64,12 +64,12 @@ impl fmt::Display for FileStat {
 }
 
 pub(crate) async fn git_show(
-    root: Utf8PathBuf,
+    root: &Utf8Path,
     revision: String,
     options: &Map<String, Value>,
 ) -> ToolResult {
     let env = env_from_options(options);
-    git_show_impl(&root, &revision, &DuctProcessRunner, &env)
+    git_show_impl(root, &revision, &DuctProcessRunner, &env)
 }
 
 fn git_show_impl<R: ProcessRunner>(

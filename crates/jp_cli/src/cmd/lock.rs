@@ -124,9 +124,14 @@ pub(crate) async fn acquire_lock(mut r: LockRequest<'_>) -> Result<LockOutcome> 
         // Wait for the next poll tick, but also listen for interrupts.
         tokio::select! {
             biased;
-            Some(()) = interrupt_rx.recv() => {
+            Some(notice) = interrupt_rx.recv() => {
                 cancel_timer(timer).await;
                 drop(interrupt_guard);
+                // The press is answered by the contention prompt below, so it
+                // no longer counts toward the escalation ladder: a press after
+                // the prompt is answered should reach a handler, not bypass
+                // the stack.
+                notice.handled();
                 return prompt_contention(r).await;
             }
             () = tokio::time::sleep(Duration::from_millis(500)) => {}

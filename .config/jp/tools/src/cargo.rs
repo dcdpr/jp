@@ -1,13 +1,17 @@
 use std::time::{Duration, Instant};
 
-use camino::{Utf8Path, Utf8PathBuf};
-use jp_tool::{AccessPolicy, Capability, Outcome};
+use camino::Utf8Path;
+use jp_tool::{Capability, Outcome};
 use serde_json::Value;
 
 use crate::{
     Context, Tool,
-    fs::utils::{authorize, resolve_workspace_path},
-    util::{OneOrMany, ToolResult, error, unknown_tool},
+    util::{
+        OneOrMany, ToolResult, error,
+        root::{CARGO_MANIFEST, configured_root, note_root, resolve_root},
+        runner::{DuctProcessRunner, ProcessOutput, ProcessRunner},
+        unknown_tool,
+    },
 };
 
 mod check;
@@ -41,31 +45,55 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
     // Which cargo workspace to operate in. Defaults to the root the tool was
     // invoked with; set `options.root` in the tool config to point the cargo
     // tooling at a different cargo workspace.
-    //
-    // A present `root` must be a string. `option_or` cannot be used here: it
-    // reports a malformed value as an absent one, which would silently run
-    // `cargo_format` or `cargo_update` against the host workspace — writing to
-    // it, and reporting success — after the user asked for another one.
-    let configured = match t.options.get("root") {
-        None | Some(Value::Null) => None,
-        Some(Value::String(value)) => Some(value.clone()),
-        Some(other) => {
-            return error(format!(
-                "The `root` tool option must be a string, got `{other}`."
-            ));
-        }
+    let configured = match configured_root(&t.options) {
+        Ok(configured) => configured,
+        Err(message) => return error(message),
     };
 
     let subcommand = t.name.trim_start_matches("cargo_");
-    let root = match cargo_root(
+    let root = match resolve_root(
         &ctx.root,
-        configured.as_deref(),
+        configured,
         ctx.access.as_ref(),
         required_capabilities(subcommand),
+        &CARGO_MANIFEST,
     ) {
         Ok(root) => root,
         Err(message) => return error(message),
     };
+
+    if root != ctx.root
+        && let Err(message) = ensure_workspace_root(&root, &DuctProcessRunner)
+    {
+        return error(message);
+    }
+
+    // Cargo profile to build under, set via `options.profile`. A profile of its
+    // own gives these tools their own directory under `target/`, which is the
+    // only way to keep their artifacts, fingerprints and build lock apart from
+    // a developer's concurrent `cargo run` in the same workspace.
+    //
+    // Refused when malformed rather than ignored: a silently dropped value puts
+    // the build back in the shared profile without saying so.
+    let profile = match t.options.get("profile") {
+        None | Some(Value::Null) => None,
+        Some(Value::String(value)) => Some(value.clone()),
+        Some(other) => {
+            return error(format!(
+                "The `profile` tool option must be a string, got `{other}`."
+            ));
+        }
+    };
+
+    // `format` and `update` never compile, and `install_tools` builds through a
+    // recipe that pins its own profile. Accepting the option for them would
+    // promise a target directory of its own and hand back the shared one, which
+    // is the outcome the option exists to avoid.
+    if profile.is_some() && !matches!(subcommand, "check" | "expand" | "test") {
+        return error(format!(
+            "The `profile` tool option has no effect on `cargo_{subcommand}`."
+        ));
+    }
 
     // Flags to append to `RUSTFLAGS`, set via `options.rustflags`. Malformed
     // values are refused for the same reason as `root`: silently ignoring them
@@ -85,11 +113,21 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
 
     let started = Instant::now();
     let outcome = match subcommand {
-        "check" => cargo_check(&root, &rustflags, t.opt("package")?, checksum_freshness).await,
+        "check" => {
+            cargo_check(
+                &root,
+                &rustflags,
+                profile.as_deref(),
+                t.opt("package")?,
+                checksum_freshness,
+            )
+            .await
+        }
         "expand" => {
             cargo_expand(
                 &root,
                 &rustflags,
+                profile.as_deref(),
                 t.req("item")?,
                 t.opt("package")?,
                 checksum_freshness,
@@ -100,6 +138,7 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
             cargo_test(
                 &root,
                 &rustflags,
+                profile.as_deref(),
                 t.opt("package")?,
                 t.opt("testname")?,
                 t.opt("backtrace")?,
@@ -119,7 +158,70 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
         return outcome;
     }
 
-    note_root(outcome, &root)
+    note_root(outcome, &root, "cargo")
+}
+
+/// Refuse a redirected root that cargo treats as a member of a larger
+/// workspace.
+///
+/// The manifest check that precedes this one only proves a `Cargo.toml` is
+/// present, and a member has one too.
+/// Cargo resolves the workspace from that manifest, so a member root puts
+/// `cargo check` and `cargo test` on `--workspace`, `cargo fmt` on `--all`, and
+/// `cargo update` on the enclosing lockfile — reaching a project the caller
+/// never named and the access policy never covered.
+///
+/// # Errors
+///
+/// Returns an error naming both directories when they differ, and when cargo
+/// cannot resolve the workspace at all.
+fn ensure_workspace_root<R: ProcessRunner>(root: &Utf8Path, runner: &R) -> Result<(), String> {
+    // Cargo is asked rather than the manifest parsed, so this answer cannot
+    // drift from the one the build commands themselves will resolve.
+    let ProcessOutput {
+        stdout,
+        stderr,
+        status,
+    } = runner
+        .run(
+            "cargo",
+            &[
+                "locate-project",
+                "--workspace",
+                "--message-format=plain",
+                "--manifest-path",
+                root.join("Cargo.toml").as_str(),
+            ],
+            root,
+        )
+        .map_err(|error| format!("Could not resolve the cargo workspace of `{root}`: {error}"))?;
+
+    if !status.is_success() {
+        return Err(format!(
+            "The `root` option resolved to `{root}`, whose cargo workspace could not be resolved: \
+             {}",
+            stderr.trim()
+        ));
+    }
+
+    let located = Utf8Path::new(stdout.trim());
+    let workspace = located.parent().unwrap_or(located);
+    // `root` arrives canonicalized, so the comparison only holds if this side is
+    // too. A path cargo reports for a directory that has since gone is left as
+    // printed, and fails the comparison below.
+    let workspace = workspace
+        .canonicalize_utf8()
+        .unwrap_or_else(|_| workspace.to_owned());
+
+    if workspace == root {
+        return Ok(());
+    }
+
+    Err(format!(
+        "The `root` option resolved to `{root}`, which is a member of the cargo workspace at \
+         `{workspace}`. Cargo would operate on that workspace instead. Name the workspace root, \
+         and scope the command with the `package` argument."
+    ))
 }
 
 /// Append how long the cargo invocation took.
@@ -211,96 +313,6 @@ fn required_capabilities(subcommand: &str) -> &'static [Capability] {
             Capability::Execute,
         ],
     }
-}
-
-/// Name the directory cargo ran in, for failures from a redirected root.
-///
-/// A redirected root turns an ordinary cargo failure into a baffling one
-/// (`package ID specification ... did not match any packages`), because nothing
-/// in cargo's own message hints that it ran somewhere other than the workspace.
-/// Successes are left alone: the caller asked for the redirect, so it only
-/// needs restating when something goes wrong.
-fn note_root(outcome: ToolResult, root: &Utf8Path) -> ToolResult {
-    let note = format!("(cargo ran in `{root}`, set by the `root` tool option.)");
-
-    match outcome {
-        Ok(Outcome::Error {
-            message,
-            trace,
-            transient,
-        }) => Ok(Outcome::Error {
-            message: format!("{message}\n\n{note}"),
-            trace,
-            transient,
-        }),
-        Err(error) => Err(format!("{error}\n\n{note}").into()),
-        ok => ok,
-    }
-}
-
-/// Resolve which cargo workspace the cargo tools operate in.
-///
-/// `None`, an empty value, or `.` all keep `default`, the root the tool was
-/// invoked with.
-/// Anything else is a workspace-relative path, resolved under the same
-/// confinement every other tool path gets: absolute paths and `..` escapes are
-/// refused, and symlinks are canonicalized before the workspace check.
-/// An approved `external` mount is the only sanctioned way to reach a checkout
-/// outside the workspace.
-///
-/// The confinement matters more here than for a read: `cargo` runs build
-/// scripts and proc macros, so an unvetted directory is arbitrary code
-/// execution.
-///
-/// The target is required to be a directory holding a `Cargo.toml`, so a typo
-/// (or naming the manifest instead of the directory holding it) surfaces here.
-/// Without the manifest check, cargo would search parent directories and
-/// silently operate on the enclosing workspace instead — rewriting sources or
-/// the lockfile of a project the caller never named, and reporting success.
-///
-/// A configured target must also grant `capabilities` outright.
-/// `external` only permits a path to resolve outside the workspace; it is not a
-/// capability grant, so reaching a mount says nothing about what may be done
-/// once there.
-fn cargo_root(
-    default: &Utf8Path,
-    configured: Option<&str>,
-    access: Option<&AccessPolicy>,
-    capabilities: &[Capability],
-) -> Result<Utf8PathBuf, String> {
-    // An empty value or `.` resolves to the invocation root, so a config layer
-    // can unload a previously-set root without naming the default.
-    let configured = configured.filter(|value| !value.is_empty() && *value != ".");
-
-    let Some(configured) = configured else {
-        return Ok(default.to_owned());
-    };
-
-    let resolved = resolve_workspace_path(default, configured, access)?;
-
-    if !resolved.absolute.is_dir() {
-        return Err(format!(
-            "The `root` option `{configured}` resolved to `{}`, which is not a directory.",
-            resolved.absolute
-        ));
-    }
-
-    if !resolved.absolute.join("Cargo.toml").is_file() {
-        return Err(format!(
-            "The `root` option `{configured}` resolved to `{}`, which has no `Cargo.toml`. Cargo \
-             would search parent directories and operate on the enclosing workspace instead.",
-            resolved.absolute
-        ));
-    }
-
-    // Only a configured root is authorized. The invocation root is where these
-    // tools have always run, so demanding grants for it here would revoke
-    // access this option never handed out.
-    for capability in capabilities {
-        authorize(access, *capability, &resolved.relative)?;
-    }
-
-    Ok(resolved.absolute)
 }
 
 #[cfg(test)]

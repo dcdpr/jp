@@ -21,10 +21,19 @@ fn test_cargo_test_success() {
     let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;
     let runner = MockProcessRunner::success(stdout);
 
-    let result = cargo_test_impl(&ctx.root, "-W warnings", None, None, false, false, &runner)
-        .unwrap()
-        .into_content()
-        .unwrap();
+    let result = cargo_test_impl(
+        &ctx.root,
+        "-W warnings",
+        None,
+        None,
+        None,
+        false,
+        false,
+        &runner,
+    )
+    .unwrap()
+    .into_content()
+    .unwrap();
 
     assert_eq!(result, "Ran 1/1 tests, of which 0 failed.\n");
 }
@@ -43,10 +52,19 @@ fn test_cargo_test_with_failure() {
     let stdout = r#"{"type":"test","event":"failed","name":"my_crate$tests::my_test","stdout":"assertion failed"}"#;
     let runner = MockProcessRunner::success(stdout);
 
-    let result = cargo_test_impl(&ctx.root, "-W warnings", None, None, false, false, &runner)
-        .unwrap()
-        .into_content()
-        .unwrap();
+    let result = cargo_test_impl(
+        &ctx.root,
+        "-W warnings",
+        None,
+        None,
+        None,
+        false,
+        false,
+        &runner,
+    )
+    .unwrap()
+    .into_content()
+    .unwrap();
 
     assert_eq!(result, indoc::indoc! {"
             Ran 1/1 tests, of which 1 failed.
@@ -82,9 +100,18 @@ fn no_tests_ran_error_is_bounded() {
         .expect_any()
         .returns_error(&stderr);
 
-    let error = cargo_test_impl(&ctx.root, "-W warnings", None, None, false, false, &runner)
-        .expect_err("a run with zero tests is an error")
-        .to_string();
+    let error = cargo_test_impl(
+        &ctx.root,
+        "-W warnings",
+        None,
+        None,
+        None,
+        false,
+        false,
+        &runner,
+    )
+    .expect_err("a run with zero tests is an error")
+    .to_string();
 
     assert!(
         error.len() < MAX_DIAGNOSTIC_BYTES + 200,
@@ -125,9 +152,18 @@ fn failure_output_is_bounded_across_the_whole_run() {
         .join("\n");
     let runner = MockProcessRunner::success(stdout);
 
-    let content = cargo_test_impl(&ctx.root, "-W warnings", None, None, false, false, &runner)
-        .unwrap()
-        .unwrap_content();
+    let content = cargo_test_impl(
+        &ctx.root,
+        "-W warnings",
+        None,
+        None,
+        None,
+        false,
+        false,
+        &runner,
+    )
+    .unwrap()
+    .unwrap_content();
 
     // Every failure is still counted, even though most carry no output.
     assert!(
@@ -174,9 +210,18 @@ fn failure_blocks_are_bounded_when_captured_output_is_empty() {
         .join("\n");
     let runner = MockProcessRunner::success(stdout);
 
-    let content = cargo_test_impl(&ctx.root, "-W warnings", None, None, false, false, &runner)
-        .unwrap()
-        .unwrap_content();
+    let content = cargo_test_impl(
+        &ctx.root,
+        "-W warnings",
+        None,
+        None,
+        None,
+        false,
+        false,
+        &runner,
+    )
+    .unwrap()
+    .unwrap_content();
 
     assert!(
         content.starts_with("Ran 5000/5000 tests, of which 5000 failed.\n"),
@@ -193,6 +238,56 @@ fn failure_blocks_are_bounded_when_captured_output_is_empty() {
         "got tail: {}",
         &content[content.len() - 200..]
     );
+}
+
+/// The cargo profile has to reach nextest under its own flag, and the
+/// positional filter has to stay last.
+///
+/// Nextest's `--profile` selects one of *its* profiles, so a cargo profile
+/// passed under that name would be silently misread as a nextest one.
+#[test]
+fn cargo_profile_is_passed_through_to_nextest() {
+    let dir = tempdir().unwrap();
+    let ctx = Context {
+        root: dir.path().to_owned(),
+        action: Action::Run,
+        access: None,
+        workspace_id: "test".into(),
+        conversation_id: "test".into(),
+    };
+
+    let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .args(&[
+            "nextest",
+            "run",
+            "--workspace",
+            "--cargo-quiet",
+            "--no-fail-fast",
+            "--hide-progress-bar",
+            "--final-status-level=none",
+            "--status-level=fail",
+            "--message-format=libtest-json-plus",
+            "--cargo-profile=agent",
+            "my_test",
+        ])
+        .returns_success(stdout);
+
+    let content = cargo_test_impl(
+        &ctx.root,
+        "-W warnings",
+        Some("agent"),
+        None,
+        Some("my_test".to_owned()),
+        false,
+        false,
+        &runner,
+    )
+    .unwrap()
+    .unwrap_content();
+
+    assert_eq!(content, "Ran 1/1 tests, of which 0 failed.\n");
 }
 
 /// A runner that captures the environment variables passed to it, so we can
@@ -258,6 +353,7 @@ fn test_rustflags_reaches_cargo() {
         "-W warnings -Zthreads=0",
         None,
         None,
+        None,
         false,
         false,
         &runner,
@@ -288,8 +384,17 @@ fn test_backtrace_disabled_by_default() {
 
     let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;
     let runner: EnvCapturingRunner = MockProcessRunner::success(stdout).into();
-    let _result =
-        cargo_test_impl(&ctx.root, "-W warnings", None, None, false, false, &runner).unwrap();
+    let _result = cargo_test_impl(
+        &ctx.root,
+        "-W warnings",
+        None,
+        None,
+        None,
+        false,
+        false,
+        &runner,
+    )
+    .unwrap();
 
     assert_eq!(
         runner
@@ -314,8 +419,17 @@ fn test_checksum_freshness_disabled_by_default() {
 
     let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;
     let runner: EnvCapturingRunner = MockProcessRunner::success(stdout).into();
-    let _result =
-        cargo_test_impl(&ctx.root, "-W warnings", None, None, false, false, &runner).unwrap();
+    let _result = cargo_test_impl(
+        &ctx.root,
+        "-W warnings",
+        None,
+        None,
+        None,
+        false,
+        false,
+        &runner,
+    )
+    .unwrap();
 
     assert!(
         !runner
@@ -339,8 +453,17 @@ fn test_checksum_freshness_enabled() {
 
     let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;
     let runner: EnvCapturingRunner = MockProcessRunner::success(stdout).into();
-    let _result =
-        cargo_test_impl(&ctx.root, "-W warnings", None, None, false, true, &runner).unwrap();
+    let _result = cargo_test_impl(
+        &ctx.root,
+        "-W warnings",
+        None,
+        None,
+        None,
+        false,
+        true,
+        &runner,
+    )
+    .unwrap();
 
     assert_eq!(
         runner
@@ -365,8 +488,17 @@ fn test_backtrace_enabled() {
 
     let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;
     let runner: EnvCapturingRunner = MockProcessRunner::success(stdout).into();
-    let _result =
-        cargo_test_impl(&ctx.root, "-W warnings", None, None, true, false, &runner).unwrap();
+    let _result = cargo_test_impl(
+        &ctx.root,
+        "-W warnings",
+        None,
+        None,
+        None,
+        true,
+        false,
+        &runner,
+    )
+    .unwrap();
 
     assert_eq!(
         runner

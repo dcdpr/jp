@@ -181,7 +181,12 @@ fn scan_fragment(
 
         // Absolute path: reject if it resolves to an existing path
         // outside the workspace.
-        if is_sep(ch) {
+        //
+        // A candidate made up of nothing but separators points at the
+        // filesystem root, which no utility can read as a file. Division
+        // operators in `jq` and `bc` programs produce exactly that, and every
+        // real path reference is still caught at its own leading separator.
+        if is_sep(ch) && !candidate.bytes().all(is_sep) {
             let normalized = clean(Path::new(candidate));
             if exists(&normalized) && !normalized.starts_with(root) {
                 return Err(format!(

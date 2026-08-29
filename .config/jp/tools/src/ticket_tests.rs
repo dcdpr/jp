@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use camino_tempfile::Utf8TempDir;
 use jp_tool::{Action, Outcome};
@@ -14,7 +14,7 @@ const FIXED_ID: &str = "T-02wt0kx";
 
 /// The directory holding this module's tool declarations.
 fn declarations() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../.jp/mcp/tools/ticket")
+    PathBuf::from("../../../.jp/mcp/tools/ticket")
 }
 
 fn declaration(file: &str) -> toml::Value {
@@ -215,7 +215,7 @@ fn comment_preview_renders_the_block_under_the_ticket_it_lands_on() {
         concat!(
             "> # T-02wt0kx: Tool call header misaligned\n",
             "> \n",
-            "> ────────────────────────────────────────────────────────────────────────────────\n",
+            "> ──────────────────────────────────────────────────────────────────────────────\n",
             "> \n",
             "> - **From**: jp\n",
             "> - **Date**: 2026-08-05T14:03:11Z\n",
@@ -607,10 +607,15 @@ fn show_renders_metadata_and_the_description() {
         json!({ "id": id.to_string() }),
     ));
 
+    // Fenced as markdown: the terminal renderer keys syntax highlighting off
+    // the leading fence.
     assert!(
-        out.starts_with(&format!("# {id}: Tool call header misaligned\n")),
+        out.starts_with(&format!(
+            "```markdown\n# {id}: Tool call header misaligned\n"
+        )),
         "{out}"
     );
+    assert!(out.ends_with("\n```"), "{out}");
     assert!(
         out.contains(&format!(
             "- **Path**: docs/ticket/{}tool-call-header-misaligned.md",
