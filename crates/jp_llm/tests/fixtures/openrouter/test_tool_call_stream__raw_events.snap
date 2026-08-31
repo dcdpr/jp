@@ -10,10 +10,10 @@ expression: v
                 "",
             ),
             metadata: {
-                "openai_encrypted_content": String("gAAAAABpquoe6AOXGp5vYRlcK52mPH_3FPYXVzoiQWE0JoNV-fIEtxz9q6hHntbV4bQ-Jt_jFLlnKinYTuDeuNUvRqLHar0bvmeTYTmJhtwI107tYzaQJAbxLfkxs5Eon9Zh-fSpm5UsyKf5WMFaSNv20Bq4znF6i6-TtcQL5OD8xXmn1rkAIDYn4PsTHCXNMS0zmc_JAHIuFyuBDtmA2iHWNV5fD0lm5g0sMEI9wHceQuGfyzfnF-BXilwz0M4bGxTxLtBFoKH4orGaflpE5vYONGdyTuTSngLoMw53jARuSHWx5ZthNVrhcYVV_oXFjYwIjg2-FIfXnP1PoyWLQrUdqMYFvxNwqoSi9V93g4OXNEO-XVQbW_Vn6GposVZQ6kXycFSNGzM56RN0fyKYSCPy-fl4rWnOKa88hOW5XdpdxV4264s3vmTkDy8ywISoR28dE8Hk5sWk1w-hhi1_mppIg7-6lpbY1FDj2Y_Rx2NoMe7EVd2UDNJGqi4_0EWmkmMj2fxm7uidUvlU5bxw-ITWQi0erJqWQdQTp69EXuzDeSaDdWAH1ZuFbWx7K2VVa3LYQ4MUiHg5hl0hbJIkisHyQXGnJr-2zZgdQnafTYK70UYda1KNeRkR3w48fTbrI6Scp-PVHO_6eyURuuqC1pFnTth23g4CAWV23JBGuSQxHdC6x9hdiYe0Zm4VQkJYPC8nGs2HEukPAQc0Qv1Cf-ZllllUsFBnA6_LCiiRODg6Pe4UYQGYQaHGDQ_4YkPEIyEJiqRXSqedfhSc24eB7K4F0qr8O66cjr5Lmh5bnxTpyKcaL5jrx--6vX20NnQFVQmJTyVOdg8lpJbvJhOePQWO4Qjqe9d8u-3u14AseIo6Rlns3V_PIJQDftkS066rqLjlj5onqOLB"),
+                "openai_encrypted_content": String("gAAAAABqiG25zSV3Bao_uWBPTIokXrYpwopAESuTocGDarXwYD1KyVJs_TdeaeXzvnHpFhOr6IrnGj9-EvzBOLuzMNpjq2YTXBgFEI5pxEfdoUElIImLkvKX8bST6jahRQewHwmaRXnJDR2yFckoJNQHTKYeLOIApE_RfL-8V-wN3n9O9ajKAt3RYo76MSL8_YeY-qD7wKn5wTK8dNVG6UnvU5y3NZCbthJreYHKjCrwjc4pxvGoXWUqWRW9Jhe7zu1ktbKrvVjgL-NObQtCbu5RMwIYMP9XvPIk5Vb8gwhWKiWVnhCUftUe_P2WuQjxWW-2mQi48iby334NHJjPQWIsim6-KmCHoGk85CE4QDTnrAHkg4q7rCfjihg7OLLZLNgyRBi_y6Ap6cABErXSftjkR5DrQfmJ5v__WZMyT54cgUWsC-YAh4y4rPQ3A8TYFWqxnUTF-7x4dWKPPqm6ywuZ07gOKABYaFUa50sFVSP4WikM0fIbzTt0v8YWCAdrKhmTvaGukQn0L_ztt8kIJS3yPynuGTBb99SAvV0WVS5Xlyq0_J63el_R8bgwRQGu93V-3FD858IjMy8KTER5pSQZl-_L1Y_5NIfGpnu0AEO_GLXoXZ67RdFijtckQTlrRHkNq6Xw8zsNMb6GJmvnf05TFDMqzkMxJY6YpYliCufyj-JIswQ7R0ohyVUElmtBi8xe2FWabCzSitng2LnUIiqZlPmCV2fgBsit_-0E7GLWRjDAi92LssDsi6AisOcrd6Ih-paon6D4XmEnTiT5zGcfL1n9QKcXCwp6jnn70_QLp0-45pQL8YMyTYgDbk5aQ4tshASubWJJbz4YPm4MarGs7CFz8RpVTR_6cCN7AzDuo963rm2WXwzZs6oQTQRgkjKhKAvqYPGsjs2eOt4mcI1zr_yEHunKixvzfgFgURJ6TZLveO0hmCuN3AUD5PmuFDasWBzYVG5m-lvHKbjggaks9w5SzCG_99_gJumWFV4aw8vLXP495-A0oohnBp9czVC2qXqcpk3pguHtNTqJvVav4BnZhKdH00oYYq_0sH1fxLVXKt92kQ68JkhTabWv5m8NP9QpzKBhe2lV8KWzRemxDDZwDviCH1IkK5DM7S47vkQWv-HPJQFPYHocFSQEjR49TsywdWgL5EjfiQ97ye14fxE6-xsiQtEV9344GcRns3ussz_mPhhSuFBdJ1DsgyfbQ4nIR61jza1oaA8vM3fosD1en-qqKA6FGEJimNHN7w9nva8G-D3npdehHe5CAboEtzXEzgWptBdX9obIW_sIgyWcsX4t5AAkhqy8T0LogiwSZkZexzzZPaNdycpKZTEQ0hqtIjXuEZQHuco9xeoF62uLbur2G3w6IWBl8TyzRJXAALXi6p-eNI4GKCuFZbrYxtE8TW3n.eyJlbmRwb2ludF9zbHVnIjoib3BlbmFpL2dwdC01LW1pbmktMjAyNS0wOC0wN3xvcGVuYWkifQ"),
                 "openrouter_metadata": Array [
                     Object {
-                        "id": String("rs_023ab01049dcaf390169aaea1de2288194885412d44aa13592"),
+                        "id": String("rs_025b061bfd084e4a016a886db975c087d1b715e4c63d7cb28a"),
                         "index": Number(0),
                         "field": String("openai_encrypted_content"),
                     },
@@ -24,7 +24,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 Start {
-                    id: "call_Vvg5Dy9TkCdqYIkRawxATO3Z",
+                    id: "call_tCr2HKeu326bnT2x94xswLYz",
                     name: "run_me",
                 },
             ),
@@ -143,32 +143,9 @@ expression: v
     ],
     [
         Part {
-            index: 0,
-            part: Reasoning(
-                "",
-            ),
-            metadata: {
-                "openai_encrypted_content": String("gAAAAABpquof7IcULL7H8xd3HSLpVOtEwoJyuBwK-UrsmJL_D_-sr2nRxRw1WNd0fSBqQ-DyAi8WFk5L-VnDWIbOj7lkbCXZb__H6EXggDD_pkpmK4ShmWL6bABywqP2B1pjhdSe6OTd-nfnCNm8sTFhHutC6FyHNf-DUL3Mc5IF_6TP_qxGSntO_DqM_4oYlZ2LSWPbyxWzWX9jGlZR--epx0QNSxBZ57fn9bB8EZfINtXKrptcqZir27CHcd74vWTUmZYYJVtubdqJoyQBtB97SfaxZW7BNFAxlwDPDaMaqpNZzahzZtYt01xvu02AVIb0kBq14e46iyALMDbd-2pJ8js4yUIzraz8Cb-evko9-Az-GHyqe-8wiI7_aPYoWli3Fj7cKAbaia-xTVNRkq6Gs_GcSQUqblF6KBHZ77cdZelwNa350QO8SY3Kztn7CjZk_s1gzA-kwM9n_gOijEcdvyQKS6xYuPX8lq4HFFiEoD8bhBboAjzNpetNolBAQDqPSi0xwuC6YNB2_Ypokw2OQmlvjD1X93mlzlUotLLjrvJKuU6fQwNSY-ceAc37J2A8oXSP_OfNutWsDfXe2fdi0BHlGzq8IWUEGCZ_ftH-fKXrIlBftvVG2HO3L63mzuEIglgyLfMvZKIRCwwbVUu99ImvoEaNNtQivMigNbR2U-XEafP9TyNtkMTFJ2v7lhOHba__rdVRH1wuOn7jR2CswSs7ntDAlqJzEIWLwlWICDPGIYhynYW9l0qCCpl-MH0wD_LJ50XKRnJIseeEFfCDIgsh7SeULVOW8XBEs3wCs2D05EvLNTCKQSQp1tI3khSw4hkMsei5-LZPn-bcd8r-BPK3JU4OjjQZ2mSbWkJj4zgTIWwjHrUTzwbm5I5iHQZW7MPkAOB9"),
-                "openrouter_metadata": Array [
-                    Object {
-                        "id": String("rs_024d31edff8a68450169aaea1eefa88193adaa0b31f3442216"),
-                        "index": Number(0),
-                        "field": String("openai_encrypted_content"),
-                    },
-                ],
-            },
-        },
-        Part {
             index: 1,
             part: Message(
-                "The",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " tool",
+                "I",
             ),
             metadata: {},
         },
@@ -182,7 +159,105 @@ expression: v
         Part {
             index: 1,
             part: Message(
+                " the",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " tool",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " with",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " arguments",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " {\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "foo",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "\":\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "hello",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "\",\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "bar",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "\":\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "foo",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "\"}",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
                 " and",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " it",
             ),
             metadata: {},
         },
@@ -219,10 +294,6 @@ expression: v
             part: Message(
                 "!\"",
             ),
-            metadata: {},
-        },
-        Flush {
-            index: 0,
             metadata: {},
         },
         Flush {

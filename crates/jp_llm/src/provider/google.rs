@@ -509,23 +509,6 @@ fn map_model(model: types::Model) -> ModelDetails {
                 features: vec![],
             }
         }
-        "gemini-3-pro-preview" => ModelDetails {
-            id,
-            display_name,
-            context_window,
-            max_output_tokens,
-            reasoning: Some(
-                ReasoningDetails::leveled(false, true, false, true, false, false).always_on(),
-            ),
-            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::deprecated(
-                &"recommended replacement: gemini-3.1-pro-preview",
-                Some(NaiveDate::from_ymd_opt(2026, 3, 9).unwrap()),
-            )),
-            structured_output: None,
-            prefill: None,
-            features: vec![],
-        },
         "gemini-flash-latest" | "gemini-3-flash-preview" => ModelDetails {
             id,
             display_name,

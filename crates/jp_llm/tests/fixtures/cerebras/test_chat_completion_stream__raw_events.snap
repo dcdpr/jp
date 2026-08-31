@@ -7,7 +7,14 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "We just need to respond.",
+                "We",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " just need to respond.",
             ),
             metadata: {},
         },
@@ -18,21 +25,21 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "Got it! Your test message",
+                "Your test message came through successfully!",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " came through loud and clear. How can",
+                " Let me know if there's anything I can",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " I help you today?",
+                " help you with.",
             ),
             metadata: {},
         },

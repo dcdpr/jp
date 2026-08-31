@@ -8,7 +8,7 @@ expression: v
             index: 1,
             part: ToolCall(
                 Start {
-                    id: "call_AO3J5fHZqoX3OaqIfyUC3hre",
+                    id: "call_O3ByNtUdUxXx7MatyW9beYgO",
                     name: "run_me",
                 },
             ),
@@ -114,7 +114,21 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "I",
+                "Done",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " —",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " I",
             ),
             metadata: {},
         },
@@ -163,21 +177,70 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " you",
+                " {\"",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " provided",
+                "foo",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                ";",
+                "\":\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "foo",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "\",\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "bar",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "\":\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "foo",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "\"}",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " and",
             ),
             metadata: {},
         },
@@ -219,7 +282,14 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "!\"\n\n",
+                "!\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " \n\n",
             ),
             metadata: {},
         },
@@ -247,6 +317,104 @@ expression: v
         Part {
             index: 1,
             part: Message(
+                " me",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " to",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " run",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " it",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " again",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " with",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " different",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " arguments",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " or",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " explain",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " what",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " the",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " tool",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " does",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
                 ",",
             ),
             metadata: {},
@@ -268,62 +436,6 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " different",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " arguments",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " to",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " try",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " or",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " what",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " you",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " expect",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
                 " the",
             ),
             metadata: {},
@@ -331,28 +443,21 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " tool",
+                " parameters",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " to",
+                " you'd",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " do",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " next",
+                " like",
             ),
             metadata: {},
         },
@@ -366,7 +471,7 @@ expression: v
         Flush {
             index: 1,
             metadata: {
-                "openai_item_id": String("msg_01f639be2b5eb5d3016995b6bb84cc81a293ffe388e335c4c2"),
+                "openai_item_id": String("msg_0fcd6bd7366e725d016a886daa268087d2abca3fa72db89980"),
             },
         },
         Finished(

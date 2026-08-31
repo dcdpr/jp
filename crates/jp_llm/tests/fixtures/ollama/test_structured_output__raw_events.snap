@@ -18,56 +18,7 @@ expression: v
         Part {
             index: 1,
             part: Structured(
-                " are",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                " a",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                " few",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                " suitable",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                " titles",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                ",",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                " depending",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                " on",
+                " Are",
             ),
             metadata: {},
         },
@@ -81,140 +32,35 @@ expression: v
         Part {
             index: 1,
             part: Structured(
-                " context",
+                " Top",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                " of",
+                " 5",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                " our",
+                "0",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                " interaction",
+                " SEO",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                ":",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                "\n\n1",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                ".",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                "  **",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                "Getting",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                " Started",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                "**",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                " (",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                "Simple",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                " and",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                " direct",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                ")",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                "\n2",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                ".",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                "  **",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                "Introduction",
+                " Strategies",
             ),
             metadata: {},
         },
@@ -228,266 +74,91 @@ expression: v
         Part {
             index: 1,
             part: Structured(
-                " Our",
+                " Boost",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                " Chat",
+                " Your",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                "**",
+                " Rankings",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                " (",
+                "!",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                "Friendly",
+                " 🚀",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                " approach",
+                "\n\nThe",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                ")",
+                " world",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                "\n3",
+                " of",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                ".",
+                " search",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                "  **",
+                " engines",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                "First",
+                " is",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                " Steps",
+                " constantly",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                " Together",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                "**",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                " (",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                "Coll",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                "abor",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                "ative",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                " tone",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                ")",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                "\n4",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                ".",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                "  **",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                "Expl",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                "oring",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                " Topics",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                " with",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                " You",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                "**",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                " (",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                "Inv",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                "iting",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                " exploration",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                ")",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                "\n5",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                ".",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                "  **",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                "Hello",
+                " evolving",
             ),
             metadata: {},
         },
@@ -501,91 +172,140 @@ expression: v
         Part {
             index: 1,
             part: Structured(
-                " I",
+                " but",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                "'m",
+                " with",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                " Ready",
+                " the",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                " for",
+                " right",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                " Questions",
+                " tactics",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                "!**",
+                "...",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                " (",
+                " [",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                "Action",
+                "Continue",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                "-oriented",
+                " reading",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                ")",
+                "]",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                "\n\nLet",
+                "  \n\n📊",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                " me",
+                " **",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                " know",
+                "Pro",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " Tip",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                ":**",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " Don",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "'t",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " forget",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " local",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " keywords",
             ),
             metadata: {},
         },
@@ -606,63 +326,14 @@ expression: v
         Part {
             index: 1,
             part: Structured(
-                "'d",
+                "'re",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                " like",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                " something",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                " more",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                " creative",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                " or",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                " tailored",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                " to",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Structured(
-                " a",
+                " targeting",
             ),
             metadata: {},
         },
@@ -676,7 +347,21 @@ expression: v
         Part {
             index: 1,
             part: Structured(
-                " theme",
+                " cities",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " or",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " regions",
             ),
             metadata: {},
         },
@@ -684,6 +369,13 @@ expression: v
             index: 1,
             part: Structured(
                 "!",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " 🔍",
             ),
             metadata: {},
         },

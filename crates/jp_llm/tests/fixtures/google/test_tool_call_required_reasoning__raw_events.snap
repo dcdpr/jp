@@ -7,14 +7,14 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "**Analyzing Tool Arguments**\n\nOkay, I'm currently assessing the best way to approach the arguments for this \"run_me\" tool. I'm focusing on \"bar\" and \"foo,\" which are the options. The \"bar\" argument seems interesting, with its dual nature of either a literal string, like \"foo\", or a list of strings, so I need to make the right choice between them. I'm prioritizing flexibility and effectiveness in my approach.\n\n\n",
+                "**Considering Tool Arguments**\n\nI'm currently focused on determining the optimal arguments for the `run_me` tool. I'm exploring the options for `foo`, realizing it's optional and defaults to \"foo\".  The more pressing concern is the `bar` argument, which is mandatory and can accept either a string literal ('foo') or a list of strings. I need to make a solid selection to proceed.\n\n\n",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "**Refining Argument Selection**\n\nI've decided to provide a list of strings to the 'bar' argument, specifically `[\"apple\", \"banana\"]`, while omitting a value for 'foo', which defaults to \"foo\". This approach prioritizes demonstrating flexibility. I believe `default_api.run_me(bar=[\"apple\", \"banana\"])` is the most effective call for the \"run_me\" tool.\n\n\n",
+                "**Defining Tool Call**\n\nI've decided on the `run_me` tool call structure. Given that `foo` is optional, and `bar` can accept a list, I'm going with `default_api.run_me(bar=[\"foo\", \"bar\"])`. This covers the list case for `bar` and leverages the default for `foo`. I now need to think about potential error handling and what to do if the returned response isn't what is expected.\n\n\n",
             ),
             metadata: {},
         },
@@ -31,14 +31,14 @@ expression: v
                 },
             ),
             metadata: {
-                "google_thought_signature": String("CiQBvj72+/34HShSSwxZHdFYG/Uz79kQfaEtCJY4kUcuRwVmB8oKWgG+Pvb7TAxpZRLOS6xvWS4BBfo4TJwLrjSC47mnjZdpkv3Insht7YT1P659y3MWIWZlGYDuBbbcGfHhVoVMSdc0cM1lr9JWP1L8zMLXJl+nmHDSv92BIQYLjgrVAQG+Pvb7fzfxJOsj3rVWUY8w1//REQkU4hdjNy4fpIhahXiE+htLdjeN3KO4Suexk7SK5LT8zsZZsZiBXWuQz92DNlPhtbkpAvojwnrkSh2++2xJJgYym6Ehqe/u9ggVg12KAF3wf8riFXx5aIy3yFPwrnlHRlqbh3SzO82xxuXpgmhrqVu74yXaAXj3fPLxZcRPbis9qt1TnlUk3U7nORztpHA/bF18Y4TMJDY+2bC9O5vcHmvunNcazdKO0buNU5dmnfeVRXjYztobprUp4dSjdr0Z4grdAQG+Pvb7XlXYNdmCL7H3k5p2PC8zbgFi6HeJdBviSwJ/qRz7rMw1himJDOb7a3iCnUIlDkknZrtT5PRlnLey/uvtc8QG9V170c6ziVBcyAi89dntdB0ZIyEaS0FMjs6EPVcu47w0HfzmeKXpmq01lE9l3K8JQMFyVowy+rj8bWZAHs/1rVcLwtH6PZTth2env+DfpTF0dWcc/j8Xk7PK8c/8VKLqvRlZrh7PCNKBQCnckREX0H+Q4iNer8q4GqH/tBm1k7/ODiVltzjusGMqHrdomoFoLrS9nE2V7lQqCtUBAb4+9vvd3MDMKUnElgy6BkpJui4380Ewh1rjz/rIi+bzUJTJJv+zKgfyQzJAFfZaqZHzVMMbwkxZjfF0zw7kO/Y1aC0zD+vQgaTBTznnqSaZ9CinYizaqg0qwOfV5T6SNiFszHZch5BQiPFPgNsxQwPvG2PtV3k3G7baopyC+fOG/PCOz3ZG+C8cTLVRrdfuIL9u2Iig3ES92U9Hqj9H8357iReJoX7UoqOvIWDFwYCIbCUjF6AsyyauaGBeZjS3KJoYaX02qG33gu5JJ5dZUD6CFP7ACs4BAb4+9vsFcITNIYmu4c977pHmWY9EUCCZUgiGoxOeIUkJiCQW3pYBoEO9phUogA0JooFkOkXAj31YQBPFvY4xr87hl5wU5UgGYk7934Y9BrjlgLkjaxeeNSrB3M6sdNihagLu+REXtLHbhpTYGLAf7f/cMuQe6HDcmKXGwMyXB1FkpwZqa5j11e6Cg+KMMUJ45rZ3ksHztp3qLNuiufOfeitikTAk7E4HaJ89Nz+418V1OmC73Kh6YhKBrVBWFROmODnwE64Nbt05C6akF/4KTwG+Pvb7X7aQpOfbNbOqiREdeethDSKSNoyJo8eh8VgjX9g66bqHVNEFzFFVReqYN7hYt+57rZ0++6jjRtAUJeuhg5MRtNWf+Anpfqe4PMA="),
+                "google_thought_signature": String("CiQBEU0yDzPKNIAmXJDry/uVJ/9vymNIyUJO6snT11BgpHLVOYQKWgERTTIPgHhc3OGQNcJXUFZKt6J0gSZYs3jbLZHSQ0EsqRe3LiQNbV82dTZ5UX/JzGUvWZjrSCm5O0nxwRp5wHoRv2rrvU4GRlYL2bwiv5QV6PYCHjrHAA2p6AraAQERTTIPY7OjYbklUGdImTOuvDu0ulCEJJxFLkf3ai9NzX5RSONRYQeNJPjMbDBCfMSTpDMRvcVWnBsmLwdycACZ8vQWQANf5GeGjJCrgYoSVErbjWDfZn2JhyKENKTCzqbIKXH/DNbpP2ZlScwlcub8J4tdEbM/Vu2Gmc23gyNYHjJPp405ovkDlBXkqT9bcPMHJB1hk4F9lQZddyydklTYaKbcPFRWfwmpMs37jYjlHwnwFlZ4KwyWisPez47YF6avPxBaRNqbPIA+g1cv2BXvGWTvKlPF162QCr8BARFNMg+Yq3k70v+Z7NYTOJNWMpb0EcjO/HgDfr5q8MKNQOtxijaE7E/ZeCGuCIgUpYeLoiRKwmxkQpRv0H372PnjVnFUy6os82rHoUSmGaoElyxP01BhojxXuNhhnfpfaF20LGmr5zTByfWBWepdV/aH8AIIF77TkzivSz8scwEFsK6smtYRK94ZujMWPLgzuUspKmxx8lVKUX90iCHQpJxG8GIUmZWaWgnNQlhM7sH7Raj9gwfrLiAQjju97x0K6QEBEU0yD9brFRvdDhEKEE/MSPxS2r7l5t9/1n7aDT6+4cD3X7AJSl7ovvGRdUTZeHFXzI7lRUa8ZZc/RiLXw2xCi/nDM9QXE9IUIlP00iKLP4lRXiqNc8ZK+gG0jpK4VNDcFZGlHnZ8kL5J474tAGw4S/TExDhoRGxkZ4GV9iKt7iK0eLfhXikZucHGY24Pn9hq4xRGQG2xhN5CeXV/yjAM0vbrnzuhztO97zc6/JVjKfTUoHGEEQbntz/8eDPgF+eiWRcqjY1XE26qQjIOA6G4BUcxSiat+0I6MKKmREwPYbGbZ1IR+rf+mwpOARFNMg9z8VNy32kVmp3rtMffppsKSIGI5ix27dS0YN2ojBFEUoO4BvV2fb+JWrTq90u/msUt20KjhNqWXzLCNF9LUbIP/mUsWQa45+52"),
             },
         },
         Part {
             index: 1,
             part: ToolCall(
                 ArgumentChunk(
-                    "{\"bar\":[\"apple\",\"banana\"]}",
+                    "{\"bar\":[\"foo\",\"bar\"]}",
                 ),
             ),
             metadata: {},
@@ -55,21 +55,21 @@ expression: v
         Part {
             index: 0,
             part: Message(
-                "The tool ran",
+                "The",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                " successfully and returned the following response: `{\"run_me_response\": {\"content\": \"working",
+                " tool ran successfully and returned the following output:\n```json\n{\"run_me_response",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                "!\"}}`",
+                "\": {\"content\": \"working!\"}}\n```",
             ),
             metadata: {},
         },

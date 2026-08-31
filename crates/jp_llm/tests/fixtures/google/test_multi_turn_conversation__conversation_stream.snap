@@ -237,7 +237,7 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "Hello! I've received your test message. I'm here and ready to help. What can I assist you with today?"
+      "message": "Test message received!"
     },
     {
       "type": "config_delta",
@@ -263,7 +263,7 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "reasoning": "**Repeating the Input**\n\nI am now focusing on repeating the last user message. It was \"Test message.\" My sole task is to reproduce this text accurately. This should be a straightforward repetition, with no alterations or interpretations needed.\n\n\n"
+      "reasoning": "**Reiterating the Response**\n\nOkay, I've processed the user's initial prompt and correctly identified the need to echo their provided message. My logic determined the required output, and now I'm prepared to provide the specified response. I am ready to implement the request.\n\n\n"
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
@@ -294,11 +294,14 @@ expression: v
       "id": "run_me_0",
       "name": "run_me",
       "arguments": {
-        "bar": "Zm9v",
-        "foo": "YmFy"
+        "bar": [
+          "Zm9v",
+          "YmFy"
+        ],
+        "foo": "YmF6"
       },
       "metadata": {
-        "google_thought_signature": "Q2k4QnZqNzIrM2dBUEFDOWlOa2dFUU9tcERFL2VEWVA2enErTnhON1dGdGZkQVRKTE1iV0RSUGlvK3hmZzlYQnd3cGlBYjQrOXZ2cnRnTzcydVg1d1Q3ajlLczY1TmZZMHpUU2xKVG5QRnhEeWs0eE8yVGZMMm0yZHZSTi9DeExpUGdNZmhCZ1JacnRLL2UxVUxCSDcySVN6a0dLUEZ0V3k2WTZiZ3JCaklTZW4xUGtySkVraFIyYk5jU1dCUzJXdW50NU13Z0t4UUVCdmo3Mis2b3RkaGJsdEJBcVVSdGVIZjlsaUx3MWw5bE92aTFBWnRUeDBQdmt2N3FLV1hlcFAySVgvdDhQaEs3aURHeEpLOUp3MHdrVnFJMGJMRVBrdGRBSmp5T1RueFNKU0taYUxJWFRNYUdCT3hjUWcvRTRKdVhjaEZ6YXQzM1RvUVprUFpIKzE0Y1VVaEJkYm9JajdJRUlaYXQrNFBZMUtCZmEybWZwVk5DZWovbjZ1UEhFdHZHRFgrMzl2VFV3R3ZGUW94bzFvUlBsU0h5cmo2TTZ0emhWU2g5SkN2UkpVeWdPRWVmVE1MeTc3OWJEVlZ5QnV2RndMNUdrVk5xRHNGenlzUXJmQVFHK1B2Yjc2OXNwWmdDZjkrRExpWmlXWkkwbE52bUxlNjhRemJhWUxlSmlNakhNdGlSMGRsMlNXQURIZnFraks4LzZRcmlDdGIxdUo0QzFXVDFoN3ZvUitZVTI1S28zYnhSS1JpR25sZFhUOVJtL2U1VHJDcEM1QkJwa1JUNVUxWHkyNXFXMG95dkN3a20wQnNMZ2JPbmo1aGF5OXJvTUMzb3VZN2FuY1JvaHdjNlIrL2c2b0lhekVJZ25TeGZoc2lLcUhDRkQ5MFZQQTllbkQxc0VVSzlTRVhlU1VEK0xxbUk1WEY3UXA3S00wTjNOR2hpNllBUStTZW8vc09QTUFSVzN4VUtGaHVySmYreDVqZHBXMnBrME1RRXVnejFreEhGcllFTTBCbDhLNWdFQnZqNzIrL0tvd0RTZ3BRWDhCTTM5eXB5SHVsdi9qMEY4MEEySkRVemQvZTMwdGhqR2RDVGRKbi9UVjRJdDl1TjRMZ2tlVTNSc1NLWGhKaVpqY3RPVTY0ZnpvZTBMd1d0V3lvcEF1RmQ5TnMwU2lZc3J2blVtZ0VHRTl3REE0S2hDbVpTUzdnbndZcXZsdXlPNzJlc2FqWE8xbkFZaXEvRWFyOUFQdzZvNFJMKzZ5NUV2aGxMajh4QVJMd0lXa2lxcTBNUm9nTVBMNkVaY3RDUGUzRk9aWGRBM1lHVjVyY3M1cElDSWFtemtnckR2U0VOM0s0ZGIxQVBrNTE5ZnNpeXFMT000NStWWDRHWmpVNk9yN0FaZlhscHFETm54Lys3ZlBYMkE0K0JKcSswK0gwNmEwQXJOQVFHK1B2YjdidkRzQnhZSUFidm1tVkpxaUwrNExhcWZKOGhvK3NqYitjdWVmZm1UbGFBeVluVEtqYVoxZVFiYWhNY1RXQmhlb1NRcHZTV1ZDdlQzYzhNSEJVQUJ0VlRQalJ1bkJkNndaK0VFZjFnTkx1QW4vZDg4U0p4WGxyMXdscGdwVDZ1R0tXaHlsdGhweS9NRy91dGxsa2hqbGJWNmFrZ2tDS0xRRStOS2hwM0NIQkxOUDd5RjJVcWp3SkxUdDlQUk5qZENiTDQ1QndMd2NZd2FsWlZTcWJFbnViSW1WSnFCR2dzcTlNZlRCTGhXcTFkK05yYnBaUGVzWk0rUmtXenQ3VG90Z3hzSFc2eEpIa1U9"
+        "google_thought_signature": "Q2k4QkVVMHlEeFJOUUNEVkdZVnZGdFhETXV2NFpuWnR6NERhMklYSWkzYndzRVgvSE84cFpUNG55bEZOc3RpRU5BcGJBUkZOTWcrQjhqcTA2SHp5VmxRcXgwY1JBQjAzS29CdTNVRVFRZXdmSmZYblFwSGtOS3FPQmdvY0NoQkRCMjYvU3l0M28vYVpLZnp6TEpvWEptVVBiZHptRXRWbHVTN3RMb3R0ZVovZVQ2Unp2REtKRk5nT2ppdXc3Z3JIQVFFUlRUSVBTWUdqMU9LZG00SjdMcUhPUVFoMU9IcUR3YmkweHRxMEdHdTkrVm9abTNzcE1haW5xZG92ckpNaFNBa1FURlJlMXVIWXNVNGU3LzJvS0hrRmpzNXhKL1ZCeGI1YzlrVHNRWVF3TnhNVzd6bjBaZFV4b2cvblErSzVkRS94Nlg2TGo2bkVHZkxESXIxaVVCNFBtRVllalNGTS83UUxSM1Jad25tNCthWitySjFpeUpuT2E1NXhYQzkvT0ZXeGhZczJ3L0tFaVNXZHlBWWVOMStsV3o0TnhyWGlSaldRWktXbzZiRHhZdXEzS2FWeEU5U25FbXhRS2V3aDgwTWREcnl6QlN3SzBBRUJFVTB5RDVlNFlDQ0dKY1NKM2Z4WTEwNXdFdllGMGNIRWdST0pWaDFUTm1uZ1U0MFJJYXNsK2xkZkNVbmN2ME1GVENCZUZodGpJaVVnMHhNOGpYSkRndVVNOERiQmJKdmo4TGNhcUZXS08yVFZaajJDa29MOGRXV001cEtBSERZNlBZNC9PRXFaVGlmWFZxRm9XY3NVNCtQK29HOHR0b3JmYlZRVzZOU1RFZ1Q5U2did0hTVkhKWXl0bWVHVGRqSGVpYXlvbDFUZDNNVzVhUHdpZFkzazNYY0NmVGV1ZElyeUk2a09BNUlGWm5pZ0R2cFdlQ1djT1Z0U2ZrQnpMTnVoUmFyVlNqeDBPWFJSSUN1a1pkUzNDc0lCQVJGTk1nL2hNUGFhVXhEaldQeWZjTjA4NkQ1QlpXVWhsTnRPUGR5ejVXcEZyaFJpekNjZXBnc2p2ejgxWUhjRjZUeE5PUkNSZExPVnVGRjZVQ2JJTDNqVmdYckRCd2NjVlhTekQyOE5oK2Q1WkxzaHNjb1FZYlhGY2JvWU9ESkNENWR0NzRseEZ3WEt3SWNsekVkRVlMMGhrWmhEUDQzWXZEKzhlQnh5UVdpeFJIYnZ3aXBrRHJrUjduaVBYOUx4Nmhkb0FVRUFOZ1JBZ0hhWVB6b0lJaXQ5d0MrcXlpQTVWbG9VbjRTbEFGRExXZ3RhU1BjSGJmek1qQk1oTUZSTkd4VUt2d0VCRVUweUR5VndBd3ZJZnRpK3ZBMXhuTDhMd09qTjdXOTEzbWNhZ0hWZEZJeWh6QjNJOXd3RzJXSXQzTmRwbXFvRjlIZXpXTWd3a0N1OHY2Y0ZmSVN5b0R2b3J6czlmRDRCL2k2TVlMK01OYzhvQTJiVWdza1Y3d3NpVmMyRkV5SnJKdlB2QkJ2S2dySU5tNHcreTlpV1IrVmc5RncvR0dTSzhmaFl4cTZFRGU3RTE4WE93TEpUakpZSEU4cnc5OTBLMUs3cjVlN1EzRGpINHRoNml4clBrRVovc1Q1aUhiRklrNHN1VmpFSm9zODBLVTF1djdBcUh4dFZjeW1ZaXdvOUFSRk5NZzh5QStLOXl4bzU2UWQyZ0ZRRkF0Mk0xakZBSVNtNTN5VGlhemw5SkdXM2U0NmdFZnlMZTFWS1BIblZLOVJ4eDlGNTEyWGk2RVVrSVE9PQ=="
       }
     },
     {
@@ -337,12 +340,12 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "reasoning": "**Accessing Historical Data**\n\nI'm now zeroing in on retrieving information from previous tool calls, as the user seems to need the \"result of the previous tool call.\" My focus is on the \"previous tool call\" itself. I think looking at the last time a tool was run will be key to meeting the user's needs.\n\n\n**Isolating Relevant Outcome**\n\nI've homed in on extracting the outcome of that prior function call. Identifying the relevant JSON output, specifically `{\"content\": \"The secret code is: 42\"}`, is now the main task. My aim is to extract and deliver just this part of the previous tool's response in a digestible way for the user.\n\n\n"
+      "reasoning": "**Accessing Recent History**\n\nI'm now zeroing in on retrieving the necessary information. The user's query about the \"previous tool call\" made me realize I need to access my internal state. My goal now is to efficiently retrieve the output of the most recent tool interaction. I need to get this info quickly, so the user has the information they requested promptly.\n\n\n**Pinpointing Past Interactions**\n\nI've successfully identified the relevant previous tool call and its corresponding output from my internal state. Now I'm extracting the pertinent data: the parameters of the tool call and the specific content from the response, which is \"The secret code is: 42\". I'm structuring this information into a concise and direct answer. Finally, I'll formulate a succinct and helpful response for the user.\n\n\n"
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "The previous tool call returned:\n\n```json\n{\"run_me_response\": {\"content\": \"The secret code is: 42\"}}\n```\n\nSo, the result was \"The secret code is: 42\"."
+      "message": "The result of the previous tool call was: The secret code is: 42"
     }
   ]
 }

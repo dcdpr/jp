@@ -21,6 +21,20 @@ expression: v
         Part {
             index: 0,
             part: Message(
+                " quick",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " brown",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
                 " fox",
             ),
             metadata: {},
@@ -35,7 +49,7 @@ expression: v
         Flush {
             index: 0,
             metadata: {
-                "openai_item_id": String("msg_041a23d55da6b2b6016a549a224678819481b59b178bbb436a"),
+                "openai_item_id": String("msg_06f37a7c50fdadd9016a886d773f7887d2a99834d7b5579c83"),
                 "openai_phase": String("final_answer"),
             },
         },
@@ -61,6 +75,13 @@ expression: v
         Part {
             index: 0,
             part: Message(
+                " lazy",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
                 " dog",
             ),
             metadata: {},
@@ -75,7 +96,7 @@ expression: v
         Flush {
             index: 0,
             metadata: {
-                "openai_item_id": String("msg_041a23d55da6b2b6016a549a23ffe48194b937f20d09be7ffd"),
+                "openai_item_id": String("msg_06f37a7c50fdadd9016a886d784eb487d2a33f67f36c23524b"),
                 "openai_phase": String("final_answer"),
             },
         },

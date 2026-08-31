@@ -56,7 +56,5 @@ then:
     - name: content-type
       value: text/event-stream
   body: |+
-    data: {"candidates": [{"content": {"parts": [{"text": "{\n  \"titles\": [\"Conversation Title"}],"role": "model"},"index": 0}],"usageMetadata": {"promptTokenCount": 8,"candidatesTokenCount": 9,"totalTokenCount": 163,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 8}],"thoughtsTokenCount": 146},"modelVersion": "gemini-2.5-flash-lite","responseId": "oraVaebXMYjyxs0PwJ_VyQQ"}
-    
-    data: {"candidates": [{"content": {"parts": [{"text": " Request\"]\n}"}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 8,"candidatesTokenCount": 13,"totalTokenCount": 167,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 8}],"thoughtsTokenCount": 146},"modelVersion": "gemini-2.5-flash-lite","responseId": "oraVaebXMYjyxs0PwJ_VyQQ"}
+    data: {"candidates": [{"content": {"parts": [{"text": "{\n  \"titles\": [\"Title Generation Request\"]\n}"}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 8,"candidatesTokenCount": 13,"totalTokenCount": 159,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 8}],"thoughtsTokenCount": 138,"serviceTier": "standard"},"modelVersion": "gemini-2.5-flash-lite","responseId": "fW2Iauz6JojjnsEPg7m-qQY"}
     

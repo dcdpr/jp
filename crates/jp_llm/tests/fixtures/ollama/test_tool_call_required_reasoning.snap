@@ -9,7 +9,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "I need to call a tool from my list of options based on the user request, which says \"Please run the tool\". I have one function called 'run_me' with these parameters:\n\n- bar (required): Can be string or array, but restricted to enum values [\"foo\", \"bar\"] - this is somewhat confusing since it can only take those two values\n- foo (optional): String type\n\nSince the user wants me to run a tool and I should use arguments if needed, let me call 'run_me' with bar=\"foo\" as an argument. This satisfies the requirement of calling at least one tool while using valid parameters according to the schema.",
+                        reasoning: "I need to call one of the tools with valid parameters. Looking at the run_me function, I can see it requires:\n- \"bar\" parameter (required): This is an array or string where each item must be either \"foo\" or \"bar\", and actually looking more carefully at the enum constraint it seems like only \"foo\" might be acceptable in practice based on how it's defined.\n\nWait, let me re-read this more carefully:\n```json\n{\"type\": \"array\", \"items\": {\"enum\": [\"foo\", \"bar\"], \"type\": \"string\"}, ...}\nand then also has enum constraint that says items should only have value of 'foo' based on the way it's defined\n\nActually I think there might be some issue with this schema but let me just call run_me with valid parameters. The bar parameter accepts array or string, and looking at its properties definition more carefully - \"enum\": [\"foo\"] suggests that maybe only 'foo' is acceptable? This seems contradictory to the items enum which lists both foo and bar.\n\nLet me just try calling it with a simple value like ['bar'] since we need to call run_me:",
                     },
                 ),
                 metadata: {},
@@ -23,7 +23,9 @@ expression: v
                         id: "run_me_2",
                         name: "run_me",
                         arguments: {
-                            "bar": String("foo"),
+                            "bar": Array [
+                                String("foo"),
+                            ],
                         },
                     },
                 ),
@@ -40,7 +42,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "The tool executed successfully with the arguments provided. Let me know if you need to run it again or adjust any parameters!",
+                        message: "The tool executed successfully with `[\"foo\"]`. Let me know if you'd like to try a different argument or adjust the approach! 😊",
                     },
                 ),
                 metadata: {},

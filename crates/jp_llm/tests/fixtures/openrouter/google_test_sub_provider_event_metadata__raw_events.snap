@@ -5,10 +5,28 @@ expression: v
 [
     [
         Part {
+            index: 0,
+            part: Reasoning(
+                "**Acknowledging Test Message**\n\nI've received your test message. I'm ready for your next prompt and eager to assist further.\n\n",
+            ),
+            metadata: {},
+        },
+        Part {
             index: 1,
             part: Message(
-                "Understood! I received your test message.\n\nHow can I help you?",
+                "Understood! How can I help you today",
             ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "?",
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
             metadata: {},
         },
         Flush {

@@ -9,7 +9,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "Thinking Process:\n\n1.  **Analyze the Request:**\n    *   Input: \"Test message\"\n    *   Intent: The user is likely testing the connection, checking if the AI responds correctly, or just saying hello in a generic way. It's not asking for information, advice, or creative content specifically.\n    *   Context: Standard chat interaction.\n\n2.  **Determine the appropriate response:**\n    *   Acknowledge the message.\n    *   Be polite and friendly.\n    *   Offer assistance.\n    *   Keep it brief since \"Test message\" is minimal input.\n\n3.  **Draft potential responses:**\n    *   Option 1 (Simple): Hello! How can I help you today?\n    *   Option 2 (Confirming receipt): Received your test message successfully! What would you like to discuss?\n    *   Option 3 (Friendly): Hi there! It's great to see a message. Is everything working well for you, or is there something specific you need help with?\n\n4.  **Select the best response:**\n    *   Option 1 & 2 are good mixes. A friendly acknowledgment followed by an offer of help is standard AI behavior.\n\n5.  **Final Polish:** \"Hello! It looks like your test message was received successfully. How can I assist you today?\" or simply \"Hi there! 👋 Everything seems to be working on my end as well. What would you like to work on today?\"\n\n    Let's go with a clear, friendly acknowledgement.\n\n6.  **Final Output Generation:** (Matches the selected draft)\n    \"Hello! Your test message was received successfully. How can I help you today?\" or similar.\n\n    *Self-Correction:* Keep it natural.\n    \"Hi there! It looks like everything is working well on my end too. What would you like to talk about or get help with today?\"\n\n    Actually, keep it simple and direct.\n    \"Hello! Message received successfully. How can I assist you today?\"\n\n    Let's add a bit of warmth.\n    \"Hi there! 👋 It looks like your message came through perfectly. Is there anything specific you'd like to discuss or need help with today?\"\n\n7.  **Final Decision:** A friendly greeting + confirmation + offer to help.cw",
+                        reasoning: "Okay, the user sent \"Test message\". They're probably checking if I'm responding properly. Let me make sure my response is clear and friendly. Maybe they want to know how fast or well I can handle queries. Since it's just a test, I should keep it concise but acknowledge their input warmly. No need for long explanations here. Just confirm receipt with some emojis to be approachable.",
                     },
                 ),
                 metadata: {},
@@ -20,7 +20,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Hello! Your test message was received successfully. 👋 How can I assist you today?",
+                        message: "Hello! 🌟 Your test message received successfully — is there anything specific you'd like help with today? 😊",
                     },
                 ),
                 metadata: {},

@@ -7,14 +7,7 @@ expression: v
         Part {
             index: 0,
             part: Message(
-                "Hello! I'",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                "ve received your test message. I'm here and ready to help. What can I assist you with today?",
+                "Test message received!",
             ),
             metadata: {},
         },
@@ -30,7 +23,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "**Repeating the Input**\n\nI am now focusing on repeating the last user message. It was \"Test message.\" My sole task is to reproduce this text accurately. This should be a straightforward repetition, with no alterations or interpretations needed.\n\n\n",
+                "**Reiterating the Response**\n\nOkay, I've processed the user's initial prompt and correctly identified the need to echo their provided message. My logic determined the required output, and now I'm prepared to provide the specified response. I am ready to implement the request.\n\n\n",
             ),
             metadata: {},
         },
@@ -63,14 +56,14 @@ expression: v
                 },
             ),
             metadata: {
-                "google_thought_signature": String("Ci8Bvj72+3gAPAC9iNkgEQOmpDE/eDYP6zq+NxN7WFtfdATJLMbWDRPio+xfg9XBwwpiAb4+9vvrtgO72uX5wT7j9Ks65NfY0zTSlJTnPFxDyk4xO2TfL2m2dvRN/CxLiPgMfhBgRZrtK/e1ULBH72ISzkGKPFtWy6Y6bgrBjISen1PkrJEkhR2bNcSWBS2Wunt5MwgKxQEBvj72+6otdhbltBAqURteHf9liLw1l9lOvi1AZtTx0Pvkv7qKWXepP2IX/t8PhK7iDGxJK9Jw0wkVqI0bLEPktdAJjyOTnxSJSKZaLIXTMaGBOxcQg/E4JuXchFzat33ToQZkPZH+14cUUhBdboIj7IEIZat+4PY1KBfa2mfpVNCej/n6uPHEtvGDX+39vTUwGvFQoxo1oRPlSHyrj6M6tzhVSh9JCvRJUygOEefTMLy779bDVVyBuvFwL5GkVNqDsFzysQrfAQG+Pvb769spZgCf9+DLiZiWZI0lNvmLe68QzbaYLeJiMjHMtiR0dl2SWADHfqkjK8/6QriCtb1uJ4C1WT1h7voR+YU25Ko3bxRKRiGnldXT9Rm/e5TrCpC5BBpkRT5U1Xy25qW0oyvCwkm0BsLgbOnj5hay9roMC3ouY7ancRohwc6R+/g6oIazEIgnSxfhsiKqHCFD90VPA9enD1sEUK9SEXeSUD+LqmI5XF7Qp7KM0N3NGhi6YAQ+Seo/sOPMARW3xUKFhurJf+x5jdpW2pk0MQEugz1kxHFrYEM0Bl8K5gEBvj72+/KowDSgpQX8BM39ypyHulv/j0F80A2JDUzd/e30thjGdCTdJn/TV4It9uN4LgkeU3RsSKXhJiZjctOU64fzoe0LwWtWyopAuFd9Ns0SiYsrvnUmgEGE9wDA4KhCmZSS7gnwYqvluyO72esajXO1nAYiq/Ear9APw6o4RL+6y5EvhlLj8xARLwIWkiqq0MRogMPL6EZctCPe3FOZXdA3YGV5rcs5pICIamzkgrDvSEN3K4db1APk519fsiyqLOM45+VX4GZjU6Or7AZfXlpqDNnx/+7fPX2A4+BJq+0+H06a0ArNAQG+Pvb7bvDsBxYIAbvmmVJqiL+4LaqfJ8ho+sjb+cueffmTlaAyYnTKjaZ1eQbahMcTWBheoSQpvSWVCvT3c8MHBUABtVTPjRunBd6wZ+EEf1gNLuAn/d88SJxXlr1wlpgpT6uGKWhylthpy/MG/utllkhjlbV6akgkCKLQE+NKhp3CHBLNP7yF2UqjwJLTt9PRNjdCbL45BwLwcYwalZVSqbEnubImVJqBGgsq9MfTBLhWq1d+NrbpZPesZM+RkWzt7TotgxsHW6xJHkU="),
+                "google_thought_signature": String("Ci8BEU0yDxRNQCDVGYVvFtXDMuv4ZnZtz4Da2IXIi3bwsEX/HO8pZT4nylFNstiENApbARFNMg+B8jq06HzyVlQqx0cRAB03KoBu3UEQQewfJfXnQpHkNKqOBgocChBDB26/Syt3o/aZKfzzLJoXJmUPbdzmEtVluS7tLotteZ/eT6RzvDKJFNgOjiuw7grHAQERTTIPSYGj1OKdm4J7LqHOQQh1OHqDwbi0xtq0GGu9+VoZm3spMainqdovrJMhSAkQTFRe1uHYsU4e7/2oKHkFjs5xJ/VBxb5c9kTsQYQwNxMW7zn0ZdUxog/nQ+K5dE/x6X6Lj6nEGfLDIr1iUB4PmEYejSFM/7QLR3RZwnm4+aZ+rJ1iyJnOa55xXC9/OFWxhYs2w/KEiSWdyAYeN1+lWz4NxrXiRjWQZKWo6bDxYuq3KaVxE9SnEmxQKewh80MdDryzBSwK0AEBEU0yD5e4YCCGJcSJ3fxY105wEvYF0cHEgROJVh1TNmngU40RIasl+ldfCUncv0MFTCBeFhtjIiUg0xM8jXJDguUM8DbBbJvj8LcaqFWKO2TVZj2CkoL8dWWM5pKAHDY6PY4/OEqZTifXVqFoWcsU4+P+oG8ttorfbVQW6NSTEgT9SgbwHSVHJYytmeGTdjHeiayol1Td3MW5aPwidY3k3XcCfTeudIryI6kOA5IFZnigDvpWeCWcOVtSfkBzLNuhRarVSjx0OXRRICukZdS3CsIBARFNMg/hMPaaUxDjWPyfcN086D5BZWUhlNtOPdyz5WpFrhRizCcepgsjvz81YHcF6TxNORCRdLOVuFF6UCbIL3jVgXrDBwccVXSzD28Nh+d5ZLshscoQYbXFcboYODJCD5dt74lxFwXKwIclzEdEYL0hkZhDP43YvD+8eBxyQWixRHbvwipkDrkR7niPX9Lx6hdoAUEANgRAgHaYPzoIIit9wC+qyiA5VloUn4SlAFDLWgtaSPcHbfzMjBMhMFRNGxUKvwEBEU0yDyVwAwvIfti+vA1xnL8LwOjN7W913mcagHVdFIyhzB3I9wwG2WIt3NdpmqoF9HezWMgwkCu8v6cFfISyoDvorzs9fD4B/i6MYL+MNc8oA2bUgskV7wsiVc2FEyJrJvPvBBvKgrINm4w+y9iWR+Vg9Fw/GGSK8fhYxq6EDe7E18XOwLJTjJYHE8rw990K1K7r5e7Q3DjH4th6ixrPkEZ/sT5iHbFIk4suVjEJos80KU1uv7AqHxtVcymYiwo9ARFNMg8yA+K9yxo56Qd2gFQFAt2M1jFAISm53yTiazl9JGW3e46gEfyLe1VKPHnVK9Rxx9F512Xi6EUkIQ=="),
             },
         },
         Part {
             index: 0,
             part: ToolCall(
                 ArgumentChunk(
-                    "{\"bar\":\"foo\",\"foo\":\"bar\"}",
+                    "{\"bar\":[\"foo\",\"bar\"],\"foo\":\"baz\"}",
                 ),
             ),
             metadata: {},
@@ -87,14 +80,14 @@ expression: v
         Part {
             index: 0,
             part: Message(
-                "The",
+                "The secret",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                " secret code is: 42",
+                " code is: 42",
             ),
             metadata: {},
         },
@@ -110,14 +103,14 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "**Accessing Historical Data**\n\nI'm now zeroing in on retrieving information from previous tool calls, as the user seems to need the \"result of the previous tool call.\" My focus is on the \"previous tool call\" itself. I think looking at the last time a tool was run will be key to meeting the user's needs.\n\n\n",
+                "**Accessing Recent History**\n\nI'm now zeroing in on retrieving the necessary information. The user's query about the \"previous tool call\" made me realize I need to access my internal state. My goal now is to efficiently retrieve the output of the most recent tool interaction. I need to get this info quickly, so the user has the information they requested promptly.\n\n\n",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "**Isolating Relevant Outcome**\n\nI've homed in on extracting the outcome of that prior function call. Identifying the relevant JSON output, specifically `{\"content\": \"The secret code is: 42\"}`, is now the main task. My aim is to extract and deliver just this part of the previous tool's response in a digestible way for the user.\n\n\n",
+                "**Pinpointing Past Interactions**\n\nI've successfully identified the relevant previous tool call and its corresponding output from my internal state. Now I'm extracting the pertinent data: the parameters of the tool call and the specific content from the response, which is \"The secret code is: 42\". I'm structuring this information into a concise and direct answer. Finally, I'll formulate a succinct and helpful response for the user.\n\n\n",
             ),
             metadata: {},
         },
@@ -128,14 +121,7 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "The previous tool call returned:\n\n```json\n{\"run_me_response\": {\"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "content\": \"The secret code is: 42\"}}\n```\n\nSo, the result was \"The secret code is: 42\".",
+                "The result of the previous tool call was: The secret code is: 42",
             ),
             metadata: {},
         },

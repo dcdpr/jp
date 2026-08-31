@@ -12,9 +12,10 @@ expression: v
                         id: "run_me_2",
                         name: "run_me",
                         arguments: {
-                            "foo": String("random_argument"),
+                            "foo": String("bar"),
                             "bar": Array [
                                 String("foo"),
+                                String("bar"),
                             ],
                         },
                     },
@@ -32,7 +33,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "The tool executed successfully with the provided arguments. Is there anything specific you'd like to do next? 😊",
+                        message: "The tool executed successfully with the provided arguments. Is there anything specific you would like to do or discuss next?",
                     },
                 ),
                 metadata: {},

@@ -14,9 +14,7 @@ expression: v
                         arguments: {
                             "bar": Array [
                                 String("foo"),
-                                String("bar"),
                             ],
-                            "foo": String("random_string_12345"),
                         },
                     },
                 ),
@@ -33,7 +31,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "The tool has been executed successfully with the arguments `{\"bar\": [\"foo\", \"bar\"], \"foo\": \"random_string_12345\"}`. \n\nLet me know if you'd like to run another iteration or try something else! 😊",
+                        message: "The tool ran successfully with the argument `[\"foo\"]`. Everything is working as expected. Let me know if you'd like to try different arguments or perform another task!",
                     },
                 ),
                 metadata: {},

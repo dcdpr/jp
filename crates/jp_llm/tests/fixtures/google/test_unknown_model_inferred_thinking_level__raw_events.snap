@@ -7,7 +7,7 @@ expression: v
         Part {
             index: 0,
             part: Message(
-                "2 + 2 = 4",
+                "2 + 2 is 4.",
             ),
             metadata: {},
         },

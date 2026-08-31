@@ -11,7 +11,7 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "Apple",
+                "apple",
             ),
             metadata: {},
         },

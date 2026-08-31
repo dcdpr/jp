@@ -225,10 +225,8 @@ expression: v
       "name": "run_me",
       "arguments": {
         "bar": [
-          "Zm9v",
-          "YmFy"
-        ],
-        "foo": "cmFuZG9tX3N0cmluZ18xMjM0NQ=="
+          "Zm9v"
+        ]
       }
     },
     {
@@ -241,7 +239,7 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "The tool has been executed successfully with the arguments `{\"bar\": [\"foo\", \"bar\"], \"foo\": \"random_string_12345\"}`. \n\nLet me know if you'd like to run another iteration or try something else! 😊"
+      "message": "The tool ran successfully with the argument `[\"foo\"]`. Everything is working as expected. Let me know if you'd like to try different arguments or perform another task!"
     }
   ]
 }

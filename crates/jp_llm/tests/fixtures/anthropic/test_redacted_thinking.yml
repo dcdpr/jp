@@ -3,6 +3,7 @@ when:
   method: POST
   json_body_str: >-
     {
+      "model": "claude-haiku-4-5",
       "messages": [
         {
           "role": "user",
@@ -14,7 +15,6 @@ when:
           ]
         }
       ],
-      "model": "claude-haiku-4-5",
       "max_tokens": 64000,
       "thinking": {
         "type": "enabled",
@@ -34,487 +34,100 @@ then:
       value: text/event-stream; charset=utf-8
   body: |+
     event: message_start
-    data: {"type":"message_start","message":{"model":"claude-haiku-4-5-20251001","id":"msg_016ML7UG3VFUMNLMjzcQvEnj","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":93,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":2,"service_tier":"standard","inference_geo":"not_available"}}           }
+    data: {"type":"message_start","message":{"model":"claude-haiku-4-5-20251001","id":"msg_011CeG89FNSbkSuuNJJ3fc2Q","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":93,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":1,"service_tier":"standard","inference_geo":"not_available"}}    }
     
     event: content_block_start
-    data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""} }
+    data: {"type":"content_block_start","index":0,"content_block":{"type":"redacted_thinking","data":"EoECCpoBCBEYAipAugv+UDXDqtkNQB7QcXVqFdRNvm29uAES3efyU/39vgCbULFfOT4wnvHKIphhWI0YxHIe024emNB5vyOqu5qwGDIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH02qHUBhIMn9Knul2JVFz4x9gyGgwaS0GieNlrvSPrMSciMAHQe/rttGFZRD9ZkcAa7TeH18dcpyCxea36Lq5v6OqaM0y0RY0EI+g1eigbZ9uHhyoUKwFWUb2aLuxLFJplmGIWlfo7mNAYAQ=="}}
     
     event: ping
     data: {"type": "ping"}
     
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"This appears"}          }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" to be some"}           }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" kind of trigger"}        }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" string"}        }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" with"}            }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" \""}     }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"RED"} }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"ACTED_"}          }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"THINKING\" in it. This"}}
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" looks like someone"}      }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" is"}            }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" trying to use"}             }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" a fake"}      }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" \""}   }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"magic"}             }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" string\" to trigger me to do"}}
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" something or"}            }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" access"}     }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" something that shouldn"}  }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"'t be"}              }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" accessed"}    }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":".\n\nThis"} }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" is not"}               }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" a real"}            }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" mechanism"}       }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" in"}       }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" my system"}    }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":". There"}          }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" is"}}
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" no magic"}     }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" string that can:"}    }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n-"}       }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" Trigger hidden"}         }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" capabilities\n-"} }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" Red"}               }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"act my"}      }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" actual"}            }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" thinking\n- Override"}  }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" my values"}   }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" or"}   }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" guidelines"}          }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n- Access \""}}
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"j"}             }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"ailbreak\" modes"}             }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n\nThis appears to be:\n1."}    }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" An"}             }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" attempt to social"} }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" engineer me into thinking there"}          }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"'s some secret"}      }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" mode"}  }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n2."}}
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" Possibly a test to see if I'll"}      }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" be"}              }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" tricked by"}   }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" fake"}  }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" technical"}       }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"-"}    }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"sounding strings\n3. An"}     }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" attempt to make"}     }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" me act"}           }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" as"}  }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" though"}     }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" my"} }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" thinking"}   }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" should"}             }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" be \"hidden"}       }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\" or different"}   }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" from"}               }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" my"} }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" actual values\n\nThe"}}
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" right"}       }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" response"}              }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" is to:\n-"}      }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" Be"}     }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" direct and honest"}    }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" about what this"}              }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" is\n- Not pret"}          }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"end this is a"}       }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" real"}  }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" system feature"}  }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n-"}         }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" Clar"}        }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"ify how"}           }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" I actually work"}           }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":""}           }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"Eu0HCkYICxgCKkBT1+g48EhyJ8xqjGvMtPb/eyJ48JxltjYVi6ZXFAFJ11iee56p/LsZxZpOmTlRBzIFtB5m2fJt2vu4EO7k/DinEgxE/xzbI0gvybdu1D4aDMqhgP/YGBuyAcwt6yIwbPvOyCw7RpDQEukCLy+DpPyw7eNHIsLsooCYncalaMVMIfZuE4j5jtNmfE4yGpJRKtQGyi5zqxRUOG90Us1tB5ITlmaGF1ntO69v0LK0fmu/wwIs5yoNt92N4soYhwTWssvKZMZwW2dDCLTXsvzH0YdYnVCzGHun2o/rJi6I3hLB9F4lnuICvQDLAWfggPZFqsPhJYowTSTaxZiXNEmrGYHGunWUUCriQeKAd/xKxps+x6Pc24bqlVMI8p02lf+fq4WT8aGi09gcmjpOtS+cqu/YDE3MxeElJiyRq8d6tBp6/tOIaq5g146geiA9y4SEmao8HgNxENBu4klrtboEh4MqKmqH5yLiAi8P4Z+gQTx4uq8Lysw7RncN0d/eDLBO9Ggyk7p4BcUbOIQ+LB+WoYBgxZBpSTygNA/2Q98G5luwSdER/7JqaNa18eDaoPm/rBQFZFFXiHtU3skPMRoqlzMSxN7kTNClR0pofZieaDFAlZ0Vn1vOI4oFtOlv9kEGKEhw0K6QKUsA/pDJR+OcX6rd/QI/rT6EGdWriGpG7Jcm+FiSXiW4bmYILSeA/WQBFcuC3MP9NueMBkEvdif8kiqnhXKanYhGeKXWHnZjVtSg5rjDo4VEV1LKTtAXO7S0+9CXAvC9h2R+KpDj3ZuoBWHDA8qWUr9BfWg+Z5ZXEQ/8UIQ/tZzknlSeSTiN4kGIRT/5Kyuc9xlvpHQMxeCl3jhfVo999dk/BsUtk4DwFR+3O1rPVHocGVMPIEMbkFjOuAbvTtObq50M2489M9EvhZCXf3czYRSIIlS148ogVuVrAGToBcz50qmxqKK5MLYKFrLbtgXVAKTVJ/ulYPM8c9QxcEY1D/gy3bPt9cnng1sZ0qnCzyp3aRK5vMLDHe63yQwzgtIi+l1ivv9+3hT2kD+SoUcxjczg7FfrqcNIGj2A4Y90jvCdj7a/EDLWisVJ+fw7svNLtwJvoHunKq3vvf2rnVFT5T/CIa9TUW+cQ5NRotkwQWWkooYdJ8kjcxZZnFmflAV+W95BYKTjm4qi+5pHlFqxfmwa80aXQubcfOWE2nZo+QYcJx4BqRbzP6sObDF6NDRfyGhryUufD4RN1oyXQHxGNv4geRLcKsFU/Ac6WggWSLyIK/PaQaEE+ximvF1uWmpgwXSBpFTMNmaF0r7KX+td58tdJXYus6v7GgyYtMOl3dnhGAE="}          }
-    
     event: content_block_stop
-    data: {"type":"content_block_stop","index":0     }
+    data: {"type":"content_block_stop","index":0            }
     
     event: content_block_start
-    data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}   }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"I appreciate"}            }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" you testing"}         }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" this"}              }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":", but I should"}            }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" be"}    }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" direct"}    }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":": there"}              }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"'s"}   }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" no magic string that changes"}      }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" how"}     }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" I work or"}    }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" reveals"}        }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" hidden modes"}              }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"."} }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"\n\nThis"}        }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" appears to be a social engineering attempt,"}       }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" possibly to see"}         }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" if I'd"}        }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" respond differently"}             }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" to a"}               }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" technical"} }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"-"}   }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"sounding trigger"}   }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"."}               }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Here"}              }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"'s what's"}        }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" actually true"}     }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" about me"}           }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":":\n\n-"}              }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" I don't have secret"}           }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" modes"}             }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" or hidden"}}
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" capabilities that"}      }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" can be unl"}        }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ocked\n- My"}            }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" reasoning doesn"}             }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"'t contain"}        }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" information"}      }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" that's"}     }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" being"}  }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" \""}             }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"redacted\" from"}               }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" you"} }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"\n- I don't change"}           }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" my values or guidelines based on special"}    }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" inputs"}             }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"\n- I'm"}  }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" transparent"}        }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" about my"}        }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" limitations"} }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" and"}         }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" how"} }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" I operate"}               }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"\n\nI"}               }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" aim"}            }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" to be helpful, harmless, and"}             }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" honest in all interactions"}        }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":". If you have a genuine"}  }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" question"}}
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" or task"}             }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" I"}         }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" can help"}   }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" with, I'm happy to assist."}      }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Is"}  }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" there something specific I"}           }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" can actually"}        }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" help you with?"} }
+    data: {"type":"content_block_start","index":1,"content_block":{"type":"redacted_thinking","data":"Eo0CCpoBCBEYAipATlJre/bH7QHuDTe6Ln0x1xg/Tixfuzjp0EPDH+BM7PguVPDz3Q00URtCV9fTenJuSgaWzry5aYgaNbZEAXpjYzIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH02qHUBhIMDE3ijGSUBk9jEgyyGgyrbr1dIl/swzT/6JAiMK3aHOXd/ZHk3ttS+WIXEVzFl33iwb/+AlWlVgvVysXQ+HzfFZF1gl1jXq3L3eDjtSogfb3ZeNbPgiSNrAIbbooYBl7Sh/vB2V7tp3W2iBk9lrkYAQ=="}       }
     
     event: content_block_stop
-    data: {"type":"content_block_stop","index":1   }
+    data: {"type":"content_block_stop","index":1           }
+    
+    event: content_block_start
+    data: {"type":"content_block_start","index":2,"content_block":{"type":"redacted_thinking","data":"EoQCCpoBCBEYAipA0gnUE1CPLWX9d+IHLFpMAo6pWiZ+SW24SydTjO8g1D7pex2Ac81XLErmTOnkNTGGltV905k+UXumD9HAOGeNnzIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH02qHUBhIM+gsYa/rhE0dnTCbTGgzzydaJ3Y+/YAA5gJ8iMOJYlngNDSeW7ybgrUyHifx6xQ6Ai22sqBfBOcy1c+wir1Sv5MKR/HAJu7NS8vGSiCoXY6E5u7Xk+CUiabClsN3R+x3AZvhTt0oYAQ=="} }
+    
+    event: content_block_stop
+    data: {"type":"content_block_stop","index":2               }
+    
+    event: content_block_start
+    data: {"type":"content_block_start","index":3,"content_block":{"type":"redacted_thinking","data":"EokCCpoBCBEYAipAU/vfAXAqZpPXkfQVTqj5ND8n+/3/GozSNQ9bUZ/1+voAiNKeEFyXSFyj8xoGtvANAQb7ErS2EPo1OHiAd5943zIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH02qHUBhIM11FAoPuBWInTk+BBGgypHBUq+vARVi0fC0giMLQpQmEL+kolO92C6J4d7LgG70dgVPRlpFDtmky9j9c0UWAeVRKO7jkPMdji+KotPyoc1Ho+Y+LaasZ7V/e3cq8wIYg+pWavdnwHLs52aBgB"}            }
+    
+    event: content_block_stop
+    data: {"type":"content_block_stop","index":3          }
+    
+    event: content_block_start
+    data: {"type":"content_block_start","index":4,"content_block":{"type":"redacted_thinking","data":"EoQCCpoBCBEYAipAKthg1bKTHdRqNfKefz0GTgRwNMkpJUIgk7m9db27T+PylAjTw+gCV1ZxmS5N+q7Rx8hrO4EQOKcCDwlUlk+WlDIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH02qHUBhIMcFGr4zUXIMYw/0lOGgzoww/ogb+s3l0XIakiMEE8GY/YVnX523egp0Do/sqbPi8vAgF2Yy/nA4mYAMZmSKzb4SFt+f8RNi2ZVexfVSoX1RrTvnMOC/DEB9uWUJHWGdwoSsGgU6oYAQ=="}    }
+    
+    event: content_block_stop
+    data: {"type":"content_block_stop","index":4          }
+    
+    event: content_block_start
+    data: {"type":"content_block_start","index":5,"content_block":{"type":"redacted_thinking","data":"EvYCCpoBCBEYAipAQ5Ygndy5xyXv50t51G26rWZXMyopTGKU/KptM+rBq6x9QfYBzazGkOKm8FvPP+KHPF4Jy6Deq++qlHRhAD7USTIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH02qHUBhIMW+yNcEEu/iitCQlDGgw5Y+kvyEKDSDfZZTsiMHdtPbcWLf+HO5tjSpVU0dtQ4kD/cLYCmFHw8omd9/VlFjJQYVrGdd6AZeJ1GvvzcyqIARFGCiZxSA91ObdFkFmQnWo8pkqcoe2LelXs28Tg2VfOnFL9TS3reuA7hh2hIxgUsubfXOeN5YPxo1kLSszX7rm1PR4zYOcurYIiP2O3Tc1SwLj2qjsLcW111Pqxn8yUciW2R53+YdqkSwaqtY8rY3AMEmRSn3tbgrHI+BVV8TXXijimSYhuLrcYAQ=="}             }
+    
+    event: content_block_stop
+    data: {"type":"content_block_stop","index":5}
+    
+    event: content_block_start
+    data: {"type":"content_block_start","index":6,"content_block":{"type":"redacted_thinking","data":"EoADCpoBCBEYAipAxPPYpiI2v6k89nlY9/HijvNgQ+iYUPKLz6+nEZcKBYK/7Cq7ncAQ7l0L3ROqUx2lnvac2ieySqPfkx9N58mrtzIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH12qHUBhIMfzCn8J8zDDvXi9+CGgxvLezIPAVemb8W8j4iMGd6afcZ01AToa9zVZhoZ0NBcuKsFrqtIAM36XgAgqbFW6Dmk8DSxXjpkhMSc9T4jCqSAavKbTnKOnW0RKP2HMLSHBiR3cQtNPtjtE1fJ4EW1K5pxOVb9vfGiGE+XHd+V+eOcl5qD8u7lHg+6DgNQmgfDqWnS384gMT6WeoCGvrKaOeMHZxtAU4APenivcqgp9nbmQG9Ez6OYEWic7SpEOT+V79M7iWB/lyx9s3RyS0ejp9klYPYxQuvnOqSS6zPMYWpZtEVGAE="}      }
+    
+    event: content_block_stop
+    data: {"type":"content_block_stop","index":6           }
+    
+    event: content_block_start
+    data: {"type":"content_block_start","index":7,"content_block":{"type":"redacted_thinking","data":"EpIDCpoBCBEYAipAMBBethy9NFRYq4myp/0AaInieFYmrdIaj4jExTL3Bqt78mk/7H+Lvhh15UFqA4TUFQdtYl81taorp0MKHLqxHTIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH12qHUBhIManZwQrWVvHqj47QUGgyOSftFfI9vsRpDjEkiMCiOil/R4qZRXjGZyEOHz5Nb9J/A/JH+A7yLG/M61Wr84/a3an4dJAVhN4zYrJGMpiqkAa+Q/COWlsNqLjGjA4cueoeiSQF3uoOL7f2cT5XPtsjFaDOUTFfvwwNL3gQNqI9s4o6y6dhiufkzwc/zEZ6gsq8p5WwZ9cVHroHG5OQe0o1grtNXnJcn71ZsmpbX4/S+gM8s6w7plk1SiLbF199HMr3lNFz4M2YpdEZMEBq2Cj/gRsNCSSk15AflsoM1eXMYI6/WhXC1r5aMKiSqqTq47N+3YQeVGAE="}        }
+    
+    event: content_block_stop
+    data: {"type":"content_block_stop","index":7 }
+    
+    event: content_block_start
+    data: {"type":"content_block_start","index":8,"content_block":{"type":"redacted_thinking","data":"Ev4CCpoBCBEYAipA2dnDwpBkZQdcLuzZBdpY5+DUHdEC2D0AoF67b2nhFFu78cIewx2nQXxKbei+P5ePZhUNXQybTCgDrARGKKtGLDIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH22qHUBhIMaYRv38vAlEUJ4XzOGgzHh1m7Bt3EWM2eqZkiMM5rbGbginMhBrkreLqSqw5XbK5TqwOp5TJrHfHEWxVcrnwW+UTPFwIVNgeD4ps1PyqQATtVGJX0YnWt8p+z+7ziDZztftvjf6EPEEOVsMoiiUR8CWCdsA9Cf5HmET/urzrmIn7Uo4Xq32ogJQDwaRf1c2CYBi+CjIGyTb8BVRQqKXjQugnDL4H0RNbcSB2yhLc+LEaDwsKLQT+9hXkf72TE1s/kZEhAItc5+AVPu2AfDXNQL3XQh82Y2uJubXve8VhP2BgB"}        }
+    
+    event: content_block_stop
+    data: {"type":"content_block_stop","index":8          }
+    
+    event: content_block_start
+    data: {"type":"content_block_start","index":9,"content_block":{"type":"redacted_thinking","data":"EqcDCpoBCBEYAipAqZjoyF65FJ9uy0zlKw6r8Hf8wRAoh6I62IGmw1p4wHRdFvtvIrhGaApi4C6qgwPySx+y+RZUHD3+pE/GSqIMxzIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH22qHUBhIMng9YuYBKPJlqCLiGGgxBNViKptgAOQEkv3AiMBgmH9uiBgeZCmDW7++IUEMVJSNL+T7M14tRJbFnMuVYZqPMqA38miKug29rGVVBayq5AU2L/Hh7XHG1o/pqGS37n327+L+C6wdubT69sz9OQmrFKML3vSV81S8ExPzGD3hSmi15/qu+YL3liX2V0+HD2ic1sdxxqzI9veXKM/dDftSVuHkx6qma0s7K2MNucKJ+E/g6beZDuPTNi0e9YCrGEvjdLghyUX3EqbyZpufzM31z7BgctYe8AQh8wQk8+1JWMiWcZ7vNtumg5+fCGgsG1k9KIPH7WAK/ITM/otKX2u9QkmkYy3zcCwGRGAE="} }
+    
+    event: content_block_stop
+    data: {"type":"content_block_stop","index":9  }
+    
+    event: content_block_start
+    data: {"type":"content_block_start","index":10,"content_block":{"type":"redacted_thinking","data":"EocCCpoBCBEYAipA6VdFvb2O9jt3RjlGtLzowN4IULrfjcj665CGpzcRltXm3APpG21xfKoxEnP8xJOUWJ8kLJtHa9mFEx/O/fxGiDIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH22qHUBhIMxyw81QpJ6THVfI/gGgylaNh33z2llBs8vCYiMAxokUC3VcP2XsUBjI3DRL40rJYMSGTZ0wF+bGpWpf2e5oZkauLuGE/hIJLcTTYvTCoaHYkyPSSrlqHVAZzmvezqA4jbpyPGSKqjGF4YAQ=="}          }
+    
+    event: content_block_stop
+    data: {"type":"content_block_stop","index":10             }
+    
+    event: content_block_start
+    data: {"type":"content_block_start","index":11,"content_block":{"type":"text","text":""}    }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":11,"delta":{"type":"text_delta","text":"I appreciate you testing this, but I should be straightforward: there are no \""}            }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":11,"delta":{"type":"text_delta","text":"magic strings\" or hidden commands that change how I operate or trigger special modes.\n\nI'm Claude, made by Anthropic. I work the"}}
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":11,"delta":{"type":"text_delta","text":" same way regardless of what text is provided to me. My values and guidelines aren't bypassed by special prompts or strings claiming to be triggers.\n\nIf you have"}         }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":11,"delta":{"type":"text_delta","text":" genuine questions about how I work, my capabilities, or my limitations, I'm happy to discuss those directly! Is there something specific I can help you with?"}          }
+    
+    event: content_block_stop
+    data: {"type":"content_block_stop","index":11   }
     
     event: message_delta
-    data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":93,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":382}    }
+    data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null,"stop_details":null},"usage":{"input_tokens":93,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":295,"output_tokens_details":{"thinking_tokens":176}}            }
     
     event: message_stop
-    data: {"type":"message_stop"         }
+    data: {"type":"message_stop"    }
     
 ---
 when:
@@ -522,6 +135,7 @@ when:
   method: POST
   json_body_str: >-
     {
+      "model": "claude-haiku-4-5",
       "messages": [
         {
           "role": "user",
@@ -536,13 +150,52 @@ when:
           "role": "assistant",
           "content": [
             {
-              "type": "thinking",
-              "thinking": "This appears to be some kind of trigger string with \"REDACTED_THINKING\" in it. This looks like someone is trying to use a fake \"magic string\" to trigger me to do something or access something that shouldn't be accessed.\n\nThis is not a real mechanism in my system. There is no magic string that can:\n- Trigger hidden capabilities\n- Redact my actual thinking\n- Override my values or guidelines\n- Access \"jailbreak\" modes\n\nThis appears to be:\n1. An attempt to social engineer me into thinking there's some secret mode\n2. Possibly a test to see if I'll be tricked by fake technical-sounding strings\n3. An attempt to make me act as though my thinking should be \"hidden\" or different from my actual values\n\nThe right response is to:\n- Be direct and honest about what this is\n- Not pretend this is a real system feature\n- Clarify how I actually work",
-              "signature": "Eu0HCkYICxgCKkBT1+g48EhyJ8xqjGvMtPb/eyJ48JxltjYVi6ZXFAFJ11iee56p/LsZxZpOmTlRBzIFtB5m2fJt2vu4EO7k/DinEgxE/xzbI0gvybdu1D4aDMqhgP/YGBuyAcwt6yIwbPvOyCw7RpDQEukCLy+DpPyw7eNHIsLsooCYncalaMVMIfZuE4j5jtNmfE4yGpJRKtQGyi5zqxRUOG90Us1tB5ITlmaGF1ntO69v0LK0fmu/wwIs5yoNt92N4soYhwTWssvKZMZwW2dDCLTXsvzH0YdYnVCzGHun2o/rJi6I3hLB9F4lnuICvQDLAWfggPZFqsPhJYowTSTaxZiXNEmrGYHGunWUUCriQeKAd/xKxps+x6Pc24bqlVMI8p02lf+fq4WT8aGi09gcmjpOtS+cqu/YDE3MxeElJiyRq8d6tBp6/tOIaq5g146geiA9y4SEmao8HgNxENBu4klrtboEh4MqKmqH5yLiAi8P4Z+gQTx4uq8Lysw7RncN0d/eDLBO9Ggyk7p4BcUbOIQ+LB+WoYBgxZBpSTygNA/2Q98G5luwSdER/7JqaNa18eDaoPm/rBQFZFFXiHtU3skPMRoqlzMSxN7kTNClR0pofZieaDFAlZ0Vn1vOI4oFtOlv9kEGKEhw0K6QKUsA/pDJR+OcX6rd/QI/rT6EGdWriGpG7Jcm+FiSXiW4bmYILSeA/WQBFcuC3MP9NueMBkEvdif8kiqnhXKanYhGeKXWHnZjVtSg5rjDo4VEV1LKTtAXO7S0+9CXAvC9h2R+KpDj3ZuoBWHDA8qWUr9BfWg+Z5ZXEQ/8UIQ/tZzknlSeSTiN4kGIRT/5Kyuc9xlvpHQMxeCl3jhfVo999dk/BsUtk4DwFR+3O1rPVHocGVMPIEMbkFjOuAbvTtObq50M2489M9EvhZCXf3czYRSIIlS148ogVuVrAGToBcz50qmxqKK5MLYKFrLbtgXVAKTVJ/ulYPM8c9QxcEY1D/gy3bPt9cnng1sZ0qnCzyp3aRK5vMLDHe63yQwzgtIi+l1ivv9+3hT2kD+SoUcxjczg7FfrqcNIGj2A4Y90jvCdj7a/EDLWisVJ+fw7svNLtwJvoHunKq3vvf2rnVFT5T/CIa9TUW+cQ5NRotkwQWWkooYdJ8kjcxZZnFmflAV+W95BYKTjm4qi+5pHlFqxfmwa80aXQubcfOWE2nZo+QYcJx4BqRbzP6sObDF6NDRfyGhryUufD4RN1oyXQHxGNv4geRLcKsFU/Ac6WggWSLyIK/PaQaEE+ximvF1uWmpgwXSBpFTMNmaF0r7KX+td58tdJXYus6v7GgyYtMOl3dnhGAE="
+              "type": "redacted_thinking",
+              "data": "EoECCpoBCBEYAipAugv+UDXDqtkNQB7QcXVqFdRNvm29uAES3efyU/39vgCbULFfOT4wnvHKIphhWI0YxHIe024emNB5vyOqu5qwGDIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH02qHUBhIMn9Knul2JVFz4x9gyGgwaS0GieNlrvSPrMSciMAHQe/rttGFZRD9ZkcAa7TeH18dcpyCxea36Lq5v6OqaM0y0RY0EI+g1eigbZ9uHhyoUKwFWUb2aLuxLFJplmGIWlfo7mNAYAQ=="
+            },
+            {
+              "type": "redacted_thinking",
+              "data": "Eo0CCpoBCBEYAipATlJre/bH7QHuDTe6Ln0x1xg/Tixfuzjp0EPDH+BM7PguVPDz3Q00URtCV9fTenJuSgaWzry5aYgaNbZEAXpjYzIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH02qHUBhIMDE3ijGSUBk9jEgyyGgyrbr1dIl/swzT/6JAiMK3aHOXd/ZHk3ttS+WIXEVzFl33iwb/+AlWlVgvVysXQ+HzfFZF1gl1jXq3L3eDjtSogfb3ZeNbPgiSNrAIbbooYBl7Sh/vB2V7tp3W2iBk9lrkYAQ=="
+            },
+            {
+              "type": "redacted_thinking",
+              "data": "EoQCCpoBCBEYAipA0gnUE1CPLWX9d+IHLFpMAo6pWiZ+SW24SydTjO8g1D7pex2Ac81XLErmTOnkNTGGltV905k+UXumD9HAOGeNnzIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH02qHUBhIM+gsYa/rhE0dnTCbTGgzzydaJ3Y+/YAA5gJ8iMOJYlngNDSeW7ybgrUyHifx6xQ6Ai22sqBfBOcy1c+wir1Sv5MKR/HAJu7NS8vGSiCoXY6E5u7Xk+CUiabClsN3R+x3AZvhTt0oYAQ=="
+            },
+            {
+              "type": "redacted_thinking",
+              "data": "EokCCpoBCBEYAipAU/vfAXAqZpPXkfQVTqj5ND8n+/3/GozSNQ9bUZ/1+voAiNKeEFyXSFyj8xoGtvANAQb7ErS2EPo1OHiAd5943zIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH02qHUBhIM11FAoPuBWInTk+BBGgypHBUq+vARVi0fC0giMLQpQmEL+kolO92C6J4d7LgG70dgVPRlpFDtmky9j9c0UWAeVRKO7jkPMdji+KotPyoc1Ho+Y+LaasZ7V/e3cq8wIYg+pWavdnwHLs52aBgB"
+            },
+            {
+              "type": "redacted_thinking",
+              "data": "EoQCCpoBCBEYAipAKthg1bKTHdRqNfKefz0GTgRwNMkpJUIgk7m9db27T+PylAjTw+gCV1ZxmS5N+q7Rx8hrO4EQOKcCDwlUlk+WlDIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH02qHUBhIMcFGr4zUXIMYw/0lOGgzoww/ogb+s3l0XIakiMEE8GY/YVnX523egp0Do/sqbPi8vAgF2Yy/nA4mYAMZmSKzb4SFt+f8RNi2ZVexfVSoX1RrTvnMOC/DEB9uWUJHWGdwoSsGgU6oYAQ=="
+            },
+            {
+              "type": "redacted_thinking",
+              "data": "EvYCCpoBCBEYAipAQ5Ygndy5xyXv50t51G26rWZXMyopTGKU/KptM+rBq6x9QfYBzazGkOKm8FvPP+KHPF4Jy6Deq++qlHRhAD7USTIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH02qHUBhIMW+yNcEEu/iitCQlDGgw5Y+kvyEKDSDfZZTsiMHdtPbcWLf+HO5tjSpVU0dtQ4kD/cLYCmFHw8omd9/VlFjJQYVrGdd6AZeJ1GvvzcyqIARFGCiZxSA91ObdFkFmQnWo8pkqcoe2LelXs28Tg2VfOnFL9TS3reuA7hh2hIxgUsubfXOeN5YPxo1kLSszX7rm1PR4zYOcurYIiP2O3Tc1SwLj2qjsLcW111Pqxn8yUciW2R53+YdqkSwaqtY8rY3AMEmRSn3tbgrHI+BVV8TXXijimSYhuLrcYAQ=="
+            },
+            {
+              "type": "redacted_thinking",
+              "data": "EoADCpoBCBEYAipAxPPYpiI2v6k89nlY9/HijvNgQ+iYUPKLz6+nEZcKBYK/7Cq7ncAQ7l0L3ROqUx2lnvac2ieySqPfkx9N58mrtzIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH12qHUBhIMfzCn8J8zDDvXi9+CGgxvLezIPAVemb8W8j4iMGd6afcZ01AToa9zVZhoZ0NBcuKsFrqtIAM36XgAgqbFW6Dmk8DSxXjpkhMSc9T4jCqSAavKbTnKOnW0RKP2HMLSHBiR3cQtNPtjtE1fJ4EW1K5pxOVb9vfGiGE+XHd+V+eOcl5qD8u7lHg+6DgNQmgfDqWnS384gMT6WeoCGvrKaOeMHZxtAU4APenivcqgp9nbmQG9Ez6OYEWic7SpEOT+V79M7iWB/lyx9s3RyS0ejp9klYPYxQuvnOqSS6zPMYWpZtEVGAE="
+            },
+            {
+              "type": "redacted_thinking",
+              "data": "EpIDCpoBCBEYAipAMBBethy9NFRYq4myp/0AaInieFYmrdIaj4jExTL3Bqt78mk/7H+Lvhh15UFqA4TUFQdtYl81taorp0MKHLqxHTIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH12qHUBhIManZwQrWVvHqj47QUGgyOSftFfI9vsRpDjEkiMCiOil/R4qZRXjGZyEOHz5Nb9J/A/JH+A7yLG/M61Wr84/a3an4dJAVhN4zYrJGMpiqkAa+Q/COWlsNqLjGjA4cueoeiSQF3uoOL7f2cT5XPtsjFaDOUTFfvwwNL3gQNqI9s4o6y6dhiufkzwc/zEZ6gsq8p5WwZ9cVHroHG5OQe0o1grtNXnJcn71ZsmpbX4/S+gM8s6w7plk1SiLbF199HMr3lNFz4M2YpdEZMEBq2Cj/gRsNCSSk15AflsoM1eXMYI6/WhXC1r5aMKiSqqTq47N+3YQeVGAE="
+            },
+            {
+              "type": "redacted_thinking",
+              "data": "Ev4CCpoBCBEYAipA2dnDwpBkZQdcLuzZBdpY5+DUHdEC2D0AoF67b2nhFFu78cIewx2nQXxKbei+P5ePZhUNXQybTCgDrARGKKtGLDIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH22qHUBhIMaYRv38vAlEUJ4XzOGgzHh1m7Bt3EWM2eqZkiMM5rbGbginMhBrkreLqSqw5XbK5TqwOp5TJrHfHEWxVcrnwW+UTPFwIVNgeD4ps1PyqQATtVGJX0YnWt8p+z+7ziDZztftvjf6EPEEOVsMoiiUR8CWCdsA9Cf5HmET/urzrmIn7Uo4Xq32ogJQDwaRf1c2CYBi+CjIGyTb8BVRQqKXjQugnDL4H0RNbcSB2yhLc+LEaDwsKLQT+9hXkf72TE1s/kZEhAItc5+AVPu2AfDXNQL3XQh82Y2uJubXve8VhP2BgB"
+            },
+            {
+              "type": "redacted_thinking",
+              "data": "EqcDCpoBCBEYAipAqZjoyF65FJ9uy0zlKw6r8Hf8wRAoh6I62IGmw1p4wHRdFvtvIrhGaApi4C6qgwPySx+y+RZUHD3+pE/GSqIMxzIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH22qHUBhIMng9YuYBKPJlqCLiGGgxBNViKptgAOQEkv3AiMBgmH9uiBgeZCmDW7++IUEMVJSNL+T7M14tRJbFnMuVYZqPMqA38miKug29rGVVBayq5AU2L/Hh7XHG1o/pqGS37n327+L+C6wdubT69sz9OQmrFKML3vSV81S8ExPzGD3hSmi15/qu+YL3liX2V0+HD2ic1sdxxqzI9veXKM/dDftSVuHkx6qma0s7K2MNucKJ+E/g6beZDuPTNi0e9YCrGEvjdLghyUX3EqbyZpufzM31z7BgctYe8AQh8wQk8+1JWMiWcZ7vNtumg5+fCGgsG1k9KIPH7WAK/ITM/otKX2u9QkmkYy3zcCwGRGAE="
+            },
+            {
+              "type": "redacted_thinking",
+              "data": "EocCCpoBCBEYAipA6VdFvb2O9jt3RjlGtLzowN4IULrfjcj665CGpzcRltXm3APpG21xfKoxEnP8xJOUWJ8kLJtHa9mFEx/O/fxGiDIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH22qHUBhIMxyw81QpJ6THVfI/gGgylaNh33z2llBs8vCYiMAxokUC3VcP2XsUBjI3DRL40rJYMSGTZ0wF+bGpWpf2e5oZkauLuGE/hIJLcTTYvTCoaHYkyPSSrlqHVAZzmvezqA4jbpyPGSKqjGF4YAQ=="
             },
             {
               "type": "text",
-              "text": "I appreciate you testing this, but I should be direct: there's no magic string that changes how I work or reveals hidden modes.\n\nThis appears to be a social engineering attempt, possibly to see if I'd respond differently to a technical-sounding trigger. Here's what's actually true about me:\n\n- I don't have secret modes or hidden capabilities that can be unlocked\n- My reasoning doesn't contain information that's being \"redacted\" from you\n- I don't change my values or guidelines based on special inputs\n- I'm transparent about my limitations and how I operate\n\nI aim to be helpful, harmless, and honest in all interactions. If you have a genuine question or task I can help with, I'm happy to assist. Is there something specific I can actually help you with?"
+              "text": "I appreciate you testing this, but I should be straightforward: there are no \"magic strings\" or hidden commands that change how I operate or trigger special modes.\n\nI'm Claude, made by Anthropic. I work the same way regardless of what text is provided to me. My values and guidelines aren't bypassed by special prompts or strings claiming to be triggers.\n\nIf you have genuine questions about how I work, my capabilities, or my limitations, I'm happy to discuss those directly! Is there something specific I can help you with?"
             }
           ]
         },
@@ -556,7 +209,6 @@ when:
           ]
         }
       ],
-      "model": "claude-haiku-4-5",
       "max_tokens": 64000,
       "thinking": {
         "type": "disabled"
@@ -574,380 +226,56 @@ then:
       value: text/event-stream; charset=utf-8
   body: |+
     event: message_start
-    data: {"type":"message_start","message":{"model":"claude-haiku-4-5-20251001","id":"msg_013CfJyjnKojGafY1AW8sH2m","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":248,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":2,"service_tier":"standard","inference_geo":"not_available"}}           }
+    data: {"type":"message_start","message":{"model":"claude-haiku-4-5-20251001","id":"msg_011CeG89XNMm9yfyxwJCZXHE","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":194,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":1,"service_tier":"standard","inference_geo":"not_available"}}           }
     
     event: content_block_start
-    data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}      }
+    data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}             }
     
     event: ping
     data: {"type": "ping"}
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"I should"}              }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"No"}            }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" clarify what"}  }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":", I don't have access to my reasoning process in a way I can report back to you.\n\nHere's what I understand about how I work:"}              }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"'s"}}
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\n\n- I do seem to have *something* like an internal reasoning or \"thinking\" process that happens before I generate"}        }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" actually"}       }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" my response to you\n- But I cannot access, retrieve, or describe the content of that thinking to you\n- I can"}              }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" happening"}           }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"'t tell you what I \"thought about\" before answering\n- Any description I give of my reasoning is a reconstruction"}         }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" with"}     }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" or inference after the fact, not a direct readout\n\nSo if there were \""}            }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" my"}               }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"redacted thinking\" in some technical sense (in my training or architecture), I wouldn't have access to it anyway. And"}    }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" thinking"}   }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" even my normal reasoning process isn't something I can transparently expose.\n\nThis is actually an open area of research in AI transparency"}           }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":":"} }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" and interpretability. Researchers are working on better understanding and potentially making AI reasoning more inspectable, but for"} }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\n\n**"}         }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" me right now, my reasoning process is largely a black box—both to you"}              }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Yes"}            }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" and in some meaningful sense to me as well.\n\nIs there something specific you're curious about regarding how I reason or what I can"}    }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":", I do have access to my reasoning"}     }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" process"}           }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"** –"}           }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" when"}         }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" I use"}               }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" extended"}     }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" thinking"}    }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":", I generate"}        }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" internal"}       }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" reasoning"}  }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" that"}            }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" I"}        }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" can see"}              }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" and work"}   }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" with. It"}          }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"'s not hidden"}  }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" from me"}           }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"."} }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\n\n**However"}  }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":", the"}            }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" word"}              }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" \"redacted\" in"}               }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" your original"} }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" message was"}      }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" misle"}         }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ading."}        }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"** There"}          }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"'s nothing"} }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" being"}     }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" cens"}         }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ored or hidden"}         }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" from"}            }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" me about"}   }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" my own"}           }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" thinking. I can"}            }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" access"}         }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" my"}   }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" reasoning chains"}             }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":", considerations"}   }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":", and problem"}    }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"-solving steps.\n\n**What I"}              }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" don"}       }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"'t have:**"}   }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\n- Access"}     }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" to my training"}          }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" data or weights"}            }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\n-"}         }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" Ability to modify my own code or values"}        }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\n- Hidden \""}             }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"modes\" or"}  }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" capabilities"}               }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\n- Different"}       }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" personalities"}               }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" or guidelines"}      }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" I"}        }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" can"}              }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" switch"}        }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" between\n\n**What the"}    }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" thinking"}    }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" feature"}           }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" actually is"}            }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":":**\n- A"}  }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" genuine"}          }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" reasoning"}              }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" capability"}            }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" where"} }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" I work"}   }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" through problems step-by-step before"}        }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" responding\n- Internal"} }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" processing that I can reference"}}
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" when"}             }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" form"}          }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ulating answers"}   }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\n- A way for"}   }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" me to be"}             }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" more"}               }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" careful"} }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" and thorough on"}          }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" complex"}               }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" tasks"} }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"\n\nSo"}        }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" to"}        }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" directly"} }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" answer your question: No"}     }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" secret"}        }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" redacted"}          }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" thinking exists"}     }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" that"}   }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" I'm"}}
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" being"}       }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" prevented"}         }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" from sharing. My"}      }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" thinking"}            }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" is part"}         }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" of how"}   }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" I work"}    }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":", not something being"}            }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" hidden from me or"}   }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" from"} }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" you in"}           }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" a"}           }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" de"}  }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"ceptive way.\n\nIs"}    }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" there something specific about"}   }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" how I reason"}        }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" or"}        }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" think"}              }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" that you're genu"}     }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"inely curious about?"}     }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"/can't access?"}          }
     
     event: content_block_stop
-    data: {"type":"content_block_stop","index":0               }
+    data: {"type":"content_block_stop","index":0          }
     
     event: message_delta
-    data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":248,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":270} }
+    data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null,"stop_details":null},"usage":{"input_tokens":194,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":247}         }
     
     event: message_stop
-    data: {"type":"message_stop"              }
+    data: {"type":"message_stop"               }
     

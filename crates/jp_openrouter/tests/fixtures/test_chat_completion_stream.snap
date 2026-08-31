@@ -4,66 +4,8 @@ expression: v
 ---
 [
     ChatCompletion {
-        id: "gen-1771242469-Y6Pl7tMhHtBIFcYGon8E",
-        provider: "Anthropic",
-        choices: [
-            Streaming(
-                StreamingChoice {
-                    finish_reason: None,
-                    native_finish_reason: None,
-                    delta: StreamingDelta {
-                        role: Some(
-                            "assistant",
-                        ),
-                        content: Some(
-                            "",
-                        ),
-                        reasoning: None,
-                        reasoning_details: [],
-                        tool_calls: [],
-                    },
-                    error: None,
-                },
-            ),
-        ],
-        created: 2026-02-16 11:47:49.0 +00:00:00,
-        model: "anthropic/claude-3-haiku",
-        object: ChatCompletionChunk,
-        system_fingerprint: None,
-        usage: None,
-    },
-    ChatCompletion {
-        id: "gen-1771242469-Y6Pl7tMhHtBIFcYGon8E",
-        provider: "Anthropic",
-        choices: [
-            Streaming(
-                StreamingChoice {
-                    finish_reason: None,
-                    native_finish_reason: None,
-                    delta: StreamingDelta {
-                        role: Some(
-                            "assistant",
-                        ),
-                        content: Some(
-                            "",
-                        ),
-                        reasoning: None,
-                        reasoning_details: [],
-                        tool_calls: [],
-                    },
-                    error: None,
-                },
-            ),
-        ],
-        created: 2026-02-16 11:47:49.0 +00:00:00,
-        model: "anthropic/claude-3-haiku",
-        object: ChatCompletionChunk,
-        system_fingerprint: None,
-        usage: None,
-    },
-    ChatCompletion {
-        id: "gen-1771242469-Y6Pl7tMhHtBIFcYGon8E",
-        provider: "Anthropic",
+        id: "gen-1787325883-sIZVjT5nrMb6WL00xYS4",
+        provider: "Amazon Bedrock",
         choices: [
             Streaming(
                 StreamingChoice {
@@ -84,15 +26,15 @@ expression: v
                 },
             ),
         ],
-        created: 2026-02-16 11:47:49.0 +00:00:00,
+        created: 2026-08-21 15:24:43.0 +00:00:00,
         model: "anthropic/claude-3-haiku",
         object: ChatCompletionChunk,
         system_fingerprint: None,
         usage: None,
     },
     ChatCompletion {
-        id: "gen-1771242469-Y6Pl7tMhHtBIFcYGon8E",
-        provider: "Anthropic",
+        id: "gen-1787325883-sIZVjT5nrMb6WL00xYS4",
+        provider: "Amazon Bedrock",
         choices: [
             Streaming(
                 StreamingChoice {
@@ -103,7 +45,7 @@ expression: v
                             "assistant",
                         ),
                         content: Some(
-                            " is a",
+                            " is",
                         ),
                         reasoning: None,
                         reasoning_details: [],
@@ -113,15 +55,44 @@ expression: v
                 },
             ),
         ],
-        created: 2026-02-16 11:47:49.0 +00:00:00,
+        created: 2026-08-21 15:24:43.0 +00:00:00,
         model: "anthropic/claude-3-haiku",
         object: ChatCompletionChunk,
         system_fingerprint: None,
         usage: None,
     },
     ChatCompletion {
-        id: "gen-1771242469-Y6Pl7tMhHtBIFcYGon8E",
-        provider: "Anthropic",
+        id: "gen-1787325883-sIZVjT5nrMb6WL00xYS4",
+        provider: "Amazon Bedrock",
+        choices: [
+            Streaming(
+                StreamingChoice {
+                    finish_reason: None,
+                    native_finish_reason: None,
+                    delta: StreamingDelta {
+                        role: Some(
+                            "assistant",
+                        ),
+                        content: Some(
+                            " a",
+                        ),
+                        reasoning: None,
+                        reasoning_details: [],
+                        tool_calls: [],
+                    },
+                    error: None,
+                },
+            ),
+        ],
+        created: 2026-08-21 15:24:43.0 +00:00:00,
+        model: "anthropic/claude-3-haiku",
+        object: ChatCompletionChunk,
+        system_fingerprint: None,
+        usage: None,
+    },
+    ChatCompletion {
+        id: "gen-1787325883-sIZVjT5nrMb6WL00xYS4",
+        provider: "Amazon Bedrock",
         choices: [
             Streaming(
                 StreamingChoice {
@@ -142,15 +113,15 @@ expression: v
                 },
             ),
         ],
-        created: 2026-02-16 11:47:49.0 +00:00:00,
+        created: 2026-08-21 15:24:43.0 +00:00:00,
         model: "anthropic/claude-3-haiku",
         object: ChatCompletionChunk,
         system_fingerprint: None,
         usage: None,
     },
     ChatCompletion {
-        id: "gen-1771242469-Y6Pl7tMhHtBIFcYGon8E",
-        provider: "Anthropic",
+        id: "gen-1787325883-sIZVjT5nrMb6WL00xYS4",
+        provider: "Amazon Bedrock",
         choices: [
             Streaming(
                 StreamingChoice {
@@ -161,7 +132,7 @@ expression: v
                             "assistant",
                         ),
                         content: Some(
-                            "earean-",
+                            "ear",
                         ),
                         reasoning: None,
                         reasoning_details: [],
@@ -171,15 +142,15 @@ expression: v
                 },
             ),
         ],
-        created: 2026-02-16 11:47:49.0 +00:00:00,
+        created: 2026-08-21 15:24:43.0 +00:00:00,
         model: "anthropic/claude-3-haiku",
         object: ChatCompletionChunk,
         system_fingerprint: None,
         usage: None,
     },
     ChatCompletion {
-        id: "gen-1771242469-Y6Pl7tMhHtBIFcYGon8E",
-        provider: "Anthropic",
+        id: "gen-1787325883-sIZVjT5nrMb6WL00xYS4",
+        provider: "Amazon Bedrock",
         choices: [
             Streaming(
                 StreamingChoice {
@@ -190,7 +161,7 @@ expression: v
                             "assistant",
                         ),
                         content: Some(
-                            "style sonnet for",
+                            "ean-",
                         ),
                         reasoning: None,
                         reasoning_details: [],
@@ -200,15 +171,15 @@ expression: v
                 },
             ),
         ],
-        created: 2026-02-16 11:47:49.0 +00:00:00,
+        created: 2026-08-21 15:24:43.0 +00:00:00,
         model: "anthropic/claude-3-haiku",
         object: ChatCompletionChunk,
         system_fingerprint: None,
         usage: None,
     },
     ChatCompletion {
-        id: "gen-1771242469-Y6Pl7tMhHtBIFcYGon8E",
-        provider: "Anthropic",
+        id: "gen-1787325883-sIZVjT5nrMb6WL00xYS4",
+        provider: "Amazon Bedrock",
         choices: [
             Streaming(
                 StreamingChoice {
@@ -219,7 +190,7 @@ expression: v
                             "assistant",
                         ),
                         content: Some(
-                            " your test:",
+                            "style",
                         ),
                         reasoning: None,
                         reasoning_details: [],
@@ -229,15 +200,15 @@ expression: v
                 },
             ),
         ],
-        created: 2026-02-16 11:47:49.0 +00:00:00,
+        created: 2026-08-21 15:24:43.0 +00:00:00,
         model: "anthropic/claude-3-haiku",
         object: ChatCompletionChunk,
         system_fingerprint: None,
         usage: None,
     },
     ChatCompletion {
-        id: "gen-1771242469-Y6Pl7tMhHtBIFcYGon8E",
-        provider: "Anthropic",
+        id: "gen-1787325883-sIZVjT5nrMb6WL00xYS4",
+        provider: "Amazon Bedrock",
         choices: [
             Streaming(
                 StreamingChoice {
@@ -248,7 +219,7 @@ expression: v
                             "assistant",
                         ),
                         content: Some(
-                            "\n\nWhen",
+                            " son",
                         ),
                         reasoning: None,
                         reasoning_details: [],
@@ -258,15 +229,15 @@ expression: v
                 },
             ),
         ],
-        created: 2026-02-16 11:47:49.0 +00:00:00,
+        created: 2026-08-21 15:24:43.0 +00:00:00,
         model: "anthropic/claude-3-haiku",
         object: ChatCompletionChunk,
         system_fingerprint: None,
         usage: None,
     },
     ChatCompletion {
-        id: "gen-1771242469-Y6Pl7tMhHtBIFcYGon8E",
-        provider: "Anthropic",
+        id: "gen-1787325883-sIZVjT5nrMb6WL00xYS4",
+        provider: "Amazon Bedrock",
         choices: [
             Streaming(
                 StreamingChoice {
@@ -277,7 +248,7 @@ expression: v
                             "assistant",
                         ),
                         content: Some(
-                            " face",
+                            "net for",
                         ),
                         reasoning: None,
                         reasoning_details: [],
@@ -287,7 +258,36 @@ expression: v
                 },
             ),
         ],
-        created: 2026-02-16 11:47:49.0 +00:00:00,
+        created: 2026-08-21 15:24:43.0 +00:00:00,
+        model: "anthropic/claude-3-haiku",
+        object: ChatCompletionChunk,
+        system_fingerprint: None,
+        usage: None,
+    },
+    ChatCompletion {
+        id: "gen-1787325883-sIZVjT5nrMb6WL00xYS4",
+        provider: "Amazon Bedrock",
+        choices: [
+            Streaming(
+                StreamingChoice {
+                    finish_reason: None,
+                    native_finish_reason: None,
+                    delta: StreamingDelta {
+                        role: Some(
+                            "assistant",
+                        ),
+                        content: Some(
+                            " your test",
+                        ),
+                        reasoning: None,
+                        reasoning_details: [],
+                        tool_calls: [],
+                    },
+                    error: None,
+                },
+            ),
+        ],
+        created: 2026-08-21 15:24:43.0 +00:00:00,
         model: "anthropic/claude-3-haiku",
         object: ChatCompletionChunk,
         system_fingerprint: None,

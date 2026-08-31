@@ -12,7 +12,10 @@ expression: v
                         id: "run_me_2",
                         name: "run_me",
                         arguments: {
-                            "bar": String("foo"),
+                            "bar": Array [
+                                String("foo"),
+                            ],
+                            "foo": String("This is an arbitrary string value for foo that I can choose freely to test a scenario if needed in the future!"),
                         },
                     },
                 ),
@@ -29,7 +32,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "The tool executed successfully with the argument `bar=\"foo\"`. It returned \"working!\". Is there anything specific you'd like to do next, or should we try a different set of arguments? 😊",
+                        message: "The tool executed successfully with your provided arguments: `bar` = `[\"foo\"]`, and `foo` = `\"This is an arbitrary string value for foo that I can choose freely to test a scenario if needed in the future!\"`. \n\nLet me know if you'd like to adjust any parameters or try another operation! 😊",
                     },
                 ),
                 metadata: {},

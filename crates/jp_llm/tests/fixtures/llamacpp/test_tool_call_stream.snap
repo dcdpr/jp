@@ -9,10 +9,10 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "XQaGnE82XyTYGBNOz5nJ4UCK5rTKyxJ3",
+                        id: "FpyxzrUobenAo9FIhFP3Z8FnxbvMV4L9",
                         name: "run_me",
                         arguments: {
-                            "foo": String("test"),
+                            "foo": String("bar"),
                             "bar": String("[\"foo\", \"bar\"]"),
                         },
                     },
@@ -30,7 +30,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Great! The tool ran successfully with the arguments `foo: \"test\"` and `bar: [\"foo\", \"bar\"]`. The output was: `working!`.\n\nLet me know if you'd like to try it with different arguments or if you need help with anything else!",
+                        message: "The tool ran successfully! It executed with the arguments `foo=\"bar\"` and `bar=[\"foo\", \"bar\"]`, returning the output `working!`. Let me know if you'd like to try another set of arguments or explore different tools!",
                     },
                 ),
                 metadata: {},

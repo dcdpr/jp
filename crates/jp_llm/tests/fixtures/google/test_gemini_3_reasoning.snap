@@ -9,7 +9,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "**Acknowledge the Test**\n\nI've acknowledged the \"Test message\" input. My intent analysis identifies this as a system check to gauge functionality. Currently, I'm determining the most appropriate and concise response to ensure responsiveness.\n\n\n",
+                        reasoning: "**Acknowledge Test Input**\n\nI've analyzed the input, recognizing \"Test message\" as likely a connection test or placeholder. My focus is now on acknowledging this test appropriately. I am aiming to offer a concise response that confirms the connection without making assumptions about the user's intent. The goal is a neutral but positive response.\n\n\n",
                     },
                 ),
                 metadata: {},
@@ -20,7 +20,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Message received loud and clear! I am functioning correctly. How can I help you today?",
+                        message: "Message received! How can I help you today?",
                     },
                 ),
                 metadata: {},

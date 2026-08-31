@@ -221,26 +221,26 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
-      "id": "call_i0uruotigAMGRzlSVrivoXUS",
+      "id": "call_9pIO9rxD5iBgHYWii3HGpW8u",
       "name": "run_me",
       "arguments": {
-        "foo": "aGVsbG8=",
+        "foo": "cHJvdmlkZWQgYnkgYXNzaXN0YW50",
         "bar": "Zm9v"
       }
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
-      "id": "call_i0uruotigAMGRzlSVrivoXUS",
+      "id": "call_9pIO9rxD5iBgHYWii3HGpW8u",
       "content": "d29ya2luZyE=",
       "is_error": false
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "I ran the tool with the arguments you provided. The tool returned:\n\nworking!\n\nIf you want me to run it again with different arguments, tell me what to change (or say “try random” and I’ll pick new ones).",
+      "message": "Done — I ran the tool with the arguments {\"foo\":\"provided by assistant\",\"bar\":\"foo\"}. The tool responded: \"working!\"",
       "metadata": {
-        "openai_item_id": "bXNnXzBhMDZiMmZmOWY3MWE2YTYwMTY5OTViNmJiNWQ3ODgxOTViMzEyMjhjMTdiMGQ1NzBk"
+        "openai_item_id": "bXNnXzBjZTIzYmYxYzliOTRiZjAwMTZhODg2ZGE5NmJlNDg3ZDI4YzRjNDk3YWQ3OTUwZDA4"
       }
     }
   ]

@@ -221,7 +221,7 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
-      "id": "call_AO3J5fHZqoX3OaqIfyUC3hre",
+      "id": "call_O3ByNtUdUxXx7MatyW9beYgO",
       "name": "run_me",
       "arguments": {
         "foo": "Zm9v",
@@ -231,16 +231,16 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
-      "id": "call_AO3J5fHZqoX3OaqIfyUC3hre",
+      "id": "call_O3ByNtUdUxXx7MatyW9beYgO",
       "content": "d29ya2luZyE=",
       "is_error": false
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "I ran the tool with the arguments you provided; it returned: \"working!\"\n\nIf you want, tell me different arguments to try or what you expect the tool to do next.",
+      "message": "Done — I ran the tool with the arguments {\"foo\":\"foo\",\"bar\":\"foo\"} and it returned: \"working!\" \n\nIf you want me to run it again with different arguments or explain what the tool does, tell me the parameters you'd like.",
       "metadata": {
-        "openai_item_id": "bXNnXzAxZjYzOWJlMmI1ZWI1ZDMwMTY5OTViNmJiODRjYzgxYTI5M2ZmZTM4OGUzMzVjNGMy"
+        "openai_item_id": "bXNnXzBmY2Q2YmQ3MzY2ZTcyNWQwMTZhODg2ZGFhMjY4MDg3ZDJhYmNhM2ZhNzJkYjg5OTgw"
       }
     }
   ]

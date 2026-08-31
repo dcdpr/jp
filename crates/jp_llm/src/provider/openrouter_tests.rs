@@ -10,7 +10,7 @@ macro_rules! test_all_models {
         ($($fn:ident),* $(,)?) => {
             mod anthropic { use super::*; $(test_all_models!(func; $fn, "openrouter/anthropic/claude-haiku-4.5");)* }
             mod google    { use super::*; $(test_all_models!(func; $fn, "openrouter/google/gemini-2.5-flash");)* }
-            mod xai       { use super::*; $(test_all_models!(func; $fn, "openrouter/x-ai/grok-code-fast-1");)* }
+            mod xai       { use super::*; $(test_all_models!(func; $fn, "openrouter/x-ai/grok-4.3");)* }
             mod minimax   { use super::*; $(test_all_models!(func; $fn, "openrouter/minimax/minimax-m2");)* }
         };
         (func; $fn:ident, $model:literal) => {
@@ -101,9 +101,13 @@ fn request_preserves_integer_tool_parameter_type() -> Result {
         .tool(
             "fs_read_file",
             json!({
-                "type": "object",
-                "properties": { "start_line": { "type": "integer" } },
-                "required": []
+              "type": "object",
+              "properties": {
+                "start_line": {
+                  "type": "integer"
+                }
+              },
+              "required": []
             }),
         )
         .chat_request("Read README.md");
@@ -136,33 +140,35 @@ fn request_preserves_integer_tool_parameter_type() -> Result {
 #[test]
 fn tool_call_finish_is_a_clean_completion() -> Result {
     let tool_call: response::Choice = serde_json::from_value(serde_json::json!({
-        "finish_reason": null,
-        "native_finish_reason": null,
-        "delta": {
-            "role": "assistant",
-            "content": null,
-            "reasoning": null,
-            "tool_calls": [{
-                "index": 0,
-                "id": "call_1",
-                "function": {
-                    "name": "fs_read_file",
-                    "arguments": "{\"path\":\"README.md\",\"start_line\":\"1\"}"
-                }
-            }]
-        },
-        "error": null
+      "finish_reason": null,
+      "native_finish_reason": null,
+      "delta": {
+        "role": "assistant",
+        "content": null,
+        "reasoning": null,
+        "tool_calls": [
+          {
+            "index": 0,
+            "id": "call_1",
+            "function": {
+              "name": "fs_read_file",
+              "arguments": "{\"path\":\"README.md\",\"start_line\":\"1\"}"
+            }
+          }
+        ]
+      },
+      "error": null
     }))?;
     let finish: response::Choice = serde_json::from_value(serde_json::json!({
-        "finish_reason": "tool_calls",
-        "native_finish_reason": "tool_calls",
-        "delta": {
-            "role": null,
-            "content": null,
-            "reasoning": null,
-            "tool_calls": []
-        },
-        "error": null
+      "finish_reason": "tool_calls",
+      "native_finish_reason": "tool_calls",
+      "delta": {
+        "role": null,
+        "content": null,
+        "reasoning": null,
+        "tool_calls": []
+      },
+      "error": null
     }))?;
     let mut state = AggregationState {
         tool_call_indices: vec![],

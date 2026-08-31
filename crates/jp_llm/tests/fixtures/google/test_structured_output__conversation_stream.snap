@@ -241,7 +241,7 @@ expression: v
       "type": "chat_response",
       "data": {
         "titles": [
-          "Conversation Title Request"
+          "Title Generation Request"
         ]
       }
     }

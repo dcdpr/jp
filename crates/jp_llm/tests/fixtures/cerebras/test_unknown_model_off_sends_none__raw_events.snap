@@ -18,14 +18,7 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " + 2 = ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "4",
+                " + 2 = 4",
             ),
             metadata: {},
         },

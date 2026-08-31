@@ -13,10 +13,10 @@ expression: v
                     },
                 ),
                 metadata: {
-                    "openai_encrypted_content": String("gAAAAABpquoalqWS1Im8NIBi5Xj4UD2aFxBv0JKgoe7MOD5ED62L5_QxYXB6duvD0OCVrjfyth7e7Na45bi_00IEWlv-dpO5r84Nq3peGGUcvessSxaILmAxQtnHM6aYqRZybAdZeSaxBCi9s6tB_BNOrFxsnFIkMSX7d3YVkk0wMRFb0WDZBiCWswP6JnZxMaWYPmleLTH0DQRIjkW9uwgJ53PcOYR0M79ZLiOaC97cT-WE94pPzJFUOuIqB5DYdxGJwVj7TY821e_LB9m36vTbdqlvRBjUnEl8TS6qCbBeriTGV5-Jy1s7MYEnM_SO-zkimkvaL-BZxdYJ1fE38vTGa9-iyfoWuojtyACpRjBfN9F6bypFDeBqCtJ39iohkqgCZLOwdxYGkl_k_5pCA8-UzvZYPwjhm4wzMSZbB8IQFGKVsAJ69P4HQAHlFnaFaBMm1oQHgIPVgORzf4kgOB4GRsP7w9ilN7qZK_jFI7LgZ05b7qC1eBM5PmS2W2nDqyI1GJ5uwAeCdtz6mkRFO0F73s7883RePLGcn3N5t_Tx3dOJ8MFtpchMakshcQesz9QxbqzJpy4PfRO7xRErCJ2INyF5ijFCwPC7s16BI8u6sRlbEGRPVkB3xdKrvibptbYFF_LV105q7accDouMj8gLFNFl47DujaPEkuZ8BOpUybh8m_zKNvijIzbzWYfoF6cO5-55EKQKinOrbPTkBaoWtJuzIG93OlFqJQQSMcwAq81Ss2oWE-MsWusM48RatUGvB-LAeqAzGDMyUYZ5x6lhJeeawg-x4dA5EJikovBGmzdBmOap9x9XLdG1MJ1yoYnAwqjUztHOwxMFOEI5dXuWVwXREdEck9W9cIqkA_CXdoLP06_tSWwKnpwJBgw9FP2ePUSMXVVo"),
+                    "openai_encrypted_content": String("gAAAAABqiG23vsNADnl7LerJtMmXs-fiADlNtS33wJ7R_x1E8Yr2FtFVDWoMgmS6ZDxj8ElIQ-8Fck_w0XgQfLjxB442vrqlQmiQNgPYgDFWC368xT_-52EtTkfe9rPY8hJiVezJKW3jvGzU7sh7N8CH4Un9JsnVQZ15c8Zh4qZGSabeebeG6ozYVffQtaH27eoPH1g-wol2prYROobwqjJ-auemJ5vlzMLH38cyM_TmRS1kXDuXwdJ_trW7ZAv46IibnnUn-UOlTfICeMSkhYy9dq5X2m8v8peUfWuBKV5fNgVEzHMqIbeCuFxydF7kpOj7nioGtpR-IX867wHPnpGaIBEpyga703Q_oEGLOxfkUCqTF61NEI_eb6OEWhQUSBiCegW1NZtrRfO25WrIFZN7_AYZ5uarLd5aeBOghwvJJBfL2JIQTv4HtzxiwpAejeZCTGaSoHekBmlbViDQE89HQ4lIgGFvuviYPhptyqJLpA4vo9aGa7HKtfWfV-ajCex_QjItx5a5x139XJXPdMY75j2qAYTMYlF1RCBJfcWOc_RywjuHIGxmBNgkLNcP8XGmM9oEhLgO859Ihz8vd8X8tkQE34Q5BGuO6-qhM1ET2_PEW0jwGX9RZi0c_OfapapomiSHTZ5ws3O2yGGzxo13KU8UMFTQtG6rtlMmV1mHUaZLsPv_q7UnNpouiv1YmcYsEB22JoEYJwiBeCs9Vn7ST0X8DIkt4yu3sI8mGO23ZNxHZe9olzE1KX0lW4tqCjIbV7I92TyH5mPHFSzEyxDat37x-8aeBrBe_tA8gf9Tkj5_11Gmouhacz8yFYCKutIHGurnO6UL38BoM1lsDiFDI3Jpww0l87O_iz-Qe-bg3FwE9E9NwSbvahBSFbF8RwYwHn1HFCfsoTCejmvSXRzEfS1v4nITjoztThj1l51-MMatQ9LNT0smEO9YfA2Vb0y5i-V9r8RxhuQOkd8uIYkaFljLewjbFpExvp9VnuHyn5GuVrfAaq5ZZx2lemLByabueE6KQamHRkqUm4r_vVgkicDtQaRMOtmfxVX0H3vM3Y3rleQFvSd8eNOW8utq1Hziv9oeoeYk1J2RV_oQbgwHRyYbPlrGcd9gxM1wwlGfT1RkiLAhAZeYZfjexgj3Z5TLKAaS44AC0HwUt4UHAyKb23n2BY3xN8hXDQfQDkTEAchVajqvqpR-XgbGIni2PP4Vpx6udyZiLyET7zx9sQ5KXb1EFI0bZWxfiy28d8kyoT4dBHAQogLLStzlurIGVem0BMzg1RiaZbJ28CH66nuSFgOivhhtffxLBr24K1wJ9p-I8n3HV1WW1ktgq2FxQvsFX_qqQrlNBLhJhq6rjGs5LsVjg1MrhpSID8FVd2A8pvJdtNT9EbUG0hGZ9fJkdg7N8mNwrTJ1.eyJlbmRwb2ludF9zbHVnIjoib3BlbmFpL2dwdC01LW1pbmktMjAyNS0wOC0wN3xvcGVuYWkifQ"),
                     "openrouter_metadata": Array [
                         Object {
-                            "id": String("rs_03cb48bc16b08d990169aaea1a04648190ae64b0a6fe7d2c83"),
+                            "id": String("rs_02bda3522a7c7a9e016a886db6eec487d18f684f43a96b0146"),
                             "index": Number(0),
                             "field": String("openai_encrypted_content"),
                         },
@@ -29,10 +29,10 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "call_L9Z0sQ0ZuY1BxWOfPbnWU7wf",
+                        id: "call_WKBmpxCWQlHgotW4KaaM3jsY",
                         name: "run_me",
                         arguments: {
-                            "foo": String("run with default"),
+                            "foo": String("example"),
                             "bar": String("foo"),
                         },
                     },
@@ -54,10 +54,10 @@ expression: v
                     },
                 ),
                 metadata: {
-                    "openai_encrypted_content": String("gAAAAABpquobLwKl3cgu7A8KnfvhGqv4bbaiLckdrbb28iVGaV788n99KrC1Mc-Rrk0-D_r6LBRa7-cSc2dCa-9AFPxxQGy3_6P2KOoN14igBWA3GK-TCI8QOAPT1WLimWiC-9pPh7yUsaPJo-B2y5OyBUkYNT0ImcoMYQ9Ac-SK9RBUcoDDw9EgjHEnd-y2TzIZFZXnL6m8wokbonw5rcCuBF_-XUM0ay7GcO5E9C3F7kmxZawfHu9BO3EsoGwbcTNMCS0jUDTxyLhf5hu10gwWSbnSPf2vFvp9z8kSKlOE6IbInNa6M_54UUXJqfyIUeMgHKoeXhLvfkss_bxcYdomDjTTr1vJeHXbinj6m12dogbNAEZDWAtV1OXeGrvYiZgb3fq6sr5nan0HfDOmmt-4e1PjPtbEZxKe7JvprvECzXrpOsTSIBU9CIoHbOfWwCdv8P9CgHJWeKP3ZbDvwmUZNIdHyIgYHPVrvmkn0hGJSsEgs00nqcwoxT9fUVrws3ijWBh0C3tGPvIgomF1MIPo_RdcyHgOIBS3V-t015D1nfL3IFc1W7SqvusOOUA_EUZw_1ZAyE6sdo2EIzq5Sl-XP_GBwJHkbp4Gf5d-SNbVxPjgBGuiRbzZb0QBKNqpMisM7WrWw_ZdF6fgsdWGPPAl7AhOHzJa8Cxn5NUoV3Vpa_lnIFyYHEh4KxoQBMwCJ9xLqwd3gS0-BaGS_iy17O7owR6N6IBHaqwhMAiBBvGiztj1vZM4c0RARB9gnFlpIwY85kI5mqpZ6lrdCUz-mNbLVixXN1xdMDFyn2L085fMeR9A6tQKJfHoTZQAAp-yxxrcnLTFyDq8Vo4wRKvbNowKJo7Nn7AkwsxOPpZEewuQZckraOILDanWgcyNspM3VsguhDT_UDIP"),
+                    "openai_encrypted_content": String("gAAAAABqiG24PCsWZqHZgIxnqoVwfpr2smc8lC0UyRfFooJOMVP3lebgsVa-ykEKl2aMOL_5kg4MQ-56GkLjDWlJpUNnI_BAxUAVthCxU7t3qC9RHu-JkxlDd2aRUPHO6ni5nrViC1jzkWiEyS2rHpK76qOPDvc3HVr713hTEjgnJt4erDF2N_XdF1SatjZQ0X26fCVDCEF-0xylR51RrNY-BHubuyUV7ftSqEQEacD0ffZs3NN4sxs7cpiJ0OZKvcv8i1djTRr_2110_FhFrJxMHseYJABlH0GSrILPS_hH2AZGnV1kJQKIDHjFIO2q90Mxd0B5eoV85xpNGJKL-0ihPDJajxRQr1SComWCQF_Reg3kIWDtnTFozLG-7IiaDFtNjsql2VaWSzl8xqKGu318OTs2854kAHtKx2dPw8HhSzddli3LWS0nt7xz7Ws7DvJdwDmCgOGMULyBjZSDV73apmdk63s1M9_8fI4n9BuX1roiugGPGhAKHlEiNRsneyA9qMy9eUqNgt49Qz1jOaRoHd5pz6-49Z7Z7Ls2F56Iy6ZXzdeF-dluM7Zv2nVTQfpaRi45Xjyxg8Jl0lMlF3J-5slVdUhKp1YN928T_fN2b78edPLyf_YbQKMFEYAuga1sF471YborAeEvpSVJT90c0NL7c8T0HClZR115Zu6PRh1YHYuX--loIn0BFtfNcoy6vmAxGPFUdJTxkuDcbx6dDpuLkARHL34Fat9q9tDpE1w5u9pH0fIwlmPrK-W1xx-m6kAh-xeEPu8ZTrzdpE9RJ3DKJEjHzkj9wY7HrIERbn_aMxQgxLfLNIok0ox1o8i0Fbv14nAl4Ot1enkpUH9iTZ9MRdt9DrJAOhuh4VWNSoLFhifZB-WIA3HMJDhrFc6FbT2iPD0RGMpf7vMnOCO7VFa2MdYH6IgE0psp-RMNfhtvIhPM-enB-PKQVVaFh7HAAdBr1GXdnrthlrYjYm89b4VKfzhyA-ZW8SW26Lb5dtdEKsOa8tgJX9u9h1IRr2bzmuGiq4NE9CthY_t12z0PpX9G0x_mYdjFJfdOk3Hnm-_LkKXIqFHDNWp-Dd11Wt0d0Ok7G5tuspL7MCTFgUMtYdsqR6KF1l8beuBtoPQVblPhPnbR1orlxbvBVlaa7HAEIXvdh9M9vXbQ9o5KgImnwg_Xqxq0FDITTcYGDNCpR7nTbaYKVwVaU2IKVrt1pDsmenzVixnNQnZJjIGKLQ7sBzhFiBqlBpdj1gmZRhJZxO-RCM9yJC_qRqZq5FJGlgSLnJKPSLSd7i2Wcr7B5-6z7LsKBGkLW34edwXLyZs6MrI3enNLInOzYNifpeNnalrglN3VG8qFD5dzNoFtMuodcDBkIHQG9tPVdTVxufM82cSttFJaWf_MkrpwLdxeOMw3-TRySqq3.eyJlbmRwb2ludF9zbHVnIjoib3BlbmFpL2dwdC01LW1pbmktMjAyNS0wOC0wN3xvcGVuYWkifQ"),
                     "openrouter_metadata": Array [
                         Object {
-                            "id": String("rs_0c59ab0afca9d0b00169aaea1b4e848190b959cc1fc2e098c1"),
+                            "id": String("rs_06bc253f7df2d9e4016a886db83c5c87d1a70951cab988ecef"),
                             "index": Number(0),
                             "field": String("openai_encrypted_content"),
                         },
@@ -70,7 +70,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "I ran the tool with default arguments. The tool responded: \"working!\"\n\nIf you'd like me to run it again with different arguments, tell me what inputs to use (or say \"choose for me\") and I'll run it.",
+                        message: "I ran the tool with the arguments {\"foo\":\"example\",\"bar\":\"foo\"} and it returned: \"working!\" \n\nDo you want me to run it again with different arguments or explain what the tool does?",
                     },
                 ),
                 metadata: {},

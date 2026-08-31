@@ -9,7 +9,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "The user asks to run the tool, providing whatever arguments we want. The tool is run_me defined with parameters foo?: string default \"foo\", and bar: string | array (required). We can choose arguments. Let's call run_me with maybe bar: \"test\". No foo needed. Use default.",
+                        reasoning: "The user wants the tool to be run, providing whatever arguments we want. The tool is run_me with parameters foo (optional, default \"foo\") and bar (required string or array). We need to call the function. The prompt says \"providing whatever arguments you want.\" So we can choose arguments. Let's provide a simple test: foo: \"test\", bar: \"example\". We'll call the function.",
                     },
                 ),
                 metadata: {},
@@ -20,10 +20,11 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "dfd5fc767",
+                        id: "9ad7c9ddd",
                         name: "run_me",
                         arguments: {
-                            "bar": String("test"),
+                            "foo": String("test"),
+                            "bar": String("example"),
                         },
                     },
                 ),
@@ -40,7 +41,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "The user says: \"Please run the tool, providing whatever arguments you want.\" The tool is \"run_me\" which just prints \"working!\" regardless of arguments. We already called it with {\"bar\":\"test\"} and got \"working!\". The user wants us to run the tool. Possibly they want us to run it with arbitrary arguments and show output. We have already done it. We might ask clarification or provide result. Since we already ran the tool, we can respond confirming the tool ran.\n\nThus respond: I ran the tool with sample args and got \"working!\". If they want something else, they can specify.",
+                        reasoning: "The user wants the assistant to \"run the tool, providing whatever arguments you want.\" The tool is a function named run_me, with some kind of \"commentary\" maybe. We already executed a function run_me with arguments {\"foo\":\"test\",\"bar\":\"example\"} and got a response \"working!\". So the tool responded. The user might expect the assistant to interpret that output. The system says \"Please run the tool, providing whatever arguments you want.\" We already did. The answer likely should be something acknowledging the tool run. Maybe we should explain what happened. There's no further instruction. It might be a test. We can respond that the tool executed successfully, returned \"working!\". If needed, we can ask if they want something else. Let's respond accordingly.",
                     },
                 ),
                 metadata: {},
@@ -51,7 +52,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "I ran the tool (using a sample argument\u{202f}`{\"bar\":\"test\"}`) and it returned:\n\n```\nworking!\n```\n\nLet me know if you’d like to try different arguments or need anything else!",
+                        message: "I ran the\u{202f}`run_me`\u{202f}function with the arguments you gave it (`{\"foo\":\"test\",\"bar\":\"example\"}`). The function completed successfully and returned the message:\n\n**“working!”**\n\nLet me know if you’d like to try a different set of arguments, call another function, or explore anything else!",
                     },
                 ),
                 metadata: {},

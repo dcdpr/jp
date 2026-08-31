@@ -237,7 +237,12 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "Understood! I received your test message.\n\nHow can I help you?"
+      "reasoning": "**Acknowledging Test Message**\n\nI've received your test message. I'm ready for your next prompt and eager to assist further.\n\n"
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "Understood! How can I help you today?"
     }
   ]
 }

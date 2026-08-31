@@ -22,7 +22,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 ArgumentChunk(
-                    "{\"bar\":[\"foo\",\"bar\"],\"foo\":\"random_string_12345\"}",
+                    "{\"bar\":[\"foo\"]}",
                 ),
             ),
             metadata: {},
@@ -61,21 +61,7 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " has",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " been",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " executed",
+                " ran",
             ),
             metadata: {},
         },
@@ -103,7 +89,7 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " arguments",
+                " argument",
             ),
             metadata: {},
         },
@@ -117,28 +103,7 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "{\"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "bar",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "\":",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " [\"",
+                "[\"",
             ),
             metadata: {},
         },
@@ -152,126 +117,49 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "\",",
+                "\"]",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " \"",
+                "`.",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "bar",
+                " Everything",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "\"],",
+                " is",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " \"",
+                " working",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "foo",
+                " as",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "\":",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " \"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "random",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "_string",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "_",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "1",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "2",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "3",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "4",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "5",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "\"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "}`",
+                " expected",
             ),
             metadata: {},
         },
@@ -285,7 +173,7 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " \n\nLet",
+                " Let",
             ),
             metadata: {},
         },
@@ -341,21 +229,21 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " run",
+                " try",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " another",
+                " different",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " iteration",
+                " arguments",
             ),
             metadata: {},
         },
@@ -369,21 +257,21 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " try",
+                " perform",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " something",
+                " another",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " else",
+                " task",
             ),
             metadata: {},
         },
@@ -391,13 +279,6 @@ expression: v
             index: 1,
             part: Message(
                 "!",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " 😊",
             ),
             metadata: {},
         },

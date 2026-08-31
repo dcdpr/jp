@@ -12,7 +12,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 Start {
-                    id: "WBlihr8npOhr1BXe5g1yBz055NtEd7B1",
+                    id: "YVmI1CdVad59bsgXRfMOXYcxpo9gAv88",
                     name: "run_me",
                 },
             ),
@@ -151,112 +151,84 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "Gre",
+                "T",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "at! T",
+                "he tool e",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "he t",
+                "xecuted succe",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ool ran succe",
+                "ssful",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ssfu",
+                "ly w",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "lly and r",
+                "ith the ar",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "et",
+                "gume",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "urned `",
+                "nts you sp",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "w",
+                "e",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "or",
+                "cif",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "king",
+                "ied!",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "!`.",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " Let ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "me ",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "know",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " i",
+                " I",
             ),
             metadata: {},
         },
@@ -284,84 +256,112 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " to",
+                " to try so",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " try i",
+                "methi",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "t aga",
+                "ng ",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "in with di",
+                "else ",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "fferent ar",
+                "or ne",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "gum",
+                "ed he",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ents or ",
+                "lp",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "expl",
+                " with a s",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ore an",
+                "pecif",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "y other functi",
+                "i",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "o",
+                "c ta",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "nality.",
+                "sk,",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " let ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "m",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "e kno",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "w. 😊",
             ),
             metadata: {},
         },

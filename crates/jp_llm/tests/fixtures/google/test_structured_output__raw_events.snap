@@ -7,14 +7,7 @@ expression: v
         Part {
             index: 0,
             part: Structured(
-                "{\n  \"titles\": [\"Conversation Title",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Structured(
-                " Request\"]\n}",
+                "{\n  \"titles\": [\"Title Generation Request\"]\n}",
             ),
             metadata: {},
         },

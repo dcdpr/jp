@@ -9,7 +9,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "",
+                        reasoning: "The user said: \"Test message\"\n",
                     },
                 ),
                 metadata: {},
@@ -20,7 +20,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Test acknowledged. Ready for the real questions? Fire away! 🚀",
+                        message: "Test received! What's up?",
                     },
                 ),
                 metadata: {},

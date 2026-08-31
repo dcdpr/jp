@@ -9,7 +9,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "We need to call the tool run_me with some arguments. The user asks to run the tool providing whatever arguments we want. So we can call run_me with foo and bar. Let's choose foo default, maybe \"test\", and bar as e.g. \"hello\". Use the function schema.",
+                        reasoning: "The user asks to run the tool, providing whatever arguments you want. There's a function run_me with parameters foo (optional default \"foo\") and bar (string or array). We need to call the function with some arguments. Since they said \"whatever arguments you want,\" we can choose. Let's call with foo as \"test\" and bar as an array e.g., [\"a\",\"b\"].\n\nWe need to output via the function call.",
                     },
                 ),
                 metadata: {},
@@ -20,11 +20,14 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "049d9b129",
+                        id: "08d59c72f",
                         name: "run_me",
                         arguments: {
                             "foo": String("test"),
-                            "bar": String("hello"),
+                            "bar": Array [
+                                String("a"),
+                                String("b"),
+                            ],
                         },
                     },
                 ),
@@ -41,7 +44,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "The user asks: \"Please run the tool, providing whatever arguments you want.\" The system says the tool is a commentary type tool; we can run with any arguments. We already did one run with foo and bar and got \"working!\" as response. But we need to respond appropriately: maybe ask clarification? The user wants us to run tool with whatever arguments. We already did. Should we provide output? We could run again with random arguments (maybe a different set), then respond with its output.\n\nGiven the tool returns \"working!\" regardless of arguments (maybe). Let's run again with other args.",
+                        reasoning: "The user asks: \"Please run the tool, providing whatever arguments you want.\"\n\nWe have a tool called \"run_me\" that takes a JSON argument. In the previous usage, the assistant used {\"foo\":\"test\",\"bar\":[\"a\",\"b\"]} and function returned \"working!\". We need to respond accordingly. Likely they want us to demonstrate usage. We can run with some arbitrary arguments. We already did. The function returned \"working!\". Now we need to produce a final answer. Should we explain the result? Probably a short response stating that the tool was run and result returned \"working!\". Let's respond.",
                     },
                 ),
                 metadata: {},
@@ -52,18 +55,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "{\"action\":\"run\",\"parameters\":{\"key1\":\"value1\",\"key2\":42}}\0I ran the tool with a couple of example argument sets:\n\n```json\n{\n  \"foo\": \"test\",\n  \"bar\": \"hello\"\n}\n```\n\nand\n\n```json\n{\n  \"action\": \"run\",\n  \"parameters\": {\n    \"key1\": \"value1\",\n    \"key2\": 42\n  }\n}\n```\n\nBoth calls returned the same response from the tool:\n\n**“working!”**\n\nLet me know if you’d like the tool invoked with specific data or if there’s anything else you’d like to do.",
-                    },
-                ),
-                metadata: {},
-            },
-        ),
-        Flushed(
-            ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
-                    Reasoning {
-                        reasoning: "The tool returned \"working!\" again. We should convey that we ran the tool with arguments, and the tool responded \"working!\". Then maybe ask if they need something else.",
+                        message: "I invoked the tool with a sample payload (`{\"foo\":\"test\",\"bar\":[\"a\",\"b\"]}`) and it responded:\n\n**“working!”**.",
                     },
                 ),
                 metadata: {},

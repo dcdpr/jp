@@ -498,20 +498,25 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Value, bool
         "Built Llamacpp request."
     );
 
-    // Like Ollama, llama.cpp models may default to thinking-on, so we
-    // explicitly control reasoning via `reasoning_format` and
-    // `chat_template_kwargs.enable_thinking`. The former tells the server how
-    // to surface reasoning tokens (separate field vs raw in content); the
-    // latter tells the chat template whether to prompt the model to think at
-    // all. Models whose template doesn't use `enable_thinking` silently
-    // ignore the extra kwarg.
+    // Like Ollama, llama.cpp models may default to thinking-on, so
+    // `chat_template_kwargs.enable_thinking` tells the chat template whether to
+    // prompt the model to think at all. Models whose template doesn't read the
+    // kwarg silently ignore it.
     let reasoning_enabled = !matches!(parameters.reasoning, None | Some(ReasoningConfig::Off));
 
+    // `reasoning_format` is a separate concern: it says how the server should
+    // parse a thinking block, not whether one is produced. `deepseek` lifts it
+    // into its own field, which is also what lets a grammar apply to the answer
+    // that follows. Asking for `none` instead leaves the server no place to put
+    // the grammar, and a structured-output request is refused outright with
+    // "Failed to initialize samplers" for any thinking-capable model. Parsing
+    // unconditionally costs nothing when the model does not think, and keeps
+    // stray reasoning out of the answer when a template ignores the kwarg.
     let mut body = json!({
         "model": slug,
         "messages": messages,
         "stream": true,
-        "reasoning_format": if reasoning_enabled { "deepseek" } else { "none" },
+        "reasoning_format": "deepseek",
         "chat_template_kwargs": { "enable_thinking": reasoning_enabled },
     });
 

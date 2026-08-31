@@ -241,7 +241,7 @@ expression: v
       "type": "chat_response",
       "data": {
         "titles": [
-          "Conversation Starter: Topic Generation Request"
+          "Chat History Summary"
         ]
       }
     }

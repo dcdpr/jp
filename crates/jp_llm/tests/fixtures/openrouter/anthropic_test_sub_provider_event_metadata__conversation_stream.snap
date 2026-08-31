@@ -237,9 +237,9 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "reasoning": "This is a simple test message. The user is likely checking whether I'm working or testing my capabilities. I should respond in a friendly, helpful way to confirm that I'm functioning and ready to assist.",
+      "reasoning": "This is a simple test message. The user is checking if I'm working/responsive. I should respond in a friendly and helpful way to acknowledge their message.",
       "metadata": {
-        "anthropic_thinking_signature": "RXZRQ0NrWUlDeGdDS2tCVU96RGZTZ1ZjQy9hU2hKY0xmcTZscS9tdTI2cnhIQnRoejljYjZtMlRjL2lWRjVBL2wzaXBVdU1qdWl0cmVVWTNqc2srOGFoeElpcWZsbGxyTzl1NUVnd3ROMmNwd1M5U3RLL0Rra1FhRE5GY2dCNVluK1hTSTc1NVRpSXdhYkI1OEFwQXlSNm5abFBxSVA2RzlZVFZhcDlJYnRRV1dham9SVVlkSUhHdWRoamNvWE5qQ1p0QURwMVNMa0c2S3RzQmEwazZINUpZejRNaWIrYXMxeFoyMU5yVm5kTmszTWc4NllNOHorK2tTSGJrYUpJbkVuR2tkVmgvQWlYc3dPNlFJd3h6TWZyclBoUCt0ZFlESG5VV1JaNUhiOHNTVW1YdGpCelBpU0ZmQ1VxeDREcGV2dUNqNGNOTCtYU1ViRUpnaTJhdGFZRTdQNkxMaVFhY3JFbzd4OTdLWmlhQ2xxMjFaSjNTUkRXVFcwNHNmcEowdWdLbkJpNG04aW0xOGNybjVuRFJXZW9hOUhNNFZ2NFQxZm51RG0rckY0Y2VLUzVnekFVZkxjUUZLUVZETFFhRkllczJBcXV2N2tZeEdpRERqV1NJWG5zNC8ybnN2MHltbnY3MTRSU1d0WUFDWmttOTZJK2xHQUU9",
+        "anthropic_thinking_signature": "RXNZQ0NrZ0lFUkFCR0FJcVFBbmJmdWpibW9PUFlGVlNlYXdMN3NHVDk3WUxPSTkvcC9TcUgyWjRYWjE5MklBNUdON2tsSUg4NVduT21MeUFwcHlOT0ZnZ1RqcXZaWXQzNi9GNzNGRVNESTRiQXZZWE5leHkrNEJmQlJvTVB6QUtoNlZXbEtWaEtqRE1JakRNdFVCWGVzeUw3RTFXNm40NmgxSUZWdVRNUlBNWXRJSmg3a3I2SnZwbkRCUlk0NzNhQ2lLcUJ5Z0ZQYmt1eGhVcXF3RlRxNlpZWUJEWXRhSkdXcWpSRHRNbWhsVkRDNzNNV3NyMVZ3R2FUNUQ4K2xVNFo3VFRVZDB2c3NtcEx0cC9IZ1F5bVliVkJEbkljdVhPYW9BakxkVklDL3pheGhpL3lGQ0dLL2ZkSmxDbGcwSFNFRUlhcmNHUjBuSHVjY0N5WFVKQ1FtS3h4N2tVL2RFbDJMYk1RSnRIZHFFK3pBVUxTbk1QMlRqcGo5c0VKU1VhdzNvMm1YcVduK2cweFNlUHM1YmJRRFhqRHNMU2ViQTI1dkNDU2JJVUUwSEJzN1V3VUxFcGl5b1lBUT09",
         "openrouter_metadata": [
           {
             "index": 0,
@@ -251,7 +251,7 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "Hello! I'm working and ready to help. What would you like to know or discuss?"
+      "message": "Hello! I'm working and ready to help. What can I assist you with today?"
     }
   ]
 }

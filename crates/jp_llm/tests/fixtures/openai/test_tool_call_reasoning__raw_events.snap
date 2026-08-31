@@ -14,15 +14,15 @@ expression: v
         Flush {
             index: 0,
             metadata: {
-                "openai_item_id": String("rs_037b7aea1b560b190169aaea0efb7081a189eeed5aef5d4a3d"),
-                "openai_encrypted_content": String("gAAAAABpquoQzwQDZUSxOfqGR_QDkz5RDtGLRjaXdMwRY1qE3HaetXG46K1MK7BeV8A0JIO1qZRZBcpJK2XNrz3k_l5GJ_ux41ktqL2MPtldEf8jatsNMnq8SGJEHxtaPC7cHdaKzd4o8IbwHNbmmsp-KsDeAkiily91tZ4F0kZjIrRbje_wQb5qXfijUalvi-JRZ5jSkirGFLrnE8grTR2Fbndwg6rEtulKaUQNSnoCyoynno3qcbxOie87ALl2FbcjxhgF_X_WMftM-aG07cpuGWE98q5s142A1F9_T_JCUY5-r-snTpvBmU5u64ek-bVCs72g3r-p_iC10-rBAZQZcQcTlSKozitGKihXqkisU-y0WIU7sryQ4Zbh4Q0iRiXedIjsy5MNEjVFAlqJeiEpZtL5IejR35UvZlbcYAjsFSp74ZV9Em_rYHQb1uQdzxI7suIiq1fr_yo4uoU1snqPusIZhne-bCBE-6VsYvVyB3Z9fCYYf1kY3KP3rKHsrNIQtdgBw_eWkuq9Y2stZu_2S9g7V_dz0tOK3aoXn7XufnCTOk8LwfwoDsls8gXiu_SGGMb0VT20V5S9oZiKbOXZJvWA-9XWY6dK8AjuSmdwUGgetZPOOs32ObvwPRhFRERGdZOddtTxUpWTp7ECpFZGF5SlJHuzQFUU0XJKhRO3kQ_kctef87BFtX8A4VoIKHE57gfg1zusTc0dL9vDK-UV3tY24Ft8QBUjAb_F8J8jk9RkmhChRBAx5sCSZALyILMqfXEWbKEsvBsXoC1rmEf1ENx1YyxGncaHTaFyITjjfT3h-cdMZ0vf3CanJ0h83mfyCjnpyOp1r658K8jsYMPPda4xjiS3vllQgmPm0HM53tFz3wD3RK0q-m7aZeY3dtrmat_byu4xoTL2A8ecgDVm3xyp8Va4CsGWmLjatpkEXL_QaWZElV10AcSS5zjwialSoSE-DdyTJa-anC-lbsrSIpOy2znFqBTaM3wpLenW4RJB0x4SPqBmL_nMfgw02RWp8V-OlpgWEw9aACI42K6YElkAZ8-4vNF6XOXHbxkuESJD-83qu-nwCA1oIfcfnMYP0G8jH8bCxBchMANC473osqU4eQxIKYux3YHNEQkB8GDTbY5TiqfJkkZR35jSMIPBHgbzOxVgFCJpFvjgLXQaHuQrfQHTEhl8Jes8oBYR2eneay8jqxUn9uCViZ64Hqzr9UcvnGrHAbrmRy2DC52MguvhEzUvF-RWzSeFnUhOQxi_tujYGkdslmHw3ghSnAb7zETDYtBG"),
+                "openai_item_id": String("rs_0277135fa0e23d88016a886daace7c87d28899b32dc50e0989"),
+                "openai_encrypted_content": String("gAAAAABqiG2svibyBvRjP-J3W2R63ADe_SWHACQ4-Jdj1snCarBKzKkbRpd-YsBJk9ZUbTzrAxGXYnoxGDvDCx6g76D-MWGuuQc0LcPyaPsuwAuXgtnPY2u67cOTkn0Rgg2Iz26c_qq-QmXYN2v0s8dak5xe43kx2ML3lmlgW5spjMe8EsN2kY5KYrrB9Ls56aN0E8m7p_BRs9LTnMlVoi2N8wkkwvENSIlFhDbpe3FuvjDrWt9Rl1KvvfHQpTij7T08Z4Ug9YRCCL_pECHR4v9OBvT2830lln93Myk4LdM7J_dGqbUC2jmbQ5R6tOVwD1IA2CFPfO5gZrET6iyOQeSvbD8SQoKIlei1XTVne_CjoLzxpKBQwiev73abGKNjGd84qMPGitVhi-l2-5ONHgut2kLNcZqWgENBazSmPGZlt3BGVyPtnVPs4b06gsLv-bt5z74ZwsnLFBvq3DAMn7gVi_FsoepUAK1pAzzi09esL2Gy5qDHM2VhMf5TB7A7vxg_PAyrA70Hh7kz9UxCC4a6wUujRhcLkpVPXeubc157BXGkDI8X3-TslBZBZGM4XrEYkgfQhS95eK4aojink3rykb_LKHr7OdMHg0Apk2MHcYWNtAqgHZOr-aPlOaYK9saWt09rk1DMWKQ52wSzzRfh5d40ZO9dZAvZIm6f2mht4PHdV-GfqusB2zdDGRqmNQV2LcmjxK9E1Km963i0LudRaCSmPLnHbr8wzAurXGT5Hgq8-j3MiS1rCyZqHIh4RWxwHqMRXyQqNcVVWcvLgFQZ3mLz-pKz9rv110m-_kYskQpGvGlW0BXTGUCERoDuGEQssj7DRfVGlDBF_AsLP_84N4DjVc4r19hC75IgYDqVpqMOjOLYSbJrDcxdHUU5ximJ-lQlLIzKZDUHRlX7EB6uHghG_rzKmq7c_C4wCIzpWI-qkcgwTVgWf6bbx4-PrpmezHB8tmR5gS_7RmUOKS1kKBs63gbuMEHVltsgaDsbxlimTIdO_bPenTOn_fVXCW-sKKlkcpB9oXYGwnvEbrdLcKjwh4peLKRlmoCxmZwtKsu6aFunmLI__A2kZ6_mrAHKGLFWYnSo8Z_CK1ywc8mXLl4r9_HA7oVOc5UhQVDGJVe6f1oUESbg6p3HkGa5sQ74j-li3KH6enZDe80MbL-pMk-7zIWzzOn5_oqBgzwKpsFI__qNUOEjFnw_nHnTcQomR7Y5RvhM8dUd7jvDN8TqKcURjwmiYz-7yHgsjg3YFZvZqZ8DyyXc1NVFwadiUFBizuekVjXjNJAU__nB2BGiAzyGxPCUa7ESNhnd6WcJums6U5q29_OYadvS3yHDxAN8X1Iwpr1ve_-8YnJlFVpmuqd1GpZ0dwCCN4RG8Bs71gCmy0YjlW5nP2wm4BDbxC62CLW6O2YP2LKikUrcTtUxmIBHxdhevDaeYYOyON2KMHYhdjJwl0yNZ0RpTqddolzgUR3Z3pRMfpGh9FivfKY10jn8sdf_7yb9E2j8uw8MD65lTNAl29aLnttnNoUwcNO5QCrNNxMmr9_SHyIULJupQhLmbrwTulLxx74LYBEia9nIxSDy8dIoB-mUEKc9A0-8DYrQI9gRXHWWV4MBhlXwmq5takBTxaY6i6EhVW-RotXqTwhTi6rhgdaIP019rTpAKLuk6-t8"),
             },
         },
         Part {
             index: 1,
             part: ToolCall(
                 Start {
-                    id: "call_0pwvos4rXm5F15nb35SiYnMV",
+                    id: "call_S4y869TTmCcKjpUrCzlx64iI",
                     name: "run_me",
                 },
             ),
@@ -128,6 +128,62 @@ expression: v
         Part {
             index: 0,
             part: Message(
+                "Tool",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " executed",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " successfully",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                ";",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " it",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " returned",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                ":",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                " \"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
                 "working",
             ),
             metadata: {},
@@ -135,14 +191,14 @@ expression: v
         Part {
             index: 0,
             part: Message(
-                "!",
+                "!\"",
             ),
             metadata: {},
         },
         Flush {
             index: 0,
             metadata: {
-                "openai_item_id": String("msg_037b7aea1b560b190169aaea115b0481a1b1f22d5d3f4f526c"),
+                "openai_item_id": String("msg_0277135fa0e23d88016a886dacd3ec87d28cd3569b8038ef4d"),
             },
         },
         Finished(

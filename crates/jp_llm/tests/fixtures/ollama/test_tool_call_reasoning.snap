@@ -9,7 +9,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "The user wants me to run a tool but hasn't specified what parameters they want to use. Looking at the available tools, I see there's only one called \"run_me\" which has these parameters:\n\n- `bar`: required parameter of type [\"string\", array] with enum values [\"foo\"] - this seems like it can be either string or array\n- `foo`: optional parameter that is a string type\n\nSince the user said to provide whatever arguments I want, but there's a requirement for at least one argument (the \"bar\" parameter), and looking at the constraints:\n- bar must have enum value of \"foo\" if it's using those values\n- foo can be any string\n\nI should call run_me with some valid parameters. Let me make sure I meet the required constraint that bar is provided, so either as a string or array but containing appropriate values based on what seems to be expected (likely just [\"foo\"] since that's in the enum).\n\nLet me provide reasonable arguments - I'll use \"bar\" as an array with \"foo\" value and maybe include some foo parameter too.",
+                        reasoning: "The user wants me to run a tool/function called \"run_me\" with some arguments they choose. Looking at the schema:\n\n- Function name: run_me\n- Parameters required: [\"bar\"] - so \"bar\" is required\n  - Type can be string or array of strings\n  - Items must have enum value either \"foo\" or \"bar\", and type string\n  \nWait, looking more carefully at this. The parameter description says the items should only accept \"foo\" or \"bar\". Let me call run_me with some arguments. Since bar is required but I can choose whatever, let me provide a simple valid argument like [\"foo\"] which would be an array containing one item that's in the enum list.\n\nActually, looking at this more carefully:\n- The function requires parameter \"bar\" \n- The type of bar is described as having properties with items from enum [\"foo\", \"bar\"], but wait... it says items must have enum values and also says bar can be string or array. This seems like some schema confusion in the description.\n\nLet me interpret this more simply: I'll call run_me with a simple argument. Since the example shows foo as an option, let me just pass [\"foo\"] as the value for bar parameter.",
                     },
                 ),
                 metadata: {},
@@ -23,10 +23,8 @@ expression: v
                         id: "run_me_2",
                         name: "run_me",
                         arguments: {
-                            "foo": String("test_value"),
                             "bar": Array [
                                 String("foo"),
-                                String("bar"),
                             ],
                         },
                     },
@@ -44,7 +42,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "The tool executed successfully with the provided arguments. It processed `foo: \"test_value\"` and `bar: [\"foo\", \"bar\"]`, returning a confirmation message indicating everything is working as expected. Let me know if you'd like to explore further or adjust parameters! 🛠\u{fe0f}",
+                        message: "The tool ran successfully with the arguments you provided. It output: `working!`. Is there anything specific you'd like to explore further or a different function you want me to execute? 😊",
                     },
                 ),
                 metadata: {},

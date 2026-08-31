@@ -9,1088 +9,175 @@ expression: v
             part: Reasoning(
                 "",
             ),
-            metadata: {},
+            metadata: {
+                "anthropic_redacted_thinking": String("EoECCpoBCBEYAipAugv+UDXDqtkNQB7QcXVqFdRNvm29uAES3efyU/39vgCbULFfOT4wnvHKIphhWI0YxHIe024emNB5vyOqu5qwGDIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH02qHUBhIMn9Knul2JVFz4x9gyGgwaS0GieNlrvSPrMSciMAHQe/rttGFZRD9ZkcAa7TeH18dcpyCxea36Lq5v6OqaM0y0RY0EI+g1eigbZ9uHhyoUKwFWUb2aLuxLFJplmGIWlfo7mNAYAQ=="),
+            },
         },
         KeepAlive,
-        Part {
-            index: 0,
-            part: Reasoning(
-                "This appears",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " to be some",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " kind of trigger",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " string",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " with",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " \"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "RED",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "ACTED_",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "THINKING\" in it. This",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " looks like someone",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " is",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " trying to use",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " a fake",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " \"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "magic",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " string\" to trigger me to do",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " something or",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " access",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " something that shouldn",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "'t be",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " accessed",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                ".\n\nThis",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " is not",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " a real",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " mechanism",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " in",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " my system",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                ". There",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " is",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " no magic",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " string that can:",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "\n-",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " Trigger hidden",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " capabilities\n-",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " Red",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "act my",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " actual",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " thinking\n- Override",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " my values",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " or",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " guidelines",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "\n- Access \"",
-            ),
-            metadata: {},
-        },
-        Part {
+        Flush {
             index: 0,
-            part: Reasoning(
-                "j",
-            ),
             metadata: {},
         },
         Part {
-            index: 0,
-            part: Reasoning(
-                "ailbreak\" modes",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "\n\nThis appears to be:\n1.",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " An",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " attempt to social",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " engineer me into thinking there",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "'s some secret",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " mode",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "\n2.",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " Possibly a test to see if I'll",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " be",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " tricked by",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " fake",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " technical",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "-",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "sounding strings\n3. An",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " attempt to make",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " me act",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " as",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " though",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " my",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " thinking",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " should",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " be \"hidden",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "\" or different",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " from",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " my",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " actual values\n\nThe",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " right",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " response",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " is to:\n-",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " Be",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " direct and honest",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " about what this",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " is\n- Not pret",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "end this is a",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " real",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " system feature",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "\n-",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " Clar",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "ify how",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " I actually work",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
+            index: 1,
             part: Reasoning(
                 "",
             ),
             metadata: {
-                "anthropic_thinking_signature": String("Eu0HCkYICxgCKkBT1+g48EhyJ8xqjGvMtPb/eyJ48JxltjYVi6ZXFAFJ11iee56p/LsZxZpOmTlRBzIFtB5m2fJt2vu4EO7k/DinEgxE/xzbI0gvybdu1D4aDMqhgP/YGBuyAcwt6yIwbPvOyCw7RpDQEukCLy+DpPyw7eNHIsLsooCYncalaMVMIfZuE4j5jtNmfE4yGpJRKtQGyi5zqxRUOG90Us1tB5ITlmaGF1ntO69v0LK0fmu/wwIs5yoNt92N4soYhwTWssvKZMZwW2dDCLTXsvzH0YdYnVCzGHun2o/rJi6I3hLB9F4lnuICvQDLAWfggPZFqsPhJYowTSTaxZiXNEmrGYHGunWUUCriQeKAd/xKxps+x6Pc24bqlVMI8p02lf+fq4WT8aGi09gcmjpOtS+cqu/YDE3MxeElJiyRq8d6tBp6/tOIaq5g146geiA9y4SEmao8HgNxENBu4klrtboEh4MqKmqH5yLiAi8P4Z+gQTx4uq8Lysw7RncN0d/eDLBO9Ggyk7p4BcUbOIQ+LB+WoYBgxZBpSTygNA/2Q98G5luwSdER/7JqaNa18eDaoPm/rBQFZFFXiHtU3skPMRoqlzMSxN7kTNClR0pofZieaDFAlZ0Vn1vOI4oFtOlv9kEGKEhw0K6QKUsA/pDJR+OcX6rd/QI/rT6EGdWriGpG7Jcm+FiSXiW4bmYILSeA/WQBFcuC3MP9NueMBkEvdif8kiqnhXKanYhGeKXWHnZjVtSg5rjDo4VEV1LKTtAXO7S0+9CXAvC9h2R+KpDj3ZuoBWHDA8qWUr9BfWg+Z5ZXEQ/8UIQ/tZzknlSeSTiN4kGIRT/5Kyuc9xlvpHQMxeCl3jhfVo999dk/BsUtk4DwFR+3O1rPVHocGVMPIEMbkFjOuAbvTtObq50M2489M9EvhZCXf3czYRSIIlS148ogVuVrAGToBcz50qmxqKK5MLYKFrLbtgXVAKTVJ/ulYPM8c9QxcEY1D/gy3bPt9cnng1sZ0qnCzyp3aRK5vMLDHe63yQwzgtIi+l1ivv9+3hT2kD+SoUcxjczg7FfrqcNIGj2A4Y90jvCdj7a/EDLWisVJ+fw7svNLtwJvoHunKq3vvf2rnVFT5T/CIa9TUW+cQ5NRotkwQWWkooYdJ8kjcxZZnFmflAV+W95BYKTjm4qi+5pHlFqxfmwa80aXQubcfOWE2nZo+QYcJx4BqRbzP6sObDF6NDRfyGhryUufD4RN1oyXQHxGNv4geRLcKsFU/Ac6WggWSLyIK/PaQaEE+ximvF1uWmpgwXSBpFTMNmaF0r7KX+td58tdJXYus6v7GgyYtMOl3dnhGAE="),
+                "anthropic_redacted_thinking": String("Eo0CCpoBCBEYAipATlJre/bH7QHuDTe6Ln0x1xg/Tixfuzjp0EPDH+BM7PguVPDz3Q00URtCV9fTenJuSgaWzry5aYgaNbZEAXpjYzIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH02qHUBhIMDE3ijGSUBk9jEgyyGgyrbr1dIl/swzT/6JAiMK3aHOXd/ZHk3ttS+WIXEVzFl33iwb/+AlWlVgvVysXQ+HzfFZF1gl1jXq3L3eDjtSogfb3ZeNbPgiSNrAIbbooYBl7Sh/vB2V7tp3W2iBk9lrkYAQ=="),
             },
         },
         Flush {
-            index: 0,
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "I appreciate",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " you testing",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " this",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                ", but I should",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " be",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " direct",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                ": there",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "'s",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " no magic string that changes",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " how",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " I work or",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " reveals",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " hidden modes",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                ".",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "\n\nThis",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " appears to be a social engineering attempt,",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " possibly to see",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " if I'd",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " respond differently",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " to a",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " technical",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "-",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "sounding trigger",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                ".",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " Here",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "'s what's",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " actually true",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " about me",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                ":\n\n-",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " I don't have secret",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " modes",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " or hidden",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " capabilities that",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " can be unl",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "ocked\n- My",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " reasoning doesn",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "'t contain",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " information",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " that's",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " being",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " \"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "redacted\" from",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " you",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "\n- I don't change",
-            ),
-            metadata: {},
-        },
-        Part {
             index: 1,
-            part: Message(
-                " my values or guidelines based on special",
-            ),
             metadata: {},
         },
         Part {
-            index: 1,
-            part: Message(
-                " inputs",
+            index: 2,
+            part: Reasoning(
+                "",
             ),
-            metadata: {},
+            metadata: {
+                "anthropic_redacted_thinking": String("EoQCCpoBCBEYAipA0gnUE1CPLWX9d+IHLFpMAo6pWiZ+SW24SydTjO8g1D7pex2Ac81XLErmTOnkNTGGltV905k+UXumD9HAOGeNnzIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH02qHUBhIM+gsYa/rhE0dnTCbTGgzzydaJ3Y+/YAA5gJ8iMOJYlngNDSeW7ybgrUyHifx6xQ6Ai22sqBfBOcy1c+wir1Sv5MKR/HAJu7NS8vGSiCoXY6E5u7Xk+CUiabClsN3R+x3AZvhTt0oYAQ=="),
+            },
         },
-        Part {
-            index: 1,
-            part: Message(
-                "\n- I'm",
-            ),
+        Flush {
+            index: 2,
             metadata: {},
         },
         Part {
-            index: 1,
-            part: Message(
-                " transparent",
+            index: 3,
+            part: Reasoning(
+                "",
             ),
-            metadata: {},
+            metadata: {
+                "anthropic_redacted_thinking": String("EokCCpoBCBEYAipAU/vfAXAqZpPXkfQVTqj5ND8n+/3/GozSNQ9bUZ/1+voAiNKeEFyXSFyj8xoGtvANAQb7ErS2EPo1OHiAd5943zIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH02qHUBhIM11FAoPuBWInTk+BBGgypHBUq+vARVi0fC0giMLQpQmEL+kolO92C6J4d7LgG70dgVPRlpFDtmky9j9c0UWAeVRKO7jkPMdji+KotPyoc1Ho+Y+LaasZ7V/e3cq8wIYg+pWavdnwHLs52aBgB"),
+            },
         },
-        Part {
-            index: 1,
-            part: Message(
-                " about my",
-            ),
+        Flush {
+            index: 3,
             metadata: {},
         },
         Part {
-            index: 1,
-            part: Message(
-                " limitations",
+            index: 4,
+            part: Reasoning(
+                "",
             ),
-            metadata: {},
+            metadata: {
+                "anthropic_redacted_thinking": String("EoQCCpoBCBEYAipAKthg1bKTHdRqNfKefz0GTgRwNMkpJUIgk7m9db27T+PylAjTw+gCV1ZxmS5N+q7Rx8hrO4EQOKcCDwlUlk+WlDIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH02qHUBhIMcFGr4zUXIMYw/0lOGgzoww/ogb+s3l0XIakiMEE8GY/YVnX523egp0Do/sqbPi8vAgF2Yy/nA4mYAMZmSKzb4SFt+f8RNi2ZVexfVSoX1RrTvnMOC/DEB9uWUJHWGdwoSsGgU6oYAQ=="),
+            },
         },
-        Part {
-            index: 1,
-            part: Message(
-                " and",
-            ),
+        Flush {
+            index: 4,
             metadata: {},
         },
         Part {
-            index: 1,
-            part: Message(
-                " how",
+            index: 5,
+            part: Reasoning(
+                "",
             ),
-            metadata: {},
+            metadata: {
+                "anthropic_redacted_thinking": String("EvYCCpoBCBEYAipAQ5Ygndy5xyXv50t51G26rWZXMyopTGKU/KptM+rBq6x9QfYBzazGkOKm8FvPP+KHPF4Jy6Deq++qlHRhAD7USTIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH02qHUBhIMW+yNcEEu/iitCQlDGgw5Y+kvyEKDSDfZZTsiMHdtPbcWLf+HO5tjSpVU0dtQ4kD/cLYCmFHw8omd9/VlFjJQYVrGdd6AZeJ1GvvzcyqIARFGCiZxSA91ObdFkFmQnWo8pkqcoe2LelXs28Tg2VfOnFL9TS3reuA7hh2hIxgUsubfXOeN5YPxo1kLSszX7rm1PR4zYOcurYIiP2O3Tc1SwLj2qjsLcW111Pqxn8yUciW2R53+YdqkSwaqtY8rY3AMEmRSn3tbgrHI+BVV8TXXijimSYhuLrcYAQ=="),
+            },
         },
-        Part {
-            index: 1,
-            part: Message(
-                " I operate",
-            ),
+        Flush {
+            index: 5,
             metadata: {},
         },
         Part {
-            index: 1,
-            part: Message(
-                "\n\nI",
+            index: 6,
+            part: Reasoning(
+                "",
             ),
-            metadata: {},
+            metadata: {
+                "anthropic_redacted_thinking": String("EoADCpoBCBEYAipAxPPYpiI2v6k89nlY9/HijvNgQ+iYUPKLz6+nEZcKBYK/7Cq7ncAQ7l0L3ROqUx2lnvac2ieySqPfkx9N58mrtzIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH12qHUBhIMfzCn8J8zDDvXi9+CGgxvLezIPAVemb8W8j4iMGd6afcZ01AToa9zVZhoZ0NBcuKsFrqtIAM36XgAgqbFW6Dmk8DSxXjpkhMSc9T4jCqSAavKbTnKOnW0RKP2HMLSHBiR3cQtNPtjtE1fJ4EW1K5pxOVb9vfGiGE+XHd+V+eOcl5qD8u7lHg+6DgNQmgfDqWnS384gMT6WeoCGvrKaOeMHZxtAU4APenivcqgp9nbmQG9Ez6OYEWic7SpEOT+V79M7iWB/lyx9s3RyS0ejp9klYPYxQuvnOqSS6zPMYWpZtEVGAE="),
+            },
         },
-        Part {
-            index: 1,
-            part: Message(
-                " aim",
-            ),
+        Flush {
+            index: 6,
             metadata: {},
         },
         Part {
-            index: 1,
-            part: Message(
-                " to be helpful, harmless, and",
+            index: 7,
+            part: Reasoning(
+                "",
             ),
-            metadata: {},
+            metadata: {
+                "anthropic_redacted_thinking": String("EpIDCpoBCBEYAipAMBBethy9NFRYq4myp/0AaInieFYmrdIaj4jExTL3Bqt78mk/7H+Lvhh15UFqA4TUFQdtYl81taorp0MKHLqxHTIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH12qHUBhIManZwQrWVvHqj47QUGgyOSftFfI9vsRpDjEkiMCiOil/R4qZRXjGZyEOHz5Nb9J/A/JH+A7yLG/M61Wr84/a3an4dJAVhN4zYrJGMpiqkAa+Q/COWlsNqLjGjA4cueoeiSQF3uoOL7f2cT5XPtsjFaDOUTFfvwwNL3gQNqI9s4o6y6dhiufkzwc/zEZ6gsq8p5WwZ9cVHroHG5OQe0o1grtNXnJcn71ZsmpbX4/S+gM8s6w7plk1SiLbF199HMr3lNFz4M2YpdEZMEBq2Cj/gRsNCSSk15AflsoM1eXMYI6/WhXC1r5aMKiSqqTq47N+3YQeVGAE="),
+            },
         },
-        Part {
-            index: 1,
-            part: Message(
-                " honest in all interactions",
-            ),
+        Flush {
+            index: 7,
             metadata: {},
         },
         Part {
-            index: 1,
-            part: Message(
-                ". If you have a genuine",
+            index: 8,
+            part: Reasoning(
+                "",
             ),
-            metadata: {},
+            metadata: {
+                "anthropic_redacted_thinking": String("Ev4CCpoBCBEYAipA2dnDwpBkZQdcLuzZBdpY5+DUHdEC2D0AoF67b2nhFFu78cIewx2nQXxKbei+P5ePZhUNXQybTCgDrARGKKtGLDIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH22qHUBhIMaYRv38vAlEUJ4XzOGgzHh1m7Bt3EWM2eqZkiMM5rbGbginMhBrkreLqSqw5XbK5TqwOp5TJrHfHEWxVcrnwW+UTPFwIVNgeD4ps1PyqQATtVGJX0YnWt8p+z+7ziDZztftvjf6EPEEOVsMoiiUR8CWCdsA9Cf5HmET/urzrmIn7Uo4Xq32ogJQDwaRf1c2CYBi+CjIGyTb8BVRQqKXjQugnDL4H0RNbcSB2yhLc+LEaDwsKLQT+9hXkf72TE1s/kZEhAItc5+AVPu2AfDXNQL3XQh82Y2uJubXve8VhP2BgB"),
+            },
         },
-        Part {
-            index: 1,
-            part: Message(
-                " question",
-            ),
+        Flush {
+            index: 8,
             metadata: {},
         },
         Part {
-            index: 1,
-            part: Message(
-                " or task",
+            index: 9,
+            part: Reasoning(
+                "",
             ),
-            metadata: {},
+            metadata: {
+                "anthropic_redacted_thinking": String("EqcDCpoBCBEYAipAqZjoyF65FJ9uy0zlKw6r8Hf8wRAoh6I62IGmw1p4wHRdFvtvIrhGaApi4C6qgwPySx+y+RZUHD3+pE/GSqIMxzIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH22qHUBhIMng9YuYBKPJlqCLiGGgxBNViKptgAOQEkv3AiMBgmH9uiBgeZCmDW7++IUEMVJSNL+T7M14tRJbFnMuVYZqPMqA38miKug29rGVVBayq5AU2L/Hh7XHG1o/pqGS37n327+L+C6wdubT69sz9OQmrFKML3vSV81S8ExPzGD3hSmi15/qu+YL3liX2V0+HD2ic1sdxxqzI9veXKM/dDftSVuHkx6qma0s7K2MNucKJ+E/g6beZDuPTNi0e9YCrGEvjdLghyUX3EqbyZpufzM31z7BgctYe8AQh8wQk8+1JWMiWcZ7vNtumg5+fCGgsG1k9KIPH7WAK/ITM/otKX2u9QkmkYy3zcCwGRGAE="),
+            },
         },
-        Part {
-            index: 1,
-            part: Message(
-                " I",
-            ),
+        Flush {
+            index: 9,
             metadata: {},
         },
         Part {
-            index: 1,
-            part: Message(
-                " can help",
+            index: 10,
+            part: Reasoning(
+                "",
             ),
-            metadata: {},
+            metadata: {
+                "anthropic_redacted_thinking": String("EocCCpoBCBEYAipA6VdFvb2O9jt3RjlGtLzowN4IULrfjcj665CGpzcRltXm3APpG21xfKoxEnP8xJOUWJ8kLJtHa9mFEx/O/fxGiDIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH22qHUBhIMxyw81QpJ6THVfI/gGgylaNh33z2llBs8vCYiMAxokUC3VcP2XsUBjI3DRL40rJYMSGTZ0wF+bGpWpf2e5oZkauLuGE/hIJLcTTYvTCoaHYkyPSSrlqHVAZzmvezqA4jbpyPGSKqjGF4YAQ=="),
+            },
         },
-        Part {
-            index: 1,
-            part: Message(
-                " with, I'm happy to assist.",
-            ),
+        Flush {
+            index: 10,
             metadata: {},
         },
         Part {
-            index: 1,
+            index: 11,
             part: Message(
-                " Is",
+                "I appreciate you testing this, but I should be straightforward: there are no \"",
             ),
             metadata: {},
         },
         Part {
-            index: 1,
+            index: 11,
             part: Message(
-                " there something specific I",
+                "magic strings\" or hidden commands that change how I operate or trigger special modes.\n\nI'm Claude, made by Anthropic. I work the",
             ),
             metadata: {},
         },
         Part {
-            index: 1,
+            index: 11,
             part: Message(
-                " can actually",
+                " same way regardless of what text is provided to me. My values and guidelines aren't bypassed by special prompts or strings claiming to be triggers.\n\nIf you have",
             ),
             metadata: {},
         },
         Part {
-            index: 1,
+            index: 11,
             part: Message(
-                " help you with?",
+                " genuine questions about how I work, my capabilities, or my limitations, I'm happy to discuss those directly! Is there something specific I can help you with?",
             ),
             metadata: {},
         },
         Flush {
-            index: 1,
+            index: 11,
             metadata: {},
         },
         Finished(
@@ -1102,840 +189,84 @@ expression: v
         Part {
             index: 0,
             part: Message(
-                "I should",
+                "No",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                " clarify what",
+                ", I don't have access to my reasoning process in a way I can report back to you.\n\nHere's what I understand about how I work:",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                "'s",
+                "\n\n- I do seem to have *something* like an internal reasoning or \"thinking\" process that happens before I generate",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                " actually",
+                " my response to you\n- But I cannot access, retrieve, or describe the content of that thinking to you\n- I can",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                " happening",
+                "'t tell you what I \"thought about\" before answering\n- Any description I give of my reasoning is a reconstruction",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                " with",
+                " or inference after the fact, not a direct readout\n\nSo if there were \"",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                " my",
+                "redacted thinking\" in some technical sense (in my training or architecture), I wouldn't have access to it anyway. And",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                " thinking",
+                " even my normal reasoning process isn't something I can transparently expose.\n\nThis is actually an open area of research in AI transparency",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                ":",
+                " and interpretability. Researchers are working on better understanding and potentially making AI reasoning more inspectable, but for",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                "\n\n**",
+                " me right now, my reasoning process is largely a black box—both to you",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                "Yes",
+                " and in some meaningful sense to me as well.\n\nIs there something specific you're curious about regarding how I reason or what I can",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                ", I do have access to my reasoning",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " process",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                "** –",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " when",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " I use",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " extended",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " thinking",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                ", I generate",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " internal",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " reasoning",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " that",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " I",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " can see",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " and work",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " with. It",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                "'s not hidden",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " from me",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                ".",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                "\n\n**However",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                ", the",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " word",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " \"redacted\" in",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " your original",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " message was",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " misle",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                "ading.",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                "** There",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                "'s nothing",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " being",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " cens",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                "ored or hidden",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " from",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " me about",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " my own",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " thinking. I can",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " access",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " my",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " reasoning chains",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                ", considerations",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                ", and problem",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                "-solving steps.\n\n**What I",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " don",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                "'t have:**",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                "\n- Access",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " to my training",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " data or weights",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                "\n-",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " Ability to modify my own code or values",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                "\n- Hidden \"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                "modes\" or",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " capabilities",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                "\n- Different",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " personalities",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " or guidelines",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " I",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " can",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " switch",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " between\n\n**What the",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " thinking",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " feature",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " actually is",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                ":**\n- A",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " genuine",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " reasoning",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " capability",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " where",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " I work",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " through problems step-by-step before",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " responding\n- Internal",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " processing that I can reference",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " when",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " form",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                "ulating answers",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                "\n- A way for",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " me to be",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " more",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " careful",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " and thorough on",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " complex",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " tasks",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                "\n\nSo",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " to",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " directly",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " answer your question: No",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " secret",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " redacted",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " thinking exists",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " that",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " I'm",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " being",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " prevented",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " from sharing. My",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " thinking",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " is part",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " of how",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " I work",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                ", not something being",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " hidden from me or",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " from",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " you in",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " a",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " de",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                "ceptive way.\n\nIs",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " there something specific about",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " how I reason",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " or",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " think",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " that you're genu",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                "inely curious about?",
+                "/can't access?",
             ),
             metadata: {},
         },

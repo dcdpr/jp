@@ -9,11 +9,11 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Received your test message — everything looks good. How can I help you today?",
+                        message: "Received your test message — everything's working. Anything you'd like to try or ask?",
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("msg_041d39a5f38ada5b016995b6b7779c8193833b79e838ac020e"),
+                    "openai_item_id": String("msg_0c1de93a3a2e8398016a886da4455087d29cfa5ccdc09ccbf6"),
                 },
             },
         ),
@@ -27,12 +27,12 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "**Repeating message**\n\nThe user asked me to repeat their previous message, which was \"Test message.\" I think it makes sense to echo that back to them clearly. I’ll respond simply with, \"Test message.\" I wonder if I should include quotes or just keep it straightforward. However, since their request is just to repeat it, I’ll stick to the original text and return exactly what they said!",
+                        reasoning: "**Repeating message clearly**\n\nThe user has asked me to repeat my previous message, which was \"Test message.\" I want to keep it concise and clear, so I’ll just repeat that exactly. It’s important to ensure that I deliver what they requested straightforwardly and without adding anything unnecessary. Okay, I’m ready to respond with the exact quote. Here goes: \"Test message.\"",
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("rs_041d39a5f38ada5b016995b6bb9fec819381cafd52d2c5aab9"),
-                    "openai_encrypted_content": String("gAAAAABplba8Wh-U9drlhfjMiMgVbCcyAFz9u3qI2q2OZMBdh0ZshtkmGckR_F7LZopxKGkXpuoM2ZJmn9SWMDCyOSsllLG9AQier849NrH_9u_zhv-Haqv4yDNfr7RZgMxxR9eGR2SL-oQ7UFRs2hnWDeOlQ8Q0LBKZmvJfP-L6TWxcLwClNYdmwO5JKxinl2q1oqpVx85IrF8wu5u0ydJeOA2EeGjQ6S2dMNOgg5yJ60T2nx2tZIlvMRfHyBhOg_8q2rFlDdpv9qY0SMTtI04NWX2uSoV_m7t49aeR6CtWYYmUfZmsVy1326s7a3JFIwi6swEeF-9Zt7RKjL7OIDVA4H2AeUQCoBqD5jZ1MoxCC6MaEgVHlU-LICufWURDJG_pCk896nyJ9ns_DUACxoXHfuJH6IAAyV1LhF4FWNyXm8V70jBV0Kt81xMpTD9WcYbHOz3Oo_O3jjX9Rdg84K1Cs0Z6s5qLzOHk188SF2SO-IsWPFywjVYlpqXdJKXuqKM1jXbiUTadfNkNyZOZEy7CanUC2ILLYPtHMsLF7SxLgpKhO1bPm0PHvpQRIPTlTdl-ZVLk9a6fUXt0xqppp55yyHzvToRBtTyyDs_u8BmjGFhb9XibGzDJh45MXBelC01fBAzehf33HO_MgtIGSfCUdy-GJWTM_Y4E5pWnyjTUNULi36ChTJd6OSJGalv3OpwxybJ-Rl1uUFHrnj0j9ZIc5k-47UXe8EisztTYSA8FuE7SEoOZ1n2luwOKpVrumlHuLsufzCgPKb0x5YWb1A-OV5JzU7KYQ9THDSwgAQNoWr5oRV9WKDwcEaKFpl75qvDOxgripdcRqOhrH1HjGR7GWjhet1jTsRKVT7uTxcRJNwDqhDwZMEndMGVubf9x1mJJ_BFMCdQ-jFCsAJl1Q_2N7qR62FRPuQbIZwjRbYlmzC-_KLyg532Tb338RwQgeqBnaouDvmZqfH_plMixGWvSQJS6ufbj_XCIGkWn-nduVQIqXMBvvtXu_FHloeYp_GsnNOp2NXRZ61EPByMsTe80F374o5tJr0DjgFfv5nPhSoDsIEhOk8FG2WpIus8JOodzL81CGIWwwj3xVM6EpL-P-jeY00lufMHrV_Wpp51I84gpZKDCBh5ZIYqbtLq2aYaU3kVkQn6YdBKCfyDFmI-DXUupHPCNCGfItJZ7QqAFshysG2skPN6_hxYGN02FMYjSUqkxdbxUxOZ8zofmTAeJl4NrrlTOf1qa3NPlmegXOFyMmCBF91s="),
+                    "openai_item_id": String("rs_0c1de93a3a2e8398016a886da55b2c87d292b5bc6caa736413"),
+                    "openai_encrypted_content": String("gAAAAABqiG2nRNjiF-EHLzNWu8QGXpz-0kg2zCVJeakGIZ5sCTl47nmOhdtvTGvwvmgUSSXIyvikDtvdxRSCETuSlUJMV_k6DUsrgvHxILRBHdhXaO-hOByw8xMsc3IGOqLLeylEGOAiOKEHpoOCiMgYoZnJSC93_K6vlmYrTI9cuCHMASrlY_2lxgscIFVq5kraFJaQHn4LnJz7t_DOg0sG1laPrGCzE0s1l5ZIaAB1xNhz9yggzQPCQvyeBkMqtpPw5eiPyRTW8KToEHDpJBZHRLHgJdTL3kSb-fjXTN-EMrzzPRpna2WuQ2mjjtiDbGJxC3Awa-4CxBlCz4Ocx8393MGeY5nD4zgkuDFOhf_Yxu1-45Uhmp9GjLch71Fkh0_cP5N23IjlGz9J5w9MOPUhYDgx1O0MFVheOvo51E1TbL1z_XGqkz4hVyjZc5Yv3O55sTYifooJXPI65WtlKUeYQWSJv9AHBigsFAfSPqbReZ67OucyjSthF_rGQAYNhgJTcRXzOE_CRWvoKzlT-ZYhgxTO10jRAeLVNb07bkqXeJe03XrrtNr4BCVSOjeZPu314H2ULzz3dwjqnjUxLALtJVwNSoUsybXHQ4kaxDIfiPZwHb7qQ2Suk2AukOjoTYGclprZW8nD74UkEwHzOkU6e5XO5dsuKa7buBsDm2jXMYs9lXYjOidkUUHCYeoI67dF-_9dngcX3JhoCZcBrs8kiPm9YUckp01xQIDDMF-gysx7dgY7jEl21p-8SJbBN1e3K-VGS0qjoyawDphNvej3J82NLpcwd83wvNE7JZe0ynMBBxsfyaIN3RiHQc60UpMdqEWsHBUrDDB7Tc7SE2eXLVbeHr0IvbPp53Ux6e5MAmokwEre6UReM5dfuhy-7Ifj3PhI8TPUT5uYUVR4CqFfszBBj-8urS5WDEXVhNU6eeWlxlOf91KdhXaBRhZnB5QeWXx0-n1hRMBSypuqftkjKof4Nir51F8-aFTpuztS7KbBMTBkohKrlc4zOjQ-YkTqjL0ZhJfNUZfr9kawmDRzhpgU7chdSnEXsDgFkHgPIqqHNcoN9lB0uArSmQchYiSPt6lX92DvhyYxdosa0-tma-mKWXuAUohtTMGMCK0Gv9Xz0r9uL4o1i2iYxx6vOi_ioNTt_PBjkNBKXjvuA-i1AEOVt10dpsupfgk-Uuk-fe798NShYdqGvmYkkPCwcX0MO_8NyPV7Vj2QnuwmGuLyJWlpv1VyGC_Up1_I2to-4gN3VCMyC-fqChKiXzh06o6FuNzE6viygdjiaY0GM_NGqRd8f9DpV7LI6WE49eaAsIaNsVCSRkmMTq1Z1GrpWxKox2estgpYXNkc2iiAT2xvoSXu-juj32TWIppNFkWYcdKXvmjoWeepiquSciOA92qvxfwEYgkKquwbQqqMMVEAdNbWdKflbg=="),
                 },
             },
         ),
@@ -45,7 +45,7 @@ expression: v
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("msg_041d39a5f38ada5b016995b6bc8d4c8193af33c487121c33a4"),
+                    "openai_item_id": String("msg_0c1de93a3a2e8398016a886da72aa887d2b4c6c0584f35be0a"),
                 },
             },
         ),
@@ -59,10 +59,10 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "call_kTWQScGzaHfcWiOR06c4Z6PJ",
+                        id: "call_aGqFUSwEmeqvj7EMW7rPrTsW",
                         name: "run_me",
                         arguments: {
-                            "foo": String("foo"),
+                            "foo": String("anything"),
                             "bar": String("foo"),
                         },
                     },
@@ -80,11 +80,11 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "I ran the tool with the arguments you provided. The tool returned: \"The secret code is: 42\".",
+                        message: "I ran the tool with arguments {\"foo\":\"anything\",\"bar\":\"foo\"} and it returned: \"The secret code is: 42\". Do you want me to run it again with different arguments or do something with that code?",
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("msg_041d39a5f38ada5b016995b6be38788193898973e5d13be9d2"),
+                    "openai_item_id": String("msg_0c1de93a3a2e8398016a886da97e4487d2b294e659ab3cf6b8"),
                 },
             },
         ),
@@ -98,12 +98,12 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "",
+                        reasoning: "**Responding to tool call result**\n\nThe user asked about the result of a previous tool call. I remember that I previously mentioned it returned, \"The secret code is: 42.\" I think the best response would be to keep it simple and state that the result was indeed \"The secret code is: 42.\" I might also want to add that this came from running the tool with specific arguments, but I’ll keep it concise to avoid any confusion.",
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("rs_041d39a5f38ada5b016995b6beeba08193afc927cc043792ec"),
-                    "openai_encrypted_content": String("gAAAAABplbbBtL1hSuIVryOPhWKyrvYUf809uHwx2yaqsB7z_9tGj9pCAO9mE5zVteQAllL8pcEjsLSQ5GoxCeFzRKO3reInb0VdUz7VCr62ekmAhF9Q_qWyGs44flnqiIU_LR0gm-3CDf1gthsnmz5WYosWzmX18YrCxgjtfsaUBmRVNzTHt9RNkOC3ehEgnZfTYT4LhYc61F71kdLLDKpEvh4IdrnNJj6rLAViPhfWl1oU3lGrLXT_pHuM0Jap5X07ajhgBLlXzSSnrHGNWRQQB5ofqoRHgmEw9qA8HW4tllVb264ZyunETcw5PFOeTzwfFt1ao04WxGs10lZeNYYVwTmGJ74Ib9tVUxXAyEuV8SGFQg_BM9gT4pctZI0VTSKzOa-jOXbBM-Iz6JoP4XfSiNa7lvtuxPz8slbpYA7VmkWdg-WR_Fh5wST1P1hKIPw44iuSLfg9PEMYGUVXlu0UxYySwxI9DFMDzgG0qTMNqeIy64WgRpEDl2wxV3j1-3NfEDSK2NkuMY1HD_1-L5VJQLrL9nURJJFQR--iQZDlp1eGFvo9_E1KV15Eq6zVbaF6WAb30Du80aaTspg5fES-2rx5vEwzN9uvqjFIkvbVfp78UdDhSwEjthpAJfinO-eocN2o21-oSFQsRyFsRXEUVoZQimFH_fHW9z9DBefHFVxmOIJwsUcMUA40JXOrgk-eYZUB3kT7Qy30Fsrkq7DEbY-D62qP0GzBKEAMQOELUrxCnzHIRDA_Wwh0kgzNDi2M62lLeFNV_qylDj40cLFi6wQBMsVJIMMNc73p8e8yqzouNJhFGxSR2T-aFXnwvp7GCPVQLSJ5FMF2nHJu_4uX5bJeI2xW44m26TJN6t5HpoeB4Tf_97LsNgxC-GfEUTd5QNgvJNT30I5hRfioqvbnS5iMhSa-vCTYzpW4KEcJoXEVNX7RlZHRx9AnYvdaNvU9i4WW-kykCiZG89GTCyPBbbuRAC67N1KpjfWm5Kz1klc-QmCvL0gy6YqaJY8OhczYsQKB2mermcr-Ml2TAsltIXccj4tZXC-WxrnD1s5bDtJ50Jbk5DmGCz76-BsV3hDpjenpT2bQ"),
+                    "openai_item_id": String("rs_0c1de93a3a2e8398016a886daad1b487d2ba8644b87920a62b"),
+                    "openai_encrypted_content": String("gAAAAABqiG2tnKqzBOVJwSLOrkB5PXhTx8bwB5mA-mE5-GyD2LCQhW98FWWQ7g5wN_9uMHhXaW_vXIEA6M4wAMcVdz0UuU19zKUcj6vhpSeEWLEfBwbM45wnBJdFJLUoT129ApKZzbtPZT8FrIjnSTJznJl5xfov4PqWL1pFnvQKfMkCBqaftg665ZbkUWVCXwOUjMPQ37pouoJXV0BwATQhUmQGNWZTvFoSbzq9Kg23EMUUBHiw9ZYcD-fw--UUJEKippAch_AK7AB6fyNLfHRfG-7xna_Rzdu-PQ3pUxtHYdxsHui9f83c2UKtfCel_NGHSW7ePGQUEbdcsR-lXS6Rr2j3FK67lQ3lhvZgJQ-Ro9zJlDgBH7eH3F99rl1HxJhpQuXfWc1BHedjI3p3_8ju555YTN1mpPKQOdswLASMMW-TDUkIkPYbWsKtzcHhaAvCo2aic91_OuWObBEyOsYnWLGXhkIo92Mn9khToziVKPRmCV4TUfOpQFHk9lojoXD2N2Y68ucbI9ITSk7WfmW6c_Su207VY98-IVxL39V5dQuEIIq4u39YifPxEtuPoqY8Eyw32zcnNwD5C7ENviJg2Kt5BQpygTwVnafDiucQ-cIoFKE1qHJ2HA1MHjixclyICLL5HSQIWXtGm5x9lKU4VLVKrM48w2L7DIi-IzTo4pSvltt7LgfPLKtADVcx6tslif-KjEgV2ZVBZTmaeJhRf608E2ODeQXcpI6OsSTTNXNidHePr1hU_Wlr8ghKVy1b_-N0Xns_s02dEtlmoL2SJYGSOsQgUmtFg3HZuWHvEAYtdo_ZRABnTD6nAQ1cyRWc88VylO5W3bkKpUjG5Vzjhjt6rQb9kjJKo1kcjm6dzj1kQ-TbZVdKGZgna35Mng0ELN2o_XAPy12jIdtB6TXUljNmagw9w0beoqTi4V54d1cx4kSz_KYrWP8f9JQgD-FEOfeTsUT16-ZRP0lfd4YmSLk4jmFyhw-kwI5fy3f-0iq1H-I5961vKg-gL4wPwSsxYFyqZ8ZLrdhRdNFIwiMkGAXG72vk12ZVQcUYGjeZvFFLbrdox7gyMCYp_Bk9mwfGkf7C5MiF_lrzGCkgyjVtnxJPSmgpPkdhsYqGJKHfE7Y_7YJzkQVALX3BqH-d7to5Ek0v7WwtgLFiz5oKc4qNJPKjG4m4rHtJLt34O0U77Z90k1f_pPrHUPjO-CsL439UmYcFPBc2SI8b9n5NFa4b0MdvdFayyMwmsfPVkf1-FMNFE1DSYqOYE5mnZwvLO5P2AYDPA0uN9EwD_po6adKVIlSCUrAcm-COga_kRCWFTO7H9uWVnaTZgsmJEPqAhlQg65-g6fhzpwpToRkHqp9M5xpfigV-oej_badmeoyA5tQcCE5-AZjnEZu6MvHFMAUCnmyIn-V8GsvIwargWOwPiygCYSivB2qSe4m7d0VtS9tObigcCwgpABho7K2N_y6zE0EI9OGg4IBBsFrlGLG6Lv7HXIPRNH66VnBy36jaWMTqS_2pawU="),
                 },
             },
         ),
@@ -116,7 +116,7 @@ expression: v
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("msg_041d39a5f38ada5b016995b6c1391c8193966a5438ed4ddcf7"),
+                    "openai_item_id": String("msg_0c1de93a3a2e8398016a886dad887887d2a8a094078eb417cc"),
                 },
             },
         ),

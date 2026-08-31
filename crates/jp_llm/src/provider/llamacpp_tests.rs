@@ -48,6 +48,78 @@ fn map_model_without_meta_leaves_context_unknown() {
     assert_eq!(details.reasoning, None);
 }
 
+/// Build a query whose only config is an explicit reasoning setting.
+fn reasoning_query(
+    reasoning: Option<jp_config::model::parameters::PartialReasoningConfig>,
+) -> ChatQuery {
+    let mut events = jp_conversation::ConversationStream::new_test().with_turn("test");
+
+    if let Some(reasoning) = reasoning {
+        let mut delta = jp_config::PartialAppConfig::empty();
+        delta.assistant.model.parameters.reasoning = Some(reasoning);
+        events.add_config_delta(delta);
+    }
+
+    ChatQuery {
+        thread: jp_conversation::thread::Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+    }
+}
+
+fn request_body(
+    reasoning: Option<jp_config::model::parameters::PartialReasoningConfig>,
+) -> serde_json::Value {
+    let details = ModelDetails::empty((PROVIDER, "Qwen3.5-9B-GGUF").try_into().unwrap());
+    let (request, _) = create_request(&details, reasoning_query(reasoning)).unwrap();
+
+    request
+}
+
+/// `reasoning_format` tells the server how to parse a thinking block, not
+/// whether the model produces one.
+/// Asking for `none` leaves llama.cpp unable to place a grammar after the
+/// block, so a structured-output request is rejected with `Failed to initialize
+/// samplers` for any thinking-capable model.
+#[test]
+fn create_request_always_parses_reasoning() {
+    use jp_config::model::parameters::PartialReasoningConfig;
+
+    for reasoning in [
+        None,
+        Some(PartialReasoningConfig::Off),
+        Some(PartialReasoningConfig::Auto),
+    ] {
+        assert_eq!(
+            request_body(reasoning)["reasoning_format"],
+            serde_json::json!("deepseek")
+        );
+    }
+}
+
+/// Whether the model thinks at all is the chat template's decision, driven by
+/// `enable_thinking`.
+/// A template that does not read the kwarg ignores it, and any reasoning it
+/// emits then arrives parsed rather than inline in the answer.
+#[test]
+fn create_request_asks_the_template_to_skip_thinking_when_reasoning_is_off() {
+    use jp_config::model::parameters::PartialReasoningConfig;
+
+    assert_eq!(
+        request_body(Some(PartialReasoningConfig::Off))["chat_template_kwargs"],
+        serde_json::json!({ "enable_thinking": false })
+    );
+    assert_eq!(
+        request_body(Some(PartialReasoningConfig::Auto))["chat_template_kwargs"],
+        serde_json::json!({ "enable_thinking": true })
+    );
+}
+
 fn sse_message(data: &str) -> SseEvent {
     SseEvent::Message(MessageEvent {
         data: data.to_owned(),

@@ -224,9 +224,10 @@ expression: v
       "id": "run_me_2",
       "name": "run_me",
       "arguments": {
-        "foo": "cmFuZG9tX2FyZ3VtZW50",
+        "foo": "YmFy",
         "bar": [
-          "Zm9v"
+          "Zm9v",
+          "YmFy"
         ]
       }
     },
@@ -240,7 +241,7 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "The tool executed successfully with the provided arguments. Is there anything specific you'd like to do next? 😊"
+      "message": "The tool executed successfully with the provided arguments. Is there anything specific you would like to do or discuss next?"
     }
   ]
 }

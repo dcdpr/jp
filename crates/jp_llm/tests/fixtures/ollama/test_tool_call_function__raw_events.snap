@@ -22,7 +22,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 ArgumentChunk(
-                    "{\"foo\":\"random_argument\",\"bar\":[\"foo\"]}",
+                    "{\"foo\":\"bar\",\"bar\":[\"foo\",\"bar\"]}",
                 ),
             ),
             metadata: {},
@@ -145,7 +145,7 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "'d",
+                " would",
             ),
             metadata: {},
         },
@@ -173,6 +173,20 @@ expression: v
         Part {
             index: 1,
             part: Message(
+                " or",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " discuss",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
                 " next",
             ),
             metadata: {},
@@ -181,13 +195,6 @@ expression: v
             index: 1,
             part: Message(
                 "?",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " 😊",
             ),
             metadata: {},
         },

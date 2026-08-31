@@ -10,10 +10,10 @@ expression: v
                 "",
             ),
             metadata: {
-                "openai_encrypted_content": String("gAAAAABpquoX5XVn9WN8APifWU9fJ8duire1ZuM-06ab-zP4GvuTgsTQMfv-w5Pw6NQn750rL2MmibXDkTYFaDmkTmY7OKtin4TfjSDG8GPFvoTtW1wsxcE7Wieo_1Zcl9O053cg4xgsB08S3gPTelIxffP356whbldAMp243_4jiLm5kGlOBeeunty_DWAQ_oGE3RhbIx8zSG6l75BjEd7GDbZbiw6GMRu6-OWFVj59InchdMY7AM4X33qtplfVXylcKGJ4SQKrA1WI6dYnVzHAHBZP_EfmQc5Zj7Aq57ubiFzQoV4xUIff9atq0-J4vBJsnGF7Jl04rirVGN7JFOzgvs4VMBzXere2sAB_Id2IgtXYKVWnsc05U5PclZqBUDG0ZQOUqsmKXtPYtQElM5-gWGQ08wUVn6TrNdLawIHYk6-wmo7JoEktKEL_qNVEd6iWLV7nTDHPvPs_YW-6pWx5grjXeVVTN-yU5GzdWhAE7p0c5TMMJxFwQYJAEHgLcLKEN7l3p43MyU_hcsjNl7P8M4fiLU-9t2YmrsrDbkRGNEj-gshfYjLvP1mSWwMvZ3LJBHNdN1oHv4T_diIEZcQYhhSOV_VGYSVZewgEYYZ76FgVkoQ1ksbw1KGMEo1h1k-ZRSp-5xJF8CKW4XKgP5QoduXDDeqQOVUqI--mHWQc8K1kvvB2ioYGSSY72KS0tH916UxOHAX4RDaNcPYCK4boQg_83hpQWfIqQ2idkxpXRQuYzix78nMa6B4LMSdCNpr5JROtPizZQezQyai0_Bg3m-LED9dTliXrhEFp_0swAsk14sCIlf_OP5UQ4F2zR9AMzZxaf0QDitdYxQhCofMz_tD0I5upASRAPC8weuy5eKeOecoqatQTRwYV_ZS16vnIZjgzW1CF"),
+                "openai_encrypted_content": String("gAAAAABqiG20r7EAr36g82VvI8GHOFEHQ6Qq-EQdnsLf0zulJhg5X8uuJmzSYO2YKXufvT6goyyvEgUyS_zXJuHYQBSvP-WdCzJOOEaq-1P6uCDL-UQfbaXy203HjZB3i-XaLrV3yKprI-rPGTS8n40mV2V9nc2hvTBbUwva6iBod_6C9lVdqzgMGgjVIyUagdY0fuFiOf5DVntDO3Fu9BVqBP-PHQt-8hGTjrCqE5Y4y8sCF5FD1TJyHRSTBu_597S54rFCNsRq2-BrChYy7nPQ5hALdyEd3lZ2F5-t1RbzEbRRP1jCn-QO92NyprMjSg6IVu09VAIUieoF-Lc-wYBPqoCWfda98CnuW3i4ISSKYxlz3tXrruXeubzu_5ucHdcgfOMXD6COtdRyGShzMFcIoG6DU1E_eeBFziJ-O7oKZ_gdKR-wp7LMvIXBXnGVt1kihK8A_bB54r_4h8FNLJgRwZaoeoClp69KdnMzSwEXvFFYkLGxsv8JN7YpSYFo5CAmC2ahj6RRkX0N6dgPmmj1-TyZfMQgA7eIghx6mQ6pIRDiExknZbOdwV7kZZqBl2anbjlMo4lRe_yT0Glm2XogPNE9D9_RUDnGa-JKrg2YfzZXKgWdXXJIklxUgUFhYhtu5229iRew3Uje-pPdh1eVtTJdxjNtQossMgC3bSpYldUeyofWxgpFAQvYqt-sU-mlI4S1uLStZCNO17orlYpFpeRYEYCQPOK7f94qdUWmdv0DkFZKXM9l5hyiRtJ2obURoQME0pRh-hXpBheUDV7ApiundLbYRHIUXkatzKkGsSRXQaqcE-RPp2E8vMYr40-j4v_QMilBxLI5iTbvTOo-4aMsr16ehq9vo_l5-dNO0QGEbMKnqmtbYC0S9rSiOhZFt9VyCWwFniYb8rZ8wDryMMx5DCAJl-D7bJjryR1uLdazhf5vQUgKhtfX8DAZ4dc5YSh9n5fiGrrGkjkdEt4ag5j7vRu1mmdhxQVyma4PpV6pgeov7t4eLyNZDkb7XumSipHhyxe40Nmt9DIeFhXKt_fA_OnTIUplyxUpvgxKAcrcUqMS2J0slKi6U59C_yabD2Me0u_TLG5VI91Dsp0NUeFmaI8qLfTt28a1Z-wZlyoguIgnvKgAquAzRIqxNje9eIP1yQRGVrmZMkwWVAS_Q0rwe6pnVDL5pDiSMhdRbQs-EvuEMJnXZc2NQqAfGKvsJnw-5l_dVDv117rH9sC2btKdAe-5ledw_g_fqq5SwH0edQOajo7PIjJHWgskZK5qJyeJtZh2BBcw4TBYn8MzTn_qwE1P0_IpYrAirKMsv-onsF6V04AeTvTpRLtXBb5EcRzfikJWPncpGQAm_WyiQr5_9H-I_iZatG-Bqyne_53oAamcEszSN9CfyW9SPH4A8aLAMHQL.eyJlbmRwb2ludF9zbHVnIjoib3BlbmFpL2dwdC01LW1pbmktMjAyNS0wOC0wN3xvcGVuYWkifQ"),
                 "openrouter_metadata": Array [
                     Object {
-                        "id": String("rs_00f1e562d37139030169aaea16a8ac81958f44e475e997470f"),
+                        "id": String("rs_0b47e8625502678a016a886db3d82487d19e75abb1db74f5e1"),
                         "index": Number(0),
                         "field": String("openai_encrypted_content"),
                     },
@@ -24,7 +24,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 Start {
-                    id: "call_YO2XYnNpcUNBw2RPB6bEWHot",
+                    id: "call_LpP8nONS14vigHaa7spwH7CP",
                     name: "run_me",
                 },
             ),
@@ -52,7 +52,88 @@ expression: v
             index: 2,
             part: ToolCall(
                 ArgumentChunk(
-                    "{\"foo\":\"hello\",\"bar\":\"foo\"}",
+                    "{\"",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "foo",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "\":\"",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "custom",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    " value",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "\",\"",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "bar",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "\":\"",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "foo",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    "\"}",
                 ),
             ),
             metadata: {},
@@ -76,10 +157,10 @@ expression: v
                 "",
             ),
             metadata: {
-                "openai_encrypted_content": String("gAAAAABpquoYXrqs2RqcMb6HuFZfth8P-MqGj-8kbrdCxmQ-AhzGsSH1folTtKkRIQ1vXHMlb3T5LwNA-oR9V4KvTOf1U_oif5PdiGA4e6AOlFrKcOkSiyDqiI-JOAp7_RWcfrmq4b8UxgKGt3NXCIjhoOmsDkkEZnsWHIHAY_B55ELoTEeXM9TnCIbLFXsvY67upvHGGolhk8zX5karnJvkEypYonjnN5PCk6LTKoTX3pM0o1F5Luil7aovWUpLwTJk9W3AWynmNnDaZ4z43c8IuMejnFsL0L0mE9qhYLCa-FTnohswL7wgd60FBC55xajOC-019zBC0uZsjhlfzEAEUFwNf6cQF47aEXvtPb0k4W9522FVPmk7DYd_9gX_1HK4eSIdwLY7Ax8Jq3tWxbL16JX5yUqqjilnrN1PXCsF0mayJha-DLwct7e1MzJszAUU8j4iEUqujVmthFQf9IHCH4XMMYPhdiddrb1weh3vwihlotq3cMAnJ__Iydpnk036OA9pgix4sa6JIAchxn42w75Zwt3rlPllEEodPUI1NkqbiIzVqwIrpcpT2LroTtebx5DMhp1xLjA1ALxkK-4AmnC8_108lIaIPIfV_Jqzz3ZaH_U485ENxqeIYAX27l3pTkN4vNnxOroOLz_PffE8phlxJSfCadAlcMiSHUrHttTN7kXfeavSECUmWTiemC0-RHTcUoeDwfk5jRJCAyUmMOTe8ThSbhhEKZEXV43xRJ0TlgX1FDD8DTu-cXODpjULBjhsiVOXpjMX8Ld2q27cHlzYT7rRgSX0DWC8V2QmhHyd9KMxCyYM8fkOdAERhhtVOfZu0VpO2GlnRfDVvjQTGJRvSxFim3evVc_9Qxjy-M9N7oKHmaMwSHLXZqTTrSjCluXXXl7V"),
+                "openai_encrypted_content": String("gAAAAABqiG21t-8VanKTYe4O0oefuXgqdi54f94-9HkdcVPgcZtz2-JieHUExtyVi3IY2qTo_R10ryBizYPTYtd-EvFYTRtrkskPPXhCvO0RCVd8-s0JS_a1300zxWk9mL3iq7oQVuYTvLEZzBtJjnW3qTW1KpIpePM4w3Www-lvPXxpeVt4KAabndkAbPCRw2m4zxA0NHrc9AmufgZ9R8ur-5Y2_0c_OIlcVxfCETqvIlv99jBbEDvSRQZtdsRtPG8i3F8t0svK5-76INh9EPfICd6DhAoAGclhQd7S82XGHDtdNJEupRQKuhl8sMA0aK1f9FxvdsC3FT7z98WjDJcWrlmGb6ISHJSBKJaqbSMvB9HQAQE_QaFkXx_52mmNJQqD20rkn10-ifuWwpYEUMgD-xcavy9_jTFQDWoEJm3G0TNQPBP82P532C3a0bEdNewIM_V9385K9LTmDKkvH1ODhDgvSb85-4Zq3Irav1fYC4MtXPzF6COj69Ns73sYWReyuFRnDkrhfoz81BMVDBUN_oPF4Y-nX2boFyu1-DR54tMAFy3dfDdh4JOXYPvzdSoDnnQb8ur5wGc2uCn7oob21PZj9uVG7a7JRXXihUw50Wli1Knx6mdSu6FmH8VgoUxdZF7rwQL3RiSgmEuRZamDbKcTL7RdjJivFLEHoeLZtBSEU4c5QUHTOFR__uN4hZvmcvFNsOORWm3aBnglnSVQF2rUJtWeAwyfHm-AFsD-holN6FuNE_9UFvDjahkCSNE9OjID4RqgIiQ0-CS84ckgf4fPujifBg_LMv1i3AsGN2W7a8R67imr2pwE1Jm_9MAYSK1tysU0i6olLtDHHezWSlV24J2xdlkhfjjUaJ1FTB_DA6DiLoU2eGfKz6RUwccOr7VlX6tBKRcdjBqKjYgnQlGMTmVl_CYEtsVWf2opBXqveiepe4ubCrzucYiF2dJzmc37TulDypKjepRNRYhyFIJxaLSwpUEyzFyPl4pQrdkqiJf6pNxK3dOJHFJsSueI9dRPt5PKrVbpBNFSS-2dKFd2XrNBt2QgZewFxUMQulhtpGIF6O-V6rEYJUNc9qreGIBivLlCsC1GavN0yaleIIH3EHwieP0L-MO_fQNIbXkzyW7NGJFZo_ztZ7UuC_ki-0rncVhSQe-U4cZRcN3eE5SyP0r8IsCHMJCDSccJ3crjZOUeGgIw10eay_piNQViGd92ellN8um7N47NxwZpFudHJr-mKGLmiEt9decAtVbuvlFfefo4Jz4PvJ_LpFgeNEnadcsdFrD4-hZ7w13_YFMnMt6fjUJqvcT_xkyquq9bYm1QitIxfAi262VJbflip9XCywFmR8nYtuY5ls7lgfcOYToNQjD8iezT2DGeNVEMN-VVWBz5xrSWhjaVnpkn7QCLfDrE.eyJlbmRwb2ludF9zbHVnIjoib3BlbmFpL2dwdC01LW1pbmktMjAyNS0wOC0wN3xvcGVuYWkifQ"),
                 "openrouter_metadata": Array [
                     Object {
-                        "id": String("rs_0f23f98973d0e5ba0169aaea183e4c8194ae991cd1439ea559"),
+                        "id": String("rs_0be4958713327613016a886db5016087d194adc77a08a01f77"),
                         "index": Number(0),
                         "field": String("openai_encrypted_content"),
                     },
@@ -111,20 +192,6 @@ expression: v
             index: 1,
             part: Message(
                 " tool",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " for",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " you",
             ),
             metadata: {},
         },
@@ -173,7 +240,14 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "hello",
+                "custom",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " value",
             ),
             metadata: {},
         },
@@ -208,35 +282,28 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "\"",
+                "\"}",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "}.",
+                " and",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " The",
+                " it",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " tool",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " responded",
+                " returned",
             ),
             metadata: {},
         },
@@ -271,7 +338,7 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "If",
+                "Would",
             ),
             metadata: {},
         },
@@ -285,35 +352,7 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " want",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " different",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " arguments",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " or",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " want",
+                " like",
             ),
             metadata: {},
         },
@@ -355,21 +394,35 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                ",",
+                " with",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " tell",
+                " different",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " me",
+                " arguments",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " or",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " explain",
             ),
             metadata: {},
         },
@@ -383,21 +436,28 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " to",
+                " the",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " pass",
+                " tool",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                ".",
+                " did",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "?",
             ),
             metadata: {},
         },

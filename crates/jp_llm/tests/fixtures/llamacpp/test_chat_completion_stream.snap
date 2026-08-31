@@ -9,7 +9,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "Okay, the user sent a test message. Let me check the conversation history. Oh, there's nothing before this. So they're just testing if the system is working. I should respond in a friendly way, maybe acknowledge it's a test and offer help. Keep it simple and inviting.",
+                        reasoning: "Thinking Process:\n\n1.  **Analyze the Request:**\n    *   Input: \"Test message\"\n    *   Context: This is likely a test query from the user to check if the AI is responsive, functioning correctly, or to get a feel for how it responds.\n    *   Intent: Verification, exploration, or simply a placeholder.\n\n2.  **Determine the Appropriate Response:**\n    *   Acknowledge the message.\n    *   Confirm receipt/processing.\n    *   Keep it friendly and open-ended to invite further interaction.\n    *   Avoid over-complicating since it's a simple test.\n\n3.  **Drafting Responses:**\n    *   *Option 1 (Simple):* Received.\n    *   *Option 2 (Friendly):* Hello! How can I help you today?\n    *   *Option 3 (Playful):* Test message received! Ready for the next challenge.\n    *   *Option 4 (Professional):* I have received your test message. Please let me know if you need anything specific.\n\n4.  **Selecting the Best Response:**\n    *   Option 2 is generally the best for an AI assistant. It confirms understanding and offers assistance.\n\n5.  **Final Polish:**\n    *   \"Hello! I received your test message. How can I assist you today?\"\n\n6.  **Final Output Generation:** (Matches the selected response)\n    *   \"Hello! I received your test message. How can I assist you today?\" (Or similar)\n\n    *Self-Correction:* Keep it concise but helpful.\n    \"Received! How can I help you today?\" is good.\n    \"Hello! This is a test message received. Is there anything specific you'd like to work on?\" is also good.\n\n    Let's go with a friendly, helpful acknowledgment.\n\n    *Final Decision:* \"Hello! I received your test message. How can I assist you today?\"\n\n    *(Wait, looking at safety guidelines)*: No sensitive info, no policy violations. Just a simple greeting.\n\n    *(Wait, looking at system instructions)*: I am a large language model. I should be helpful.\n\n    *Refined Output:* \"Hello! I received your test message. Is there anything specific you'd like to chat about or work on today?\"\n\n    *(Even simpler)*: \"Got it! How can I help you today?\"\n\n    Let's stick with a balanced friendly response.\n\n    \"Hello! I received your test message. How can I assist you today?\"\n\n    *(Wait, one more check)*: Sometimes users just want to know if it works.\n    \"Message received! Everything seems to be working. What would you like to do next?\"\n\n    Okay, I'll go with a standard friendly acknowledgment.\n\n    \"Hello! I received your test message. How can I help you today?\"\n",
                     },
                 ),
                 metadata: {},
@@ -20,7 +20,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Hello! This is a test message received successfully. 😊 How can I assist you today?",
+                        message: "Hello! I received your test message. How can I assist you today?",
                     },
                 ),
                 metadata: {},

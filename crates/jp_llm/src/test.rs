@@ -114,7 +114,12 @@ mod harness_tests {
 
     #[test]
     fn a_declared_argument_passes() {
-        let arguments = json!({ "foo": "x" }).as_object().cloned().unwrap();
+        let arguments = json!({
+          "foo": "x"
+        })
+        .as_object()
+        .cloned()
+        .unwrap();
 
         assert_tool_calls_match_schema(&run_me(), &[tool_call(arguments)]);
     }
@@ -124,7 +129,12 @@ mod harness_tests {
     #[test]
     #[should_panic(expected = "undeclared argument")]
     fn an_invented_argument_fails() {
-        let arguments = json!({ "command": "ls" }).as_object().cloned().unwrap();
+        let arguments = json!({
+          "command": "ls"
+        })
+        .as_object()
+        .cloned()
+        .unwrap();
 
         assert_tool_calls_match_schema(&run_me(), &[tool_call(arguments)]);
     }
@@ -331,7 +341,10 @@ impl TestRequest {
     pub fn tool_without_parameters<S: Into<String>>(self, name: S) -> Self {
         self.tool(
             name,
-            serde_json::json!({ "type": "object", "properties": {} }),
+            serde_json::json!({
+              "type": "object",
+              "properties": {}
+            }),
         )
     }
 
@@ -790,7 +803,7 @@ pub(crate) fn test_model_details(id: ProviderId) -> ModelDetails {
             features: vec![],
         },
         ProviderId::Llamacpp => ModelDetails {
-            id: "llamacpp/qwen3.5:9b".parse().unwrap(),
+            id: "llamacpp/unsloth/Qwen3.5-9B-GGUF:Q4_K_M".parse().unwrap(),
             display_name: None,
             context_window: None,
             max_output_tokens: None,

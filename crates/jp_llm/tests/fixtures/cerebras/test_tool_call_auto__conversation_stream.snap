@@ -221,38 +221,34 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "reasoning": "The user asks: \"Please run the tool, providing whatever arguments you want.\" The tool is run_me with parameters foo (optional default \"foo\") and bar (required string or array). So we need to call the function. Provide arbitrary arguments. Let's pick foo: \"testFoo\" and bar: maybe an array? The type says bar: string | array. Provide something like bar: [\"a\",\"b\",\"c\"]. Use the function.\n\nWe need to call the function with appropriate JSON."
+      "reasoning": "The user asks to run the tool, providing whatever arguments we want. The tool definition is functions.run_me with parameters foo optional default \"foo\", and bar which is string or array, required. We can call it with some data. Let's choose a simple bar: \"hello\". Maybe also supply foo. We'll call."
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
-      "id": "a48c92f22",
+      "id": "ad7b0fd0d",
       "name": "run_me",
       "arguments": {
-        "foo": "dGVzdEZvbw==",
-        "bar": [
-          "YQ==",
-          "Yg==",
-          "Yw=="
-        ]
+        "foo": "dGVzdA==",
+        "bar": "aGVsbG8="
       }
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
-      "id": "a48c92f22",
+      "id": "ad7b0fd0d",
       "content": "d29ya2luZyE=",
       "is_error": false
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "reasoning": "The user wants the assistant to \"run the tool, providing whatever arguments you want.\" The assistant already used the tool run_me with some arguments and got a response \"working!\". Now the user likely wants the assistant to do something with the tool. In the previous step, we already ran the tool with arguments. The assistant generated a response from the tool: \"working!\". The user has not asked a new question yet; they said \"Please run the tool, providing whatever arguments you want.\" The assistant complied. Possibly they want a result, like \"Tool output: working!\". So we should respond accordingly.\n\nWe can respond: \"I ran the tool with arguments and got the response 'working!'\". Also maybe reflect on the result.\n\nThus produce final answer."
+      "reasoning": "The user asks: \"Please run the tool, providing whatever arguments you want.\" There is a tool \"run_me\" with function comment. The user wants me to run the tool with whatever arguments I choose. I (assistant) already called run_me with arguments {\"foo\":\"test\",\"bar\":\"hello\"} and got response \"working!\". That is presumably the response from the tool. The user likely wants me to display the result or comment. I should output something like \"The tool executed with arguments ... and returned: working!\". Also maybe ask if they need anything else. So produce final answer."
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "I ran the tool with the sample arguments `{ \"foo\": \"testFoo\", \"bar\": [\"a\", \"b\", \"c\"] }` and the tool returned:\n\n**“working!”**"
+      "message": "I ran the **run_me** tool with the arguments you gave (​`{\"foo\":\"test\",\"bar\":\"hello\"}`​) and it responded:\n\n**“working!”**\n\nLet me know if you’d like to try different arguments or need anything else!"
     }
   ]
 }

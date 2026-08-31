@@ -224,7 +224,10 @@ expression: v
       "id": "run_me_2",
       "name": "run_me",
       "arguments": {
-        "bar": "Zm9v"
+        "bar": [
+          "Zm9v"
+        ],
+        "foo": "VGhpcyBpcyBhbiBhcmJpdHJhcnkgc3RyaW5nIHZhbHVlIGZvciBmb28gdGhhdCBJIGNhbiBjaG9vc2UgZnJlZWx5IHRvIHRlc3QgYSBzY2VuYXJpbyBpZiBuZWVkZWQgaW4gdGhlIGZ1dHVyZSE="
       }
     },
     {
@@ -237,7 +240,7 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "The tool executed successfully with the argument `bar=\"foo\"`. It returned \"working!\". Is there anything specific you'd like to do next, or should we try a different set of arguments? 😊"
+      "message": "The tool executed successfully with your provided arguments: `bar` = `[\"foo\"]`, and `foo` = `\"This is an arbitrary string value for foo that I can choose freely to test a scenario if needed in the future!\"`. \n\nLet me know if you'd like to adjust any parameters or try another operation! 😊"
     }
   ]
 }

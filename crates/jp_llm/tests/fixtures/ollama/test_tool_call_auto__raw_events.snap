@@ -22,7 +22,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 ArgumentChunk(
-                    "{\"bar\":\"foo\"}",
+                    "{\"bar\":[\"foo\"],\"foo\":\"This is an arbitrary string value for foo that I can choose freely to test a scenario if needed in the future!\"}",
                 ),
             ),
             metadata: {},
@@ -82,14 +82,28 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " the",
+                " your",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " argument",
+                " provided",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " arguments",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                ":",
             ),
             metadata: {},
         },
@@ -110,7 +124,28 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "=\"",
+                "`",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " =",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " `",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "[\"",
             ),
             metadata: {},
         },
@@ -124,7 +159,217 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "\"",
+                "\"]",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "`,",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " and",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " `",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "foo",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "`",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " =",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " `\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "This",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " is",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " an",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " arbitrary",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " string",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " value",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " for",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " foo",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " that",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " I",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " can",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " choose",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " freely",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " to",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " test",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " a",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " scenario",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " if",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " needed",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " in",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " the",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " future",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "!\"",
             ),
             metadata: {},
         },
@@ -138,63 +383,28 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " It",
+                " \n\nLet",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " returned",
+                " me",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " \"",
+                " know",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "working",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "!\".",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " Is",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " there",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " anything",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " specific",
+                " if",
             ),
             metadata: {},
         },
@@ -229,21 +439,21 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " do",
+                " adjust",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " next",
+                " any",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                ",",
+                " parameters",
             ),
             metadata: {},
         },
@@ -257,20 +467,6 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " should",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " we",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
                 " try",
             ),
             metadata: {},
@@ -278,42 +474,21 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " a",
+                " another",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " different",
+                " operation",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " set",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " of",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " arguments",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "?",
+                "!",
             ),
             metadata: {},
         },
