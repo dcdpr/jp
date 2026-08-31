@@ -116,10 +116,11 @@ use tokio::sync::broadcast::error::RecvError;
 use tool::{TerminalExecutorSource, ToolCoordinator};
 use tracing::{debug, trace, warn};
 use turn_loop::run_turn_loop;
+use url::Url;
 
 use super::{
     ConversationLoadRequest, Output,
-    attachment::load_conversation_attachments,
+    attachment::{load_conversation_attachments, needs_mcp_server, resolve_attachments},
     conversation_id::{ConversationIds, FlagIds},
     lock::LockOutcome,
     target::TargetGrammar,
@@ -444,7 +445,7 @@ impl Query {
         // the request, and title generation and attachment loading are all
         // wasted — and the title task alone can hold the run open for
         // seconds at teardown — when the request can never be sent.
-        // `handle_turn` repeats this check implicitly when it constructs
+        // `Query::run_turn` repeats this check implicitly when it constructs
         // the live provider.
         provider::preflight(
             cfg.assistant.model.id.resolved().provider,
@@ -610,7 +611,7 @@ impl Query {
             if !fresh {
                 setup.update_events(|events| persist_config_reset(events, reset_events, now));
             }
-        } else if let Some(delta) = get_config_delta_from_cli(&cfg, lock)? {
+        } else if let Some(delta) = turn_config_delta(&cfg, lock)? {
             setup.update_events(|events| events.add_config_delta(delta));
         }
 
@@ -683,7 +684,6 @@ impl Query {
         let inputs = TurnInputs::collect(
             ctx,
             cfg.clone(),
-            lock,
             chat_request,
             pending_trim,
             mcp_servers_handle,
@@ -1251,10 +1251,14 @@ pub(crate) struct TurnInputs<'a> {
     root: Utf8PathBuf,
     interactive: bool,
     attachments: Vec<Attachment>,
+
+    /// Attachments that read from an MCP server, held until it is running.
+    mcp_attachments: Vec<Url>,
+
     printer: Arc<Printer>,
     approvals: Arc<ApprovalStore>,
     chat_request: ChatRequest,
-    invocation: InvocationContext,
+    workspace_id: String,
     pending_trim: PendingStreamTrim,
 
     /// MCP servers starting in the background, awaited by [`TurnInputs::run`].
@@ -1264,15 +1268,14 @@ pub(crate) struct TurnInputs<'a> {
 impl<'a> TurnInputs<'a> {
     /// Collect what a turn needs from the context.
     ///
-    /// Deliberately does nothing slow.
-    /// Everything that waits, MCP servers coming up and the provider, happens
-    /// in [`Self::run`], which reads no context.
-    /// A caller serving other work off the same task is blocked for exactly as
-    /// long as this takes.
+    /// This is the half that reads [`Ctx`]; [`Self::run`] reads none of it, so
+    /// the turn can be driven by a caller that has no CLI context to hand over.
+    /// The split is about what each half needs, not about how long it takes: an
+    /// attachment here can fetch over HTTP, call the GitHub API, or shell out,
+    /// and this waits for all of them.
     ///
-    /// Attachment loading is the one wait that has to stay here, because it
-    /// reads conversations out of the workspace.
-    /// Local reads, not process startup.
+    /// An attachment that reads from an MCP server is the exception, held back
+    /// for [`Self::run`] to resolve once the servers it needs are up.
     ///
     /// `printer` is where the turn's output goes.
     /// A turn typed at a terminal renders to it; a turn asked for from
@@ -1281,7 +1284,6 @@ impl<'a> TurnInputs<'a> {
     pub(crate) async fn collect(
         ctx: &'a Ctx,
         config: Arc<AppConfig>,
-        lock: &ConversationLock,
         chat_request: ChatRequest,
         pending_trim: PendingStreamTrim,
         mcp_servers: StartupSet,
@@ -1293,22 +1295,28 @@ impl<'a> TurnInputs<'a> {
             .iter()
             .map(jp_config::conversation::attachment::AttachmentConfig::to_url)
             .collect::<std::result::Result<Vec<_>, _>>()?;
+
+        let (mcp_attachments, attachment_urls): (Vec<_>, Vec<_>) =
+            attachment_urls.into_iter().partition(needs_mcp_server);
+
         let attachments = load_conversation_attachments(ctx, attachment_urls).await?;
 
-        debug!(count = attachments.len(), "Attachments loaded.");
+        debug!(
+            count = attachments.len(),
+            deferred = mcp_attachments.len(),
+            "Attachments loaded."
+        );
 
         Ok(Self {
             root: ctx.workspace.root().to_path_buf(),
             approvals: Arc::new(load_approval_store(ctx.fs_backend.as_deref())),
-            invocation: InvocationContext {
-                workspace_id: ctx.workspace.id().to_string(),
-                conversation_id: lock.id().to_string(),
-            },
+            workspace_id: ctx.workspace.id().to_string(),
             signals: &ctx.signals,
             mcp_client: ctx.mcp_client.clone(),
             printer,
             interactive: ctx.term.interactive,
             attachments,
+            mcp_attachments,
             mcp_servers,
             chat_request,
             pending_trim,
@@ -1339,11 +1347,17 @@ impl<'a> TurnInputs<'a> {
         .await?;
         report_skipped_servers(&self.printer, cfg, &skipped);
 
+        // Only now can these resolve: the handler reads a resource from a
+        // running server, and until the wait above returns there is none.
+        let mut attachments = self.attachments;
+        attachments
+            .extend(resolve_attachments(&self.root, &self.mcp_client, self.mcp_attachments).await?);
+
         let forced_tool = cfg.assistant.tool_choice.function_name();
         let tools =
             tool_definitions(cfg.conversation.tools.iter(), &self.mcp_client, forced_tool).await?;
 
-        let thread = build_thread(stream, self.attachments, &cfg.assistant, !tools.is_empty())?;
+        let thread = build_thread(stream, attachments, &cfg.assistant, !tools.is_empty())?;
 
         // Sanitize any structural issues (orphaned tool calls, missing user
         // messages, etc.) before sending the stream to the provider.
@@ -1362,7 +1376,12 @@ impl<'a> TurnInputs<'a> {
             self.printer,
             self.approvals,
             self.chat_request,
-            self.invocation,
+            // Built from the lock the turn actually runs against, so it cannot
+            // name one conversation while the events land in another.
+            InvocationContext {
+                workspace_id: self.workspace_id,
+                conversation_id: lock.id().to_string(),
+            },
             self.pending_trim,
         )
         .await
@@ -2095,14 +2114,17 @@ fn persist_config_reset(
 /// What a conversation would have to record to arrive at `cfg`.
 ///
 /// The difference between the configuration the stream already resolves to and
-/// the one a turn is about to run under, which is what `--cfg` amounts to: not
-/// a setting for one turn, but a change from this point on.
+/// the effective configuration this turn runs under, whichever layer produced
+/// it: a `--cfg` file, a command flag like `--model`, a named compaction
+/// setting.
+/// Recording it makes the change hold from this turn on rather than for this
+/// turn alone.
 /// `None` when the two agree and there is nothing to record.
 ///
 /// A field whose merge strategy cannot reach the new value carries it whole and
 /// has its path recorded in the returned `unsets`, which clear the field before
 /// the delta merges.
-pub(crate) fn get_config_delta_from_cli(
+pub(crate) fn turn_config_delta(
     cfg: &AppConfig,
     lock: &ConversationLock,
 ) -> Result<Option<ApplyDelta>> {

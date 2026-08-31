@@ -9,6 +9,27 @@ use url::Url;
 use super::*;
 use crate::{Globals, ctx::Ctx, error::Error};
 
+/// An `mcp+…` attachment is the one kind that cannot resolve until its server
+/// is running, so the query path holds it back until after the startup wait.
+#[test]
+fn only_mcp_attachments_wait_for_a_server() {
+    let mcp = Url::parse("mcp+github-mcp-server+repo://owner/repo/contents/README.md").unwrap();
+    assert!(needs_mcp_server(&mcp));
+
+    for other in [
+        "jp://17861332336",
+        "file://./README.md",
+        "https://example.com/page",
+        "cmd://git?arg=diff",
+    ] {
+        let url = Url::parse(other).unwrap();
+        assert!(
+            !needs_mcp_server(&url),
+            "{other} resolves without a running MCP server"
+        );
+    }
+}
+
 fn make_id(secs: u64) -> ConversationId {
     ConversationId::try_from(
         chrono::DateTime::<chrono::Utc>::UNIX_EPOCH + std::time::Duration::from_secs(secs),
