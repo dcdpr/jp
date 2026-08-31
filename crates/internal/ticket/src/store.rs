@@ -1,18 +1,24 @@
 //! Ticket files on disk: id allocation and the create, comment, close, and list
 //! operations.
 //!
-//! Ids come from a counter file rather than from the highest file in the
-//! directory, so deleting a ticket never frees its number for reuse.
-//! The counter is the authority; the files on disk are consulted only as a
-//! floor, so a counter that lost an increment to a bad merge still can't hand
-//! out an id that already exists.
+//! Ids carry a time bucket and a random tail rather than a counter, so two
+//! checkouts that cannot see each other still hand out different ids.
+//! Nothing coordinates allocation; see
+//! `docs/rfd/102-collision-resistant-ticket-identifiers.md`.
 
-use std::{fmt, fs, io};
+use std::{
+    collections::hash_map::RandomState,
+    fmt, fs,
+    hash::BuildHasher,
+    io::{self, Write},
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use camino::{Utf8Path, Utf8PathBuf};
 
 use crate::{
     Comment, Kind, ParseError, Status, Ticket, TicketId,
+    id::{MAX_BUCKET, TAIL_SPACE},
     import::{Import, escaped},
     parse, render,
 };
@@ -20,8 +26,12 @@ use crate::{
 /// Directory holding the ticket files, relative to the workspace root.
 pub const DEFAULT_DIR: &str = "docs/ticket";
 
-/// File holding the highest ticket id ever handed out.
-const COUNTER: &str = ".counter";
+/// Start of the id time range: `2026-08-10T00:00:00Z`, the day the ticket
+/// system went live.
+const EPOCH_SECS: u64 = 1_786_320_000;
+
+/// Seconds one id bucket spans.
+const BUCKET_SECS: u64 = 5;
 
 type Result<T> = std::result::Result<T, Error>;
 
@@ -34,6 +44,24 @@ pub enum Error {
     NoSuchComment { id: TicketId, position: usize },
     /// A ticket file that isn't a well-formed ticket.
     Parse(ParseError),
+    /// Two files claim the same id.
+    ///
+    /// Two checkouts drew one id and both branches landed.
+    Duplicate {
+        id: TicketId,
+        paths: Vec<Utf8PathBuf>,
+    },
+    /// A path that isn't a ticket file in the directory being written to.
+    NotATicketFile(Utf8PathBuf),
+    /// Every id drawn was already claimed on disk.
+    Contended,
+    /// The clock reads before the epoch ids are measured from.
+    ClockBeforeEpoch,
+    /// The time component has no bucket left to express.
+    ///
+    /// Allocation refuses rather than wrapping, which would reuse old time
+    /// prefixes, or widening, which would break the fixed-width form.
+    Exhausted,
     /// The filesystem said no.
     Io(io::Error),
 }
@@ -46,6 +74,26 @@ impl fmt::Display for Error {
                 write!(f, "{id} has no comment #{position} to reply to.")
             }
             Self::Parse(error) => error.fmt(f),
+            Self::Duplicate { id, paths } => {
+                let names = paths
+                    .iter()
+                    .map(|path| path.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                write!(f, "{id} is claimed by more than one file: {names}.")
+            }
+            Self::NotATicketFile(path) => {
+                write!(f, "{path} is not a ticket file in the ticket directory.")
+            }
+            Self::Contended => f.write_str(
+                "Every id drawn was already taken; another process is creating tickets.",
+            ),
+            Self::ClockBeforeEpoch => {
+                f.write_str("The system clock reads before 2026-08-10, when ticket ids start.")
+            }
+            Self::Exhausted => f.write_str(
+                "The ticket id format has no time buckets left; it needs a wider time component.",
+            ),
             Self::Io(error) => error.fmt(f),
         }
     }
@@ -77,14 +125,27 @@ impl From<io::Error> for Error {
 ///
 /// Listing keeps unreadable files rather than failing on them: one hand-mangled
 /// ticket shouldn't hide the rest of the board.
+#[derive(Debug)]
 pub struct Entry {
+    /// The id, which the filename carries and the document does not.
+    pub id: TicketId,
     pub path: Utf8PathBuf,
     pub ticket: std::result::Result<Ticket, ParseError>,
 }
 
+/// How many ids to draw before giving up on a contended directory.
+///
+/// Each attempt sees the file the previous one lost to, so the tail advances
+/// every round rather than redrawing into the same clash.
+const CLAIM_ATTEMPTS: usize = 16;
+
 /// Create a ticket at `Todo`, returning its id and path.
 ///
 /// `implements` names the RFD this work comes from, if any.
+///
+/// Creating the file exclusively is what claims the id: two processes drawing
+/// in the same bucket can land on one tail, and the loser finds out here rather
+/// than overwriting the winner's ticket.
 pub fn create(
     dir: &Utf8Path,
     kind: Kind,
@@ -94,14 +155,31 @@ pub fn create(
     implements: Option<&str>,
     description: &str,
 ) -> Result<(TicketId, Utf8PathBuf)> {
-    let id = allocate_id(dir)?;
-    let path = dir.join(format!("{}{}.md", id.file_prefix(), slug(title)));
-    fs::write(
-        &path,
-        render::ticket(id, title, kind, authors, date, implements, description),
-    )?;
+    let slug = slug(title);
 
-    Ok((id, path))
+    for _ in 0..CLAIM_ATTEMPTS {
+        let id = allocate_id(dir)?;
+        let path = dir.join(format!("{}{slug}.md", id.file_prefix()));
+
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(mut file) => {
+                let document = render::ticket(title, kind, authors, date, implements, description);
+                file.write_all(document.as_bytes())?;
+
+                return Ok((id, path));
+            }
+            // Another process claimed this id first. The next attempt sees its
+            // file and draws a higher tail.
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+
+    Err(Error::Contended)
 }
 
 /// Record that a ticket became an RFD, and close it.
@@ -137,7 +215,6 @@ pub fn edit(
 
     let updated = render::replace_content(
         &source,
-        id,
         title.unwrap_or(&ticket.title),
         description.unwrap_or(&ticket.description),
         &ticket.comments,
@@ -165,7 +242,8 @@ pub fn set_field(dir: &Utf8Path, id: TicketId, key: &str, value: &str) -> Result
 ///
 /// Unlike an RFD, a ticket can go: one carrying false claims or imported spam
 /// is removed outright so nothing reads it as true.
-/// Its number is not reused — the counter never goes backwards.
+/// Its id is not retired: a later creation in the same time bucket can draw it
+/// again.
 pub fn delete(dir: &Utf8Path, id: TicketId) -> Result<Utf8PathBuf> {
     let path = locate(dir, id)?;
     fs::remove_file(&path)?;
@@ -192,7 +270,9 @@ pub fn append_comment(
         Some(position) if position == 0 || position > count => {
             return Err(Error::NoSuchComment { id, position });
         }
-        Some(position) => Some(format!("{id}#{position}")),
+        // A reply always targets a comment on this ticket, so the position
+        // alone says everything. Nothing in a ticket names the ticket.
+        Some(position) => Some(format!("#{position}")),
         None => None,
     };
 
@@ -235,7 +315,7 @@ pub fn import(dir: &Utf8Path, upstream: &Import<'_>) -> Result<Imported> {
     });
 
     let (id, path, created) = if let Some(entry) = existing {
-        (entry.ticket.map_err(Error::Parse)?.id, entry.path, false)
+        (entry.id, entry.path, false)
     } else {
         let (id, path) = create(
             dir,
@@ -258,7 +338,7 @@ pub fn import(dir: &Utf8Path, upstream: &Import<'_>) -> Result<Imported> {
     };
 
     let source = fs::read_to_string(&path)?;
-    let updated = render::replace_content(&source, id, &title, &description, &comments)
+    let updated = render::replace_content(&source, &title, &description, &comments)
         .ok_or(ParseError::MissingMetadata)?;
     fs::write(&path, updated)?;
 
@@ -290,12 +370,20 @@ pub fn close(dir: &Utf8Path, id: TicketId) -> Result<(Utf8PathBuf, Status)> {
 /// Read every ticket in `dir`, ordered by id.
 ///
 /// A directory that doesn't exist yet holds no tickets.
+/// Two files claiming one id is an error: nothing downstream can tell which of
+/// them a reference means, so the board refuses to render rather than pick.
 pub fn list(dir: &Utf8Path) -> Result<Vec<Entry>> {
-    files(dir)?
+    let files = files(dir)?;
+    if let Some(error) = duplicate(&files) {
+        return Err(error);
+    }
+
+    files
         .into_iter()
-        .map(|(_, path)| {
+        .map(|(id, path)| {
             let source = fs::read_to_string(&path)?;
             Ok(Entry {
+                id,
                 ticket: parse::document(&source),
                 path,
             })
@@ -309,12 +397,24 @@ pub fn locate_ticket(dir: &Utf8Path, id: TicketId) -> Result<Utf8PathBuf> {
 }
 
 /// Resolve a ticket id to its file.
+///
+/// Two files claiming the id is an error rather than a choice: a write by id
+/// would otherwise land on whichever one the directory happened to yield first.
 fn locate(dir: &Utf8Path, id: TicketId) -> Result<Utf8PathBuf> {
-    files(dir)?
+    let mut claiming: Vec<Utf8PathBuf> = files(dir)?
         .into_iter()
-        .find(|(found, _)| *found == id)
+        .filter(|(found, _)| *found == id)
         .map(|(_, path)| path)
-        .ok_or(Error::NoSuchTicket(id))
+        .collect();
+
+    if claiming.len() > 1 {
+        return Err(Error::Duplicate {
+            id,
+            paths: claiming,
+        });
+    }
+
+    claiming.pop().ok_or(Error::NoSuchTicket(id))
 }
 
 /// Every `NNNN-slug.md` in `dir`, paired with its id and ordered by it.
@@ -349,24 +449,184 @@ fn files(dir: &Utf8Path) -> Result<Vec<(TicketId, Utf8PathBuf)>> {
     Ok(files)
 }
 
-/// Hand out the next id, recording it in the counter file.
+/// The reference token and slug of `path`, when it is a ticket file directly
+/// inside `dir`.
+///
+/// The token is the id as other documents write it: `T-02wt0kx` now, `T0005`
+/// for a ticket left in the pre-RFD-102 format, which is exactly what a
+/// migration reassigns.
+fn ticket_filename<'a>(dir: &Utf8Path, path: &'a Utf8Path) -> Option<(String, &'a str)> {
+    if !same_directory(dir, path.parent()?) || path.extension() != Some("md") {
+        return None;
+    }
+
+    let (id, slug) = path.file_stem()?.split_once('-')?;
+    if slug.is_empty() {
+        return None;
+    }
+
+    if id.len() == 4 && id.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Some((format!("T{id}"), slug));
+    }
+
+    id.parse::<TicketId>().ok().map(|id| (id.to_string(), slug))
+}
+
+/// Whether two paths name the same directory.
+///
+/// A repository reached through a symlink — `/tmp` on macOS, a linked home —
+/// has two spellings for one directory, and comparing the strings alone would
+/// reject a ticket sitting right where it belongs.
+fn same_directory(left: &Utf8Path, right: &Utf8Path) -> bool {
+    if left == right {
+        return true;
+    }
+
+    match (left.canonicalize_utf8(), right.canonicalize_utf8()) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
+    }
+}
+
+/// The first id claimed by more than one file, if any.
+///
+/// `files` is ordered by id, so duplicates are adjacent.
+fn duplicate(files: &[(TicketId, Utf8PathBuf)]) -> Option<Error> {
+    files
+        .windows(2)
+        .find(|pair| pair[0].0 == pair[1].0)
+        .map(|pair| Error::Duplicate {
+            id: pair[0].0,
+            paths: vec![pair[0].1.clone(), pair[1].1.clone()],
+        })
+}
+
+/// Hand out an id for a ticket about to be written.
+///
+/// The time component comes from the clock; the tail is random, except when
+/// this bucket already holds an id.
+/// Then it continues from the highest one, so tickets created back to back stay
+/// in creation order rather than shuffling.
+///
+/// An id sitting in a *future* bucket is ignored rather than continued from:
+/// one merged ticket from a machine with a fast clock would otherwise drag
+/// every later local timestamp forward with it.
 fn allocate_id(dir: &Utf8Path) -> Result<TicketId> {
+    allocate_in(dir, current_bucket()?)
+}
+
+/// Hand out an id in `bucket`, or the first bucket after it with room.
+fn allocate_in(dir: &Utf8Path, mut bucket: u32) -> Result<TicketId> {
     fs::create_dir_all(dir)?;
 
-    let counter = fs::read_to_string(dir.join(COUNTER))
+    let existing: Vec<TicketId> = files(dir)?.into_iter().map(|(id, _)| id).collect();
+
+    loop {
+        let highest = existing.iter().rev().find(|id| id.bucket() == bucket);
+        let tail = match highest {
+            Some(id) => match id.tail() + 1 {
+                // The bucket is full, which takes 1,024 tickets in five
+                // seconds. Move to the next one rather than reusing a tail.
+                next if next >= TAIL_SPACE => {
+                    bucket += 1;
+                    continue;
+                }
+                next => next,
+            },
+            None => random_tail(),
+        };
+
+        return TicketId::new(bucket, tail).ok_or(Error::Exhausted);
+    }
+}
+
+/// The bucket a unix timestamp falls in.
+///
+/// # Errors
+///
+/// Returns an error when the timestamp predates the epoch ids are measured
+/// from, or falls past the last bucket the format can express.
+pub fn bucket_at(unix_seconds: u64) -> Result<u32> {
+    let bucket = unix_seconds
+        .checked_sub(EPOCH_SECS)
+        .ok_or(Error::ClockBeforeEpoch)?
+        / BUCKET_SECS;
+
+    u32::try_from(bucket)
         .ok()
-        .and_then(|text| text.trim().parse::<u32>().ok())
-        .unwrap_or(0);
-    let highest = files(dir)?
-        .into_iter()
-        .map(|(id, _)| id.number())
-        .max()
-        .unwrap_or(0);
+        .filter(|bucket| *bucket < MAX_BUCKET)
+        .ok_or(Error::Exhausted)
+}
 
-    let next = counter.max(highest) + 1;
-    fs::write(dir.join(COUNTER), format!("{next}\n"))?;
+/// What a reassignment changed.
+#[derive(Debug)]
+pub struct Reassigned {
+    /// The reference token the ticket is leaving behind, as other documents
+    /// write it.
+    ///
+    /// A string rather than a [`TicketId`], so a ticket from an older format
+    /// can report `T0005`.
+    pub old: String,
+    pub new: TicketId,
+    pub path: Utf8PathBuf,
+}
 
-    Ok(TicketId::new(next))
+/// Give the ticket at `path` a new id by renaming its file.
+///
+/// `bucket` places the new id in time; pass the one the ticket was created in
+/// so it keeps its position relative to everything around it.
+/// The slug is kept, and references held by other files are the caller's to fix
+/// — nothing here knows which of them meant this ticket.
+///
+/// The document is not touched: a ticket names itself nowhere inside its own
+/// file, so moving the file is the whole operation.
+///
+/// `path` must name a ticket file directly inside `dir`, or an unrelated file
+/// would be renamed into the ticket directory.
+pub fn reassign(dir: &Utf8Path, path: &Utf8Path, bucket: u32) -> Result<Reassigned> {
+    let (old, slug) =
+        ticket_filename(dir, path).ok_or_else(|| Error::NotATicketFile(path.to_path_buf()))?;
+
+    let new = allocate_in(dir, bucket)?;
+    let target = dir.join(format!("{}{slug}.md", new.file_prefix()));
+    if target != path {
+        fs::rename(path, &target)?;
+    }
+
+    Ok(Reassigned {
+        old,
+        new,
+        path: target,
+    })
+}
+
+/// The bucket the current time falls in.
+///
+/// # Errors
+///
+/// Returns an error when the clock reads before the epoch, or past the last
+/// bucket the format can express.
+pub fn current_bucket() -> Result<u32> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|_| Error::ClockBeforeEpoch)?
+        .as_secs();
+
+    bucket_at(now)
+}
+
+/// A random tail.
+///
+/// `RandomState` is seeded by the OS once per thread and advances per call, so
+/// two processes starting in the same second draw independently.
+/// Independent is not distinct: ten bits leave a 1-in-1,024 chance they land on
+/// the same tail, which is the collision `store::list` and the docs build exist
+/// to catch.
+/// Ten bits do not warrant a dependency on a generator.
+fn random_tail() -> u16 {
+    let value = RandomState::new().hash_one(SystemTime::now()) % u64::from(TAIL_SPACE);
+
+    u16::try_from(value).unwrap_or_default()
 }
 
 /// Build the filename slug from a title.

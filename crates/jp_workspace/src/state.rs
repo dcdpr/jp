@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    sync::{Arc, OnceLock},
+    sync::{Arc, OnceLock, atomic::AtomicBool},
 };
 
 use jp_conversation::{Conversation, ConversationId, ConversationStream};
@@ -31,4 +31,16 @@ pub(super) struct State {
     /// Populated from the cross-root index load and a conversation's creation
     /// intent.
     pub(super) presence: HashMap<ConversationId, StoragePresence>,
+
+    /// Whether each conversation has ever been written to the store.
+    ///
+    /// Shared with any lock held on the conversation, which is what sets it: a
+    /// write happens under a lock, and a lock has no route back here.
+    ///
+    /// The question it answers is "have we written this", not "is it on disk
+    /// now" — an index scan already reports the latter.
+    /// Only the former can tell a conversation created moments ago from one
+    /// another process has since deleted, because both are absent from the
+    /// scan.
+    pub(super) written: HashMap<ConversationId, Arc<AtomicBool>>,
 }

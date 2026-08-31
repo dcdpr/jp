@@ -20,4 +20,17 @@ pub trait SessionBackend: Send + Sync + Debug {
 
     /// List all session mapping keys.
     fn list_session_keys(&self) -> Vec<String>;
+
+    /// Whether writes through this backend are discarded.
+    ///
+    /// A read-only backend still serves [`load_session`] and
+    /// [`list_session_keys`]; [`save_session`] reports success without storing
+    /// anything.
+    ///
+    /// [`list_session_keys`]: Self::list_session_keys
+    /// [`load_session`]: Self::load_session
+    /// [`save_session`]: Self::save_session
+    fn is_read_only(&self) -> bool {
+        false
+    }
 }

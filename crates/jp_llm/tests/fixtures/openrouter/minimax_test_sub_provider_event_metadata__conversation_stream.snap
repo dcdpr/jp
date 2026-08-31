@@ -223,6 +223,7 @@ expression: v
         "assistant": {
           "model": {
             "id": {
+              "provider": "openrouter",
               "name": "minimax/minimax-m2"
             }
           }

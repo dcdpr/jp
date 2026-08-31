@@ -148,19 +148,6 @@ pub fn with_output_limit(stream: EventStream, max_bytes: u64) -> EventStream {
     .boxed()
 }
 
-/// Translate a configured output ceiling into the argument for
-/// [`with_output_limit`], where `0` means the ceiling is disabled.
-///
-/// Returns `None` when no ceiling applies, in which case the caller leaves the
-/// stream unwrapped.
-#[must_use]
-pub fn output_limit_bytes(configured: u32) -> Option<u64> {
-    match configured {
-        0 => None,
-        bytes => Some(u64::from(bytes)),
-    }
-}
-
 /// Byte size of the generated content carried by a stream item.
 ///
 /// A tool call's `id` and `name` are generated response bytes too, so a stream

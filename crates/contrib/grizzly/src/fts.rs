@@ -4,7 +4,9 @@
 //! then queries them with BM25 ranking (unicode61 tokenizer) or substring
 //! matching (trigram tokenizer).
 
-use rusqlite::Connection;
+use std::rc::Rc;
+
+use rusqlite::{Connection, types::Value};
 
 use crate::Result;
 
@@ -53,18 +55,30 @@ pub fn setup_trigram_table(conn: &Connection, cte: &str) -> Result<()> {
     Ok(())
 }
 
+/// The note IDs a search is allowed to return, when it is narrowed at all.
+///
+/// `None` means unrestricted.
+/// Shared rather than owned because `rarray` binds it by reference.
+pub type AllowedIds = Option<Rc<Vec<Value>>>;
+
 /// Search the word-based FTS5 table.
-pub fn search_words(conn: &Connection, queries: &[String], limit: usize) -> Result<Vec<FtsResult>> {
-    query_table(conn, "fts_notes", &build_query(queries), limit)
+pub fn search_words(
+    conn: &Connection,
+    queries: &[String],
+    allowed: AllowedIds,
+    limit: usize,
+) -> Result<Vec<FtsResult>> {
+    query_table(conn, "fts_notes", &build_query(queries), allowed, limit)
 }
 
 /// Search the trigram FTS5 table.
 pub fn search_trigrams(
     conn: &Connection,
     queries: &[String],
+    allowed: AllowedIds,
     limit: usize,
 ) -> Result<Vec<FtsResult>> {
-    query_table(conn, "fts_trigram", &build_query(queries), limit)
+    query_table(conn, "fts_trigram", &build_query(queries), allowed, limit)
 }
 
 /// Build an FTS5 MATCH query from user search terms.
@@ -88,18 +102,35 @@ fn query_table(
     conn: &Connection,
     table: &str,
     fts_query: &str,
+    allowed: AllowedIds,
     limit: usize,
 ) -> Result<Vec<FtsResult>> {
+    // `note_id` is stored (UNINDEXED) on the table, so the narrowing sits in
+    // the same statement as the MATCH and `LIMIT` applies to what survives it.
+    let narrowing = if allowed.is_some() {
+        " AND note_id IN rarray(?3)"
+    } else {
+        ""
+    };
+
     let sql = format!(
-        "SELECT note_id, title, content, rank FROM temp.{table} WHERE {table} MATCH ?1 ORDER BY \
-         rank LIMIT ?2"
+        "SELECT note_id, title, content, rank FROM temp.{table} WHERE {table} MATCH ?1{narrowing} \
+         ORDER BY rank LIMIT ?2"
     );
 
     #[allow(clippy::cast_possible_wrap)]
     let limit = limit as i64;
+
+    let mut binds: Vec<Box<dyn rusqlite::types::ToSql>> =
+        vec![Box::new(fts_query.to_owned()), Box::new(limit)];
+    if let Some(allowed) = allowed {
+        binds.push(Box::new(allowed));
+    }
+    let refs: Vec<&dyn rusqlite::types::ToSql> = binds.iter().map(AsRef::as_ref).collect();
+
     let mut stmt = conn.prepare(&sql)?;
     let results = stmt
-        .query_map(rusqlite::params![fts_query, limit], |row| {
+        .query_map(refs.as_slice(), |row| {
             Ok(FtsResult {
                 note_id: row.get(0)?,
                 title: row.get(1)?,

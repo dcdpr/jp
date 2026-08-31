@@ -13,7 +13,7 @@ ticket that needs it should have been closed and split.
 
 examples = """
 ```json
-{"id": "T0042"}
+{"id": "T-02wt0kx"}
 ```
 """
 
@@ -25,4 +25,4 @@ results_file_link = "off"
 [conversation.tools.ticket_show.parameters.id]
 type = "string"
 required = true
-summary = "The ticket to read: `42`, `042`, or `T0042`."
+summary = "The ticket to read: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`."

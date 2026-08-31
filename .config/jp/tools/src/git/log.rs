@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8Path;
 use serde_json::{Map, Value};
 
 use super::env_from_options;
@@ -32,7 +32,7 @@ struct LogEntry {
 }
 
 pub(crate) async fn git_log(
-    root: Utf8PathBuf,
+    root: &Utf8Path,
     query: Option<String>,
     content: Option<String>,
     content_regex: Option<bool>,
@@ -47,7 +47,7 @@ pub(crate) async fn git_log(
     let paths = paths.iter().map(AsRef::as_ref).collect::<Vec<_>>();
 
     git_log_impl(
-        &root,
+        root,
         query.as_deref(),
         content.as_deref(),
         content_regex.unwrap_or(false),

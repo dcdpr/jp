@@ -8,7 +8,7 @@
 
 use std::{collections::HashMap, fmt::Write};
 
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8Path;
 use chrono::{FixedOffset, TimeZone};
 use serde_json::{Map, Value};
 
@@ -64,7 +64,7 @@ struct BlameOutput {
 }
 
 pub(crate) async fn git_blame(
-    root: Utf8PathBuf,
+    root: &Utf8Path,
     path: String,
     start_line: usize,
     end_line: usize,
@@ -75,7 +75,7 @@ pub(crate) async fn git_blame(
     let env = env_from_options(options);
 
     git_blame_impl(
-        &root,
+        root,
         &path,
         start_line,
         end_line,

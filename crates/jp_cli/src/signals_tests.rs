@@ -5,8 +5,21 @@ use tokio::sync::mpsc::{self, error::TryRecvError};
 use super::*;
 
 /// Push a handler scope onto the router state.
-fn push_handler(inner: &Arc<RouterInner>) -> (InterruptGuard, mpsc::Receiver<()>) {
+fn push_handler(inner: &Arc<RouterInner>) -> (InterruptGuard, mpsc::Receiver<InterruptNotice>) {
     inner.push_handler()
+}
+
+/// Take a delivered press off the channel and drop it unresolved.
+///
+/// Dropping models a handler that was notified but neither acted on the press
+/// nor declined it, which is what keeps it on the escalation ladder.
+fn took_notice(rx: &mut mpsc::Receiver<InterruptNotice>) -> bool {
+    rx.try_recv().is_ok()
+}
+
+/// Why no press was waiting on the channel.
+fn recv_error(rx: &mut mpsc::Receiver<InterruptNotice>) -> Option<TryRecvError> {
+    rx.try_recv().err()
 }
 
 #[test]
@@ -26,8 +39,8 @@ fn interrupt_notifies_topmost_handler_only() {
     let now = Instant::now();
 
     assert_eq!(inner.route_at(OsSignal::Interrupt, now), Routed::Handler);
-    assert_eq!(rx_top.try_recv(), Ok(()));
-    assert_eq!(rx_bottom.try_recv(), Err(TryRecvError::Empty));
+    assert!(took_notice(&mut rx_top));
+    assert_eq!(recv_error(&mut rx_bottom), Some(TryRecvError::Empty));
     assert!(!inner.shutdown_token.is_cancelled());
 }
 
@@ -38,7 +51,8 @@ fn second_interrupt_within_cooldown_bypasses_handlers() {
     let now = Instant::now();
 
     assert_eq!(inner.route_at(OsSignal::Interrupt, now), Routed::Handler);
-    assert_eq!(rx.try_recv(), Ok(()));
+    // Taken and dropped unresolved: the handler did nothing with the press.
+    assert!(took_notice(&mut rx));
 
     let second = now + Duration::from_millis(500);
     assert_eq!(
@@ -47,7 +61,7 @@ fn second_interrupt_within_cooldown_bypasses_handlers() {
     );
     assert!(inner.shutdown_token.is_cancelled());
     // The handler was bypassed: no second notification.
-    assert_eq!(rx.try_recv(), Err(TryRecvError::Empty));
+    assert_eq!(recv_error(&mut rx), Some(TryRecvError::Empty));
 }
 
 #[test]
@@ -83,12 +97,32 @@ fn cooldown_resets_escalation_counter() {
     let now = Instant::now();
 
     assert_eq!(inner.route_at(OsSignal::Interrupt, now), Routed::Handler);
-    assert_eq!(rx.try_recv(), Ok(()));
+    assert!(took_notice(&mut rx));
 
     // Past the cooldown, the next press counts as a fresh first press.
     let later = now + Duration::from_secs(3);
     assert_eq!(inner.route_at(OsSignal::Interrupt, later), Routed::Handler);
-    assert_eq!(rx.try_recv(), Ok(()));
+    assert!(took_notice(&mut rx));
+    assert!(!inner.shutdown_token.is_cancelled());
+}
+
+#[test]
+fn answered_interrupt_resets_escalation_counter() {
+    let inner = RouterInner::new(Duration::from_secs(2));
+    let (_guard, mut rx) = push_handler(&inner);
+    let now = Instant::now();
+
+    // The handler showed its menu and the user answered it.
+    assert_eq!(inner.route_at(OsSignal::Interrupt, now), Routed::Handler);
+    rx.try_recv()
+        .expect("the handler should be notified")
+        .handled();
+
+    // Well inside the cooldown, but the previous press was answered, so this
+    // one opens the menu again rather than escalating past it.
+    let second = now + Duration::from_millis(1400);
+    assert_eq!(inner.route_at(OsSignal::Interrupt, second), Routed::Handler);
+    assert!(took_notice(&mut rx));
     assert!(!inner.shutdown_token.is_cancelled());
 }
 
@@ -104,8 +138,8 @@ fn full_notification_channel_counts_as_notified() {
     // press (past the cooldown) is a no-op send, not an error.
     let later = now + Duration::from_secs(3);
     assert_eq!(inner.route_at(OsSignal::Interrupt, later), Routed::Handler);
-    assert_eq!(rx.try_recv(), Ok(()));
-    assert_eq!(rx.try_recv(), Err(TryRecvError::Empty));
+    assert!(took_notice(&mut rx));
+    assert_eq!(recv_error(&mut rx), Some(TryRecvError::Empty));
 }
 
 #[test]
@@ -131,9 +165,9 @@ fn dropping_guard_deregisters_handler() {
     drop(guard_top);
 
     assert_eq!(inner.route_at(OsSignal::Interrupt, now), Routed::Handler);
-    assert_eq!(rx_bottom.try_recv(), Ok(()));
+    assert!(took_notice(&mut rx_bottom));
     // Deregistration dropped the stored sender without ever notifying.
-    assert_eq!(rx_top.try_recv(), Err(TryRecvError::Disconnected));
+    assert_eq!(recv_error(&mut rx_top), Some(TryRecvError::Disconnected));
 }
 
 #[test]
@@ -148,9 +182,9 @@ fn guards_can_drop_out_of_order() {
     drop(guard_bottom);
 
     assert_eq!(inner.route_at(OsSignal::Interrupt, now), Routed::Handler);
-    assert_eq!(rx_top.try_recv(), Ok(()));
+    assert!(took_notice(&mut rx_top));
     // Deregistration dropped the stored sender without ever notifying.
-    assert_eq!(rx_bottom.try_recv(), Err(TryRecvError::Disconnected));
+    assert_eq!(recv_error(&mut rx_bottom), Some(TryRecvError::Disconnected));
 }
 
 #[test]
@@ -169,7 +203,7 @@ fn terminate_bypasses_handler_stack() {
     let now = Instant::now();
 
     assert_eq!(inner.route_at(OsSignal::Terminate, now), Routed::Shutdown);
-    assert_eq!(rx.try_recv(), Err(TryRecvError::Empty));
+    assert_eq!(recv_error(&mut rx), Some(TryRecvError::Empty));
     assert!(inner.shutdown_token.is_cancelled());
 }
 
@@ -190,8 +224,8 @@ fn decline_notifies_next_handler_down() {
 
     inner.notify_next_or_shutdown();
 
-    assert_eq!(rx_bottom.try_recv(), Ok(()));
-    assert_eq!(rx_top.try_recv(), Err(TryRecvError::Empty));
+    assert!(took_notice(&mut rx_bottom));
+    assert_eq!(recv_error(&mut rx_top), Some(TryRecvError::Empty));
     assert!(!inner.shutdown_token.is_cancelled());
 }
 
@@ -202,7 +236,7 @@ fn decline_with_single_handler_requests_shutdown() {
 
     inner.notify_next_or_shutdown();
 
-    assert_eq!(rx.try_recv(), Err(TryRecvError::Empty));
+    assert_eq!(recv_error(&mut rx), Some(TryRecvError::Empty));
     assert!(inner.shutdown_token.is_cancelled());
 }
 
@@ -229,10 +263,14 @@ async fn escalation_ladder_reaches_exit_through_signal_task() {
 
     // First press: notifies the topmost handler; no shutdown, no exit.
     signals.interrupt().await;
-    interrupt_rx
-        .recv()
-        .await
-        .expect("handler should be notified");
+    // Dropped unresolved: this handler was notified but did nothing with the
+    // press, which is what leaves it on the ladder for the next one.
+    drop(
+        interrupt_rx
+            .recv()
+            .await
+            .expect("handler should be notified"),
+    );
     assert!(!router.shutdown_token().is_cancelled());
     assert!(signals.exit_codes().is_empty());
 

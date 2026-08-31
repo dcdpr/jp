@@ -42,7 +42,7 @@ command = [
     "--hide-progress-bar",
     "--failure-output",
     "final",
-    "--profile=nextest",
+    "--cargo-profile=nextest",
 ]
 need_stdout = true
 analyzer = "nextest"

@@ -6,8 +6,8 @@ use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::{PartialConfigDelta, delta_opt, delta_opt_vec},
     fill::FillDefaults,
+    internal::merge::append_vec_dedup,
     partial::{ToPartial, partial_opt},
-    util,
 };
 
 /// Anthropic API configuration.
@@ -38,7 +38,7 @@ pub struct AnthropicConfig {
     ///
     /// To find out which beta headers are available, see:
     /// <https://docs.anthropic.com/en/release-notes/api>
-    #[setting(default = vec![], merge = schematic::merge::append_vec, transform = util::vec_dedup)]
+    #[setting(default = vec![], merge = append_vec_dedup)]
     pub beta_headers: Vec<String>,
 }
 

@@ -25,6 +25,14 @@ fn truncate_cuts_on_char_boundary() {
 }
 
 #[test]
+fn quote_marks_every_line_and_nests() {
+    assert_eq!(quote("one\n\ntwo\n"), "> one\n>\n> two\n");
+    // Quoting the result again is how a quoted parent comment ends up reading
+    // as a quote inside the preview.
+    assert_eq!(quote(&quote("one\n\ntwo\n")), "> > one\n> >\n> > two\n");
+}
+
+#[test]
 fn test_one_or_many_one() {
     let mut v = OneOrMany::One(1);
 

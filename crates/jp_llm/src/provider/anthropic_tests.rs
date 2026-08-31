@@ -1965,6 +1965,61 @@ fn test_create_request_falls_back_to_think_tags_without_signature() {
     ));
 }
 
+/// Anthropic can return a thinking block that carries a signature but no text.
+/// Once a repair patch strips the signature, nothing is left to send, and
+/// replaying it as an empty `<think></think>` pair would spend tokens on
+/// nothing.
+#[test]
+fn test_create_request_drops_empty_reasoning_instead_of_empty_think_tags() {
+    let model = ModelDetails {
+        id: (PROVIDER, "claude-sonnet-4-5").try_into().unwrap(),
+        display_name: None,
+        context_window: Some(200_000),
+        max_output_tokens: Some(64_000),
+        reasoning: Some(ReasoningDetails::budgetted(1024, None)),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: Some(true),
+        features: vec![],
+    };
+
+    let mut events = ConversationStream::new_test();
+    events.start_turn("First question");
+    events.extend([
+        // A signed-but-textless block whose signature a patch removed.
+        ConversationEvent::now(ChatResponse::reasoning("")),
+        ConversationEvent::now(ChatResponse::message("Visible answer")),
+    ]);
+    events.start_turn("Follow-up question");
+
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+    };
+
+    let beta = BetaFeatures(vec![]);
+    let (request, _, _) = create_request(&model, query, true, &beta).unwrap();
+
+    let assistant = &request.messages[1];
+    assert_eq!(assistant.role, types::MessageRole::Assistant);
+    assert_eq!(
+        assistant.content.0.len(),
+        1,
+        "the empty reasoning event contributes no content block"
+    );
+    assert!(matches!(
+        &assistant.content.0[0],
+        types::MessageContent::Text(text) if text.text == "Visible answer"
+    ));
+}
+
 /// When the conversation ends with an assistant turn carrying signed thinking
 /// (a resumed/continued turn), that thinking must be rewritten as `<think>`
 /// text rather than re-sent as a native block, which Anthropic rejects in the
@@ -2774,11 +2829,15 @@ mod thinking_signature_recovery {
         ]
     }
 
-    /// Anthropic requires the latest assistant message to carry its thinking
-    /// blocks back exactly as generated, so downgrading only the block named in
-    /// the error is rejected on the next request with `cannot be modified`.
+    /// Anthropic requires a turn to carry its thinking blocks back exactly as
+    /// generated, so downgrading only the block named in the error is rejected
+    /// on the next request with `cannot be modified`.
+    ///
+    /// The turn spans several of our messages, and every thinking block in all
+    /// of them has to go — including `sig_early`, which sits in the turn's
+    /// first message, two messages before the one the error names.
     #[test]
-    fn latest_assistant_message_downgrades_every_thinking_block() {
+    fn rejected_block_downgrades_every_thinking_block_in_its_turn() {
         let request = request(interleaved_thinking_conversation());
 
         // Flat index 5 is the first signed block in the newest assistant
@@ -2791,6 +2850,7 @@ mod thinking_signature_recovery {
         let patches = patches_for(&request, &error).unwrap();
 
         assert_eq!(patch_targets(&patches), [
+            ("anthropic_thinking_signature", "sig_early"),
             ("anthropic_redacted_thinking", "r0"),
             ("anthropic_redacted_thinking", "r1"),
             ("anthropic_thinking_signature", "sig_3"),
@@ -2871,11 +2931,14 @@ mod thinking_signature_recovery {
         ]);
     }
 
-    /// Turns before the final one carry no immutability constraint, so a stale
-    /// signature there is repaired in place, leaving that turn's other
-    /// reasoning native.
+    /// Models that retain prior turns' thinking validate those turns too, so a
+    /// rejection naming an older turn gets the same whole-turn downgrade as one
+    /// naming the newest.
+    ///
+    /// Turns other than the named one keep their reasoning native: `sig_2` in
+    /// the following turn is untouched.
     #[test]
-    fn earlier_turn_downgrades_only_the_named_block() {
+    fn earlier_turn_downgrades_every_block_in_that_turn_only() {
         let request = request(vec![
             msg(MessageRole::User, vec![make_text("first")]),
             msg(MessageRole::Assistant, vec![
@@ -2895,10 +2958,44 @@ mod thinking_signature_recovery {
 
         let patches = patches_for(&request, &error).unwrap();
 
-        assert_eq!(patch_targets(&patches), [(
-            "anthropic_thinking_signature",
-            "sig_1"
-        )]);
+        assert_eq!(patch_targets(&patches), [
+            ("anthropic_thinking_signature", "sig_0"),
+            ("anthropic_thinking_signature", "sig_1"),
+        ]);
+    }
+
+    /// A position can parse and resolve, yet land in a turn carrying no native
+    /// thinking — our turn model disagreeing with the one the API reports
+    /// against.
+    /// The repair falls back to a turn that does carry thinking, and still
+    /// downgrades the whole of it: emitting a single patch there would be the
+    /// partial rewrite the API refuses, costing another round.
+    #[test]
+    fn position_resolving_into_a_thinkingless_turn_still_downgrades_a_whole_turn() {
+        let request = request(vec![
+            msg(MessageRole::User, vec![make_text("first")]),
+            // Turn 1: resolvable, but text only.
+            msg(MessageRole::Assistant, vec![make_text("plain answer")]),
+            msg(MessageRole::User, vec![make_text("second")]),
+            msg(MessageRole::Assistant, vec![
+                make_thinking("t_a", "sig_a"),
+                make_thinking("t_b", "sig_b"),
+                make_text("answer"),
+            ]),
+        ]);
+
+        // Flat index 0 of turn 1 is the text block in messages[1].
+        let error = StreamError::other(
+            "api error: invalid_request_error: messages.1.content.0: `thinking` or \
+             `redacted_thinking` blocks in the latest assistant message cannot be modified.",
+        );
+
+        let patches = patches_for(&request, &error).unwrap();
+
+        assert_eq!(patch_targets(&patches), [
+            ("anthropic_thinking_signature", "sig_a"),
+            ("anthropic_thinking_signature", "sig_b"),
+        ]);
     }
 
     /// A conversation left half-downgraded by an earlier one-block-at-a-time

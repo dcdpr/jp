@@ -11,7 +11,7 @@ use std::{collections::HashMap, sync::Arc};
 use camino::Utf8PathBuf;
 use chrono::Utc;
 use jp_config::{
-    AppConfig, PartialAppConfig,
+    PartialAppConfig,
     conversation::tool::{
         ToolConfigWithDefaults, ToolsConfig,
         style::{DisplayStyleConfig, ParametersStyle},
@@ -261,7 +261,7 @@ impl TurnRenderer {
         let assistant_name = partial.assistant.name.clone();
         let model_id = render_model_id(&partial.assistant.model.id);
 
-        let config = match AppConfig::from_partial_with_defaults(partial.clone()) {
+        let config = match jp_config::util::build(partial.clone()) {
             Ok(config) => config,
             Err(err) => {
                 warn!(%err, "Failed to build per-turn config, keeping current config.");

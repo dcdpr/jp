@@ -5,7 +5,7 @@ use crate::{Kind, Status};
 
 /// A ticket with a description and no comments.
 const PLAIN: &str = indoc! {"
-    # T0042: Tool call header misaligned
+    # Tool call header misaligned
 
     - **Status**: Todo
     - **Kind**: Bug
@@ -17,7 +17,7 @@ const PLAIN: &str = indoc! {"
 
 /// The same ticket after two comments.
 const WITH_COMMENTS: &str = indoc! {"
-    # T0042: Tool call header misaligned
+    # Tool call header misaligned
 
     - **Status**: In Progress
     - **Kind**: Bug
@@ -40,7 +40,7 @@ const WITH_COMMENTS: &str = indoc! {"
 
     - **From**: jp
     - **Date**: 2026-08-05T14:31:02Z
-    - **Re**: T0042#1
+    - **Re**: #1
 
     The wrap calculation uses the pre-indent width.
 "};
@@ -49,7 +49,6 @@ const WITH_COMMENTS: &str = indoc! {"
 fn reads_title_metadata_and_description() {
     let ticket = document(PLAIN).unwrap();
 
-    assert_eq!(ticket.id.to_string(), "T0042");
     assert_eq!(ticket.title, "Tool call header misaligned");
     assert_eq!(ticket.metadata.status, Status::Todo);
     assert_eq!(ticket.metadata.kind, Kind::Bug);
@@ -85,7 +84,7 @@ fn reads_comments_in_order() {
         "Reproduced at 72 columns. Not at 80."
     );
     assert_eq!(ticket.comments[1].from, "jp");
-    assert_eq!(ticket.comments[1].re.as_deref(), Some("T0042#1"));
+    assert_eq!(ticket.comments[1].re.as_deref(), Some("#1"));
     assert_eq!(
         ticket.comments[1].body,
         "The wrap calculation uses the pre-indent width."
@@ -104,7 +103,7 @@ fn description_stops_at_the_first_comment() {
 #[test]
 fn separators_inside_fenced_blocks_are_not_boundaries() {
     let source = indoc! {"
-        # T0001: Quoting a ticket
+        # Quoting a ticket
 
         - **Status**: Todo
         - **Kind**: Chore
@@ -143,7 +142,7 @@ fn separators_inside_fenced_blocks_are_not_boundaries() {
 #[test]
 fn longer_fences_contain_shorter_ones() {
     let source = indoc! {"
-        # T0001: Nested fences
+        # Nested fences
 
         - **Status**: Todo
         - **Kind**: Chore
@@ -182,7 +181,7 @@ fn longer_fences_contain_shorter_ones() {
 #[test]
 fn separator_without_a_metadata_block_is_not_a_boundary() {
     let source = indoc! {"
-        # T0001: Horizontal rules
+        # Horizontal rules
 
         - **Status**: Todo
         - **Kind**: Chore
@@ -207,7 +206,7 @@ fn separator_without_a_metadata_block_is_not_a_boundary() {
 #[test]
 fn comments_heading_alone_creates_no_comments() {
     let source = indoc! {"
-        # T0001: Decorative heading
+        # Decorative heading
 
         - **Status**: Todo
         - **Kind**: Chore
@@ -232,6 +231,32 @@ fn counts_comments_without_validating_the_header() {
     assert_eq!(comment_count("no ticket here"), 0);
 }
 
+/// A ticket whose metadata block is missing a field still has a readable title,
+/// and an append never needs the rest of the header.
+#[test]
+fn reads_the_title_without_validating_the_header() {
+    let headerless = indoc! {"
+        # Tool call header misaligned
+
+        - **Status**: Todo
+        - **Kind**: Bug
+        - **Date**: 2026-08-05
+
+        The header renders one column left of the body.
+    "};
+
+    assert_eq!(
+        document(headerless),
+        Err(ParseError::MissingField("Authors"))
+    );
+    assert_eq!(
+        title(headerless).as_deref(),
+        Some("Tool call header misaligned")
+    );
+    assert_eq!(title(PLAIN).as_deref(), Some("Tool call header misaligned"));
+    assert_eq!(title("no ticket here"), None);
+}
+
 #[test]
 fn rejects_a_document_without_a_title() {
     let source = "- **Status**: Todo\n";
@@ -241,7 +266,7 @@ fn rejects_a_document_without_a_title() {
 
 #[test]
 fn rejects_a_title_without_a_metadata_block() {
-    let source = "# T0001: Bare\n\nJust prose.\n";
+    let source = "# Bare\n\nJust prose.\n";
 
     assert_eq!(document(source), Err(ParseError::MissingMetadata));
 }
@@ -249,7 +274,7 @@ fn rejects_a_title_without_a_metadata_block() {
 #[test]
 fn rejects_a_missing_required_field() {
     let source = indoc! {"
-        # T0001: No kind
+        # No kind
 
         - **Status**: Todo
         - **Authors**: jean
@@ -262,7 +287,7 @@ fn rejects_a_missing_required_field() {
 #[test]
 fn rejects_an_unknown_status() {
     let source = indoc! {"
-        # T0001: Bad status
+        # Bad status
 
         - **Status**: Blocked
         - **Kind**: Bug
@@ -282,18 +307,26 @@ fn rejects_an_unknown_status() {
 #[test]
 fn locates_the_metadata_block() {
     assert_eq!(metadata_range(PLAIN), Some(2..6));
-    assert_eq!(metadata_range("# T0001: No metadata\n"), None);
+    assert_eq!(metadata_range("# No metadata\n"), None);
 }
 
 #[test]
 fn splits_metadata_lines() {
     assert_eq!(
-        meta_line("- **Blocked by**: T0041"),
-        Some(("Blocked by", "T0041"))
+        meta_line("- **Blocked by**: T-02wt0m3"),
+        Some(("Blocked by", "T-02wt0m3"))
     );
     assert_eq!(meta_line("- **Re**:"), Some(("Re", "")));
     assert_eq!(meta_line("- not metadata"), None);
     assert_eq!(meta_line("  - **Indented**: value"), None);
+}
+
+/// A markdown formatter escapes a value that opens with `#`, since the bare
+/// form would read as a heading.
+#[test]
+fn reads_a_value_through_its_markdown_escape() {
+    assert_eq!(meta_line(r"- **Re**: \#1"), Some(("Re", "#1")));
+    assert_eq!(meta_line("- **Re**: #1"), Some(("Re", "#1")));
 }
 
 #[test]

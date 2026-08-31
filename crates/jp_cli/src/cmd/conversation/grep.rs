@@ -5,7 +5,9 @@ use crossterm::style::Stylize as _;
 use jp_conversation::ConversationId;
 use jp_term::{
     osc::hyperlink,
-    width::{display_width, truncate_to_width},
+    width::{
+        display_width, prefix_end_for_width, suffix_start_for_width, truncate_to_width, wrap_ranges,
+    },
 };
 use jp_workspace::ConversationHandle;
 use rayon::prelude::*;
@@ -28,6 +30,26 @@ use crate::{
 /// Display columns always left for a hit's text, however wide the line prefix
 /// grows.
 const MIN_TEXT_WIDTH: usize = 20;
+
+/// Marks an end of a hit's text that was cut to fit the available columns.
+const ELLIPSIS: &str = "\u{2026}";
+
+/// Display columns of what follows a match that the window keeps in view when
+/// it slides right.
+///
+/// Enough for a few short words, so a match arrives with the start of its
+/// sentence rather than flush against the right margin.
+const WINDOW_TRAILING_CONTEXT: usize = 16;
+
+/// Display columns the window will give up to open on a word boundary instead
+/// of mid-word.
+///
+/// A stray fragment of a word reads as noise, and prose puts a boundary within
+/// a few columns.
+/// An unbroken run wider than this is more likely a path or an identifier,
+/// where even a fragment tells the reader something, so the window keeps the
+/// ragged edge rather than spending a third of itself on the search.
+const WINDOW_SNAP_COLUMNS: usize = 12;
 
 /// The kind field of a line-mode record whose line contains the pattern.
 const MATCH_KIND: char = 'm';
@@ -103,6 +125,17 @@ pub(crate) struct Grep {
     #[arg(long)]
     no_heading: bool,
 
+    /// Wrap long lines instead of cutting them to fit.
+    ///
+    /// Wraps at the output width, so pair it with `--width` to pick a column:
+    /// `jp c grep --width=100 --wrap PATTERN`.
+    /// Has no effect when the output width is unknown, which is the case for a
+    /// pipe with no `--width`.
+    /// Groups hits under per-conversation headings even when piped, since a
+    /// continuation row has no coordinate to carry.
+    #[arg(long, conflicts_with = "no_heading")]
+    wrap: bool,
+
     /// Stop after this many matching lines per conversation.
     ///
     /// Must be at least 1: a cap of zero would discard every match and report
@@ -119,7 +152,8 @@ pub(crate) struct Grep {
 
     /// Only search conversations carrying this label.
     ///
-    /// `key=value` matches the exact value, a bare `key` matches any value.
+    /// `key=value` matches when the key holds that value, a bare `key` matches
+    /// any value.
     /// Repeat the flag to require several; every selector must match.
     #[arg(long = "label", value_name = "KEY[=VALUE]")]
     labels: Vec<LabelSelector>,
@@ -412,8 +446,10 @@ impl Grep {
     ///
     /// A terminal gets headings; a pipe gets one self-contained line per hit so
     /// that field-splitting tools see a fixed shape.
+    /// `--wrap` forces headings: its continuation rows carry no coordinate, so
+    /// wrapping and the one-record-per-line shape cannot both hold.
     fn heading_enabled(&self, pretty: bool) -> bool {
-        if self.heading {
+        if self.heading || self.wrap {
             true
         } else if self.no_heading {
             false
@@ -440,7 +476,7 @@ impl Grep {
                     output.push('\n');
                 }
                 render_group_heading(&mut output, group, columns, pretty);
-                render_group_hits(&mut output, group, columns, pretty, separators);
+                render_group_hits(&mut output, group, columns, self.wrap, pretty, separators);
             }
         } else {
             for (index, group) in groups.iter().enumerate() {
@@ -872,72 +908,239 @@ fn text_budget(columns: Option<usize>, prefix_width: usize) -> Option<usize> {
     Some(columns.saturating_sub(prefix_width).max(MIN_TEXT_WIDTH))
 }
 
-/// A hit's text fitted to the available columns.
-struct FittedText {
+/// How a hit's text is laid out against the available columns.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Layout {
+    /// One row carrying the text exactly as stored.
+    ///
+    /// What the `TEXT` field of a piped record promises, and the only option
+    /// when no output width is known.
+    Verbatim,
+
+    /// One row of at most the given columns, windowed onto the text.
+    Window(usize),
+
+    /// As many rows of at most the given columns as the text needs.
+    Wrap(usize),
+}
+
+impl Layout {
+    /// The layout for hit rows carrying a prefix of `prefix_width` columns.
+    ///
+    /// Verbatim whenever no output width is known, whether or not wrapping was
+    /// asked for: there is no column to wrap at.
+    fn new(columns: Option<usize>, prefix_width: usize, wrap: bool) -> Self {
+        let Some(budget) = text_budget(columns, prefix_width) else {
+            return Self::Verbatim;
+        };
+
+        if wrap {
+            Self::Wrap(budget)
+        } else {
+            Self::Window(budget)
+        }
+    }
+}
+
+/// One display row of a hit's text.
+struct Row {
+    /// The row as printed, including any [`ELLIPSIS`] markers.
     text: String,
 
-    /// Byte offset in [`Self::text`] where the text carried over from the
-    /// original ends.
+    /// Byte range within [`Self::text`] carried over from the hit's text.
     ///
-    /// `None` when nothing was cut, so the whole string is original text.
-    /// When truncation happened this is where the appended ellipsis begins:
-    /// match spans index the original line, and the ellipsis is not part of it,
-    /// so highlighting must stop here.
-    kept: Option<usize>,
+    /// Excludes the markers, so a span can be clipped against it.
+    kept: Range<usize>,
+
+    /// Byte offset in the hit's text that `kept.start` corresponds to.
+    origin: usize,
 }
 
-/// Fit a hit's text to the available columns.
-///
-/// The text is modified only when a width budget applies: trailing whitespace
-/// is trimmed so invisible columns don't spend the budget, and the rest is
-/// truncated to fit.
-/// With no budget — piped output — the text is returned verbatim, which is
-/// what the `TEXT` field of a piped record promises.
-/// Even trailing whitespace can be the match itself (`--regex '\s+$'`).
-fn fit_text(text: &str, columns: Option<usize>, prefix_width: usize) -> FittedText {
-    let Some(budget) = text_budget(columns, prefix_width) else {
-        return FittedText {
+impl Row {
+    /// A row carrying `text` whole.
+    fn whole(text: &str) -> Self {
+        Self {
+            kept: 0..text.len(),
             text: text.to_owned(),
-            kept: None,
-        };
+            origin: 0,
+        }
+    }
+
+    /// A row showing `text[range]`, with an [`ELLIPSIS`] marking each end that
+    /// the range cut.
+    fn windowed(text: &str, range: Range<usize>, cut_left: bool, cut_right: bool) -> Self {
+        let mut out = String::new();
+        if cut_left {
+            out.push_str(ELLIPSIS);
+        }
+
+        let start = out.len();
+        out.push_str(&text[range.clone()]);
+        let end = out.len();
+
+        if cut_right {
+            out.push_str(ELLIPSIS);
+        }
+
+        Self {
+            text: out,
+            kept: start..end,
+            origin: range.start,
+        }
+    }
+}
+
+/// Lay a hit's text out as the rows to print for it.
+///
+/// Always returns at least one row, so a hit is never dropped for having no
+/// text.
+fn layout_rows(text: &str, spans: &[Range<usize>], layout: Layout) -> Vec<Row> {
+    match layout {
+        Layout::Verbatim => vec![Row::whole(text)],
+        // Trailing whitespace is trimmed only once a budget applies, so that
+        // invisible columns don't spend it. It survives verbatim output, where
+        // it can be the match itself (`--regex '\s+$'`).
+        Layout::Window(budget) => vec![window_row(text.trim_end(), spans, budget)],
+        Layout::Wrap(budget) => wrap_rows(text.trim_end(), budget),
+    }
+}
+
+/// Every row of `text`, broken to fit `budget` columns.
+///
+/// Rows carry no [`ELLIPSIS`]: nothing is cut, so there is nothing to mark.
+fn wrap_rows(text: &str, budget: usize) -> Vec<Row> {
+    wrap_ranges(text, budget)
+        .into_iter()
+        .map(|range| Row::windowed(text, range, false, false))
+        .collect()
+}
+
+/// One row showing as much of `text` as `budget` columns allow, positioned so
+/// the first match stays visible.
+///
+/// The window sits at the start of the line while the first match fits there,
+/// which leaves a short line untouched and a long one cut at the right.
+/// A match past the budget slides the window right until the match and
+/// [`WINDOW_TRAILING_CONTEXT`] columns of what follows it are in view.
+/// Keeping the match in view wins over the trailing context, and a match too
+/// wide to contain is shown from its start.
+/// A slid window opens between words where it can; see [`WINDOW_SNAP_COLUMNS`].
+/// Each end the window cut is marked with an [`ELLIPSIS`], counted against the
+/// budget.
+///
+/// Only the first span is honored.
+/// Later matches are visible when they fall in the same window and cut off when
+/// they don't.
+fn window_row(text: &str, spans: &[Range<usize>], budget: usize) -> Row {
+    if display_width(text) <= budget {
+        return Row::whole(text);
+    }
+
+    // One column for the trailing marker.
+    let at_start = prefix_end_for_width(text, budget.saturating_sub(1));
+
+    // `text` is trimmed, so a span can reach past it; that match lay entirely
+    // in whitespace and slides the window to the end of the line.
+    let first = spans
+        .first()
+        .map(|span| span.start.min(text.len())..span.end.min(text.len()));
+
+    // A context line has no spans, and a match already inside the window needs
+    // no sliding.
+    let Some(first) = first.filter(|span| span.end > at_start) else {
+        return Row::windowed(text, 0..at_start, false, true);
     };
 
-    let trimmed = text.trim_end();
-    let fitted = truncate_to_width(trimmed, budget);
+    // Trailing context is capped so that it can never push the start of the
+    // match back out of the window. `budget - 2` is the narrowest the window
+    // gets, carrying a marker at each end.
+    let headroom = budget.saturating_sub(2);
+    let target = (display_width(&text[..first.end]) + WINDOW_TRAILING_CONTEXT)
+        .min(display_width(&text[..first.start]) + headroom);
 
-    // `truncate_to_width` returns the input unchanged when it already fits, and
-    // otherwise a prefix of it plus a single ellipsis character. Taking the
-    // offset of that final character avoids restating which character it is.
-    let kept =
-        (fitted != trimmed).then(|| fitted.char_indices().next_back().map_or(0, |(at, _)| at));
+    let end = prefix_end_for_width(text, target);
+    let cut_right = end < text.len();
 
-    FittedText { text: fitted, kept }
+    // One column for the leading marker, and another for the trailing one when
+    // the window stops short of the end of the line.
+    let reserved = 1 + usize::from(cut_right);
+    let start = suffix_start_for_width(&text[..end], budget.saturating_sub(reserved));
+    let start = snap_to_word_start(text, start, first.start);
+
+    // A window that reaches the start of the line cut nothing there, whatever
+    // the reserve assumed. A match at column 0 wider than the budget lands here.
+    Row::windowed(text, start..end, start > 0, cut_right)
 }
 
-/// Style each matched span within `text`, leaving the rest unstyled.
+/// Advance `start` past the partial word it landed in, so the window opens
+/// between words.
 ///
-/// `spans` are byte ranges into the hit's *original* text.
-/// `kept` bounds how much of `text` came from that original: any span starting
-/// at or after it is dropped and one straddling it is clipped, so a truncated
-/// line highlights only what survived and never the appended ellipsis.
+/// Searches at most [`WINDOW_SNAP_COLUMNS`] columns ahead and never advances
+/// past `limit`, which is where the match begins.
+/// `start` is returned unchanged when neither allows a boundary to be reached.
+fn snap_to_word_start(text: &str, start: usize, limit: usize) -> usize {
+    let horizon = (start + prefix_end_for_width(&text[start..], WINDOW_SNAP_COLUMNS)).min(limit);
+    if horizon <= start {
+        return start;
+    }
+
+    let Some(at) = text[start..horizon].find(char::is_whitespace) else {
+        return start;
+    };
+
+    // Past the whole run, so the window opens on the next word rather than on
+    // the space before it.
+    let tail = &text[start + at..];
+    (start + at + (tail.len() - tail.trim_start().len())).min(limit)
+}
+
+/// Style each matched span visible in `row`, leaving the rest unstyled.
+///
+/// `spans` are byte ranges into the hit's text.
+/// Each is shifted onto the row by the row's origin and clipped to the part of
+/// it that came from that text, so a span belonging to another row is dropped
+/// and one running past the row's end is cut there.
+/// A cut span's styling carries onto the trailing [`ELLIPSIS`], marking it as
+/// "the match continues" rather than "the line continues".
+/// A span reaching back past the origin is clipped to the row's left edge,
+/// which is how a match crossing a wrap break stays styled on both rows.
+/// The leading [`ELLIPSIS`] is never styled: that clip lands at the start of
+/// the kept region, after the marker.
 /// A span whose clipped end isn't a character boundary is skipped rather than
 /// split.
-fn highlight(text: &str, spans: &[Range<usize>], kept: Option<usize>) -> String {
-    let boundary = kept.unwrap_or(text.len());
+fn highlight(row: &Row, spans: &[Range<usize>]) -> String {
+    let text = row.text.as_str();
     let mut out = String::with_capacity(text.len());
     let mut cursor = 0;
 
     for span in spans {
-        if span.start >= boundary || span.start < cursor {
-            continue;
-        }
-        let end = span.end.min(boundary);
-        if !text.is_char_boundary(span.start) || !text.is_char_boundary(end) {
+        // A span ending at or before the origin belongs to an earlier row.
+        if span.end <= row.origin {
             continue;
         }
 
-        out.push_str(&text[cursor..span.start]);
-        let _ = write!(out, "{}", text[span.start..end].red().bold());
+        // One that began on an earlier row resumes at this row's left edge.
+        let start = span.start.saturating_sub(row.origin) + row.kept.start;
+        if start >= row.kept.end || start < cursor {
+            continue;
+        }
+
+        // A span reaching past the kept region takes the trailing marker with
+        // it, in one styled run rather than two adjacent ones. Rows without a
+        // marker end at `kept.end` anyway, so this is a plain clip there.
+        let reach = span.end - row.origin + row.kept.start;
+        let end = if reach > row.kept.end {
+            text.len()
+        } else {
+            reach
+        };
+
+        if !text.is_char_boundary(start) || !text.is_char_boundary(end) {
+            continue;
+        }
+
+        out.push_str(&text[cursor..start]);
+        let _ = write!(out, "{}", text[start..end].red().bold());
         cursor = end;
     }
 
@@ -945,17 +1148,17 @@ fn highlight(text: &str, spans: &[Range<usize>], kept: Option<usize>) -> String 
     out
 }
 
-/// Render a hit's text, styled for a match or dimmed for a context line.
-fn styled_text(hit: &Hit, fitted: &FittedText, pretty: bool) -> String {
-    let text = fitted.text.as_str();
+/// Render one row of a hit's text, styled for a match or dimmed for a context
+/// line.
+fn styled_row(hit: &Hit, row: &Row, pretty: bool) -> String {
     if !pretty {
-        return text.to_owned();
+        return row.text.clone();
     }
     if hit.is_match {
-        return highlight(text, &hit.spans, fitted.kept);
+        return highlight(row, &hit.spans);
     }
 
-    text.dim().to_string()
+    row.text.as_str().dim().to_string()
 }
 
 /// Write the `--` separator that precedes a hit starting a new group.
@@ -1029,6 +1232,7 @@ fn render_group_hits(
     output: &mut String,
     group: &ConversationHits,
     columns: Option<usize>,
+    wrap: bool,
     pretty: bool,
     separators: bool,
 ) {
@@ -1055,32 +1259,39 @@ fn render_group_hits(
 
     // `INDENT`, both padded fields, and the two `:` separators.
     let prefix_width = INDENT.len() + turn_width + scope_width + 2;
+    let layout = Layout::new(columns, prefix_width, wrap);
 
     for hit in &group.hits {
         if separators && hit.group_break {
             write_group_break(output, INDENT, pretty);
         }
 
-        let text = fit_text(&hit.text, columns, prefix_width);
-        let text = styled_text(hit, &text, pretty);
+        for (index, row) in layout_rows(&hit.text, &hit.spans, layout)
+            .iter()
+            .enumerate()
+        {
+            let text = styled_row(hit, row, pretty);
 
-        // A context row's coordinate is its match's, by construction: every hit
-        // in a block comes from one event, so the turn and scope are identical.
-        // Printing it once per block instead of once per line makes a visible
-        // coordinate the match marker on its own, rather than a `:`-versus-`-`
-        // difference the eye has to hunt for down a dense block.
-        if !hit.is_match {
-            let _ = writeln!(output, "{blank:prefix_width$}{text}", blank = "");
-            continue;
-        }
+            // A context row's coordinate is its match's, by construction: every
+            // hit in a block comes from one event, so the turn and scope are
+            // identical. Printing it once per block instead of once per line
+            // makes a visible coordinate the match marker on its own, rather
+            // than a `:`-versus-`-` difference the eye has to hunt for down a
+            // dense block. A row continuing the one above it is blank for the
+            // same reason.
+            if !hit.is_match || index > 0 {
+                let _ = writeln!(output, "{blank:prefix_width$}{text}", blank = "");
+                continue;
+            }
 
-        let turn = format!("{:>turn_width$}", hit.turn_field());
-        let scope = format!("{:>scope_width$}", hit.scope.as_str());
+            let turn = format!("{:>turn_width$}", hit.turn_field());
+            let scope = format!("{:>scope_width$}", hit.scope.as_str());
 
-        if pretty {
-            let _ = writeln!(output, "{INDENT}{}:{}:{text}", turn.green(), scope.dim());
-        } else {
-            let _ = writeln!(output, "{INDENT}{turn}:{scope}:{text}");
+            if pretty {
+                let _ = writeln!(output, "{INDENT}{}:{}:{text}", turn.green(), scope.dim());
+            } else {
+                let _ = writeln!(output, "{INDENT}{turn}:{scope}:{text}");
+            }
         }
     }
 }
@@ -1115,8 +1326,12 @@ fn render_group_lines(
 
         // Four separators plus the single-character kind field.
         let prefix_width = display_width(&id_str) + display_width(&turn) + display_width(scope) + 5;
-        let text = fit_text(&hit.text, columns, prefix_width);
-        let text = styled_text(hit, &text, pretty);
+        // Never wrapped: line mode promises every emitted line is a coordinate
+        // record, and a continuation row has no coordinate to carry. `--wrap`
+        // is rejected alongside `--no-heading` for the same reason.
+        let layout = Layout::new(columns, prefix_width, false);
+        let rows = layout_rows(&hit.text, &hit.spans, layout);
+        let text = styled_row(hit, &rows[0], pretty);
 
         if pretty {
             let _ = writeln!(

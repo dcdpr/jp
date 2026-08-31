@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8Path;
 use serde_json::{Map, Value};
 
 use crate::util::{
@@ -188,7 +188,7 @@ fn extract_path(diff_header: &str) -> String {
 }
 
 pub(crate) async fn git_diff(
-    root: Utf8PathBuf,
+    root: &Utf8Path,
     paths: Option<OneOrMany<String>>,
     status: String,
     options: &Map<String, Value>,
@@ -196,7 +196,7 @@ pub(crate) async fn git_diff(
     let status = DiffStatus::parse(&status)?;
     let paths = paths.unwrap_or_default();
     let env = super::env_from_options(options);
-    git_diff_impl(&root, &paths, status, &DuctProcessRunner, &env)
+    git_diff_impl(root, &paths, status, &DuctProcessRunner, &env)
 }
 
 #[cfg(test)]

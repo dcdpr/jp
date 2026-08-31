@@ -103,12 +103,14 @@ impl clap::Args for CompactFlag {
                      `--compact=SPEC` flags add multiple rules.\n\nBoth forms compose: bare \
                      `--compact` includes config rules, each `--compact=SPEC` adds a DSL \
                      rule.\n\nDSL format: POLICIES[:RANGE]\n\nPolicies are joined with `+`:\n- \
-                     `r` / `reasoning`: strip reasoning blocks\n- `s` / `summarize`: generate an \
+                     `r` / `reasoning`: strip reasoning blocks\n- `s` / `summary`: generate an \
                      LLM summary\n- `t` / `tools` (or `t=MODE`): strip tool calls; bare strips \
                      both, or MODE is one of `strip`/`s`, `strip-requests`/`sreq`, \
                      `strip-responses`/`sres`, `omit`/`o`\n\nRange: FROM..TO (1-based, inclusive \
-                     on both ends, so 1..5 is turns 1-5), single number, or .. for \
-                     all\n\nExamples: s:..-3, r+t, t=sreq:5..-3, r:-20",
+                     on both ends, so 1..5 is turns 1-5), single number, or .. for all\n\nA \
+                     negative bound counts from the end, where -1 is the last turn: ..-3 compacts \
+                     through the third turn from the end, leaving the final two \
+                     alone\n\nExamples: s:..-3, r+t, t=sreq:5..-3, r:-20",
                 )
                 .action(ArgAction::Append)
                 .num_args(0..=1)
@@ -161,7 +163,7 @@ pub(crate) struct CompactSpec {
     /// `None` = no tool-call policy.
     /// The mode mirrors the `--tools` flag.
     pub tools: Option<ToolCallsMode>,
-    pub summarize: bool,
+    pub summary: bool,
     /// `None` = use config defaults for range.
     pub range: Option<DslRange>,
 }
@@ -189,7 +191,7 @@ impl CompactSpec {
             rule.reasoning = Some(ReasoningMode::Strip);
         }
         rule.tool_calls = self.tools;
-        if self.summarize {
+        if self.summary {
             rule.summary = Some(PartialSummaryConfig::default());
         }
 
@@ -216,7 +218,7 @@ impl FromStr for CompactSpec {
 
         let mut reasoning = false;
         let mut tools: Option<ToolCallsMode> = None;
-        let mut summarize = false;
+        let mut summary = false;
 
         for policy in policies_str.split('+') {
             let policy = policy.trim();
@@ -232,11 +234,13 @@ impl FromStr for CompactSpec {
                     }
                     reasoning = true;
                 }
-                "s" | "summarize" => {
+                // `summarize` predates the `summary` spelling and stays
+                // accepted so existing specs keep parsing.
+                "s" | "summary" | "summarize" => {
                     if value.is_some() {
-                        return Err("`summarize` does not take a value".into());
+                        return Err("`summary` does not take a value".into());
                     }
-                    summarize = true;
+                    summary = true;
                 }
                 "t" | "tools" => {
                     tools = Some(match value {
@@ -250,7 +254,7 @@ impl FromStr for CompactSpec {
             }
         }
 
-        if !reasoning && tools.is_none() && !summarize {
+        if !reasoning && tools.is_none() && !summary {
             return Err("at least one policy required (r, t=MODE, s)".into());
         }
 
@@ -259,20 +263,23 @@ impl FromStr for CompactSpec {
         Ok(CompactSpec {
             reasoning,
             tools,
-            summarize,
+            summary,
             range,
         })
     }
 }
 
 /// Parse one DSL range bound: a positive integer is a 1-based absolute turn
-/// index, a negative integer is an offset from the end.
+/// index, a negative integer counts back from the last turn (`-1`).
 fn parse_dsl_bound(s: &str) -> Result<RuleBound, String> {
     if let Some(rest) = s.strip_prefix('-') {
-        let n = rest
+        let n: usize = rest
             .parse()
             .map_err(|_| format!("invalid bound '-{rest}'"))?;
-        Ok(RuleBound::FromEnd(n))
+        if n == 0 {
+            return Err("from-end offsets are 1-based; use `-1` for the last turn".to_owned());
+        }
+        Ok(RuleBound::FromEnd(n - 1))
     } else {
         let n: usize = s.parse().map_err(|_| format!("invalid bound '{s}'"))?;
         if n == 0 {
@@ -300,8 +307,8 @@ fn parse_dsl_range(s: &str) -> Result<DslRange, String> {
         return Ok(DslRange { from, to });
     }
 
-    // Single-number shorthand: positive `N` = `N..` (keep first N), negative
-    // `-N` = `..-N` (keep last N).
+    // Single-number shorthand: positive `N` = `N..` (compact from turn N on),
+    // negative `-N` = `..-N` (compact through the Nth turn from the end).
     match parse_dsl_bound(s)? {
         bound @ RuleBound::FromEnd(_) => Ok(DslRange {
             from: None,
