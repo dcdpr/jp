@@ -13,7 +13,7 @@ use jp_config::{
 use jp_conversation::{
     ByteSize, Compaction, ConversationStream, PolicySpec, ReasoningPolicy, SummaryPolicy,
     SummarySource, ToolCallPolicy,
-    event::{ToolCallRequest, ToolCallResponse},
+    event::{ChatResponse, ToolCallRequest, ToolCallResponse},
 };
 use jp_printer::{OutputFormat, Printer, SharedBuffer};
 use jp_workspace::Workspace;
@@ -133,6 +133,21 @@ fn over_conflicts_with_summarize() {
     }
 
     assert!(TestCli::try_parse_from(["compact", "--summarize", "--over", "1mb"]).is_err());
+}
+
+#[test]
+fn over_conflicts_with_reset() {
+    // `--reset` conflicts with every other policy flag. Without `over` on that
+    // list the pair reaches `validate()`, which reports the wrong problem
+    // ("--over needs a policy to narrow") for a combination clap should refuse
+    // outright, and which no added policy flag could satisfy anyway.
+    #[derive(clap::Parser)]
+    struct TestCli {
+        #[command(flatten)]
+        compact: Compact,
+    }
+
+    assert!(TestCli::try_parse_from(["compact", "--reset", "--over", "1mb"]).is_err());
 }
 
 #[test]
@@ -491,6 +506,50 @@ fn preview_rejects_a_blank_verbatim_summary() {
         error.to_string(),
         "error 1: Compaction error (error:\"the summary text is empty; drop the value to generate \
          a summary instead\")"
+    );
+}
+
+#[test]
+fn preview_does_not_itemize_a_summary_rule() {
+    // A config rule can carry both a summary and a thresholded mechanical
+    // policy. The real run's stored event takes the summary branch and itemizes
+    // nothing, but the preview builds a summary-less mechanical compaction, so
+    // it has to make that call from the rule or the two disagree: the dry run
+    // would list items the run it previews never selects.
+    let (ctx, out, _tmp) = preview_ctx();
+
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("think");
+    stream
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::reasoning("z".repeat(4096)))
+        .build()
+        .unwrap();
+
+    let rule = CompactionConfig::finalize_rules(vec![PartialCompactionRuleConfig {
+        keep_first: Some(RuleBound::Turns(0)),
+        keep_last: Some(RuleBound::Turns(0)),
+        reasoning: Some(PolicySpec::over(
+            ReasoningMode::Strip,
+            ByteSize::from_bytes(1024),
+        )),
+        summary: Some(PartialSummaryConfig {
+            text: Some("the gist".to_owned()),
+            ..PartialSummaryConfig::default()
+        }),
+        ..PartialCompactionRuleConfig::default()
+    }])
+    .unwrap()
+    .remove(0);
+
+    Compact::preview_compaction(&ctx, &stream, &[rule], &parse_compact(&[]).range).unwrap();
+    ctx.printer.flush();
+
+    // One range line and nothing under it. The 4 KB reasoning block clears the
+    // 1 KB threshold, so an unguarded preview would name it here.
+    assert_eq!(
+        *out.lock(),
+        "Would have compacted turns 1..1 (1 total, verbatim summary).\n"
     );
 }
 

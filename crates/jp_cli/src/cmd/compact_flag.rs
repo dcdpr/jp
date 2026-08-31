@@ -262,7 +262,7 @@ impl FromStr for CompactSpec {
                         // A summary replaces its whole range rather than acting
                         // per item, so there is nothing for a size threshold to
                         // select.
-                        return Err("`summarize` does not take an `over` threshold".into());
+                        return Err("`summary` does not take an `over` threshold".into());
                     }
                     summary = true;
                 }

@@ -140,6 +140,7 @@ pub(crate) struct Compact {
         conflicts_with_all = [
             "keep_first", "keep_last", "from", "to", "first", "last", "turn",
             "reasoning", "tools", "summary", "summary_context", "compact", "model",
+            "over",
         ],
     )]
     reset: Option<Option<usize>>,
@@ -1050,16 +1051,25 @@ impl Compact {
             let source = rule_summary_source(rule);
             for range in ranges {
                 let preview = build_mechanical_compaction(range.from_turn, range.to_turn, rule);
-                let label = match source {
-                    Some(source) => Some(summary_label(source).to_owned()),
-                    None => compaction_policy_label(&preview),
+                // `build_mechanical_compaction` carries no summary, so the
+                // summary case is decided from the rule here rather than left
+                // to `threshold_items`. Label and items move together: a
+                // summary replaces its whole range, so it takes the summary
+                // label and itemizes nothing, matching the stored event the
+                // real run builds.
+                let (label, items) = match source {
+                    Some(source) => (Some(summary_label(source).to_owned()), None),
+                    None => (
+                        compaction_policy_label(&preview),
+                        threshold_items(events_snapshot, &preview),
+                    ),
                 };
                 new_segments.push(TimelineSegment {
                     from: range.from_turn,
                     to: range.to_turn,
                     label,
                     existing: false,
-                    items: threshold_items(events_snapshot, &preview),
+                    items,
                 });
                 // The placeholder carries the rule's provenance so a second
                 // summary rule previews the same refusal the real run would

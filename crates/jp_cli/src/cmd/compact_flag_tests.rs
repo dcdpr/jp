@@ -256,7 +256,7 @@ fn parse_over_option_errors() {
     // threshold on it would be a silent no-op.
     assert_eq!(
         "s,over=1mb".parse::<CompactSpec>().unwrap_err(),
-        "`summarize` does not take an `over` threshold"
+        "`summary` does not take an `over` threshold"
     );
     assert_eq!(
         "t,under=1mb".parse::<CompactSpec>().unwrap_err(),
