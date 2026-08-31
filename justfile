@@ -76,7 +76,7 @@ run *ARGS:
 # Install the `jp` binary from your local checkout.
 [group('build')]
 [group('main')]
-install $JP_NO_INSTALL="":
+install $JP_INSTALL="1":
     @just quiet_flag="" _install-jp
 
 [group('jp')]
@@ -3004,8 +3004,8 @@ vet-ci: (_install "cargo-vet@" + vet_version)
 _install-jp *args:
     #!/usr/bin/env sh
     set -eu
-    if [ -n "${JP_NO_INSTALL:-}" ]; then
-        echo "Skipping jp rebuild (JP_NO_INSTALL set); using the installed binary." >&2
+    if [ -z "${JP_INSTALL:-}" ]; then
+        echo "Skipping jp rebuild (set JP_INSTALL=1 to rebuild); using the installed binary." >&2
         exit 0
     fi
     cargo install {{quiet_flag}} --locked --path crates/jp_cli {{args}}
@@ -3016,8 +3016,8 @@ _install-jp *args:
 _install-tools *args:
     #!/usr/bin/env sh
     set -eu
-    if [ -n "${JP_NO_INSTALL:-}" ]; then
-        echo "Skipping jp-tools rebuild (JP_NO_INSTALL set); using the installed binary." >&2
+    if [ -z "${JP_INSTALL:-}" ]; then
+        echo "Skipping jp-tools rebuild (set JP_INSTALL=1 to rebuild); using the installed binary." >&2
         exit 0
     fi
     cargo install {{quiet_flag}} --locked --path .config/jp/tools --debug {{args}}
@@ -3029,8 +3029,8 @@ _install-tools *args:
 _install-ticket *args:
     #!/usr/bin/env sh
     set -eu
-    if [ -n "${JP_NO_INSTALL:-}" ]; then
-        echo "Skipping jp-ticket rebuild (JP_NO_INSTALL set); using the installed binary." >&2
+    if [ -z "${JP_INSTALL:-}" ]; then
+        echo "Skipping jp-ticket rebuild (set JP_INSTALL=1 to rebuild); using the installed binary." >&2
         exit 0
     fi
     cargo install {{quiet_flag}} --locked --path crates/plugins/command/ticket --debug {{args}}
