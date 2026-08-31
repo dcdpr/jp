@@ -44,6 +44,7 @@ struct TestFailure {
 
 pub(crate) async fn cargo_test(
     root: &Utf8Path,
+    rustflags: &str,
     profile: Option<&str>,
     package: Option<String>,
     testname: Option<String>,
@@ -52,6 +53,7 @@ pub(crate) async fn cargo_test(
 ) -> ToolResult {
     cargo_test_impl(
         root,
+        rustflags,
         profile,
         package,
         testname,
@@ -63,6 +65,7 @@ pub(crate) async fn cargo_test(
 
 fn cargo_test_impl<R: ProcessRunner>(
     root: &Utf8Path,
+    rustflags: &str,
     profile: Option<&str>,
     package: Option<String>,
     testname: Option<String>,
@@ -78,6 +81,7 @@ fn cargo_test_impl<R: ProcessRunner>(
     let mut env = vec![
         ("NEXTEST_EXPERIMENTAL_LIBTEST_JSON", "1"),
         ("RUST_BACKTRACE", if backtrace { "1" } else { "0" }),
+        ("RUSTFLAGS", rustflags),
     ];
     if checksum_freshness {
         // Use content checksums instead of file mtimes for cargo's freshness

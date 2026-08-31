@@ -1,12 +1,15 @@
-use std::fs;
+use std::{fs, time::Duration};
 
 use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::tempdir;
 use jp_tool::{AccessPolicy, Action, Capability, Context, FsRule, Outcome};
 use pretty_assertions::assert_eq;
-use serde_json::{Map, json};
+use serde_json::{Map, Value, json};
 
-use super::{Tool, ensure_workspace_root, required_capabilities, run};
+use super::{
+    Tool, ensure_workspace_root, format_duration, note_duration, required_capabilities, run,
+    rustflags,
+};
 use crate::util::{
     root::{CARGO_MANIFEST, resolve_root},
     runner::MockProcessRunner,
@@ -202,6 +205,206 @@ async fn a_profile_on_a_subcommand_that_cannot_use_it_fails_the_invocation() {
         message.contains("no effect on `cargo_install_tools`"),
         "got: {message}"
     );
+}
+
+/// `cargo_install_tools` builds through `just install-tools`, whose recipe owns
+/// the install flags, and the arm passes no environment to it.
+/// Ignoring the option would install a binary built without the flags the
+/// caller asked for, report success, and serve every later tool call from it.
+#[tokio::test]
+async fn rustflags_on_a_subcommand_that_cannot_use_them_fails_the_invocation() {
+    let dir = tempdir().unwrap();
+    let ctx = Context {
+        root: dir.path().to_owned(),
+        action: Action::Run,
+        access: None,
+        workspace_id: "test".into(),
+        conversation_id: "test".into(),
+    };
+    let tool = Tool {
+        name: "cargo_install_tools".to_owned(),
+        arguments: Map::new(),
+        answers: Map::new(),
+        options: Map::from_iter([("rustflags".to_owned(), json!(["--cfg", "tokio_unstable"]))]),
+    };
+
+    // Returns before `just` is spawned, so no process fixture is needed.
+    let Outcome::Error { message, .. } = run(ctx, tool).await.unwrap() else {
+        panic!("expected an error outcome");
+    };
+
+    assert!(
+        message.contains("no effect on `cargo_install_tools`"),
+        "got: {message}"
+    );
+}
+
+/// `cargo fmt` runs rustfmt, not rustc, so a configured flag would be accepted
+/// and never reach a compiler.
+#[tokio::test]
+async fn rustflags_on_format_fails_the_invocation() {
+    let dir = tempdir().unwrap();
+    let ctx = Context {
+        root: dir.path().to_owned(),
+        action: Action::Run,
+        access: None,
+        workspace_id: "test".into(),
+        conversation_id: "test".into(),
+    };
+    let tool = Tool {
+        name: "cargo_format".to_owned(),
+        arguments: Map::new(),
+        answers: Map::new(),
+        options: Map::from_iter([("rustflags".to_owned(), json!("-Zthreads=0"))]),
+    };
+
+    let Outcome::Error { message, .. } = run(ctx, tool).await.unwrap() else {
+        panic!("expected an error outcome");
+    };
+
+    assert!(
+        message.contains("no effect on `cargo_format`"),
+        "got: {message}"
+    );
+}
+
+/// An explicit null is an absent value, not a configured one, so it must not
+/// trip the guard on a subcommand that cannot use flags.
+#[tokio::test]
+async fn a_null_rustflags_option_is_not_treated_as_configured() {
+    let dir = tempdir().unwrap();
+    let ctx = Context {
+        root: dir.path().to_owned(),
+        action: Action::Run,
+        access: None,
+        workspace_id: "test".into(),
+        conversation_id: "test".into(),
+    };
+    let tool = Tool {
+        name: "cargo_update".to_owned(),
+        arguments: Map::new(),
+        answers: Map::new(),
+        options: Map::from_iter([("rustflags".to_owned(), Value::Null)]),
+    };
+
+    // Reaches the `update` arm, which rejects the empty package list. Getting
+    // that far is the assertion: the guard did not fire.
+    let outcome = run(ctx, tool).await;
+
+    let message = match outcome {
+        Ok(Outcome::Error { message, .. }) => message,
+        Ok(other) => panic!("expected an error outcome, got: {other:?}"),
+        Err(error) => error.to_string(),
+    };
+    assert!(
+        !message.contains("no effect on"),
+        "a null option must not trip the guard, got: {message}"
+    );
+}
+
+#[test]
+fn no_configured_flags_is_just_the_base() {
+    assert_eq!(rustflags(&[]), "-W warnings");
+}
+
+/// Configured flags come last so they can override the base.
+#[test]
+fn configured_flags_are_appended_to_the_base() {
+    let flags = rustflags(&[
+        "-Zthreads=0".to_owned(),
+        "-Clink-arg=-fuse-ld=lld".to_owned(),
+    ]);
+
+    assert_eq!(flags, "-W warnings -Zthreads=0 -Clink-arg=-fuse-ld=lld");
+}
+
+/// An array and a bare string are both accepted, so a single flag needs no
+/// brackets.
+#[test]
+fn a_bare_string_is_accepted_as_one_flag() {
+    assert_eq!(
+        rustflags(&["-Zthreads=0".to_owned()]),
+        "-W warnings -Zthreads=0"
+    );
+}
+
+/// A malformed value is refused rather than dropped, for the same reason as
+/// `root`: compiling with flags the caller believes are in effect is worse than
+/// refusing to compile.
+#[tokio::test]
+async fn a_non_string_rustflags_option_fails_the_invocation() {
+    let dir = tempdir().unwrap();
+    let ctx = Context {
+        root: dir.path().to_owned(),
+        action: Action::Run,
+        access: None,
+        workspace_id: "test".into(),
+        conversation_id: "test".into(),
+    };
+    let tool = Tool {
+        name: "cargo_check".to_owned(),
+        arguments: Map::new(),
+        answers: Map::new(),
+        options: Map::from_iter([("rustflags".to_owned(), json!({ "flag": true }))]),
+    };
+
+    let Outcome::Error { message, .. } = run(ctx, tool).await.unwrap() else {
+        panic!("expected an error outcome");
+    };
+
+    assert!(
+        message.contains("must be a string or an array of strings"),
+        "got: {message}"
+    );
+}
+
+/// A tenth of a second is what separates a warm cache from a small rebuild, so
+/// sub-minute durations keep the fraction.
+#[test]
+fn short_durations_keep_a_fraction() {
+    assert_eq!(format_duration(Duration::from_millis(1_240)), "1.2s");
+    assert_eq!(format_duration(Duration::from_millis(230)), "0.2s");
+    assert_eq!(format_duration(Duration::from_secs(59)), "59.0s");
+}
+
+#[test]
+fn long_durations_are_minutes_and_seconds() {
+    assert_eq!(format_duration(Duration::from_mins(1)), "1m 0s");
+    assert_eq!(format_duration(Duration::from_secs(230)), "3m 50s");
+}
+
+/// "Check succeeded" reads the same after a warm cache and a full rebuild; the
+/// duration is the only thing that tells them apart.
+#[test]
+fn a_success_carries_its_duration() {
+    let outcome = Ok(Outcome::Success {
+        content: "Check succeeded. No warnings or errors found.".to_owned(),
+    });
+
+    let noted = note_duration(outcome, Duration::from_secs(230)).unwrap();
+
+    assert_eq!(noted, Outcome::Success {
+        content: "Check succeeded. No warnings or errors found.\n\n(took 3m 50s)".to_owned(),
+    });
+}
+
+/// A failure that took three minutes and one that took three seconds call for
+/// different responses.
+#[test]
+fn a_failure_carries_its_duration() {
+    let outcome = Ok(Outcome::Error {
+        message: "error: could not compile `bevy`".to_owned(),
+        trace: vec![],
+        transient: false,
+    });
+
+    let Outcome::Error { message, .. } = note_duration(outcome, Duration::from_secs(95)).unwrap()
+    else {
+        panic!("expected an error outcome");
+    };
+
+    assert!(message.contains("could not compile"), "got: {message}");
+    assert!(message.contains("(took 1m 35s)"), "got: {message}");
 }
 
 /// `Tool::option_or` reports a malformed value as an absent one, which would

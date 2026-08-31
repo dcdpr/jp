@@ -9,12 +9,17 @@ use crate::util::{
     truncate,
 };
 
-pub(crate) async fn cargo_format(root: &Utf8Path, package: Option<String>) -> ToolResult {
-    cargo_format_impl(root, package.as_deref(), &DuctProcessRunner)
+pub(crate) async fn cargo_format(
+    root: &Utf8Path,
+    rustflags: &str,
+    package: Option<String>,
+) -> ToolResult {
+    cargo_format_impl(root, rustflags, package.as_deref(), &DuctProcessRunner)
 }
 
 fn cargo_format_impl<R: ProcessRunner>(
     root: &Utf8Path,
+    rustflags: &str,
     package: Option<&str>,
     runner: &R,
 ) -> ToolResult {
@@ -35,8 +40,7 @@ fn cargo_format_impl<R: ProcessRunner>(
             "--files-with-diff",
         ],
         root,
-        // Prevent warnings from being treated as errors, e.g. on CI.
-        &[("RUSTFLAGS", "-W warnings")],
+        &[("RUSTFLAGS", rustflags)],
     )?;
 
     if !cargo_status.is_success() {

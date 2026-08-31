@@ -11,12 +11,14 @@ use crate::util::{
 
 pub(crate) async fn cargo_check(
     root: &Utf8Path,
+    rustflags: &str,
     profile: Option<&str>,
     package: Option<String>,
     checksum_freshness: bool,
 ) -> ToolResult {
     cargo_check_impl(
         root,
+        rustflags,
         profile,
         package.as_deref(),
         checksum_freshness,
@@ -26,6 +28,7 @@ pub(crate) async fn cargo_check(
 
 fn cargo_check_impl<R: ProcessRunner>(
     root: &Utf8Path,
+    rustflags: &str,
     profile: Option<&str>,
     package: Option<&str>,
     checksum_freshness: bool,
@@ -34,8 +37,7 @@ fn cargo_check_impl<R: ProcessRunner>(
     let clippy_scope = package.map_or("--workspace".to_owned(), |v| format!("--package={v}"));
     let profile_arg = profile.map(|name| format!("--profile={name}"));
 
-    // Prevent warnings from being treated as errors, e.g. on CI.
-    let mut env = vec![("RUSTFLAGS", "-W warnings")];
+    let mut env = vec![("RUSTFLAGS", rustflags)];
     if checksum_freshness {
         // Use content checksums instead of file mtimes for cargo's freshness
         // checks, so that sibling checkouts (git worktrees) sharing a target
