@@ -212,6 +212,90 @@ fn diff_ranges_nearest_clamps_into_ranges() {
     assert_eq!(ranges.nearest(Side::Right, 700), Some(700));
 }
 
+/// A preview as a terminal shows it, with the ANSI styling removed.
+fn strip_ansi(rendered: &str) -> String {
+    String::from_utf8(strip_ansi_escapes::strip(rendered)).unwrap()
+}
+
+#[test]
+fn comment_preview_quotes_the_body() {
+    let out = strip_ansi(&render_comment_preview(
+        954,
+        "src/search.rs:436 (RIGHT)",
+        None,
+        "rust",
+        "    let x = 1;",
+        "This shadows the outer binding.",
+    ));
+
+    assert_eq!(
+        out,
+        concat!(
+            "PR #954 \u{2014} src/search.rs:436 (RIGHT)\n",
+            "\n",
+            "```rust\n",
+            "    let x = 1;\n",
+            "```\n",
+            "\n",
+            "> This shadows the outer binding.\n",
+        )
+    );
+}
+
+#[test]
+fn comment_preview_keeps_the_anchor_warning_out_of_the_rail() {
+    let out = strip_ansi(&render_comment_preview(
+        954,
+        "src/search.rs:436 (RIGHT)",
+        Some("\u{26a0} not part of this PR's diff"),
+        "rust",
+        "    let x = 1;",
+        "Body.",
+    ));
+
+    assert_eq!(
+        out,
+        concat!(
+            "PR #954 \u{2014} src/search.rs:436 (RIGHT)\n",
+            "\n",
+            "\u{26a0} not part of this PR's diff\n",
+            "\n",
+            "```rust\n",
+            "    let x = 1;\n",
+            "```\n",
+            "\n",
+            "> Body.\n",
+        )
+    );
+}
+
+#[test]
+fn reply_preview_nests_the_parent_inside_the_rail() {
+    let out = strip_ansi(&render_reply_preview(
+        954,
+        "JeanMertz",
+        "src/search.rs:436 (RIGHT)",
+        "nit: the stated ordering is wrong.\n\nNarrow the contract instead.",
+        "Correct, so I narrowed the claim.",
+    ));
+
+    // The parent sits one level deeper than the reply. Written line by line
+    // because the blank quote lines carry a trailing space an editor would trim
+    // out of a block literal.
+    assert_eq!(
+        out,
+        concat!(
+            "PR #954 \u{2014} replying to JeanMertz on src/search.rs:436 (RIGHT)\n",
+            "\n",
+            "> > nit: the stated ordering is wrong.\n",
+            "> > \n",
+            "> > Narrow the contract instead.\n",
+            "> \n",
+            "> Correct, so I narrowed the claim.\n",
+        )
+    );
+}
+
 #[test]
 fn extract_window_handles_start_line_past_end() {
     // Validation should keep us out of this case in practice, but the

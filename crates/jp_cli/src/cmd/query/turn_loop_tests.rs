@@ -19,7 +19,7 @@ use jp_config::{
     AppConfig, PartialAppConfig,
     assistant::{
         PartialAssistantConfig,
-        request::{CachePolicy, PartialRequestConfig, RequestConfig},
+        request::{CachePolicy, MaxResponseBytes, PartialRequestConfig},
     },
     conversation::tool::{
         CommandConfigOrString, QuestionConfig, QuestionTarget, RunMode, ToolConfig, ToolSource,
@@ -30,7 +30,10 @@ use jp_config::{
 };
 use jp_conversation::{
     Conversation, ConversationEvent,
-    event::{ChatRequest, ChatResponse, InquirySource, ToolCallRequest, TurnStart},
+    event::{
+        CancellationReason, ChatRequest, ChatResponse, InquiryResponse, InquirySource,
+        ToolCallRequest, TurnStart,
+    },
 };
 use jp_inquire::{
     InlineOption, ReplyEditMode, ReplyOutcome,
@@ -749,7 +752,7 @@ async fn output_ceiling_ends_turn_without_re_requesting() {
     let storage = root.join(".jp");
 
     let mut config = AppConfig::new_test();
-    config.assistant.request.max_response_bytes = 64;
+    config.assistant.request.max_response_bytes = MaxResponseBytes::Bytes(64);
     // A retry budget is left in place so the call-count assertion below has
     // something to catch: were the ceiling classified as retryable, the loop
     // would re-request the response instead of ending the turn.
@@ -1132,12 +1135,19 @@ impl PromptBackend for DelayedPromptBackend {
         initial_text: &str,
         edit_mode: ReplyEditMode,
         editor_escape: bool,
+        help: Option<&str>,
         output: Box<dyn Write + Send>,
     ) -> Result<ReplyOutcome, InquireError> {
         self.started.notify_one();
         std::thread::sleep(self.delay);
-        self.inner
-            .inline_reply(message, initial_text, edit_mode, editor_escape, output)
+        self.inner.inline_reply(
+            message,
+            initial_text,
+            edit_mode,
+            editor_escape,
+            help,
+            output,
+        )
     }
 
     fn text(
@@ -1161,6 +1171,12 @@ impl PromptBackend for DelayedPromptBackend {
         self.started.notify_one();
         std::thread::sleep(self.delay);
         self.inner.select(message, options, default, writer)
+    }
+
+    fn password(&self, message: &str, writer: &mut dyn Write) -> Result<String, InquireError> {
+        self.started.notify_one();
+        std::thread::sleep(self.delay);
+        self.inner.password(message, writer)
     }
 }
 
@@ -1531,7 +1547,7 @@ async fn test_interrupt_during_tool_prompt_completes_turn_early() {
             Box::new(InquiryMockExecutor::new(
                 &req.id,
                 &req.name,
-                vec![Question::boolean("confirm", "Proceed?")],
+                vec![Question::boolean("confirm", "Proceed?").unwrap()],
                 "question tool output",
             ))
         });
@@ -4429,11 +4445,12 @@ impl Executor for InquiryMockExecutor {
         _cancellation_token: tokio_util::sync::CancellationToken,
     ) -> ExecutorResult {
         for q in &self.questions {
-            if !answers.contains_key(&q.id) {
+            if !answers.contains_key(q.id.as_str()) {
                 return ExecutorResult::NeedsInput {
                     tool_id: self.tool_id.clone(),
                     tool_name: self.tool_name.clone(),
                     question: q.clone(),
+                    source: InquirySource::tool(self.tool_name.clone()),
                     accumulated_answers: answers.clone(),
                 };
             }
@@ -4528,19 +4545,20 @@ fn inquiry_mock_model() -> ModelDetails {
     })
 }
 
-/// The global inquiry override for the output ceiling wins over the parent
-/// assistant's value.
+/// The global inquiry ceiling wins over the top-level assistant's value.
 ///
 /// `conversation.inquiry.assistant.request.max_response_bytes` is a public key,
-/// so reading the parent value here would silently ignore it.
+/// so reading the assistant value here would silently ignore it.
 #[tokio::test]
 async fn inquiry_ceiling_honors_the_global_inquiry_override() {
     let mut config = AppConfig::new_test();
-    config.assistant.request.max_response_bytes = 999_999;
-    config.conversation.inquiry.assistant.request = Some(RequestConfig {
-        max_response_bytes: 4096,
-        ..config.assistant.request
-    });
+    config.assistant.request.max_response_bytes = MaxResponseBytes::Bytes(999_999);
+    config
+        .conversation
+        .inquiry
+        .assistant
+        .request
+        .max_response_bytes = MaxResponseBytes::Bytes(4096);
 
     let provider: Arc<dyn Provider> = Arc::new(MockProvider::new(vec![]));
     let model = inquiry_mock_model();
@@ -4553,42 +4571,27 @@ async fn inquiry_ceiling_honors_the_global_inquiry_override() {
         backend
             .config_for("any_tool", "any_question")
             .max_response_bytes,
-        4096,
+        Some(4096),
         "the global inquiry override must win over the parent assistant"
     );
 }
 
-/// A partially-set inquiry request block must not disable the ceiling.
+/// Setting one field in the inquiry request block leaves the ceiling inheriting
+/// from the assistant rather than resolving to the disable sentinel.
 ///
-/// Built through the real loading path rather than by hand: because
-/// `AssistantOverrideConfig::request` is a resolved struct, setting only a
-/// sibling field leaves `max_response_bytes` at `0`, which is the ceiling's
-/// disable sentinel.
-/// Reading it verbatim would silently drop the runaway guard for every inquiry.
+/// Built through the real loading path, since the failure this guards against
+/// only appears in the partial-to-resolved conversion.
 #[tokio::test]
 async fn inquiry_ceiling_survives_a_sibling_only_request_override() {
     let mut partial = PartialAppConfig::new_test();
-    partial.assistant.request.max_response_bytes = Some(500_000);
+    partial.assistant.request.max_response_bytes = Some(MaxResponseBytes::Bytes(500_000));
 
-    partial.conversation.inquiry.assistant.request = Some(PartialRequestConfig {
+    partial.conversation.inquiry.assistant.request = PartialRequestConfig {
         cache: Some(CachePolicy::Off),
         ..PartialRequestConfig::default()
-    });
+    };
 
-    let config = AppConfig::from_partial_with_defaults(partial).expect("valid config");
-
-    // The resolution the guard has to cope with: the block is present, and its
-    // ceiling field is a zero the user never asked for.
-    assert_eq!(
-        config
-            .conversation
-            .inquiry
-            .assistant
-            .request
-            .expect("the block is set")
-            .max_response_bytes,
-        0
-    );
+    let config = jp_config::util::build(partial).expect("valid config");
 
     let provider: Arc<dyn Provider> = Arc::new(MockProvider::new(vec![]));
     let model = inquiry_mock_model();
@@ -4601,24 +4604,57 @@ async fn inquiry_ceiling_survives_a_sibling_only_request_override() {
         backend
             .config_for("any_tool", "any_question")
             .max_response_bytes,
-        500_000,
-        "an unset inquiry ceiling must inherit the parent, not disable the guard"
+        Some(500_000),
+        "an unset inquiry ceiling must inherit the assistant, not disable the guard"
     );
 }
 
-/// A per-question ceiling wins over the global inquiry override, which in turn
-/// wins over the parent assistant (RFD 034's resolution order).
+/// An explicit `0` at the inquiry layer disables the ceiling for inquiries,
+/// even when the assistant sets one.
+#[tokio::test]
+async fn inquiry_ceiling_can_be_disabled_independently() {
+    let mut partial = PartialAppConfig::new_test();
+    partial.assistant.request.max_response_bytes = Some(MaxResponseBytes::Bytes(500_000));
+    partial
+        .conversation
+        .inquiry
+        .assistant
+        .request
+        .max_response_bytes = Some(MaxResponseBytes::Disabled);
+
+    let config = jp_config::util::build(partial).expect("valid config");
+
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider::new(vec![]));
+    let model = inquiry_mock_model();
+
+    let backend = build_inquiry_backend(&config, vec![], model, provider, vec![])
+        .await
+        .expect("the inquiry backend builds");
+
+    assert_eq!(
+        backend
+            .config_for("any_tool", "any_question")
+            .max_response_bytes,
+        None,
+        "an explicit disable removes the ceiling for inquiries"
+    );
+}
+
+/// A per-question ceiling wins over the global inquiry value, which in turn
+/// wins over the top-level assistant (RFD 034's resolution order).
 #[tokio::test]
 async fn inquiry_ceiling_honors_the_per_question_override() {
     let mut config = AppConfig::new_test();
-    config.assistant.request.max_response_bytes = 999_999;
-    config.conversation.inquiry.assistant.request = Some(RequestConfig {
-        max_response_bytes: 4096,
-        ..config.assistant.request
-    });
+    config.assistant.request.max_response_bytes = MaxResponseBytes::Bytes(999_999);
+    config
+        .conversation
+        .inquiry
+        .assistant
+        .request
+        .max_response_bytes = MaxResponseBytes::Bytes(4096);
 
     let mut per_question = PartialAssistantConfig::default();
-    per_question.request.max_response_bytes = Some(512);
+    per_question.request.max_response_bytes = Some(MaxResponseBytes::Bytes(512));
 
     let mut tool = inquiry_tool_config(&["confirm"]);
     tool.questions
@@ -4642,7 +4678,7 @@ async fn inquiry_ceiling_honors_the_per_question_override() {
         backend
             .config_for("inquiry_tool", "confirm")
             .max_response_bytes,
-        512,
+        Some(512),
         "the per-question override must win over the global inquiry value"
     );
 
@@ -4652,7 +4688,7 @@ async fn inquiry_ceiling_honors_the_per_question_override() {
         backend
             .config_for("inquiry_tool", "other")
             .max_response_bytes,
-        4096,
+        Some(4096),
         "an unset per-question ceiling falls back to the global inquiry value"
     );
 }
@@ -4710,7 +4746,7 @@ async fn test_tool_with_single_inquiry() {
             Box::new(InquiryMockExecutor::new(
                 &req.id,
                 &req.name,
-                vec![Question::boolean("confirm", "Create backup?")],
+                vec![Question::boolean("confirm", "Create backup?").unwrap()],
                 "inquiry tool output",
             ))
         });
@@ -4783,7 +4819,658 @@ async fn test_tool_with_single_inquiry() {
             .filter_map(|e| e.event.into_inquiry_response())
             .collect();
         assert_eq!(res.len(), 1, "Should have one inquiry response");
-        assert_eq!(res[0].answer, json!(true));
+        assert_eq!(res[0].answer(), Some(&json!(true)));
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out");
+}
+
+/// A `Secret` question with no interactive terminal fails the tool and records
+/// `Cancelled(no_prompt_backend)` (RFD 082 routing guard).
+#[tokio::test]
+async fn test_secret_question_without_tty_fails_tool() {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let mut config = AppConfig::new_test();
+        config.conversation.tools.defaults.run = RunMode::Unattended;
+        // Register the tool without a question config: the question targets
+        // the user by default, and without a TTY it would fall back to the
+        // inquiry backend — which the secret guard refuses.
+        config
+            .conversation
+            .tools
+            .insert("secret_tool".to_string(), inquiry_tool_config(&[]));
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+
+        let chat_request = ChatRequest::from("Use the tool");
+        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+            responses: vec![
+                single_tool_call_events("call_sec", "secret_tool"),
+                final_message_events("Understood."),
+            ],
+            call_index: AtomicUsize::new(0),
+            model: inquiry_mock_model(),
+        });
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let mcp_client = jp_mcp::Client::default();
+        let router = detached_router();
+
+        let executor_source = TestExecutorSource::new().with_executor("secret_tool", |req| {
+            Box::new(InquiryMockExecutor::new(
+                &req.id,
+                &req.name,
+                vec![Question::secret("passphrase", "Enter passphrase").unwrap()],
+                "secret tool output",
+            ))
+        });
+        let tool_defs = executor_source.tool_definitions();
+
+        let result = run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &router,
+            &mcp_client,
+            root,
+            false,
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &tool_defs,
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
+            chat_request,
+            InvocationContext::default(),
+            PendingStreamTrim::default(),
+        )
+        .await;
+
+        assert!(result.is_ok(), "Turn loop should complete: {result:?}");
+
+        let events = lock.events().clone();
+
+        // The tool fails with a tool-level error.
+        let tool_responses: Vec<_> = events
+            .clone()
+            .into_iter()
+            .filter_map(|e| e.event.into_tool_call_response())
+            .collect();
+        assert_eq!(tool_responses.len(), 1);
+        let error = tool_responses[0].result.as_ref().unwrap_err();
+        assert!(error.contains("secret value"), "unexpected error: {error}");
+
+        // The recorded inquiry pair closes as Cancelled(no_prompt_backend).
+        let req: Vec<_> = events
+            .clone()
+            .into_iter()
+            .filter_map(|e| e.event.into_inquiry_request())
+            .collect();
+        assert_eq!(req.len(), 1, "Should have one inquiry request");
+        let res: Vec<_> = events
+            .into_iter()
+            .filter_map(|e| e.event.into_inquiry_response())
+            .collect();
+        assert_eq!(res.len(), 1, "Should have one inquiry response");
+        assert!(matches!(&res[0], InquiryResponse::Cancelled {
+            reason: CancellationReason::NoPromptBackend,
+            ..
+        }));
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out");
+}
+
+/// A `Secret` question whose target is the assistant is refused and records
+/// `Cancelled(assistant_routing_denied)` (RFD 082 routing guard).
+#[tokio::test]
+async fn test_secret_question_with_assistant_target_fails_tool() {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let mut config = AppConfig::new_test();
+        config.conversation.tools.defaults.run = RunMode::Unattended;
+        // Route the secret question to the assistant — the guard refuses.
+        config.conversation.tools.insert(
+            "secret_tool".to_string(),
+            inquiry_tool_config(&["passphrase"]),
+        );
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+
+        let chat_request = ChatRequest::from("Use the tool");
+        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+            responses: vec![
+                single_tool_call_events("call_sec", "secret_tool"),
+                final_message_events("Understood."),
+            ],
+            call_index: AtomicUsize::new(0),
+            model: inquiry_mock_model(),
+        });
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let mcp_client = jp_mcp::Client::default();
+        let router = detached_router();
+
+        let executor_source = TestExecutorSource::new().with_executor("secret_tool", |req| {
+            Box::new(InquiryMockExecutor::new(
+                &req.id,
+                &req.name,
+                vec![Question::secret("passphrase", "Enter passphrase").unwrap()],
+                "secret tool output",
+            ))
+        });
+        let tool_defs = executor_source.tool_definitions();
+
+        let result = run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &router,
+            &mcp_client,
+            root,
+            false,
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &tool_defs,
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
+            chat_request,
+            InvocationContext::default(),
+            PendingStreamTrim::default(),
+        )
+        .await;
+
+        assert!(result.is_ok(), "Turn loop should complete: {result:?}");
+
+        let events = lock.events().clone();
+
+        let tool_responses: Vec<_> = events
+            .clone()
+            .into_iter()
+            .filter_map(|e| e.event.into_tool_call_response())
+            .collect();
+        assert_eq!(tool_responses.len(), 1);
+        assert!(tool_responses[0].result.is_err());
+
+        let res: Vec<_> = events
+            .into_iter()
+            .filter_map(|e| e.event.into_inquiry_response())
+            .collect();
+        assert_eq!(res.len(), 1, "Should have one inquiry response");
+        assert!(matches!(&res[0], InquiryResponse::Cancelled {
+            reason: CancellationReason::AssistantRoutingDenied,
+            ..
+        }));
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out");
+}
+
+/// A `Secret` question answered at the prompter delivers the answer to the tool
+/// in-memory while the persisted response is `Redacted` (RFD 082).
+#[tokio::test]
+async fn test_secret_prompter_answer_is_redacted() {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let mut config = AppConfig::new_test();
+        config.conversation.tools.defaults.run = RunMode::Unattended;
+        // Register the tool without a question config: the question targets
+        // the user and the TTY prompter answers it via the no-echo password
+        // path.
+        config
+            .conversation
+            .tools
+            .insert("secret_tool".to_string(), inquiry_tool_config(&[]));
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+
+        let chat_request = ChatRequest::from("Use the tool");
+        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+            responses: vec![
+                single_tool_call_events("call_sec", "secret_tool"),
+                final_message_events("Secret used."),
+            ],
+            call_index: AtomicUsize::new(0),
+            model: inquiry_mock_model(),
+        });
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let mcp_client = jp_mcp::Client::default();
+        let router = detached_router();
+
+        let executor_source = TestExecutorSource::new().with_executor("secret_tool", |req| {
+            Box::new(InquiryMockExecutor::new(
+                &req.id,
+                &req.name,
+                vec![Question::secret("passphrase", "Enter passphrase").unwrap()],
+                "secret tool output",
+            ))
+        });
+        let tool_defs = executor_source.tool_definitions();
+
+        let result = run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &router,
+            &mcp_client,
+            root,
+            true,
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &tool_defs,
+            printer.clone(),
+            Arc::new(MockPromptBackend::new().with_password_responses(["s3cret"])),
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
+            chat_request,
+            InvocationContext::default(),
+            PendingStreamTrim::default(),
+        )
+        .await;
+
+        assert!(result.is_ok(), "Turn loop should complete: {result:?}");
+
+        let events = lock.events().clone();
+
+        // The answer reached the tool in-memory: it completed successfully.
+        let tool_responses: Vec<_> = events
+            .clone()
+            .into_iter()
+            .filter_map(|e| e.event.into_tool_call_response())
+            .collect();
+        assert_eq!(tool_responses.len(), 1);
+        assert_eq!(tool_responses[0].content(), "secret tool output");
+
+        // The persisted response is redacted and carries no answer value.
+        let res: Vec<_> = events
+            .into_iter()
+            .filter_map(|e| e.event.into_inquiry_response())
+            .collect();
+        assert_eq!(res.len(), 1, "Should have one inquiry response");
+        assert!(matches!(&res[0], InquiryResponse::Redacted { .. }));
+        assert_eq!(res[0].answer(), None);
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out");
+}
+
+/// A `Secret` question with a configured static answer delivers the value to
+/// the tool in-memory while recording `Redacted` instead of `Answered`.
+#[tokio::test]
+async fn test_secret_static_answer_is_redacted() {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let mut config = AppConfig::new_test();
+        config.conversation.tools.defaults.run = RunMode::Unattended;
+        let mut tool_config = inquiry_tool_config(&[]);
+        tool_config
+            .questions
+            .insert("passphrase".to_string(), QuestionConfig {
+                target: QuestionTarget::User,
+                answer: Some(json!("s3cret")),
+            });
+        config
+            .conversation
+            .tools
+            .insert("secret_tool".to_string(), tool_config);
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+
+        let chat_request = ChatRequest::from("Use the tool");
+        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+            responses: vec![
+                single_tool_call_events("call_sec", "secret_tool"),
+                final_message_events("Secret used."),
+            ],
+            call_index: AtomicUsize::new(0),
+            model: inquiry_mock_model(),
+        });
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let mcp_client = jp_mcp::Client::default();
+        let router = detached_router();
+
+        let executor_source = TestExecutorSource::new().with_executor("secret_tool", |req| {
+            Box::new(InquiryMockExecutor::new(
+                &req.id,
+                &req.name,
+                vec![Question::secret("passphrase", "Enter passphrase").unwrap()],
+                "secret tool output",
+            ))
+        });
+        let tool_defs = executor_source.tool_definitions();
+
+        let result = run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &router,
+            &mcp_client,
+            root,
+            false,
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &tool_defs,
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
+            chat_request,
+            InvocationContext::default(),
+            PendingStreamTrim::default(),
+        )
+        .await;
+
+        assert!(result.is_ok(), "Turn loop should complete: {result:?}");
+
+        let events = lock.events().clone();
+
+        // The static answer reached the tool in-memory.
+        let tool_responses: Vec<_> = events
+            .clone()
+            .into_iter()
+            .filter_map(|e| e.event.into_tool_call_response())
+            .collect();
+        assert_eq!(tool_responses.len(), 1);
+        assert_eq!(tool_responses[0].content(), "secret tool output");
+
+        // The persisted response is redacted, not `Answered` with the value.
+        let res: Vec<_> = events
+            .into_iter()
+            .filter_map(|e| e.event.into_inquiry_response())
+            .collect();
+        assert_eq!(res.len(), 1, "Should have one inquiry response");
+        assert!(matches!(&res[0], InquiryResponse::Redacted { .. }));
+        assert_eq!(res[0].answer(), None);
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out");
+}
+
+/// A non-secret question with a configured static answer records a full
+/// `InquiryRequest`/`InquiryResponse::Answered` pair carrying the configured
+/// value (RFD 082: static answers are recorded, not pre-seeded).
+#[tokio::test]
+async fn test_static_answer_records_answered_inquiry() {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let mut config = AppConfig::new_test();
+        config.conversation.tools.defaults.run = RunMode::Unattended;
+        let mut tool_config = inquiry_tool_config(&[]);
+        tool_config
+            .questions
+            .insert("confirm".to_string(), QuestionConfig {
+                target: QuestionTarget::User,
+                answer: Some(json!(true)),
+            });
+        config
+            .conversation
+            .tools
+            .insert("static_tool".to_string(), tool_config);
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+
+        let chat_request = ChatRequest::from("Use the tool");
+        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+            responses: vec![
+                single_tool_call_events("call_static", "static_tool"),
+                final_message_events("Done."),
+            ],
+            call_index: AtomicUsize::new(0),
+            model: inquiry_mock_model(),
+        });
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let mcp_client = jp_mcp::Client::default();
+        let router = detached_router();
+
+        let executor_source = TestExecutorSource::new().with_executor("static_tool", |req| {
+            Box::new(InquiryMockExecutor::new(
+                &req.id,
+                &req.name,
+                vec![Question::boolean("confirm", "Proceed?").unwrap()],
+                "static tool output",
+            ))
+        });
+        let tool_defs = executor_source.tool_definitions();
+
+        let result = run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &router,
+            &mcp_client,
+            root,
+            false,
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &tool_defs,
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
+            chat_request,
+            InvocationContext::default(),
+            PendingStreamTrim::default(),
+        )
+        .await;
+
+        assert!(result.is_ok(), "Turn loop should complete: {result:?}");
+
+        let events = lock.events().clone();
+
+        // The static answer reached the tool and it completed successfully.
+        let tool_responses: Vec<_> = events
+            .clone()
+            .into_iter()
+            .filter_map(|e| e.event.into_tool_call_response())
+            .collect();
+        assert_eq!(tool_responses.len(), 1);
+        assert_eq!(tool_responses[0].content(), "static tool output");
+
+        // The round-trip is recorded as a request/response pair, with the
+        // response carrying the configured value.
+        let req: Vec<_> = events
+            .clone()
+            .into_iter()
+            .filter_map(|e| e.event.into_inquiry_request())
+            .collect();
+        assert_eq!(req.len(), 1, "Should have one inquiry request");
+        let res: Vec<_> = events
+            .into_iter()
+            .filter_map(|e| e.event.into_inquiry_response())
+            .collect();
+        assert_eq!(res.len(), 1, "Should have one inquiry response");
+        assert!(matches!(&res[0], InquiryResponse::Answered { .. }));
+        assert_eq!(res[0].answer(), Some(&json!(true)));
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out");
+}
+
+/// A "remember for this turn" prompter answer is reused for a later tool call
+/// in the same turn, and the cache hit still records a fresh
+/// `InquiryRequest`/`InquiryResponse::Answered` pair (RFD 082).
+#[tokio::test]
+async fn test_remembered_answer_cache_hit_records_new_inquiry_pair() {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let mut config = AppConfig::new_test();
+        config.conversation.tools.defaults.run = RunMode::Unattended;
+        // No question config: the question targets the user and is answered
+        // at the interactive prompter.
+        config
+            .conversation
+            .tools
+            .insert("cached_tool".to_string(), inquiry_tool_config(&[]));
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+
+        let chat_request = ChatRequest::from("Use the tool twice");
+        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+            responses: vec![
+                single_tool_call_events("call_a", "cached_tool"),
+                single_tool_call_events("call_b", "cached_tool"),
+                final_message_events("Done."),
+            ],
+            call_index: AtomicUsize::new(0),
+            model: inquiry_mock_model(),
+        });
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let mcp_client = jp_mcp::Client::default();
+        let router = detached_router();
+
+        let executor_source = TestExecutorSource::new().with_executor("cached_tool", |req| {
+            Box::new(InquiryMockExecutor::new(
+                &req.id,
+                &req.name,
+                vec![Question::boolean("confirm", "Proceed?").unwrap()],
+                "cached tool output",
+            ))
+        });
+        let tool_defs = executor_source.tool_definitions();
+
+        // A single queued 'Y' ("yes, and remember for this turn"): the second
+        // call must be satisfied from the turn cache, because another prompt
+        // would find the queue empty and cancel.
+        let prompt_backend = Arc::new(MockPromptBackend::new().with_inline_responses(['Y']));
+
+        let result = run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &router,
+            &mcp_client,
+            root,
+            true,
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &tool_defs,
+            printer.clone(),
+            prompt_backend,
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
+            chat_request,
+            InvocationContext::default(),
+            PendingStreamTrim::default(),
+        )
+        .await;
+
+        assert!(result.is_ok(), "Turn loop should complete: {result:?}");
+
+        let events = lock.events().clone();
+
+        // Both tool calls completed with the answer.
+        let tool_responses: Vec<_> = events
+            .clone()
+            .into_iter()
+            .filter_map(|e| e.event.into_tool_call_response())
+            .collect();
+        assert_eq!(tool_responses.len(), 2);
+        assert_eq!(tool_responses[0].content(), "cached tool output");
+        assert_eq!(tool_responses[1].content(), "cached tool output");
+
+        // Each round-trip records its own pair; the cache hit records
+        // `Answered`, not nothing.
+        let req: Vec<_> = events
+            .clone()
+            .into_iter()
+            .filter_map(|e| e.event.into_inquiry_request())
+            .collect();
+        assert_eq!(req.len(), 2, "Should have two inquiry requests");
+        let res: Vec<_> = events
+            .into_iter()
+            .filter_map(|e| e.event.into_inquiry_response())
+            .collect();
+        assert_eq!(res.len(), 2, "Should have two inquiry responses");
+        for r in &res {
+            assert!(matches!(r, InquiryResponse::Answered { .. }));
+            assert_eq!(r.answer(), Some(&json!(true)));
+        }
     }))
     .await;
 
@@ -4846,8 +5533,8 @@ async fn test_tool_with_multiple_inquiries() {
                 &req.id,
                 &req.name,
                 vec![
-                    Question::boolean("confirm", "Proceed?"),
-                    Question::text("reason", "Why?"),
+                    Question::boolean("confirm", "Proceed?").unwrap(),
+                    Question::text("reason", "Why?").unwrap(),
                 ],
                 "both questions answered",
             ))
@@ -4997,7 +5684,7 @@ async fn test_parallel_tools_one_with_inquiry() {
                 Box::new(InquiryMockExecutor::new(
                     &req.id,
                     &req.name,
-                    vec![Question::boolean("confirm", "Proceed?")],
+                    vec![Question::boolean("confirm", "Proceed?").unwrap()],
                     "inquiry completed",
                 ))
             })
@@ -5130,7 +5817,7 @@ async fn test_parallel_tools_both_with_inquiries() {
                 Box::new(InquiryMockExecutor::new(
                     &req.id,
                     &req.name,
-                    vec![Question::boolean("confirm_a", "Proceed A?")],
+                    vec![Question::boolean("confirm_a", "Proceed A?").unwrap()],
                     "tool_a done",
                 ))
             })
@@ -5138,7 +5825,7 @@ async fn test_parallel_tools_both_with_inquiries() {
                 Box::new(InquiryMockExecutor::new(
                     &req.id,
                     &req.name,
-                    vec![Question::boolean("confirm_b", "Proceed B?")],
+                    vec![Question::boolean("confirm_b", "Proceed B?").unwrap()],
                     "tool_b done",
                 ))
             });
@@ -5537,7 +6224,7 @@ async fn test_inquiry_failure_marks_tool_as_error() {
             Box::new(InquiryMockExecutor::new(
                 &req.id,
                 &req.name,
-                vec![Question::boolean("confirm", "Confirm?")],
+                vec![Question::boolean("confirm", "Confirm?").unwrap()],
                 "should not reach this",
             ))
         });

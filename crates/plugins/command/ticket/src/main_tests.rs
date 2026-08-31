@@ -99,6 +99,37 @@ fn exchange(message: &HostToPlugin) -> Vec<PluginToHost> {
         .collect()
 }
 
+/// Drive a full exchange: one message in, then a scripted reply to each request
+/// the plugin makes.
+///
+/// The plugin reads its replies from the same stream, so a composition is just
+/// more lines of input.
+fn exchange_with(message: &HostToPlugin, replies: &[HostToPlugin]) -> Vec<PluginToHost> {
+    let mut input = serde_json::to_string(message).unwrap() + "\n";
+    for reply in replies {
+        input.push_str(&serde_json::to_string(reply).unwrap());
+        input.push('\n');
+    }
+
+    let mut output = vec![];
+    run(input.as_bytes(), &mut output).unwrap();
+
+    String::from_utf8(output)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect()
+}
+
+/// A composed answer carrying `text`.
+fn composed(text: &str) -> HostToPlugin {
+    HostToPlugin::Composed(jp_plugin::message::ComposeResponse {
+        id: None,
+        text: Some(text.to_owned()),
+        values: vec![],
+    })
+}
+
 fn init(root: &Utf8Path, args: &[&str]) -> HostToPlugin {
     init_at(jp_plugin::PROTOCOL_VERSION, root, args)
 }
@@ -273,6 +304,86 @@ fn the_author_falls_back_through_jp_then_git_then_the_environment() {
     // passes for whichever branch happens to fire, which is how this test came
     // to fail on Windows. Covering them means having `resolve_author` take
     // those two values as arguments instead of reading them itself.
+}
+
+/// A `--body` given on the command line stays the description.
+///
+/// It used to seed the whole-ticket buffer, where a single line reads back as a
+/// title: the description became the summary and the ticket was filed with
+/// none.
+/// Only the title is asked for now, so the text keeps the field it was given
+/// for.
+#[test]
+fn an_explicit_body_is_not_read_back_as_the_title() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let messages = exchange_with(
+        &init(dir.path(), &["add", "bug", "--body", "Steps to reproduce"]),
+        &[composed("Header misaligned")],
+    );
+
+    // One prompt, and it asks for the title rather than the whole ticket.
+    let asked: Vec<&jp_plugin::message::ComposeRequest> = messages
+        .iter()
+        .filter_map(|message| match message {
+            PluginToHost::Compose(request) => Some(request),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(asked.len(), 1, "asked more than once: {messages:?}");
+    assert_eq!(asked[0].message, "Title");
+    assert!(
+        matches!(asked[0].mode, ComposeMode::Line { .. }),
+        "asked for a whole ticket, not a title: {:?}",
+        asked[0].mode
+    );
+
+    // Read back through the store rather than by filename: the id is allocated,
+    // so the path is not something the test gets to predict.
+    let entries = ticket::store::list(&dir.path().join(ticket::store::DEFAULT_DIR)).unwrap();
+    let [entry] = entries.as_slice() else {
+        panic!("expected exactly one ticket, got {entries:?}");
+    };
+    let filed = entry.ticket.as_ref().expect("a well-formed ticket");
+
+    assert_eq!(filed.title, "Header misaligned");
+    assert_eq!(
+        filed.description.trim(),
+        "Steps to reproduce",
+        "the description should be the text `--body` supplied"
+    );
+}
+
+#[test]
+fn composed_text_splits_into_a_title_and_a_body() {
+    // A single line, however many blank lines follow it, is a title alone.
+    assert_eq!(
+        Composition::read("Tool call header misaligned"),
+        Composition::Title("Tool call header misaligned".to_owned())
+    );
+    assert_eq!(
+        Composition::read("Tool call header misaligned\n\n\n"),
+        Composition::Title("Tool call header misaligned".to_owned())
+    );
+
+    // Subject, blank line, body.
+    assert_eq!(
+        Composition::read("Header misaligned\n\nIt wraps one column early.\n"),
+        Composition::TitleAndBody {
+            title: "Header misaligned".to_owned(),
+            body: "It wraps one column early.".to_owned(),
+        }
+    );
+
+    // Prose running straight on from the first line has no subject.
+    assert_eq!(
+        Composition::read("The header wraps one column\nearly, below 80 columns."),
+        Composition::Body("The header wraps one column\nearly, below 80 columns.".to_owned())
+    );
+
+    assert_eq!(Composition::read(""), Composition::Empty);
+    assert_eq!(Composition::read("  \n\n"), Composition::Empty);
 }
 
 #[test]

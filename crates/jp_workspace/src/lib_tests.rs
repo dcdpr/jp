@@ -10,7 +10,7 @@ use jp_config::{
     util::build,
 };
 use jp_storage::{
-    backend::{FsStorageBackend, NullLockBackend, NullPersistBackend},
+    backend::{FsStorageBackend, NullLockBackend, NullPersistBackend, PersistBackend as _},
     value::read_json,
 };
 use parking_lot::RwLock;
@@ -22,6 +22,200 @@ use super::*;
 /// Test helper: wire a single backend into all four Workspace slots.
 fn workspace_with_fs(root: impl Into<Utf8PathBuf>, fs: &FsStorageBackend) -> Workspace {
     Workspace::in_memory(root).with_backend(Arc::new(fs.clone()))
+}
+
+/// Persistence backend whose every write fails with a full disk.
+#[derive(Debug)]
+struct AlwaysFullBackend;
+
+impl jp_storage::backend::PersistBackend for AlwaysFullBackend {
+    fn write(
+        &self,
+        _id: &ConversationId,
+        _metadata: &Conversation,
+        _events: &ConversationStream,
+        _projection: jp_storage::backend::Projection,
+    ) -> std::result::Result<(), jp_storage::Error> {
+        Err(jp_storage::Error::write_failed(
+            Utf8Path::new("/data/conv/events.json"),
+            std::io::Error::from(std::io::ErrorKind::StorageFull),
+        ))
+    }
+
+    fn remove(&self, _id: &ConversationId) -> std::result::Result<(), jp_storage::Error> {
+        Ok(())
+    }
+
+    fn archive(&self, _id: &ConversationId) -> std::result::Result<(), jp_storage::Error> {
+        Ok(())
+    }
+
+    fn unarchive(&self, _id: &ConversationId) -> std::result::Result<(), jp_storage::Error> {
+        Ok(())
+    }
+}
+
+#[test]
+fn workspace_drains_a_persist_failure_left_by_a_dropped_lock() {
+    // The teardown path for a cancelled command future: everything the run held
+    // is dropped without any drain running, so the workspace is the only place
+    // left that can still report the conversation was not saved.
+    let mut workspace = Workspace::in_memory("root").with_persist(Arc::new(AlwaysFullBackend));
+    let config = Arc::new(AppConfig::new_test());
+
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), config, None)
+        .unwrap();
+    {
+        let conv = lock.as_mut();
+        conv.update_metadata(|m| m.title = Some("unsaved".into()));
+    }
+    drop(lock);
+
+    let error = workspace
+        .take_persist_failure()
+        .expect("the workspace still holds the failure");
+    assert_eq!(
+        error.to_string(),
+        "Storage error: no space left on device while writing /data/conv/events.json"
+    );
+    assert!(
+        workspace.take_persist_failure().is_none(),
+        "the failure is reported once"
+    );
+}
+
+/// An index reload keeps a conversation that has not been written yet.
+///
+/// A scan reports what a store holds, so a conversation created in memory is
+/// absent from it, indistinguishable from the scan alone from one another
+/// process has deleted.
+/// Rebuilding the index from the scan alone therefore forgets conversations
+/// moments after creating them: a long-running host reloads the index on every
+/// request, and a conversation created to serve one request is gone by the
+/// next.
+#[test]
+fn an_index_reload_keeps_an_unwritten_conversation() {
+    let dir = tempdir().unwrap();
+    let fs = FsStorageBackend::new(&dir.path().join("workspace")).unwrap();
+    let mut ws = workspace_with_fs(dir.path(), &fs);
+
+    let id = ws.create_conversation(Conversation::default(), Arc::new(AppConfig::new_test()));
+
+    ws.load_conversation_index();
+
+    assert!(
+        ws.acquire_conversation(&id).is_ok(),
+        "an unwritten conversation survives the reload that cannot see it"
+    );
+}
+
+/// An index reload forgets a conversation that was written and then deleted.
+///
+/// The counterpart to the case above, and the reason the distinction has to be
+/// recorded rather than inferred: both are absent from the scan, and only one
+/// should be kept.
+///
+/// The whole sequence runs for real — write it, then delete it from the store
+/// the way another `jp` process would, then reload.
+/// Setting the recorded state by hand instead would assert the merge while
+/// skipping the path that records it, leaving the case this exists for — a
+/// write and a delete both landing between two reloads — uncovered.
+#[test]
+fn an_index_reload_forgets_a_written_conversation_that_is_gone() {
+    let dir = tempdir().unwrap();
+    let fs = FsStorageBackend::new(&dir.path().join("workspace")).unwrap();
+    let mut ws = workspace_with_fs(dir.path(), &fs);
+
+    let id = ws.create_conversation(Conversation::default(), Arc::new(AppConfig::new_test()));
+
+    let handle = ws.acquire_conversation(&id).unwrap();
+    let mut conv = ws.test_lock(handle).into_mut();
+    conv.update_metadata(|_| {});
+    conv.flush().unwrap();
+    drop(conv);
+
+    // No reload in between: the window this closes is the one where a delete
+    // lands before the next scan would have reported the conversation durable.
+    // For an idle long-running host that window is open until the next request.
+    fs.remove(&id).unwrap();
+
+    ws.load_conversation_index();
+
+    assert!(
+        ws.acquire_conversation(&id).is_err(),
+        "a conversation this process wrote and someone else deleted is forgotten"
+    );
+}
+
+/// An index reload forgets a conversation persisted by dropping its scope.
+///
+/// Most writes happen that way rather than through an explicit `flush()`, so
+/// this is the path that matters most: durability has to be recorded however
+/// the write was reached.
+#[test]
+fn an_index_reload_forgets_a_conversation_persisted_on_drop() {
+    let dir = tempdir().unwrap();
+    let fs = FsStorageBackend::new(&dir.path().join("workspace")).unwrap();
+    let mut ws = workspace_with_fs(dir.path(), &fs);
+
+    let id = ws.create_conversation(Conversation::default(), Arc::new(AppConfig::new_test()));
+
+    // No `flush()`: the write happens because the scope goes away.
+    let handle = ws.acquire_conversation(&id).unwrap();
+    let conv = ws.test_lock(handle).into_mut();
+    conv.update_metadata(|_| {});
+    drop(conv);
+
+    fs.remove(&id).unwrap();
+
+    ws.load_conversation_index();
+
+    assert!(
+        ws.acquire_conversation(&id).is_err(),
+        "a conversation persisted on drop and then deleted is forgotten"
+    );
+}
+
+/// A long-running reader has to see what other processes write.
+///
+/// A plugin host outlives the `jp` runs happening around it, so re-reading the
+/// index must drop the cached index and streams rather than keep serving the
+/// snapshot taken at startup.
+#[test]
+fn reloading_the_index_picks_up_another_process_writes() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path().join("root");
+    let storage_path = root.join("storage");
+    let config = Arc::new(AppConfig::new_test());
+
+    let first = ConversationId::try_from(datetime!(2024-03-15 12:00:00 Z)).unwrap();
+    let second = ConversationId::try_from(datetime!(2024-03-15 13:00:00 Z)).unwrap();
+
+    let write = |id: ConversationId| {
+        let mut ws = workspace_with_fs(&root, &FsStorageBackend::new(&storage_path).unwrap());
+        ws.load_conversation_index();
+        ws.create_conversation_with_id(id, Conversation::default(), config.clone());
+        let handle = ws.acquire_conversation(&id).unwrap();
+        let mut conv = ws.test_lock(handle).into_mut();
+        conv.update_metadata(|_| {});
+        conv.flush().unwrap();
+    };
+
+    write(first);
+
+    // The reader loads the index once, as a plugin host does at startup.
+    let mut reader = workspace_with_fs(&root, &FsStorageBackend::new(&storage_path).unwrap());
+    reader.load_conversation_index();
+    assert_eq!(reader.conversations().count(), 1);
+
+    write(second);
+
+    // Still one: the reader is serving the snapshot it took at startup.
+    assert_eq!(reader.conversations().count(), 1);
+
+    reader.load_conversation_index();
+    assert_eq!(reader.conversations().count(), 2);
 }
 
 #[test]
@@ -668,6 +862,130 @@ fn test_lock_new_conversation_errors_on_denial() {
     );
 }
 
+/// Regression: `jp conversation compact` read the event stream, waited for the
+/// lock another process held, and then persisted the stream it had read before
+/// the wait — dropping the turn that process wrote while it waited.
+#[test]
+fn lock_refreshes_a_conversation_read_before_acquisition() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path().join("root");
+    let storage = root.join("storage");
+    let config = Arc::new(AppConfig::new_test());
+    let id = ConversationId::try_from(datetime!(2024-09-01 09:00:00 Z)).unwrap();
+
+    {
+        let mut seed = workspace_with_fs(&root, &FsStorageBackend::new(&storage).unwrap());
+        seed.create_conversation_with_id(id, Conversation::default(), config.clone());
+        let h = seed.acquire_conversation(&id).unwrap();
+        let mut conv = seed.test_lock(h).into_mut();
+        conv.update_metadata(|meta| meta.title = Some("before".to_owned()));
+        conv.flush().unwrap();
+    }
+
+    let mut ws = workspace_with_fs(&root, &FsStorageBackend::new(&storage).unwrap());
+    ws.load_conversation_index();
+    let handle = ws.acquire_conversation(&id).unwrap();
+
+    // The reads a command performs before it starts waiting for the lock.
+    assert_eq!(ws.events(&handle).unwrap().len(), 0);
+    assert_eq!(
+        ws.metadata(&handle).unwrap().title.as_deref(),
+        Some("before")
+    );
+
+    // The lock holder finishes its turn and releases the lock.
+    {
+        let mut other = workspace_with_fs(&root, &FsStorageBackend::new(&storage).unwrap());
+        other.load_conversation_index();
+        let h = other.acquire_conversation(&id).unwrap();
+        let mut conv = other.test_lock(h).into_mut();
+        conv.update_events(|events| events.start_turn("try again"));
+        conv.update_metadata(|meta| meta.title = Some("after".to_owned()));
+        conv.flush().unwrap();
+    }
+
+    let LockResult::Acquired(lock) = ws.lock_conversation(handle, None).unwrap() else {
+        panic!("the lock is free");
+    };
+
+    assert_eq!(
+        lock.events().len(),
+        2,
+        "the lock sees the turn written while it waited"
+    );
+    assert_eq!(lock.metadata().title.as_deref(), Some("after"));
+}
+
+/// Regression: the projection decides whether a write creates or drops the
+/// workspace copy, so a locality change made while this process waited for the
+/// lock has to be read back — otherwise the next flush recreates the
+/// projection `jp conversation edit --local` just removed.
+#[test]
+fn lock_reads_the_projection_from_the_store_after_a_wait() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path().join("root");
+    let storage = root.join("storage");
+    let user = tmp.path().join("user-data");
+    let config = Arc::new(AppConfig::new_test());
+    let id = ConversationId::try_from(datetime!(2024-09-02 09:00:00 Z)).unwrap();
+
+    // Both roots: with user-local storage disabled, a persist ignores the
+    // projection entirely and there is no workspace copy to create or drop.
+    let backend = || {
+        FsStorageBackend::new(&storage)
+            .unwrap()
+            .with_user_storage(&user, None, "wsid")
+            .unwrap()
+    };
+
+    {
+        let mut seed = workspace_with_fs(&root, &backend());
+        seed.create_conversation_with_id(id, Conversation::default(), config.clone());
+        let h = seed.acquire_conversation(&id).unwrap();
+        let mut conv = seed.test_lock(h).into_mut();
+        conv.update_metadata(|_| {});
+        conv.flush().unwrap();
+    }
+
+    let mut ws = workspace_with_fs(&root, &backend());
+    ws.load_conversation_index();
+    let handle = ws.acquire_conversation(&id).unwrap();
+    assert_eq!(
+        ws.conversation_presence(&id),
+        Some(StoragePresence::Projected),
+        "the index this command read before waiting says projected"
+    );
+
+    // The lock holder makes the conversation local-only and releases the lock.
+    {
+        let mut other = workspace_with_fs(&root, &backend());
+        other.load_conversation_index();
+        let h = other.acquire_conversation(&id).unwrap();
+        let mut conv = other.test_lock(h).into_mut();
+        conv.set_projection(Projection::LocalOnly);
+        conv.flush().unwrap();
+    }
+
+    let LockResult::Acquired(lock) = ws.lock_conversation(handle, None).unwrap() else {
+        panic!("the lock is free");
+    };
+
+    assert_eq!(
+        lock.projection(),
+        Projection::LocalOnly,
+        "the lock writes with the locality the other process left behind"
+    );
+
+    let mut conv = lock.into_mut();
+    conv.update_metadata(|meta| meta.title = Some("after".to_owned()));
+    conv.flush().unwrap();
+
+    assert!(
+        !jp_storage::load::projected_conversation_ids(&storage).contains(&id),
+        "a local-only conversation stays out of the workspace projection"
+    );
+}
+
 #[test]
 fn test_archive_removes_from_index() {
     let tmp = tempdir().unwrap();
@@ -1020,7 +1338,7 @@ fn open_errors_when_no_store_exists_above_dir() {
     fs::create_dir_all(&dir).unwrap();
 
     assert_eq!(
-        Workspace::open_with_storage_dir(&dir, ".jp-no-such-store").unwrap_err(),
+        Workspace::open_inner(&dir, ".jp-no-such-store", Access::ReadWrite).unwrap_err(),
         Error::WorkspaceNotFound(dir)
     );
 }

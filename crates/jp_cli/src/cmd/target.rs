@@ -21,6 +21,7 @@ use std::{
     io::{self, BufRead as _, IsTerminal as _},
 };
 
+use inquire::InquireError;
 use jp_config::conversation::DefaultConversationId;
 use jp_conversation::ConversationId;
 use jp_workspace::{ConversationHandle, Workspace, session::Session};
@@ -121,54 +122,101 @@ impl ConversationLoadRequest {
     /// Use explicit targets if non-empty, otherwise resolve from
     /// session/picker.
     pub fn explicit_or_session(args: &dyn ConversationIds) -> Self {
-        if args.ids().is_empty() {
+        let mut req = if args.ids().is_empty() {
             Self::from_session()
         } else {
-            let mut req = Self::explicit(args.ids().to_vec());
-            req.multi = args.is_multi();
-            req.session = args.supports_session();
-            req
-        }
+            Self::explicit(args.ids().to_vec())
+        };
+
+        req.multi = args.is_multi();
+        req.session = args.supports_session();
+        req
     }
 
     /// Use explicit targets if non-empty, otherwise resolve from session/picker
     /// with config loading.
     pub fn explicit_or_session_with_config(args: &dyn ConversationIds) -> Self {
-        if args.ids().is_empty() {
+        let mut req = if args.ids().is_empty() {
             Self::from_session_with_config()
         } else {
-            let mut req = Self::explicit_with_config(args.ids().to_vec());
-            req.multi = args.is_multi();
-            req.session = args.supports_session();
-            req
-        }
+            Self::explicit_with_config(args.ids().to_vec())
+        };
+
+        req.multi = args.is_multi();
+        req.session = args.supports_session();
+        req
     }
 
     /// Use explicit targets if non-empty, otherwise no conversations needed.
     pub fn explicit_or_none(args: &dyn ConversationIds) -> Self {
-        if args.ids().is_empty() {
+        let mut req = if args.ids().is_empty() {
             Self::none()
         } else {
-            let mut req = Self::explicit(args.ids().to_vec());
-            req.multi = args.is_multi();
-            req.session = args.supports_session();
-            req
-        }
+            Self::explicit(args.ids().to_vec())
+        };
+
+        req.multi = args.is_multi();
+        req.session = args.supports_session();
+        req
     }
 
     /// Use explicit targets if non-empty, otherwise try the session's previous
     /// conversation, falling back to the interactive picker.
     pub fn explicit_or_previous(args: &dyn ConversationIds) -> Self {
-        if args.ids().is_empty() {
+        let mut req = if args.ids().is_empty() {
             Self::explicit(vec![
                 ConversationTarget::SessionPrevious,
                 ConversationTarget::Picker(PickerFilter::default()),
             ])
         } else {
-            let mut req = Self::explicit(args.ids().to_vec());
-            req.multi = args.is_multi();
-            req.session = args.supports_session();
-            req
+            Self::explicit(args.ids().to_vec())
+        };
+
+        req.multi = args.is_multi();
+        req.session = args.supports_session();
+        req
+    }
+}
+
+/// What the command being resolved accepts as a target.
+///
+/// Carried down into the picker paths so that a resolution failure can print
+/// keyword help for that command, rather than for the union of every command's
+/// grammar.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct TargetGrammar {
+    /// Session-based keywords (`s`, `+s`, `?s`, `.`) are accepted.
+    pub session: bool,
+
+    /// Several conversations are accepted, and `?` opens a multi-select.
+    pub multi: bool,
+
+    /// The command can start a fresh conversation, so the picker may offer it
+    /// and `--new` is worth suggesting when resolution fails.
+    pub allow_new: bool,
+}
+
+impl TargetGrammar {
+    /// Read the grammar off a command's target argument.
+    ///
+    /// `allow_new` is passed separately because the argument type can't know
+    /// it: whether a fresh conversation can be created is a property of the
+    /// command, not of what it accepts as a target.
+    pub fn from_args(args: &dyn ConversationIds, allow_new: bool) -> Self {
+        Self {
+            session: args.supports_session(),
+            multi: args.is_multi(),
+            allow_new,
+        }
+    }
+}
+
+impl From<TargetGrammar> for Error {
+    fn from(grammar: TargetGrammar) -> Self {
+        Self::NoConversationTarget {
+            session: grammar.session,
+            multi: grammar.multi,
+            allow_new: grammar.allow_new,
         }
     }
 }
@@ -207,15 +255,13 @@ pub(crate) fn resolve_request(
         return Ok(ResolveOutcome::default());
     };
 
-    let (ids, start_new) = resolve_targets(
-        targets,
-        workspace,
-        session,
-        default_id,
-        request.multi,
-        request.session,
-        allow_picker_new,
-    )?;
+    let grammar = TargetGrammar {
+        session: request.session,
+        multi: request.multi,
+        allow_new: allow_picker_new,
+    };
+
+    let (ids, start_new) = resolve_targets(targets, workspace, session, default_id, grammar)?;
 
     let handles = ids
         .iter()
@@ -555,7 +601,10 @@ fn non_empty(ids: Vec<ConversationId>, empty: &'static str) -> Result<Vec<Conver
 /// Errors when stdin is a terminal (nothing piped) or when no IDs are provided.
 fn read_stdin_ids() -> Result<Vec<ConversationId>> {
     if io::stdin().is_terminal() {
-        return Err(Error::NoConversationTarget);
+        return Err(Error::NotFound(
+            "conversation",
+            "the '-' target reads IDs from stdin, but nothing is piped to it".into(),
+        ));
     }
 
     let mut ids = Vec::new();
@@ -588,12 +637,10 @@ fn resolve_targets(
     workspace: &Workspace,
     session: Option<&Session>,
     default_id: DefaultConversationId,
-    multi: bool,
-    supports_session: bool,
-    allow_new: bool,
+    grammar: TargetGrammar,
 ) -> Result<(Vec<ConversationId>, bool)> {
     if targets.is_empty() {
-        return resolve_from_session_or_picker(workspace, session, default_id, allow_new);
+        return resolve_from_session_or_picker(workspace, session, default_id, grammar);
     }
 
     let all_ids = targets
@@ -626,8 +673,8 @@ fn resolve_targets(
     for target in targets {
         if matches!(target, ConversationTarget::Help) {
             return Err(Error::TargetHelp {
-                session: supports_session,
-                multi,
+                session: grammar.session,
+                multi: grammar.multi,
             });
         }
 
@@ -640,19 +687,21 @@ fn resolve_targets(
 
                 // Archived picker draws from the archive partition.
                 if filter.archived {
-                    return if multi {
-                        resolve_archived_multi_picker(workspace, filter).map(|ids| (ids, false))
+                    return if grammar.multi {
+                        resolve_archived_multi_picker(workspace, filter, grammar)
+                            .map(|ids| (ids, false))
                     } else {
-                        resolve_archived_picker(workspace, filter).map(|id| (vec![id], false))
+                        resolve_archived_picker(workspace, filter, grammar)
+                            .map(|id| (vec![id], false))
                     };
                 }
 
-                if multi {
-                    return resolve_multi_picker(workspace, session, filter)
+                if grammar.multi {
+                    return resolve_multi_picker(workspace, session, filter, grammar)
                         .map(|ids| (ids, false));
                 }
 
-                return resolve_single_picker(workspace, session, filter, allow_new);
+                return resolve_single_picker(workspace, session, filter, grammar);
             }
             Ok(v) => return Ok((v, false)),
             Err(e) => last_err = Some(e),
@@ -667,7 +716,7 @@ fn resolve_from_session_or_picker(
     workspace: &Workspace,
     session: Option<&Session>,
     default_id: DefaultConversationId,
-    allow_new: bool,
+    grammar: TargetGrammar,
 ) -> Result<(Vec<ConversationId>, bool)> {
     if let Some(id) = session.and_then(|s| workspace.session_active_conversation(s)) {
         return Ok((vec![id], false));
@@ -678,7 +727,7 @@ fn resolve_from_session_or_picker(
         return Ok((vec![id], false));
     }
 
-    resolve_single_picker(workspace, session, &PickerFilter::default(), allow_new)
+    resolve_single_picker(workspace, session, &PickerFilter::default(), grammar)
 }
 
 /// Single-select picker dispatch, optionally offering "start a new
@@ -690,20 +739,19 @@ fn resolve_single_picker(
     workspace: &Workspace,
     session: Option<&Session>,
     filter: &PickerFilter,
-    allow_new: bool,
+    grammar: TargetGrammar,
 ) -> Result<(Vec<ConversationId>, bool)> {
-    if !allow_new {
-        return resolve_picker(workspace, session, filter).map(|id| (vec![id], false));
+    if !grammar.allow_new {
+        return resolve_picker(workspace, session, filter, grammar).map(|id| (vec![id], false));
     }
 
     if !io::stdin().is_terminal() {
-        return Err(Error::NoConversationTarget);
+        return Err(grammar.into());
     }
 
-    match pick_conversation(workspace, session, filter, true) {
-        Some(PickSelection::Existing(id)) => Ok((vec![id], false)),
-        Some(PickSelection::New) => Ok((vec![], true)),
-        None => Err(Error::NoConversationTarget),
+    match pick_conversation(workspace, session, filter, true)? {
+        PickSelection::Existing(id) => Ok((vec![id], false)),
+        PickSelection::New => Ok((vec![], true)),
     }
 }
 
@@ -733,30 +781,28 @@ pub(crate) fn resolve_picker(
     workspace: &Workspace,
     session: Option<&Session>,
     filter: &PickerFilter,
+    grammar: TargetGrammar,
 ) -> Result<ConversationId> {
     if !io::stdin().is_terminal() {
-        return Err(Error::NoConversationTarget);
+        return Err(grammar.into());
     }
 
-    pick_conversation(workspace, session, filter, false)
-        .and_then(PickSelection::existing)
-        .ok_or(Error::NoConversationTarget)
+    pick_conversation(workspace, session, filter, false)?
+        .existing()
+        .ok_or(Error::NoConversationSelected)
 }
 
 fn resolve_multi_picker(
     workspace: &Workspace,
     session: Option<&Session>,
     filter: &PickerFilter,
+    grammar: TargetGrammar,
 ) -> Result<Vec<ConversationId>> {
     if !io::stdin().is_terminal() {
-        return Err(Error::NoConversationTarget);
+        return Err(grammar.into());
     }
 
-    let ids = pick_conversations(workspace, session, filter);
-    if ids.is_empty() {
-        return Err(Error::NoConversationTarget);
-    }
-    Ok(ids)
+    pick_conversations(workspace, session, filter)
 }
 
 /// Build the sorted, labeled conversation list for the picker.
@@ -873,6 +919,7 @@ fn format_picker_label(row: &PickerRow, time_width: usize) -> String {
 const NEW_CONVERSATION_LABEL: &str = "+ Start a new conversation";
 
 /// The result of an interactive single-select conversation picker.
+#[derive(Debug)]
 enum PickSelection {
     /// An existing conversation was chosen.
     Existing(ConversationId),
@@ -895,15 +942,18 @@ impl PickSelection {
 ///
 /// When `allow_new` is set, a "start a new conversation" item is offered as the
 /// first entry, so pressing Enter immediately selects it.
+///
+/// Errors with [`Error::NotFound`] when the filter matches nothing — no prompt
+/// is shown in that case, so there is nothing for the user to decline.
 fn pick_conversation(
     workspace: &Workspace,
     session: Option<&Session>,
     filter: &PickerFilter,
     allow_new: bool,
-) -> Option<PickSelection> {
+) -> Result<PickSelection> {
     let items = build_picker_items(workspace, session, filter);
     if items.is_empty() && !allow_new {
-        return None;
+        return Err(no_candidates(filter));
     }
 
     let mut labels: Vec<String> = items.iter().map(|(_, l)| l.clone()).collect();
@@ -916,16 +966,19 @@ fn pick_conversation(
     if let Some(query) = &filter.query {
         prompt = prompt.with_starting_filter_input(query);
     }
-    let selected = prompt.prompt_with_writer(&mut writer).ok()?;
+    let selected = prompt
+        .prompt_with_writer(&mut writer)
+        .map_err(declined_or_failed)?;
 
     if allow_new && selected == NEW_CONVERSATION_LABEL {
-        return Some(PickSelection::New);
+        return Ok(PickSelection::New);
     }
 
     items
         .iter()
         .find(|(_, l)| *l == selected)
         .map(|(id, _)| PickSelection::Existing(*id))
+        .ok_or(Error::NoConversationSelected)
 }
 
 /// Build picker items from archived conversations.
@@ -980,9 +1033,10 @@ fn build_archived_picker_items(
 pub(crate) fn resolve_archived_picker(
     workspace: &Workspace,
     filter: &PickerFilter,
+    grammar: TargetGrammar,
 ) -> Result<ConversationId> {
     if !io::stdin().is_terminal() {
-        return Err(Error::NoConversationTarget);
+        return Err(grammar.into());
     }
 
     let items = build_archived_picker_items(workspace, filter);
@@ -1001,21 +1055,22 @@ pub(crate) fn resolve_archived_picker(
     }
     let selected = prompt
         .prompt_with_writer(&mut writer)
-        .map_err(|_| Error::NoConversationTarget)?;
+        .map_err(declined_or_failed)?;
 
     items
         .iter()
         .find(|(_, l)| *l == selected)
         .map(|(id, _)| *id)
-        .ok_or(Error::NoConversationTarget)
+        .ok_or(Error::NoConversationSelected)
 }
 
 fn resolve_archived_multi_picker(
     workspace: &Workspace,
     filter: &PickerFilter,
+    grammar: TargetGrammar,
 ) -> Result<Vec<ConversationId>> {
     if !io::stdin().is_terminal() {
-        return Err(Error::NoConversationTarget);
+        return Err(grammar.into());
     }
 
     let items = build_archived_picker_items(workspace, filter);
@@ -1032,9 +1087,9 @@ fn resolve_archived_multi_picker(
     if let Some(query) = &filter.query {
         prompt = prompt.with_starting_filter_input(query);
     }
-    let Ok(selected) = prompt.prompt_with_writer(&mut writer) else {
-        return Err(Error::NoConversationTarget);
-    };
+    let selected = prompt
+        .prompt_with_writer(&mut writer)
+        .map_err(declined_or_failed)?;
 
     let ids: Vec<_> = items
         .iter()
@@ -1043,20 +1098,23 @@ fn resolve_archived_multi_picker(
         .collect();
 
     if ids.is_empty() {
-        return Err(Error::NoConversationTarget);
+        return Err(Error::NoConversationSelected);
     }
     Ok(ids)
 }
 
 /// Multi-select interactive conversation picker.
+///
+/// Errors with [`Error::NotFound`] when the filter matches nothing, and with
+/// [`Error::NoConversationSelected`] when the user submits an empty selection.
 fn pick_conversations(
     workspace: &Workspace,
     session: Option<&Session>,
     filter: &PickerFilter,
-) -> Vec<ConversationId> {
+) -> Result<Vec<ConversationId>> {
     let items = build_picker_items(workspace, session, filter);
     if items.is_empty() {
-        return vec![];
+        return Err(no_candidates(filter));
     }
 
     let labels: Vec<String> = items.iter().map(|(_, l)| l.clone()).collect();
@@ -1065,15 +1123,54 @@ fn pick_conversations(
     if let Some(query) = &filter.query {
         prompt = prompt.with_starting_filter_input(query);
     }
-    let Ok(selected) = prompt.prompt_with_writer(&mut writer) else {
-        return vec![];
-    };
+    let selected = prompt
+        .prompt_with_writer(&mut writer)
+        .map_err(declined_or_failed)?;
 
-    items
+    let ids: Vec<_> = items
         .iter()
         .filter(|(_, l)| selected.contains(l))
         .map(|(id, _)| *id)
-        .collect()
+        .collect();
+
+    if ids.is_empty() {
+        return Err(Error::NoConversationSelected);
+    }
+
+    Ok(ids)
+}
+
+/// The error for a picker whose filter matched no conversations.
+///
+/// Names the set that came up empty, because a lookup that found nothing is a
+/// different outcome from a prompt the user declined.
+fn no_candidates(filter: &PickerFilter) -> Error {
+    let missing = if filter.pinned {
+        "no pinned conversations"
+    } else if filter.session {
+        "no conversations in this session"
+    } else if filter.candidate_ids.is_some() {
+        "no conversations match"
+    } else {
+        "no conversations exist"
+    };
+
+    Error::NotFound("conversation", missing.into())
+}
+
+/// Classify a prompt failure as the user declining or the prompt breaking.
+///
+/// `OperationCanceled` / `OperationInterrupted` are the user saying no (Esc,
+/// Ctrl-C, or EOF).
+/// Every other variant keeps its cause, so a broken terminal is reported as a
+/// failure instead of a deliberate choice.
+fn declined_or_failed(error: InquireError) -> Error {
+    match error {
+        InquireError::OperationCanceled | InquireError::OperationInterrupted => {
+            Error::NoConversationSelected
+        }
+        error => Error::Inquire(error),
+    }
 }
 
 #[cfg(test)]

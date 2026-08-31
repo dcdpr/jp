@@ -223,6 +223,7 @@ expression: v
         "assistant": {
           "model": {
             "id": {
+              "provider": "openrouter",
               "name": "google/gemini-2.5-flash"
             }
           }

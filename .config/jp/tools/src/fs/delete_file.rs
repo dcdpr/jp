@@ -52,13 +52,12 @@ pub(crate) async fn fs_delete_file(
                 return error("File has uncommitted changes. Please stage or discard first.");
             }
             None => {
-                return Ok(Outcome::NeedsInput {
-                    question: Question::boolean(
-                        "delete_dirty_file",
-                        format!("File '{path}' has uncommitted changes. Delete anyway?"),
-                    )
-                    .with_default(Value::Bool(false)),
-                });
+                let question = Question::boolean(
+                    "delete_dirty_file",
+                    format!("File '{path}' has uncommitted changes. Delete anyway?"),
+                )?
+                .with_default(Value::Bool(false));
+                return Ok(Outcome::NeedsInput { question });
             }
         }
     }

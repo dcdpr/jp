@@ -6,154 +6,22 @@ use jp_tool::{AccessPolicy, Action, Capability, Context, FsRule, Outcome};
 use pretty_assertions::assert_eq;
 use serde_json::{Map, json};
 
-use super::{Tool, cargo_root, note_root, required_capabilities, run};
-
-/// Capabilities for a building subcommand, which is the demanding case.
-const BUILDS: &[Capability] = &[
-    Capability::Read,
-    Capability::Create,
-    Capability::Update,
-    Capability::Delete,
-    Capability::Execute,
-];
+use super::{Tool, ensure_workspace_root, required_capabilities, run};
+use crate::util::{
+    root::{CARGO_MANIFEST, resolve_root},
+    runner::MockProcessRunner,
+};
 
 /// Create `relative` under `root` as a cargo package.
 ///
-/// A bare directory is not enough: `cargo_root` requires a manifest, because
-/// without one cargo would search parent directories and operate on the
+/// A bare directory is not enough: the root resolver requires a manifest,
+/// because without one cargo would search parent directories and operate on the
 /// enclosing workspace.
 fn package_dir(root: &Utf8Path, relative: &str) -> Utf8PathBuf {
     let dir = root.join(relative);
     fs::create_dir_all(&dir).unwrap();
     fs::write(dir.join("Cargo.toml"), "[package]\nname = \"game\"\n").unwrap();
     dir
-}
-
-#[test]
-fn no_option_keeps_the_invocation_root() {
-    let dir = tempdir().unwrap();
-
-    assert_eq!(
-        cargo_root(dir.path(), None, None, BUILDS)
-            .unwrap()
-            .as_path(),
-        dir.path()
-    );
-}
-
-/// A config layer that unloads a previously-set root can say so without knowing
-/// what the default was.
-#[test]
-fn an_empty_or_dot_option_resolves_to_the_invocation_root() {
-    let dir = tempdir().unwrap();
-
-    assert_eq!(
-        cargo_root(dir.path(), Some(""), None, BUILDS)
-            .unwrap()
-            .as_path(),
-        dir.path()
-    );
-    assert_eq!(
-        cargo_root(dir.path(), Some("."), None, BUILDS)
-            .unwrap()
-            .as_path(),
-        dir.path()
-    );
-}
-
-/// The resolver canonicalizes, so the expectation has to be canonical too: on
-/// macOS a temp dir under `/var` resolves to `/private/var`.
-#[test]
-fn a_relative_option_is_joined_onto_the_invocation_root() {
-    let dir = tempdir().unwrap();
-    let nested = package_dir(dir.path(), "crates/game");
-
-    assert_eq!(
-        cargo_root(dir.path(), Some("crates/game"), None, BUILDS).unwrap(),
-        nested.canonicalize_utf8().unwrap()
-    );
-}
-
-/// `cargo` runs build scripts and proc macros, so the root is confined to the
-/// workspace exactly like every other tool path.
-/// An approved `external` mount is the only sanctioned way out.
-#[test]
-fn an_absolute_option_is_rejected() {
-    let dir = tempdir().unwrap();
-    let outside = tempdir().unwrap();
-
-    let error = cargo_root(dir.path(), Some(outside.path().as_str()), None, BUILDS).unwrap_err();
-
-    assert!(error.contains("must be relative"), "got: {error}");
-}
-
-#[test]
-fn a_parent_traversal_is_rejected() {
-    let dir = tempdir().unwrap();
-
-    let error = cargo_root(dir.path(), Some("../.."), None, BUILDS).unwrap_err();
-
-    assert!(error.contains("escape"), "got: {error}");
-}
-
-/// The resolved path embeds a temp directory, so this pins the two facts that
-/// matter rather than the whole message.
-#[test]
-fn a_missing_directory_is_rejected() {
-    let dir = tempdir().unwrap();
-
-    let error = cargo_root(dir.path(), Some("crates/typo"), None, BUILDS).unwrap_err();
-
-    assert!(error.contains("crates/typo"), "got: {error}");
-    assert!(error.contains("not a directory"), "got: {error}");
-}
-
-/// Without the directory named, cargo's own message gives no hint that it ran
-/// somewhere other than the workspace.
-#[test]
-fn an_error_names_the_redirected_root() {
-    let outcome = Ok(Outcome::Error {
-        message: "package ID specification `tools` did not match any packages".to_owned(),
-        trace: vec![],
-        transient: false,
-    });
-
-    let annotated = note_root(outcome, Utf8Path::new("crates/my-workspace")).unwrap();
-
-    let Outcome::Error { message, .. } = annotated else {
-        panic!("expected an error outcome");
-    };
-    assert!(
-        message.contains("did not match any packages"),
-        "the original message must survive, got: {message}"
-    );
-    assert!(message.contains("crates/my-workspace"), "got: {message}");
-}
-
-/// The caller asked for the redirect, so a success needs no restating.
-#[test]
-fn a_success_is_left_alone() {
-    let outcome = Ok(Outcome::Success {
-        content: "Check succeeded.".to_owned(),
-    });
-
-    let annotated = note_root(outcome, Utf8Path::new("crates/my-workspace")).unwrap();
-
-    assert_eq!(annotated, Outcome::Success {
-        content: "Check succeeded.".to_owned()
-    });
-}
-
-/// Naming the manifest instead of the directory holding it is the likely
-/// mistake; cargo would otherwise fail somewhere far less obvious.
-#[test]
-fn a_file_is_rejected() {
-    let dir = tempdir().unwrap();
-    fs::write(dir.path().join("Cargo.toml"), "").unwrap();
-
-    let error = cargo_root(dir.path(), Some("Cargo.toml"), None, BUILDS).unwrap_err();
-
-    assert!(error.contains("not a directory"), "got: {error}");
 }
 
 /// `external` only lets a path resolve outside the workspace; it grants
@@ -172,44 +40,27 @@ fn a_configured_root_needs_the_capabilities_its_subcommand_uses() {
 
     // `cargo fmt` reads and rewrites sources, both of which are granted.
     assert!(
-        cargo_root(
+        resolve_root(
             dir.path(),
             Some("crates/game"),
             Some(&policy),
             required_capabilities("format"),
+            &CARGO_MANIFEST,
         )
         .is_ok()
     );
 
     // `cargo check` additionally writes artifacts and executes build scripts.
-    let error = cargo_root(
+    let error = resolve_root(
         dir.path(),
         Some("crates/game"),
         Some(&policy),
         required_capabilities("check"),
+        &CARGO_MANIFEST,
     )
     .unwrap_err();
 
     assert!(error.contains("Access denied"), "got: {error}");
-}
-
-/// The invocation root predates this option, so a restrictive policy must not
-/// revoke access the `root` option never handed out.
-#[test]
-fn the_invocation_root_is_not_authorized() {
-    let dir = tempdir().unwrap();
-
-    let policy = AccessPolicy {
-        fs: vec![FsRule::new("nowhere").with_read(true)],
-        ..AccessPolicy::default()
-    };
-
-    assert_eq!(
-        cargo_root(dir.path(), None, Some(&policy), BUILDS)
-            .unwrap()
-            .as_path(),
-        dir.path()
-    );
 }
 
 /// `fmt` rewrites sources in place and does nothing else.
@@ -257,24 +108,106 @@ fn building_subcommands_declare_every_capability() {
     }
 }
 
-/// A directory without a manifest is not a cargo workspace: cargo would search
-/// parent directories and rewrite the enclosing workspace instead, reporting
-/// success while touching a project the caller never named.
+/// Build a runner that answers one `cargo locate-project` for `root` with
+/// `workspace` as the manifest it resolves to.
+fn locate_project(root: &Utf8Path, workspace: &Utf8Path) -> MockProcessRunner {
+    MockProcessRunner::builder()
+        .expect("cargo")
+        .args(&[
+            "locate-project",
+            "--workspace",
+            "--message-format=plain",
+            "--manifest-path",
+            root.join("Cargo.toml").as_str(),
+        ])
+        .returns_success(format!("{}\n", workspace.join("Cargo.toml")))
+}
+
+/// A member has a manifest, so the marker check clears it, but cargo resolves
+/// the workspace from that manifest: `--workspace`, `--all` and the lockfile
+/// would all land on the enclosing project instead.
 #[test]
-fn a_directory_without_a_manifest_is_rejected() {
+fn a_workspace_member_is_refused() {
     let dir = tempdir().unwrap();
-    fs::create_dir_all(dir.path().join("crates")).unwrap();
+    let member = package_dir(dir.path(), "crates/game");
+    let workspace = dir.path().canonicalize_utf8().unwrap();
 
-    let error = cargo_root(dir.path(), Some("crates"), None, BUILDS).unwrap_err();
+    let runner = locate_project(&member, &workspace);
 
-    assert!(error.contains("no `Cargo.toml`"), "got: {error}");
-    assert!(error.contains("enclosing workspace"), "got: {error}");
+    let error = ensure_workspace_root(&member, &runner).unwrap_err();
+
+    assert!(error.contains("crates/game"), "got: {error}");
+    assert!(error.contains(workspace.as_str()), "got: {error}");
+    assert!(
+        error.contains("member of the cargo workspace"),
+        "got: {error}"
+    );
+}
+
+#[test]
+fn a_workspace_root_is_accepted() {
+    let dir = tempdir().unwrap();
+    let root = dir.path().canonicalize_utf8().unwrap();
+    fs::write(root.join("Cargo.toml"), "[workspace]\n").unwrap();
+
+    let runner = locate_project(&root, &root);
+
+    ensure_workspace_root(&root, &runner).unwrap();
+}
+
+/// Falling through on a manifest cargo cannot read would hand the question back
+/// to the build command, which answers it by walking up.
+#[test]
+fn a_workspace_cargo_cannot_resolve_is_refused() {
+    let dir = tempdir().unwrap();
+    let root = dir.path().canonicalize_utf8().unwrap();
+
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .returns_error("error: failed to parse manifest");
+
+    let error = ensure_workspace_root(&root, &runner).unwrap_err();
+
+    assert!(error.contains("failed to parse manifest"), "got: {error}");
+}
+
+/// `cargo_install_tools` builds through `just install-tools`, whose recipe pins
+/// its own profile, so the option cannot be honored there.
+/// Ignoring it would put the build back in the shared target directory —
+/// taking the lock and rewriting the fingerprints a concurrent build relies on
+/// — and report success.
+#[tokio::test]
+async fn a_profile_on_a_subcommand_that_cannot_use_it_fails_the_invocation() {
+    let dir = tempdir().unwrap();
+    let ctx = Context {
+        root: dir.path().to_owned(),
+        action: Action::Run,
+        access: None,
+        workspace_id: "test".into(),
+        conversation_id: "test".into(),
+    };
+    let tool = Tool {
+        name: "cargo_install_tools".to_owned(),
+        arguments: Map::new(),
+        answers: Map::new(),
+        options: Map::from_iter([("profile".to_owned(), json!("agent"))]),
+    };
+
+    // Returns before `just` is spawned, so no process fixture is needed.
+    let Outcome::Error { message, .. } = run(ctx, tool).await.unwrap() else {
+        panic!("expected an error outcome");
+    };
+
+    assert!(
+        message.contains("no effect on `cargo_install_tools`"),
+        "got: {message}"
+    );
 }
 
 /// `Tool::option_or` reports a malformed value as an absent one, which would
 /// silently run against the host workspace while reporting success.
-/// Every other test here calls `cargo_root` directly, so only driving `run`
-/// catches a regression to reading the option through `option_or`.
+/// The resolver itself is covered in `util/root_tests.rs`, so only driving
+/// `run` catches a regression to reading the option through `option_or`.
 #[tokio::test]
 async fn a_non_string_root_option_fails_the_invocation() {
     let dir = tempdir().unwrap();

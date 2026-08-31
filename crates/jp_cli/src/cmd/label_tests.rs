@@ -2,332 +2,341 @@ use clap::Parser as _;
 
 use super::*;
 
-/// The `jp query` shape: `--label` with aliases, no reset.
-#[derive(Debug, clap::Parser)]
-struct Aliased {
-    #[command(flatten)]
-    labels: LabelDirectives<true, false>,
-}
-
-/// The `jp conversation fork` shape: no aliases, with `--reset-labels`.
-#[derive(Debug, clap::Parser)]
-struct Resettable {
-    #[command(flatten)]
-    labels: LabelDirectives<false, true>,
-}
-
 #[derive(Debug, clap::Parser)]
 struct Filtering {
     #[arg(long = "label")]
     labels: Vec<LabelSelector>,
 }
 
-fn parse(args: &[&str]) -> Vec<LabelDirective> {
-    Aliased::try_parse_from(args).unwrap().labels.0
+/// Parse operands the way `add` and `set` do, with aliases accepted.
+fn parse(raw: &[&str]) -> Vec<LabelOperand> {
+    raw.iter()
+        .map(|raw| LabelOperand::parse(raw, true).unwrap())
+        .collect()
 }
 
-// ── Flag parsing ─────────────────────────────────────────────────────────────
+/// Resolve operands without a resolver, which only alias-free input allows.
+fn resolved(raw: &[&str], aliases: bool) -> Resolved {
+    Resolved(
+        raw.iter()
+            .map(|raw| match LabelOperand::parse(raw, aliases).unwrap() {
+                LabelOperand::Pair { key, value } => {
+                    let contribution = value.map_or(Contribution::Bare, |value| {
+                        Contribution::Values(vec![value])
+                    });
+                    (key, contribution)
+                }
+                LabelOperand::Alias(name) => panic!("alias ':{name}' needs a resolver"),
+            })
+            .collect(),
+    )
+}
+
+fn pair(key: &str, value: &str) -> LabelOperand {
+    LabelOperand::Pair {
+        key: key.to_owned(),
+        value: Some(value.to_owned()),
+    }
+}
+
+fn bare(key: &str) -> LabelOperand {
+    LabelOperand::Pair {
+        key: key.to_owned(),
+        value: None,
+    }
+}
+
+// ── Operand parsing ──────────────────────────────────────────────────────────
 
 #[test]
 fn key_value_and_bare_keys_parse() {
-    assert_eq!(parse(&["jp", "--label=team=platform", "--label=draft"]), [
-        LabelDirective::Set {
-            key: "team".to_owned(),
-            value: "platform".to_owned()
-        },
-        LabelDirective::Set {
-            key: "draft".to_owned(),
-            value: String::new()
-        },
+    assert_eq!(parse(&["team=platform", "draft"]), [
+        pair("team", "platform"),
+        bare("draft"),
     ]);
 }
 
-/// One flag carries one label, so a value needs no escaping: commas, equals
+/// One argument carries one label, so a value needs no escaping: commas, equals
 /// signs and spaces are all just characters.
 #[test]
 fn values_are_taken_literally() {
-    assert_eq!(parse(&["jp", "--label=branch=feat,exp"]), [
-        LabelDirective::Set {
-            key: "branch".to_owned(),
-            value: "feat,exp".to_owned()
-        },
-    ]);
-
-    assert_eq!(parse(&["jp", "--label=expr=a=b,c=d"]), [
-        LabelDirective::Set {
-            key: "expr".to_owned(),
-            value: "a=b,c=d".to_owned()
-        },
-    ]);
-}
-
-/// The plural spelling is gone: one label per flag, repeated.
-#[test]
-fn the_plural_spelling_is_not_accepted() {
-    assert!(Aliased::try_parse_from(["jp", "--labels=a=1"]).is_err());
+    assert_eq!(parse(&["branch=feat,exp"]), [pair("branch", "feat,exp")]);
+    assert_eq!(parse(&["expr=a=b,c=d"]), [pair("expr", "a=b,c=d")]);
 }
 
 #[test]
-fn invalid_keys_are_rejected_at_parse_time() {
-    let error = Aliased::try_parse_from(["jp", "--label=team.platform=x"]).unwrap_err();
-    assert!(error.to_string().contains("invalid character '.'"));
+fn invalid_keys_are_rejected() {
+    let error = LabelOperand::parse("team.platform=x", true).unwrap_err();
+    assert!(error.contains("invalid character '.'"), "got: {error}");
 }
 
 /// A key that starts with `-` would be read as a flag where keys are written as
 /// bare arguments, so the grammar requires a leading letter.
+///
+/// `jp c label set` leans on the same rule: it marks its output with `-` and
+/// `+`, which no label line can begin with on its own.
 #[test]
 fn keys_must_start_with_a_letter() {
-    for raw in ["--label=-lead=x", "--label=1st=x", "--label=_x=y"] {
-        let error = Aliased::try_parse_from(["jp", raw]).unwrap_err();
-        let error = error.to_string();
-        assert!(
-            error.contains("starts with") || error.contains("unexpected argument"),
-            "got: {error}"
-        );
+    for raw in ["-lead=x", "+lead=x", "1st=x", "_x=y"] {
+        let error = LabelOperand::parse(raw, true).unwrap_err();
+        assert!(error.contains("starts with"), "got: {error}");
     }
 }
 
 #[test]
 fn alias_syntax_parses_where_supported() {
-    assert_eq!(parse(&["jp", "--label=:branch", "--label=a=1"]), [
-        LabelDirective::Alias("branch".to_owned()),
-        LabelDirective::Set {
-            key: "a".to_owned(),
-            value: "1".to_owned()
-        },
+    assert_eq!(parse(&[":branch", "a=1"]), [
+        LabelOperand::Alias("branch".to_owned()),
+        pair("a", "1"),
     ]);
 }
 
-/// A command that may target several conversations can't resolve a rule, so it
-/// points at the command that can.
+/// `rm` names values already stored rather than a rule to resolve, so `:name`
+/// is nothing but an invalid key there.
 #[test]
-fn alias_syntax_is_rejected_without_alias_support() {
-    let error = Resettable::try_parse_from(["jp", "--label=:branch"]).unwrap_err();
-    let error = error.to_string();
-    assert!(error.contains("not supported here"), "got: {error}");
-    assert!(error.contains("conversation label add"), "got: {error}");
+fn an_alias_is_an_invalid_key_where_aliases_are_off() {
+    let error = LabelOperand::parse(":branch", false).unwrap_err();
+    assert!(error.contains("starts with ':'"), "got: {error}");
 }
 
 #[test]
 fn an_alias_name_must_be_a_valid_key() {
-    let error = Aliased::try_parse_from(["jp", "--label=:a.b"]).unwrap_err();
-    assert!(error.to_string().contains("invalid character '.'"));
+    let error = LabelOperand::parse(":a.b", true).unwrap_err();
+    assert!(error.contains("invalid character '.'"), "got: {error}");
 }
 
-// ── `--reset-labels` ─────────────────────────────────────────────────────────
-
+/// Removal takes a bare key or a pair, so a `key=value` argument names one
+/// value rather than being rejected.
 #[test]
-fn reset_is_unavailable_where_it_is_not_registered() {
-    assert!(Aliased::try_parse_from(["jp", "--reset-labels"]).is_err());
-}
-
-/// `--reset-labels` is positioned like any other directive: it drops what came
-/// before it and leaves what comes after.
-#[test]
-fn reset_takes_its_place_in_command_line_order() {
-    let parsed = Resettable::try_parse_from(["jp", "--label=a=1", "--reset-labels", "--label=b=2"])
-        .unwrap()
-        .labels
-        .0;
-
-    assert_eq!(parsed, [
-        LabelDirective::Set {
-            key: "a".to_owned(),
-            value: "1".to_owned()
-        },
-        LabelDirective::RemoveAll,
-        LabelDirective::Set {
-            key: "b".to_owned(),
-            value: "2".to_owned()
-        },
-    ]);
-}
-
-/// `--reset-labels` takes no value, so it can never swallow the argument that
-/// follows it.
-#[test]
-fn reset_consumes_no_value() {
-    let parsed = Resettable::try_parse_from(["jp", "--reset-labels", "--label=a=1"])
-        .unwrap()
-        .labels
-        .0;
-
-    assert_eq!(parsed, [LabelDirective::RemoveAll, LabelDirective::Set {
-        key: "a".to_owned(),
-        value: "1".to_owned()
-    },]);
-}
-
-// ── Bare-argument parsing, as `jp c label` uses it ───────────────────────────
-
-#[test]
-fn bare_arguments_parse_as_set_directives() {
+fn removal_takes_keys_and_pairs() {
     assert_eq!(
-        LabelDirective::parse_set::<true>("team=platform").unwrap(),
-        LabelDirective::Set {
-            key: "team".to_owned(),
-            value: "platform".to_owned()
-        }
+        LabelOperand::parse("team=platform", false).unwrap(),
+        pair("team", "platform")
     );
-    assert_eq!(
-        LabelDirective::parse_set::<true>("draft").unwrap(),
-        LabelDirective::Set {
-            key: "draft".to_owned(),
-            value: String::new()
-        }
-    );
-    assert_eq!(
-        LabelDirective::parse_set::<true>(":branch").unwrap(),
-        LabelDirective::Alias("branch".to_owned())
-    );
+    assert_eq!(LabelOperand::parse("team", false).unwrap(), bare("team"));
 }
 
-/// Removal names keys, so a `key=value` argument is rejected rather than
-/// silently treated as a key.
-#[test]
-fn removal_takes_keys_not_pairs() {
-    let error = LabelDirective::parse_remove("team=platform").unwrap_err();
-    assert!(error.contains("invalid character '='"), "got: {error}");
-}
-
-/// A conversation ID is a perfectly good label key now that keys and
-/// conversation targets no longer share an argument slot.
+/// A conversation ID is a perfectly good label key, since keys and conversation
+/// targets do not share an argument slot.
 #[test]
 fn a_conversation_id_is_an_ordinary_key() {
     assert_eq!(
-        LabelDirective::parse_remove("jp-c17866928997").unwrap(),
-        LabelDirective::Remove("jp-c17866928997".to_owned())
+        LabelOperand::parse("jp-c17866928997", false).unwrap(),
+        bare("jp-c17866928997")
     );
+}
+
+// ── Grouping ─────────────────────────────────────────────────────────────────
+
+/// A key named several times is applied once, with every value it was given.
+/// Without that, `set k=a k=b` would replace the set twice and leave `{b}`.
+#[test]
+fn values_group_under_their_key_in_the_order_given() {
+    let grouped = resolved(&["crate=jp_config", "team=platform", "crate=jp_llm"], true).grouped();
+
+    assert_eq!(grouped.keys().collect::<Vec<_>>(), ["crate", "team"]);
+    assert_eq!(grouped["crate"].iter().collect::<Vec<_>>(), [
+        "jp_config",
+        "jp_llm"
+    ]);
+}
+
+#[test]
+fn a_repeated_value_is_grouped_once() {
+    let grouped = resolved(&["crate=jp_llm", "crate=jp_llm"], true).grouped();
+
+    assert_eq!(grouped["crate"].iter().collect::<Vec<_>>(), ["jp_llm"]);
+}
+
+#[test]
+fn a_bare_key_groups_as_the_empty_value() {
+    let grouped = resolved(&["draft"], true).grouped();
+
+    assert_eq!(grouped["draft"].iter().collect::<Vec<_>>(), [""]);
+}
+
+/// For removal a bare key names the whole key, which is an empty value set.
+#[test]
+fn a_bare_key_groups_as_the_whole_key_for_removal() {
+    let grouped = resolved(&["draft", "crate=jp_llm"], false).grouped_for_removal();
+
+    assert!(grouped["draft"].is_empty());
+    assert_eq!(grouped["crate"].iter().collect::<Vec<_>>(), ["jp_llm"]);
+}
+
+/// Removing the key removes its values too, so naming both is the key.
+#[test]
+fn a_whole_key_removal_absorbs_the_values_named_alongside_it() {
+    for raw in [["crate", "crate=jp_llm"], ["crate=jp_llm", "crate"]] {
+        let grouped = resolved(&raw, false).grouped_for_removal();
+        assert!(grouped["crate"].is_empty(), "got: {grouped:?}");
+    }
 }
 
 // ── Application ──────────────────────────────────────────────────────────────
 
-fn resolved(directives: Vec<LabelDirective>) -> Resolved {
-    Resolved(directives)
-}
-
 #[test]
-fn directives_apply_in_order() {
-    let mut labels = BTreeMap::from([("keep".to_owned(), "yes".to_owned())]);
+fn add_accumulates_into_the_keys_set() {
+    let mut labels = Labels::from_iter([("crate", ["jp_config"])]);
 
-    apply(
+    let applied = apply(
         &mut labels,
-        &resolved(vec![
-            LabelDirective::Set {
-                key: "branch".to_owned(),
-                value: "main".to_owned(),
-            },
-            LabelDirective::Set {
-                key: "branch".to_owned(),
-                value: "feat".to_owned(),
-            },
-        ]),
+        &LabelChange::Add(resolved(&["crate=jp_llm"], true).grouped()),
     );
 
     assert_eq!(
         labels,
-        BTreeMap::from([
-            ("keep".to_owned(), "yes".to_owned()),
-            ("branch".to_owned(), "feat".to_owned()),
-        ])
+        Labels::from_iter([("crate", ["jp_config", "jp_llm"])])
     );
+    assert_eq!(applied.changes, [Change {
+        key: "crate".to_owned(),
+        before: IndexSet::from(["jp_config".to_owned()]),
+        after: IndexSet::from(["jp_config".to_owned(), "jp_llm".to_owned()]),
+    }]);
 }
 
 #[test]
-fn remove_all_clears_then_later_sets_apply() {
-    let mut labels = BTreeMap::from([
-        ("a".to_owned(), "1".to_owned()),
-        ("b".to_owned(), "2".to_owned()),
+fn set_replaces_the_keys_set_and_leaves_other_keys_alone() {
+    let mut labels = Labels::from_iter([
+        ("crate", vec!["jp_config", "jp_llm"]),
+        ("team", vec!["platform"]),
     ]);
-
-    apply(
-        &mut labels,
-        &resolved(vec![LabelDirective::RemoveAll, LabelDirective::Set {
-            key: "c".to_owned(),
-            value: "3".to_owned(),
-        }]),
-    );
-
-    assert_eq!(labels, BTreeMap::from([("c".to_owned(), "3".to_owned())]));
-}
-
-/// Removing a key the conversation doesn't carry is not an error — removal is
-/// idempotent — but it is reported, so a directive that did nothing is
-/// visible.
-#[test]
-fn removing_an_absent_key_is_reported() {
-    let mut labels = BTreeMap::from([("kept".to_owned(), "yes".to_owned())]);
 
     let applied = apply(
         &mut labels,
-        &resolved(vec![
-            LabelDirective::Remove("absent".to_owned()),
-            LabelDirective::Remove("kept".to_owned()),
-            LabelDirective::Remove("alsoabsent".to_owned()),
-        ]),
+        &LabelChange::Set(resolved(&["crate=jp_cli"], true).grouped()),
+    );
+
+    assert_eq!(
+        labels,
+        Labels::from_iter([("crate", ["jp_cli"]), ("team", ["platform"])])
+    );
+    assert_eq!(applied.changes, [Change {
+        key: "crate".to_owned(),
+        before: IndexSet::from(["jp_config".to_owned(), "jp_llm".to_owned()]),
+        after: IndexSet::from(["jp_cli".to_owned()]),
+    }]);
+}
+
+#[test]
+fn removing_a_pair_takes_one_value_and_leaves_the_rest() {
+    let mut labels = Labels::from_iter([("crate", ["jp_config", "jp_llm"])]);
+
+    let applied = apply(
+        &mut labels,
+        &LabelChange::Remove(resolved(&["crate=jp_llm"], false).grouped_for_removal()),
+    );
+
+    assert_eq!(labels, Labels::from_iter([("crate", ["jp_config"])]));
+    assert_eq!(applied.changes, [Change {
+        key: "crate".to_owned(),
+        before: IndexSet::from(["jp_config".to_owned(), "jp_llm".to_owned()]),
+        after: IndexSet::from(["jp_config".to_owned()]),
+    }]);
+    assert!(applied.missing.is_empty());
+}
+
+#[test]
+fn removing_a_bare_key_takes_every_value_it_held() {
+    let mut labels = Labels::from_iter([
+        ("crate", vec!["jp_config", "jp_llm"]),
+        ("team", vec!["platform"]),
+    ]);
+
+    let applied = apply(
+        &mut labels,
+        &LabelChange::Remove(resolved(&["crate"], false).grouped_for_removal()),
+    );
+
+    assert_eq!(labels, Labels::from_iter([("team", ["platform"])]));
+    assert_eq!(applied.changes, [Change {
+        key: "crate".to_owned(),
+        before: IndexSet::from(["jp_config".to_owned(), "jp_llm".to_owned()]),
+        after: IndexSet::new(),
+    }]);
+}
+
+#[test]
+fn remove_all_takes_every_label() {
+    let mut labels = Labels::from_iter([("crate", ["jp_llm"]), ("draft", [""])]);
+
+    let applied = apply(&mut labels, &LabelChange::RemoveAll);
+
+    assert!(labels.is_empty());
+    assert_eq!(applied.changes, [
+        Change {
+            key: "crate".to_owned(),
+            before: IndexSet::from(["jp_llm".to_owned()]),
+            after: IndexSet::new(),
+        },
+        Change {
+            key: "draft".to_owned(),
+            before: IndexSet::from([String::new()]),
+            after: IndexSet::new(),
+        },
+    ]);
+    assert!(applied.missing.is_empty());
+}
+
+/// Removing something the conversation doesn't carry is not an error — removal
+/// is idempotent — but it is reported, so an operand that did nothing is
+/// visible.
+#[test]
+fn removing_what_is_not_there_is_reported() {
+    let mut labels = Labels::from_iter([("crate", ["jp_config"])]);
+
+    let applied = apply(
+        &mut labels,
+        &LabelChange::Remove(
+            resolved(&["absent", "crate=jp_llm", "crate=jp_config"], false).grouped_for_removal(),
+        ),
     );
 
     assert_eq!(
         applied.missing,
-        ["absent", "alsoabsent"],
+        [
+            ("absent".to_owned(), None),
+            ("crate".to_owned(), Some("jp_llm".to_owned())),
+        ],
         "in the order given"
     );
-    assert_eq!(
-        applied.removed,
-        [("kept".to_owned(), "yes".to_owned())],
-        "the value is captured so the removal can be undone"
-    );
-    assert!(labels.is_empty(), "the present key was still removed");
+    assert!(labels.is_empty(), "the value that was there is gone");
 }
 
-/// A bare `rm` reports every label it took, with values, so the printed line is
-/// the `add` that puts them back.
+/// A key whose named values were all absent changed nothing, so it reports no
+/// change to undo.
 #[test]
-fn removing_everything_reports_each_label_with_its_value() {
-    let mut labels = BTreeMap::from([
-        ("foo".to_owned(), String::new()),
-        ("qux".to_owned(), "quux".to_owned()),
-    ]);
-
-    let applied = apply(&mut labels, &resolved(vec![LabelDirective::RemoveAll]));
-
-    assert_eq!(applied.removed, [
-        ("foo".to_owned(), String::new()),
-        ("qux".to_owned(), "quux".to_owned()),
-    ]);
-    assert!(applied.missing.is_empty());
-    assert!(labels.is_empty());
-}
-
-/// A key set earlier in the same invocation counts as present: the check runs
-/// against the live map, not the starting one.
-#[test]
-fn a_key_set_then_removed_is_not_reported_missing() {
-    let mut labels = BTreeMap::new();
+fn a_removal_that_matched_nothing_reports_no_change() {
+    let mut labels = Labels::from_iter([("crate", ["jp_config"])]);
 
     let applied = apply(
         &mut labels,
-        &resolved(vec![
-            LabelDirective::Set {
-                key: "tmp".to_owned(),
-                value: "1".to_owned(),
-            },
-            LabelDirective::Remove("tmp".to_owned()),
-        ]),
+        &LabelChange::Remove(resolved(&["crate=jp_llm"], false).grouped_for_removal()),
     );
 
-    assert!(applied.missing.is_empty(), "got: {applied:?}");
-    assert!(labels.is_empty());
+    assert!(applied.changes.is_empty());
+    assert_eq!(applied.missing, [(
+        "crate".to_owned(),
+        Some("jp_llm".to_owned())
+    )]);
 }
 
+/// Adding a value the key already holds is honest about having changed nothing,
+/// rather than pretending the key was untouched.
 #[test]
-fn a_bare_removal_never_reports_missing() {
-    let mut labels = BTreeMap::new();
+fn adding_a_value_the_key_already_holds_reports_both_sides_the_same() {
+    let mut labels = Labels::from_iter([("crate", ["jp_config"])]);
 
-    let applied = apply(&mut labels, &resolved(vec![LabelDirective::RemoveAll]));
+    let applied = apply(
+        &mut labels,
+        &LabelChange::Add(resolved(&["crate=jp_config"], true).grouped()),
+    );
 
-    assert!(applied.missing.is_empty());
-    assert!(applied.removed.is_empty());
+    assert_eq!(applied.changes, [Change {
+        key: "crate".to_owned(),
+        before: IndexSet::from(["jp_config".to_owned()]),
+        after: IndexSet::from(["jp_config".to_owned()]),
+    }]);
 }
 
 // ── Filters ──────────────────────────────────────────────────────────────────
@@ -338,26 +347,36 @@ fn selectors_and_together() {
         .unwrap()
         .labels;
 
-    let matching = BTreeMap::from([
-        ("team".to_owned(), "platform".to_owned()),
-        ("draft".to_owned(), String::new()),
-    ]);
+    let matching = Labels::from_iter([("team", ["platform"]), ("draft", [""])]);
     assert!(matches(&matching, &filter));
 
     // Present-only selectors accept any value, including an empty one.
-    let wrong_value = BTreeMap::from([
-        ("team".to_owned(), "infra".to_owned()),
-        ("draft".to_owned(), "yes".to_owned()),
-    ]);
+    let wrong_value = Labels::from_iter([("team", ["infra"]), ("draft", ["yes"])]);
     assert!(!matches(&wrong_value, &filter));
 
-    let missing_key = BTreeMap::from([("team".to_owned(), "platform".to_owned())]);
+    let missing_key = Labels::from_iter([("team", ["platform"])]);
     assert!(!matches(&missing_key, &filter));
+}
+
+/// A key holding several values matches on membership, so a filter naming one
+/// of them finds the conversation, and naming two requires both.
+#[test]
+fn a_selector_matches_any_value_the_key_holds() {
+    let one = Filtering::try_parse_from(["jp", "--label=crate=jp_llm"])
+        .unwrap()
+        .labels;
+    let both = Filtering::try_parse_from(["jp", "--label=crate=jp_llm", "--label=crate=jp_cli"])
+        .unwrap()
+        .labels;
+
+    let labels = Labels::from_iter([("crate", ["jp_config", "jp_llm"])]);
+    assert!(matches(&labels, &one));
+    assert!(!matches(&labels, &both));
 }
 
 #[test]
 fn an_empty_filter_matches_everything() {
-    assert!(matches(&BTreeMap::new(), &[]));
+    assert!(matches(&Labels::default(), &[]));
 }
 
 /// Filters read persisted labels, so a rule name has nothing to resolve
@@ -387,18 +406,62 @@ async fn expand_aliases_replaces_aliases_and_keeps_order() {
     let prompts = jp_inquire::prompt::MockPromptBackend::new();
     let resolver = resolve::Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
 
-    let directives = parse(&["jp", "--label=a=1", "--label=:stage"]);
-    let expanded = expand_aliases(&directives, &resolver).await.unwrap();
+    let operands = parse(&["a=1", ":stage"]);
+    let expanded = expand_aliases(&operands, &resolver).await.unwrap();
 
-    assert_eq!(*expanded, [
-        LabelDirective::Set {
-            key: "a".to_owned(),
-            value: "1".to_owned()
-        },
-        LabelDirective::Set {
-            key: "stage".to_owned(),
-            value: "review".to_owned()
-        },
+    assert_eq!(
+        expanded,
+        Resolved(vec![
+            ("a".to_owned(), Contribution::Values(vec!["1".to_owned()])),
+            (
+                "stage".to_owned(),
+                Contribution::Values(vec!["review".to_owned()])
+            ),
+        ])
+    );
+}
+
+/// A rule that produced nothing still names its key, so `set :alias` replaces
+/// the key's set with nothing rather than passing over it.
+#[tokio::test]
+async fn an_alias_that_produced_nothing_still_names_its_key() {
+    let rules = alias_resolver_rules(r#"{ "quiet": [] }"#);
+    let tmp = camino_tempfile::tempdir().unwrap();
+    let (printer, _out, _err) = jp_printer::Printer::memory(jp_printer::OutputFormat::Text);
+    let prompts = jp_inquire::prompt::MockPromptBackend::new();
+    let resolver = resolve::Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
+
+    let grouped = expand_aliases(&parse(&[":quiet"]), &resolver)
+        .await
+        .unwrap()
+        .grouped();
+
+    assert!(grouped["quiet"].is_empty(), "got: {grouped:?}");
+
+    let mut labels = Labels::from_iter([("quiet", ["inherited"])]);
+    apply(&mut labels, &LabelChange::Set(grouped));
+
+    assert!(labels.is_empty(), "the set replaced the key with nothing");
+}
+
+/// An alias contributes its values to its key's group, alongside anything else
+/// named for that key.
+#[tokio::test]
+async fn an_alias_joins_its_keys_group() {
+    let rules = alias_resolver_rules(r#"{ "stage": "review" }"#);
+    let tmp = camino_tempfile::tempdir().unwrap();
+    let (printer, _out, _err) = jp_printer::Printer::memory(jp_printer::OutputFormat::Text);
+    let prompts = jp_inquire::prompt::MockPromptBackend::new();
+    let resolver = resolve::Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
+
+    let operands = parse(&["stage=draft", ":stage"]);
+    let grouped = expand_aliases(&operands, &resolver)
+        .await
+        .unwrap()
+        .grouped();
+
+    assert_eq!(grouped["stage"].iter().collect::<Vec<_>>(), [
+        "draft", "review"
     ]);
 }
 
@@ -410,8 +473,8 @@ async fn expand_aliases_propagates_an_unknown_name() {
     let prompts = jp_inquire::prompt::MockPromptBackend::new();
     let resolver = resolve::Resolver::new(&rules, tmp.path(), false, &printer, &prompts);
 
-    let directives = parse(&["jp", "--label=:missing"]);
-    let error = expand_aliases(&directives, &resolver)
+    let operands = parse(&[":missing"]);
+    let error = expand_aliases(&operands, &resolver)
         .await
         .unwrap_err()
         .to_string();

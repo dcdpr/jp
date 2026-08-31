@@ -76,7 +76,7 @@ run *ARGS:
 # Install the `jp` binary from your local checkout.
 [group('build')]
 [group('main')]
-install $JP_NO_INSTALL="":
+install $JP_INSTALL="1":
     @just quiet_flag="" _install-jp
 
 [group('jp')]
@@ -122,6 +122,107 @@ stage-and-commit: _install-jp
 
     out=$(just stage -c style.reasoning.display=hidden)
     just commit "$out - now write me a commit message"
+
+# Merge REF into the current branch and hand any conflicts to jp.
+#
+# A clean merge just reports and exits. When the merge stops on conflicts,
+# prompts where to resolve them (a [p]icked conversation, a [n]ew one, or
+# [q]uit) and sends the merge output plus `git status -sb` as the query. The
+# conflicted files stay in the working tree; jp edits them in place, and does
+# not commit or abort the merge. Exits nonzero, listing what is left, when
+# conflicts remain after the query.
+#
+# Re-running while a merge is already in progress skips the merge itself and
+# hands the outstanding conflicts over again, so a resolution that went
+# sideways can be retried in another conversation. That merge's source is read
+# from MERGE_HEAD, not from REF, so the retry needs no arguments.
+#
+# Refuses to start when unmerged paths exist without a merge in progress: a
+# rebase, cherry-pick, or revert stopped on conflicts is not this recipe's to
+# resolve.
+#
+# A picked conversation keeps its own config; it usually already holds the
+# branch's context. A new one gets `personas/dev`, since the workspace default
+# has no file-editing tools.
+#
+# ARGS are forwarded to `jp query` as flags:
+#
+#   just git-merge main
+#   just git-merge origin/main --edit
+[group('jp')]
+[positional-arguments]
+git-merge REF="main" *ARGS: _install-jp _install-tools
+    #!/usr/bin/env sh
+    set -eu
+
+    ref="$1"
+    shift # remove REF from positional params
+
+    if git rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
+        # This invocation's REF says nothing about the merge already underway;
+        # MERGE_HEAD is the commit actually being merged.
+        ref=$(git name-rev --name-only --always MERGE_HEAD)
+        merge_block="(a merge with ${ref} was already in progress; no new merge was started)"
+        merge_exit=0
+        printf '%s\n' "$merge_block" >&2
+    elif [ -n "$(git diff --name-only --diff-filter=U)" ]; then
+        echo "Unmerged paths exist but no merge is in progress." >&2
+        echo "Finish or abort the rebase/cherry-pick/revert that stopped first." >&2
+        exit 1
+    else
+        set +e
+        merge_out=$(git merge "$ref" 2>&1)
+        merge_exit=$?
+        set -e
+        printf '%s\n' "$merge_out"
+        merge_block=$(printf '$ git merge %s\n%s' "$ref" "$merge_out")
+    fi
+
+    # Unmerged paths, not the exit status, decide whether there's work for jp:
+    # a merge can also fail for reasons it can't help with (dirty tree, unknown
+    # ref), and an in-progress merge may already be fully resolved.
+    conflicts=$(git diff --name-only --diff-filter=U)
+    if [ -z "$conflicts" ]; then
+        exit "$merge_exit"
+    fi
+
+    count=$(printf '%s\n' "$conflicts" | wc -l | tr -d ' ')
+
+    if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+        printf "\n%s file(s) left conflicted.\n" "$count" > /dev/tty
+        printf "  Resolve in a [p]icked conversation / [n]ew conversation / [q]uit: " > /dev/tty
+        IFS= read -r ans < /dev/tty
+    else
+        ans=n
+    fi
+
+    branch=$(git rev-parse --abbrev-ref HEAD)
+    case "$ans" in
+        ""|p|P) jp conversation use '?' ;;
+        n|N)    set -- --new --title "merge:${ref}-into-${branch}" --cfg=personas/dev "$@" ;;
+        q|Q)    exit 0 ;;
+        *)      echo "Unknown choice '$ans'; aborting." >&2; exit 1 ;;
+    esac
+
+    preamble="Please resolve the merge conflicts with ${ref}. Read each conflicted file, \
+    work out what both sides were after, and write the resolution that keeps both intents. \
+    Where the two sides genuinely disagree, stop and tell me instead of picking one. Leave \
+    the merge uncommitted and do not run 'git merge --abort'."
+
+    printf '%s\n\n```sh\n%s\n\n$ git status -sb\n%s\n```\n' \
+        "$preamble" "$merge_block" "$(git status -sb)" \
+        | jp query "$@"
+
+    # `--diff-filter=U` reports index-level unmerged entries, which is exactly
+    # what `git commit` refuses on: a file edited but never staged still counts.
+    remaining=$(git diff --name-only --diff-filter=U)
+    if [ -n "$remaining" ]; then
+        printf "\nStill conflicted:\n" >&2
+        printf '%s\n' "$remaining" | sed 's/^/  /' >&2
+        exit 1
+    fi
+
+    printf "\nReview the resolution, then 'git commit' to conclude the merge.\n" >&2
 
 # Generate changelog for the project.
 [group('build')]
@@ -693,6 +794,87 @@ pr-triage NNN *ARGS: _install-jp _install-tools
             $args
     fi
 
+# Archive `pr-review:NNN` / `pr-triage:NNN` conversations whose pull request is
+# no longer open.
+#
+# Fetches dcdpr/jp's open PRs once, then archives every conversation whose title
+# names a PR outside that set (merged, closed, or never existed). Set
+# `JP_GITHUB_TOKEN` or `GITHUB_TOKEN` to avoid GitHub's 60-requests-per-hour
+# anonymous rate limit. Archiving is reversible with `jp c unarchive`.
+[group('jp')]
+pr-gc: _install-jp
+    #!/usr/bin/env sh
+    set -eu
+
+    api="https://api.github.com/repos/dcdpr/jp/pulls?state=open&per_page=100"
+    token="${JP_GITHUB_TOKEN:-${GITHUB_TOKEN:-}}"
+    if [ -n "$token" ]; then
+        body=$(curl -fsSL -H "Authorization: Bearer $token" "$api" || true)
+    else
+        body=$(curl -fsSL "$api" || true)
+    fi
+
+    # A failed request must not read as "no PRs are open", which would archive
+    # every conversation. Insist on a JSON array before going further.
+    if ! printf '%s' "$body" | jq -e 'type == "array"' >/dev/null 2>&1; then
+        echo "Could not list open pull requests for dcdpr/jp." >&2
+        echo "Check your network, or set JP_GITHUB_TOKEN / GITHUB_TOKEN if you're rate-limited." >&2
+        exit 1
+    fi
+    open=$(printf '%s' "$body" | jq -r '[.[].number | tostring] | join(" ")')
+
+    convs=$(jp -F json conversation ls) || {
+        echo "Could not list conversations." >&2
+        exit 1
+    }
+
+    # `<id>:<title>:<number>` per line. Conversation ids carry no colon, so the
+    # id is everything before the first one. The trailing number is the title's
+    # PR number without leading zeros, since `pr-review:0948` and
+    # `pr-review:948` both name pull request 948.
+    convs=$(printf '%s' "$convs" | jq -r '
+        .[]
+        | (.title // "") as $t
+        | select($t | test("^pr-(review|triage):[0-9]+$"))
+        | ($t | capture(":(?<n>[0-9]+)$") | .n | tonumber | tostring) as $n
+        | "\(.id):\($t):\($n)"')
+
+    if [ -z "$convs" ]; then
+        echo "No pr-review or pr-triage conversations found."
+        exit 0
+    fi
+
+    stale=""
+    for entry in $convs; do
+        case " $open " in
+            *" ${entry##*:} "*) continue ;;
+        esac
+        stale="${stale} ${entry}"
+    done
+
+    if [ -z "$stale" ]; then
+        echo "Nothing to archive: every conversation tracks an open pull request."
+        exit 0
+    fi
+
+    ids=""
+    echo "These conversations track pull requests that are no longer open:"
+    for entry in $stale; do
+        title=${entry#*:}
+        printf "  %s (%s)\n" "${title%:*}" "${entry%%:*}"
+        ids="${ids} ${entry%%:*}"
+    done
+
+    if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+        printf "Archive them? [Y/n] " > /dev/tty
+        IFS= read -r ans < /dev/tty
+        case "$ans" in
+            n|N|no|No|NO) echo "Nothing archived."; exit 0 ;;
+        esac
+    fi
+
+    jp conversation archive --yes $ids
+
 # Review the current diff with revdiff and send the annotations to jp for
 # triage. The assistant (personas/review-triager: dev/architect knowledge,
 # no edit tools) grounds each note against the code and responds note by
@@ -737,7 +919,7 @@ review *ARGS: _install-jp
     # review because the target was wrong.
     target=""
     active_id=$(jp -F json conversation ls +s 2>/dev/null \
-        | jq -r '.[-1].ID // empty' 2>/dev/null || true)
+        | jq -r '.[-1].id // empty' 2>/dev/null || true)
     if [ -n "$active_id" ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
         printf "This session's active conversation is %s.\n" "$active_id" > /dev/tty
         printf "  Review in the [a]ctive conversation / [n]ew conversation / [q]uit: " > /dev/tty
@@ -917,7 +1099,7 @@ rfd-review NNN *ARGS: _install-jp
     if [ -n "$existing" ]; then
         triage_id=$(jp -F json conversation ls 2>/dev/null \
             | jq -r --arg t "rfd-triage:${rfd_id}" \
-                'first(.[] | select(.Title == $t) | .ID) // empty' \
+                'first(.[] | select(.title == $t) | .id) // empty' \
             2>/dev/null || true)
         if [ -n "$triage_id" ]; then
             triage_attach="--attach jp://${triage_id}?select=u,a:-1"
@@ -994,7 +1176,7 @@ rfd-triage NNN *ARGS: _install-jp
     # The triage step needs the sibling review conversation to exist.
     review_id=$(jp -F json conversation ls 2>/dev/null \
         | jq -r --arg t "rfd-review:${rfd_id}" \
-            'first(.[] | select(.Title == $t) | .ID) // empty' \
+            'first(.[] | select(.title == $t) | .id) // empty' \
         2>/dev/null || true)
     if [ -z "$review_id" ]; then
         echo "No 'rfd-review:${rfd_id}' conversation found. Run 'just rfd-review ${rfd_id}' first." >&2
@@ -1009,7 +1191,7 @@ rfd-triage NNN *ARGS: _install-jp
     # conversation or the offer is declined.
     target=""
     active_id=$(jp -F json conversation ls +s 2>/dev/null \
-        | jq -r '.[-1].ID // empty' 2>/dev/null || true)
+        | jq -r '.[-1].id // empty' 2>/dev/null || true)
     if [ -n "$active_id" ]; then
         if [ -r /dev/tty ] && [ -w /dev/tty ]; then
             printf "This session's active conversation is %s.\n" "$active_id" > /dev/tty
@@ -1239,6 +1421,11 @@ rfd-supersede NNN MMM:
         { print }
     ' "$new_file" > "${new_file}.tmp"
     mv "${new_file}.tmp" "$new_file"
+
+    # The superseded RFD is no longer work to prioritise; the replacement
+    # carries it. Whether MMM belongs on the board is a call for whoever
+    # reorders it, so only the old id is dropped.
+    just _rfd-priority-remove "$old_num"
 
     echo "${old_file}: Superseded by RFD ${new_num}"
     echo "${new_file}: Supersedes RFD ${old_num}"
@@ -1767,6 +1954,19 @@ rfd-promote NNN: _install-jp _install-comfort _install-ticket
             done
         done
 
+        # The review and triage conversations are titled after the draft id,
+        # which no longer names anything. Archive them; a later cycle starts
+        # fresh under the permanent number.
+        for kind in review triage; do
+            conv_title="rfd-${kind}:${old_draft_id}"
+            conv_id=$(jp -F json conversation ls 2>/dev/null \
+                | jq -r --arg t "$conv_title" 'first(.[] | select(.title == $t) | .id) // empty' \
+                2>/dev/null || true)
+            [ -n "$conv_id" ] || continue
+            echo "  archiving conversation ${conv_title} (${conv_id})"
+            jp conversation archive "$conv_id" || true
+        done
+
         echo "${new_file}: Draft -> Discussion (assigned ${num})"
         if [ "$updated" -gt 0 ]; then
             echo "Updated ${updated} cross-reference(s) in RFD files."
@@ -1914,6 +2114,10 @@ rfd-promote NNN: _install-jp _install-comfort _install-ticket
                 echo "  stripped Requires: RFD ${this_n} from ${dep_file}"
             done
         fi
+
+        # The board ranks open work; this RFD is done. Drop it so `rfd-list`
+        # and the web board stop counting it as planned.
+        just _rfd-priority-remove "$rfd_id"
 
         echo "${file}: Accepted -> Implemented"
     fi
@@ -2149,18 +2353,88 @@ _rfd-priority-rewrite OLD NEW:
         | .backlog = ((.backlog // []) | sub_id)
     ' "$priority_file" > "${priority_file}.tmp" && mv "${priority_file}.tmp" "$priority_file"
 
+# Internal: drop RFD ids from the priority board.
+#
+# IDS are canonical ids (`045`, `D12`), space-separated. Each is removed from
+# every list that can hold it: the `planned` milestone groups, `backlog`, and
+# the legacy flat `order`. Ids the board doesn't mention are ignored, so this is
+# safe to call unconditionally. A missing board file is a no-op.
+[private]
+_rfd-priority-remove +IDS:
+    #!/usr/bin/env sh
+    set -eu
+
+    priority_file="docs/rfd/.priority.json"
+    [ -f "$priority_file" ] || exit 0
+    ids=$(printf '%s\n' {{IDS}})
+    jq --arg ids "$ids" '
+        ($ids | split("\n") | map(select(. != ""))) as $drop
+        | def prune: map(select(. as $id | ($drop | index($id)) == null));
+        (if .planned then .planned |= map(.ids |= prune) else . end)
+        | (if .order then .order |= prune else . end)
+        | .backlog = ((.backlog // []) | prune)
+    ' "$priority_file" > "${priority_file}.tmp" && mv "${priority_file}.tmp" "$priority_file"
+
+# Drop terminal RFDs from the priority board.
+#
+# The board ranks work that is still open, so an Implemented, Superseded, or
+# Abandoned RFD has no place on it and the docs build rejects one that lingers.
+# `rfd-promote`, `rfd-abandon`, and `rfd-supersede` prune the id as they change
+# the status; this recipe is the repair path for a status edited by hand.
+[group('rfd')]
+rfd-board-prune:
+    #!/usr/bin/env sh
+    set -eu
+
+    priority_file="docs/rfd/.priority.json"
+    if [ ! -f "$priority_file" ]; then
+        echo "No priority board at ${priority_file}; nothing to prune."
+        exit 0
+    fi
+
+    # Both id spaces: the board ranks published RFDs and drafts alike, and a
+    # draft can be abandoned.
+    stale=""
+    for file in docs/rfd/[0-9][0-9][0-9]-*.md docs/rfd/drafts/D[0-9][0-9]-*.md; do
+        [ -f "$file" ] || continue
+        basename_f=$(basename "$file")
+        case "$basename_f" in 000-*) continue ;; esac
+
+        status=$(sed -n 's/^- \*\*Status\*\*: \([A-Za-z]*\).*/\1/p' "$file" | head -1)
+        case "$status" in
+            Implemented|Superseded|Abandoned) ;;
+            *) continue ;;
+        esac
+
+        num=${basename_f%%-*}
+        if jq -e --arg n "$num" \
+                '[.planned[]?.ids[]?, .order[]?, .backlog[]?] | index($n) != null' \
+                "$priority_file" > /dev/null; then
+            stale="${stale} ${num}"
+        fi
+    done
+
+    if [ -z "$stale" ]; then
+        echo "Priority board is clean."
+        exit 0
+    fi
+
+    just _rfd-priority-remove $stale
+    echo "Pruned from the priority board:${stale}"
+
 # Mark an RFD as abandoned with the given reason.
+#
+# Accepts: a permanent number (41, 041) or a draft ID (D01). A draft the author
+# has decided not to pursue can be abandoned when the rationale is worth keeping
+# as a record, or simply deleted when it isn't (see RFD 001).
 [group('rfd')]
 rfd-abandon NNN +REASON:
     #!/usr/bin/env sh
     set -eu
 
-    n=$(echo "{{NNN}}" | sed 's/^0*//')
-    num=$(printf "%03d" "${n:-0}")
-    file=$(ls docs/rfd/${num}-*.md 2>/dev/null | head -1)
-    if [ -z "$file" ]; then
-        echo "No RFD found with number ${num}." >&2; exit 1
-    fi
+    out=$(just _rfd-resolve "{{NNN}}") || exit 1
+    rfd_id="${out%% *}"
+    file="${out#* }"
 
     current=$(sed -n 's/^- \*\*Status\*\*: \([A-Za-z]*\).*/\1/p' "$file" | head -1)
     case "$current" in
@@ -2177,6 +2451,9 @@ rfd-abandon NNN +REASON:
         { print }
     ' "$file" > "${file}.tmp"
     mv "${file}.tmp" "$file"
+
+    # An abandoned RFD is no longer work to prioritise.
+    just _rfd-priority-remove "$rfd_id"
 
     # Remind the user to close the tracking issue if one exists.
     tracking=$(sed -n 's/^- \*\*Tracking Issue\*\*: \[#\([0-9]*\)\].*/\1/p' "$file" | head -1)
@@ -2196,7 +2473,7 @@ rfd-abandon NNN +REASON:
         for r in $(echo "$required_by_line" | grep -oE 'RFD (D[0-9]+|[0-9]{3})' | awk '{print $2}'); do
             echo "  RFD ${r}" >&2
         done
-        echo "Their dependency on RFD ${num} is now broken — review and update." >&2
+        echo "Their dependency on RFD ${rfd_id} is now broken — review and update." >&2
     fi
 
 # Generate or update AI summaries for RFD documents.
@@ -2613,8 +2890,11 @@ serve-tools CONTEXT TOOL:
 # recipe, so every `jp query` that uses bookworm tools picks up the latest
 # local source automatically.
 [group('tools')]
-serve-bookworm: _build-bookworm
-    @$(cargo metadata --format-version 1 | jq -r .build_directory)/release/bookworm mcp
+serve-bookworm: # _build-bookworm
+    # NOTE: had to patch this, because both `_build-bookworm` and `cargo metadata` require a working
+    # Cargo workspace, and the merge conflicts broke the build.
+    # @$(cargo metadata --format-version 1 | jq -r .build_directory)/release/bookworm mcp
+    /Users/jean/.cargo/bin/bookworm mcp
 
 [private]
 @_build-bookworm:
@@ -2677,6 +2957,12 @@ plugin-build-local: _install-jp (plugin-build "")
         echo "Installed jp-${id} → ${dir}/jp-${id}"
     done
 
+# Run all formatting-related tasks
+fmt: (_rustup_component "rustfmt") _install-comfort
+    cargo fmt --all
+    comfort --workspace --language rust --format-markdown --reference-links --prune-reference-links
+    comfort --workspace --language markdown --format-markdown --reference-links --prune-reference-links
+
 # Run all ci tasks.
 [group('ci')]
 ci: lint-ci fmt-ci test-ci docs-ci coverage-ci deny-ci insta-ci shear-ci vet-ci
@@ -2684,6 +2970,25 @@ ci: lint-ci fmt-ci test-ci docs-ci coverage-ci deny-ci insta-ci shear-ci vet-ci
 # Lint the code on CI.
 [group('ci')]
 lint-ci: (_rustup_component "clippy") _install_ci_matchers
+    #!/usr/bin/env sh
+    set -eu
+
+    # `env!("CARGO_MANIFEST_DIR")` is resolved when the binary is compiled. With
+    # a target directory shared between git worktrees, the binary that runs is
+    # not always the one this worktree compiled, so the baked path can point at
+    # a sibling worktree: fixtures and snapshots then resolve against the wrong
+    # checkout. Read the variable at runtime instead, via
+    # `jp_test::fixtures_dir()` or `std::env::var`, which stays correct wherever
+    # the binary was built.
+    #
+    # Matches `option_env!` and the two-argument form too. A newline between the
+    # macro's paren and the string would slip past this line-oriented check, but
+    # `fmt-ci` collapses that spelling onto one line.
+    if grep -rnE --include='*.rs' '(env|option_env)!\s*\(\s*"CARGO_MANIFEST_DIR"' crates .config/jp/tools; then
+        echo "error: resolve the paths above at runtime, not at compile time" >&2
+        exit 1
+    fi
+
     cargo clippy --locked --workspace --all-targets --all-features --no-deps --profile=lint -- --deny warnings
 
 # Check code formatting on CI.
@@ -2768,8 +3073,8 @@ vet-ci: (_install "cargo-vet@" + vet_version)
 _install-jp *args:
     #!/usr/bin/env sh
     set -eu
-    if [ -n "${JP_NO_INSTALL:-}" ]; then
-        echo "Skipping jp rebuild (JP_NO_INSTALL set); using the installed binary." >&2
+    if [ -z "${JP_INSTALL:-}" ]; then
+        echo "Skipping jp rebuild (set JP_INSTALL=1 to rebuild); using the installed binary." >&2
         exit 0
     fi
     cargo install {{quiet_flag}} --locked --path crates/jp_cli {{args}}
@@ -2780,8 +3085,8 @@ _install-jp *args:
 _install-tools *args:
     #!/usr/bin/env sh
     set -eu
-    if [ -n "${JP_NO_INSTALL:-}" ]; then
-        echo "Skipping jp-tools rebuild (JP_NO_INSTALL set); using the installed binary." >&2
+    if [ -z "${JP_INSTALL:-}" ]; then
+        echo "Skipping jp-tools rebuild (set JP_INSTALL=1 to rebuild); using the installed binary." >&2
         exit 0
     fi
     cargo install {{quiet_flag}} --locked --path .config/jp/tools --debug {{args}}
@@ -2793,8 +3098,8 @@ _install-tools *args:
 _install-ticket *args:
     #!/usr/bin/env sh
     set -eu
-    if [ -n "${JP_NO_INSTALL:-}" ]; then
-        echo "Skipping jp-ticket rebuild (JP_NO_INSTALL set); using the installed binary." >&2
+    if [ -z "${JP_INSTALL:-}" ]; then
+        echo "Skipping jp-ticket rebuild (set JP_INSTALL=1 to rebuild); using the installed binary." >&2
         exit 0
     fi
     cargo install {{quiet_flag}} --locked --path crates/plugins/command/ticket --debug {{args}}
@@ -2835,7 +3140,7 @@ _resolve-conversation TITLE:
     set -eu
 
     existing=$(jp -F json conversation ls 2>/dev/null \
-        | jq -r --arg t "{{TITLE}}" 'first(.[] | select(.Title == $t) | .ID) // empty' \
+        | jq -r --arg t "{{TITLE}}" 'first(.[] | select(.title == $t) | .id) // empty' \
         2>/dev/null \
         || true)
 

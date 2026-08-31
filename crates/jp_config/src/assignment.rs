@@ -437,6 +437,14 @@ impl KvAssignment {
         matches!(&self.value, KvValue::Json(Value::Null))
     }
 
+    /// Returns `true` if the value is a JSON object.
+    ///
+    /// Only the JSON forms (`key:={…}`, `key:+={…}`) can be objects; a plain
+    /// `key=…` value is a string, whatever it contains.
+    pub(crate) const fn is_json_object(&self) -> bool {
+        matches!(&self.value, KvValue::Json(Value::Object(_)))
+    }
+
     /// Try to parse the value as a JSON object.
     pub(crate) fn try_object<T: DeserializeOwned>(self) -> Result<T, KvAssignmentError> {
         let Self { key, value, .. } = self;
@@ -709,6 +717,51 @@ impl KvAssignment {
         self.try_bool_or_from_str().map(Some)
     }
 
+    /// Try to parse the value as a boolean via [`From<bool>`], or as a JSON
+    /// number or string via [`FromStr`].
+    ///
+    /// For a type whose accepted values span all three, such as a byte ceiling
+    /// that also reads `false` as "no ceiling".
+    /// Without the bool arm such a value parses from `KEY=false` (which arrives
+    /// as a string) but not from `KEY:=false`, making an advertised spelling
+    /// depend on assignment syntax.
+    pub(crate) fn try_bool_number_or_from_str<T, E>(self) -> Result<T, KvAssignmentError>
+    where
+        T: From<bool> + FromStr<Err = E>,
+        E: Into<BoxedError>,
+    {
+        let Self { key, value, .. } = self;
+
+        match value {
+            KvValue::Json(Value::Bool(v)) => Ok(T::from(v)),
+            KvValue::Json(Value::Number(n)) => {
+                let s = n.to_string();
+                T::from_str(&s)
+                    .map_err(Into::into)
+                    .or_else(|err| assignment_error(&key, Value::String(s), err))
+            }
+            KvValue::Json(Value::String(s)) | KvValue::String(s) => T::from_str(&s)
+                .map_err(Into::into)
+                .or_else(|err| assignment_error(&key, Value::String(s), err)),
+            KvValue::Json(_) => type_error(&key, &value, &["bool", "number", "string"]),
+        }
+    }
+
+    /// Convenience method for [`Self::try_bool_number_or_from_str`] that wraps
+    /// the `Ok` value into `Some`.
+    pub(crate) fn try_some_bool_number_or_from_str<T, E>(
+        self,
+    ) -> Result<Option<T>, KvAssignmentError>
+    where
+        T: From<bool> + FromStr<Err = E>,
+        E: Into<BoxedError>,
+    {
+        if self.is_json_null() {
+            return Ok(None);
+        }
+        self.try_bool_number_or_from_str().map(Some)
+    }
+
     /// Try to parse the value as an unsigned 32-bit integer.
     pub(crate) fn try_u32(self) -> Result<u32, KvAssignmentError> {
         let Self { key, value, .. } = self;
@@ -778,8 +831,13 @@ impl KvAssignment {
         self.try_i32().map(Some)
     }
 
-    /// Try to parse the value as a JSON array of partial configs, and set or
-    /// merge the elements.
+    /// Try to parse the value as a list, and set or merge the elements.
+    ///
+    /// Three shapes reach the list: a JSON array is taken element-wise, a JSON
+    /// string is one element, and a bare string is split on commas, with each
+    /// element trimmed and empty ones dropped.
+    /// The comma shorthand is confined to the bare form, so `key:="a,b"` names
+    /// one element and `key=a,b` names two.
     pub(crate) fn try_vec<T>(
         mut self,
         vec: &mut Vec<T>,
@@ -827,17 +885,24 @@ impl KvAssignment {
                     parser(kv).or_else(|err| assignment_error(&self.key, v, err))
                 })
                 .collect::<Result<Vec<_>, _>>()?,
-            KvValue::Json(Value::String(s)) | KvValue::String(s) => {
-                try_parse_vec(&self.key, &s, |i, s| {
-                    let mut kv = self.clone();
-                    kv.key.path = i.to_string();
-                    kv.value = KvValue::String(s.into());
+            // A JSON string is one value. The comma shorthand belongs to the
+            // bare form, where there is no other way to name a list; the JSON
+            // form already says what the value is.
+            KvValue::Json(Value::String(s)) => {
+                let mut kv = self.clone();
+                "0".clone_into(&mut kv.key.path);
+                kv.value = KvValue::Json(Value::String(s.clone()));
 
-                    parser(kv).or_else(|err| {
-                        assignment_error(&self.key, Value::String(s.to_owned()), err)
-                    })
-                })?
+                vec![parser(kv).or_else(|err| assignment_error(&self.key, Value::String(s), err))?]
             }
+            KvValue::String(s) => try_parse_vec(&self.key, &s, |i, s| {
+                let mut kv = self.clone();
+                kv.key.path = i.to_string();
+                kv.value = KvValue::String(s.into());
+
+                parser(kv)
+                    .or_else(|err| assignment_error(&self.key, Value::String(s.to_owned()), err))
+            })?,
             KvValue::Json(_) => type_error(&self.key, &self.value, &["string", "array"])?,
         };
 

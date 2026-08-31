@@ -96,6 +96,19 @@ fn tool(name: &str, arguments: &Value) -> Tool {
     }
 }
 
+/// Build a tool whose `root` option redirects it at another checkout.
+fn tool_with_root(name: &str, arguments: &Value, root: &str) -> Tool {
+    let mut options = git_options();
+    options.insert("root".to_string(), json!(root));
+
+    Tool {
+        name: name.to_string(),
+        arguments: arguments.as_object().unwrap().clone(),
+        answers: Map::new(),
+        options,
+    }
+}
+
 fn tool_with_answers(name: &str, arguments: &Value, answers: &Value) -> Tool {
     Tool {
         name: name.to_string(),
@@ -118,6 +131,26 @@ async fn run_ok(ctx: Context, t: Tool) -> String {
 /// Call `tools::run` and return the Outcome directly.
 async fn run_outcome(ctx: Context, t: Tool) -> Outcome {
     tools::run(ctx, t).await.unwrap()
+}
+
+/// Init a second repository at `relative` inside `root`, with one commit.
+///
+/// The outer repository is left unaware of it: without a `root` option the git
+/// tools see the outer history, which is what the redirect tests contrast
+/// against.
+fn init_nested_repo(root: &Utf8Path, relative: &str) -> Utf8PathBuf {
+    let nested = root.join(relative);
+    fs::create_dir_all(&nested).unwrap();
+
+    git(&nested, &["init"]);
+    git(&nested, &["config", "user.email", "nested@test.com"]);
+    git(&nested, &["config", "user.name", "Nested"]);
+
+    fs::write(nested.join("nested.txt"), "nested\n").unwrap();
+    git(&nested, &["add", "."]);
+    git(&nested, &["commit", "-m", "nested repository commit"]);
+
+    nested
 }
 
 /// Commit a file with given content, then modify it in the working tree.
@@ -161,6 +194,125 @@ async fn patch_ids(root: &Utf8Path, path: &str) -> Vec<String> {
     )
     .await;
     extract_patch_ids(&raw)
+}
+
+/// Without the redirect, `git_log` reports the outer repository's history, so
+/// the nested subject appearing is only possible if git ran in the nested
+/// checkout.
+#[tokio::test]
+async fn a_configured_root_reads_the_nested_repository() {
+    if !has_git() {
+        return;
+    }
+
+    let (_dir, root) = init_repo();
+    init_nested_repo(&root, "nested");
+
+    let content = run_ok(ctx(&root), tool_with_root("git_log", &json!({}), "nested")).await;
+
+    assert!(
+        content.contains("nested repository commit"),
+        "got: {content}"
+    );
+    assert!(!content.contains("subject: init"), "got: {content}");
+}
+
+/// The negative control for the redirect tests: the same fixture, read without
+/// a redirect, shows the outer history and none of the nested one.
+/// An empty value is also how a config layer unloads a previously-set root.
+#[tokio::test]
+async fn an_empty_root_keeps_the_workspace_repository() {
+    if !has_git() {
+        return;
+    }
+
+    let (_dir, root) = init_repo();
+    init_nested_repo(&root, "nested");
+
+    let content = run_ok(ctx(&root), tool_with_root("git_log", &json!({}), "")).await;
+
+    assert!(content.contains("subject: init"), "got: {content}");
+    assert!(
+        !content.contains("nested repository commit"),
+        "got: {content}"
+    );
+}
+
+/// The outer repository has the nested directory untracked, so a status that
+/// forgot the redirect would report `nested/...` rather than the paths inside
+/// it.
+#[tokio::test]
+async fn a_configured_root_stats_the_nested_working_tree() {
+    if !has_git() {
+        return;
+    }
+
+    let (_dir, root) = init_repo();
+    let nested = init_nested_repo(&root, "nested");
+    fs::write(nested.join("scratch.txt"), "scratch\n").unwrap();
+
+    let content = run_ok(
+        ctx(&root),
+        tool_with_root("git_status", &json!({}), "nested"),
+    )
+    .await;
+
+    assert_eq!(
+        content,
+        "<git_status>\n  - scratch.txt (untracked)\n</git_status>"
+    );
+}
+
+/// A root one directory above the repository is the accident that would send
+/// every write tool at the enclosing repository instead.
+#[tokio::test]
+async fn a_root_without_a_git_directory_is_refused() {
+    if !has_git() {
+        return;
+    }
+
+    let (_dir, root) = init_repo();
+    init_nested_repo(&root, "vendor/project");
+
+    let outcome = run_outcome(
+        ctx(&root),
+        tool_with_root("git_commit", &json!({"message": "nope"}), "vendor"),
+    )
+    .await;
+
+    let Outcome::Error { message, .. } = outcome else {
+        panic!("expected the missing `.git` to be refused");
+    };
+    assert!(message.contains("no `.git`"), "got: {message}");
+    assert!(message.contains("enclosing repository"), "got: {message}");
+}
+
+/// Git's own message never mentions where it ran, so a failure under a redirect
+/// reads as a failure in the workspace repository.
+#[tokio::test]
+async fn a_failure_under_a_redirect_names_the_repository_git_ran_in() {
+    if !has_git() {
+        return;
+    }
+
+    let (_dir, root) = init_repo();
+    init_nested_repo(&root, "nested");
+
+    let outcome = run_outcome(
+        ctx(&root),
+        tool_with_root(
+            "git_show",
+            &json!({"revision": "nonexistent_ref_xyz"}),
+            "nested",
+        ),
+    )
+    .await;
+
+    let Outcome::Error { message, .. } = outcome else {
+        panic!("expected a bad revision to fail");
+    };
+    assert!(message.contains("git ran in"), "got: {message}");
+    assert!(message.contains("nested"), "got: {message}");
 }
 
 #[tokio::test]
