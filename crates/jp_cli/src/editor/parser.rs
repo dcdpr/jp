@@ -2,7 +2,7 @@ use std::fmt;
 
 const CONVERSATION_MARKER: &str = "\n<!-- CONVERSATION_MARKER -->\n";
 const CONFIG_HEADER: &str = "\n# Active Configuration\n";
-pub(super) const CUT_MARKER: &str = indoc::indoc!(
+pub(crate) const CUT_MARKER: &str = indoc::indoc!(
     "
     ---------------------------------------8<---------------------------------------
     --------------------- EVERYTHING BELOW THIS LINE IS IGNORED --------------------

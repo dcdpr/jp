@@ -5,7 +5,6 @@
 
 use std::{
     collections::HashSet,
-    fmt::Write as _,
     fs,
     io::{self, BufRead, BufReader, Write},
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
@@ -45,14 +44,13 @@ use jp_printer::Printer;
 use jp_storage::backend::FsStorageBackend;
 use jp_workspace::{ConversationLock, LockResult, Workspace, session::Session};
 use serde_json::Value;
-use sha2::{Digest as _, Sha256};
 use tracing::{debug, error, trace, warn};
 
 use super::registry;
 use crate::{
     Ctx, cmd,
     cmd::query::interrupt::reply_edit_mode,
-    editor::{draft_query_text, report_editor_failure},
+    editor::{draft_query_text, draft_revision, report_editor_failure},
 };
 
 /// Runs the prompts a plugin asks for.
@@ -801,18 +799,6 @@ fn parse_conversation_id(conversation: &str) -> Result<ConversationId, String> {
         .map_err(|error| format!("invalid conversation ID `{conversation}`: {error}"))
 }
 
-/// The query draft's fingerprint: a short hash of the stored file.
-///
-/// Content rather than modification time, so a rewrite with identical text is
-/// not mistaken for someone else's edit.
-fn draft_revision(content: &str) -> String {
-    let digest = Sha256::digest(content.as_bytes());
-    digest[..8].iter().fold(String::new(), |mut acc, byte| {
-        let _ = write!(acc, "{byte:02x}");
-        acc
-    })
-}
-
 /// Where a conversation's query draft lives, if user-local storage is
 /// configured.
 ///
@@ -963,19 +949,23 @@ fn handle_write_draft(
         Err(message) => return failed(message),
     };
 
+    let Some(path) = draft_path(fs_backend, workspace, &id, true) else {
+        return failed("this workspace has no user-local storage for drafts".to_owned());
+    };
+
     // A conversation that is gone — archived, or removed — gets no draft
     // directory of its own: `jp query` never looks there, and unarchiving one
     // deletes whatever occupies the live path.
-    if workspace.acquire_conversation(&id).is_err() {
+    //
+    // Asked of the store rather than of the conversation index: the index is a
+    // snapshot taken when the host started, and a host that stays up for hours
+    // holds it while another process archives.
+    if fs_backend.is_none_or(|fs| fs.find_conversation_dir(&id).is_none()) {
         return failed(format!(
             "conversation `{}` does not exist",
             req.conversation
         ));
     }
-
-    let Some(path) = draft_path(fs_backend, workspace, &id, true) else {
-        return failed("this workspace has no user-local storage for drafts".to_owned());
-    };
 
     let current = match read_draft_file(&path) {
         Ok(current) => current,

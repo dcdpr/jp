@@ -1,10 +1,11 @@
 use camino_tempfile::{Utf8TempDir, tempdir};
 use jp_conversation::{Conversation, ConversationId};
 use jp_plugin::message::{ExitMessage, ReadyMessage};
-use jp_storage::backend::FsStorageBackend;
+use jp_storage::backend::{FsStorageBackend, PersistBackend as _};
 use serde_json::json;
 
 use super::*;
+use crate::editor::CUT_MARKER;
 
 /// A workspace no request in these tests reaches into, so it needs no storage.
 fn bare_workspace() -> Workspace {
@@ -223,11 +224,21 @@ fn a_stored_draft_reads_back_as_its_query_text() {
     let (ws, id, fs, _tmp) = workspace_with_drafts();
     let path = draft_path(Some(&fs), &ws, &id, true).unwrap();
 
+    // The shape `jp q --edit` leaves on disk, built from the real marker so the
+    // fixture cannot drift from the parser.
+    let document = format!(
+        "half a thought\n\n{CUT_MARKER}\n\n# Active \
+         Configuration\n\n```toml\n[assistant.model]\nid = \"anthropic/claude\"\n```\n"
+    );
+
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(&path, "half a thought\n\n").unwrap();
+    std::fs::write(&path, &document).unwrap();
 
     let read = draft(handle_read_draft(Some(&fs), &ws, &wire_id(id), None));
-    assert_eq!(read.content, "half a thought");
+    assert_eq!(
+        read.content, "half a thought",
+        "the configuration section stays on disk"
+    );
 
     let written = draft(handle_write_draft(Some(&fs), &ws, WriteDraftRequest {
         id: None,
@@ -238,11 +249,47 @@ fn a_stored_draft_reads_back_as_its_query_text() {
 
     assert!(
         !written.conflict,
-        "the revision a read hands out is the one a write accepts"
+        "the revision covers the bytes the answer left out, and a write based on it is still \
+         accepted"
     );
     assert_eq!(
         std::fs::read_to_string(&path).unwrap(),
         "half a thought, finished"
+    );
+}
+
+/// The conversation index is a snapshot from startup, so a host that stays up
+/// while another process archives a conversation has to ask the store before
+/// writing a draft nothing would read.
+#[test]
+fn writing_a_draft_for_a_conversation_archived_elsewhere_fails() {
+    let (ws, id, fs, _tmp) = workspace_with_drafts();
+
+    // Another process archives it, leaving this host's index stale.
+    fs.archive(&id).unwrap();
+    assert!(
+        ws.acquire_conversation(&id).is_ok(),
+        "the host still believes the conversation is live, which is the point"
+    );
+
+    let response = handle_write_draft(Some(&fs), &ws, WriteDraftRequest {
+        id: Some("w5".to_owned()),
+        conversation: wire_id(id),
+        content: "typed against a stale list".to_owned(),
+        revision: None,
+    });
+
+    match response {
+        HostToPlugin::Error(error) => {
+            assert_eq!(error.request.as_deref(), Some("write_draft"));
+            assert!(error.message.contains("does not exist"), "{error:?}");
+        }
+        other => panic!("expected an error, got {other:?}"),
+    }
+
+    assert!(
+        !fs.build_conversation_dir(&id, None, true).exists(),
+        "no live directory is left beside the archived one"
     );
 }
 

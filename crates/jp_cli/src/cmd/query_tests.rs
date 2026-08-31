@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use assert_matches::assert_matches;
+use camino_tempfile::Utf8TempDir;
 use chrono::{DateTime, Utc};
 use clap::Parser as _;
 use indexmap::IndexMap;
@@ -24,6 +25,7 @@ use jp_llm::{
     tool::{InvocationContext, builtin::BuiltinExecutors, executor::ExecutorSource},
 };
 use jp_printer::{OutputFormat, Printer, SharedBuffer};
+use jp_storage::backend::FsStorageBackend;
 use jp_term::width::display_width;
 use jp_workspace::{
     ConversationHandle, Workspace,
@@ -1432,6 +1434,76 @@ async fn query_sequence_new_cfg_profile_then_model_override_persists_for_plain_q
         model_delta["delta"]["assistant"]["model"]["id"]["name"],
         "gpt-model"
     );
+}
+
+/// A backend with user-local storage and a conversation directory in it,
+/// holding the draft `jp query` would have composed.
+///
+/// The temp dir comes back so the caller keeps it alive.
+fn draft_fixture() -> (FsStorageBackend, ConversationId, Utf8PathBuf, Utf8TempDir) {
+    let tmp = camino_tempfile::tempdir().unwrap();
+    let fs = FsStorageBackend::new(&tmp.path().join(".jp"))
+        .unwrap()
+        .with_user_storage(&tmp.path().join("user"), None, "abc")
+        .unwrap();
+
+    let id = make_id(1_700_000_000);
+    let dir = fs.build_conversation_dir(&id, None, true);
+    std::fs::create_dir_all(&dir).unwrap();
+
+    let path = dir.join(editor::QUERY_FILENAME);
+    std::fs::write(&path, "the request this turn sent").unwrap();
+
+    (fs, id, path, tmp)
+}
+
+/// A draft replaced while the turn ran belongs to whoever wrote it: a plugin
+/// through `write_draft`, or another `jp` process.
+/// A successful turn removes the request it sent, not text it never saw.
+#[test]
+fn cleanup_keeps_a_draft_written_after_the_request() {
+    let (fs, id, path, _tmp) = draft_fixture();
+    let at_send = draft_fingerprint(Some(&fs), &id);
+
+    std::fs::write(&path, "the follow-up typed during the turn").unwrap();
+
+    cleanup_query_message_file(
+        Some(&fs),
+        &id,
+        DraftRemoval::IfUnchanged(at_send.as_deref()),
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "the follow-up typed during the turn"
+    );
+}
+
+#[test]
+fn cleanup_removes_the_draft_the_turn_sent() {
+    let (fs, id, path, _tmp) = draft_fixture();
+    let at_send = draft_fingerprint(Some(&fs), &id);
+
+    cleanup_query_message_file(
+        Some(&fs),
+        &id,
+        DraftRemoval::IfUnchanged(at_send.as_deref()),
+    );
+
+    assert!(!path.exists(), "the request that was sent is cleaned up");
+}
+
+/// An emptied editor buffer discards the draft it was seeded from, whatever it
+/// now holds.
+#[test]
+fn cleanup_any_removes_a_replaced_draft() {
+    let (fs, id, path, _tmp) = draft_fixture();
+
+    std::fs::write(&path, "something else entirely").unwrap();
+
+    cleanup_query_message_file(Some(&fs), &id, DraftRemoval::Any);
+
+    assert!(!path.exists());
 }
 
 fn lock_with_title(
