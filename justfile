@@ -771,10 +771,10 @@ pr-gc: _install-jp
     # `pr-review:948` both name pull request 948.
     convs=$(printf '%s' "$convs" | jq -r '
         .[]
-        | (.Title // "") as $t
+        | (.title // "") as $t
         | select($t | test("^pr-(review|triage):[0-9]+$"))
         | ($t | capture(":(?<n>[0-9]+)$") | .n | tonumber | tostring) as $n
-        | "\(.ID):\($t):\($n)"')
+        | "\(.id):\($t):\($n)"')
 
     if [ -z "$convs" ]; then
         echo "No pr-review or pr-triage conversations found."
@@ -856,7 +856,7 @@ review *ARGS: _install-jp
     # review because the target was wrong.
     target=""
     active_id=$(jp -F json conversation ls +s 2>/dev/null \
-        | jq -r '.[-1].ID // empty' 2>/dev/null || true)
+        | jq -r '.[-1].id // empty' 2>/dev/null || true)
     if [ -n "$active_id" ] && [ -r /dev/tty ] && [ -w /dev/tty ]; then
         printf "This session's active conversation is %s.\n" "$active_id" > /dev/tty
         printf "  Review in the [a]ctive conversation / [n]ew conversation / [q]uit: " > /dev/tty
@@ -1036,7 +1036,7 @@ rfd-review NNN *ARGS: _install-jp
     if [ -n "$existing" ]; then
         triage_id=$(jp -F json conversation ls 2>/dev/null \
             | jq -r --arg t "rfd-triage:${rfd_id}" \
-                'first(.[] | select(.Title == $t) | .ID) // empty' \
+                'first(.[] | select(.title == $t) | .id) // empty' \
             2>/dev/null || true)
         if [ -n "$triage_id" ]; then
             triage_attach="--attach jp://${triage_id}?select=u,a:-1"
@@ -1113,7 +1113,7 @@ rfd-triage NNN *ARGS: _install-jp
     # The triage step needs the sibling review conversation to exist.
     review_id=$(jp -F json conversation ls 2>/dev/null \
         | jq -r --arg t "rfd-review:${rfd_id}" \
-            'first(.[] | select(.Title == $t) | .ID) // empty' \
+            'first(.[] | select(.title == $t) | .id) // empty' \
         2>/dev/null || true)
     if [ -z "$review_id" ]; then
         echo "No 'rfd-review:${rfd_id}' conversation found. Run 'just rfd-review ${rfd_id}' first." >&2
@@ -1128,7 +1128,7 @@ rfd-triage NNN *ARGS: _install-jp
     # conversation or the offer is declined.
     target=""
     active_id=$(jp -F json conversation ls +s 2>/dev/null \
-        | jq -r '.[-1].ID // empty' 2>/dev/null || true)
+        | jq -r '.[-1].id // empty' 2>/dev/null || true)
     if [ -n "$active_id" ]; then
         if [ -r /dev/tty ] && [ -w /dev/tty ]; then
             printf "This session's active conversation is %s.\n" "$active_id" > /dev/tty
@@ -1897,7 +1897,7 @@ rfd-promote NNN: _install-jp _install-comfort _install-ticket
         for kind in review triage; do
             conv_title="rfd-${kind}:${old_draft_id}"
             conv_id=$(jp -F json conversation ls 2>/dev/null \
-                | jq -r --arg t "$conv_title" 'first(.[] | select(.Title == $t) | .ID) // empty' \
+                | jq -r --arg t "$conv_title" 'first(.[] | select(.title == $t) | .id) // empty' \
                 2>/dev/null || true)
             [ -n "$conv_id" ] || continue
             echo "  archiving conversation ${conv_title} (${conv_id})"
@@ -3077,7 +3077,7 @@ _resolve-conversation TITLE:
     set -eu
 
     existing=$(jp -F json conversation ls 2>/dev/null \
-        | jq -r --arg t "{{TITLE}}" 'first(.[] | select(.Title == $t) | .ID) // empty' \
+        | jq -r --arg t "{{TITLE}}" 'first(.[] | select(.title == $t) | .id) // empty' \
         2>/dev/null \
         || true)
 
