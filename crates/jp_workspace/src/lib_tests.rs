@@ -729,6 +729,60 @@ fn test_lock_new_conversation_errors_on_denial() {
     );
 }
 
+/// Regression: `jp conversation compact` read the event stream, waited for the
+/// lock another process held, and then persisted the stream it had read before
+/// the wait — dropping the turn that process wrote while it waited.
+#[test]
+fn lock_refreshes_a_conversation_read_before_acquisition() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path().join("root");
+    let storage = root.join("storage");
+    let config = Arc::new(AppConfig::new_test());
+    let id = ConversationId::try_from(datetime!(2024-09-01 09:00:00 Z)).unwrap();
+
+    {
+        let mut seed = workspace_with_fs(&root, &FsStorageBackend::new(&storage).unwrap());
+        seed.create_conversation_with_id(id, Conversation::default(), config.clone());
+        let h = seed.acquire_conversation(&id).unwrap();
+        let mut conv = seed.test_lock(h).into_mut();
+        conv.update_metadata(|meta| meta.title = Some("before".to_owned()));
+        conv.flush().unwrap();
+    }
+
+    let mut ws = workspace_with_fs(&root, &FsStorageBackend::new(&storage).unwrap());
+    ws.load_conversation_index();
+    let handle = ws.acquire_conversation(&id).unwrap();
+
+    // The reads a command performs before it starts waiting for the lock.
+    assert_eq!(ws.events(&handle).unwrap().len(), 0);
+    assert_eq!(
+        ws.metadata(&handle).unwrap().title.as_deref(),
+        Some("before")
+    );
+
+    // The lock holder finishes its turn and releases the lock.
+    {
+        let mut other = workspace_with_fs(&root, &FsStorageBackend::new(&storage).unwrap());
+        other.load_conversation_index();
+        let h = other.acquire_conversation(&id).unwrap();
+        let mut conv = other.test_lock(h).into_mut();
+        conv.update_events(|events| events.start_turn("try again"));
+        conv.update_metadata(|meta| meta.title = Some("after".to_owned()));
+        conv.flush().unwrap();
+    }
+
+    let LockResult::Acquired(lock) = ws.lock_conversation(handle, None).unwrap() else {
+        panic!("the lock is free");
+    };
+
+    assert_eq!(
+        lock.events().len(),
+        2,
+        "the lock sees the turn written while it waited"
+    );
+    assert_eq!(lock.metadata().title.as_deref(), Some("after"));
+}
+
 #[test]
 fn test_archive_removes_from_index() {
     let tmp = tempdir().unwrap();

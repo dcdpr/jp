@@ -692,8 +692,17 @@ impl Workspace {
     /// `Ok(LockResult::AlreadyLocked(handle))` if another process holds it,
     /// giving the handle back so the caller can retry.
     ///
+    /// An acquired lock reads the conversation from the backing store, so it
+    /// reflects whatever the previous lock holder wrote rather than a copy this
+    /// process cached earlier.
+    /// A value read through [`events`] or [`metadata`] before the lock was held
+    /// is superseded by that read.
+    ///
     /// Returns an error if conversation data cannot be loaded from the backing
     /// store (e.g. the user deleted a required file).
+    ///
+    /// [`events`]: Self::events
+    /// [`metadata`]: Self::metadata
     pub fn lock_conversation(
         &self,
         handle: ConversationHandle,
@@ -706,12 +715,7 @@ impl Workspace {
             return Ok(LockResult::AlreadyLocked(handle));
         };
 
-        if let Some(cell) = self.state.conversations.get(&id) {
-            maybe_init_conversation(&*self.loader, (&id, cell));
-        }
-        if let Some(cell) = self.state.events.get(&id) {
-            maybe_init_events(&*self.loader, (&id, cell));
-        }
+        self.sync_conversation(&id)?;
 
         let metadata = self
             .state
@@ -859,6 +863,46 @@ impl Workspace {
         self.state.conversations.remove(&id);
         self.state.events.remove(&id);
         self.state.presence.remove(&id);
+    }
+
+    /// Bring a conversation's in-memory copy in line with the backing store.
+    ///
+    /// Data cached before the flock was held can predate a write by whoever
+    /// held it, and a persist writes the whole conversation: without this,
+    /// mutating through a lock acquired after a wait would drop every event the
+    /// other writer appended.
+    /// The cached `Arc`s are updated in place, so scopes already sharing them
+    /// observe the refreshed data.
+    ///
+    /// A conversation the store does not have keeps its cached copy: an
+    /// in-memory conversation that was never persisted is the whole truth about
+    /// itself.
+    /// Any other load failure is returned rather than leaving a stale copy in
+    /// place for the next write to persist.
+    fn sync_conversation(&self, id: &ConversationId) -> Result<()> {
+        if let Some(cell) = self.state.conversations.get(id) {
+            match cell.get() {
+                None => maybe_init_conversation(&*self.loader, (id, cell)),
+                Some(arc) => match self.loader.load_conversation_metadata(id) {
+                    Ok(metadata) => *arc.write() = metadata,
+                    Err(error) if error.kind().is_missing() => {}
+                    Err(error) => return Err(error.into()),
+                },
+            }
+        }
+
+        if let Some(cell) = self.state.events.get(id) {
+            match cell.get() {
+                None => maybe_init_events(&*self.loader, (id, cell)),
+                Some(arc) => match self.loader.load_conversation_stream(id) {
+                    Ok(stream) => *arc.write() = stream,
+                    Err(error) if error.kind().is_missing() => {}
+                    Err(error) => return Err(error.into()),
+                },
+            }
+        }
+
+        Ok(())
     }
 
     /// Read the lock holder info for a conversation.
