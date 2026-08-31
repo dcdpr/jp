@@ -176,6 +176,14 @@ schemes:
       # binary on each run — a cost paid on every `just run-app` for data nothing
       # currently reads. Turn it back on alongside something that reports it.
       gatherCoverageData: false
+      # No debugger for a test run. Nothing attaches to one: the suites run from
+      # a terminal or from CI, where LLDB has nobody to talk to and fails trying
+      # — `IDELaunchParametersSnapshot: no debugger version`, once per app launch
+      # the UI tests make.
+      #
+      # The cost is that a breakpoint set in a test does not stop a run started
+      # from Xcode's UI. Set this back to `true` while doing that.
+      debugEnabled: false
       targets:
         - JPTests
         - JPUITests
