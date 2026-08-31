@@ -82,23 +82,61 @@ impl PartialConfigDelta for PartialToolsConfig {
 
 impl FillDefaults for PartialToolsConfig {
     fn fill_from(self, defaults: Self) -> Self {
+        let tool_defaults = self.defaults.fill_from(defaults.defaults);
+
+        // A tool declaring any `style` field of its own resolves to a whole
+        // `DisplayStyleConfig`, at which point the fields it didn't set are
+        // indistinguishable from the ones it did. Fill the gaps from the `*`
+        // block here, while the partial still records what the tool asked for,
+        // so a single `[conversation.tools.'*'.style]` key reaches every tool.
+        let tools = self
+            .tools
+            .into_iter()
+            .map(|(name, mut tool)| {
+                tool.style = tool
+                    .style
+                    .map(|style| style.fill_from(tool_defaults.style.clone()));
+
+                (name, tool)
+            })
+            .collect();
+
         Self {
-            defaults: self.defaults.fill_from(defaults.defaults),
-            tools: self.tools,
+            defaults: tool_defaults,
+            tools,
         }
     }
 }
 
 impl ToPartial for ToolsConfig {
     fn to_partial(&self) -> Self::Partial {
-        Self::Partial {
-            defaults: self.defaults.to_partial(),
-            tools: self
-                .tools
-                .iter()
-                .map(|(k, v)| (k.clone(), v.to_partial()))
-                .collect(),
-        }
+        let defaults = self.defaults.to_partial();
+
+        // A per-tool style field that merely equals the `*` value holds no
+        // choice of the tool's: `fill_from` put it there. Recording it as a
+        // per-tool key would pin it, and a later layer changing `*` could never
+        // reach the tool again.
+        //
+        // Equality is the only signal available here. A resolved `ToolConfig`
+        // records values, not whether the user wrote them, so a style field
+        // deliberately set to the same value as the `*` block is
+        // indistinguishable from an inherited one and is dropped. It then
+        // follows a later `*`-only change instead of holding its own value.
+        let tools = self
+            .tools
+            .iter()
+            .map(|(name, tool)| {
+                let mut tool = tool.to_partial();
+                tool.style = tool
+                    .style
+                    .map(|style| defaults.style.delta(style))
+                    .filter(|style| !style.is_empty());
+
+                (name.clone(), tool)
+            })
+            .collect();
+
+        Self::Partial { defaults, tools }
     }
 }
 
@@ -430,7 +468,8 @@ pub struct ToolConfig {
 
     /// How to display the results of the tool in the terminal.
     ///
-    /// Overrides the global default.
+    /// Overrides the global default field by field: keys set here win, keys
+    /// left out take their value from `conversation.tools.'*'.style`.
     /// The error overlay lives at `style.error.*` (see
     /// [`DisplayStyleConfig::error`]).
     #[setting(nested)]
@@ -1210,6 +1249,9 @@ impl ToolConfigWithDefaults {
     }
 
     /// Return the display style of the tool.
+    ///
+    /// Fields the tool does not set carry the value from the global `*`
+    /// defaults, so the returned style is already fully resolved.
     #[must_use]
     pub fn style(&self) -> &DisplayStyleConfig {
         self.tool.style.as_ref().unwrap_or(&self.defaults.style)
