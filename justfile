@@ -2897,8 +2897,8 @@ plugin-build-local: _install-jp (plugin-build "")
 # Run all formatting-related tasks
 fmt: (_rustup_component "rustfmt") _install-comfort
     cargo fmt --all
-    comfort --check --workspace --language rust --format-markdown --reference-links --prune-reference-links
-    comfort --check --workspace --language markdown --format-markdown --reference-links --prune-reference-links
+    comfort --workspace --language rust --format-markdown --reference-links --prune-reference-links
+    comfort --workspace --language markdown --format-markdown --reference-links --prune-reference-links
 
 # Run all ci tasks.
 [group('ci')]
