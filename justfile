@@ -466,46 +466,109 @@ open-app: build-app
 # runs those.
 [group('test')]
 [macos]
-test-app: gen-app (build-ffi "debug")
-    xcodebuild test -project apps/macos/JP.xcodeproj -scheme JP \
-        -destination platform=macOS -only-testing:JPTests -quiet
+test-app FILTER="": gen-app (build-ffi "debug")
+    @just _xctest JPTests "" {{quote(FILTER)}}
 
-# Run every one of the macOS app's UI tests.
+# Run the macOS app's UI tests, or the ones FILTER names.
 #
-# Takes over the screen for the length of the run. This is the CI job; while
-# writing a test, run it by name through the `swift_test_ui` tool instead, which
-# stops at the first failure.
+# Takes over the screen for the length of the run.
 #
-# Every test runs here even after one fails, which is what `CI` means to that
-# tool and what a run nobody is watching should do.
+#     just test-app-ui
+#     just test-app-ui UISuite/PointerCursorTests
+#     just test-app-ui 'UISuite/PointerCursorTests/showsResizeCursorOverTheDivider()'
 #
-# The result bundle is written into the checkout rather than left in derived
-# data, so a failing run leaves its evidence somewhere a reader or a CI artifact
-# step can reach without deriving a container path. `swift_test_ui` writes to
-# the same place for the same reason.
+# A single test needs its parentheses, and quoting to keep the shell off them.
+#
+# With no filter this is the CI job: every test runs even after one fails, which
+# is what a run nobody is watching should do. Naming a test drops that, so an
+# iterating run stops at the first failure.
 [group('test')]
 [macos]
-test-app-ui: gen-app (build-ffi "debug")
+test-app-ui FILTER="": gen-app (build-ffi "debug")
     #!/usr/bin/env sh
     set -eu
 
-    # Not tidying up: `xcodebuild` refuses to write over an existing bundle, so
-    # without this the second run in a checkout fails before it starts.
-    rm -rf tmp/uitests/run.xcresult
-    mkdir -p tmp/uitests
-
-    # Captured rather than propagated, so the bundle is still reported on the
-    # failing run — which is the only run anybody opens it for.
-    status=0
-    CI=1 xcodebuild test -project apps/macos/JP.xcodeproj -scheme JP \
-        -destination platform=macOS -only-testing:JPUITests \
-        -resultBundlePath tmp/uitests/run.xcresult -quiet || status=$?
-
-    if [ -d tmp/uitests/run.xcresult ]; then
-        echo "result bundle: tmp/uitests/run.xcresult" >&2
+    # CI only for the unattended whole-suite run, where finishing and reporting
+    # everything beats stopping early. A named run is someone iterating, and they
+    # want the first failure.
+    if [ -n "{{FILTER}}" ]; then
+        just _xctest JPUITests "" {{quote(FILTER)}}
+    else
+        just _xctest JPUITests 1 ""
     fi
 
-    exit $status
+# Run one of the app's test bundles, reporting what failed.
+#
+# `-quiet` keeps a passing run to a couple of lines, and also suppresses the
+# failure summary — a failing run prints `** TEST FAILED **` and nothing else,
+# which is not something anyone can act on. The result bundle is what makes the
+# failure readable, so it is always written and read back when the run fails.
+#
+# It is written inside the checkout rather than left in derived data, so a
+# failing run leaves its evidence where a reader or a CI artifact step can reach
+# it without deriving a container path.
+#
+# FILTER narrows the run to `Suite`, `Suite/test()`, or a nested
+# `Outer/Inner/test()`. The names are the *type* names, not the display names a
+# `@Suite("...")` or `@Test("...")` gives them; a nested suite needs its whole
+# path, and a single test needs its parentheses.
+#
+# A filter matching nothing is reported rather than passing quietly — which is
+# what it does on its own, since a run that tested nothing still exits zero.
+[private]
+[macos]
+_xctest BUNDLE CI FILTER="":
+    #!/usr/bin/env sh
+    set -eu
+
+    target="{{BUNDLE}}"
+    if [ -n "{{FILTER}}" ]; then
+        target="{{BUNDLE}}/{{FILTER}}"
+    fi
+
+    result="apps/macos/.build/{{BUNDLE}}.xcresult"
+    rm -rf "$result"
+
+    # Exported only when asked for, never as an empty string: the tests ask
+    # whether `CI` is set, not what it says, so `CI=""` would read as CI.
+    if [ -n "{{CI}}" ]; then
+        export CI="{{CI}}"
+    fi
+
+    if xcodebuild test \
+        -project apps/macos/JP.xcodeproj -scheme JP \
+        -destination platform=macOS -only-testing:"$target" \
+        -resultBundlePath "$result" -quiet
+    then
+        # `xcodebuild` exits zero when a filter matches nothing, so a run that
+        # tested nothing looks exactly like one that passed. Read the count out of
+        # the summary rather than grepping its prose, which is how the first
+        # version of this check missed exactly the case it was written for.
+        ran=$(xcrun xcresulttool get test-results summary --path "$result" 2>/dev/null |
+            jq -r '.totalTestCount // 0')
+
+        if [ "$ran" -eq 0 ]; then
+            echo "No test matched '$target'." >&2
+            echo >&2
+            echo "Names are type names, not the display names in @Suite(\"...\") or" >&2
+            echo "@Test(\"...\"). A nested suite needs its full path, and a single" >&2
+            echo "test needs its parentheses:" >&2
+            echo >&2
+            echo "    UISuite/PointerCursorTests" >&2
+            echo "    UISuite/PointerCursorTests/showsResizeCursorOverTheDivider()" >&2
+            exit 1
+        fi
+
+        exit 0
+    fi
+
+    echo >&2
+    echo "--- $target failures ---------------------------------------------" >&2
+    xcrun xcresulttool get test-results summary --path "$result" >&2 || true
+    echo >&2
+    echo "Full results: $result" >&2
+
+    exit 1
 
 # Format the macOS app's Swift sources.
 [group('fmt')]

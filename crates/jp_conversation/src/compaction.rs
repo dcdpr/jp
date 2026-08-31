@@ -11,6 +11,7 @@
 //! [RFD 064]: https://github.com/dcdpr/jp/blob/main/docs/rfd/064-non-destructive-conversation-compaction.md
 
 use chrono::{DateTime, Utc};
+pub use jp_config::types::{byte_size::ByteSize, policy_spec::PolicySpec};
 use serde::{Deserialize, Serialize};
 
 /// A compaction overlay stored in the event stream.
@@ -45,13 +46,19 @@ pub struct Compaction {
 
     /// Policy for `ChatResponse::Reasoning` events.
     /// Ignored when `summary` is set.
+    ///
+    /// An `over` threshold on the spec limits the policy to reasoning blocks
+    /// larger than that size.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub reasoning: Option<ReasoningPolicy>,
+    pub reasoning: Option<PolicySpec<ReasoningPolicy>>,
 
     /// Policy for `ToolCallRequest` and `ToolCallResponse` pairs.
     /// Ignored when `summary` is set.
+    ///
+    /// An `over` threshold on the spec limits the policy to calls larger than
+    /// that size, judged per half for `Strip` and on the pair total for `Omit`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_calls: Option<ToolCallPolicy>,
+    pub tool_calls: Option<PolicySpec<ToolCallPolicy>>,
 }
 
 impl Compaction {
@@ -72,16 +79,22 @@ impl Compaction {
     }
 
     /// Set the reasoning policy.
+    ///
+    /// Accepts a bare [`ReasoningPolicy`] to apply it to every reasoning block
+    /// in range, or a [`PolicySpec`] carrying a size threshold.
     #[must_use]
-    pub const fn with_reasoning(mut self, policy: ReasoningPolicy) -> Self {
-        self.reasoning = Some(policy);
+    pub fn with_reasoning(mut self, policy: impl Into<PolicySpec<ReasoningPolicy>>) -> Self {
+        self.reasoning = Some(policy.into());
         self
     }
 
     /// Set the tool call policy.
+    ///
+    /// Accepts a bare [`ToolCallPolicy`] to apply it to every tool call in
+    /// range, or a [`PolicySpec`] carrying a size threshold.
     #[must_use]
-    pub const fn with_tool_calls(mut self, policy: ToolCallPolicy) -> Self {
-        self.tool_calls = Some(policy);
+    pub fn with_tool_calls(mut self, policy: impl Into<PolicySpec<ToolCallPolicy>>) -> Self {
+        self.tool_calls = Some(policy.into());
         self
     }
 

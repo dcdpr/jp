@@ -11,8 +11,9 @@ use jp_config::{
     model::{PartialModelConfig, id::PartialModelIdOrAliasConfig},
 };
 use jp_conversation::{
-    Compaction, ConversationStream, ReasoningPolicy, SummaryPolicy, SummarySource, ToolCallPolicy,
-    event::{ToolCallRequest, ToolCallResponse},
+    ByteSize, Compaction, ConversationStream, PolicySpec, ReasoningPolicy, SummaryPolicy,
+    SummarySource, ToolCallPolicy,
+    event::{ChatResponse, ToolCallRequest, ToolCallResponse},
 };
 use jp_printer::{OutputFormat, Printer, SharedBuffer};
 use jp_workspace::Workspace;
@@ -67,6 +68,97 @@ fn bare_compact_flag_parses_without_a_value() {
     let compact = parse_compact(&["--compact"]);
     assert!(compact.compact_flag.use_config_rules);
     assert!(compact.compact_flag.specs.is_empty());
+}
+
+#[test]
+fn over_flag_reaches_the_stored_policy() {
+    // The threshold has to survive the whole path (flag -> ad-hoc rule ->
+    // stored `Compaction`), because projection reads it from the event, not
+    // from the invocation.
+    let compact = parse_compact(&["--tools=sres", "--over", "1mb"]);
+    let rules = compact.effective_rules(&AppConfig::new_test()).unwrap();
+
+    assert_eq!(rules.len(), 1);
+    assert_eq!(
+        rules[0].tool_calls,
+        Some(PolicySpec::over(
+            ToolCallsMode::StripResponses,
+            ByteSize::from_bytes(1024 * 1024)
+        ))
+    );
+
+    let compaction = super::build_mechanical_compaction(0, 0, &rules[0]);
+
+    assert_eq!(
+        compaction.tool_calls,
+        Some(PolicySpec::over(
+            ToolCallPolicy::Strip {
+                request: false,
+                response: true,
+            },
+            ByteSize::from_bytes(1024 * 1024)
+        ))
+    );
+}
+
+#[test]
+fn over_flag_applies_to_every_mechanical_policy_it_sets() {
+    let compact = parse_compact(&["--reasoning", "--tools=strip", "--over", "512kb"]);
+    let rules = compact.effective_rules(&AppConfig::new_test()).unwrap();
+
+    let over = Some(ByteSize::from_bytes(512 * 1024));
+    assert_eq!(rules[0].reasoning.map(|spec| spec.over), Some(over));
+    assert_eq!(rules[0].tool_calls.map(|spec| spec.over), Some(over));
+}
+
+#[test]
+fn over_without_a_policy_is_rejected() {
+    // Without a policy to narrow, the flag would silently do nothing.
+    let compact = parse_compact(&["--over", "1mb"]);
+
+    assert_eq!(
+        compact.validate().unwrap_err(),
+        "--over needs a policy to narrow: pass --reasoning and/or --tools"
+    );
+}
+
+#[test]
+fn over_conflicts_with_summarize() {
+    // A summary replaces its whole range rather than acting per item, so it
+    // ignores the mechanical policies a threshold would narrow.
+    #[derive(clap::Parser)]
+    struct TestCli {
+        #[command(flatten)]
+        compact: Compact,
+    }
+
+    assert!(TestCli::try_parse_from(["compact", "--summarize", "--over", "1mb"]).is_err());
+}
+
+#[test]
+fn over_conflicts_with_reset() {
+    // `--reset` conflicts with every other policy flag. Without `over` on that
+    // list the pair reaches `validate()`, which reports the wrong problem
+    // ("--over needs a policy to narrow") for a combination clap should refuse
+    // outright, and which no added policy flag could satisfy anyway.
+    #[derive(clap::Parser)]
+    struct TestCli {
+        #[command(flatten)]
+        compact: Compact,
+    }
+
+    assert!(TestCli::try_parse_from(["compact", "--reset", "--over", "1mb"]).is_err());
+}
+
+#[test]
+fn no_over_flag_leaves_the_policy_unnarrowed() {
+    let compact = parse_compact(&["--tools=sres"]);
+    let rules = compact.effective_rules(&AppConfig::new_test()).unwrap();
+
+    assert_eq!(
+        rules[0].tool_calls,
+        Some(PolicySpec::new(ToolCallsMode::StripResponses))
+    );
 }
 
 #[test]
@@ -418,6 +510,50 @@ fn preview_rejects_a_blank_verbatim_summary() {
 }
 
 #[test]
+fn preview_does_not_itemize_a_summary_rule() {
+    // A config rule can carry both a summary and a thresholded mechanical
+    // policy. The real run's stored event takes the summary branch and itemizes
+    // nothing, but the preview builds a summary-less mechanical compaction, so
+    // it has to make that call from the rule or the two disagree: the dry run
+    // would list items the run it previews never selects.
+    let (ctx, out, _tmp) = preview_ctx();
+
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("think");
+    stream
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::reasoning("z".repeat(4096)))
+        .build()
+        .unwrap();
+
+    let rule = CompactionConfig::finalize_rules(vec![PartialCompactionRuleConfig {
+        keep_first: Some(RuleBound::Turns(0)),
+        keep_last: Some(RuleBound::Turns(0)),
+        reasoning: Some(PolicySpec::over(
+            ReasoningMode::Strip,
+            ByteSize::from_bytes(1024),
+        )),
+        summary: Some(PartialSummaryConfig {
+            text: Some("the gist".to_owned()),
+            ..PartialSummaryConfig::default()
+        }),
+        ..PartialCompactionRuleConfig::default()
+    }])
+    .unwrap()
+    .remove(0);
+
+    Compact::preview_compaction(&ctx, &stream, &[rule], &parse_compact(&[]).range).unwrap();
+    ctx.printer.flush();
+
+    // One range line and nothing under it. The 4 KB reasoning block clears the
+    // 1 KB threshold, so an unguarded preview would name it here.
+    assert_eq!(
+        *out.lock(),
+        "Would have compacted turns 1..1 (1 total, verbatim summary).\n"
+    );
+}
+
+#[test]
 fn preview_refuses_an_overlap_the_real_run_would_refuse() {
     // The preview shares `resolve_rule_range` with the real run, so the same
     // widening over an existing summary is refused before anything is printed.
@@ -621,7 +757,7 @@ fn tool_calls_mode_maps_to_policy() {
             keep_first: RuleBound::Turns(0),
             keep_last: RuleBound::Turns(0),
             reasoning: None,
-            tool_calls: Some(mode),
+            tool_calls: Some(mode.into()),
             summary: None,
         };
         let compactions = rt
@@ -634,7 +770,11 @@ fn tool_calls_mode_maps_to_policy() {
             ))
             .unwrap();
         assert_eq!(compactions.len(), 1, "non-empty range, mode {mode:?}");
-        assert_eq!(compactions[0].tool_calls, Some(expected), "mode {mode:?}");
+        assert_eq!(
+            compactions[0].tool_calls,
+            Some(expected.into()),
+            "mode {mode:?}"
+        );
     }
 }
 
@@ -652,7 +792,7 @@ fn keep_last_duration_covering_whole_conversation_compacts_nothing() {
         keep_first: RuleBound::Turns(0),
         keep_last: RuleBound::Duration(Duration::from_hours(720)),
         reasoning: None,
-        tool_calls: Some(ToolCallsMode::Strip),
+        tool_calls: Some(ToolCallsMode::Strip.into()),
         summary: None,
     };
     let compactions = runtime()
@@ -685,7 +825,7 @@ fn from_last_compaction_resolves_against_original_stream_for_every_rule() {
         CompactionRuleConfig {
             keep_first: RuleBound::Turns(0),
             keep_last: RuleBound::Turns(3),
-            reasoning: Some(ReasoningMode::Strip),
+            reasoning: Some(ReasoningMode::Strip.into()),
             tool_calls: None,
             summary: None,
         },
@@ -693,7 +833,7 @@ fn from_last_compaction_resolves_against_original_stream_for_every_rule() {
             keep_first: RuleBound::Turns(0),
             keep_last: RuleBound::Turns(3),
             reasoning: None,
-            tool_calls: Some(ToolCallsMode::Strip),
+            tool_calls: Some(ToolCallsMode::Strip.into()),
             summary: None,
         },
     ];
@@ -753,7 +893,7 @@ fn config_rule_strip_requests_blanks_args_through_projection() {
         keep_first: RuleBound::Turns(1),
         keep_last: RuleBound::Turns(1),
         reasoning: None,
-        tool_calls: Some(ToolCallsMode::StripRequests),
+        tool_calls: Some(ToolCallsMode::StripRequests.into()),
         summary: None,
     }];
 
@@ -773,10 +913,13 @@ fn config_rule_strip_requests_blanks_args_through_projection() {
     assert_eq!((compactions[0].from_turn, compactions[0].to_turn), (1, 4));
     assert_eq!(
         compactions[0].tool_calls,
-        Some(ToolCallPolicy::Strip {
-            request: true,
-            response: false,
-        })
+        Some(
+            ToolCallPolicy::Strip {
+                request: true,
+                response: false,
+            }
+            .into()
+        )
     );
 
     for compaction in compactions {
@@ -1068,7 +1211,7 @@ fn cli_keep_first_replaces_the_configured_keep_first() {
     let rules = vec![CompactionRuleConfig {
         keep_first: RuleBound::Turns(4),
         keep_last: RuleBound::Turns(0),
-        reasoning: Some(ReasoningMode::Strip),
+        reasoning: Some(ReasoningMode::Strip.into()),
         tool_calls: None,
         summary: None,
     }];
@@ -1259,6 +1402,7 @@ fn timeline_keeps_genesis_and_trailing_turns() {
         to: 7,
         label: None,
         existing: false,
+        items: None,
     }];
     let lines = timeline_lines(&segments, 8, false);
     assert_eq!(lines, vec![
@@ -1277,12 +1421,14 @@ fn timeline_interleaves_gaps_between_compactions() {
             to: 3,
             label: None,
             existing: false,
+            items: None,
         },
         TimelineSegment {
             from: 6,
             to: 8,
             label: None,
             existing: false,
+            items: None,
         },
     ];
     let lines = timeline_lines(&segments, 10, false);
@@ -1305,12 +1451,14 @@ fn timeline_sorts_by_start_turn_regardless_of_generation_order() {
             to: 8,
             label: None,
             existing: false,
+            items: None,
         },
         TimelineSegment {
             from: 1,
             to: 3,
             label: None,
             existing: false,
+            items: None,
         },
     ];
     let lines = timeline_lines(&segments, 8, false);
@@ -1332,12 +1480,14 @@ fn timeline_collapses_overlapping_ranges() {
             to: 5,
             label: None,
             existing: false,
+            items: None,
         },
         TimelineSegment {
             from: 3,
             to: 8,
             label: None,
             existing: false,
+            items: None,
         },
     ];
     let lines = timeline_lines(&segments, 10, false);
@@ -1356,6 +1506,7 @@ fn timeline_labels_describe_compaction_type() {
         to: 3,
         label: Some("reasoning + tools".to_owned()),
         existing: false,
+        items: None,
     }];
     let lines = timeline_lines(&segments, 4, false);
     assert_eq!(lines, vec![
@@ -1372,6 +1523,7 @@ fn timeline_dry_run_uses_conditional_verbs() {
         to: 3,
         label: None,
         existing: false,
+        items: None,
     }];
     let lines = timeline_lines(&segments, 4, true);
     assert_eq!(lines, vec![
@@ -1391,9 +1543,130 @@ fn segment_label_reflects_mechanical_policies() {
             request: true,
             response: true,
         });
-    let segments = segments_for_compactions(std::slice::from_ref(&compaction), "test-conv");
+    let segments = segments_for_compactions(
+        std::slice::from_ref(&compaction),
+        &ConversationStream::new_test(),
+        "test-conv",
+    );
     assert_eq!(segments.len(), 1);
     assert_eq!(segments[0].label.as_deref(), Some("reasoning + tools"));
+}
+
+/// A one-turn stream with two tool calls: a 4 KB response and a 2-byte one.
+fn stream_with_a_large_and_a_small_call() -> ConversationStream {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("read them");
+    stream
+        .current_turn_mut()
+        .add_tool_call_request(ToolCallRequest {
+            id: "big".into(),
+            name: "fs_read_file".into(),
+            arguments: Map::from_iter([("path".into(), Value::from("huge.log"))]),
+        })
+        .add_tool_call_response(ToolCallResponse {
+            id: "big".into(),
+            result: Ok("x".repeat(4096)),
+        })
+        .add_tool_call_request(ToolCallRequest {
+            id: "small".into(),
+            name: "fs_read_file".into(),
+            arguments: Map::from_iter([("path".into(), Value::from("tiny.log"))]),
+        })
+        .add_tool_call_response(ToolCallResponse {
+            id: "small".into(),
+            result: Ok("ok".into()),
+        })
+        .build()
+        .unwrap();
+    stream
+}
+
+#[test]
+fn timeline_lists_what_a_threshold_caught() {
+    // A threshold reaches an unpredictable subset of its range, so the range
+    // line alone would leave the user guessing whether it hit 1 call or 12.
+    let stream = stream_with_a_large_and_a_small_call();
+    let compaction = Compaction::new(0, 0).with_tool_calls(PolicySpec::over(
+        ToolCallPolicy::Strip {
+            request: false,
+            response: true,
+        },
+        ByteSize::from_bytes(1024),
+    ));
+
+    let segments = segments_for_compactions(std::slice::from_ref(&compaction), &stream, "conv");
+    let lines = timeline_lines(&segments, 0, true);
+
+    assert_eq!(lines, vec![
+        "Would have compacted turns 1..1 (1 total, tool responses over 1KB).".to_owned(),
+        "  turn 1  fs_read_file (response)  4.0 KB".to_owned(),
+    ]);
+}
+
+#[test]
+fn timeline_says_so_when_a_threshold_caught_nothing() {
+    // Silence here would read as "the whole range was compacted".
+    let stream = stream_with_a_large_and_a_small_call();
+    let compaction = Compaction::new(0, 0).with_tool_calls(PolicySpec::over(
+        ToolCallPolicy::Strip {
+            request: false,
+            response: true,
+        },
+        ByteSize::from_bytes(1024 * 1024),
+    ));
+
+    let segments = segments_for_compactions(std::slice::from_ref(&compaction), &stream, "conv");
+    let lines = timeline_lines(&segments, 0, true);
+
+    assert_eq!(lines, vec![
+        "Would have compacted turns 1..1 (1 total, tool responses over 1MB).".to_owned(),
+        "  nothing over the threshold.".to_owned(),
+    ]);
+}
+
+#[test]
+fn timeline_does_not_itemize_a_summary_rule() {
+    // `-k 's+r,over=1kb'` parses: the threshold binds to `r`, and the summary
+    // rule carries it. A summary replaces its whole range, so projection never
+    // consults the threshold and itemizing it would name items nothing selected.
+    let stream = stream_with_a_large_and_a_small_call();
+    let compaction = Compaction::new(0, 0)
+        .with_tool_calls(PolicySpec::over(
+            ToolCallPolicy::Strip {
+                request: false,
+                response: true,
+            },
+            ByteSize::from_bytes(1024),
+        ))
+        .with_summary(jp_conversation::SummaryPolicy::generated("the gist"));
+
+    let segments = segments_for_compactions(std::slice::from_ref(&compaction), &stream, "conv");
+    let lines = timeline_lines(&segments, 0, true);
+
+    assert_eq!(lines.len(), 1, "no item lines: {lines:?}");
+    assert!(
+        lines[0].contains("summary"),
+        "summary wins the label: {}",
+        lines[0]
+    );
+}
+
+#[test]
+fn timeline_does_not_itemize_a_rule_without_a_threshold() {
+    // An unnarrowed rule reaches everything in range by definition, so listing
+    // each call would be noise.
+    let stream = stream_with_a_large_and_a_small_call();
+    let compaction = Compaction::new(0, 0).with_tool_calls(ToolCallPolicy::Strip {
+        request: false,
+        response: true,
+    });
+
+    let segments = segments_for_compactions(std::slice::from_ref(&compaction), &stream, "conv");
+    let lines = timeline_lines(&segments, 0, true);
+
+    assert_eq!(lines, vec![
+        "Would have compacted turns 1..1 (1 total, tool responses).".to_owned(),
+    ]);
 }
 
 #[test]
@@ -1413,6 +1686,7 @@ fn timeline_reports_pre_existing_compactions_not_as_kept() {
         to: 8,
         label: None,
         existing: false,
+        items: None,
     });
 
     let lines = timeline_lines(&segments, 9, false);
@@ -1441,6 +1715,7 @@ fn timeline_dry_run_keeps_pre_existing_compactions_factual() {
         to: 8,
         label: None,
         existing: false,
+        items: None,
     });
 
     let lines = timeline_lines(&segments, 9, true);

@@ -8,8 +8,9 @@ use jp_config::{
     },
 };
 use jp_conversation::{
-    Compaction, CompactionRange, ConversationStream, ReasoningPolicy, SummaryOverlap,
-    SummaryPolicy, SummarySource, ToolCallPolicy, compaction::extend_summary_range,
+    ByteSize, Compaction, CompactionRange, ConversationStream, PolicySpec, ReasoningPolicy,
+    SummaryOverlap, SummaryPolicy, SummarySource, ToolCallPolicy, compaction::extend_summary_range,
+    stream::AffectedItem,
 };
 use jp_workspace::{ConversationHandle, ConversationMut, Workspace};
 use tracing::warn;
@@ -86,6 +87,26 @@ pub(crate) struct Compact {
     #[arg(long)]
     summary_context: Option<String>,
 
+    /// Only compact items larger than this.
+    ///
+    /// Accepts a human-readable size (`512KB`, `1MB`) or a bare byte count.
+    /// Applies to every mechanical policy this invocation sets; use the inline
+    /// DSL (`-k 'r,over=16kb+t=sres,over=1mb'`) to give each policy its own
+    /// threshold.
+    ///
+    /// Each half of a tool call is judged on its own size, so `--tools=strip`
+    /// on a call with a short request and a huge response drops only the
+    /// response.
+    /// `--tools=omit` removes whole pairs, so it is judged on the two halves
+    /// combined.
+    #[arg(
+        long,
+        value_name = "SIZE",
+        value_parser = parse_byte_size,
+        conflicts_with_all = ["summary", "compact"],
+    )]
+    over: Option<ByteSize>,
+
     /// The model to summarize with.
     ///
     /// Accepts a model alias or a full `provider/name` ID, the same values as
@@ -119,6 +140,7 @@ pub(crate) struct Compact {
         conflicts_with_all = [
             "keep_first", "keep_last", "from", "to", "first", "last", "turn",
             "reasoning", "tools", "summary", "summary_context", "compact", "model",
+            "over",
         ],
     )]
     reset: Option<Option<usize>>,
@@ -133,6 +155,19 @@ pub(crate) struct Compact {
 }
 
 impl Compact {
+    /// Reject flag combinations clap cannot express.
+    ///
+    /// A size threshold narrows a policy, so `--over` needs one to narrow; on
+    /// its own it would be a silent no-op.
+    fn validate(&self) -> Result<(), String> {
+        if self.over.is_some() && !self.reasoning && self.tools.is_none() {
+            return Err(
+                "--over needs a policy to narrow: pass --reasoning and/or --tools".to_owned(),
+            );
+        }
+        Ok(())
+    }
+
     /// Returns `true` if any dedicated policy flag is set.
     ///
     /// Policy flags (`--reasoning`/`--tools`/`--summary`) build a single ad-hoc
@@ -172,9 +207,15 @@ impl Compact {
         if self.has_policy_overrides() {
             let mut rule = PartialCompactionRuleConfig::default();
             if self.reasoning {
-                rule.reasoning = Some(ReasoningMode::Strip);
+                rule.reasoning = Some(PolicySpec {
+                    policy: ReasoningMode::Strip,
+                    over: self.over,
+                });
             }
-            rule.tool_calls = self.tools;
+            rule.tool_calls = self.tools.map(|policy| PolicySpec {
+                policy,
+                over: self.over,
+            });
             if let Some(text) = &self.summary {
                 rule.summary = Some(PartialSummaryConfig {
                     text: text.clone(),
@@ -237,6 +278,10 @@ impl IntoPartialAppConfig for Compact {
 
         Ok(partial)
     }
+}
+
+fn parse_byte_size(s: &str) -> Result<ByteSize, String> {
+    s.parse::<ByteSize>().map_err(|e| e.to_string())
 }
 
 fn parse_tool_calls_mode(s: &str) -> Result<ToolCallsMode, String> {
@@ -594,6 +639,41 @@ struct TimelineSegment {
     /// Existing compactions are reported factually ("Compacted") even under
     /// `--dry-run`, since they pre-date the previewed run.
     existing: bool,
+    /// The individual items a size threshold selected.
+    ///
+    /// `None` when no policy carries a threshold, where the range and the label
+    /// already describe the effect exactly.
+    /// `Some(vec![])` means a threshold ran and matched nothing, which reads
+    /// very differently from the range line alone.
+    items: Option<Vec<AffectedItem>>,
+}
+
+/// The items a compaction selects, when a size threshold makes the selection
+/// worth spelling out.
+///
+/// Returns `None` for a rule with no threshold: it reaches everything in its
+/// range by definition, so listing each item would be noise.
+/// Also `None` for a summary, which replaces its whole range regardless of any
+/// mechanical policy it happens to carry, so naming individual items would
+/// describe a selection that never happened.
+fn threshold_items(
+    events: &ConversationStream,
+    compaction: &Compaction,
+) -> Option<Vec<AffectedItem>> {
+    if compaction.summary.is_some() {
+        return None;
+    }
+
+    let narrowed = compaction
+        .reasoning
+        .as_ref()
+        .is_some_and(|spec| spec.over.is_some())
+        || compaction
+            .tool_calls
+            .as_ref()
+            .is_some_and(|spec| spec.over.is_some());
+
+    narrowed.then(|| events.affected_items(compaction))
 }
 
 /// Build timeline segments for the compactions about to be applied, spilling
@@ -601,7 +681,11 @@ struct TimelineSegment {
 ///
 /// `conv_id` prefixes the temp-file names so summaries from different
 /// conversations don't collide.
-fn segments_for_compactions(compactions: &[Compaction], conv_id: &str) -> Vec<TimelineSegment> {
+fn segments_for_compactions(
+    compactions: &[Compaction],
+    events: &ConversationStream,
+    conv_id: &str,
+) -> Vec<TimelineSegment> {
     compactions
         .iter()
         .map(|c| {
@@ -623,6 +707,7 @@ fn segments_for_compactions(compactions: &[Compaction], conv_id: &str) -> Vec<Ti
                 to: c.to_turn,
                 label,
                 existing: false,
+                items: threshold_items(events, c),
             }
         })
         .collect()
@@ -652,6 +737,7 @@ fn existing_segments(snapshot: &ConversationStream) -> Vec<TimelineSegment> {
             to: c.to_turn,
             label: Some("already compacted".to_owned()),
             existing: true,
+            items: None,
         })
         .collect()
 }
@@ -720,6 +806,23 @@ fn timeline_lines(segments: &[TimelineSegment], last_turn: usize, dry_run: bool)
             ),
         });
 
+        // A size threshold reaches an unpredictable subset of its range, so the
+        // range line alone doesn't say what happened. Name what it caught, and
+        // say so explicitly when it caught nothing.
+        if let Some(items) = &segment.items {
+            if items.is_empty() {
+                lines.push("  nothing over the threshold.".to_owned());
+            }
+            for item in items {
+                lines.push(format!(
+                    "  turn {}  {}  {}",
+                    item.turn + 1,
+                    item.name,
+                    item.size.human()
+                ));
+            }
+        }
+
         covered = Some(covered.map_or(segment.to, |c| c.max(segment.to)));
     }
 
@@ -749,25 +852,33 @@ fn build_mechanical_compaction(
 ) -> Compaction {
     let mut compaction = Compaction::new(from_turn, to_turn);
 
-    if rule.reasoning.is_some() {
-        compaction = compaction.with_reasoning(ReasoningPolicy::Strip);
+    // Each rule's size threshold carries across to the stored policy, so the
+    // projection applies the same narrowing the user configured.
+    if let Some(spec) = rule.reasoning {
+        compaction = compaction.with_reasoning(PolicySpec {
+            policy: ReasoningPolicy::Strip,
+            over: spec.over,
+        });
     }
 
-    if let Some(mode) = rule.tool_calls {
-        compaction = compaction.with_tool_calls(match mode {
-            ToolCallsMode::Strip => ToolCallPolicy::Strip {
-                request: true,
-                response: true,
+    if let Some(spec) = rule.tool_calls {
+        compaction = compaction.with_tool_calls(PolicySpec {
+            policy: match spec.policy {
+                ToolCallsMode::Strip => ToolCallPolicy::Strip {
+                    request: true,
+                    response: true,
+                },
+                ToolCallsMode::StripResponses => ToolCallPolicy::Strip {
+                    request: false,
+                    response: true,
+                },
+                ToolCallsMode::StripRequests => ToolCallPolicy::Strip {
+                    request: true,
+                    response: false,
+                },
+                ToolCallsMode::Omit => ToolCallPolicy::Omit,
             },
-            ToolCallsMode::StripResponses => ToolCallPolicy::Strip {
-                request: false,
-                response: true,
-            },
-            ToolCallsMode::StripRequests => ToolCallPolicy::Strip {
-                request: true,
-                response: false,
-            },
-            ToolCallsMode::Omit => ToolCallPolicy::Omit,
+            over: spec.over,
         });
     }
 
@@ -780,6 +891,7 @@ impl Compact {
     }
 
     pub(crate) async fn run(self, ctx: &mut Ctx, handles: Vec<ConversationHandle>) -> Output {
+        self.validate()?;
         self.range.validate()?;
 
         // Reject an out-of-range `--turn` against every target before compacting
@@ -846,6 +958,7 @@ impl Compact {
         let mut segments = existing_segments(&events_snapshot);
         segments.extend(segments_for_compactions(
             &compactions,
+            &events_snapshot,
             &conv.id().to_string(),
         ));
         apply_compactions(&conv, compactions);
@@ -937,19 +1050,26 @@ impl Compact {
 
             let source = rule_summary_source(rule);
             for range in ranges {
-                let label = match source {
-                    Some(source) => Some(summary_label(source).to_owned()),
-                    None => compaction_policy_label(&build_mechanical_compaction(
-                        range.from_turn,
-                        range.to_turn,
-                        rule,
-                    )),
+                let preview = build_mechanical_compaction(range.from_turn, range.to_turn, rule);
+                // `build_mechanical_compaction` carries no summary, so the
+                // summary case is decided from the rule here rather than left
+                // to `threshold_items`. Label and items move together: a
+                // summary replaces its whole range, so it takes the summary
+                // label and itemizes nothing, matching the stored event the
+                // real run builds.
+                let (label, items) = match source {
+                    Some(source) => (Some(summary_label(source).to_owned()), None),
+                    None => (
+                        compaction_policy_label(&preview),
+                        threshold_items(events_snapshot, &preview),
+                    ),
                 };
                 new_segments.push(TimelineSegment {
                     from: range.from_turn,
                     to: range.to_turn,
                     label,
                     existing: false,
+                    items,
                 });
                 // The placeholder carries the rule's provenance so a second
                 // summary rule previews the same refusal the real run would

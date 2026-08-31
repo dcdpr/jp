@@ -191,6 +191,108 @@ fn tool_call_finish_is_a_clean_completion() -> Result {
     Ok(())
 }
 
+/// A prompt rejected after the response is committed arrives as a 200 stream
+/// whose only chunk carries a top-level `error` and an empty `choices` array.
+/// The rejection must reach the caller instead of being dropped, which would
+/// leave the stream looking merely truncated.
+#[test]
+fn top_level_error_with_empty_choices_is_reported() -> Result {
+    let chunk: OpenRouterChunk = serde_json::from_value(serde_json::json!({
+        "id": "gen-1786537769-1XuUJY00pSj6s5GLfq9d",
+        "provider": "Azure",
+        "choices": [],
+        "created": 1_786_537_769,
+        "model": "unknown",
+        "object": "chat.completion.chunk",
+        "system_fingerprint": null,
+        "usage": null,
+        "error": {
+            "code": 400,
+            "message": "prompt is too long: 1284668 tokens > 1000000 maximum",
+            "metadata": null
+        }
+    }))?;
+    let mut state = AggregationState {
+        tool_call_indices: vec![],
+        aggregating_reasoning: false,
+        aggregating_message: false,
+        is_structured: false,
+    };
+
+    let events = map_completion(chunk, &mut state);
+
+    let [Err(error)] = events.as_slice() else {
+        panic!("expected exactly one error event, got {events:?}");
+    };
+    assert_eq!(
+        error.message(),
+        "API error (status 400): prompt is too long: 1284668 tokens > 1000000 maximum"
+    );
+    // A 400 is the provider rejecting this request as-is. Retrying resends the
+    // identical body, so it must not be classified as transient.
+    assert_eq!(error.kind, StreamErrorKind::Other);
+    assert!(!error.is_retryable());
+    Ok(())
+}
+
+/// A quota failure delivered as a top-level error is classified by its status
+/// code, so the caller can surface the credits hint rather than a bare message.
+#[test]
+fn top_level_payment_error_is_classified_as_quota() -> Result {
+    let chunk: OpenRouterChunk = serde_json::from_value(serde_json::json!({
+        "id": "gen-1",
+        "provider": "Azure",
+        "choices": [],
+        "created": 1_786_537_769,
+        "model": "unknown",
+        "object": "chat.completion.chunk",
+        "system_fingerprint": null,
+        "usage": null,
+        "error": { "code": 402, "message": "Payment required", "metadata": null }
+    }))?;
+    let mut state = AggregationState {
+        tool_call_indices: vec![],
+        aggregating_reasoning: false,
+        aggregating_message: false,
+        is_structured: false,
+    };
+
+    let events = map_completion(chunk, &mut state);
+
+    let [Err(error)] = events.as_slice() else {
+        panic!("expected exactly one error event, got {events:?}");
+    };
+    assert_eq!(error.kind, StreamErrorKind::InsufficientQuota);
+    Ok(())
+}
+
+/// A per-choice error is classified by status code on the same path as a
+/// top-level one: a 503 from the upstream provider is worth retrying.
+#[test]
+fn per_choice_error_is_classified_by_status_code() -> Result {
+    let choice: response::Choice = serde_json::from_value(serde_json::json!({
+        "finish_reason": "error",
+        "native_finish_reason": "error",
+        "delta": { "role": null, "content": "", "reasoning": null, "tool_calls": [] },
+        "error": { "code": 503, "message": "Provider disconnected unexpectedly", "metadata": null }
+    }))?;
+    let mut state = AggregationState {
+        tool_call_indices: vec![],
+        aggregating_reasoning: false,
+        aggregating_message: false,
+        is_structured: false,
+    };
+
+    let events = map_event(choice, &mut state);
+
+    let [Err(error)] = events.as_slice() else {
+        panic!("expected exactly one error event, got {events:?}");
+    };
+    assert_eq!(error.kind, StreamErrorKind::Transient);
+    assert!(error.is_retryable());
+    Ok(())
+}
+
 fn forced_tool_request(
     reasoning: ReasoningDetails,
     enable_reasoning: bool,

@@ -937,7 +937,7 @@ fn compaction_rule_unset_bounds_resolve_to_field_defaults() {
     // A rule that sets only a tool-call policy, leaving keep_first/keep_last
     // unset — exactly what `jp c compact -t sreq` produces.
     partial.conversation.compaction.rules = MergeableVec::Vec(vec![PartialCompactionRuleConfig {
-        tool_calls: Some(ToolCallsMode::StripRequests),
+        tool_calls: Some(ToolCallsMode::StripRequests.into()),
         ..Default::default()
     }]);
 
@@ -973,8 +973,8 @@ fn empty_config_preserves_default_compaction_rule() {
 
     let rules = &config.conversation.compaction.rules;
     assert_eq!(rules.len(), 1, "default rule must survive an empty config");
-    assert_eq!(rules[0].reasoning, Some(ReasoningMode::Strip));
-    assert_eq!(rules[0].tool_calls, Some(ToolCallsMode::Strip));
+    assert_eq!(rules[0].reasoning, Some(ReasoningMode::Strip.into()));
+    assert_eq!(rules[0].tool_calls, Some(ToolCallsMode::Strip.into()));
     assert_eq!(rules[0].keep_first, RuleBound::Turns(1));
     assert_eq!(rules[0].keep_last, RuleBound::Turns(1));
 }
