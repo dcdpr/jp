@@ -11,7 +11,7 @@ mod protocol;
 pub mod registry;
 
 pub use message::{HostToPlugin, PluginToHost};
-pub use protocol::{Error, PROTOCOL_VERSION};
+pub use protocol::{Error, PROTOCOL_VERSION, ready};
 
 #[cfg(test)]
 #[path = "lib_tests.rs"]

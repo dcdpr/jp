@@ -270,12 +270,23 @@ fn run(mut stdin: impl BufRead, mut stdout: impl Write) -> Result<(), String> {
     match read_message(&mut stdin)? {
         HostToPlugin::Describe => send_describe(&mut stdout),
         HostToPlugin::Init(init) => {
-            send(&mut stdout, &PluginToHost::Ready)?;
+            match jp_plugin::ready(REQUIRED_PROTOCOL, init.version) {
+                Ok(ready) => send(&mut stdout, &PluginToHost::Ready(ready))?,
+                Err(exit) => return send(&mut stdout, &PluginToHost::Exit(exit)),
+            }
             handle_command(&init, &mut stdin, &mut stdout)
         }
         other => Err(format!("expected init or describe, got: {other:?}")),
     }
 }
+
+/// The protocol version this plugin needs from the host.
+///
+/// Composition (`compose` / `composed`) arrived in 2.
+/// Running against an older `jp` means every interactive path sends a message
+/// the host cannot read, so the handshake refuses it up front rather than
+/// discovering it mid-prompt.
+const REQUIRED_PROTOCOL: u32 = 2;
 
 fn handle_command(
     init: &InitMessage,
