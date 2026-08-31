@@ -327,6 +327,6 @@ fn report(
     report
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "pixels_tests.rs"]
 mod tests;

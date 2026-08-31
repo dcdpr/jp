@@ -1,16 +1,16 @@
 set fallback
 
 # see: <https://github.com/cargo-bins/cargo-quickinstall/releases>
-bacon_version        := "3.23.0"
-binstall_version     := "1.20.0"
+bacon_version        := "3.25.0"
+binstall_version     := "1.22.0"
 cbindgen_version     := "0.29.4"
-deny_version         := "0.19.9"
-expand_version       := "1.0.123"
+deny_version         := "0.20.2"
+expand_version       := "1.0.126"
 insta_version        := "1.48.0"
 jilu_version         := "0.13.2"
 llvm_cov_version     := "0.8.7"
-nextest_version      := "0.9.137"
-shear_version        := "1.12.4"
+nextest_version      := "0.9.143"
+shear_version        := "1.13.4"
 vet_version          := "0.10.2"
 
 quiet_flag := if env_var_or_default("CI", "") == "true" { "" } else { "--quiet" }
@@ -2883,7 +2883,7 @@ ticket-grep +ARGS:
 
 # Locally develop the documentation, with hot-reloading.
 [group('docs')]
-develop-docs *FLAGS="--host --allowedHosts --open": rfd-summaries
+develop-docs *FLAGS="--host --allowedHosts --open": rfd-summaries _install-ticket
     just _docs "dev" {{FLAGS}}
 
 # Open the RFD priority board for drag-and-drop reordering.

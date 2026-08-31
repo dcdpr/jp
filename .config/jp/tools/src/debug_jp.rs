@@ -12,6 +12,11 @@
 //! - `debug_jp_profile_sampling` — macOS `sample(1)` wall-clock profile.
 //! - `debug_jp_profile_heap` — dhat heap profile.
 //! - `debug_jp_trace` — `JP_DEBUG=1` trace log capture and render.
+//!
+//! The tests here are `#[cfg(all(test, unix))]`.
+//! Their fixtures drive process groups and match on `/`-separated paths,
+//! neither of which means anything on Windows.
+//! Linux keeps them.
 
 use crate::{
     Context, Tool,

@@ -1554,6 +1554,6 @@ fn plural(count: usize, word: &str) -> String {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "report_tests.rs"]
 mod tests;

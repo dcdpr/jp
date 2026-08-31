@@ -822,6 +822,6 @@ fn report(
     report
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "launch_tests.rs"]
 mod tests;

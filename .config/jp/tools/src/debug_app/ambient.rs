@@ -92,6 +92,6 @@ fn read<T: for<'de> Deserialize<'de>>(
     serde_json::from_str(&output.stdout).ok()
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "ambient_tests.rs"]
 mod tests;

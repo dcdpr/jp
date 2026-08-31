@@ -51,6 +51,14 @@
 //! It does not cover window state saved by `@SceneStorage`, which is keyed by
 //! bundle identifier.
 //! See [`launch`] for what each variable does and why.
+//!
+//! The tests here are `#[cfg(all(test, unix))]`, and so are the fixtures they
+//! reach for.
+//! They send signals, ask whether a pid is alive, and match on `/`-separated
+//! paths; on Windows `pid_is_alive` answers `true` for everything and
+//! `RealSignals::send` does nothing, so those tests assert against a process
+//! model that is not there.
+//! Linux runs them all.
 
 use crate::{
     Context, Tool,

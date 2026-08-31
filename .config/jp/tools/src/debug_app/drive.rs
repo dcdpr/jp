@@ -537,6 +537,6 @@ fn cap(text: &str) -> String {
     )
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "drive_tests.rs"]
 mod tests;

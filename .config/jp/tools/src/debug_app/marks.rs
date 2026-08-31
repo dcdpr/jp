@@ -192,6 +192,6 @@ pub(crate) fn overlapping(marks: &[Mark], from_ms: u64, to_ms: u64) -> Vec<Mark>
         .collect()
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "marks_tests.rs"]
 mod tests;

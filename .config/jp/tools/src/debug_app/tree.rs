@@ -222,6 +222,6 @@ pub(crate) fn render(node: &TreeNode, depth: usize, opts: &Options, out: &mut St
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "tree_tests.rs"]
 mod tests;

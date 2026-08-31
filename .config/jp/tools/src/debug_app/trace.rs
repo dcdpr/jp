@@ -108,6 +108,6 @@ fn plural(count: usize, word: &str) -> String {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "trace_tests.rs"]
 mod tests;

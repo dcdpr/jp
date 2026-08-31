@@ -335,6 +335,6 @@ struct RawPP {
     fs: Vec<usize>,
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "profile_heap_parse_tests.rs"]
 mod tests;

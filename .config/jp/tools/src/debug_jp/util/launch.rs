@@ -327,19 +327,19 @@ impl Launcher for RealLauncher {
 
 /// A [`Launcher`] for tests: returns a canned [`LaunchResult`] without touching
 /// any real process.
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) struct MockLauncher {
     result: LaunchResult,
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 impl MockLauncher {
     pub(crate) fn returning(result: LaunchResult) -> Self {
         Self { result }
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 impl Launcher for MockLauncher {
     fn run(
         &self,
@@ -458,7 +458,7 @@ fn signal_group(pid: u32, sig: libc::c_int) {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "launch_tests.rs"]
 mod tests;
 
