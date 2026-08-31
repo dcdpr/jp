@@ -36,9 +36,13 @@ struct FixedWindowFrameTests {
     /// an unclamped window keeps that width and puts its right edge past the
     /// screen. A pointer stops at the display bounds, so a test driving that edge
     /// presses whatever is at the boundary and the window never resizes.
+    ///
+    /// The screen is tall enough for the pinned height on purpose, so the height
+    /// assertion says the axis that fits was left alone. A 768-tall screen leaves
+    /// 688 after the insets and would clamp both, which is the case below.
     @Test("pulls a frame wider than the screen back onto it")
     func aTooWideFrameIsClamped() {
-        let visible = CGRect(x: 0, y: 0, width: 1024, height: 768)
+        let visible = CGRect(x: 0, y: 0, width: 1024, height: 900)
 
         let size = FixedWindowFrame.contentSize(
             pinning: CGSize(width: 1000, height: 700),
