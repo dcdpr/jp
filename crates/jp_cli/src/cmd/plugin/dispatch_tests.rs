@@ -137,12 +137,15 @@ fn message_loop_refuses_a_plugin_needing_a_newer_protocol() {
     let sink: Mutex<Vec<u8>> = Mutex::new(Vec::new());
     let config = json!({});
     let shutdown_sent = AtomicBool::new(false);
-    let ws = jp_workspace::Workspace::new("/tmp/jp-test-plugin");
+    let ws = jp_workspace::Workspace::in_memory("/tmp/jp-test-plugin");
 
     let printer = jp_printer::Printer::sink();
+    let prompts = jp_inquire::prompt::TerminalPromptBackend;
     let composer = Composer {
         printer: &printer,
+        prompts: &prompts,
         editor: None,
+        edit_mode: jp_inquire::ReplyEditMode::default(),
         is_tty: false,
     };
 
