@@ -1,0 +1,27 @@
+[conversation.tools.debug_app_quit]
+enable = false
+format = "unattended"
+run = "ask"
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "Stop the app started by `debug_app_launch`, keeping its state so it can be relaunched into. Returns the console output since the last call. macOS only."
+
+description = """
+A profile bracket left open is closed first, before the app, and its summary is \
+reported here. Closing a system-wide bracket takes minutes, so a quit that \
+seems to hang is usually that — close the bracket yourself with \
+`debug_app_profile` beforehand if you want to know which step is costing the \
+time.
+"""
+
+examples = """
+Stop the running app:
+```json
+{}
+```
+"""
+
+[conversation.tools.debug_app_quit.style]
+parameters = "just serve-tools {{context}} {{tool}}"
+inline_results = "full"
+results_file_link = "off"

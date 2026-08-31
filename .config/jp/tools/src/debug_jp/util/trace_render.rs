@@ -30,9 +30,9 @@ use std::{fmt::Write as _, time::Duration};
 
 use serde_json::Value;
 
-use crate::debug_jp::util::{
-    launch::LaunchResult,
-    trace_parse::{self, TraceEvent},
+use crate::{
+    debug_jp::util::launch::LaunchResult,
+    util::trace::{self, TraceEvent},
 };
 
 /// Hard ceiling on target column padding.
@@ -266,7 +266,7 @@ fn write_multi_footer(out: &mut String, runs: &[CommandRun<'_>]) {
 fn strip_trace_path_marker(stderr: &str) -> String {
     stderr
         .lines()
-        .filter(|line| !trace_parse::is_trace_path_marker_line(line))
+        .filter(|line| !trace::is_trace_path_marker_line(line))
         .collect::<Vec<_>>()
         .join("\n")
 }

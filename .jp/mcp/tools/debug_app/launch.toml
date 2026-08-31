@@ -1,0 +1,108 @@
+[conversation.tools.debug_app_launch]
+enable = false
+format = "unattended"
+run = "ask"
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "Build the macOS app and launch an isolated instance that later `debug_app_*` calls address. Leaves a running GUI application behind. macOS only."
+
+description = """
+The app instruments itself on every run, so a launch always produces timings: \
+`debug_app_snapshot` reports the intervals it recorded and its memory \
+footprint. Reach for `debug_app_profile` when those numbers raise a question \
+those intervals cannot answer.
+
+Launching into an already-open profile bracket is how the app's own startup \
+gets covered.
+"""
+
+examples = """
+Launch against a scratch workspace with no conversations:
+```json
+{}
+```
+
+Launch against this checkout, to drive a workspace with real conversations:
+```json
+{"workspace": "."}
+```
+
+Relaunch after a quit, keeping the previous run's state so window and workspace
+restoration can be observed:
+```json
+{"fresh": false}
+```
+
+Launch an app a profile bracket can record allocations against, accepting that
+every timing in the session becomes incomparable with one recorded without it:
+```json
+{"allocation_stacks": true}
+```
+
+Launch in dark appearance, whatever the machine is set to, to check a palette's
+other half:
+```json
+{"workspace": ".", "appearance": "dark"}
+```
+"""
+
+[conversation.tools.debug_app_launch.style]
+parameters = "just serve-tools {{context}} {{tool}}"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.debug_app_launch.parameters.allocation_stacks]
+type = "boolean"
+summary = "Whether the app keeps a stack for every allocation it makes. Defaults to false."
+description = """
+Passes `MallocStackLogging` to the app, which libmalloc reads at process start. \
+That makes this the only moment the decision can be taken: an app launched \
+without it can never report allocation stacks, and `debug_app_profile` refuses \
+to record allocations against one.
+
+Off by default because it costs 2x to 10x and not evenly — allocation-heavy \
+paths slow disproportionately, so one operation looking 3x another may mean \
+only that it allocates more. Every timing in such a session is comparable only \
+with another one like it, including the intervals the app reports about \
+itself. Ask for it when the question is about memory, not when it is about \
+time.
+"""
+
+[conversation.tools.debug_app_launch.parameters.workspace]
+type = "string"
+summary = "Workspace the app should open. Defaults to a scratch workspace at `tmp/debug-app/workspace`."
+description = """
+Relative paths resolve against the repository root. The scratch default is \
+created on first use with an empty store, which is deterministic but has no \
+conversations to select — pass a real workspace when the behaviour under test \
+needs them.
+"""
+
+[conversation.tools.debug_app_launch.parameters.appearance]
+type = "string"
+summary = "Appearance to draw in: `light` or `dark`. Follows the machine when unset."
+description = """
+Passed as `-AppleInterfaceStyle`, which reaches the app's argument domain and \
+outranks the system setting. Both values are named explicitly, so `light` forces \
+light on a machine set to dark rather than merely leaving the choice alone.
+
+The lever for checking the half of a palette nobody has looked at. A colour that \
+resolves correctly per appearance in a unit test still says nothing about \
+whether the view drawing it picked the right one.
+"""
+
+[conversation.tools.debug_app_launch.parameters.configuration]
+type = "string"
+summary = "Xcode configuration to build. Defaults to `Debug`."
+
+[conversation.tools.debug_app_launch.parameters.fresh]
+type = "boolean"
+summary = "Whether to empty the app's state directory first. Defaults to true."
+description = """
+When `true`, the app starts with no recent-workspace list, which is what makes \
+it open the workspace named above.
+
+When `false`, the previous run's state is kept and the app reopens whatever it \
+had open, ignoring the workspace argument. This is the only way to observe \
+state restoration across a quit and relaunch.
+"""

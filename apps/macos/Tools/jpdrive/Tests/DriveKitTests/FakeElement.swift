@@ -16,7 +16,21 @@ final class FakeElement: Element {
     /// Attribute names this element accepts writes for.
     let settable: Set<String>
 
-    var actions: [String]
+    /// Counts every read of ``actions``, so a test can pin that a walk which was
+    /// not asked for them never asked the element.
+    ///
+    /// Each read is an accessibility round-trip of its own against a real
+    /// element, so "the answer came back empty" and "nothing was asked" are
+    /// different outcomes with the same output.
+    private(set) var actionReads = 0
+
+    private var storedActions: [String]
+
+    var actions: [String] {
+        actionReads += 1
+        return storedActions
+    }
+
     var children: [FakeElement]
 
     /// Counts every call to ``read(_:)``, so a test can pin how much of a tree a
@@ -76,7 +90,7 @@ final class FakeElement: Element {
         self.attributes[kAXIdentifierAttribute] = identifier
         self.attributes[AXElement.attributedDescription] = label
         self.settable = settable
-        self.actions = actions
+        self.storedActions = actions
         self.children = children
     }
 

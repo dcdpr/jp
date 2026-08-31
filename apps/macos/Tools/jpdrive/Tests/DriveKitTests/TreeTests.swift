@@ -10,7 +10,9 @@ struct TreeTests {
         maxMatches: Int = 100,
         maxDepth: Int = 20,
         maxSiblings: Int = 0,
-        frames: Bool = false
+        frames: Bool = false,
+        actions: Bool = false,
+        menus: Bool = false
     ) -> TreeOptions {
         return TreeOptions(
             pid: 0,
@@ -18,7 +20,9 @@ struct TreeTests {
             maxMatches: maxMatches,
             maxDepth: maxDepth,
             maxSiblings: maxSiblings,
-            frames: frames
+            frames: frames,
+            actions: actions,
+            menus: menus
         )
     }
 
@@ -146,6 +150,57 @@ struct TreeTests {
 
         let with = try #require(Tree.walk(from: root, options: options(frames: true)))
         #expect(with.frame == "0.0,0.0 100.0x100.0")
+    }
+
+    /// Actions are an accessibility round-trip of their own, per kept element, so
+    /// a walk that was not asked for them must not ask.
+    ///
+    /// Asserted on the element rather than on the output: reading them and
+    /// dropping them afterwards produces exactly the same tree, and costs
+    /// exactly what this is meant to avoid.
+    @Test("actions are not read unless asked for")
+    func actionsAreOptIn() throws {
+        let root = FakeElement(role: "AXButton", actions: ["AXPress"])
+
+        let without = try #require(Tree.walk(from: root, options: options()))
+        #expect(without.actions.isEmpty)
+        #expect(root.actionReads == 0)
+
+        let with = try #require(Tree.walk(from: root, options: options(actions: true)))
+        #expect(with.actions == ["AXPress"])
+        #expect(root.actionReads == 1)
+    }
+
+    /// The Apple menu, Services and the window tiling submenus belong to macOS
+    /// rather than to the app, and run to a couple of hundred elements around the
+    /// handful describing the window.
+    ///
+    /// Skipped in the walk rather than filtered out of the result, so they are
+    /// never read. The bar is still reported, with its children counted, because
+    /// this is the one elision a caller can undo.
+    @Test("the menu bar is not walked unless asked for")
+    func menusAreOptIn() throws {
+        let items = [
+            FakeElement(role: "AXMenuBarItem", label: "Apple"),
+            FakeElement(role: "AXMenuBarItem", label: "File"),
+        ]
+        let bar = FakeElement(role: "AXMenuBar", children: items)
+        let root = FakeElement(role: "AXApplication", children: [bar])
+
+        let without = try #require(Tree.walk(from: root, options: options()))
+        let unwalked = try #require(without.children.first)
+
+        #expect(unwalked.role == "AXMenuBar")
+        #expect(unwalked.children.isEmpty)
+        #expect(unwalked.elidedChildren == 2)
+        #expect(items.allSatisfy { $0.reads == 0 })
+
+        let with = try #require(Tree.walk(from: root, options: options(menus: true)))
+        let walked = try #require(with.children.first)
+
+        #expect(walked.children.count == 2)
+        #expect(walked.elidedChildren == nil)
+        #expect(items.allSatisfy { $0.reads == 1 })
     }
 
     /// An element the accessibility API refused reports no identifier, no label

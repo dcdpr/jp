@@ -1,6 +1,8 @@
 pub mod diff;
+pub mod paths;
 pub mod root;
 pub mod runner;
+pub mod trace;
 pub mod xml;
 
 use jp_md::format::Formatter;

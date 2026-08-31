@@ -19,6 +19,7 @@ jp_md = { workspace = true }
 jp_tool = { workspace = true }
 jp_workspace = { workspace = true }
 ticket = { workspace = true }
+xct2cli = { workspace = true }
 
 base64 = { workspace = true, features = ["std"] }
 camino = { workspace = true }

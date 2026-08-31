@@ -18,7 +18,11 @@ struct MenuTests {
             maxMatches: 100,
             maxDepth: 20,
             maxSiblings: 0,
-            frames: false
+            frames: false,
+            // Neither is a choice for this subcommand: it walks the menu bar by
+            // definition, and reports each item with the action that presses it.
+            actions: true,
+            menus: true
         )
     }
 

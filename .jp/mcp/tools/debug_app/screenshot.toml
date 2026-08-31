@@ -1,0 +1,19 @@
+[conversation.tools.debug_app_screenshot]
+enable = false
+format = "unattended"
+run = "ask"
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "Write a PNG of the running macOS app's frontmost window and return its path. The image reaches the assistant only when a human attaches the file on a following turn. macOS only."
+
+examples = """
+A picture of the window as it stands:
+```json
+{}
+```
+"""
+
+[conversation.tools.debug_app_screenshot.style]
+parameters = "just serve-tools {{context}} {{tool}}"
+inline_results = "full"
+results_file_link = "off"
