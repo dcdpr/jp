@@ -471,7 +471,7 @@ impl Query {
             // Empty query, early exit. Nothing was mutated and nothing is
             // dirty: the persisted stream is untouched, even for `--replay`.
             if query_source == QuerySource::Editor {
-                cleanup_query_message_file(ctx.fs_backend.as_deref(), &cid);
+                cleanup_query_message_file(ctx.fs_backend.as_deref(), &cid, DraftRemoval::Any);
             }
             ctx.printer.println("Query is empty, ignoring.");
             return Ok(());
@@ -512,6 +512,16 @@ impl Query {
         {
             preserve_query_message_file(&conversation_path, &chat_request.content);
         }
+
+        // The draft as it stands now, so the cleanup after the turn can tell it
+        // apart from one written while the turn ran: by another process, or by a
+        // plugin through `write_draft`.
+        //
+        // Taken from the file rather than from the request, because the two are
+        // not the same text: an editor-composed draft keeps its configuration
+        // and history sections, and `--template` renders the request after the
+        // file was written.
+        let draft_at_send = draft_fingerprint(ctx.fs_backend.as_deref(), &cid);
 
         // Echo the request back through the same role-aware rendering
         // machinery used by replay and live streaming — a labeled user header
@@ -718,7 +728,11 @@ impl Query {
         // title), so re-resolve the live directories rather than trusting the
         // path captured before the turn ran.
         if turn_result.is_ok() {
-            cleanup_query_message_file(ctx.fs_backend.as_deref(), &cid);
+            cleanup_query_message_file(
+                ctx.fs_backend.as_deref(),
+                &cid,
+                DraftRemoval::IfUnchanged(draft_at_send.as_deref()),
+            );
         }
 
         turn_result
@@ -2568,6 +2582,34 @@ fn preserve_query_message_file(conversation_dir: &Utf8Path, content: &str) {
     }
 }
 
+/// Which stored query drafts a cleanup may remove.
+#[derive(Debug, Clone, Copy)]
+enum DraftRemoval<'a> {
+    /// Remove whatever is stored.
+    Any,
+
+    /// Remove the draft only while it still matches this fingerprint.
+    ///
+    /// `None` means nothing was stored, so anything found now was written by
+    /// someone else and is left alone.
+    IfUnchanged(Option<&'a str>),
+}
+
+/// The fingerprint of a conversation's stored query draft, if it has one.
+///
+/// A draft that cannot be read has no fingerprint, which leaves it in place
+/// rather than removing bytes nothing has seen.
+fn draft_fingerprint(
+    fs_backend: Option<&jp_storage::backend::FsStorageBackend>,
+    id: &ConversationId,
+) -> Option<String> {
+    let dir = fs_backend.and_then(|fs| fs.find_user_local_conversation_dir(id))?;
+
+    fs::read_to_string(dir.join(editor::QUERY_FILENAME))
+        .ok()
+        .map(|content| editor::draft_revision(&content))
+}
+
 /// Remove the editor's query-message file from a conversation's user-local
 /// storage directory, tolerating its absence.
 ///
@@ -2578,15 +2620,36 @@ fn preserve_query_message_file(conversation_dir: &Utf8Path, content: &str) {
 /// workspace, so a single root is enough.
 /// Without a filesystem backend or user-local store there is nothing to
 /// resolve.
+///
+/// `removal` decides what may go: a draft replaced since the request was
+/// composed belongs to whoever wrote it, and removing it would discard text
+/// this invocation never saw.
 fn cleanup_query_message_file(
     fs_backend: Option<&jp_storage::backend::FsStorageBackend>,
     id: &ConversationId,
+    removal: DraftRemoval<'_>,
 ) {
     let Some(dir) = fs_backend.and_then(|fs| fs.find_user_local_conversation_dir(id)) else {
         return;
     };
 
     let path = dir.join(editor::QUERY_FILENAME);
+
+    if let DraftRemoval::IfUnchanged(fingerprint) = removal {
+        match fs::read_to_string(&path) {
+            Ok(content) if Some(editor::draft_revision(&content).as_str()) != fingerprint => {
+                debug!(path = %path, "Keeping a draft written since the request was composed.");
+                return;
+            }
+            Ok(_) => {}
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return,
+            Err(e) => {
+                warn!(path = %path, error = %e, "Failed to read query message file; keeping it.");
+                return;
+            }
+        }
+    }
+
     match fs::remove_file(&path) {
         Ok(()) => {}
         Err(e) if e.kind() == io::ErrorKind::NotFound => {}

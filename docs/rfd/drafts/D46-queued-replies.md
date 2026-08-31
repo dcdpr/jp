@@ -109,6 +109,14 @@ come from:
   queued reply.
   Ownership of the file's lifecycle moves to the turn loop: clean up after the
   loop, only when the slot is empty.
+
+  A narrower guard already stands in for this: `jp query` fingerprints the draft
+  when it composes its request (`DraftRemoval::IfUnchanged`) and a successful
+  turn removes the file only while it still matches, so a draft written mid-turn
+  through the plugin protocol's `write_draft` survives.
+  The slot-based rule replaces it, and the fingerprint plumbing comes out with
+  the same change.
+
 - The file is a `QueryDocument` (config preamble plus query text), while
   `preserve_query_message_file` writes raw content.
   Writing a queued reply must preserve an existing preamble, which is the same

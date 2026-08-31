@@ -2,7 +2,7 @@ use std::fmt;
 
 const CONVERSATION_MARKER: &str = "\n<!-- CONVERSATION_MARKER -->\n";
 const CONFIG_HEADER: &str = "\n# Active Configuration\n";
-pub(super) const CUT_MARKER: &str = indoc::indoc!(
+pub(crate) const CUT_MARKER: &str = indoc::indoc!(
     "
     ---------------------------------------8<---------------------------------------
     --------------------- EVERYTHING BELOW THIS LINE IS IGNORED --------------------
@@ -186,6 +186,18 @@ impl<'s> TryFrom<&'s str> for QueryConfigSection<'s> {
 
         Ok(Self { value, error })
     }
+}
+
+/// The query text of a stored query-message document.
+///
+/// Everything from the cut marker on is metadata the editor renders and the
+/// next session regenerates; only the message above it is the query.
+/// Text with no marker is a query in full.
+pub(crate) fn draft_query_text(content: &str) -> &str {
+    content
+        .split_once(CUT_MARKER)
+        .map_or(content, |(query, _)| query)
+        .trim()
 }
 
 #[cfg(test)]

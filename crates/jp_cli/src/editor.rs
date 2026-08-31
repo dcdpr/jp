@@ -1,6 +1,7 @@
 mod parser;
 
 use std::{
+    fmt::Write as _,
     fs::{self, OpenOptions},
     io::{Read as _, Write as _},
     sync::Arc,
@@ -18,6 +19,12 @@ use jp_conversation::{
 };
 use jp_editor::{EditOutcome, EditRequest, EditorBackend, EditorError, TerminalEditorBackend};
 use jp_printer::Printer;
+// Tests elsewhere in the crate build query-message fixtures from the real
+// marker, so a fixture cannot drift from the parser.
+#[cfg(test)]
+pub(crate) use parser::CUT_MARKER;
+pub(crate) use parser::draft_query_text;
+use sha2::{Digest as _, Sha256};
 use tracing::warn;
 
 use crate::{
@@ -57,6 +64,18 @@ pub(crate) fn report_editor_failure(printer: &Printer, error: &EditorError, reco
 
 /// The name of the file used to store the current query message.
 pub(crate) const QUERY_FILENAME: &str = "QUERY_MESSAGE.md";
+
+/// A stored query draft's fingerprint: a short hash of the file's content.
+///
+/// Content rather than modification time, so a rewrite with identical text is
+/// not mistaken for someone else's edit.
+pub(crate) fn draft_revision(content: &str) -> String {
+    let digest = Sha256::digest(content.as_bytes());
+    digest[..8].iter().fold(String::new(), |mut acc, byte| {
+        let _ = write!(acc, "{byte:02x}");
+        acc
+    })
+}
 
 /// Options for opening an editor.
 #[derive(Debug)]

@@ -66,6 +66,9 @@ pub enum HostToPlugin {
     /// request it was.
     Done(DoneResponse),
 
+    /// Response to `read_draft` and `write_draft`.
+    Draft(DraftResponse),
+
     /// An error response to any plugin request.
     Error(ErrorResponse),
 
@@ -104,6 +107,12 @@ pub enum PluginToHost {
 
     /// Rename a conversation, or clear its name.
     SetTitle(SetTitleRequest),
+
+    /// Read a conversation's query draft.
+    ReadDraft(ConversationRequest),
+
+    /// Replace a conversation's query draft.
+    WriteDraft(WriteDraftRequest),
 
     /// Print user-facing output through JP's printer.
     Print(PrintMessage),
@@ -239,6 +248,66 @@ pub struct DoneResponse {
     /// Optional request correlation ID.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+}
+
+/// A conversation's query draft.
+///
+/// The answer to both `read_draft` and `write_draft`, so a write reports back
+/// what the draft now holds without a second read.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DraftResponse {
+    /// Optional request correlation ID.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+
+    /// The conversation the draft belongs to.
+    pub conversation: String,
+
+    /// The draft's query text, empty when there is no draft.
+    ///
+    /// A draft composed in an editor also carries the active configuration and
+    /// recent history below the message.
+    /// That is not part of this field, and a `write_draft` replaces it with the
+    /// text it is given.
+    pub content: String,
+
+    /// An opaque fingerprint of the stored draft, absent when there is no
+    /// draft.
+    ///
+    /// Passed back in the next `write_draft` to say which version was edited.
+    /// It covers the whole stored draft rather than `content` alone, so two
+    /// drafts with the same query text can still be told apart.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<String>,
+
+    /// Whether a `write_draft` was refused because the draft had moved on.
+    ///
+    /// When true, `content` and `revision` describe what is on disk, not what
+    /// was submitted, and the write did not happen.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub conflict: bool,
+}
+
+/// Replace a conversation's query draft.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WriteDraftRequest {
+    /// Optional request correlation ID.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+
+    /// The conversation the draft belongs to.
+    pub conversation: String,
+
+    /// The new query text.
+    /// Empty removes the draft.
+    pub content: String,
+
+    /// The `revision` the edit was based on, from an earlier draft response.
+    ///
+    /// Absent means "there was no draft when I started".
+    /// A mismatch against what is on disk is refused rather than overwritten.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<String>,
 }
 
 /// An error response.
