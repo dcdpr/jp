@@ -29,23 +29,6 @@ fn a_path_quoted_from_a_subprocess_is_shortened_too() {
     assert_eq!(report, "  Error: failed to read .jp/config.toml\n");
 }
 
-/// dhat renders a source location inside the frame string, and there is no
-/// point at which that is a path rather than prose.
-#[test]
-fn a_source_location_inside_a_stack_frame_is_shortened() {
-    let report = shorten_paths(
-        "> jp_conversation::event::Event::deserialize \
-         (/Users/jean/.cargo/registry/src/index.crates.io-1949/serde-1.0/src/de.rs:2025:9)\n",
-        Utf8Path::new(ROOT),
-    );
-
-    assert_eq!(
-        report,
-        "> jp_conversation::event::Event::deserialize \
-         ($CARGO_HOME/registry/src/index.crates.io-1949/serde-1.0/src/de.rs:2025:9)\n"
-    );
-}
-
 /// Several paths on one line, which is the ordinary case for a jp trace event's
 /// fields.
 #[test]
@@ -81,42 +64,6 @@ fn the_root_on_its_own_becomes_a_dot() {
     let report = shorten_paths("cwd=/Users/jean/jp\n", Utf8Path::new(ROOT));
 
     assert_eq!(report, "cwd=.\n");
-}
-
-/// A sibling directory whose name merely starts with the root's is a different
-/// directory, and the boundary check is the only thing that knows it.
-#[test]
-fn a_sibling_with_a_longer_name_is_left_alone() {
-    let report = shorten_paths("cwd=/Users/jean/jp-other/src\n", Utf8Path::new(ROOT));
-
-    assert_eq!(report, "cwd=$HOME/jp-other/src\n");
-}
-
-/// The same directory name under a mounted disk is a different file, and only
-/// the check on what precedes the match knows it.
-///
-/// Without that check the home directory is replaced mid-path, leaving
-/// `/Volumes/Backup$HOME/...` — which names neither the backup nor the home.
-#[test]
-fn a_path_under_a_mounted_copy_of_home_is_left_alone() {
-    let report = shorten_paths(
-        "- Trace: `/Volumes/Backup/Users/jean/jp/tmp/trace.jsonl`\n",
-        Utf8Path::new(ROOT),
-    );
-
-    assert_eq!(
-        report,
-        "- Trace: `/Volumes/Backup/Users/jean/jp/tmp/trace.jsonl`\n"
-    );
-}
-
-/// A separator does not continue a component, so a path behind a URL scheme is
-/// still a path starting where it appears to start.
-#[test]
-fn a_path_after_a_scheme_is_still_shortened() {
-    let report = shorten_paths("opened file:///Users/jean/notes.md\n", Utf8Path::new(ROOT));
-
-    assert_eq!(report, "opened file://$HOME/notes.md\n");
 }
 
 /// A path under nothing known is left alone: the system temp directory is where

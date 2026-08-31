@@ -1,6 +1,6 @@
 use camino::Utf8Path;
 
-use super::{shorten, shortenings_from};
+use super::{shorten, shorten_within, shortenings_from};
 
 /// The layout of a real machine, as the failing reports showed it.
 fn fixture() -> Vec<super::Shortening> {
@@ -156,6 +156,68 @@ fn a_root_valued_variable_is_dropped_rather_than_applied() {
         "/etc/passwd",
         "a root home must not rewrite unrelated paths"
     );
+}
+
+/// A report is prose with paths somewhere inside it, so the shortening has to
+/// find them mid-string. dhat renders a source location inside the frame text,
+/// and there is no point at which that substring is a path rather than prose.
+#[test]
+fn a_source_location_inside_a_stack_frame_is_shortened() {
+    let report = shorten_within(
+        "> jp_conversation::event::Event::deserialize \
+         (/Users/jean/.cargo/registry/src/index.crates.io-1949/serde-1.0/src/de.rs:2025:9)\n",
+        &fixture(),
+    );
+
+    assert_eq!(
+        report,
+        "> jp_conversation::event::Event::deserialize \
+         ($CARGO_HOME/registry/src/index.crates.io-1949/serde-1.0/src/de.rs:2025:9)\n"
+    );
+}
+
+/// Mid-string, the trailing boundary is what keeps `/Users/jean` off the front
+/// of `/Users/jeanne`.
+#[test]
+fn a_longer_name_is_not_shortened_mid_string() {
+    let report = shorten_within("cwd=/Users/jeanne/src\n", &fixture());
+
+    assert_eq!(report, "cwd=/Users/jeanne/src\n");
+}
+
+/// The same, for the repository root, whose replacement is empty rather than a
+/// variable name: a sibling checkout must not be reported as living inside it.
+#[test]
+fn a_sibling_of_the_root_is_not_made_relative() {
+    let report = shorten_within("cwd=/Users/jean/Projects/jp-other/src\n", &fixture());
+
+    assert_eq!(report, "cwd=$HOME/Projects/jp-other/src\n");
+}
+
+/// The same directory name under a mounted disk is a different file, and only
+/// the check on what *precedes* the match knows it.
+///
+/// Without that check the home directory is replaced mid-path, leaving
+/// `/Volumes/Backup$HOME/...` — which names neither the backup nor the home.
+#[test]
+fn a_path_under_a_mounted_copy_of_home_is_left_alone() {
+    let report = shorten_within(
+        "- Trace: `/Volumes/Backup/Users/jean/notes.md`\n",
+        &fixture(),
+    );
+
+    assert_eq!(report, "- Trace: `/Volumes/Backup/Users/jean/notes.md`\n");
+}
+
+/// A separator does not continue a component, so a path behind a URL scheme is
+/// still a path starting where it appears to start.
+///
+/// The pair with the test above: the naive fix for one breaks the other.
+#[test]
+fn a_path_after_a_scheme_is_still_shortened() {
+    let report = shorten_within("opened file:///Users/jean/notes.md\n", &fixture());
+
+    assert_eq!(report, "opened file://$HOME/notes.md\n");
 }
 
 /// The path that is exactly the root has no remainder to show.
