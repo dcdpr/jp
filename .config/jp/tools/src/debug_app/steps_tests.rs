@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    env,
+    path::{Path, PathBuf},
+};
 
 use serde_json::json;
 
@@ -178,10 +181,19 @@ fn advertised(tool: &str) -> Vec<String> {
     verbs
 }
 
+/// Where this tool's definition lives, relative to the crate.
+///
+/// `CARGO_MANIFEST_DIR` is read at runtime rather than through `env!`.
+/// Both cargo and nextest set it for the process running a test, whereas the
+/// macro bakes in whichever worktree compiled the binary — which, with a
+/// target directory shared between worktrees, is not necessarily the one
+/// running it.
 fn manifest(tool: &str) -> PathBuf {
     let name = tool.trim_start_matches("debug_app_");
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join(format!("../../../.jp/mcp/tools/debug_app/{name}.toml"))
+    let crate_dir = env::var_os("CARGO_MANIFEST_DIR")
+        .expect("CARGO_MANIFEST_DIR: run tests via `cargo test` or `cargo nextest`");
+
+    Path::new(&crate_dir).join(format!("../../../.jp/mcp/tools/debug_app/{name}.toml"))
 }
 
 /// The definition is what the model writes a list against, and this parser is
