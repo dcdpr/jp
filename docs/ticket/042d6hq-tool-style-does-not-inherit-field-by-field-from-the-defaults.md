@@ -84,6 +84,6 @@ tool that sets one style field expecting the others to fall back to the
 hardcoded defaults rather than to a `'*'` block.
 
 Equality is the only signal the subtraction has.
-A tool that deliberately sets a style field to the value the `'*'` block
-already holds is indistinguishable from one inheriting it, and will follow a
-later `'*'`-only change instead of holding its own value.
+A tool that deliberately sets a style field to the value the `'*'` block already
+holds is indistinguishable from one inheriting it, and will follow a later
+`'*'`-only change instead of holding its own value.
