@@ -15,9 +15,12 @@ use crate::{
 };
 
 const ALLOWED_UTILS: &[&str] = &[
-    "base64", "bc", "date", "file", "head", "jq", "nl", "shasum", "sort", "tail", "touch", "uname",
-    "uniq", "uuidgen", "wc",
+    "base64", "bc", "date", "file", "head", "jq", "nl", "now", "shasum", "sleep", "sort", "tail",
+    "touch", "uname", "uniq", "uuidgen", "wc",
 ];
+
+/// The longest `sleep` this tool will wait.
+const LONGEST_SLEEP: f64 = 60.0;
 
 /// Utilities allowed to write inside the workspace.
 ///
@@ -60,6 +63,16 @@ fn unix_utils_impl<R: ProcessRunner>(
 
     let args: Vec<String> = args.map(OneOrMany::into_vec).unwrap_or_default();
 
+    if util == "now" {
+        return now();
+    }
+
+    if util == "sleep"
+        && let Err(message) = check_sleep(&args)
+    {
+        return error(message);
+    }
+
     if let Err(msg) = validate_args(&ctx.root, &args, Path::exists) {
         return error(msg);
     }
@@ -96,6 +109,54 @@ fn unix_utils_impl<R: ProcessRunner>(
     };
 
     Ok(to_xml(output)?.into())
+}
+
+// ---------------------------------------------------------------------------
+// Utilities answered without a subprocess
+// ---------------------------------------------------------------------------
+
+/// Milliseconds since the Unix epoch.
+fn now() -> ToolResult {
+    let millis = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|error| format!("The system clock is before the Unix epoch: {error}"))?
+        .as_millis();
+
+    Ok(to_xml(CommandOutput {
+        stdout: millis.to_string(),
+        stderr: String::new(),
+        status: "0".to_owned(),
+    })?
+    .into())
+}
+
+/// Refuse a sleep that is malformed, or longer than anyone is still waiting
+/// for.
+fn check_sleep(args: &[String]) -> Result<(), String> {
+    let [seconds] = args else {
+        return Err(format!(
+            "`sleep` takes one argument, a number of seconds. Got {} of them.",
+            args.len()
+        ));
+    };
+
+    let asked: f64 = seconds
+        .parse()
+        .map_err(|_| format!("`sleep` takes a number of seconds, got `{seconds}`."))?;
+
+    if !asked.is_finite() || asked < 0.0 {
+        return Err(format!(
+            "`sleep` takes a number of seconds, got `{seconds}`."
+        ));
+    }
+
+    if asked > LONGEST_SLEEP {
+        return Err(format!(
+            "`sleep {seconds}` is longer than the {LONGEST_SLEEP} second ceiling."
+        ));
+    }
+
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
