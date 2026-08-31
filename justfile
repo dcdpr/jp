@@ -232,15 +232,20 @@ build-changelog: (_install "jilu@" + jilu_version)
 # Build the static library and C header that the macOS app links against, and
 # stage both where the Xcode project expects them.
 #
-# Universal. The app declares no `ARCHS`, so Xcode builds it for
+# Universal by default. The app declares no `ARCHS`, so Xcode builds it for
 # `ARCHS_STANDARD` — arm64 and x86_64 — and a Release build links both slices.
 #
 # Xcode runs this from a build phase, so `just` stays the single entry point for
 # building the Rust side rather than Xcode growing a competing one.
 #
 # PROFILE is a cargo profile directory name (`debug`, `release`, ...).
+#
+# SLICES is `universal` or `host`, and falls back to `JP_FFI_SLICES` and then to
+# `universal`. The environment is how CI reaches this: Xcode's build phase runs
+# `build-ffi` again, and an argument given to `just build-ffi` does not reach
+# that second invocation while an exported variable does.
 [group('build')]
-build-ffi PROFILE="debug": (_install "cbindgen@" + cbindgen_version)
+build-ffi PROFILE="debug" SLICES="": (_install "cbindgen@" + cbindgen_version)
     #!/usr/bin/env sh
     set -eu
 
@@ -257,12 +262,33 @@ build-ffi PROFILE="debug": (_install "cbindgen@" + cbindgen_version)
         build_profile="{{PROFILE}}"
     fi
 
-    # Both slices, every time. A host-only library satisfies the Debug build on
-    # the machine that produced it and nothing else, so the gap stays invisible
-    # until somebody cuts a release or runs the UI suite under Rosetta — at
-    # which point it is a link error a long way from its cause.
+    # `universal` is the default, and is what a local Xcode build and every
+    # Release build get. A host-only library satisfies the machine that produced
+    # it and nothing else, so the gap would otherwise stay invisible until
+    # somebody cuts a release or runs the UI suite under Rosetta — at which
+    # point it is a link error a long way from its cause.
+    #
+    # `host` is for a build that links one slice and would compile the other for
+    # nothing: Xcode's `ONLY_ACTIVE_ARCH` defaults to YES in Debug, so a Debug
+    # build on one machine never touches the second. That is every CI run of the
+    # test bundles, which is where the saving is worth having and where nothing
+    # would have caught a missing slice anyway.
+    mode="{{SLICES}}"
+    if [ -z "$mode" ]; then
+        mode="${JP_FFI_SLICES:-universal}"
+    fi
+
+    case "$mode" in
+        universal) targets="aarch64-apple-darwin x86_64-apple-darwin" ;;
+        host)      targets=$(rustc -vV | sed -n 's/^host: //p') ;;
+        *)
+            echo "SLICES takes 'universal' or 'host', not '$mode'." >&2
+            exit 1
+            ;;
+    esac
+
     slices=""
-    for target in aarch64-apple-darwin x86_64-apple-darwin; do
+    for target in $targets; do
         rustup target add "$target" >/dev/null
 
         # Ask cargo which file it wrote rather than reconstructing the path. The
@@ -297,8 +323,20 @@ build-ffi PROFILE="debug": (_install "cbindgen@" + cbindgen_version)
     mkdir -p "$out/include"
 
     # A debug staticlib bundles every dependency, so joining the slices is worth
-    # skipping when what is staged is already newer than both of them.
-    if [ ! -f "$out/libjp_ffi.a" ] || [ -n "$(find $slices -newer "$out/libjp_ffi.a")" ]; then
+    # skipping when what is staged is already newer than every one of them.
+    #
+    # The architectures are compared as well as the timestamps, because a `host`
+    # run and a `universal` run write the same path from different inputs. On
+    # timestamps alone, a universal build following a host build finds both
+    # slices older than the thin library already staged, skips the join, and
+    # leaves a single-architecture library where one linking both was asked for
+    # — which is the failure `universal` exists to prevent, arriving by way of
+    # the optimisation meant to be free.
+    want=$(printf '%s\n' $targets |
+        sed -e 's/^aarch64-.*/arm64/' -e 's/^x86_64-.*/x86_64/' | sort | tr '\n' ' ')
+    have=$(lipo -archs "$out/libjp_ffi.a" 2>/dev/null | tr ' ' '\n' | sort | tr '\n' ' ')
+
+    if [ "$want" != "$have" ] || [ -n "$(find $slices -newer "$out/libjp_ffi.a")" ]; then
         lipo -create -output "$out/libjp_ffi.a" $slices
     fi
 

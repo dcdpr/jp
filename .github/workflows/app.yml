@@ -10,6 +10,12 @@ env:
   JUST_COLOR: always
   JUST_EXPLAIN: true
   JUST_VERBOSE: 4
+  # The test bundles build the Debug configuration, where Xcode's
+  # `ONLY_ACTIVE_ARCH` defaults to YES — so one slice is linked and a universal
+  # `jp_ffi` compiles a second for nothing. Set in the environment rather than
+  # passed to `just`, because Xcode's own build phase runs `build-ffi` again and
+  # inherits this where an argument would not reach it.
+  JP_FFI_SLICES: host
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
@@ -79,9 +85,10 @@ jobs:
         task: [lint-app, test-drive, test-app, test-app-ui]
     name: ${{ matrix.task }}
     # The UI tests drive the app through the screen and are the slowest thing
-    # here by a wide margin. Cap the job so a hung run does not burn macOS
-    # minutes unnoticed.
-    timeout-minutes: 45
+    # here by a wide margin. A warm run is about five minutes, so this is triple
+    # the worst observed — enough headroom for a cold cache, and short enough
+    # that a hung run does not burn macOS minutes at ten times the rate.
+    timeout-minutes: 15
     steps:
       - name: Decide whether to run task
         id: task
@@ -126,8 +133,13 @@ jobs:
       - if: ${{ steps.task.outputs.run == 'true' && (matrix.task == 'test-app' || matrix.task == 'test-app-ui') }}
         uses: Swatinem/rust-cache@7e1e2d0a10862b34e5df481373b2b0f295d1a2ef # v2
         with:
-          key: ${{ matrix.task }}
-          cache-bin: false
+          # One key for both tasks, not one each. They build the same `jp_ffi`
+          # from the same lockfile, so separate entries would double the storage
+          # for identical artifacts and halve the chance either finds one.
+          key: app
+          # `cbindgen` is the only installed binary here and the justfile pins
+          # its version, so a cached one cannot go stale unnoticed.
+          cache-bin: true
           cache-workspace-crates: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - if: ${{ steps.task.outputs.run == 'true' }}
