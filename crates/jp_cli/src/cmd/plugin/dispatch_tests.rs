@@ -1,6 +1,66 @@
+use jp_plugin::message::{ExitMessage, ReadyMessage};
 use serde_json::json;
 
 use super::*;
+
+/// A workspace no request in these tests reaches into, so it needs no storage.
+fn bare_workspace() -> Workspace {
+    Workspace::in_memory("/tmp/jp-test-plugin")
+}
+
+#[test]
+fn a_ready_carries_on_and_a_clean_exit_stops() {
+    let ws = bare_workspace();
+    let config = json!({});
+    let mut sink: Vec<u8> = Vec::new();
+
+    assert_eq!(
+        handle_request(
+            PluginToHost::Ready(ReadyMessage { protocol: 1 }),
+            &mut sink,
+            &ws,
+            &config,
+        )
+        .unwrap(),
+        Flow::Continue
+    );
+
+    assert_eq!(
+        handle_request(
+            PluginToHost::Exit(ExitMessage {
+                code: 0,
+                reason: None,
+            }),
+            &mut sink,
+            &ws,
+            &config,
+        )
+        .unwrap(),
+        Flow::Stop
+    );
+}
+
+/// A non-zero exit is the plugin's failure, so it surfaces as one rather than
+/// ending the run quietly.
+#[test]
+fn a_failing_exit_carries_its_code_and_reason() {
+    let ws = bare_workspace();
+    let mut sink: Vec<u8> = Vec::new();
+
+    let error = handle_request(
+        PluginToHost::Exit(ExitMessage {
+            code: 3,
+            reason: Some("no such ticket".to_owned()),
+        }),
+        &mut sink,
+        &ws,
+        &json!({}),
+    )
+    .expect_err("a non-zero exit is an error");
+
+    assert_eq!(error.code.get(), 3);
+    assert_eq!(error.message.as_deref(), Some("no such ticket"));
+}
 
 /// A plugin that ignores `Shutdown` is killed rather than waited on forever.
 ///
