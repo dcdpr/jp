@@ -18,6 +18,7 @@ use jp_conversation::{
 };
 use jp_editor::{EditOutcome, EditRequest, EditorBackend, EditorError, TerminalEditorBackend};
 use jp_printer::Printer;
+pub(crate) use parser::draft_query_text;
 use tracing::warn;
 
 use crate::{

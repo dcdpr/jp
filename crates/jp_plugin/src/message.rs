@@ -263,12 +263,20 @@ pub struct DraftResponse {
     /// The conversation the draft belongs to.
     pub conversation: String,
 
-    /// The draft text, empty when there is no draft.
+    /// The draft's query text, empty when there is no draft.
+    ///
+    /// A draft composed in an editor also carries the active configuration and
+    /// recent history below the message.
+    /// That is not part of this field, and a `write_draft` replaces it with the
+    /// text it is given.
     pub content: String,
 
-    /// A fingerprint of `content`, absent when there is no draft.
+    /// An opaque fingerprint of the stored draft, absent when there is no
+    /// draft.
     ///
     /// Passed back in the next `write_draft` to say which version was edited.
+    /// It covers the whole stored draft rather than `content` alone, so two
+    /// drafts with the same query text can still be told apart.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub revision: Option<String>,
 
@@ -290,7 +298,7 @@ pub struct WriteDraftRequest {
     /// The conversation the draft belongs to.
     pub conversation: String,
 
-    /// The new draft text.
+    /// The new query text.
     /// Empty removes the draft.
     pub content: String,
 

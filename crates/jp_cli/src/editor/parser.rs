@@ -188,6 +188,18 @@ impl<'s> TryFrom<&'s str> for QueryConfigSection<'s> {
     }
 }
 
+/// The query text of a stored query-message document.
+///
+/// Everything from the cut marker on is metadata the editor renders and the
+/// next session regenerates; only the message above it is the query.
+/// Text with no marker is a query in full.
+pub(crate) fn draft_query_text(content: &str) -> &str {
+    content
+        .split_once(CUT_MARKER)
+        .map_or(content, |(query, _)| query)
+        .trim()
+}
+
 #[cfg(test)]
 #[path = "parser_tests.rs"]
 mod tests;

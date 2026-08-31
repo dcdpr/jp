@@ -185,6 +185,105 @@ fn writing_a_draft_without_user_local_storage_fails() {
     }
 }
 
+/// A conversation that has been archived is no longer somewhere a draft can go:
+/// `jp query` never looks beside the archive, and unarchiving deletes whatever
+/// occupies the live path.
+#[test]
+fn writing_a_draft_for_an_archived_conversation_fails() {
+    let (mut ws, id, fs, _tmp) = workspace_with_drafts();
+
+    handle_archive(&mut ws, None, &wire_id(id), None);
+
+    let response = handle_write_draft(Some(&fs), &ws, WriteDraftRequest {
+        id: Some("w4".to_owned()),
+        conversation: wire_id(id),
+        content: "typed against a stale list".to_owned(),
+        revision: None,
+    });
+
+    match response {
+        HostToPlugin::Error(error) => {
+            assert_eq!(error.request.as_deref(), Some("write_draft"));
+            assert!(error.message.contains("does not exist"), "{error:?}");
+        }
+        other => panic!("expected an error, got {other:?}"),
+    }
+
+    assert!(
+        !fs.build_conversation_dir(&id, None, true).exists(),
+        "no live directory is left beside the archived one"
+    );
+}
+
+/// The answer is the query text, while the revision covers the stored file: a
+/// draft composed in an editor keeps its configuration and history sections on
+/// disk, and neither reaches the plugin.
+#[test]
+fn a_stored_draft_reads_back_as_its_query_text() {
+    let (ws, id, fs, _tmp) = workspace_with_drafts();
+    let path = draft_path(Some(&fs), &ws, &id, true).unwrap();
+
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, "half a thought\n\n").unwrap();
+
+    let read = draft(handle_read_draft(Some(&fs), &ws, &wire_id(id), None));
+    assert_eq!(read.content, "half a thought");
+
+    let written = draft(handle_write_draft(Some(&fs), &ws, WriteDraftRequest {
+        id: None,
+        conversation: wire_id(id),
+        content: "half a thought, finished".to_owned(),
+        revision: read.revision,
+    }));
+
+    assert!(
+        !written.conflict,
+        "the revision a read hands out is the one a write accepts"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "half a thought, finished"
+    );
+}
+
+/// A draft the host cannot read is not an absent draft.
+/// Reporting it as one would have a plugin compose from nothing, and then
+/// overwrite text it never saw.
+#[test]
+fn an_unreadable_draft_is_reported_rather_than_read_as_empty() {
+    let (ws, id, fs, _tmp) = workspace_with_drafts();
+    let path = draft_path(Some(&fs), &ws, &id, true).unwrap();
+
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, [0xff, 0xfe]).unwrap();
+
+    match handle_read_draft(Some(&fs), &ws, &wire_id(id), Some("r5".to_owned())) {
+        HostToPlugin::Error(error) => {
+            assert_eq!(error.id.as_deref(), Some("r5"));
+            assert_eq!(error.request.as_deref(), Some("read_draft"));
+        }
+        other => panic!("expected an error, got {other:?}"),
+    }
+
+    let response = handle_write_draft(Some(&fs), &ws, WriteDraftRequest {
+        id: None,
+        conversation: wire_id(id),
+        content: "mine".to_owned(),
+        revision: None,
+    });
+
+    match response {
+        HostToPlugin::Error(error) => assert_eq!(error.request.as_deref(), Some("write_draft")),
+        other => panic!("expected an error, got {other:?}"),
+    }
+
+    assert_eq!(
+        std::fs::read(&path).unwrap(),
+        [0xff, 0xfe],
+        "the bytes the host could not read are still there"
+    );
+}
+
 #[test]
 fn set_title_names_a_conversation() {
     let (ws, id, _tmp) = workspace_with_conversation();

@@ -7,7 +7,7 @@ use std::{
     collections::HashSet,
     fmt::Write as _,
     fs,
-    io::{BufRead, BufReader, Write},
+    io::{self, BufRead, BufReader, Write},
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
     sync::{
         Arc, Mutex,
@@ -18,6 +18,7 @@ use std::{
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
+use camino_tempfile::NamedUtf8TempFile;
 use jp_config::{
     AppConfig,
     plugins::{
@@ -48,7 +49,11 @@ use sha2::{Digest as _, Sha256};
 use tracing::{debug, error, trace, warn};
 
 use super::registry;
-use crate::{Ctx, cmd, cmd::query::interrupt::reply_edit_mode, editor::report_editor_failure};
+use crate::{
+    Ctx, cmd,
+    cmd::query::interrupt::reply_edit_mode,
+    editor::{draft_query_text, report_editor_failure},
+};
 
 /// Runs the prompts a plugin asks for.
 ///
@@ -796,7 +801,7 @@ fn parse_conversation_id(conversation: &str) -> Result<ConversationId, String> {
         .map_err(|error| format!("invalid conversation ID `{conversation}`: {error}"))
 }
 
-/// The query draft's fingerprint: a short hash of its content.
+/// The query draft's fingerprint: a short hash of the stored file.
 ///
 /// Content rather than modification time, so a rewrite with identical text is
 /// not mistaken for someone else's edit.
@@ -825,6 +830,10 @@ fn draft_path(
 ) -> Option<Utf8PathBuf> {
     let fs = fs_backend?;
 
+    // A backend with no user store resolves the conversations directory to the
+    // workspace tree, which is the one place a draft may not be written.
+    fs.user_storage_path()?;
+
     if let Some(dir) = fs.find_user_local_conversation_dir(id) {
         return Some(dir.join(crate::editor::QUERY_FILENAME));
     }
@@ -848,36 +857,82 @@ fn draft_path(
     )
 }
 
+/// Read the stored draft, or `None` when there is none.
+///
+/// Only an absent file counts as an absent draft.
+/// Anything else — unreadable permissions, a failed read, bytes that are not
+/// UTF-8 — is an error, so a draft the host cannot see is never reported as
+/// one that isn't there.
+fn read_draft_file(path: &Utf8Path) -> Result<Option<String>, String> {
+    match fs::read_to_string(path) {
+        Ok(content) => Ok(Some(content)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("failed to read the draft: {error}")),
+    }
+}
+
+/// Replace the stored draft, leaving the old text in place if the write fails.
+///
+/// The content goes to a temporary file beside the target and is renamed over
+/// it, so a write that runs out of disk partway cannot leave a truncated draft:
+/// the text is either replaced or untouched.
+fn write_draft_file(path: &Utf8Path, content: &str) -> Result<(), String> {
+    let dir = path.parent().unwrap_or_else(|| Utf8Path::new("."));
+
+    let mut tmp = NamedUtf8TempFile::new_in(dir)
+        .map_err(|error| format!("failed to open a temporary draft file: {error}"))?;
+
+    tmp.write_all(content.as_bytes())
+        .map_err(|error| format!("failed to write the draft: {error}"))?;
+
+    tmp.persist(path)
+        .map_err(|error| format!("failed to replace the draft: {error}"))?;
+
+    Ok(())
+}
+
 /// Read a conversation's query draft.
 ///
 /// An absent draft is not an error: most conversations do not have one, and the
 /// answer is an empty draft with no revision.
+/// The revision covers the stored file, of which the answer's content is the
+/// query section.
 fn handle_read_draft(
     fs_backend: Option<&FsStorageBackend>,
     workspace: &Workspace,
     conversation: &str,
     req_id: Option<String>,
 ) -> HostToPlugin {
-    let id = match parse_conversation_id(conversation) {
-        Ok(id) => id,
-        Err(message) => {
-            return HostToPlugin::Error(ErrorResponse {
-                id: req_id,
-                request: Some("read_draft".to_owned()),
-                message,
-            });
-        }
+    let failed = |message: String| {
+        HostToPlugin::Error(ErrorResponse {
+            id: req_id.clone(),
+            request: Some("read_draft".to_owned()),
+            message,
+        })
     };
 
-    let content = draft_path(fs_backend, workspace, &id, false)
-        .filter(|path| path.exists())
-        .and_then(|path| fs::read_to_string(path).ok());
+    let id = match parse_conversation_id(conversation) {
+        Ok(id) => id,
+        Err(message) => return failed(message),
+    };
+
+    let stored = match draft_path(fs_backend, workspace, &id, false) {
+        Some(path) => match read_draft_file(&path) {
+            Ok(stored) => stored,
+            Err(message) => return failed(message),
+        },
+        None => None,
+    };
 
     HostToPlugin::Draft(DraftResponse {
         id: req_id,
         conversation: conversation.to_owned(),
-        revision: content.as_deref().map(draft_revision),
-        content: content.unwrap_or_default(),
+        revision: stored.as_deref().map(draft_revision),
+        content: stored
+            .as_deref()
+            .map(draft_query_text)
+            .unwrap_or_default()
+            .to_owned(),
         conflict: false,
     })
 }
@@ -887,6 +942,9 @@ fn handle_read_draft(
 /// The `revision` names the version the caller edited.
 /// A draft that has moved on since is reported back rather than overwritten:
 /// the other writer's text is exactly what the caller has not seen.
+///
+/// A conversation that does not exist is an error, rather than a draft written
+/// somewhere nothing will read it.
 fn handle_write_draft(
     fs_backend: Option<&FsStorageBackend>,
     workspace: &Workspace,
@@ -905,18 +963,35 @@ fn handle_write_draft(
         Err(message) => return failed(message),
     };
 
+    // A conversation that is gone — archived, or removed — gets no draft
+    // directory of its own: `jp query` never looks there, and unarchiving one
+    // deletes whatever occupies the live path.
+    if workspace.acquire_conversation(&id).is_err() {
+        return failed(format!(
+            "conversation `{}` does not exist",
+            req.conversation
+        ));
+    }
+
     let Some(path) = draft_path(fs_backend, workspace, &id, true) else {
         return failed("this workspace has no user-local storage for drafts".to_owned());
     };
 
-    let current = fs::read_to_string(&path).ok();
+    let current = match read_draft_file(&path) {
+        Ok(current) => current,
+        Err(message) => return failed(message),
+    };
     let current_revision = current.as_deref().map(draft_revision);
 
     if current_revision != req.revision {
         return HostToPlugin::Draft(DraftResponse {
             id: req.id,
             conversation: req.conversation,
-            content: current.unwrap_or_default(),
+            content: current
+                .as_deref()
+                .map(draft_query_text)
+                .unwrap_or_default()
+                .to_owned(),
             revision: current_revision,
             conflict: true,
         });
@@ -925,10 +1000,10 @@ fn handle_write_draft(
     // An empty draft is no draft: a blank file left behind would have the CLI
     // seed an editor with nothing and treat it as a recovery copy.
     if req.content.is_empty() {
-        if path.exists()
-            && let Err(error) = fs::remove_file(&path)
-        {
-            return failed(format!("failed to remove the draft: {error}"));
+        match fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return failed(format!("failed to remove the draft: {error}")),
         }
 
         return HostToPlugin::Draft(DraftResponse {
@@ -946,8 +1021,8 @@ fn handle_write_draft(
         return failed(format!("failed to create the draft directory: {error}"));
     }
 
-    if let Err(error) = fs::write(&path, &req.content) {
-        return failed(format!("failed to write the draft: {error}"));
+    if let Err(message) = write_draft_file(&path, &req.content) {
+        return failed(message);
     }
 
     HostToPlugin::Draft(DraftResponse {
