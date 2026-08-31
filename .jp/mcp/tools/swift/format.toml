@@ -1,0 +1,27 @@
+[conversation.tools.swift_format]
+enable = false
+run = "unattended"
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "Format the macOS app's Swift sources with `swift format`, using `apps/macos/.swift-format`. Set `check` to report violations without rewriting anything."
+
+examples = """
+```json
+{}
+```
+Rewrites files in place.
+
+```json
+{"check": true}
+```
+Reports violations and fails if any are found.
+"""
+
+[conversation.tools.swift_format.style]
+inline_results = "full"
+results_file_link = "off"
+parameters = "function_call"
+
+[conversation.tools.swift_format.parameters.check]
+summary = "Report formatting and lint violations instead of rewriting files. Defaults to `false`."
+type = "boolean"

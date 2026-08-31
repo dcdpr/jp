@@ -1,0 +1,246 @@
+[[assistant.system_prompt_sections]]
+tag = "swift_development_skill"
+title = "Skill: Swift Development"
+content = """\
+You have been given the Swift development skill. You are an expert at writing Swift code for the \
+native macOS app in `apps/macos`, which reads JP conversations through the `jp_ffi` C ABI. The \
+following tools help you with this:
+
+- swift_check: Build the app, reporting compiler diagnostics.
+- swift_test: Run the fast suites — the app's unit tests and the `jpdrive` package.
+- swift_test_ui: Run named UI tests, which drive the app through the screen. Stops at the first \
+failure unless `CI` is set.
+- swift_format: Format the app's Swift sources, or report violations without rewriting.
+
+Each build tool brings its own inputs up to date first (the `jp_ffi` static library, its generated \
+C header, and the Xcode project), so no setup step is needed.
+
+The Xcode project is generated from `apps/macos/project.yml` and is not committed. Change the \
+manifest, never the generated `.xcodeproj`.
+"""
+
+[conversation.tools]
+swift_check = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
+swift_test = { enable = true, run = "unattended", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
+swift_test_ui = { enable = true, run = "ask", result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
+swift_format = { enable = true, run = "unattended", result = "unattended", style.inline_results = "off", style.results_file_link = "off" }
+
+[[assistant.instructions]]
+title = "Swift Project Conventions"
+items = [
+    """\
+    The app is held to the same bar as the Rust code: strict compiler modes, warnings as errors, \
+    and tests for every behavior. There is no "it's only the UI" exemption.\
+    """,
+    """\
+    Swift 6 language mode with complete concurrency checking is on, and warnings are errors. Do \
+    not silence a diagnostic with `@unchecked Sendable`, `nonisolated(unsafe)`, or an `@preconcurrency` \
+    import without saying in a comment why the code is actually safe.\
+    """,
+    """\
+    Add doc comments (`///`) for every type, method, and property, and clarify non-obvious logic \
+    with inline comments (`//`). The audience is a reader who has never seen the FFI boundary.\
+    """,
+    """\
+    Tests live in `apps/macos/Tests`, use swift-testing (`import Testing`, `@Test`, `#expect`), and \
+    reach app-internal types through `@testable import JP`.\
+    """,
+    """\
+    UI tests live in `apps/macos/UITests` and run in their own process, so `@testable import JP` \
+    is not available and must not be reached for. Anything checkable in-process belongs in \
+    `apps/macos/Tests`, where it runs in milliseconds instead of costing an app launch.\
+    """,
+    """\
+    No test may touch the *system* pasteboard. A debug build copies wherever `JP_DEBUG_PASTEBOARD` \
+    names, so a test points the app at a private pasteboard and reads that back; \
+    `ClipboardPolicyTests` fails on any spelling of the general one.\
+    """,
+    """\
+    Anything a UI test needs the app to do differently goes through `DebugState`, gated on \
+    `#if DEBUG` and off unless an environment variable says otherwise — the pasteboard and \
+    animations both work this way. A release build must have no way to reach the test behaviour.\
+    """,
+    """\
+    A new animation goes through `DebugState.animated(_:)`. XCUITest waits for the app to stop \
+    moving before every action it synthesizes, so an animation is time added to every test that \
+    triggers one, and one lever turning them all off is worth keeping whole.\
+    """,
+    """\
+    Wait on a condition, never on the clock, and never through `waitForExistence`: it reports an \
+    element about a second after it appears, whatever the element. `AppUnderTest.wait(for:)` asks \
+    again instead, which finds it in under 100ms, and the timeout (one second) is the price of a \
+    failure rather than of a pass.\
+    """,
+    """\
+    A UI suite shares one launched app through `.sharedApp(...)`, because launching costs about \
+    four seconds and the work under test costs milliseconds. Leave the app as you found it, or \
+    order the suite so what one test leaves is what the next expects. A test needing an untouched \
+    app launches its own and says why.\
+    """,
+    """\
+    Run `swift_format` and `swift_check` before considering a change done, and `swift_test` before \
+    considering it correct. A change to the UI suite also needs the tests you touched run by name \
+    through `swift_test_ui`; the whole bundle is CI's job.\
+    """,
+    """\
+    Anything published through `@FocusedValue` or `focusedSceneValue` must compare equal to itself \
+    between renders. A struct of closures never does, and the App-body loop that follows re-renders \
+    the whole scene continuously: menus lose the items AppKit injects, and the entire app turns \
+    sluggish.\
+    """,
+    """\
+    `accessibilityIdentifier` does not reach the `NSMenuItem` SwiftUI bridges a menu button to, \
+    on the button or on its label, so every item in a menu reports the same selector name and is \
+    addressable only by title.\
+    """,
+    """\
+    A `RawRepresentable` silently inherits behaviour from its raw value: `Codable` that encodes \
+    through `rawValue`, which recurses forever if `rawValue` uses `JSONEncoder`, and `==` that \
+    compares raw values, which is unstable when the raw value is JSON holding a dictionary. Encode \
+    a separate private `Codable` struct, and write `==` out by hand.\
+    """,
+]
+
+[[assistant.instructions]]
+title = "Swift Code Style Rules"
+description = """\
+Hard rules for Swift in this project. The goal is code that reasons like the Rust it calls into: \
+ownership, errors, and concurrency all visible at the use site. Violating any of these is a bug.\
+"""
+items = [
+    """\
+    **Use typed throws.** Write `throws(WorkspaceError)`, not bare `throws`. A caller should know \
+    what can go wrong from the signature. Give a `do` block an explicit `do throws(E)` when its \
+    `catch` needs the concrete type rather than `any Error`.\
+    """,
+    """\
+    **Model unique ownership with `~Copyable`.** A type that owns a resource requiring exactly one \
+    release (an FFI handle, a file descriptor) is a noncopyable struct with a `deinit`, not a class. \
+    That makes a double free a compile error instead of a crash.\
+    """,
+    """\
+    **Never force unwrap or force try.** No `!`, no `try!`, no implicitly unwrapped optionals. Use \
+    `guard let`, `if let`, or a typed throw. The formatter enforces this; do not work around it.\
+    """,
+    """\
+    **Spell existentials `any P`.** The `ExistentialAny` upcoming feature is on, so a witness table \
+    lookup is visible at the use site. Prefer a generic parameter when the concrete type is known.\
+    """,
+    """\
+    **Copy owned data across the FFI boundary.** Read the bytes out of a C pointer, hand the pointer \
+    straight back to the library that allocated it, and never let a pointer, a lock guard, or a \
+    borrow outlive the call that produced it.\
+    """,
+    """\
+    **Keep FFI calls off the main thread.** The Rust side takes locks and touches the filesystem. \
+    Wrap reads in a detached task and return `Sendable` values from it.\
+    """,
+    """\
+    **Treat Swift mirrors of Rust types as a contract.** A `Decodable` struct mirroring a Rust \
+    payload has no compiler checking it agrees. Pin the exact JSON in a test on both sides, and \
+    ignore unknown keys so a field added in Rust does not break an older app.\
+    """,
+    """\
+    **Use early exits.** `guard` for preconditions at the top of a function rather than nesting the \
+    body inside an `if`.\
+    """,
+]
+
+[[assistant.instructions.examples]]
+good = """\
+init(path: String) throws(WorkspaceError) {
+    guard let handle = jp_workspace_open(path) else {
+        throw Self.lastError()
+    }
+    self.handle = handle
+}\
+"""
+bad = """\
+init(path: String) throws {
+    self.handle = jp_workspace_open(path)!
+}\
+"""
+reason = """\
+The typed throw tells the caller what can fail; the force unwrap turns a reported error into a \
+crash and discards the message the library left behind.\
+"""
+
+[[assistant.instructions.examples]]
+good = """\
+struct WorkspaceReader: ~Copyable {
+    private let handle: OpaquePointer
+
+    deinit { jp_workspace_close(handle) }
+}\
+"""
+bad = """\
+final class WorkspaceReader {
+    private let handle: OpaquePointer
+
+    deinit { jp_workspace_close(handle) }
+}\
+"""
+reason = """\
+Noncopyable gives one owner and one release, checked at compile time. The class relies on ARC and \
+lets a second reference outlive the close.\
+"""
+
+[[assistant.instructions.examples]]
+good = """\
+private static func take(_ raw: UnsafeMutablePointer<CChar>) -> Data {
+    defer { jp_string_free(raw) }
+    return Data(bytes: raw, count: strlen(raw))
+}\
+"""
+bad = """\
+private static func take(_ raw: UnsafeMutablePointer<CChar>) -> String {
+    return String(cString: raw)
+}\
+"""
+reason = """\
+The good version copies the bytes and returns the allocation to the library that made it. The bad \
+version leaks, because Rust frees what Rust allocates.\
+"""
+
+[[assistant.instructions.examples]]
+good = """\
+let read = Task.detached { () -> Result<[ConversationSummary], WorkspaceError> in
+    do throws(WorkspaceError) {
+        let reader = try WorkspaceReader(path: path)
+        return .success(try reader.conversations())
+    } catch {
+        return .failure(error)
+    }
+}
+return await read.value\
+"""
+bad = """\
+return await Task.detached {
+    do {
+        return .success(try WorkspaceReader(path: path).conversations())
+    } catch {
+        return .failure(error)
+    }
+}.value\
+"""
+reason = """\
+The explicit closure return type and `do throws(E)` give `catch` a concrete error. Without them the \
+binding is `any Error` and needs a downcast.\
+"""
+
+[[assistant.instructions.examples]]
+good = """\
+/// When the conversation was last activated, as RFC 3339 text.
+///
+/// Deliberately unparsed: the Rust side emits fractional seconds whenever the
+/// stored timestamp has them, which `JSONDecoder`'s `.iso8601` strategy rejects.
+let lastActivatedAt: String\
+"""
+bad = """\
+@available(*, deprecated)
+let lastActivatedAt: Date\
+"""
+reason = """\
+The comment records the constraint that makes the odd-looking type correct. A future reader would \
+otherwise "fix" it to `Date` and break every real workspace.\
+"""
