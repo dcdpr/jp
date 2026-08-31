@@ -10,7 +10,7 @@ use jp_config::{
     util::build,
 };
 use jp_storage::{
-    backend::{FsStorageBackend, NullLockBackend, NullPersistBackend},
+    backend::{FsStorageBackend, NullLockBackend, NullPersistBackend, PersistBackend as _},
     value::read_json,
 };
 use parking_lot::RwLock;
@@ -83,6 +83,139 @@ fn workspace_drains_a_persist_failure_left_by_a_dropped_lock() {
         workspace.take_persist_failure().is_none(),
         "the failure is reported once"
     );
+}
+
+/// An index reload keeps a conversation that has not been written yet.
+///
+/// A scan reports what a store holds, so a conversation created in memory is
+/// absent from it, indistinguishable from the scan alone from one another
+/// process has deleted.
+/// Rebuilding the index from the scan alone therefore forgets conversations
+/// moments after creating them: a long-running host reloads the index on every
+/// request, and a conversation created to serve one request is gone by the
+/// next.
+#[test]
+fn an_index_reload_keeps_an_unwritten_conversation() {
+    let dir = tempdir().unwrap();
+    let fs = FsStorageBackend::new(&dir.path().join("workspace")).unwrap();
+    let mut ws = workspace_with_fs(dir.path(), &fs);
+
+    let id = ws.create_conversation(Conversation::default(), Arc::new(AppConfig::new_test()));
+
+    ws.load_conversation_index();
+
+    assert!(
+        ws.acquire_conversation(&id).is_ok(),
+        "an unwritten conversation survives the reload that cannot see it"
+    );
+}
+
+/// An index reload forgets a conversation that was written and then deleted.
+///
+/// The counterpart to the case above, and the reason the distinction has to be
+/// recorded rather than inferred: both are absent from the scan, and only one
+/// should be kept.
+///
+/// The whole sequence runs for real — write it, then delete it from the store
+/// the way another `jp` process would, then reload.
+/// Setting the recorded state by hand instead would assert the merge while
+/// skipping the path that records it, leaving the case this exists for — a
+/// write and a delete both landing between two reloads — uncovered.
+#[test]
+fn an_index_reload_forgets_a_written_conversation_that_is_gone() {
+    let dir = tempdir().unwrap();
+    let fs = FsStorageBackend::new(&dir.path().join("workspace")).unwrap();
+    let mut ws = workspace_with_fs(dir.path(), &fs);
+
+    let id = ws.create_conversation(Conversation::default(), Arc::new(AppConfig::new_test()));
+
+    let handle = ws.acquire_conversation(&id).unwrap();
+    let mut conv = ws.test_lock(handle).into_mut();
+    conv.update_metadata(|_| {});
+    conv.flush().unwrap();
+    drop(conv);
+
+    // No reload in between: the window this closes is the one where a delete
+    // lands before the next scan would have reported the conversation durable.
+    // For an idle long-running host that window is open until the next request.
+    fs.remove(&id).unwrap();
+
+    ws.load_conversation_index();
+
+    assert!(
+        ws.acquire_conversation(&id).is_err(),
+        "a conversation this process wrote and someone else deleted is forgotten"
+    );
+}
+
+/// An index reload forgets a conversation persisted by dropping its scope.
+///
+/// Most writes happen that way rather than through an explicit `flush()`, so
+/// this is the path that matters most: durability has to be recorded however
+/// the write was reached.
+#[test]
+fn an_index_reload_forgets_a_conversation_persisted_on_drop() {
+    let dir = tempdir().unwrap();
+    let fs = FsStorageBackend::new(&dir.path().join("workspace")).unwrap();
+    let mut ws = workspace_with_fs(dir.path(), &fs);
+
+    let id = ws.create_conversation(Conversation::default(), Arc::new(AppConfig::new_test()));
+
+    // No `flush()`: the write happens because the scope goes away.
+    let handle = ws.acquire_conversation(&id).unwrap();
+    let conv = ws.test_lock(handle).into_mut();
+    conv.update_metadata(|_| {});
+    drop(conv);
+
+    fs.remove(&id).unwrap();
+
+    ws.load_conversation_index();
+
+    assert!(
+        ws.acquire_conversation(&id).is_err(),
+        "a conversation persisted on drop and then deleted is forgotten"
+    );
+}
+
+/// A long-running reader has to see what other processes write.
+///
+/// A plugin host outlives the `jp` runs happening around it, so re-reading the
+/// index must drop the cached index and streams rather than keep serving the
+/// snapshot taken at startup.
+#[test]
+fn reloading_the_index_picks_up_another_process_writes() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path().join("root");
+    let storage_path = root.join("storage");
+    let config = Arc::new(AppConfig::new_test());
+
+    let first = ConversationId::try_from(datetime!(2024-03-15 12:00:00 Z)).unwrap();
+    let second = ConversationId::try_from(datetime!(2024-03-15 13:00:00 Z)).unwrap();
+
+    let write = |id: ConversationId| {
+        let mut ws = workspace_with_fs(&root, &FsStorageBackend::new(&storage_path).unwrap());
+        ws.load_conversation_index();
+        ws.create_conversation_with_id(id, Conversation::default(), config.clone());
+        let handle = ws.acquire_conversation(&id).unwrap();
+        let mut conv = ws.test_lock(handle).into_mut();
+        conv.update_metadata(|_| {});
+        conv.flush().unwrap();
+    };
+
+    write(first);
+
+    // The reader loads the index once, as a plugin host does at startup.
+    let mut reader = workspace_with_fs(&root, &FsStorageBackend::new(&storage_path).unwrap());
+    reader.load_conversation_index();
+    assert_eq!(reader.conversations().count(), 1);
+
+    write(second);
+
+    // Still one: the reader is serving the snapshot it took at startup.
+    assert_eq!(reader.conversations().count(), 1);
+
+    reader.load_conversation_index();
+    assert_eq!(reader.conversations().count(), 2);
 }
 
 #[test]

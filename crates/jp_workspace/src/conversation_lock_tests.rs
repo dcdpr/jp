@@ -129,6 +129,7 @@ fn test_lock_sharing_persist_state() -> (
         Box::new(NoopLockGuard),
         Projection::Projected,
         Arc::clone(&failures),
+        Arc::new(std::sync::atomic::AtomicBool::new(false)),
     );
     (lock, backend, failures)
 }
@@ -151,6 +152,7 @@ fn test_lock_with_mock() -> (ConversationLock, Arc<MockPersistBackend>) {
         Box::new(NoopLockGuard),
         Projection::Projected,
         PersistFailures::default(),
+        Arc::new(std::sync::atomic::AtomicBool::new(false)),
     );
     (lock, mock)
 }
@@ -164,6 +166,7 @@ fn test_lock_no_writer() -> ConversationLock {
         Box::new(NoopLockGuard),
         Projection::Projected,
         PersistFailures::default(),
+        Arc::new(std::sync::atomic::AtomicBool::new(false)),
     )
 }
 

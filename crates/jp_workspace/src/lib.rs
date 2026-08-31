@@ -21,8 +21,12 @@ pub mod session_store;
 mod state;
 
 use std::{
+    collections::HashMap,
     env,
-    sync::{Arc, OnceLock},
+    sync::{
+        Arc, OnceLock,
+        atomic::{self, AtomicBool},
+    },
 };
 
 use camino::{FromPathBufError, Utf8Path, Utf8PathBuf};
@@ -347,31 +351,100 @@ impl Workspace {
     /// [`sanitize`]: Self::sanitize
     pub fn load_conversation_index(&mut self) {
         trace!("Loading conversation index.");
+
+        // Conversations created here and not yet written, carried across the
+        // reload.
+        //
+        // A scan reports what a store holds, so an unwritten conversation is
+        // absent from it, the same way a deleted one is. Replacing the index with
+        // the scan alone therefore forgets conversations that were only just
+        // created, which is how one could be started and then immediately not
+        // found.
+        //
+        // Keeping them is safe because the distinction is decidable, but only by
+        // asking whether *we* have written it: a conversation that was written and
+        // then deleted by another process is also absent, and that one has to be
+        // forgotten. The flag is set by whatever wrote it, under the lock.
+        //
+        // Read before the scan, because a lock on another thread can write in
+        // between: a conversation that becomes written after this point is found
+        // by the scan below, while one that becomes written after the scan is
+        // carried across and corrected by the next reload. Reading afterwards
+        // instead leaves a write that lands between the two invisible to both.
+        let candidates: Vec<ConversationId> = self
+            .state
+            .written
+            .iter()
+            .filter(|(_, written)| !written.load(atomic::Ordering::Relaxed))
+            .map(|(id, _)| *id)
+            .collect();
+
         let entries = self
             .loader
             .load_conversation_index(ConversationFilter::default());
 
         debug!(count = entries.len(), "Loaded conversation index.");
 
-        let conversations = entries
+        let unwritten: Vec<ConversationId> = candidates
+            .into_iter()
+            .filter(|id| !entries.iter().any(|entry| entry.id == *id))
+            .collect();
+
+        let mut conversations: HashMap<_, _> = entries
             .iter()
             .map(|entry| (entry.id, OnceLock::new()))
             .collect();
 
-        let events = entries
+        let mut events: HashMap<_, _> = entries
             .iter()
             .map(|entry| (entry.id, OnceLock::new()))
             .collect();
 
-        let presence = entries
+        let mut presence: HashMap<_, _> = entries
             .iter()
             .map(|entry| (entry.id, entry.presence))
             .collect();
+
+        // Carried across for everything the scan found, so a conversation that
+        // has been written keeps saying so, and a lock still holding one of these
+        // keeps writing to the same cell.
+        let mut written: HashMap<_, _> = entries
+            .iter()
+            .map(|entry| {
+                let flag = self
+                    .state
+                    .written
+                    .remove(&entry.id)
+                    .unwrap_or_else(|| Arc::new(AtomicBool::new(true)));
+
+                // Found by the scan, so it is on disk whatever this process did.
+                flag.store(true, atomic::Ordering::Relaxed);
+                (entry.id, flag)
+            })
+            .collect();
+
+        // Moved rather than re-inserted: the loaded metadata and events are the
+        // only copy, and re-scanning cannot produce them.
+        for id in unwritten {
+            if let Some(entry) = self.state.conversations.remove(&id) {
+                conversations.insert(id, entry);
+            }
+            if let Some(entry) = self.state.events.remove(&id) {
+                events.insert(id, entry);
+            }
+            if let Some(entry) = self.state.presence.remove(&id) {
+                presence.insert(id, entry);
+            }
+            if let Some(entry) = self.state.written.remove(&id) {
+                written.insert(id, entry);
+            }
+        }
 
         self.state = State {
             conversations,
             events,
             presence,
+            written,
         };
     }
 
@@ -505,6 +578,13 @@ impl Workspace {
             .presence
             .insert(id, StoragePresence::from(projection));
 
+        // Nothing has been written yet, and a reload has to be able to tell that
+        // apart from a conversation another process has deleted: both are absent
+        // from a scan. Whatever takes a lock on this sets the flag when it writes.
+        self.state
+            .written
+            .insert(id, Arc::new(AtomicBool::new(false)));
+
         id
     }
 
@@ -610,7 +690,22 @@ impl Workspace {
             lock_guard,
             projection,
             Arc::clone(&self.persist_failures),
+            self.written_flag(&id),
         ))
+    }
+
+    /// The cell recording whether a conversation has ever been written.
+    ///
+    /// Handed to every lock, which sets it on a successful write.
+    /// An id with no cell is one the index does not hold, which a caller cannot
+    /// have a handle for.
+    /// The fallback reads as written, so an id that does reach here is dropped
+    /// by the next reload rather than kept for the life of the process.
+    fn written_flag(&self, id: &ConversationId) -> Arc<AtomicBool> {
+        self.state
+            .written
+            .get(id)
+            .map_or_else(|| Arc::new(AtomicBool::new(true)), Arc::clone)
     }
 
     /// Resolve the write projection for a conversation from its stored
@@ -767,6 +862,7 @@ impl Workspace {
             lock_guard,
             projection,
             Arc::clone(&self.persist_failures),
+            self.written_flag(&id),
         )))
     }
 
@@ -797,6 +893,7 @@ impl Workspace {
         self.state.conversations.remove(&id);
         self.state.events.remove(&id);
         self.state.presence.remove(&id);
+        self.state.written.remove(&id);
     }
 
     /// Restore a conversation from the archive.
@@ -847,6 +944,11 @@ impl Workspace {
 
         self.state.presence.insert(*id, presence);
 
+        // On disk, in the live partition: the move is what put it there.
+        self.state
+            .written
+            .insert(*id, Arc::new(AtomicBool::new(true)));
+
         Ok(handle)
     }
 
@@ -888,6 +990,7 @@ impl Workspace {
         self.state.conversations.remove(&id);
         self.state.events.remove(&id);
         self.state.presence.remove(&id);
+        self.state.written.remove(&id);
     }
 
     /// Bring a conversation's in-memory copy in line with the backing store.
@@ -1006,6 +1109,7 @@ impl Workspace {
             Box::new(NoopLockGuard),
             projection,
             Arc::clone(&self.persist_failures),
+            self.written_flag(&id),
         )
     }
 }

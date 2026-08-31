@@ -154,6 +154,14 @@ pub struct ConversationLock {
     lock_guard: Arc<Box<dyn ConversationLockGuard>>,
     projection: Projection,
     persist: PersistFailures,
+
+    /// Set once this conversation has been written, and shared with the
+    /// workspace that handed the lock out.
+    ///
+    /// Writing happens here and the workspace cannot see it happen, so the
+    /// answer to "has this ever been written" has to be left somewhere the
+    /// workspace can read later.
+    written: Arc<AtomicBool>,
 }
 
 impl ConversationLock {
@@ -170,6 +178,7 @@ impl ConversationLock {
         lock_guard: Box<dyn ConversationLockGuard>,
         projection: Projection,
         persist: PersistFailures,
+        written: Arc<AtomicBool>,
     ) -> Self {
         Self {
             id: handle.into_inner(),
@@ -179,6 +188,7 @@ impl ConversationLock {
             lock_guard: Arc::new(lock_guard),
             projection,
             persist,
+            written,
         }
     }
 
@@ -247,6 +257,7 @@ impl ConversationLock {
             writer: Arc::clone(&self.writer),
             projection: self.projection,
             persist: Arc::clone(&self.persist),
+            written: Arc::clone(&self.written),
             _lock_guard: Arc::clone(&self.lock_guard),
         }
     }
@@ -266,6 +277,7 @@ impl ConversationLock {
             writer: self.writer,
             projection: self.projection,
             persist: self.persist,
+            written: self.written,
             _lock_guard: self.lock_guard,
         }
     }
@@ -302,6 +314,10 @@ pub struct ConversationMut {
     // Shared with the workspace, the originating lock, and every other scope
     // derived from it, so a failure recorded here survives this scope's drop.
     persist: PersistFailures,
+
+    /// Set once a write succeeds; read by the workspace that handed out the
+    /// lock this came from.
+    written: Arc<AtomicBool>,
 
     // Holds the lock guard alive. Released when the last Arc drops.
     _lock_guard: Arc<Box<dyn ConversationLockGuard>>,
@@ -467,6 +483,11 @@ impl ConversationMut {
         self.writer.write(&self.id, &meta, &evts, self.projection)?;
         self.dirty.store(false, Ordering::Relaxed);
 
+        // After the write, never before: a failed write leaves the conversation
+        // as unwritten as it was, and claiming otherwise would have a later
+        // index reload treat its absence as somebody else's deletion.
+        self.written.store(true, Ordering::Relaxed);
+
         info!(id = %self.id, "Flushed conversation to disk.");
         Ok(())
     }
@@ -528,13 +549,18 @@ impl Drop for ConversationMut {
         let meta = self.metadata.read();
         let evts = self.events.read();
 
-        if let Err(error) = self.writer.write(&self.id, &meta, &evts, self.projection) {
-            let error = Error::from(error);
-            warn!(id = %self.id, %error, "Failed to persist conversation.");
+        match self.writer.write(&self.id, &meta, &evts, self.projection) {
+            // Recorded here as well as in `flush`, since most conversations are
+            // persisted by going out of scope rather than by an explicit call.
+            Ok(()) => self.written.store(true, Ordering::Relaxed),
+            Err(error) => {
+                let error = Error::from(error);
+                warn!(id = %self.id, %error, "Failed to persist conversation.");
 
-            let mut state = self.persist.lock();
-            if state.failure.is_none() {
-                state.failure = Some(error);
+                let mut state = self.persist.lock();
+                if state.failure.is_none() {
+                    state.failure = Some(error);
+                }
             }
         }
     }
