@@ -1632,7 +1632,7 @@ mod recorded {
 
     use chrono::{TimeZone as _, Utc};
     use jp_attachment::Attachment;
-    use jp_config::assistant::request::CachePolicy;
+    use jp_config::{assistant::request::CachePolicy, util::build};
     use jp_conversation::{ConversationStream, event::ChatResponse};
     use jp_test::{Result, function_name};
     use test_log::test;
@@ -1672,12 +1672,18 @@ mod recorded {
             return request;
         };
 
-        let mut base = (*thread.events.base_config()).clone();
-        base.assistant
+        // Routed through the partial and re-resolved rather than mutated in
+        // place: settings that inherit from `assistant` are filled during
+        // resolution, so an in-place edit would leave them on the old value.
+        let mut partial = thread.events.base_config().to_partial();
+        partial
+            .assistant
             .model
             .parameters
             .other
+            .get_or_insert_default()
             .insert(key.to_owned(), serde_json::Value::from(value).into());
+        let base = build(partial).expect("a valid test config");
 
         let placeholder = ConversationStream::new(thread.events.base_config());
         let stream = std::mem::replace(&mut thread.events, placeholder);
@@ -1707,8 +1713,12 @@ mod recorded {
             return request;
         };
 
-        let mut base = (*thread.events.base_config()).clone();
-        base.assistant.request.cache = CachePolicy::Off;
+        // Routed through the partial and re-resolved rather than mutated in
+        // place: settings that inherit from `assistant` are filled during
+        // resolution, so an in-place edit would leave them on the old value.
+        let mut partial = thread.events.base_config().to_partial();
+        partial.assistant.request.cache = Some(CachePolicy::Off);
+        let base = build(partial).expect("a valid test config");
 
         let placeholder = ConversationStream::new(thread.events.base_config());
         let stream = std::mem::replace(&mut thread.events, placeholder);
@@ -1976,5 +1986,52 @@ mod classify_stream_error {
 
         assert_eq!(classified.kind, StreamErrorKind::Other);
         assert_eq!(classified.retry_after, None);
+    }
+
+    #[test]
+    fn context_window_via_typed_code() {
+        let e = err(
+            "invalid_request_error",
+            Some("context_length_exceeded"),
+            "the request is too large",
+        );
+        let classified = classify_stream_error(e);
+
+        assert_eq!(classified.kind, StreamErrorKind::ContextWindowExceeded);
+        assert!(!classified.is_retryable());
+    }
+
+    /// With no typed signal the message is all there is, so the text heuristic
+    /// still catches a window overflow.
+    #[test]
+    fn context_window_falls_back_to_the_message() {
+        let e = err(
+            "invalid_request_error",
+            None,
+            "This model's maximum context length is 8192 tokens.",
+        );
+        let classified = classify_stream_error(e);
+
+        assert_eq!(classified.kind, StreamErrorKind::ContextWindowExceeded);
+        assert!(!classified.is_retryable());
+    }
+
+    /// A token-per-minute limit whose message reads like a window overflow must
+    /// still be a retryable rate limit.
+    ///
+    /// `code` is authoritative and the message heuristic is only a fallback;
+    /// letting the text win would turn a wait-and-retry into a fatal error.
+    #[test]
+    fn typed_rate_limit_outranks_a_context_window_phrasing() {
+        let e = err(
+            "tokens",
+            Some("rate_limit_exceeded"),
+            "Rate limit reached: too many tokens requested. Please try again in 2.398s.",
+        );
+        let classified = classify_stream_error(e);
+
+        assert_eq!(classified.kind, StreamErrorKind::RateLimit);
+        assert_eq!(classified.retry_after, Some(Duration::from_secs(3)));
+        assert!(classified.is_retryable());
     }
 }

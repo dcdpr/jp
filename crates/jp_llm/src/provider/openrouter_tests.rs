@@ -660,7 +660,6 @@ async fn run_test(
 ) -> Result {
     crate::test::run_chat_completion(
         test_name,
-        env!("CARGO_MANIFEST_DIR"),
         ProviderId::Openrouter,
         LlmProviderConfig::default(),
         requests.into_iter().collect(),

@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use camino_tempfile::Utf8TempDir;
 use jp_tool::{Action, Outcome};
@@ -14,7 +14,7 @@ const FIXED_ID: &str = "T-02wt0kx";
 
 /// The directory holding this module's tool declarations.
 fn declarations() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../.jp/mcp/tools/ticket")
+    PathBuf::from("../../../.jp/mcp/tools/ticket")
 }
 
 fn declaration(file: &str) -> toml::Value {
@@ -215,7 +215,7 @@ fn comment_preview_renders_the_block_under_the_ticket_it_lands_on() {
         concat!(
             "> # T-02wt0kx: Tool call header misaligned\n",
             "> \n",
-            "> ────────────────────────────────────────────────────────────────────────────────\n",
+            "> ──────────────────────────────────────────────────────────────────────────────\n",
             "> \n",
             "> - **From**: jp\n",
             "> - **Date**: 2026-08-05T14:03:11Z\n",
@@ -350,6 +350,37 @@ fn preview_rejects_the_arguments_execution_would_reject() {
     );
 }
 
+/// Markdown in this repository is laid out by `comfort`, and a body arrives
+/// from the model as one long line per paragraph.
+#[test]
+fn create_reflows_the_body_with_comfort() {
+    let dir = Utf8TempDir::new().unwrap();
+    run_tool(
+        &dir,
+        "ticket_create",
+        json!({
+            "kind": "bug",
+            "title": "Wrapping is wrong",
+            "body": "The first sentence. The second one, which the model wrote on the same line."
+        }),
+    )
+    .unwrap();
+
+    let id = ids(&dir)[0];
+    let source = std::fs::read_to_string(dir.path().join(format!(
+        "docs/ticket/{}wrapping-is-wrong.md",
+        id.file_prefix()
+    )))
+    .unwrap();
+
+    assert!(
+        source.ends_with(
+            "\nThe first sentence.\nThe second one, which the model wrote on the same line.\n"
+        ),
+        "{source}"
+    );
+}
+
 #[test]
 fn create_rejects_an_unknown_kind() {
     let dir = Utf8TempDir::new().unwrap();
@@ -420,6 +451,38 @@ fn comments_are_attributed_to_the_assistant_and_numbered() {
         shown.contains(&format!("### {id}#2 — jp at "))
             && shown.contains(&format!("replying to {id}#1")),
         "{shown}"
+    );
+}
+
+/// A comment body is reflowed for the same reason a description is: the file it
+/// lands in is one CI checks.
+#[test]
+fn comment_reflows_the_body_with_comfort() {
+    let dir = Utf8TempDir::new().unwrap();
+    create_ticket(&dir, "Wrapping is wrong");
+    let id = ids(&dir)[0];
+
+    run_tool(
+        &dir,
+        "ticket_comment",
+        json!({
+            "id": id.to_string(),
+            "body": "The first sentence. The second one, which the model wrote on the same line."
+        }),
+    )
+    .unwrap();
+
+    let source = std::fs::read_to_string(dir.path().join(format!(
+        "docs/ticket/{}wrapping-is-wrong.md",
+        id.file_prefix()
+    )))
+    .unwrap();
+
+    assert!(
+        source.ends_with(
+            "\nThe first sentence.\nThe second one, which the model wrote on the same line.\n"
+        ),
+        "{source}"
     );
 }
 
@@ -544,10 +607,15 @@ fn show_renders_metadata_and_the_description() {
         json!({ "id": id.to_string() }),
     ));
 
+    // Fenced as markdown: the terminal renderer keys syntax highlighting off
+    // the leading fence.
     assert!(
-        out.starts_with(&format!("# {id}: Tool call header misaligned\n")),
+        out.starts_with(&format!(
+            "```markdown\n# {id}: Tool call header misaligned\n"
+        )),
         "{out}"
     );
+    assert!(out.ends_with("\n```"), "{out}");
     assert!(
         out.contains(&format!(
             "- **Path**: docs/ticket/{}tool-call-header-misaligned.md",

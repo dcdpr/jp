@@ -9,6 +9,8 @@
 //! counting `char`s understates wide characters and ignores escape sequences
 //! entirely.
 
+use std::{iter, ops::Range};
+
 use strip_ansi_escapes::strip_str;
 use unicode_segmentation::UnicodeSegmentation as _;
 use unicode_width::UnicodeWidthStr;
@@ -77,6 +79,121 @@ pub fn truncate_to_width(s: &str, max_width: usize) -> String {
     out
 }
 
+/// Byte offset just past the longest prefix of `s` that fits `max_width`
+/// columns.
+///
+/// Returns `0` when even the first grapheme cluster is too wide, and `s.len()`
+/// when the whole string fits.
+/// The offset always falls on a grapheme cluster boundary.
+///
+/// `s` is expected to carry no ANSI escapes, for the reason given on
+/// [`truncate_to_width`].
+#[must_use]
+pub fn prefix_end_for_width(s: &str, max_width: usize) -> usize {
+    longest_fitting_prefix(s, max_width).0
+}
+
+/// Byte offset where the longest suffix of `s` that fits `max_width` columns
+/// begins.
+///
+/// Returns `s.len()` when even the last grapheme cluster is too wide, and `0`
+/// when the whole string fits.
+/// The offset always falls on a grapheme cluster boundary.
+///
+/// `s` is expected to carry no ANSI escapes, for the reason given on
+/// [`truncate_to_width`].
+#[must_use]
+pub fn suffix_start_for_width(s: &str, max_width: usize) -> usize {
+    longest_fitting_suffix(s, max_width).0
+}
+
+/// Split `s` into byte ranges, each rendering in at most `max_width` columns.
+///
+/// Ranges are returned rather than substrings so a caller holding offsets into
+/// `s` — match positions, say — can map them onto the row that contains them.
+/// They are contiguous except at a break, where the whitespace broken on is
+/// left out of both neighbours.
+///
+/// A row ends at the last whitespace that fits; a word too wide for a row of
+/// its own is broken mid-word instead.
+/// At least one grapheme cluster is always consumed per row, so a cluster wider
+/// than `max_width` overflows its row rather than stalling the split.
+///
+/// Always returns at least one range: empty input yields one empty range, and a
+/// `max_width` of `0` yields the whole string unsplit, since no positive number
+/// of columns is available to split it into.
+///
+/// `s` is expected to carry no ANSI escapes, for the reason given on
+/// [`truncate_to_width`].
+///
+/// Runs in time proportional to the input: each row measures only as far as its
+/// own width, never the rest of the string.
+#[must_use]
+pub fn wrap_ranges(s: &str, max_width: usize) -> Vec<Range<usize>> {
+    if s.is_empty() || max_width == 0 {
+        return iter::once(0..s.len()).collect();
+    }
+
+    let mut rows = Vec::new();
+    let mut start = 0;
+
+    while start < s.len() {
+        let rest = &s[start..];
+        let mut end = prefix_end_for_width(rest, max_width);
+
+        // Reaching the end of the input is the fit check: the offset returned is
+        // one that measured within the budget. Measuring `rest` itself would
+        // rescan every byte still to come, once per row.
+        if end == rest.len() {
+            rows.push(start..s.len());
+            return rows;
+        }
+
+        if end == 0 {
+            // A single cluster wider than the whole row. It has to go somewhere,
+            // and leaving it for the next row would never terminate.
+            end = first_cluster_end(rest);
+        }
+
+        // The widest word break the budget allows. The budget boundary itself
+        // counts when the character there is whitespace, which is the case of a
+        // word ending exactly at the row edge.
+        let word_break = if rest[end..].starts_with(char::is_whitespace) {
+            Some(end)
+        } else {
+            rest[..end].rfind(char::is_whitespace)
+        };
+
+        // Whitespace before the break belongs to the break, not to the row.
+        // A break with nothing but whitespace ahead of it — an indent wider than
+        // the row — would make no progress, so the row is cut mid-word instead.
+        if let Some(at) = word_break
+            .map(|at| rest[..at].trim_end().len())
+            .filter(|at| *at > 0)
+        {
+            end = at;
+        }
+
+        rows.push(start..start + end);
+
+        // The whitespace broken on is consumed by the break itself. When the
+        // break was mid-word there is none, and nothing is skipped.
+        let tail = &s[start + end..];
+        start += end + (tail.len() - tail.trim_start().len());
+    }
+
+    rows
+}
+
+/// Byte offset just past the first grapheme cluster of `s`.
+///
+/// `s.len()` when `s` is empty.
+fn first_cluster_end(s: &str) -> usize {
+    s.grapheme_indices(true)
+        .next()
+        .map_or(s.len(), |(at, cluster)| at + cluster.len())
+}
+
 /// Byte offset just past the longest prefix of `s` that fits `budget` columns,
 /// and the number of whole-string measurements taken to find it.
 ///
@@ -125,6 +242,42 @@ fn longest_fitting_prefix(s: &str, budget: usize) -> (usize, usize) {
     }
 
     (end, measurements)
+}
+
+/// Byte offset where the longest suffix of `s` that fits `budget` columns
+/// begins, and the number of whole-string measurements taken to find it.
+///
+/// The mirror of [`longest_fitting_prefix`], scanning clusters from the end,
+/// and resting on the same bound: a running sum of cluster widths over-counts a
+/// ligature but never under-counts, so a suffix that fits under the sum
+/// certainly fits.
+fn longest_fitting_suffix(s: &str, budget: usize) -> (usize, usize) {
+    let mut start = s.len();
+    let mut sum = 0;
+    let mut probes = 0;
+    let mut measurements = 0;
+
+    for (offset, cluster) in s.grapheme_indices(true).rev() {
+        sum += UnicodeWidthStr::width(cluster);
+
+        if sum <= budget {
+            start = offset;
+            continue;
+        }
+
+        if probes == MAX_LIGATURE_PROBES {
+            break;
+        }
+        probes += 1;
+        measurements += 1;
+
+        if UnicodeWidthStr::width(&s[offset..]) <= budget {
+            start = offset;
+            probes = 0;
+        }
+    }
+
+    (start, measurements)
 }
 
 #[cfg(test)]

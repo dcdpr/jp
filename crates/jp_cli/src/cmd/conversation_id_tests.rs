@@ -176,6 +176,23 @@ fn flag_multi_repeated() {
     assert_eq!(cmd.target.ids().len(), 2);
 }
 
+/// Free text parses to a fuzzy `Picker`, which has no keyword name — so the
+/// keyword check waved it through, and `resolve_targets` then took the
+/// fallback-chain branch on a list containing a literal ID, tripping its
+/// `debug_assert` (and silently dropping the ID in release).
+#[test]
+fn flag_multi_rejects_fuzzy_text_mixed_with_id() {
+    let err =
+        TestFlagMulti::try_parse_from(["test-flag-multi", "--id", "some title,jp-c17000000000"]);
+    assert!(err.is_err());
+}
+
+#[test]
+fn flag_multi_rejects_picker_mixed_with_id() {
+    let err = TestFlagMulti::try_parse_from(["test-flag-multi", "--id", "?,jp-c17000000000"]);
+    assert!(err.is_err());
+}
+
 #[test]
 fn flag_multi_session_keyword() {
     let cmd = TestFlagMulti::try_parse_from(["test-flag-multi", "--id", "+session"]).unwrap();
@@ -292,6 +309,37 @@ fn positional_session_single_rejects_multi_target_pinned() {
 fn positional_session_single_rejects_multi_target_live() {
     let err = TestPositionalSessionSingle::try_parse_from(["test-positional-session-single", "+l"]);
     assert!(err.is_err());
+}
+
+/// `jp c use +archived` reached `run_unarchive`, which takes the *first* of
+/// however many IDs the keyword resolved to — silently unarchiving and
+/// activating an arbitrary conversation.
+/// A single-target command must reject the keyword outright.
+#[test]
+fn positional_session_single_rejects_multi_target_archived() {
+    let err = TestPositionalSessionSingle::try_parse_from(["test-positional-session-single", "+a"]);
+    assert!(err.is_err());
+}
+
+/// The single-target archive keywords stay accepted; only the multi-target one
+/// is rejected.
+#[test]
+fn positional_session_single_accepts_single_archive_keywords() {
+    for (input, expected) in [
+        ("a", ConversationTarget::Archived),
+        (
+            "?a",
+            ConversationTarget::Picker(PickerFilter {
+                archived: true,
+                ..PickerFilter::default()
+            }),
+        ),
+    ] {
+        let cmd =
+            TestPositionalSessionSingle::try_parse_from(["test-positional-session-single", input])
+                .unwrap();
+        assert_eq!(cmd.target.ids(), &[expected], "failed for input: {input}");
+    }
 }
 
 #[test]

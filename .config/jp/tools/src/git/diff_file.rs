@@ -1,6 +1,6 @@
 use std::fmt::Write;
 
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8Path;
 use serde_json::{Map, Value};
 
 use super::{
@@ -20,7 +20,7 @@ use crate::util::{
 const MAX_LINES: usize = 500;
 
 pub(crate) async fn git_diff_file(
-    root: Utf8PathBuf,
+    root: &Utf8Path,
     status: String,
     paths: OneOrMany<String>,
     pattern: Option<String>,
@@ -49,7 +49,7 @@ pub(crate) async fn git_diff_file(
     }
 
     git_diff_file_impl(
-        &root,
+        root,
         status,
         &paths,
         pattern.as_deref(),

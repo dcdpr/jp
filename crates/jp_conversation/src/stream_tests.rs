@@ -2,6 +2,7 @@ use chrono::TimeZone as _;
 use jp_config::{
     PartialConfig as _,
     conversation::tool::{PartialToolConfig, RunMode},
+    model::id::{ModelIdConfig, PartialModelIdConfig, PartialModelIdOrAliasConfig, ProviderId},
 };
 use serde_json::{Map, Value};
 
@@ -179,6 +180,33 @@ fn trim_chat_request_preserves_trailing_compaction() {
         stream.compactions().count(),
         1,
         "compaction overlay must survive trim_chat_request"
+    );
+}
+
+#[test]
+fn a_delta_may_introduce_a_model_alias_the_base_config_never_had() {
+    // Deltas are merged into a partial, so an alias arriving in one has nothing
+    // resolving it unless the stream builds the config properly. An unresolved
+    // alias then panics on the first `resolved()` read, far from here.
+    let mut partial = PartialAppConfig::empty();
+    partial.providers.llm.aliases.insert(
+        "fast".to_owned(),
+        PartialModelIdOrAliasConfig::Id(PartialModelIdConfig {
+            provider: Some(ProviderId::Anthropic),
+            name: "claude-haiku-4-5".parse().ok(),
+        }),
+    );
+    partial.assistant.model.id = PartialModelIdOrAliasConfig::Alias("fast".to_owned());
+
+    let mut stream = ConversationStream::new_test();
+    stream.add_config_delta(partial);
+
+    assert_eq!(
+        stream.config().unwrap().assistant.model.id.resolved(),
+        &ModelIdConfig {
+            provider: ProviderId::Anthropic,
+            name: "claude-haiku-4-5".parse().unwrap(),
+        }
     );
 }
 
@@ -514,6 +542,97 @@ fn test_sanitize_removes_orphaned_inquiry_request() {
         !has_inquiry_request,
         "Orphaned InquiryRequest should be removed"
     );
+}
+
+#[test]
+fn test_sanitize_inquiry_orphan_repair_is_turn_scoped() {
+    // Turn 1 holds an orphaned request that shares its id with a valid pair in
+    // turn 2. The turn-1 orphan must be repaired within its own turn, not
+    // cross-satisfied by turn 2's response.
+    let mut stream = ConversationStream::new_test();
+
+    stream.start_turn("turn 1");
+    stream.push(ConversationEvent::new(
+        InquiryRequest::new(
+            "call_1.confirm",
+            InquirySource::tool("t"),
+            InquiryQuestion::boolean("proceed?".into()),
+        ),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 1).unwrap(),
+    ));
+
+    stream.start_turn("turn 2");
+    stream.push(ConversationEvent::new(
+        InquiryRequest::new(
+            "call_1.confirm",
+            InquirySource::tool("t"),
+            InquiryQuestion::boolean("proceed?".into()),
+        ),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 2).unwrap(),
+    ));
+    stream.push(ConversationEvent::new(
+        InquiryResponse::boolean("call_1.confirm", true),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 3).unwrap(),
+    ));
+
+    stream.sanitize();
+
+    let requests = stream
+        .iter()
+        .filter(|e| e.event.is_inquiry_request())
+        .count();
+    let responses = stream
+        .iter()
+        .filter(|e| e.event.is_inquiry_response())
+        .count();
+    assert_eq!(requests, 1, "turn 1's orphan request should be removed");
+    assert_eq!(responses, 1, "turn 2's paired response should survive");
+}
+
+#[test]
+fn test_sanitize_legacy_duplicate_ids_pair_by_order() {
+    // A single turn with two requests sharing a legacy two-segment id and one
+    // response: the by-order pair is preserved and the remaining request
+    // orphan is removed.
+    let mut stream = ConversationStream::new_test();
+
+    stream.start_turn("turn");
+    stream.push(ConversationEvent::new(
+        InquiryRequest::new(
+            "call_1.confirm",
+            InquirySource::tool("t"),
+            InquiryQuestion::boolean("proceed?".into()),
+        ),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 1).unwrap(),
+    ));
+    stream.push(ConversationEvent::new(
+        InquiryRequest::new(
+            "call_1.confirm",
+            InquirySource::tool("t"),
+            InquiryQuestion::boolean("proceed?".into()),
+        ),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 2).unwrap(),
+    ));
+    stream.push(ConversationEvent::new(
+        InquiryResponse::boolean("call_1.confirm", true),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 3).unwrap(),
+    ));
+
+    stream.sanitize();
+
+    let requests = stream
+        .iter()
+        .filter(|e| e.event.is_inquiry_request())
+        .count();
+    let responses = stream
+        .iter()
+        .filter(|e| e.event.is_inquiry_response())
+        .count();
+    assert_eq!(
+        requests, 1,
+        "the unpaired duplicate request should be removed"
+    );
+    assert_eq!(responses, 1);
 }
 
 #[test]
@@ -914,10 +1033,267 @@ fn test_roundtrip_delta_strip_unknown_field_preserves_rest() {
     json["delta"]["style"]["code"]["removed_field"] = serde_json::json!("stale");
 
     let deserialized: InternalEvent = serde_json::from_value(json).unwrap();
-    let InternalEvent::ConfigDelta(result) = deserialized else {
-        panic!("expected ConfigDelta");
+    let InternalEvent::ConfigDelta(ConfigDelta::Apply(result)) = deserialized else {
+        panic!("expected Apply config delta");
     };
     assert_eq!(result.delta.style.code.color, Some(false));
+}
+
+#[test]
+fn test_internal_event_config_delta_reset_roundtrip() {
+    let reset = ConfigDelta::Reset(ResetDelta {
+        timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+    });
+
+    let event = InternalEvent::ConfigDelta(reset.clone());
+    let json = serde_json::to_value(&event).unwrap();
+
+    assert_eq!(
+        json,
+        serde_json::json!({
+            "type": "config_delta",
+            "op": "reset",
+            "timestamp": "2020-01-01 00:00:00.0",
+        })
+    );
+
+    let deserialized: InternalEvent = serde_json::from_value(json).unwrap();
+    assert_eq!(deserialized, InternalEvent::ConfigDelta(reset));
+}
+
+#[test]
+fn test_internal_event_config_delta_apply_shape_has_no_op_field() {
+    let mut partial = jp_config::PartialAppConfig::empty();
+    partial.style.code.color = Some(false);
+
+    let event = InternalEvent::ConfigDelta(ConfigDelta::Apply(ApplyDelta {
+        timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+        delta: Box::new(partial),
+    }));
+
+    let json = serde_json::to_value(&event).unwrap();
+    let mut keys: Vec<_> = json.as_object().unwrap().keys().cloned().collect();
+    keys.sort();
+
+    assert_eq!(keys, ["delta", "timestamp", "type"]);
+    assert_eq!(json["type"], "config_delta");
+    assert_eq!(json["timestamp"], "2020-01-01 00:00:00.0");
+    assert_eq!(json["delta"]["style"]["code"]["color"], false);
+}
+
+#[test]
+fn test_legacy_config_delta_without_op_decodes_as_apply() {
+    // Every config delta written before the reset variant existed lacks an
+    // `op` field; those must keep decoding as `Apply`.
+    let raw = serde_json::json!({
+        "type": "config_delta",
+        "timestamp": "2025-01-01 00:00:00.0",
+        "delta": { "style": { "code": { "color": false } } }
+    });
+
+    let internal: InternalEvent = serde_json::from_value(raw).unwrap();
+    let InternalEvent::ConfigDelta(ConfigDelta::Apply(apply)) = internal else {
+        panic!("expected Apply config delta");
+    };
+    assert_eq!(apply.delta.style.code.color, Some(false));
+}
+
+#[test]
+fn test_config_delta_with_explicit_apply_op_decodes_as_apply() {
+    let raw = serde_json::json!({
+        "type": "config_delta",
+        "op": "apply",
+        "timestamp": "2025-01-01 00:00:00.0",
+        "delta": { "style": { "code": { "color": false } } }
+    });
+
+    let internal: InternalEvent = serde_json::from_value(raw).unwrap();
+    let InternalEvent::ConfigDelta(ConfigDelta::Apply(apply)) = internal else {
+        panic!("expected Apply config delta");
+    };
+    assert_eq!(apply.delta.style.code.color, Some(false));
+}
+
+#[test]
+fn test_config_delta_with_unknown_op_fails_deserialization() {
+    // An op added by a newer jp must fail loudly instead of being misread as
+    // an apply.
+    let raw = serde_json::json!({
+        "type": "config_delta",
+        "op": "unset",
+        "timestamp": "2025-01-01 00:00:00.0",
+    });
+    assert!(serde_json::from_value::<InternalEvent>(raw).is_err());
+
+    // Non-string values are rejected too.
+    let raw = serde_json::json!({
+        "type": "config_delta",
+        "op": 42,
+        "timestamp": "2025-01-01 00:00:00.0",
+    });
+    assert!(serde_json::from_value::<InternalEvent>(raw).is_err());
+}
+
+#[test]
+fn test_add_config_delta_reset_always_appends() {
+    let mut stream = ConversationStream::new_test();
+    let delta_count = |s: &ConversationStream| {
+        s.events
+            .iter()
+            .filter(|e| matches!(e, InternalEvent::ConfigDelta(_)))
+            .count()
+    };
+
+    // An `Apply` whose diff against the current config is empty is suppressed.
+    stream.add_config_delta(jp_config::PartialAppConfig::empty());
+    assert_eq!(delta_count(&stream), 0);
+
+    // A `Reset` always lands, even though it carries no diff.
+    stream.add_config_delta(ResetDelta {
+        timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+    });
+    assert_eq!(delta_count(&stream), 1);
+}
+
+#[test]
+fn test_add_config_reset_appends_reset_then_nonempty_layers() {
+    let mut stream = ConversationStream::new_test();
+
+    let mut layer = jp_config::PartialAppConfig::empty();
+    layer.style.code.color = Some(false);
+
+    stream.add_config_reset(
+        ResetDelta {
+            timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+        },
+        [
+            // Empty layers are skipped: they would resolve to a no-op `Apply`.
+            ApplyDelta {
+                timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+                delta: Box::new(jp_config::PartialAppConfig::empty()),
+            },
+            ApplyDelta {
+                timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+                delta: Box::new(layer),
+            },
+        ],
+    );
+
+    // The reset lands first, followed by the single non-empty layer —
+    // verbatim, without diff-suppression (the delta is written as given, not
+    // reduced against the stream's current config).
+    let deltas: Vec<_> = stream
+        .events
+        .iter()
+        .filter_map(|e| match e {
+            InternalEvent::ConfigDelta(delta) => Some(delta),
+            _ => None,
+        })
+        .collect();
+
+    assert_eq!(deltas.len(), 2, "expected [Reset, Apply], got {deltas:?}");
+    assert!(matches!(deltas[0], ConfigDelta::Reset(_)));
+    let ConfigDelta::Apply(apply) = deltas[1] else {
+        panic!("expected Apply config delta");
+    };
+    assert_eq!(apply.delta.style.code.color, Some(false));
+}
+
+#[test]
+fn test_config_fold_reset_discards_accumulated_state() {
+    use jp_config::model::id::{Name, PartialModelIdConfig, ProviderId};
+
+    let mut stream = ConversationStream::new_test();
+
+    // Diverge from the program default (`style.code.color` defaults to
+    // `true`). The test base config also carries
+    // `conversation.title.generate.auto = false` (default `true`).
+    let mut dev = jp_config::PartialAppConfig::empty();
+    dev.style.code.color = Some(false);
+
+    // The post-reset state starts from program defaults, which lack the
+    // required model id and tool run mode, so `fresh` must supply both for
+    // the stream config to be valid.
+    let mut fresh = jp_config::PartialAppConfig::empty();
+    fresh.conversation.tools.defaults.run = Some(RunMode::Ask);
+    fresh.assistant.model.id = PartialModelIdConfig {
+        provider: Some(ProviderId::Anthropic),
+        name: Some(Name("fresh".to_owned())),
+    }
+    .into();
+
+    for delta in [
+        ConfigDelta::Apply(ApplyDelta {
+            timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+            delta: Box::new(dev),
+        }),
+        ConfigDelta::Reset(ResetDelta {
+            timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 1).unwrap(),
+        }),
+        ConfigDelta::Apply(ApplyDelta {
+            timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 2).unwrap(),
+            delta: Box::new(fresh),
+        }),
+    ] {
+        stream.events.push(InternalEvent::ConfigDelta(delta));
+    }
+
+    let config = stream.config().unwrap();
+
+    // dev's change is behind the reset; the program default is restored.
+    assert!(config.style.code.color);
+    // The base config's contribution is discarded too.
+    assert!(config.conversation.title.generate.auto);
+    // fresh applies on top of program defaults.
+    assert_eq!(config.assistant.model.id.resolved().name.0, "fresh");
+}
+
+#[test]
+fn test_iter_config_reflects_reset() {
+    let mut dev = jp_config::PartialAppConfig::empty();
+    dev.style.code.color = Some(false);
+
+    let mut fresh = jp_config::PartialAppConfig::empty();
+    fresh.user.name = Some("fresh".to_owned());
+
+    let mut stream = ConversationStream::new_test();
+    stream
+        .events
+        .push(InternalEvent::ConfigDelta(ConfigDelta::Apply(ApplyDelta {
+            timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+            delta: Box::new(dev),
+        })));
+    stream.push(ConversationEvent::new(
+        ChatRequest::from("before reset"),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 1).unwrap(),
+    ));
+    stream
+        .events
+        .push(InternalEvent::ConfigDelta(ConfigDelta::Reset(ResetDelta {
+            timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 2).unwrap(),
+        })));
+    stream
+        .events
+        .push(InternalEvent::ConfigDelta(ConfigDelta::Apply(ApplyDelta {
+            timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 3).unwrap(),
+            delta: Box::new(fresh),
+        })));
+    stream.push(ConversationEvent::new(
+        ChatRequest::from("after reset"),
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 4).unwrap(),
+    ));
+
+    let events: Vec<_> = stream.iter().collect();
+    assert_eq!(events.len(), 2);
+
+    // Before the reset: dev's change plus the base config's fields.
+    assert_eq!(events[0].config.style.code.color, Some(false));
+
+    // After the reset: only fresh's fields remain; both dev's change and the
+    // base config's contribution are gone.
+    assert_eq!(events[1].config.style.code.color, None);
+    assert_eq!(events[1].config.user.name, Some("fresh".to_owned()));
+    assert!(events[1].config.conversation.title.generate.auto.is_none());
 }
 
 // --- deserialize_config_delta tests ---
@@ -931,9 +1307,12 @@ fn test_deserialize_config_delta_extracts_timestamp_and_delta() {
         }
     });
 
-    let delta = deserialize_config_delta(&value);
-    assert_eq!(delta.timestamp.to_string(), "2025-01-01 00:00:00 UTC");
-    assert_eq!(delta.delta.style.code.color, Some(false));
+    let delta = deserialize_config_delta(&value).unwrap();
+    assert_eq!(delta.timestamp().to_string(), "2025-01-01 00:00:00 UTC");
+    let ConfigDelta::Apply(apply) = delta else {
+        panic!("expected Apply config delta");
+    };
+    assert_eq!(apply.delta.style.code.color, Some(false));
 }
 
 #[test]
@@ -943,9 +1322,12 @@ fn test_deserialize_config_delta_preserves_timestamp_on_bad_delta() {
         "delta": "not an object at all"
     });
 
-    let delta = deserialize_config_delta(&value);
-    assert_eq!(delta.timestamp.to_string(), "2024-12-25 18:30:00 UTC");
-    assert!(delta.delta.is_empty());
+    let delta = deserialize_config_delta(&value).unwrap();
+    assert_eq!(delta.timestamp().to_string(), "2024-12-25 18:30:00 UTC");
+    let ConfigDelta::Apply(apply) = delta else {
+        panic!("expected Apply config delta");
+    };
+    assert!(apply.delta.is_empty());
 }
 
 // --- from_parts / to_parts stream-level compat tests ---
@@ -983,6 +1365,43 @@ fn test_from_parts_tolerates_unknown_fields_in_config_deltas() {
 }
 
 #[test]
+fn test_from_parts_tolerates_legacy_compaction_bounds_in_base_config() {
+    // A conversation written before `last` was renamed and before `@N` stopped
+    // being a config spelling. Both land in `base_config.json`, which is
+    // rewritten on every save, so a hard failure here would discard the stored
+    // config and then persist the loss.
+    let mut partial = jp_config::PartialAppConfig::empty();
+    partial.style.code.color = Some(false);
+
+    let mut stream = ConversationStream::new_test().with_config_delta(partial);
+    stream.start_turn(ChatRequest::from("hello"));
+
+    let (mut base_config, events) = stream.to_parts().unwrap();
+
+    base_config["style"]["code"]["color"] = serde_json::json!(false);
+    // `@7` ended compaction at turn 7. Substituting the default `keep_last`
+    // would end it at the second-to-last turn instead, compacting every turn
+    // in between.
+    base_config["conversation"]["compaction"]["rules"] = serde_json::json!({
+        "value": [{ "keep_first": "last", "keep_last": "@7" }],
+        "strategy": "replace"
+    });
+
+    let result = ConversationStream::from_parts(base_config, events).unwrap();
+
+    let config = result.config().unwrap();
+    assert!(
+        !config.style.code.color,
+        "settings beside the stale bound must survive the load"
+    );
+
+    assert!(
+        config.conversation.compaction.rules.is_empty(),
+        "the `@7` rule is dropped whole rather than run over a substituted range"
+    );
+}
+
+#[test]
 fn test_from_parts_tolerates_config_deltas_with_only_unknown_fields() {
     let mut stream = ConversationStream::new_test();
     stream.start_turn(ChatRequest::from("hello"));
@@ -998,6 +1417,101 @@ fn test_from_parts_tolerates_config_deltas_with_only_unknown_fields() {
 
     let result = ConversationStream::from_parts(base_config, events).unwrap();
     assert_eq!(result.len(), 2); // TurnStart + ChatRequest
+}
+
+// --- from_legacy_events tests ---
+
+// Conversations written before the base config moved into `base_config.json`
+// keep it as the first `config_delta` element of `events.json`. Three shapes
+// exist across versions: the config nested under a `delta` key, the config
+// fields as siblings of `type`/`timestamp`, and the same siblings with no
+// `timestamp` at all (the oldest serializer had no timestamp field).
+//
+// `created_at` is the caller's responsibility, so none of these assert it;
+// the storage layer derives it from the conversation ID.
+#[test]
+fn test_from_legacy_events_reads_base_config_nested_under_delta() {
+    let events = vec![
+        serde_json::json!({
+            "type": "config_delta",
+            "timestamp": "2025-12-04 09:28:23.202081",
+            "delta": {
+                "assistant": {"model": {"id": "anthropic/nested"}},
+                "conversation": {"tools": {"*": {"run": "ask"}}},
+                "style": {"code": {"color": false}}
+            }
+        }),
+        serde_json::json!({
+            "type": "chat_request",
+            "timestamp": "2025-12-04 09:28:24.0",
+            "content": "hello"
+        }),
+    ];
+
+    let stream = ConversationStream::from_legacy_events(events)
+        .expect("legacy stream loads")
+        .expect("first event is a config delta");
+
+    let config = stream.config().expect("config resolves");
+    assert_eq!(config.assistant.model.id.to_string(), "anthropic/nested");
+    assert!(!config.style.code.color);
+}
+
+#[test]
+fn test_from_legacy_events_reads_base_config_inline_alongside_type() {
+    let events = vec![
+        serde_json::json!({
+            "type": "config_delta",
+            "timestamp": "2025-12-04 09:28:23.202081",
+            "assistant": {"model": {"id": "anthropic/inline"}},
+            "conversation": {"tools": {"*": {"run": "ask"}}},
+            "style": {"code": {"color": false}}
+        }),
+        serde_json::json!({
+            "type": "chat_request",
+            "timestamp": "2025-12-04 09:28:24.0",
+            "content": "hello"
+        }),
+    ];
+
+    let stream = ConversationStream::from_legacy_events(events)
+        .expect("legacy stream loads")
+        .expect("first event is a config delta");
+
+    let config = stream.config().expect("config resolves");
+    assert_eq!(config.assistant.model.id.to_string(), "anthropic/inline");
+    assert!(!config.style.code.color);
+}
+
+#[test]
+fn test_from_legacy_events_reads_base_config_inline_without_timestamp() {
+    let events = vec![
+        serde_json::json!({
+            "type": "config_delta",
+            "inherit": true,
+            "config_load_paths": [],
+            "extends": [],
+            "assistant": {"model": {"id": "anthropic/no-timestamp"}},
+            "conversation": {"tools": {"*": {"run": "ask"}}},
+            "style": {"code": {"color": false}}
+        }),
+        serde_json::json!({
+            "type": "chat_request",
+            "timestamp": "2025-12-04 09:28:24.0",
+            "content": "hello"
+        }),
+    ];
+
+    let stream = ConversationStream::from_legacy_events(events)
+        .expect("legacy stream loads")
+        .expect("first event is a config delta");
+
+    let config = stream.config().expect("config resolves");
+    assert_eq!(
+        config.assistant.model.id.to_string(),
+        "anthropic/no-timestamp"
+    );
+    assert!(!config.style.code.color);
 }
 
 // --- Compaction event invariant tests ---
@@ -1133,7 +1647,7 @@ fn test_retain_removing_within_turn_event_drops_compactions() {
 }
 
 #[test]
-fn test_retain_first_turns_drops_compactions() {
+fn test_retain_turns_drops_compactions() {
     let mut stream = ConversationStream::new_test();
     for t in 0..6 {
         stream.start_turn(format!("turn {t}"));
@@ -1142,7 +1656,7 @@ fn test_retain_first_turns_drops_compactions() {
     // summary text covers turns the fork no longer has.
     stream.add_compaction(make_compaction(0, 5));
 
-    stream.retain_first_turns(2);
+    stream.retain_turns(|index| index < 2);
 
     assert_eq!(stream.turn_count(), 2);
     assert_eq!(
@@ -1163,7 +1677,7 @@ fn test_retain_keeps_compactions_entirely_before_removal() {
 
     // `--first 4` drops turns 4-5; turns 0-1 are untouched and not renumbered,
     // so the overlay over them keeps valid anchors and survives.
-    stream.retain_first_turns(4);
+    stream.retain_turns(|index| index < 4);
 
     assert_eq!(stream.turn_count(), 4);
     let compactions: Vec<_> = stream.compactions().collect();
@@ -1176,7 +1690,7 @@ fn test_retain_keeps_compactions_entirely_before_removal() {
 }
 
 #[test]
-fn test_retain_first_and_last_keeps_leading_block_compaction() {
+fn test_retain_turns_two_windows_keeps_leading_block_compaction() {
     let mut stream = ConversationStream::new_test();
     for t in 0..8 {
         stream.start_turn(format!("turn {t}"));
@@ -1186,7 +1700,7 @@ fn test_retain_first_and_last_keeps_leading_block_compaction() {
     stream.add_compaction(make_compaction(3, 6));
 
     // Keep first 3 and last 2 turns, dropping the middle (turns 3-5).
-    stream.retain_first_and_last_turns(3, 2);
+    stream.retain_turns(|index| !(3..6).contains(&index));
 
     let compactions: Vec<_> = stream.compactions().collect();
     assert_eq!(
@@ -1653,7 +2167,7 @@ fn extend_into_empty_preserves_observed_iter_and_serialized_shape() {
 
     // Build a source stream with two turns and a config delta before each.
     let mut source = ConversationStream::new_test();
-    source.add_config_delta(ConfigDelta {
+    source.add_config_delta(ApplyDelta {
         delta: Box::new(partial1),
         timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
     });
@@ -1669,7 +2183,7 @@ fn extend_into_empty_preserves_observed_iter_and_serialized_shape() {
         ChatResponse::message("A1"),
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 2).unwrap(),
     ));
-    source.add_config_delta(ConfigDelta {
+    source.add_config_delta(ApplyDelta {
         delta: Box::new(partial2),
         timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 3).unwrap(),
     });

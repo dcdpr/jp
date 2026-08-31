@@ -223,6 +223,7 @@ expression: v
         "assistant": {
           "model": {
             "id": {
+              "provider": "openrouter",
               "name": "x-ai/grok-4.3"
             }
           }

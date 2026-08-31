@@ -11,6 +11,7 @@ use jp_llm::{
 
 use super::{
     Error, StreamOutcome, collect_range_events, failure_reason, summarize_events, summarize_stream,
+    window_overflow,
 };
 
 /// A stream that produced `text` and then stopped for `reason`.
@@ -54,13 +55,13 @@ async fn summarize_with(
     batches: Vec<Vec<Event>>,
     stream: ConversationStream,
 ) -> super::Result<String> {
-    summarize_with_ceiling(batches, stream, 1_048_576).await
+    summarize_with_ceiling(batches, stream, Some(1_048_576)).await
 }
 
 async fn summarize_with_ceiling(
     batches: Vec<Vec<Event>>,
     stream: ConversationStream,
-    max_response_bytes: u32,
+    max_response_bytes: Option<u64>,
 ) -> super::Result<String> {
     let provider = MockProvider::with_batches(batches);
     let model_id = test_model_id();
@@ -90,7 +91,7 @@ async fn summarize_applies_the_configured_output_ceiling() {
         FinishReason::Completed,
     )];
 
-    let error = summarize_with_ceiling(batches, range_stream(&["sig"]), 25)
+    let error = summarize_with_ceiling(batches, range_stream(&["sig"]), Some(25))
         .await
         .expect_err("the summary must stop at the configured ceiling");
 
@@ -120,6 +121,55 @@ fn chat_request_texts(events: &[jp_conversation::ConversationEvent]) -> Vec<Stri
         .filter_map(|e| e.as_chat_request())
         .map(|r| r.content.clone())
         .collect()
+}
+
+/// A range comfortably inside the window is summarized as-is.
+#[test]
+fn a_range_that_fits_reports_no_overflow() {
+    let stream = build_stream_with_turns(4);
+    assert_eq!(window_overflow(&stream, Some(100_000), 0), None);
+}
+
+/// The reported failure's shape, on the summarizer path: a large range against
+/// a small-window model.
+/// Unlike title generation this is rejected rather than shortened, so the
+/// summary never covers less than the range it is stored for.
+#[test]
+fn a_range_past_the_window_overflows() {
+    let mut stream = ConversationStream::new_test();
+    for i in 0..200 {
+        stream.start_turn(format!("turn {i}: {}", "x".repeat(1000)));
+    }
+
+    let overflow = window_overflow(&stream, Some(1000), 0).expect("range must not fit");
+    assert_eq!(
+        overflow,
+        "are roughly 201890 characters, which exceeds the ~2700 that fit in the model's 1000 \
+         token context window"
+    );
+}
+
+/// Overhead is charged against the same window, so a range that fits on its own
+/// can still overflow once the instructions are counted.
+#[test]
+fn overhead_can_push_a_fitting_range_over() {
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("x".repeat(2000));
+
+    assert_eq!(window_overflow(&stream, Some(1000), 0), None);
+    assert!(window_overflow(&stream, Some(1000), 1000).is_some());
+}
+
+/// Providers that don't report a window (local llama.cpp, Ollama) have no
+/// budget to check against, so nothing is rejected.
+#[test]
+fn an_unknown_window_never_overflows() {
+    let mut stream = ConversationStream::new_test();
+    for i in 0..200 {
+        stream.start_turn(format!("turn {i}: {}", "x".repeat(1000)));
+    }
+
+    assert_eq!(window_overflow(&stream, None, 0), None);
 }
 
 #[test]
@@ -209,6 +259,22 @@ fn completed_stream_with_text_is_a_summary() {
 #[test]
 fn completed_stream_without_text_is_unusable() {
     let events = vec![Event::Finished(FinishReason::Completed)];
+
+    assert_eq!(
+        summarize_events(events),
+        StreamOutcome::Unusable("the model returned an empty response".to_owned())
+    );
+}
+
+#[test]
+fn completed_stream_with_only_whitespace_is_unusable() {
+    // `EventBuilder::handle_flush` drops a whitespace-only message, so a stream
+    // carrying nothing but a newline arrives here with no message at all and
+    // takes the same path as one that never produced text.
+    //
+    // This pins the composed behavior across that boundary, not a check in
+    // `summarize_events`: no input can make `summary` non-empty and blank.
+    let events = stream_with_text(" \n", FinishReason::Completed);
 
     assert_eq!(
         summarize_events(events),

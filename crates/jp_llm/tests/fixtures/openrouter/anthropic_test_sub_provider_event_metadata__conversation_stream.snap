@@ -223,6 +223,7 @@ expression: v
         "assistant": {
           "model": {
             "id": {
+              "provider": "openrouter",
               "name": "anthropic/claude-haiku-4.5"
             }
           }

@@ -503,8 +503,11 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
             }
             HrStyle::Line => {
                 // A rule spans the text column, not the terminal, so it lines up
-                // with the wrapped prose above and below it.
-                let line: String = "─".repeat(self.writer.width.max(1));
+                // with the wrapped prose above and below it. Inside a
+                // blockquote or a list item that column is narrowed by the
+                // prefix each line carries.
+                let width = self.writer.width.saturating_sub(self.writer.prefix_width());
+                let line: String = "─".repeat(width.max(1));
                 self.writer.output(&line, false)?;
             }
         }

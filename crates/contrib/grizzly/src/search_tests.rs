@@ -1,5 +1,80 @@
 use super::*;
-use crate::BearDb;
+use crate::{BearDb, schema};
+
+/// Notes for [`a_date_filter_is_applied_before_the_fts_limit`]: how many times
+/// each repeats the search term, and the day it was created.
+///
+/// Rank follows the repeat count, so the order is fixed rather than left to
+/// BM25 ties among identical documents.
+/// Only the two created on day 9 are inside the cutoff, and they sit either
+/// side of the eighth row — which is where a `4 * limit` fetch would have
+/// stopped looking.
+const BOUNDARY_NOTES: [(usize, i64); 10] = [
+    (10, 9),
+    (9, 0),
+    (8, 0),
+    (7, 0),
+    (6, 0),
+    (5, 0),
+    (4, 0),
+    (3, 0),
+    (2, 9),
+    (1, 0),
+];
+
+/// Build a database from [`BOUNDARY_NOTES`], returning a connection and its
+/// normalizing CTE.
+///
+/// Its own fixture rather than the shared one: this needs more notes than `4 *
+/// limit`, and growing `setup_test_schema` would move every count the other
+/// tests assert.
+fn boundary_corpus() -> (rusqlite::Connection, String) {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE ZSFNOTE (
+            Z_PK INTEGER PRIMARY KEY,
+            ZUNIQUEIDENTIFIER TEXT,
+            ZTITLE TEXT,
+            ZTEXT TEXT,
+            ZMODIFICATIONDATE REAL,
+            ZCREATIONDATE REAL,
+            ZTRASHED INTEGER,
+            ZARCHIVED INTEGER
+         );
+         CREATE TABLE ZSFNOTETAG (Z_PK INTEGER PRIMARY KEY, ZTITLE TEXT);
+         INSERT INTO ZSFNOTETAG (Z_PK, ZTITLE) VALUES (1, 'topic');
+         CREATE TABLE Z_5TAGS (Z_5NOTES INTEGER, Z_13TAGS INTEGER);",
+    )
+    .unwrap();
+
+    for (index, (repeats, day)) in BOUNDARY_NOTES.iter().enumerate() {
+        let pk = i64::try_from(index).unwrap() + 1;
+        conn.execute(
+            "INSERT INTO ZSFNOTE
+                (Z_PK, ZUNIQUEIDENTIFIER, ZTITLE, ZTEXT, ZMODIFICATIONDATE, ZCREATIONDATE,
+                 ZTRASHED, ZARCHIVED)
+             VALUES (?1, ?2, ?3, ?4, 0, ?5, 0, 0)",
+            rusqlite::params![
+                pk,
+                format!("note-{pk}"),
+                format!("Note {pk}"),
+                vec!["recurring"; *repeats].join(" "),
+                day * 86400,
+            ],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO Z_5TAGS (Z_5NOTES, Z_13TAGS) VALUES (?1, 1)",
+            rusqlite::params![pk],
+        )
+        .unwrap();
+    }
+
+    let meta = schema::discover(&conn).unwrap();
+    let cte = schema::normalizing_cte(&meta);
+
+    (conn, cte)
+}
 
 fn search(db: &BearDb, queries: Vec<&str>) -> Vec<SearchMatch> {
     db.search(&SearchParams {
@@ -11,6 +86,52 @@ fn search(db: &BearDb, queries: Vec<&str>) -> Vec<SearchMatch> {
 
 fn search_with(db: &BearDb, params: &SearchParams) -> Vec<SearchMatch> {
     db.search(params).unwrap()
+}
+
+/// Both shapes SQLite renders, and nothing else.
+#[test]
+fn a_cutoff_takes_a_day_or_an_instant() {
+    assert_eq!(
+        "2026-08-01".parse::<Cutoff>().unwrap().to_string(),
+        "2026-08-01"
+    );
+    assert_eq!(
+        "2026-08-01 13:45:02".parse::<Cutoff>().unwrap().to_string(),
+        "2026-08-01 13:45:02"
+    );
+    assert_eq!(
+        "  2026-08-01  ".parse::<Cutoff>().unwrap().to_string(),
+        "2026-08-01"
+    );
+}
+
+/// The comparison is lexical, so an unpadded date is not a near-miss: it means
+/// a different day and still returns a plausible answer.
+///
+/// `2026-08-1` sorts above every `2026-08-09 ...` and below every `2026-08-10
+/// ...`, quietly dropping the first nine days of the month.
+#[test]
+fn a_cutoff_that_would_mean_another_day_is_refused() {
+    for input in [
+        "2026-08-1",
+        "2026-8-01",
+        "26-08-01",
+        "2026/08/01",
+        "2026-08-01T00:00:00",
+        "2026-08-01 13:45",
+        "yesterday",
+        "",
+    ] {
+        assert!(
+            input.parse::<Cutoff>().is_err(),
+            "`{input}` should not parse as a cutoff"
+        );
+    }
+
+    assert_eq!(
+        "2026-08-1".parse::<Cutoff>().unwrap_err().to_string(),
+        "`2026-08-1` is not a date; write `YYYY-MM-DD` or `YYYY-MM-DD HH:MM:SS`, zero-padded."
+    );
 }
 
 #[test]
@@ -94,6 +215,7 @@ fn archived_xml_marks_archived_and_omits_content() {
         title: "Archived".into(),
         tags: vec![],
         updated_at: None,
+        created_at: None,
         line_hits: vec![],
         total_hits: 3,
         snippet: None,
@@ -101,6 +223,9 @@ fn archived_xml_marks_archived_and_omits_content() {
     };
 
     let xml = m.to_xml();
+    // A note whose creation date didn't come back still reports the attribute,
+    // so a caller never has to tell "absent" from "unknown".
+    assert!(xml.contains(r#"created-at="unknown""#));
     assert!(xml.contains(r#"archived="true""#));
     assert!(xml.contains(r#"total-hits="3""#));
     assert!(!xml.contains("<snippet"));
@@ -158,6 +283,7 @@ fn title_in_xml_output() {
         title: "My Note".into(),
         tags: vec!["work".into()],
         updated_at: Some("2024-01-01 00:00:00".into()),
+        created_at: Some("2024-01-01 00:00:00".into()),
         line_hits: vec![1],
         total_hits: 1,
         snippet: Some(Snippet {
@@ -171,6 +297,7 @@ fn title_in_xml_output() {
     assert!(xml.contains(r#"note-id="abc-123""#));
     assert!(xml.contains(r#"title="My Note""#));
     assert!(xml.contains(r#"tags="work""#));
+    assert!(xml.contains(r#"created-at="2024-01-01 00:00:00""#));
     assert!(xml.contains(r#"updated-at="2024-01-01 00:00:00""#));
     assert!(xml.contains(r#"total-hits="1""#));
     assert!(xml.contains(r#"<snippet line="1">first line</snippet>"#));
@@ -184,6 +311,7 @@ fn title_xml_escaping() {
         title: r#"Notes & "Quotes" <stuff>"#.into(),
         tags: vec![],
         updated_at: None,
+        created_at: None,
         line_hits: vec![],
         total_hits: 0,
         snippet: None,
@@ -201,6 +329,7 @@ fn xml_lists_all_line_hits() {
         title: "Test".into(),
         tags: vec![],
         updated_at: None,
+        created_at: None,
         line_hits: vec![10, 11, 50],
         total_hits: 3,
         snippet: Some(Snippet {
@@ -343,7 +472,7 @@ fn nested_tag_filter_excludes_untagged() {
 }
 
 #[test]
-fn result_carries_tags_and_updated_at() {
+fn result_carries_tags_and_timestamps() {
     let db = BearDb::in_memory().unwrap();
     let results = search(&db, vec!["productivity"]);
 
@@ -351,6 +480,111 @@ fn result_carries_tags_and_updated_at() {
     assert_eq!(results[0].note_id, "note-1");
     assert_eq!(results[0].tags, vec!["productivity", "projects/jp"]);
     assert!(results[0].updated_at.is_some());
+    assert_eq!(
+        results[0].created_at.as_deref(),
+        Some("2001-01-01 00:00:00")
+    );
+}
+
+/// note-1 and note-2 both carry `productivity`, a day apart.
+#[test]
+fn created_after_drops_notes_older_than_the_cutoff() {
+    let db = BearDb::in_memory().unwrap();
+    let results = search_with(&db, &SearchParams {
+        queries: vec!["*".into()],
+        tags: vec!["productivity".into()],
+        created_after: Some("2001-01-02".parse().unwrap()),
+        ..Default::default()
+    });
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0].note_id, "note-2");
+}
+
+/// "On or after": a cutoff equal to a note's creation instant keeps it.
+///
+/// Spelled as a full timestamp rather than a bare day, because a bare day is a
+/// prefix of every time on it and so cannot tell `>=` from `>`.
+#[test]
+fn created_after_keeps_a_note_created_exactly_on_the_cutoff() {
+    let db = BearDb::in_memory().unwrap();
+    let results = search_with(&db, &SearchParams {
+        queries: vec!["*".into()],
+        created_after: Some("2001-01-03 00:00:00".parse().unwrap()),
+        ..Default::default()
+    });
+
+    assert_eq!(
+        results
+            .iter()
+            .map(|r| r.note_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["note-3"],
+        "note-3 was created at exactly this instant"
+    );
+}
+
+#[test]
+fn created_after_beyond_every_note_matches_nothing() {
+    let db = BearDb::in_memory().unwrap();
+    let results = search_with(&db, &SearchParams {
+        queries: vec!["*".into()],
+        created_after: Some("2026-01-01".parse().unwrap()),
+        ..Default::default()
+    });
+
+    assert!(results.is_empty());
+}
+
+/// A date cutoff and FTS relevance are uncorrelated, so the excluded notes can
+/// fill a whole page on their own.
+///
+/// Filtering after the fetch leaves one survivor here, and one survivor is
+/// non-empty — which is enough to stop `Auto` falling back to LIKE, so the
+/// eligible note below the boundary is never reported at all.
+#[test]
+fn a_date_filter_is_applied_before_the_fts_limit() {
+    let (conn, cte) = boundary_corpus();
+
+    let results = execute(&conn, &cte, &SearchParams {
+        queries: vec!["recurring".into()],
+        created_after: Some("2001-01-10".parse().unwrap()),
+        limit: 2,
+        ..Default::default()
+    })
+    .unwrap();
+
+    // note-1 ranks first and note-9 ninth, so a `4 * limit` fetch would have
+    // returned note-1 alone and called it a complete answer.
+    assert_eq!(
+        results
+            .iter()
+            .map(|r| r.note_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["note-1", "note-9"]
+    );
+}
+
+/// Tag-only queries all score the same, so the date decides the order and a
+/// limit takes the newest rather than an arbitrary row.
+///
+/// Scoped to queryless searches on purpose: with a text query every note also
+/// carries a hit count, and the Rust sort below `execute_like` puts that ahead
+/// of anything SQL ordered by.
+///
+/// The cutoff keeps only the two notes with distinct creation dates, so the
+/// expected order is fully determined.
+#[test]
+fn queryless_results_come_back_newest_first() {
+    let db = BearDb::in_memory().unwrap();
+    let results = search_with(&db, &SearchParams {
+        queries: vec!["*".into()],
+        created_after: Some("2001-01-02".parse().unwrap()),
+        ..Default::default()
+    });
+
+    let ids: Vec<&str> = results.iter().map(|r| r.note_id.as_str()).collect();
+    assert_eq!(ids, vec!["note-3", "note-2"]);
 }
 
 #[test]

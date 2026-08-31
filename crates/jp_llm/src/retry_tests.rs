@@ -97,7 +97,7 @@ async fn collect_with_retry_applies_the_output_ceiling_without_retrying() {
         max_retries: 5,
         base_backoff_ms: 1,
         max_backoff_secs: 1,
-        max_response_bytes: 25,
+        max_response_bytes: Some(25),
     };
 
     let error = collect_with_retry(&provider, &model(), empty_query(), &config)

@@ -15,7 +15,7 @@ use jp_test::{
 };
 
 fn vcr() -> Vcr {
-    Vcr::new("https://openrouter.ai", env!("CARGO_MANIFEST_DIR"))
+    Vcr::new("https://openrouter.ai")
 }
 
 #[tokio::test]

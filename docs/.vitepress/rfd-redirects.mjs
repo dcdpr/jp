@@ -1,31 +1,32 @@
 import { mkdirSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 
-// Short links for RFDs: `/rfd/101` lands on `/rfd/101-conversation-labels`,
-// `/rfd/drafts/D38` on the matching draft. The id is the stable part of an
-// RFD's identity — slugs change when a title is reworded — so the id-only form
-// is the one worth pasting into a commit message or an issue.
+// Short links for RFDs: `/rfd/101` lands on `/rfd/101-conversation-labels`. The
+// number is the stable part of an RFD's identity — slugs change when a title is
+// reworded — so the number-only form is the one worth pasting into a commit
+// message or an issue.
+//
+// Drafts get no short link: draft numbers are recycled once a draft is promoted
+// or dropped, so `/rfd/drafts/D38` would resolve to a different document
+// depending on when it is opened. Their full paths carry the title slug, which
+// makes a stale link obvious rather than silently wrong.
 //
 // GitHub Pages has no redirect table, so each short link is a stub page that
 // bounces the browser. `cleanUrls` means a request for `/rfd/101` is answered
 // with `rfd/101.html`, the same way every other page on the site is served.
 
-const SOURCES = [
-    { dir: 'rfd', pattern: /^(\d{3})-.+\.md$/ },
-    { dir: 'rfd/drafts', pattern: /^(D\d{2})-.+\.md$/ },
-]
+const DIR = 'rfd'
+const PATTERN = /^(\d{3})-.+\.md$/
 
-// Map every RFD id to its full site path, keyed by the short URL path.
+// Map every RFD number to its full site path, keyed by the short URL path.
 // `srcDir` is the docs root.
 export function rfdRedirects(srcDir) {
     const redirects = new Map()
-    for (const { dir, pattern } of SOURCES) {
-        for (const file of readdirSync(resolve(srcDir, dir)).sort()) {
-            const id = file.match(pattern)?.[1]
-            // `000` is the templates' shared id: several files, no one target.
-            if (!id || id === '000') continue
-            redirects.set(`/${dir}/${id}`, `/${dir}/${file.replace(/\.md$/, '')}`)
-        }
+    for (const file of readdirSync(resolve(srcDir, DIR)).sort()) {
+        const id = file.match(PATTERN)?.[1]
+        // `000` is the templates' shared id: several files, no one target.
+        if (!id || id === '000') continue
+        redirects.set(`/${DIR}/${id}`, `/${DIR}/${file.replace(/\.md$/, '')}`)
     }
     return redirects
 }

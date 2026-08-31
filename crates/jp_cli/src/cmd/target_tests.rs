@@ -10,9 +10,10 @@ use jp_workspace::{
 };
 
 use super::*;
+use crate::cmd::conversation_id::{FlagIds, PositionalIds};
 
 fn workspace_with_conversation() -> (Workspace, ConversationId) {
-    let mut ws = Workspace::new(Utf8PathBuf::new());
+    let mut ws = Workspace::in_memory(Utf8PathBuf::new());
     let config = Arc::new(AppConfig::new_test());
     let id = ws.create_conversation(Conversation::default(), config);
     (ws, id)
@@ -26,7 +27,7 @@ fn make_id(secs: u64) -> ConversationId {
 /// A workspace whose session activated `previous` and then `active`, so the two
 /// session-scoped keywords resolve to different conversations.
 fn workspace_with_session_history() -> (Workspace, Session, ConversationId, ConversationId) {
-    let mut ws = Workspace::new(Utf8PathBuf::new());
+    let mut ws = Workspace::in_memory(Utf8PathBuf::new());
     let config = Arc::new(AppConfig::new_test());
     let previous = make_id(1000);
     let active = make_id(2000);
@@ -74,7 +75,7 @@ fn last_created_resolves() {
 
 #[test]
 fn last_activated_empty_workspace_returns_none() {
-    let ws = Workspace::new(Utf8PathBuf::new());
+    let ws = Workspace::in_memory(Utf8PathBuf::new());
     assert_eq!(
         resolve_default_id(DefaultConversationId::LastActivated, &ws, None),
         None
@@ -193,7 +194,7 @@ fn archived_keyword_errors_when_no_archived_conversations() {
 
 #[test]
 fn all_archived_empty_returns_error() {
-    let ws = Workspace::new(Utf8PathBuf::new());
+    let ws = Workspace::in_memory(Utf8PathBuf::new());
     let result = ConversationTarget::AllArchived.resolve(&ws, None);
     assert!(result.is_err());
 }
@@ -314,8 +315,119 @@ fn all_live_resolves_to_every_live_conversation() {
 
 #[test]
 fn all_live_empty_workspace_errors() {
-    let ws = Workspace::new(Utf8PathBuf::new());
+    let ws = Workspace::in_memory(Utf8PathBuf::new());
     assert!(ConversationTarget::AllLive.resolve(&ws, None).is_err());
+}
+
+/// The grammar comes off the argument type rather than being restated, so it
+/// can't drift from what the command actually accepts.
+#[test]
+fn grammar_is_read_from_the_target_argument() {
+    let multi_session = PositionalIds::<true, true>::from_targets(vec![]);
+    let grammar = TargetGrammar::from_args(&multi_session, false);
+    assert!(grammar.session);
+    assert!(grammar.multi);
+    assert!(!grammar.allow_new);
+
+    let single = PositionalIds::<false, false>::from_targets(vec![]);
+    let grammar = TargetGrammar::from_args(&single, true);
+    assert!(!grammar.session);
+    assert!(!grammar.multi);
+    assert!(grammar.allow_new);
+}
+
+#[test]
+fn grammar_converts_to_a_no_target_error() {
+    let grammar = TargetGrammar {
+        session: false,
+        multi: true,
+        allow_new: true,
+    };
+
+    assert!(matches!(
+        Error::from(grammar),
+        Error::NoConversationTarget {
+            session: false,
+            multi: true,
+            allow_new: true
+        }
+    ));
+}
+
+/// A command's grammar reaches the request even when no target was given.
+///
+/// The empty-argument path is the one a bare `jp query` takes.
+/// Its argument type is `FlagIds<false, false>`, so the request must not claim
+/// the session or multi support that its own parser rejects — nor drop the
+/// support a multi-target command does have.
+#[test]
+fn an_empty_target_list_keeps_the_commands_grammar() {
+    let neither = FlagIds::<false, false>::from_targets(vec![]);
+    for request in [
+        ConversationLoadRequest::explicit_or_session(&neither),
+        ConversationLoadRequest::explicit_or_session_with_config(&neither),
+        ConversationLoadRequest::explicit_or_none(&neither),
+        ConversationLoadRequest::explicit_or_previous(&neither),
+    ] {
+        assert!(!request.session, "invented session keyword support");
+        assert!(!request.multi, "invented multi-target support");
+    }
+
+    let both = PositionalIds::<true, true>::from_targets(vec![]);
+    for request in [
+        ConversationLoadRequest::explicit_or_session(&both),
+        ConversationLoadRequest::explicit_or_session_with_config(&both),
+        ConversationLoadRequest::explicit_or_none(&both),
+        ConversationLoadRequest::explicit_or_previous(&both),
+    ] {
+        assert!(request.session, "dropped session keyword support");
+        assert!(request.multi, "dropped multi-target support");
+    }
+}
+
+/// A filter that matches nothing shows no prompt, so the failure has to name
+/// the empty set rather than claim the user declined something.
+///
+/// Safe to drive directly: both helpers return before constructing a prompt, so
+/// no terminal is involved.
+#[test]
+fn a_picker_with_no_candidates_reports_what_was_missing() {
+    let (ws, _) = workspace_with_conversation();
+    let pinned = PickerFilter {
+        pinned: true,
+        ..PickerFilter::default()
+    };
+
+    let error = pick_conversation(&ws, None, &pinned, false).expect_err("nothing is pinned");
+    assert_eq!(
+        error.to_string(),
+        "conversation not found: no pinned conversations"
+    );
+
+    let error = pick_conversations(&ws, None, &pinned).expect_err("nothing is pinned");
+    assert_eq!(
+        error.to_string(),
+        "conversation not found: no pinned conversations"
+    );
+}
+
+/// Only Esc, Ctrl-C, and EOF are the user declining.
+/// Anything else is the prompt itself breaking, and must keep its cause so the
+/// run is reported as a failure rather than a choice.
+#[test]
+fn only_cancellation_reads_as_a_declined_picker() {
+    assert!(matches!(
+        declined_or_failed(InquireError::OperationCanceled),
+        Error::NoConversationSelected
+    ));
+    assert!(matches!(
+        declined_or_failed(InquireError::OperationInterrupted),
+        Error::NoConversationSelected
+    ));
+    assert!(matches!(
+        declined_or_failed(InquireError::NotTTY),
+        Error::Inquire(_)
+    ));
 }
 
 // --- Picker label formatting ------------------------------------------------

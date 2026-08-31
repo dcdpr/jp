@@ -8,13 +8,17 @@ import {
     checkRequiresOnImplemented,
     checkStatusGate,
     checkSummaries,
+    checkTerminalOnBoard,
     findCycles,
     findDuplicateIds,
     findStrayDraftRefs,
+    loadPriority,
 } from './rfd-shared.mjs'
 
 const rfdDir = resolve(import.meta.dirname, '../../rfd')
+const draftsDir = resolve(import.meta.dirname, '../../rfd/drafts')
 const cachePath = resolve(import.meta.dirname, '../rfd-summaries.json')
+const priorityPath = resolve(import.meta.dirname, '../../rfd/.priority.json')
 
 function loadSummaries() {
     try {
@@ -39,6 +43,18 @@ export default {
         const summaries = loadSummaries()
         const graph = buildGraph(rfdDir, files)
 
+        // The board mixes both id spaces, so the terminal check needs statuses
+        // from both. Drafts are otherwise none of this loader's business: they
+        // contribute nothing but a status here.
+        const draftFiles = readdirSync(draftsDir)
+            .filter(f => /^D\d{2}-.+\.md$/.test(f))
+        const boardGraph = new Map([
+            ...graph,
+            ...buildGraph(draftsDir, draftFiles),
+        ])
+
+        const priority = loadPriority(priorityPath)
+
         // Every validation aborts the published build.
         const errors = [
             checkSummaries(rfdDir, files, summaries),
@@ -48,6 +64,7 @@ export default {
             checkStatusGate(graph),
             checkRequiresOnImplemented(graph),
             findCycles(graph),
+            checkTerminalOnBoard(boardGraph, priority),
         ]
         for (const error of errors) {
             if (error) throw new Error(error)

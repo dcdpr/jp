@@ -107,6 +107,24 @@ fn longest_wildcard_wins_over_shorter() {
 }
 
 #[test]
+fn headless_is_off_unless_asked_for() {
+    assert!(!opts(&json!({})).allows_headless());
+    assert!(!opts(&json!({ "allow_headless": false })).allows_headless());
+    assert!(opts(&json!({ "allow_headless": true })).allows_headless());
+}
+
+#[test]
+fn headless_permission_is_independent_of_strategy() {
+    let o = opts(&json!({ "strategy": "html", "allow_headless": true }));
+
+    assert!(o.allows_headless());
+    assert_eq!(
+        o.pick_strategy(&url("https://example.com/x")),
+        Strategy::Html
+    );
+}
+
+#[test]
 fn unknown_strategy_errors() {
     let map = json!({ "strategy": "nonsense" })
         .as_object()

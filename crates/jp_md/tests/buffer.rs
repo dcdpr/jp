@@ -4,16 +4,14 @@ use jp_md::buffer::Buffer;
 
 #[test]
 fn test_buffer_chunks() {
-    let manifest_dir = env!("CARGO_MANIFEST_DIR");
-    let fixtures_dir = format!("{manifest_dir}/tests/fixtures");
-    let glob_pattern = format!("{fixtures_dir}/*.md");
+    let glob_pattern = "tests/fixtures/*.md";
 
-    let paths: Vec<_> = glob::glob(&glob_pattern)
+    let paths: Vec<_> = glob::glob(glob_pattern)
         .expect("Failed to read glob pattern")
         .filter_map(Result::ok)
         .collect();
 
-    assert!(!paths.is_empty(), "No fixtures found");
+    assert!(!paths.is_empty(), "No fixtures found in {glob_pattern}");
 
     for path in paths {
         let name = path.file_stem().unwrap().to_string_lossy();

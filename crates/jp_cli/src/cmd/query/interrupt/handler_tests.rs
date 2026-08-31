@@ -1,7 +1,11 @@
 use std::sync::Arc;
 
+use inquire::InquireError;
 use jp_editor::MockEditorBackend;
-use jp_inquire::{ReplyEditMode, ReplyOutcome, prompt::MockPromptBackend};
+use jp_inquire::{
+    InlineOption, ReplyEditMode, ReplyOutcome,
+    prompt::{MockPromptBackend, PromptBackend},
+};
 use jp_printer::{OutputFormat, Printer};
 
 use super::*;
@@ -38,6 +42,100 @@ fn handler_with_editor(
     editor: MockEditorBackend,
 ) -> InterruptHandler<MockPromptBackend> {
     InterruptHandler::with_backend(backend, Some(Arc::new(editor)), ReplyEditMode::Emacs)
+}
+
+/// A backend whose prompts cannot run at all, as when there is no usable
+/// terminal to read from.
+///
+/// Distinct from an empty [`MockPromptBackend`], which reports
+/// `OperationCanceled` — the user pressing `Ctrl+C` on the prompt.
+struct UnavailableBackend;
+
+impl PromptBackend for UnavailableBackend {
+    fn inline_select(
+        &self,
+        _message: &str,
+        _options: Vec<InlineOption>,
+        _default: Option<char>,
+        _writer: &mut dyn std::io::Write,
+    ) -> Result<char, InquireError> {
+        Err(InquireError::NotTTY)
+    }
+
+    fn inline_reply(
+        &self,
+        _message: &str,
+        _initial_text: &str,
+        _edit_mode: ReplyEditMode,
+        _editor_escape: bool,
+        _help: Option<&str>,
+        _output: Box<dyn std::io::Write + Send>,
+    ) -> Result<ReplyOutcome, InquireError> {
+        Err(InquireError::NotTTY)
+    }
+
+    fn text(
+        &self,
+        _message: &str,
+        _default: Option<&str>,
+        _writer: &mut dyn std::io::Write,
+    ) -> Result<String, InquireError> {
+        Err(InquireError::NotTTY)
+    }
+
+    fn select(
+        &self,
+        _message: &str,
+        _options: Vec<String>,
+        _default: Option<usize>,
+        _writer: &mut dyn std::io::Write,
+    ) -> Result<String, InquireError> {
+        Err(InquireError::NotTTY)
+    }
+
+    fn password(
+        &self,
+        _message: &str,
+        _writer: &mut dyn std::io::Write,
+    ) -> Result<String, InquireError> {
+        Err(InquireError::NotTTY)
+    }
+}
+
+/// A menu the user cancels with `Ctrl+C` is a request to get past it, so it
+/// escalates.
+#[test]
+fn streaming_menu_cancelled_by_user_escalates() {
+    // An empty mock queue reports `OperationCanceled`.
+    let handler = handler(MockPromptBackend::new());
+    let action = handler.handle_streaming_interrupt(
+        &streaming(StreamingInterruptAction::Prompt),
+        &make_printer(),
+        true,
+    );
+    assert_eq!(action, InterruptAction::Escalate);
+}
+
+/// A menu that cannot run answered nothing, so it must not escalate: doing so
+/// would end the run on a decision the user never made.
+/// The press stays on the router's escalation ladder, which is what gets the
+/// user out on the next one.
+#[test]
+fn streaming_menu_that_cannot_run_does_not_escalate() {
+    let handler = InterruptHandler::with_backend(UnavailableBackend, None, ReplyEditMode::Emacs);
+    let action = handler.handle_streaming_interrupt(
+        &streaming(StreamingInterruptAction::Prompt),
+        &make_printer(),
+        true,
+    );
+    assert_eq!(action, InterruptAction::PromptFailed);
+}
+
+#[test]
+fn tool_menu_that_cannot_run_does_not_escalate() {
+    let handler = InterruptHandler::with_backend(UnavailableBackend, None, ReplyEditMode::Emacs);
+    let action = handler.handle_tool_interrupt(&tool(ToolInterruptAction::Prompt), &make_printer());
+    assert_eq!(action, InterruptAction::PromptFailed);
 }
 
 #[test]

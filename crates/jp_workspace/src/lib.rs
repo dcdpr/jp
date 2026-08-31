@@ -3,22 +3,34 @@
 //! This crate provides data models and storage operations for the JP workspace,
 //! a CLI tool for managing LLM-assisted code conversations with fine-grained
 //! control over context and behavior.
+//!
+//! Session identity, the per-session active-workspace store, and the roots
+//! registry (RFD 087) live in [`session`], [`session_store`], and [`roots`].
+//! The session store is user-global (above any checkout); the roots registry
+//! maps a workspace ID to its live checkouts on disk.
 
 mod conversation_lock;
 mod error;
 mod handle;
 mod id;
+pub mod roots;
 mod sanitize;
 pub mod session;
 pub(crate) mod session_mapping;
+pub mod session_store;
 mod state;
 
 use std::{
+    collections::HashMap,
     env,
-    sync::{Arc, OnceLock},
+    sync::{
+        Arc, OnceLock,
+        atomic::{self, AtomicBool},
+    },
 };
 
 use camino::{FromPathBufError, Utf8Path, Utf8PathBuf};
+use conversation_lock::PersistFailures;
 pub use conversation_lock::{ConversationLock, ConversationMut, LockResult};
 pub use error::Error;
 use error::Result;
@@ -28,8 +40,8 @@ use jp_config::AppConfig;
 use jp_conversation::{Conversation, ConversationId, ConversationStream};
 use jp_storage::{
     backend::{
-        ConversationFilter, ConversationIndexEntry, InMemoryStorageBackend, LoadBackend,
-        LockBackend, NullPersistBackend, PersistBackend, Projection, SessionBackend,
+        ConversationFilter, ConversationIndexEntry, FsStorageBackend, InMemoryStorageBackend,
+        LoadBackend, LockBackend, NullPersistBackend, PersistBackend, Projection, SessionBackend,
         StoragePresence,
     },
     lock::LockInfo,
@@ -42,6 +54,20 @@ use tracing::{debug, trace, warn};
 use crate::session::Session;
 
 const APPLICATION: &str = "jp";
+
+/// The directory a workspace stores its data in, relative to the workspace
+/// root.
+pub const DEFAULT_STORAGE_DIR: &str = ".jp";
+
+/// Whether opening a workspace may write to disk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Access {
+    /// Materialize user-local storage and repair the stored workspace ID.
+    ReadWrite,
+
+    /// Wire only what already exists, and write nothing.
+    ReadOnly,
+}
 
 #[derive(Debug)]
 pub struct Workspace {
@@ -63,8 +89,18 @@ pub struct Workspace {
     /// Backend for session-to-conversation mapping storage.
     sessions: Arc<dyn SessionBackend>,
 
+    /// The filesystem backend, for workspaces opened from disk.
+    fs: Option<Arc<FsStorageBackend>>,
+
     /// The in-memory state of the workspace.
     state: State,
+
+    /// Drop-time persistence failures recorded by conversation scopes.
+    ///
+    /// Lives here rather than on a [`ConversationLock`] so a failure recorded
+    /// while a cancelled future unwinds is still reachable after the lock is
+    /// gone.
+    persist_failures: PersistFailures,
 }
 
 impl Workspace {
@@ -87,23 +123,25 @@ impl Workspace {
         }
     }
 
-    /// Creates a new workspace with the given root directory.
+    /// Creates a workspace with the given root directory, backed by memory.
     ///
-    /// The workspace starts with in-memory backends (no filesystem
-    /// persistence).
-    /// Call [`with_backend`] to wire in a storage backend.
+    /// Nothing is read from or written to disk.
+    /// Call [`with_backend`] to wire in a storage backend, or [`open`] to open
+    /// a workspace that already exists on disk.
     ///
+    /// [`open`]: Self::open
     /// [`with_backend`]: Self::with_backend
-    pub fn new(root: impl Into<Utf8PathBuf>) -> Self {
-        Self::new_with_id(root, id::Id::new())
+    pub fn in_memory(root: impl Into<Utf8PathBuf>) -> Self {
+        Self::in_memory_with_id(root, id::Id::new())
     }
 
-    /// Creates a new workspace with the given root directory and ID.
+    /// Creates a workspace with the given root directory and ID, backed by
+    /// memory.
     ///
     /// All four backend slots are wired to a single shared
     /// [`InMemoryStorageBackend`], so data written through one trait is visible
     /// through the others.
-    pub fn new_with_id(root: impl Into<Utf8PathBuf>, id: id::Id) -> Self {
+    pub fn in_memory_with_id(root: impl Into<Utf8PathBuf>, id: id::Id) -> Self {
         let root = root.into();
         trace!(root = %root, id = %id, "Initializing Workspace.");
 
@@ -115,14 +153,111 @@ impl Workspace {
             loader: backend.clone(),
             locker: backend.clone(),
             sessions: backend,
+            fs: None,
             state: State::default(),
+            persist_failures: PersistFailures::default(),
         }
+    }
+
+    /// Open the workspace containing `dir`, wiring filesystem and user-local
+    /// storage.
+    ///
+    /// Walks up from `dir` until a [`DEFAULT_STORAGE_DIR`] directory is found,
+    /// and wires both that store and the workspace's user-local silo under
+    /// [`user_data_dir`].
+    /// Conversations live in either root, so both are needed to see all of
+    /// them.
+    ///
+    /// The conversation index is not populated, so [`conversations`] is empty
+    /// until [`load_conversation_index`] is called.
+    /// Call [`sanitize`] before that: it repairs the backing store, and
+    /// indexing an unrepaired store carries the damage into the index.
+    ///
+    /// Opening writes to disk: the user-local silo is created if missing, its
+    /// `storage` symlink is repointed at this workspace root, and the workspace
+    /// ID is persisted back to the store.
+    /// A store whose ID file is missing, unreadable, or malformed is assigned a
+    /// fresh ID.
+    ///
+    /// Returns [`Error::WorkspaceNotFound`] when neither `dir` nor any of its
+    /// parents holds a store.
+    ///
+    /// [`conversations`]: Self::conversations
+    /// [`load_conversation_index`]: Self::load_conversation_index
+    /// [`sanitize`]: Self::sanitize
+    pub fn open(dir: &Utf8Path) -> Result<Self> {
+        Self::open_inner(dir, DEFAULT_STORAGE_DIR, Access::ReadWrite)
+    }
+
+    /// Open the workspace containing `dir` without writing anything to disk.
+    ///
+    /// User-local storage is wired only when its directory already exists, and
+    /// the stored workspace ID is left untouched, so reading a workspace cannot
+    /// mint state for it.
+    /// Use this to report on a workspace, and [`open`] for the one a command
+    /// runs against.
+    ///
+    /// [`open`]: Self::open
+    pub fn open_read_only(dir: &Utf8Path) -> Result<Self> {
+        Self::open_inner(dir, DEFAULT_STORAGE_DIR, Access::ReadOnly)
+    }
+
+    fn open_inner(dir: &Utf8Path, storage_dir: &str, access: Access) -> Result<Self> {
+        trace!(dir = %dir, storage_dir, ?access, "Finding workspace.");
+        let root = Self::find_root(dir.to_path_buf(), storage_dir)
+            .ok_or_else(|| Error::WorkspaceNotFound(dir.to_path_buf()))?;
+        trace!(root = %root, "Found workspace root.");
+
+        let storage = root.join(storage_dir);
+        trace!(storage = %storage, "Initializing workspace storage.");
+
+        let id = Id::load(&storage)
+            .transpose()
+            .ok()
+            .flatten()
+            .unwrap_or_default();
+        trace!(%id, "Loaded unique workspace ID.");
+
+        let user_root = user_data_dir()?.join("workspace");
+        // The workspace directory name slugs a freshly created user-workspace
+        // directory so users can recognize it; an existing one is reused by ID
+        // regardless of its slug.
+        let slug = root.file_name();
+        let backend = FsStorageBackend::new(&storage)?;
+        let backend = match access {
+            Access::ReadWrite => backend.with_user_storage(&user_root, slug, id.to_string())?,
+            Access::ReadOnly => {
+                backend.with_existing_user_storage(&user_root, slug, &id.to_string())
+            }
+        };
+        let fs = Arc::new(backend);
+
+        let mut workspace = Self::in_memory_with_id(root, id).with_backend(fs.clone());
+        workspace.fs = Some(fs);
+
+        if access == Access::ReadWrite {
+            workspace.id().store(&storage)?;
+        }
+
+        Ok(workspace)
     }
 
     /// Get the root path of the workspace.
     #[must_use]
     pub fn root(&self) -> &Utf8Path {
         &self.root
+    }
+
+    /// Take the drop-time persist failure recorded by any conversation scope.
+    ///
+    /// The drain of last resort: a scope that dropped while a cancelled future
+    /// unwound recorded its failure here, and the lock it came from is already
+    /// gone.
+    /// Yields each failure once, so draining here after a
+    /// [`ConversationLock::take_persist_failure`] does not report it twice.
+    #[must_use]
+    pub fn take_persist_failure(&self) -> Option<Error> {
+        self.persist_failures.lock().take()
     }
 
     /// Set the persist backend.
@@ -151,6 +286,31 @@ impl Workspace {
     pub fn with_sessions(mut self, sessions: Arc<dyn SessionBackend>) -> Self {
         self.sessions = sessions;
         self
+    }
+
+    /// The filesystem storage backend, for workspaces opened from disk.
+    ///
+    /// `None` for workspaces built with [`in_memory`], including those that had
+    /// a filesystem backend wired in through [`with_backend`].
+    ///
+    /// [`in_memory`]: Self::in_memory
+    /// [`with_backend`]: Self::with_backend
+    #[must_use]
+    pub fn fs_storage(&self) -> Option<&Arc<FsStorageBackend>> {
+        self.fs.as_ref()
+    }
+
+    /// The backend session-to-conversation mappings are read from and written
+    /// to.
+    ///
+    /// Set by [`with_sessions`] or [`with_backend`]; an in-memory workspace
+    /// keeps its mappings for the lifetime of the backend.
+    ///
+    /// [`with_backend`]: Self::with_backend
+    /// [`with_sessions`]: Self::with_sessions
+    #[must_use]
+    pub fn sessions(&self) -> &Arc<dyn SessionBackend> {
+        &self.sessions
     }
 
     /// Set all four backends from a single implementation.
@@ -191,31 +351,100 @@ impl Workspace {
     /// [`sanitize`]: Self::sanitize
     pub fn load_conversation_index(&mut self) {
         trace!("Loading conversation index.");
+
+        // Conversations created here and not yet written, carried across the
+        // reload.
+        //
+        // A scan reports what a store holds, so an unwritten conversation is
+        // absent from it, the same way a deleted one is. Replacing the index with
+        // the scan alone therefore forgets conversations that were only just
+        // created, which is how one could be started and then immediately not
+        // found.
+        //
+        // Keeping them is safe because the distinction is decidable, but only by
+        // asking whether *we* have written it: a conversation that was written and
+        // then deleted by another process is also absent, and that one has to be
+        // forgotten. The flag is set by whatever wrote it, under the lock.
+        //
+        // Read before the scan, because a lock on another thread can write in
+        // between: a conversation that becomes written after this point is found
+        // by the scan below, while one that becomes written after the scan is
+        // carried across and corrected by the next reload. Reading afterwards
+        // instead leaves a write that lands between the two invisible to both.
+        let candidates: Vec<ConversationId> = self
+            .state
+            .written
+            .iter()
+            .filter(|(_, written)| !written.load(atomic::Ordering::Relaxed))
+            .map(|(id, _)| *id)
+            .collect();
+
         let entries = self
             .loader
             .load_conversation_index(ConversationFilter::default());
 
         debug!(count = entries.len(), "Loaded conversation index.");
 
-        let conversations = entries
+        let unwritten: Vec<ConversationId> = candidates
+            .into_iter()
+            .filter(|id| !entries.iter().any(|entry| entry.id == *id))
+            .collect();
+
+        let mut conversations: HashMap<_, _> = entries
             .iter()
             .map(|entry| (entry.id, OnceLock::new()))
             .collect();
 
-        let events = entries
+        let mut events: HashMap<_, _> = entries
             .iter()
             .map(|entry| (entry.id, OnceLock::new()))
             .collect();
 
-        let presence = entries
+        let mut presence: HashMap<_, _> = entries
             .iter()
             .map(|entry| (entry.id, entry.presence))
             .collect();
+
+        // Carried across for everything the scan found, so a conversation that
+        // has been written keeps saying so, and a lock still holding one of these
+        // keeps writing to the same cell.
+        let mut written: HashMap<_, _> = entries
+            .iter()
+            .map(|entry| {
+                let flag = self
+                    .state
+                    .written
+                    .remove(&entry.id)
+                    .unwrap_or_else(|| Arc::new(AtomicBool::new(true)));
+
+                // Found by the scan, so it is on disk whatever this process did.
+                flag.store(true, atomic::Ordering::Relaxed);
+                (entry.id, flag)
+            })
+            .collect();
+
+        // Moved rather than re-inserted: the loaded metadata and events are the
+        // only copy, and re-scanning cannot produce them.
+        for id in unwritten {
+            if let Some(entry) = self.state.conversations.remove(&id) {
+                conversations.insert(id, entry);
+            }
+            if let Some(entry) = self.state.events.remove(&id) {
+                events.insert(id, entry);
+            }
+            if let Some(entry) = self.state.presence.remove(&id) {
+                presence.insert(id, entry);
+            }
+            if let Some(entry) = self.state.written.remove(&id) {
+                written.insert(id, entry);
+            }
+        }
 
         self.state = State {
             conversations,
             events,
             presence,
+            written,
         };
     }
 
@@ -349,6 +578,13 @@ impl Workspace {
             .presence
             .insert(id, StoragePresence::from(projection));
 
+        // Nothing has been written yet, and a reload has to be able to tell that
+        // apart from a conversation another process has deleted: both are absent
+        // from a scan. Whatever takes a lock on this sets the flag when it writes.
+        self.state
+            .written
+            .insert(id, Arc::new(AtomicBool::new(false)));
+
         id
     }
 
@@ -453,7 +689,23 @@ impl Workspace {
             Arc::clone(&self.persist),
             lock_guard,
             projection,
+            Arc::clone(&self.persist_failures),
+            self.written_flag(&id),
         ))
+    }
+
+    /// The cell recording whether a conversation has ever been written.
+    ///
+    /// Handed to every lock, which sets it on a successful write.
+    /// An id with no cell is one the index does not hold, which a caller cannot
+    /// have a handle for.
+    /// The fallback reads as written, so an id that does reach here is dropped
+    /// by the next reload rather than kept for the life of the process.
+    fn written_flag(&self, id: &ConversationId) -> Arc<AtomicBool> {
+        self.state
+            .written
+            .get(id)
+            .map_or_else(|| Arc::new(AtomicBool::new(true)), Arc::clone)
     }
 
     /// Resolve the write projection for a conversation from its stored
@@ -463,6 +715,26 @@ impl Workspace {
     fn lock_projection(&self, id: &ConversationId) -> Projection {
         self.conversation_presence(id)
             .map_or(Projection::Projected, Projection::from)
+    }
+
+    /// The write projection for a lock being acquired on `id`.
+    ///
+    /// Read from the store rather than the workspace index: another process can
+    /// change a conversation's locality (`jp conversation edit --local`) while
+    /// this one waits for the flock, and the projection decides whether the
+    /// next write creates or drops the workspace copy.
+    /// A conversation the store does not have falls back to its recorded
+    /// presence, which for an unpersisted conversation is the intent it was
+    /// created with.
+    fn acquired_lock_projection(&self, id: &ConversationId) -> Projection {
+        self.loader
+            .load_conversation_index(ConversationFilter::default())
+            .into_iter()
+            .find(|entry| entry.id == *id)
+            .map_or_else(
+                || self.lock_projection(id),
+                |entry| Projection::from(entry.presence),
+            )
     }
 
     /// Returns the globally unique ID of the workspace.
@@ -535,8 +807,22 @@ impl Workspace {
     /// `Ok(LockResult::AlreadyLocked(handle))` if another process holds it,
     /// giving the handle back so the caller can retry.
     ///
+    /// An acquired lock reads the conversation from the backing store, so it
+    /// reflects whatever the previous lock holder wrote rather than a copy this
+    /// process cached earlier.
+    /// A value read through [`events`] or [`metadata`] before the lock was held
+    /// is superseded by that read, and the guard it returned must be dropped
+    /// first: the refresh takes the write side of the same lock.
+    ///
+    /// The write projection is resolved from the store at acquisition too, so a
+    /// locality change made while this process waited decides which roots the
+    /// next write reaches.
+    ///
     /// Returns an error if conversation data cannot be loaded from the backing
     /// store (e.g. the user deleted a required file).
+    ///
+    /// [`events`]: Self::events
+    /// [`metadata`]: Self::metadata
     pub fn lock_conversation(
         &self,
         handle: ConversationHandle,
@@ -549,12 +835,7 @@ impl Workspace {
             return Ok(LockResult::AlreadyLocked(handle));
         };
 
-        if let Some(cell) = self.state.conversations.get(&id) {
-            maybe_init_conversation(&*self.loader, (&id, cell));
-        }
-        if let Some(cell) = self.state.events.get(&id) {
-            maybe_init_events(&*self.loader, (&id, cell));
-        }
+        self.sync_conversation(&id)?;
 
         let metadata = self
             .state
@@ -572,7 +853,7 @@ impl Workspace {
             .ok_or_else(|| Error::not_found("Conversation events", &id))?
             .clone();
 
-        let projection = self.lock_projection(&id);
+        let projection = self.acquired_lock_projection(&id);
         Ok(LockResult::Acquired(ConversationLock::new(
             handle,
             metadata,
@@ -580,6 +861,8 @@ impl Workspace {
             Arc::clone(&self.persist),
             lock_guard,
             projection,
+            Arc::clone(&self.persist_failures),
+            self.written_flag(&id),
         )))
     }
 
@@ -610,6 +893,7 @@ impl Workspace {
         self.state.conversations.remove(&id);
         self.state.events.remove(&id);
         self.state.presence.remove(&id);
+        self.state.written.remove(&id);
     }
 
     /// Restore a conversation from the archive.
@@ -660,6 +944,11 @@ impl Workspace {
 
         self.state.presence.insert(*id, presence);
 
+        // On disk, in the live partition: the move is what put it there.
+        self.state
+            .written
+            .insert(*id, Arc::new(AtomicBool::new(true)));
+
         Ok(handle)
     }
 
@@ -701,6 +990,49 @@ impl Workspace {
         self.state.conversations.remove(&id);
         self.state.events.remove(&id);
         self.state.presence.remove(&id);
+        self.state.written.remove(&id);
+    }
+
+    /// Bring a conversation's in-memory copy in line with the backing store.
+    ///
+    /// Data cached before the flock was held can predate a write by whoever
+    /// held it, and a persist writes the whole conversation: without this,
+    /// mutating through a lock acquired after a wait would drop every event the
+    /// other writer appended.
+    /// The cached `Arc`s are updated in place, so scopes already sharing them
+    /// observe the refreshed data.
+    ///
+    /// A conversation the store does not have keeps its cached copy, covering
+    /// an in-memory conversation that was never persisted.
+    /// This does not distinguish that case from a conversation another process
+    /// removed or archived while this one waited, which the next write
+    /// recreates.
+    /// Any other load failure is returned rather than leaving a stale copy in
+    /// place for the next write to persist.
+    fn sync_conversation(&self, id: &ConversationId) -> Result<()> {
+        if let Some(cell) = self.state.conversations.get(id) {
+            match cell.get() {
+                None => maybe_init_conversation(&*self.loader, (id, cell)),
+                Some(arc) => match self.loader.load_conversation_metadata(id) {
+                    Ok(metadata) => *arc.write() = metadata,
+                    Err(error) if error.kind().is_missing() => {}
+                    Err(error) => return Err(error.into()),
+                },
+            }
+        }
+
+        if let Some(cell) = self.state.events.get(id) {
+            match cell.get() {
+                None => maybe_init_events(&*self.loader, (id, cell)),
+                Some(arc) => match self.loader.load_conversation_stream(id) {
+                    Ok(stream) => *arc.write() = stream,
+                    Err(error) if error.kind().is_missing() => {}
+                    Err(error) => return Err(error.into()),
+                },
+            }
+        }
+
+        Ok(())
     }
 
     /// Read the lock holder info for a conversation.
@@ -776,6 +1108,8 @@ impl Workspace {
             Arc::clone(&self.persist),
             Box::new(NoopLockGuard),
             projection,
+            Arc::clone(&self.persist_failures),
+            self.written_flag(&id),
         )
     }
 }
@@ -788,9 +1122,12 @@ fn maybe_init_conversation(
         return;
     }
 
-    let Ok(meta) = loader.load_conversation_metadata(id) else {
-        warn!(%id, "Failed to load conversation metadata. Skipping.");
-        return;
+    let meta = match loader.load_conversation_metadata(id) {
+        Ok(meta) => meta,
+        Err(error) => {
+            warn!(%id, %error, cause = %error.kind(), "Failed to load conversation metadata. Skipping.");
+            return;
+        }
     };
 
     if let Err(error) = cell.set(Arc::new(RwLock::new(meta))) {
@@ -806,9 +1143,12 @@ fn maybe_init_events(
         return;
     }
 
-    let Ok(stream) = loader.load_conversation_stream(id) else {
-        warn!(%id, "Failed to load conversation events. Skipping.");
-        return;
+    let stream = match loader.load_conversation_stream(id) {
+        Ok(stream) => stream,
+        Err(error) => {
+            warn!(%id, %error, cause = %error.kind(), "Failed to load conversation events. Skipping.");
+            return;
+        }
     };
 
     if let Err(error) = cell.set(Arc::new(RwLock::new(stream))) {

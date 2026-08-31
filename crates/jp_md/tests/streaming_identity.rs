@@ -88,8 +88,8 @@ fn indent_lines(content: &str, indent: usize) -> String {
 /// for these documents.
 #[test]
 fn fixtures_stream_identically_to_non_streaming() {
-    let glob_pattern = format!("{}/tests/fixtures/*.md", env!("CARGO_MANIFEST_DIR"));
-    let paths: Vec<_> = glob::glob(&glob_pattern)
+    let glob_pattern = "tests/fixtures/*.md";
+    let paths: Vec<_> = glob::glob(glob_pattern)
         .expect("valid glob pattern")
         .filter_map(Result::ok)
         .collect();

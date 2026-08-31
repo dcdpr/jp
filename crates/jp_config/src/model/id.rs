@@ -58,7 +58,17 @@ impl AssignKeyValue for PartialModelIdOrAliasConfig {
 impl PartialConfigDelta for PartialModelIdOrAliasConfig {
     fn delta(&self, next: Self) -> Self {
         match (self, next) {
-            (Self::Id(prev), Self::Id(next)) => Self::Id(prev.delta(next)),
+            // A model id is one value spelled across two fields, so a changed id
+            // is recorded whole. Keeping only the field that differs leaves a
+            // half id, which takes its missing half from whatever model the
+            // layer below happens to name.
+            (Self::Id(prev), Self::Id(next)) => {
+                if prev.delta(next.clone()).is_empty() {
+                    Self::empty()
+                } else {
+                    Self::Id(next)
+                }
+            }
             (Self::Alias(prev), Self::Alias(next)) if prev == &next => Self::empty(),
             (_, next) => next,
         }
@@ -69,6 +79,10 @@ impl FillDefaults for PartialModelIdOrAliasConfig {
     fn fill_from(self, defaults: Self) -> Self {
         match (self, defaults) {
             (Self::Id(s), Self::Id(d)) => Self::Id(s.fill_from(d)),
+            // A value carrying no information takes the default whole, even
+            // across variants: an unset id filling from a config that names its
+            // model by alias has to end up with that alias.
+            (s, d) if s.is_empty() => d,
             (s, _) => s,
         }
     }
@@ -205,6 +219,22 @@ impl PartialModelIdOrAliasConfig {
         match self {
             Self::Id(id) => Ok(id.clone()),
             Self::Alias(alias) => resolve_partial_alias_chain(alias, aliases),
+        }
+    }
+
+    /// Replace an `Alias` variant with the partial model ID it names, following
+    /// the chain through a partial alias map.
+    ///
+    /// A no-op for an `Id`, and for an alias the map cannot resolve — an
+    /// unresolvable alias is left in place to be reported when the config is
+    /// finalized.
+    pub fn finalize_in_place(&mut self, aliases: &IndexMap<String, Self>) {
+        let Self::Alias(alias) = self else {
+            return;
+        };
+
+        if let Ok(resolved) = resolve_partial_alias_chain(alias, aliases) {
+            *self = Self::Id(resolved);
         }
     }
 

@@ -11,18 +11,20 @@
 //! action, previewing the document they are about to write in the shape it
 //! takes on disk.
 
-use std::{fs, path::MAIN_SEPARATOR};
+use std::{fs, io, path::MAIN_SEPARATOR};
 
-// The leading `::` picks the crate over this module, which shares its name.
 use ::ticket::{Comment, Kind, ParseError, Status, Ticket, TicketId, parse, render, store};
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{Local, SecondsFormat, Utc};
-use jp_md::format::Formatter;
+use comfort::{
+    DEFAULT_MAX_WIDTH,
+    format::{FormatOptions, format_markdown_with},
+};
 use serde_json::Value;
 
 use crate::{
     Context, Tool,
-    util::{ToolResult, error, unknown_tool},
+    util::{ToolResult, error, preview, unknown_tool},
 };
 
 /// The handle tickets and comments written by the assistant carry.
@@ -134,6 +136,7 @@ fn create(
         implements,
         &body.unwrap_or_default(),
     )?;
+    reflow(&path)?;
 
     Ok(format!("Created {id} at {}", relative(root, &path)).into())
 }
@@ -160,9 +163,13 @@ fn preview_create(
 }
 
 fn comment(root: &Utf8Path, id: TicketId, re: Option<usize>, body: &str) -> ToolResult {
+    let tickets = dir(root);
     let date = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
-    match store::append_comment(&dir(root), id, HANDLE, &date, re, body.trim()) {
-        Ok(position) => Ok(format!("Added {id}#{position}").into()),
+    match store::append_comment(&tickets, id, HANDLE, &date, re, body.trim()) {
+        Ok(position) => {
+            reflow(&store::locate_ticket(&tickets, id)?)?;
+            Ok(format!("Added {id}#{position}").into())
+        }
         Err(store::Error::NoSuchTicket(_) | store::Error::NoSuchComment { .. }) => error(format!(
             "No {id}, or no comment #{} on it.",
             re.unwrap_or(0)
@@ -238,7 +245,13 @@ fn show(root: &Utf8Path, id: TicketId) -> ToolResult {
     };
 
     match entry.ticket {
-        Ok(ticket) => Ok(render_ticket(entry.id, &ticket, &relative(root, &entry.path)).into()),
+        Ok(ticket) => {
+            let rendered = render_ticket(entry.id, &ticket, &relative(root, &entry.path));
+            // The terminal keys syntax highlighting off a leading code fence,
+            // so the fence is what gets a ticket displayed as markdown rather
+            // than as a flat wall of text.
+            Ok(format!("```markdown\n{}\n```", rendered.trim_end()).into())
+        }
         Err(problem) => error(format!("{id} is not a well-formed ticket: {problem}")),
     }
 }
@@ -267,6 +280,28 @@ fn dir(root: &Utf8Path) -> Utf8PathBuf {
     root.join(store::DEFAULT_DIR)
 }
 
+/// Lay out a markdown file the way `comfort` does.
+///
+/// A body arrives as the model wrote it — one long line per paragraph — and
+/// the repository's markdown carries semantic line breaks.
+/// The options mirror the `fmt-markdown-ci` recipe in the justfile, so a ticket
+/// written here is one CI accepts as it stands.
+fn reflow(path: &Utf8Path) -> io::Result<()> {
+    let source = fs::read_to_string(path)?;
+    let formatted = format_markdown_with(&source, &FormatOptions {
+        max_width: DEFAULT_MAX_WIDTH,
+        canonical: true,
+        reference_links: true,
+        prune_reference_links: true,
+    });
+
+    if formatted == source {
+        return Ok(());
+    }
+
+    fs::write(path, formatted)
+}
+
 /// A path the model can hand straight to `fs_read_file`.
 ///
 /// Separators are always `/`, on every platform: the path travels through tool
@@ -277,28 +312,6 @@ fn relative(root: &Utf8Path, path: &Utf8Path) -> String {
         .unwrap_or(path)
         .as_str()
         .replace(MAIN_SEPARATOR, "/")
-}
-
-/// Style a document for the terminal as a tool-call preview.
-///
-/// The document is quoted first, so the transcript carries a marker down the
-/// whole preview and the reader can see where the ticket ends and the
-/// conversation resumes.
-/// Falls back to the unstyled source if the markdown can't be formatted.
-fn preview(document: &str) -> String {
-    let mut quoted = String::with_capacity(document.len() * 2);
-    for line in document.lines() {
-        quoted.push('>');
-        if !line.is_empty() {
-            quoted.push(' ');
-            quoted.push_str(line);
-        }
-        quoted.push('\n');
-    }
-
-    Formatter::new()
-        .format_terminal(&quoted)
-        .unwrap_or_else(|_| quoted.clone())
 }
 
 /// Render the board as one line per ticket.

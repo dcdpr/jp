@@ -75,10 +75,15 @@ pub fn metadata_range(source: &str) -> Option<Range<usize>> {
 }
 
 /// Split a `- **Key**: Value` line into its key and value.
+///
+/// A leading `\` on the value is dropped: a markdown formatter escapes a value
+/// that opens with `#`, and `\#1` means the reference `#1`.
 #[must_use]
 pub fn meta_line(line: &str) -> Option<(&str, &str)> {
     let (key, value) = line.strip_prefix("- **")?.split_once("**:")?;
-    Some((key.trim(), value.trim()))
+    let value = value.trim();
+
+    Some((key.trim(), value.strip_prefix('\\').unwrap_or(value)))
 }
 
 /// A line of five or more dashes at column zero: the shape that opens a
