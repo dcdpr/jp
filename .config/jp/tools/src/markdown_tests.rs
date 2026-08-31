@@ -1,4 +1,4 @@
-use std::fs;
+use std::{fs, path};
 
 use camino_tempfile::{Utf8TempDir, tempdir};
 use jp_tool::{Action, Outcome};
@@ -34,6 +34,16 @@ fn paths(paths: &[&str]) -> OneOrMany<String> {
     OneOrMany::Many(paths.iter().map(|p| (*p).to_owned()).collect())
 }
 
+/// A `/`-spelled path, respelled the way the resolver hands it back on this
+/// platform.
+///
+/// A selected path reaches `comfort` as `ResolvedPath::relative`, which is a
+/// filesystem path and carries the platform separator: `docs/rfd` on unix,
+/// `docs\rfd` on Windows.
+fn native(spelling: &str) -> String {
+    spelling.replace('/', path::MAIN_SEPARATOR_STR)
+}
+
 #[test]
 fn no_paths_formats_the_whole_workspace() {
     let (_dir, ctx) = ctx();
@@ -50,7 +60,8 @@ fn no_paths_formats_the_whole_workspace() {
 #[test]
 fn explicit_paths_replace_the_workspace_scope() {
     let (_dir, ctx) = ctx();
-    let expected_args = [BASE_ARGS, &["docs/rfd/drafts/D01-knowledge-base.md"]].concat();
+    let selected = native("docs/rfd/drafts/D01-knowledge-base.md");
+    let expected_args = [BASE_ARGS, &[selected.as_str()]].concat();
     let runner = MockProcessRunner::builder()
         .expect("comfort")
         .args(&expected_args)
@@ -87,7 +98,8 @@ fn an_empty_path_list_is_refused_without_running_comfort() {
 fn a_directory_is_passed_through_for_comfort_to_walk() {
     let (dir, ctx) = ctx();
     fs::create_dir_all(dir.path().join("docs/rfd")).unwrap();
-    let expected_args = [BASE_ARGS, &["docs/rfd"]].concat();
+    let selected = native("docs/rfd");
+    let expected_args = [BASE_ARGS, &[selected.as_str()]].concat();
     let runner = MockProcessRunner::builder()
         .expect("comfort")
         .args(&expected_args)
