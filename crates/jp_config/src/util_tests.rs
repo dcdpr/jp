@@ -648,8 +648,12 @@ fn test_list_configs_in_missing_load_path() {
     assert!(list_configs_in_load_path(&tmp.path().join("absent")).is_empty());
 }
 
-/// Each segment is what `find_file_in_load_path` resolves back to the same
-/// file, which is the contract that makes a listed segment usable as `--cfg`.
+/// Each listed segment resolves back to its own file, which is the contract
+/// that makes a listed segment usable as `--cfg`.
+///
+/// A dotted stem is the case a substituting lookup gets wrong: `review.v2` has
+/// to find `review.v2.toml` rather than the `review.toml` next to it, and
+/// `model/gpt-4.1` has to resolve at all.
 #[test]
 fn test_listed_segments_resolve_back_to_their_files() {
     let tmp = tempdir().unwrap();
@@ -657,13 +661,48 @@ fn test_listed_segments_resolve_back_to_their_files() {
 
     write_config(&root.join("default.toml"), "");
     write_config(&root.join("skill/rfd.toml"), "");
+    write_config(&root.join("review.toml"), "");
+    write_config(&root.join("review.v2.toml"), "");
+    write_config(&root.join("model/gpt-4.1.toml"), "");
 
-    for segment in list_configs_in_load_path(&root) {
-        assert!(
-            find_file_in_load_path(&segment, &root).is_some(),
-            "`{segment}` was listed but does not resolve"
+    let want = [
+        ("default", "default.toml"),
+        ("model/gpt-4.1", "model/gpt-4.1.toml"),
+        ("review", "review.toml"),
+        ("review.v2", "review.v2.toml"),
+        ("skill/rfd", "skill/rfd.toml"),
+    ];
+
+    assert_eq!(
+        list_configs_in_load_path(&root),
+        want.iter()
+            .map(|(s, _)| (*s).to_owned())
+            .collect::<Vec<_>>()
+    );
+
+    for (segment, file) in want {
+        assert_eq!(
+            find_file_in_load_path(&segment, &root),
+            Some(root.join(file).into_std_path_buf()),
+            "`{segment}` did not resolve to `{file}`"
         );
     }
+}
+
+/// A name carrying an extension that matches no file still finds a same-named
+/// configuration, which is how `--cfg persona/dev.yaml` has always found
+/// `persona/dev.toml`.
+#[test]
+fn test_find_file_in_load_path_substitutes_an_unmatched_extension() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+
+    write_config(&root.join("persona/dev.toml"), "");
+
+    assert_eq!(
+        find_file_in_load_path(&"persona/dev.yaml", &root),
+        Some(root.join("persona/dev.toml").into_std_path_buf())
+    );
 }
 
 #[test]

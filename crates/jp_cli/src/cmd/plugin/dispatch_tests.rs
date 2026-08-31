@@ -2,7 +2,9 @@ use camino_tempfile::{Utf8TempDir, tempdir};
 use jp_conversation::{Conversation, ConversationId};
 use jp_plugin::message::{ExitMessage, ReadyMessage};
 use jp_storage::backend::{FsStorageBackend, PersistBackend as _};
+use relative_path::RelativePathBuf;
 use serde_json::json;
+use serial_test::serial;
 
 use super::*;
 use crate::editor::CUT_MARKER;
@@ -742,6 +744,46 @@ fn message_loop_refuses_a_plugin_needing_a_newer_protocol() {
         error.to_string().contains("Reinstall the two together"),
         "{error}"
     );
+}
+
+/// The user-global root is `<config dir>/config/`, the directory `--cfg` itself
+/// searches, so a listing built from its parent reports nothing.
+///
+/// `JP_GLOBAL_CONFIG_DIR` also has to reach this handler: it is honoured
+/// wherever else the roots are built.
+#[test]
+#[serial(env_vars)]
+fn list_configs_reports_the_user_global_root() {
+    let tmp = tempdir().unwrap();
+    let global_dir = tmp.path().join("global");
+
+    unsafe { std::env::set_var("JP_GLOBAL_CONFIG_DIR", global_dir.as_str()) };
+
+    let path = global_dir.join("config/profiles/skill/rfd.toml");
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    fs::write(&path, "").unwrap();
+
+    let mut config = AppConfig::new_test();
+    config.config_load_paths = vec![RelativePathBuf::from("profiles")];
+
+    let response = handle_list_configs(
+        &config,
+        &Workspace::in_memory(tmp.path().join("workspace")),
+        None,
+        None,
+    );
+
+    unsafe { std::env::remove_var("JP_GLOBAL_CONFIG_DIR") };
+
+    let HostToPlugin::Configs(configs) = response else {
+        panic!("expected a configs response, got {response:?}");
+    };
+
+    assert_eq!(configs.data, vec![ConfigEntry {
+        segment: "skill/rfd".to_owned(),
+        namespace: "skill".to_owned(),
+        name: "rfd".to_owned(),
+    }]);
 }
 
 #[test]

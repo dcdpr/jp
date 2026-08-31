@@ -20,7 +20,6 @@ use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::NamedUtf8TempFile;
 use jp_config::{
     AppConfig,
-    fs::user_global_config_dir,
     plugins::{
         PluginsConfig,
         command::{CommandPluginConfig, RunPolicy},
@@ -45,7 +44,6 @@ use jp_plugin::{
 use jp_printer::Printer;
 use jp_storage::backend::FsStorageBackend;
 use jp_workspace::{ConversationLock, LockResult, Workspace, session::Session};
-use relative_path::RelativePath;
 use serde_json::Value;
 use tracing::{debug, error, trace, warn};
 
@@ -53,6 +51,7 @@ use super::registry;
 use crate::{
     Ctx, cmd,
     cmd::query::interrupt::reply_edit_mode,
+    config_pipeline::config_search_roots,
     editor::{draft_query_text, draft_revision, report_editor_failure},
 };
 
@@ -1047,17 +1046,7 @@ fn handle_list_configs(
     fs_backend: Option<&FsStorageBackend>,
     req_id: Option<String>,
 ) -> HostToPlugin {
-    let mut roots: Vec<Utf8PathBuf> = Vec::new();
-
-    if let Some(dir) = user_global_config_dir(None) {
-        roots.push(dir);
-    }
-    roots.push(workspace.root().to_owned());
-    if let Some(path) =
-        fs_backend.and_then(|fs| fs.user_storage_with_path(RelativePath::new("config")))
-    {
-        roots.push(path);
-    }
+    let roots = config_search_roots(Some(workspace), fs_backend);
 
     let mut segments = BTreeSet::new();
     for root in &roots {
