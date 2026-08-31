@@ -98,10 +98,10 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
     // Flags to append to `RUSTFLAGS`, set via `options.rustflags`. Malformed
     // values are refused for the same reason as `root`: silently ignoring them
     // would compile with flags the caller believes are in effect.
-    let rustflags = match t.options.get("rustflags") {
-        None | Some(Value::Null) => rustflags(&[]),
+    let configured_flags = match t.options.get("rustflags") {
+        None | Some(Value::Null) => None,
         Some(value) => match serde_json::from_value::<OneOrMany<String>>(value.clone()) {
-            Ok(flags) => rustflags(&flags.into_vec()),
+            Ok(flags) => Some(flags.into_vec()),
             Err(_) => {
                 return error(format!(
                     "The `rustflags` tool option must be a string or an array of strings, got \
@@ -110,6 +110,18 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
             }
         },
     };
+
+    // `format` and `update` never invoke rustc, and `install_tools` builds
+    // through a recipe that owns its flags. Accepting the option for them would
+    // report success over a build the flags never reached — for `install_tools`
+    // that build installs a binary, which then serves later calls.
+    if configured_flags.is_some() && !matches!(subcommand, "check" | "expand" | "test") {
+        return error(format!(
+            "The `rustflags` tool option has no effect on `cargo_{subcommand}`."
+        ));
+    }
+
+    let rustflags = rustflags(configured_flags.as_deref().unwrap_or_default());
 
     let started = Instant::now();
     let outcome = match subcommand {
@@ -278,8 +290,10 @@ const BASE_RUSTFLAGS: &str = "-W warnings";
 /// wholesale, so a workspace that relies on those (a linker choice, extra `-Z`
 /// flags) has to restate them through `options.rustflags`.
 ///
-/// Every compiling cargo tool sets the variable, so they agree on the flag set
-/// and a shared target directory stays warm when alternating between them.
+/// `check`, `expand` and `test` all set the variable, so they agree on the flag
+/// set and a shared target directory stays warm when alternating between them.
+/// `format` gets the base value alone, which keeps CI's `-D warnings` off the
+/// tools it spawns.
 /// Configured flags come last, so they win over the base.
 fn rustflags(extra: &[String]) -> String {
     if extra.is_empty() {

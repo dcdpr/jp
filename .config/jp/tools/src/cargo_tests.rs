@@ -4,7 +4,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use camino_tempfile::tempdir;
 use jp_tool::{AccessPolicy, Action, Capability, Context, FsRule, Outcome};
 use pretty_assertions::assert_eq;
-use serde_json::{Map, json};
+use serde_json::{Map, Value, json};
 
 use super::{
     Tool, ensure_workspace_root, format_duration, note_duration, required_capabilities, run,
@@ -204,6 +204,101 @@ async fn a_profile_on_a_subcommand_that_cannot_use_it_fails_the_invocation() {
     assert!(
         message.contains("no effect on `cargo_install_tools`"),
         "got: {message}"
+    );
+}
+
+/// `cargo_install_tools` builds through `just install-tools`, whose recipe owns
+/// the install flags, and the arm passes no environment to it.
+/// Ignoring the option would install a binary built without the flags the
+/// caller asked for, report success, and serve every later tool call from it.
+#[tokio::test]
+async fn rustflags_on_a_subcommand_that_cannot_use_them_fails_the_invocation() {
+    let dir = tempdir().unwrap();
+    let ctx = Context {
+        root: dir.path().to_owned(),
+        action: Action::Run,
+        access: None,
+        workspace_id: "test".into(),
+        conversation_id: "test".into(),
+    };
+    let tool = Tool {
+        name: "cargo_install_tools".to_owned(),
+        arguments: Map::new(),
+        answers: Map::new(),
+        options: Map::from_iter([("rustflags".to_owned(), json!(["--cfg", "tokio_unstable"]))]),
+    };
+
+    // Returns before `just` is spawned, so no process fixture is needed.
+    let Outcome::Error { message, .. } = run(ctx, tool).await.unwrap() else {
+        panic!("expected an error outcome");
+    };
+
+    assert!(
+        message.contains("no effect on `cargo_install_tools`"),
+        "got: {message}"
+    );
+}
+
+/// `cargo fmt` runs rustfmt, not rustc, so a configured flag would be accepted
+/// and never reach a compiler.
+#[tokio::test]
+async fn rustflags_on_format_fails_the_invocation() {
+    let dir = tempdir().unwrap();
+    let ctx = Context {
+        root: dir.path().to_owned(),
+        action: Action::Run,
+        access: None,
+        workspace_id: "test".into(),
+        conversation_id: "test".into(),
+    };
+    let tool = Tool {
+        name: "cargo_format".to_owned(),
+        arguments: Map::new(),
+        answers: Map::new(),
+        options: Map::from_iter([("rustflags".to_owned(), json!("-Zthreads=0"))]),
+    };
+
+    let Outcome::Error { message, .. } = run(ctx, tool).await.unwrap() else {
+        panic!("expected an error outcome");
+    };
+
+    assert!(
+        message.contains("no effect on `cargo_format`"),
+        "got: {message}"
+    );
+}
+
+/// An explicit null is an absent value, not a configured one, so it must not
+/// trip the guard on a subcommand that cannot use flags.
+#[tokio::test]
+async fn a_null_rustflags_option_is_not_treated_as_configured() {
+    let dir = tempdir().unwrap();
+    let ctx = Context {
+        root: dir.path().to_owned(),
+        action: Action::Run,
+        access: None,
+        workspace_id: "test".into(),
+        conversation_id: "test".into(),
+    };
+    let tool = Tool {
+        name: "cargo_update".to_owned(),
+        arguments: Map::new(),
+        answers: Map::new(),
+        options: Map::from_iter([("rustflags".to_owned(), Value::Null)]),
+    };
+
+    // Reaches the `update` arm, which rejects the empty package list. Getting
+    // that far is the assertion: the guard did not fire.
+    let outcome = run(ctx, tool).await;
+
+    let message = match outcome {
+        Ok(Outcome::Error { message, .. }) => message,
+        Ok(other) => panic!("expected an error outcome, got: {other:?}"),
+        Err(error) => error.to_string(),
+    };
+    assert!(
+        !message.contains("no effect on"),
+        "a null option must not trip the guard, got: {message}"
     );
 }
 
