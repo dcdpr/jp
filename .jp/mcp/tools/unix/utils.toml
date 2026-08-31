@@ -17,6 +17,10 @@ and update file timestamps within the workspace. Use bare `touch <paths>`
 only — avoid `-t`/`-d`/`-r` timestamp flags, as backdated timestamps can
 silently corrupt build-system freshness tracking.
 
+`now` and `sleep` together are how you time something: read `now`, do the
+thing or `sleep` a known amount, read `now` again. `now` runs no subprocess
+and `sleep` is capped at 60 seconds.
+
 See the `util` parameter enum values for the list of available tools.
 """
 
@@ -101,6 +105,16 @@ crate whose artifacts are stale in a shared build cache):
 ```json
 {"util": "touch", "args": ["crates/jp_cli/src/main.rs"]}
 ```
+
+```json
+{"util": "now"}
+```
+
+Wait, to space two observations a known distance apart. Fractional seconds
+are accepted, and the ceiling is 60:
+```json
+{"util": "sleep", "args": ["0.25"]}
+```
 """
 
 [conversation.tools.unix_utils.style]
@@ -120,7 +134,9 @@ enum = [
     "head",
     "jq",
     "nl",
+    "now",
     "shasum",
+    "sleep",
     "sort",
     "tail",
     "touch",
