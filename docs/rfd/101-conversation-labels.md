@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-19
+- **Extended by**: [RFD 103]
 
 ## Summary
 
@@ -78,6 +79,13 @@ conversation's effective config.
 **Setting labels at creation.** `jp q` and `jp c fork` carry a `--label` flag,
 because their argument slot is already taken by the query text and the source
 conversation:
+
+> [!TIP]
+> [RFD 103] removes `--label` and `--reset-labels` from both commands, leaving
+> `jp c label` as the only way to mutate labels.
+> Under a set-valued model the flag has to mean either "add to" or "replace",
+> and nothing reads labels during a turn, so the two-command form loses nothing
+> but a keystroke.
 
 ```sh
 jp q --new --label=team=platform --label=branch=main
@@ -271,6 +279,12 @@ There is no back-propagation from metadata to config.
 
 ### Data model
 
+> [!TIP]
+> [RFD 103] replaces this with a set of values per key, so `crate=jp_config` and
+> `crate=jp_llm` can coexist.
+> Single-valued labels become the one-element case, and value order is
+> preserved.
+
 ```rust
 // jp_conversation::Conversation
 #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -309,8 +323,8 @@ pub struct ConversationConfig {
 
 #[serde(untagged)]
 pub enum LabelConfig {
-    /// Shorthand: `foo = "bar"` — a static label value with default
-    /// `apply_on` and `run`.
+    /// Shorthand: `foo = "bar"` — a static label value with default `apply_on`
+    /// and `run`.
     Static(String),
 
     /// Full form: `foo = { value, apply_on, run }`.
@@ -318,19 +332,22 @@ pub enum LabelConfig {
 }
 
 pub struct LabelObject {
-    /// The label's value: a literal string, or a command whose stdout
-    /// produces the value at resolution time.
+    /// The label's value: a literal string, or a command whose stdout produces
+    /// the value at resolution time.
     #[setting(default = "")]
     pub value: LabelValue,
 
-    /// When this label is auto-applied. Independent of CLI / alias use.
+    /// When this label is auto-applied.
+    /// Independent of CLI / alias use.
     #[setting(default)]
     pub apply_on: ApplyOn,
 
-    /// Confirmation policy for command-shaped values. Ignored for
-    /// `Static` values. Defaults to `Ask`. A label-specific enum;
-    /// conceptually similar to plugin `RunPolicy` (see [RFD 077]),
-    /// not shared with tool `RunMode` (which has different variants).
+    /// Confirmation policy for command-shaped values.
+    /// Ignored for `Static` values.
+    /// Defaults to `Ask`.
+    /// A label-specific enum; conceptually similar to plugin `RunPolicy` (see
+    /// [RFD 077]), not shared with tool `RunMode` (which has different
+    /// variants).
     #[setting(default)]
     pub run: LabelRunMode,
 }
@@ -347,14 +364,16 @@ pub enum LabelValue {
 
 #[derive(Default)]
 pub struct ApplyOn {
-    /// Resolve and apply when a new conversation is created
-    /// (`jp q --new`). Default: `true`.
+    /// Resolve and apply when a new conversation is created (`jp q --new`).
+    /// Default: `true`.
     #[setting(default = true)]
     pub new: bool,
 
-    /// Re-resolve and apply when an existing conversation is forked
-    /// (`jp c fork`). Default: `false`. When `false`, the source
-    /// conversation's existing value (if any) is inherited verbatim.
+    /// Re-resolve and apply when an existing conversation is forked (`jp c
+    /// fork`).
+    /// Default: `false`.
+    /// When `false`, the source conversation's existing value (if any) is
+    /// inherited verbatim.
     #[setting(default)]
     pub fork: bool,
 }
@@ -786,5 +805,6 @@ Mergeable independently of Phase 1, but depends on it.
 [RFD 031]: 031-durable-conversation-storage-with-workspace-projection.md
 [RFD 040]: 040-hidden-conversations-and-tool-context.md
 [RFD 077]: 077-plugin-configuration-and-trust-policy.md
+[RFD 103]: 103-multi-value-conversation-labels.md
 [cmd-cfg]: ../architecture/ubiquitous-language.md#commandconfig
 [tools]: ../../crates/jp_config/src/conversation/tool.rs

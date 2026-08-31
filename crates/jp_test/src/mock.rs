@@ -40,12 +40,13 @@ impl Snap {
 
 impl Vcr {
     /// Create a new recorder.
-    pub fn new(forward_to: impl Into<String>, manifest_dir: &'static str) -> Self {
-        let fixtures = PathBuf::from(manifest_dir).join("tests/fixtures");
-
+    ///
+    /// Cassettes and snapshots are read from the calling package's
+    /// `tests/fixtures` directory.
+    pub fn new(forward_to: impl Into<String>) -> Self {
         Self {
             forward_to: forward_to.into(),
-            fixtures,
+            fixtures: crate::fixtures_dir(),
             recording: env::var("RECORD").is_ok(),
         }
     }

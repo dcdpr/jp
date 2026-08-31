@@ -2,6 +2,8 @@
 //!
 //! Picks a fetch strategy (HTML, markdown, or auto) based on the URL and the
 //! user-configured `tool.options`, and delegates to the matching pipeline.
+//! A caller-supplied `headless` flag overrides the strategy and routes to the
+//! browser pipeline instead.
 
 use reqwest::header::{HeaderMap, HeaderValue, USER_AGENT};
 use serde_json::{Map, Value};
@@ -9,6 +11,7 @@ use url::Url;
 
 use crate::util::{ToolResult, error};
 
+mod browser;
 mod html;
 mod markdown;
 mod options;
@@ -18,10 +21,31 @@ use options::{Strategy, WebFetchOptions};
 /// Content size limit (in bytes) above which we try LLM summarization.
 pub(super) const SUMMARIZE_THRESHOLD: usize = 200_000;
 
+/// Refusal returned when `headless` is requested but not enabled.
+///
+/// The argument stays in the tool's declared schema either way, so the model
+/// can ask for it on any deployment; this says why it didn't happen and who can
+/// change that.
+const HEADLESS_DISABLED: &str = "Headless rendering is disabled for this deployment of \
+                                 `web_fetch`. Retry without `headless`, or ask the user to set \
+                                 `options.allow_headless = true` in the tool's configuration.";
+
+/// How JP identifies itself to web servers.
+///
+/// The browser pipeline overrides its own User-Agent with this value.
+/// Chrome's headless builds advertise a `HeadlessChrome/...` token, and sites
+/// behind bot protection answer that with a challenge page instead of the
+/// content: on `claude.ai` this one substitution is the difference between the
+/// article and an interstitial.
+pub(super) const USER_AGENT_VALUE: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) \
+                                           AppleWebKit/537.36 (KHTML, like Gecko) \
+                                           Chrome/152.0.0.0 Safari/537.36";
+
 pub(crate) async fn web_fetch(
     url: Url,
     list_sections: bool,
     sections: Option<Vec<String>>,
+    headless: bool,
     options: &Map<String, Value>,
 ) -> ToolResult {
     // GitHub issue and PR pages render comments client-side, so the HTML
@@ -40,6 +64,14 @@ pub(crate) async fn web_fetch(
         }
     };
 
+    if headless {
+        if !options.allows_headless() {
+            return error(HEADLESS_DISABLED);
+        }
+
+        return browser::fetch(&url, list_sections, sections).await;
+    }
+
     match options.pick_strategy(&url) {
         Strategy::Html => html::fetch(&url, list_sections, sections).await,
         Strategy::Markdown => markdown::fetch(&url, list_sections, sections).await,
@@ -56,13 +88,7 @@ pub(crate) async fn web_fetch(
 
 pub(super) fn http_client() -> reqwest::Client {
     let mut headers = HeaderMap::new();
-    headers.insert(
-        USER_AGENT,
-        HeaderValue::from_static(
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like \
-             Gecko) Chrome/137.0.0.0 Safari/537.36",
-        ),
-    );
+    headers.insert(USER_AGENT, HeaderValue::from_static(USER_AGENT_VALUE));
 
     reqwest::Client::builder()
         .default_headers(headers)

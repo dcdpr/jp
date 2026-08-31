@@ -6,18 +6,25 @@
 //! Tickets the assistant writes are attributed to `jp`, and comments are
 //! rendered with their 1-based positions so a reply can name the comment it
 //! answers.
+//!
+//! `ticket_create` and `ticket_comment` also answer the format-arguments
+//! action, previewing the document they are about to write in the shape it
+//! takes on disk.
 
-use std::path::MAIN_SEPARATOR;
+use std::{fs, io, path::MAIN_SEPARATOR};
 
-// The leading `::` picks the crate over this module, which shares its name.
-use ::ticket::{Kind, ParseError, Status, Ticket, TicketId, store};
+use ::ticket::{Comment, Kind, ParseError, Status, Ticket, TicketId, parse, render, store};
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{Local, SecondsFormat, Utc};
+use comfort::{
+    DEFAULT_MAX_WIDTH,
+    format::{FormatOptions, format_markdown_with},
+};
 use serde_json::Value;
 
 use crate::{
     Context, Tool,
-    util::{ToolResult, error, unknown_tool},
+    util::{ToolResult, error, preview, unknown_tool},
 };
 
 /// The handle tickets and comments written by the assistant carry.
@@ -35,13 +42,31 @@ pub fn run(ctx: Context, t: Tool) -> ToolResult {
             let Ok(kind) = t.req::<String>("kind")?.parse::<Kind>() else {
                 return error("`kind` must be one of: bug, feature, chore.");
             };
-            create(
-                root,
-                kind,
-                &t.req::<String>("title")?,
-                t.opt::<String>("implements")?.as_deref(),
-                t.opt("body")?,
-            )
+            let title = t.req::<String>("title")?;
+            let implements = t.opt::<String>("implements")?;
+            let body = t.opt::<String>("body")?;
+
+            // Checked before the action split so a preview fails too: an
+            // unattended formatter that errors fails the call ahead of the
+            // approval prompt, which tells the assistant to fix the arguments
+            // rather than asking the user about a call that cannot land.
+            if title.trim().is_empty() {
+                return error("`title` must not be empty.");
+            }
+
+            if ctx.action.is_format_arguments() {
+                let date = Local::now().format("%Y-%m-%d").to_string();
+                return Ok(preview_create(
+                    kind,
+                    &title,
+                    implements.as_deref(),
+                    body.as_deref(),
+                    &date,
+                )
+                .into());
+            }
+
+            create(root, kind, &title, implements.as_deref(), body)
         }
 
         "comment" => {
@@ -49,7 +74,19 @@ pub fn run(ctx: Context, t: Tool) -> ToolResult {
                 Ok(id) => id,
                 Err(message) => return error(message),
             };
-            comment(root, id, t.opt("re")?, &t.req::<String>("body")?)
+            let re = t.opt("re")?;
+            let body = t.req::<String>("body")?;
+
+            if body.trim().is_empty() {
+                return error("`body` must not be empty.");
+            }
+
+            if ctx.action.is_format_arguments() {
+                let date = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
+                return preview_comment(root, id, re, &body, &date);
+            }
+
+            comment(root, id, re, &body)
         }
 
         "close" => match id_arg(&t.req("id")?) {
@@ -89,10 +126,6 @@ fn create(
     implements: Option<&str>,
     body: Option<String>,
 ) -> ToolResult {
-    if title.trim().is_empty() {
-        return error("`title` must not be empty.");
-    }
-
     let date = Local::now().format("%Y-%m-%d").to_string();
     let (id, path) = store::create(
         &dir(root),
@@ -103,24 +136,92 @@ fn create(
         implements,
         &body.unwrap_or_default(),
     )?;
+    reflow(&path)?;
 
     Ok(format!("Created {id} at {}", relative(root, &path)).into())
 }
 
-fn comment(root: &Utf8Path, id: TicketId, re: Option<usize>, body: &str) -> ToolResult {
-    if body.trim().is_empty() {
-        return error("`body` must not be empty.");
-    }
+/// Render the ticket file `create` is about to write.
+///
+/// The id is left out because the file doesn't carry one: it is drawn when the
+/// ticket is claimed, and the result names it.
+fn preview_create(
+    kind: Kind,
+    title: &str,
+    implements: Option<&str>,
+    body: Option<&str>,
+    date: &str,
+) -> String {
+    preview(&render::ticket(
+        title.trim(),
+        kind,
+        HANDLE,
+        date,
+        implements,
+        body.unwrap_or_default(),
+    ))
+}
 
+fn comment(root: &Utf8Path, id: TicketId, re: Option<usize>, body: &str) -> ToolResult {
+    let tickets = dir(root);
     let date = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
-    match store::append_comment(&dir(root), id, HANDLE, &date, re, body.trim()) {
-        Ok(position) => Ok(format!("Added {id}#{position}").into()),
+    match store::append_comment(&tickets, id, HANDLE, &date, re, body.trim()) {
+        Ok(position) => {
+            reflow(&store::locate_ticket(&tickets, id)?)?;
+            Ok(format!("Added {id}#{position}").into())
+        }
         Err(store::Error::NoSuchTicket(_) | store::Error::NoSuchComment { .. }) => error(format!(
             "No {id}, or no comment #{} on it.",
             re.unwrap_or(0)
         )),
         Err(other) => Err(other.into()),
     }
+}
+
+/// Render the comment block `comment` is about to append, under the heading of
+/// the ticket it lands on.
+///
+/// Fails when the ticket or the reply target isn't there, the same two
+/// conditions the append itself rejects, so a call that cannot land is answered
+/// before it is put to the user.
+fn preview_comment(
+    root: &Utf8Path,
+    id: TicketId,
+    re: Option<usize>,
+    body: &str,
+    date: &str,
+) -> ToolResult {
+    let path = match store::locate_ticket(&dir(root), id) {
+        Ok(path) => path,
+        Err(store::Error::NoSuchTicket(_)) => return error(format!("No {id}.")),
+        Err(other) => return Err(other.into()),
+    };
+    let document = fs::read_to_string(path)?;
+
+    // The count comes from the same tolerant reader the append uses, so the
+    // two agree on a file with a hand-mangled header.
+    let count = parse::comment_count(&document);
+    if let Some(position) = re
+        && (position == 0 || position > count)
+    {
+        return error(format!("No comment #{position} on {id}."));
+    }
+
+    // The heading names the ticket, which its own file doesn't: the id is what
+    // makes the preview readable next to the call that produced it.
+    let heading = match parse::title(&document) {
+        Some(title) => format!("# {id}: {title}"),
+        None => format!("# {id}"),
+    };
+
+    let comment = Comment {
+        from: HANDLE.to_owned(),
+        date: date.to_owned(),
+        re: re.map(|position| format!("#{position}")),
+        body: body.to_owned(),
+    };
+
+    Ok(preview(&format!("{heading}\n\n{}", render::comment(&comment))).into())
 }
 
 fn close(root: &Utf8Path, id: TicketId) -> ToolResult {
@@ -144,7 +245,13 @@ fn show(root: &Utf8Path, id: TicketId) -> ToolResult {
     };
 
     match entry.ticket {
-        Ok(ticket) => Ok(render_ticket(entry.id, &ticket, &relative(root, &entry.path)).into()),
+        Ok(ticket) => {
+            let rendered = render_ticket(entry.id, &ticket, &relative(root, &entry.path));
+            // The terminal keys syntax highlighting off a leading code fence,
+            // so the fence is what gets a ticket displayed as markdown rather
+            // than as a flat wall of text.
+            Ok(format!("```markdown\n{}\n```", rendered.trim_end()).into())
+        }
         Err(problem) => error(format!("{id} is not a well-formed ticket: {problem}")),
     }
 }
@@ -171,6 +278,28 @@ fn list(root: &Utf8Path, status: Option<Status>, kind: Option<Kind>) -> ToolResu
 /// The ticket directory inside the workspace.
 fn dir(root: &Utf8Path) -> Utf8PathBuf {
     root.join(store::DEFAULT_DIR)
+}
+
+/// Lay out a markdown file the way `comfort` does.
+///
+/// A body arrives as the model wrote it — one long line per paragraph — and
+/// the repository's markdown carries semantic line breaks.
+/// The options mirror the `fmt-markdown-ci` recipe in the justfile, so a ticket
+/// written here is one CI accepts as it stands.
+fn reflow(path: &Utf8Path) -> io::Result<()> {
+    let source = fs::read_to_string(path)?;
+    let formatted = format_markdown_with(&source, &FormatOptions {
+        max_width: DEFAULT_MAX_WIDTH,
+        canonical: true,
+        reference_links: true,
+        prune_reference_links: true,
+    });
+
+    if formatted == source {
+        return Ok(());
+    }
+
+    fs::write(path, formatted)
 }
 
 /// A path the model can hand straight to `fs_read_file`.

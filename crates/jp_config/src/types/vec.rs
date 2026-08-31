@@ -6,7 +6,9 @@ use schematic::{Config, ConfigEnum, PartialConfig as _, Schematic};
 use serde::{Deserialize, Deserializer, Serialize, de::DeserializeOwned};
 use serde_untagged::UntaggedEnumVisitor;
 
-use crate::{delta::PartialConfigDelta, fill::FillDefaults, partial::ToPartial};
+use crate::{
+    delta::PartialConfigDelta, fill::FillDefaults, partial::ToPartial, types::deserialize_dedup,
+};
 
 /// Vec of `T`'s, either defaulting to a merge strategy of `replace`, or
 /// defining a specific merge strategy.
@@ -300,18 +302,24 @@ pub struct MergedVec<T> {
 
     /// Whether to remove duplicate items after merging.
     ///
+    /// Defaults to `true` for `append` and `prepend`, which combine two lists.
+    /// Set to `false` to keep duplicates.
     /// Accepts `true`, `false`, or `"inherit"`.
     ///
-    /// When `true`, items already present in the merged result are skipped.
+    /// `replace` keeps duplicates by default: it contributes a single list, so
+    /// repeated items in it are kept as written.
+    /// Set `dedup = true` alongside `strategy = "replace"` to collapse them.
+    ///
+    /// When enabled, items already present in the merged result are skipped.
     /// Comparison uses `PartialEq`.
     /// Order is preserved (first occurrence wins).
     ///
     /// This flag is "sticky": once a non-discarded config in the merge chain
-    /// sets it to `true`, all subsequent merges for this field will deduplicate
-    /// — unless a later config explicitly sets it to `false`.
+    /// sets it explicitly, all subsequent merges for this field use that value
+    /// — unless a later config states a different one.
     ///
     /// `"inherit"` (or omitting the field) means "no opinion" — inherit from
-    /// the previous merge.
+    /// the previous merge, falling back to the per-strategy default above.
     #[setting(default, skip_serializing_if = "Option::is_none")]
     #[serde(
         default,
@@ -363,45 +371,4 @@ pub enum MergedVecStrategy {
 
     /// Replace the previous value with the new value.
     Replace,
-}
-
-/// Deserialize `dedup` from `true`, `false`, or `"inherit"` → `Option<bool>`.
-fn deserialize_dedup<'de, D>(deserializer: D) -> Result<Option<bool>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    struct DedupVisitor;
-
-    impl serde::de::Visitor<'_> for DedupVisitor {
-        type Value = Option<bool>;
-
-        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            formatter.write_str("a boolean or \"inherit\"")
-        }
-
-        fn visit_bool<E: serde::de::Error>(self, v: bool) -> Result<Self::Value, E> {
-            Ok(Some(v))
-        }
-
-        fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
-            match v {
-                "inherit" => Ok(None),
-                "true" => Ok(Some(true)),
-                "false" => Ok(Some(false)),
-                _ => Err(serde::de::Error::unknown_variant(v, &[
-                    "true", "false", "inherit",
-                ])),
-            }
-        }
-
-        fn visit_none<E: serde::de::Error>(self) -> Result<Self::Value, E> {
-            Ok(None)
-        }
-
-        fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
-            Ok(None)
-        }
-    }
-
-    deserializer.deserialize_any(DedupVisitor)
 }

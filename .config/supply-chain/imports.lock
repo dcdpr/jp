@@ -1,6 +1,20 @@
 
 # cargo-vet imports lock
 
+[[publisher.addr2line]]
+version = "0.24.2"
+when = "2024-10-04"
+user-id = 4415
+user-login = "philipc"
+user-name = "Philip Craig"
+
+[[publisher.addr2line]]
+version = "0.26.1"
+when = "2026-03-29"
+user-id = 4415
+user-login = "philipc"
+user-name = "Philip Craig"
+
 [[publisher.aho-corasick]]
 version = "1.1.3"
 when = "2024-03-20"
@@ -158,6 +172,13 @@ user-id = 2699
 user-login = "matklad"
 user-name = "Alex Kladov"
 
+[[publisher.cpp_demangle]]
+version = "0.2.14"
+when = "2019-11-15"
+user-id = 696
+user-login = "fitzgen"
+user-name = "Nick Fitzgerald"
+
 [[publisher.dtoa]]
 version = "1.0.11"
 when = "2025-12-27"
@@ -212,6 +233,13 @@ user-id = 980
 user-login = "Byron"
 user-name = "Sebastian Thiel"
 
+[[publisher.gimli]]
+version = "0.33.0"
+when = "2026-01-24"
+user-id = 4415
+user-login = "philipc"
+user-name = "Philip Craig"
+
 [[publisher.globset]]
 version = "0.4.19"
 when = "2026-07-15"
@@ -229,13 +257,6 @@ user-name = "Andrew Gallant"
 [[publisher.grep-printer]]
 version = "0.3.1"
 when = "2025-10-22"
-user-id = 189
-user-login = "BurntSushi"
-user-name = "Andrew Gallant"
-
-[[publisher.grep-regex]]
-version = "0.1.13"
-when = "2024-09-09"
 user-id = 189
 user-login = "BurntSushi"
 user-name = "Andrew Gallant"
@@ -343,6 +364,13 @@ user-id = 6743
 user-login = "epage"
 user-name = "Ed Page"
 
+[[publisher.jetscii]]
+version = "0.5.3"
+when = "2022-07-07"
+user-id = 1060
+user-login = "shepmaster"
+user-name = "Jake Goulding"
+
 [[publisher.js-sys]]
 version = "0.3.90"
 when = "2026-02-24"
@@ -404,6 +432,20 @@ when = "2024-03-15"
 user-id = 2017
 user-login = "mbrubeck"
 user-name = "Matt Brubeck"
+
+[[publisher.object]]
+version = "0.36.7"
+when = "2024-12-21"
+user-id = 4415
+user-login = "philipc"
+user-name = "Philip Craig"
+
+[[publisher.object]]
+version = "0.39.1"
+when = "2026-04-21"
+user-id = 4415
+user-login = "philipc"
+user-name = "Philip Craig"
 
 [[publisher.once_cell]]
 version = "1.21.3"
@@ -532,8 +574,8 @@ user-login = "BurntSushi"
 user-name = "Andrew Gallant"
 
 [[publisher.regex-automata]]
-version = "0.4.10"
-when = "2025-08-24"
+version = "0.4.18"
+when = "2026-08-04"
 user-id = 189
 user-login = "BurntSushi"
 user-name = "Andrew Gallant"
@@ -747,6 +789,13 @@ when = "2025-12-08"
 user-id = 359
 user-login = "seanmonstar"
 user-name = "Sean McArthur"
+
+[[publisher.twox-hash]]
+version = "2.1.3"
+when = "2026-07-19"
+user-id = 1060
+user-login = "shepmaster"
+user-name = "Jake Goulding"
 
 [[publisher.typeid]]
 version = "1.0.3"
@@ -1230,6 +1279,18 @@ who = "Alex Crichton <alex@alexcrichton.com>"
 criteria = "safe-to-deploy"
 version = "1.0.0"
 notes = "I am the author of this crate."
+
+[[audits.bytecode-alliance.audits.cpp_demangle]]
+who = "Alex Crichton <alex@alexcrichton.com>"
+criteria = "safe-to-deploy"
+delta = "0.3.5 -> 0.4.3"
+notes = "No substantive changes to `unsafe` code and otherwise all looks good."
+
+[[audits.bytecode-alliance.audits.cpp_demangle]]
+who = "Alex Crichton <alex@alexcrichton.com>"
+criteria = "safe-to-deploy"
+delta = "0.4.3 -> 0.5.1"
+notes = "API refactors, support for new symbols, nothing awry."
 
 [[audits.bytecode-alliance.audits.crossbeam-epoch]]
 who = "Alex Crichton <alex@alexcrichton.com>"

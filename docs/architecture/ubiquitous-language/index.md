@@ -55,7 +55,8 @@ In disagreements between code and this document, the code is authoritative.
 ## Clusters
 
 - [**Conversation**] — `Conversation`, `Turn`, `Event`, `Tool Call`, `Inquiry`,
-  `Thread`.
+  `Thread`, `Active Conversation`, `Live Conversation`, `Archived Conversation`,
+  `Label`.
   The user-facing notion of "talking to the assistant" and the event log that
   backs it.
 

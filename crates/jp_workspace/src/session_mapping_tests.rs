@@ -45,7 +45,7 @@ fn setup() -> (Utf8TempDir, Workspace, Option<Arc<FsStorageBackend>>) {
             .with_user_storage(&user_root, None, "abc")
             .unwrap(),
     );
-    let mut ws = Workspace::new(tmp.path()).with_backend(fs.clone());
+    let mut ws = Workspace::in_memory(tmp.path()).with_backend(fs.clone());
     ws.disable_persistence();
 
     (tmp, ws, Some(fs))
@@ -198,7 +198,7 @@ fn no_user_storage_returns_none() {
 
     // Workspace without user storage.
     let fs = Arc::new(FsStorageBackend::new(&storage_path).unwrap());
-    let mut ws = Workspace::new(tmp.path()).with_backend(fs);
+    let mut ws = Workspace::in_memory(tmp.path()).with_backend(fs);
     ws.disable_persistence();
 
     let session = test_session();
@@ -211,7 +211,7 @@ fn no_user_storage_returns_error_on_write() {
     let storage_path = tmp.path().join("storage");
 
     let fs = Arc::new(FsStorageBackend::new(&storage_path).unwrap());
-    let mut ws = Workspace::new(tmp.path()).with_backend(fs);
+    let mut ws = Workspace::in_memory(tmp.path()).with_backend(fs);
     ws.disable_persistence();
 
     let session = test_session();
@@ -437,7 +437,7 @@ fn cleanup_keeps_session_referencing_conversation_created_after_index_load() {
             .with_user_storage(&user_root, None, "abc")
             .unwrap(),
     );
-    let mut ws = Workspace::new(tmp.path()).with_backend(fs.clone());
+    let mut ws = Workspace::in_memory(tmp.path()).with_backend(fs.clone());
     ws.disable_persistence();
     let fs = Some(fs);
 
@@ -492,7 +492,7 @@ fn cleanup_keeps_env_session_with_live_conversations() {
             .with_user_storage(&user_root, None, "abc")
             .unwrap(),
     );
-    let mut ws = Workspace::new(tmp.path()).with_backend(fs.clone());
+    let mut ws = Workspace::in_memory(tmp.path()).with_backend(fs.clone());
     ws.disable_persistence();
     let fs = Some(fs);
 
@@ -645,7 +645,7 @@ fn cleanup_keeps_archived_conversations_in_session_history() {
             .with_user_storage(&user_root, None, "abc")
             .unwrap(),
     );
-    let mut ws = Workspace::new(tmp.path()).with_backend(fs.clone());
+    let mut ws = Workspace::in_memory(tmp.path()).with_backend(fs.clone());
     ws.disable_persistence();
 
     let session = Session {
@@ -684,7 +684,7 @@ fn cleanup_reads_lock_state_from_the_filesystem_not_the_workspace_backend() {
             .with_user_storage(&user_root, None, "abc")
             .unwrap(),
     );
-    let mut ws = Workspace::new(tmp.path()).with_backend(fs.clone());
+    let mut ws = Workspace::in_memory(tmp.path()).with_backend(fs.clone());
     ws.disable_persistence();
     ws = ws.with_locker(Arc::new(NullLockBackend));
 
@@ -725,7 +725,7 @@ fn cleanup_skips_session_maintenance_when_session_storage_is_read_only() {
             .with_user_storage(&user_root, None, "abc")
             .unwrap(),
     );
-    let mut ws = Workspace::new(tmp.path()).with_backend(fs.clone());
+    let mut ws = Workspace::in_memory(tmp.path()).with_backend(fs.clone());
     ws.disable_persistence();
     ws = ws.with_sessions(Arc::new(ReadOnlySessionBackend::new(fs.clone())));
 
@@ -775,7 +775,7 @@ fn ephemeral_cleanup_protects_the_conversation_the_session_resolves_to() {
     );
     // Persistence stays enabled: the removal under test has to reach the disk,
     // otherwise the assertion below holds no matter which ids are protected.
-    let mut ws = Workspace::new(tmp.path()).with_backend(fs.clone());
+    let mut ws = Workspace::in_memory(tmp.path()).with_backend(fs.clone());
 
     let session = test_session();
     let expired = ConversationId::try_from(datetime!(2025-07-19 14:00:00 Z)).unwrap();
@@ -825,7 +825,7 @@ fn ephemeral_cleanup_protects_a_conversation_created_after_the_index_was_loaded(
     );
     // Persistence stays enabled: the removal under test has to reach the disk,
     // otherwise the assertion below holds no matter which ids are protected.
-    let mut ws = Workspace::new(tmp.path()).with_backend(fs.clone());
+    let mut ws = Workspace::in_memory(tmp.path()).with_backend(fs.clone());
     ws.load_conversation_index();
 
     // Another process creates an expires-immediately conversation and records
@@ -902,7 +902,7 @@ fn cleanup_skips_pruning_locked_conversations() {
             .with_user_storage(&user_root, None, "abc")
             .unwrap(),
     );
-    let mut ws = Workspace::new(tmp.path()).with_backend(fs.clone());
+    let mut ws = Workspace::in_memory(tmp.path()).with_backend(fs.clone());
     ws.disable_persistence();
 
     let session = Session {
@@ -953,7 +953,7 @@ fn cleanup_prunes_dead_entries_from_session_history() {
             .with_user_storage(&user_root, None, "abc")
             .unwrap(),
     );
-    let mut ws = Workspace::new(tmp.path()).with_backend(fs.clone());
+    let mut ws = Workspace::in_memory(tmp.path()).with_backend(fs.clone());
     ws.disable_persistence();
 
     let session = Session {
@@ -1094,7 +1094,7 @@ fn cleanup_migrates_legacy_filename_to_source_prefixed_key() {
             .with_user_storage(&user_root, None, "abc")
             .unwrap(),
     );
-    let mut ws = Workspace::new(tmp.path()).with_backend(fs.clone());
+    let mut ws = Workspace::in_memory(tmp.path()).with_backend(fs.clone());
     ws.disable_persistence();
 
     let session = Session {

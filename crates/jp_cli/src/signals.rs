@@ -7,9 +7,13 @@
 //!
 //! Ctrl-C escalates: the first press notifies the topmost registered handler
 //! (or requests a graceful shutdown when nothing handles interrupts), a second
-//! press within the cooldown window bypasses all handlers and cancels the
-//! shutdown token, and any press after shutdown has begun exits the process
-//! immediately.
+//! unanswered press within the cooldown window bypasses all handlers and
+//! cancels the shutdown token, and any press after shutdown has begun exits the
+//! process immediately.
+//! Only presses that produced nothing escalate: resolving a delivered press
+//! with [`InterruptNotice::handled`] clears the count, so answering an
+//! interrupt menu and pressing again a moment later reopens the menu instead of
+//! quitting.
 //! SIGTERM requests a graceful shutdown; SIGQUIT exits.
 //! Neither goes through the handler stack.
 //!
@@ -19,6 +23,13 @@
 //! The interrupt logic runs in the registering event loop's own context, never
 //! on the router's signal task, so handlers can block on interactive prompts
 //! and act on the result immediately.
+//! Each delivered press arrives as an [`InterruptNotice`] the loop resolves
+//! once its logic finishes: [`InterruptNotice::handled`] when it acted on the
+//! press, [`InterruptNotice::decline`] when the press belongs to a handler
+//! further down the stack.
+//! Dropping a notice unresolved leaves the press on the ladder, so a handler
+//! that was notified but produced nothing visible still escalates on the next
+//! press.
 //!
 //! Code without an interrupt handler cooperates through the shutdown token
 //! ([`SignalRouter::shutdown_token`]) instead: awaiting its cancellation (or
@@ -26,6 +37,7 @@
 //! graceful shutdown request.
 
 use std::{
+    fmt,
     sync::{
         Arc, Mutex,
         atomic::{AtomicU64, Ordering},
@@ -96,6 +108,8 @@ impl SignalRouter {
     /// `escalation_cooldown` is how long the Ctrl-C escalation counter survives
     /// without a new press; a press arriving after the window counts as a fresh
     /// first press.
+    /// The counter also clears as soon as a handler answers a press (see
+    /// [`InterruptNotice::handled`]).
     pub fn new(runtime: &Runtime, escalation_cooldown: Duration) -> Self {
         #[cfg(unix)]
         let signals = os_signals(runtime);
@@ -161,22 +175,53 @@ impl SignalRouter {
 
     /// Register an interrupt handler scope.
     ///
-    /// Returns a guard (drop to deregister) and a receiver that fires when
-    /// SIGINT arrives while this handler is topmost.
+    /// Returns a guard (drop to deregister) and a receiver that yields an
+    /// [`InterruptNotice`] when SIGINT arrives while this handler is topmost.
     /// The registering event loop polls the receiver alongside its other
-    /// sources and runs its interrupt logic in its own context when the
-    /// receiver fires.
+    /// sources, runs its interrupt logic in its own context when the receiver
+    /// fires, and resolves the notice with the outcome.
     #[must_use]
-    pub fn push_handler(&self) -> (InterruptGuard, mpsc::Receiver<()>) {
+    pub fn push_handler(&self) -> (InterruptGuard, mpsc::Receiver<InterruptNotice>) {
         self.inner.push_handler()
     }
+}
 
-    /// Called by a handler's event loop when it declines to handle the current
-    /// interrupt.
+/// A delivered Ctrl-C press, handed to the notified handler's event loop.
+///
+/// The loop resolves it once its interrupt logic finishes: [`Self::handled`]
+/// when it acted on the press, [`Self::decline`] to pass the press to the next
+/// handler down the stack.
+/// Dropping it unresolved leaves the press on the escalation ladder, which is
+/// the safe default: a handler that was notified but produced nothing visible
+/// should still escalate on the next press.
+#[must_use = "resolving an interrupt notice decides whether the press stays on the escalation \
+              ladder"]
+pub struct InterruptNotice {
+    inner: Arc<RouterInner>,
+}
+
+impl fmt::Debug for InterruptNotice {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("InterruptNotice")
+    }
+}
+
+impl InterruptNotice {
+    /// The handler acted on this press.
     ///
-    /// The router notifies the next handler on the stack, or falls back to
-    /// graceful shutdown when no other handler exists.
-    pub fn decline(&self) {
+    /// Clears the escalation count, so the next press starts a fresh ladder
+    /// instead of bypassing the handler stack.
+    pub fn handled(self) {
+        self.inner.reset_escalation();
+    }
+
+    /// The handler declined this press.
+    ///
+    /// Notifies the next handler down the stack, or requests a graceful
+    /// shutdown when this was the last one.
+    /// The press keeps its place on the escalation ladder: nothing has acted on
+    /// it yet.
+    pub fn decline(self) {
         self.inner.notify_next_or_shutdown();
     }
 }
@@ -203,7 +248,7 @@ struct RegisteredHandler {
 
     /// Notifies the handler's event loop that SIGINT arrived.
     /// The event loop runs the interrupt logic; the router never does.
-    notify_tx: mpsc::Sender<()>,
+    notify_tx: mpsc::Sender<InterruptNotice>,
 }
 
 /// Ctrl-C press tracking for escalation.
@@ -240,6 +285,15 @@ impl EscalationState {
         self.last_press = Some(now);
         self.presses
     }
+
+    /// Forget the recorded presses.
+    ///
+    /// The next press starts a fresh ladder however recently the previous one
+    /// arrived.
+    fn reset(&mut self) {
+        self.presses = 0;
+        self.last_press = None;
+    }
 }
 
 struct RouterInner {
@@ -268,11 +322,11 @@ impl RouterInner {
         })
     }
 
-    fn route(&self, signal: OsSignal) -> Routed {
+    fn route(self: &Arc<Self>, signal: OsSignal) -> Routed {
         self.route_at(signal, Instant::now())
     }
 
-    fn route_at(&self, signal: OsSignal, now: Instant) -> Routed {
+    fn route_at(self: &Arc<Self>, signal: OsSignal, now: Instant) -> Routed {
         match signal {
             OsSignal::Interrupt => self.route_interrupt(now),
 
@@ -295,7 +349,11 @@ impl RouterInner {
     /// Second press within the cooldown: bypass all handlers and request a
     /// graceful shutdown.
     /// Any press once shutdown has begun: exit the process.
-    fn route_interrupt(&self, now: Instant) -> Routed {
+    ///
+    /// The count tracks only presses that went unanswered:
+    /// [`Self::reset_escalation`] clears it when a handler reports that it
+    /// acted on one.
+    fn route_interrupt(self: &Arc<Self>, now: Instant) -> Routed {
         let presses = self
             .escalation
             .lock()
@@ -313,15 +371,18 @@ impl RouterInner {
         }
 
         if let Some(notify_tx) = self.topmost() {
-            return match notify_tx.try_send(()) {
+            return match notify_tx.try_send(self.notice()) {
                 // A full channel means the handler already has a pending
-                // interrupt notification; nothing to add.
-                Ok(()) | Err(TrySendError::Full(())) => Routed::Handler,
+                // interrupt notification; nothing to add. The undelivered
+                // notice is dropped unresolved, leaving this press on the
+                // ladder — which is correct, since the handler hasn't even
+                // picked up the previous one.
+                Ok(()) | Err(TrySendError::Full(_)) => Routed::Handler,
 
                 // The handler's event loop is gone but its guard hasn't
                 // dropped yet. Treat it as declined and fall back to
                 // graceful shutdown.
-                Err(TrySendError::Closed(())) => {
+                Err(TrySendError::Closed(_)) => {
                     self.shutdown_token.cancel();
                     Routed::Shutdown
                 }
@@ -332,8 +393,23 @@ impl RouterInner {
         Routed::Shutdown
     }
 
+    /// Clear the escalation count after a handler answered a press.
+    fn reset_escalation(&self) {
+        self.escalation
+            .lock()
+            .expect("escalation state lock poisoned")
+            .reset();
+    }
+
+    /// Build a notice for a press about to be delivered to a handler.
+    fn notice(self: &Arc<Self>) -> InterruptNotice {
+        InterruptNotice {
+            inner: Arc::clone(self),
+        }
+    }
+
     /// Clone the topmost handler's notification channel.
-    fn topmost(&self) -> Option<mpsc::Sender<()>> {
+    fn topmost(&self) -> Option<mpsc::Sender<InterruptNotice>> {
         self.stack
             .lock()
             .expect("handler stack lock poisoned")
@@ -343,7 +419,7 @@ impl RouterInner {
 
     /// Register a handler scope: push a fresh notification channel onto the
     /// stack and return the deregistration guard plus the receiver.
-    fn push_handler(self: &Arc<Self>) -> (InterruptGuard, mpsc::Receiver<()>) {
+    fn push_handler(self: &Arc<Self>) -> (InterruptGuard, mpsc::Receiver<InterruptNotice>) {
         let (notify_tx, notify_rx) = mpsc::channel(1);
         let id = HandlerId(self.next_handler_id.fetch_add(1, Ordering::Relaxed));
         self.stack
@@ -373,7 +449,7 @@ impl RouterInner {
 
     /// Notify the handler below the topmost one, or request a graceful shutdown
     /// when no other handler exists.
-    fn notify_next_or_shutdown(&self) {
+    fn notify_next_or_shutdown(self: &Arc<Self>) {
         let next = {
             let stack = self.stack.lock().expect("handler stack lock poisoned");
             stack
@@ -388,9 +464,9 @@ impl RouterInner {
             return;
         };
 
-        match notify_tx.try_send(()) {
-            Ok(()) | Err(TrySendError::Full(())) => {}
-            Err(TrySendError::Closed(())) => self.shutdown_token.cancel(),
+        match notify_tx.try_send(self.notice()) {
+            Ok(()) | Err(TrySendError::Full(_)) => {}
+            Err(TrySendError::Closed(_)) => self.shutdown_token.cancel(),
         }
     }
 }

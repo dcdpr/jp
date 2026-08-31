@@ -197,7 +197,7 @@ fn read_ids(matches: &ArgMatches) -> Vec<ConversationTarget> {
 }
 
 /// When multiple values are provided, only literal conversation IDs are allowed
-/// — keywords like `last`, `session`, etc. are rejected.
+/// — keywords like `recent` and `session`, and pickers, are rejected.
 fn validate_multi<const MULTI: bool>(ids: &[ConversationTarget]) -> Result<(), clap::Error> {
     if !MULTI && ids.len() > 1 {
         return Err(clap::Error::raw(
@@ -230,6 +230,7 @@ fn validate_multi<const MULTI: bool>(ids: &[ConversationTarget]) -> Result<(), c
                 ConversationTarget::AllLive
                     | ConversationTarget::AllSession
                     | ConversationTarget::AllPinned
+                    | ConversationTarget::AllArchived
             ) {
                 let kw = target.keyword_name().expect("multi-target has keyword");
                 return Err(clap::Error::raw(
@@ -240,15 +241,17 @@ fn validate_multi<const MULTI: bool>(ids: &[ConversationTarget]) -> Result<(), c
         }
     }
 
-    if ids.len() > 1 {
-        for target in ids {
-            if let Some(kw) = target.keyword_name() {
-                return Err(clap::Error::raw(
-                    clap::error::ErrorKind::InvalidValue,
-                    format!("keywords are not supported when multiple IDs are given; got '{kw}'\n"),
-                ));
-            }
-        }
+    // Anything that isn't a literal ID resolves to a set of its own, which
+    // can't be meaningfully unioned with hand-listed IDs. Tested against `Id`
+    // rather than against the keywords: a picker (bare `?` or free text) has no
+    // keyword name, and letting it through leaves `resolve_targets` with a
+    // mixed list it has no rule for.
+    if ids.len() > 1 && ids.iter().any(|t| !matches!(t, ConversationTarget::Id(_))) {
+        return Err(clap::Error::raw(
+            clap::error::ErrorKind::InvalidValue,
+            "only literal conversation IDs can be combined; keywords, pickers, and free-text \
+             searches must be used on their own\n",
+        ));
     }
 
     Ok(())

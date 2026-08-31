@@ -25,8 +25,9 @@ use crate::{
 /// Pass `--confirm` to prompt for every conversation, or `--no-confirm` /
 /// `--yes` to skip all prompts.
 ///
-/// Use `--from`/`--until` to archive a range of conversations by creation date,
-/// or `--inactive-since` to archive everything unused since a given time.
+/// Use `--created-since`/`--created-before` to archive a range of conversations
+/// by creation date, or `--inactive-since` to archive everything unused since a
+/// given time.
 /// The three filters AND together when combined.
 ///
 /// Archived conversations are hidden from listings and pickers.
@@ -37,15 +38,17 @@ pub(crate) struct Archive {
     #[command(flatten)]
     target: PositionalIds<false, true>,
 
-    /// Archive all conversations created in a `[--from, --until)` range.
+    /// Archive all conversations created in a `[--created-since,
+    /// --created-before)` range.
     #[command(flatten)]
     range: CreationRange,
 
     /// Archive all conversations inactive since a given time.
     ///
-    /// Accepts the same formats as `--from`.
+    /// Accepts the same formats as `--created-since`.
     /// Filters on `last_activated_at` (when the conversation was last used)
-    /// rather than its creation date, which makes this distinct from `--until`.
+    /// rather than its creation date, which makes this distinct from the
+    /// `--created-since`/`--created-before` range.
     #[arg(long, conflicts_with = "id")]
     inactive_since: Option<TimeThreshold>,
 

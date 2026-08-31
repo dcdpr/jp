@@ -51,8 +51,10 @@ a resolved config → use.
 `PartialConfig::finalize` (called via `default_values`). Calling \
 `from_partial` on an unfinalized partial silently falls back to Rust's \
 `Default` trait — `""` for `String`, `0` for `u16`, etc. Always go through \
-`AppConfig::from_partial_with_defaults`, which merges schematic defaults as \
-a base layer before converting.
+`jp_config::util::build`, the only supported way to reach a resolved \
+`AppConfig`. It merges schematic defaults as a base layer, then resolves \
+model aliases and orders instructions and prompt sections — all three of \
+which the rest of JP assumes have happened.
 
 Three traits make a new config type participate in the pipeline:
 
@@ -79,7 +81,7 @@ Layers are applied in this order, with later layers overriding earlier \
 ones:
 
 1. Schematic defaults (`#[setting(default = ...)]`), injected by \
-   `PartialConfig::finalize` / `AppConfig::from_partial_with_defaults`.
+   `PartialConfig::finalize` via `jp_config::util::build`.
 2. User-global config (`~/.config/jp/config.toml`; platform-specific \
    path via `jp_config::fs::user_global_config_dir`).
 3. Workspace config (`<workspace_root>/.jp/config.toml`).

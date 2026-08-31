@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 
-import { normalizePriority } from '../loaders/rfd-priority.mjs'
+import { normalizePriority, TERMINAL_STATUSES } from '../loaders/rfd-priority.mjs'
 import { createSortable, isDev, loadBoard, saveBoard } from './board.mjs'
 
 const props = defineProps({
@@ -14,8 +14,6 @@ const props = defineProps({
 // Dragging only exists on the dev server (see `board.mjs`), so the production
 // bundle never includes SortableJS and the list renders read-only — the
 // client-facing view.
-
-const TERMINAL = new Set(['Implemented', 'Superseded', 'Abandoned'])
 
 // Marker rows are synthetic list entries: labeled milestone lines plus the
 // unnamed cutoff between the prioritised list and the unsorted backlog. An
@@ -75,7 +73,7 @@ function topoSort(list) {
 // backlog, and finally any active RFDs the file doesn't mention. Dependencies
 // are kept above their dependents; the saved order is the tiebreak.
 function buildRows(p) {
-    const isActive = e => e && !TERMINAL.has(e.status)
+    const isActive = e => e && !TERMINAL_STATUSES.has(e.status)
     const placed = new Set()
     const rows = []
     const push = num => {

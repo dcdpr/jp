@@ -1,6 +1,7 @@
 [conversation.tools.ticket_create]
 enable = false
 source = "local"
+format = "unattended"
 command = "just serve-tools {{context}} {{tool}}"
 summary = "File a work item as a ticket under docs/ticket/."
 description = """
@@ -33,7 +34,7 @@ File a chore with no description:
 """
 
 [conversation.tools.ticket_create.style]
-parameters = "function_call"
+parameters = "just serve-tools {{context}} {{tool}}"
 inline_results = "full"
 results_file_link = "off"
 

@@ -55,6 +55,16 @@ pub fn comment_count(source: &str) -> usize {
     Doc::new(source).boundaries().len()
 }
 
+/// The title from a document's `# Title` heading.
+///
+/// Tolerant of a malformed header, like [`comment_count`], so a caller that
+/// only needs to name a ticket doesn't have to be able to read the rest of it.
+/// Returns `None` when the first non-empty line isn't a level-one heading.
+#[must_use]
+pub fn title(source: &str) -> Option<String> {
+    Doc::new(source).title().ok()
+}
+
 /// The line range of the metadata block that follows the title heading.
 ///
 /// Returns `None` when the heading is missing, or when the first thing after it
@@ -65,10 +75,15 @@ pub fn metadata_range(source: &str) -> Option<Range<usize>> {
 }
 
 /// Split a `- **Key**: Value` line into its key and value.
+///
+/// A leading `\` on the value is dropped: a markdown formatter escapes a value
+/// that opens with `#`, and `\#1` means the reference `#1`.
 #[must_use]
 pub fn meta_line(line: &str) -> Option<(&str, &str)> {
     let (key, value) = line.strip_prefix("- **")?.split_once("**:")?;
-    Some((key.trim(), value.trim()))
+    let value = value.trim();
+
+    Some((key.trim(), value.strip_prefix('\\').unwrap_or(value)))
 }
 
 /// A line of five or more dashes at column zero: the shape that opens a

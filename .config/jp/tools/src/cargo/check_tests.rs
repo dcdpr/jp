@@ -2,7 +2,7 @@ use std::{io, sync::Mutex};
 
 use camino::Utf8Path;
 use camino_tempfile::{Utf8TempDir, tempdir};
-use jp_tool::{Action, Outcome};
+use jp_tool::{Action, Context, Outcome};
 use pretty_assertions::assert_eq;
 
 use super::*;
@@ -50,7 +50,7 @@ fn test_cargo_check_with_warnings() {
         .expect("comfort")
         .returns_success("");
 
-    let result = cargo_check_impl(&ctx, None, false, &runner).unwrap();
+    let result = cargo_check_impl(&ctx.root, None, None, false, &runner).unwrap();
 
     assert_eq!(result.into_content().unwrap(), indoc::indoc! {r#"
             ```
@@ -80,7 +80,7 @@ fn test_cargo_check_no_warnings() {
         .expect("comfort")
         .returns_success("");
 
-    let result = cargo_check_impl(&ctx, None, false, &runner).unwrap();
+    let result = cargo_check_impl(&ctx.root, None, None, false, &runner).unwrap();
 
     assert_eq!(
         result.into_content().unwrap(),
@@ -103,7 +103,7 @@ fn clean_clippy_with_comfort_drift_appends_note() {
             status: ExitCode::from_code(1),
         });
 
-    let result = cargo_check_impl(&ctx, None, false, &runner).unwrap();
+    let result = cargo_check_impl(&ctx.root, None, None, false, &runner).unwrap();
 
     // The header is clippy-scoped, not a blanket "Check succeeded", so it does
     // not contradict the drift note below it.
@@ -134,7 +134,7 @@ fn clippy_warnings_and_comfort_drift_are_both_reported() {
             status: ExitCode::from_code(1),
         });
 
-    let result = cargo_check_impl(&ctx, None, false, &runner).unwrap();
+    let result = cargo_check_impl(&ctx.root, None, None, false, &runner).unwrap();
 
     assert_eq!(result.into_content().unwrap(), indoc::indoc! {"
             ```
@@ -163,7 +163,7 @@ fn comfort_drift_listing_is_bounded() {
             status: ExitCode::from_code(1),
         });
 
-    let content = cargo_check_impl(&ctx, None, false, &runner)
+    let content = cargo_check_impl(&ctx.root, None, None, false, &runner)
         .unwrap()
         .unwrap_content();
 
@@ -193,7 +193,7 @@ fn comfort_real_failure_is_reported_as_error() {
             status: ExitCode::from_code(2),
         });
 
-    let result = cargo_check_impl(&ctx, None, false, &runner).unwrap();
+    let result = cargo_check_impl(&ctx.root, None, None, false, &runner).unwrap();
     match result {
         Outcome::Error { message, .. } => {
             assert_eq!(message, "comfort failed: comfort: parse error");
@@ -214,7 +214,7 @@ fn clippy_failure_short_circuits_before_running_comfort() {
             status: ExitCode::from_code(101),
         });
 
-    let result = cargo_check_impl(&ctx, None, false, &runner).unwrap();
+    let result = cargo_check_impl(&ctx.root, None, None, false, &runner).unwrap();
     match result {
         Outcome::Error { message, .. } => {
             assert_eq!(message, "Cargo command failed: error: build failed");
@@ -252,7 +252,66 @@ fn package_scope_is_passed_through_to_both_tools() {
         ])
         .returns_success("");
 
-    let result = cargo_check_impl(&ctx, Some("my_pkg"), false, &runner).unwrap();
+    let result = cargo_check_impl(&ctx.root, None, Some("my_pkg"), false, &runner).unwrap();
+    assert_eq!(
+        result.into_content().unwrap(),
+        "Check succeeded. No warnings or errors found."
+    );
+}
+
+/// The configured profile has to reach clippy.
+///
+/// Without it the run lands in whichever profile directory the developer's own
+/// builds use, where it takes the build lock and rewrites the fingerprints they
+/// are relying on.
+#[test]
+fn profile_is_passed_through_to_clippy() {
+    let (_dir, ctx) = ctx();
+
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .args(&[
+            "clippy",
+            "--color=never",
+            "--workspace",
+            "--quiet",
+            "--all-targets",
+            "--all-features",
+            "--profile=agent",
+        ])
+        .returns_success("")
+        .expect("comfort")
+        .returns_success("");
+
+    let result = cargo_check_impl(&ctx.root, Some("agent"), None, false, &runner).unwrap();
+
+    assert_eq!(
+        result.into_content().unwrap(),
+        "Check succeeded. No warnings or errors found."
+    );
+}
+
+/// Unconfigured means no flag at all, leaving the profile to cargo.
+#[test]
+fn clippy_gets_no_profile_flag_unless_configured() {
+    let (_dir, ctx) = ctx();
+
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .args(&[
+            "clippy",
+            "--color=never",
+            "--workspace",
+            "--quiet",
+            "--all-targets",
+            "--all-features",
+        ])
+        .returns_success("")
+        .expect("comfort")
+        .returns_success("");
+
+    let result = cargo_check_impl(&ctx.root, None, None, false, &runner).unwrap();
+
     assert_eq!(
         result.into_content().unwrap(),
         "Check succeeded. No warnings or errors found."
@@ -277,7 +336,7 @@ fn checksum_freshness_reaches_cargo() {
         .returns_success("")
         .into();
 
-    cargo_check_impl(&ctx, None, true, &runner).unwrap();
+    cargo_check_impl(&ctx.root, None, None, true, &runner).unwrap();
 
     let call = runner
         .call_with_arg("clippy")
@@ -304,7 +363,7 @@ fn checksum_freshness_is_absent_unless_opted_into() {
         .returns_success("")
         .into();
 
-    cargo_check_impl(&ctx, None, false, &runner).unwrap();
+    cargo_check_impl(&ctx.root, None, None, false, &runner).unwrap();
 
     let call = runner
         .call_with_arg("clippy")

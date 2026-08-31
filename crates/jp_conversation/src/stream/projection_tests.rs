@@ -153,9 +153,7 @@ fn summary_origins_preserve_raw_turn_numbers() {
         timestamp: ts(2),
         from_turn: 1,
         to_turn: 4,
-        summary: Some(SummaryPolicy {
-            summary: "middle turns".into(),
-        }),
+        summary: Some(SummaryPolicy::generated("middle turns")),
         reasoning: None,
         tool_calls: None,
     });
@@ -198,9 +196,7 @@ fn contained_summary_origins_reflect_actual_runs() {
         timestamp: ts(1),
         from_turn: 0,
         to_turn: 3,
-        summary: Some(SummaryPolicy {
-            summary: "OUTER".into(),
-        }),
+        summary: Some(SummaryPolicy::generated("OUTER")),
         reasoning: None,
         tool_calls: None,
     });
@@ -208,9 +204,7 @@ fn contained_summary_origins_reflect_actual_runs() {
         timestamp: ts(2),
         from_turn: 1,
         to_turn: 2,
-        summary: Some(SummaryPolicy {
-            summary: "INNER".into(),
-        }),
+        summary: Some(SummaryPolicy::generated("INNER")),
         reasoning: None,
         tool_calls: None,
     });
@@ -841,9 +835,7 @@ fn affected_items_reports_nothing_for_a_summary_compaction() {
     // irrelevant.
     let stream = mixed_size_tool_calls();
     let compaction = Compaction {
-        summary: Some(SummaryPolicy {
-            summary: "the gist".into(),
-        }),
+        summary: Some(SummaryPolicy::generated("the gist")),
         ..tool_call_compaction(PolicySpec::over(
             ToolCallPolicy::Strip {
                 request: false,
@@ -1022,9 +1014,9 @@ fn summary_replaces_all_events_in_range() {
         timestamp: ts(2),
         from_turn: 0,
         to_turn: 1,
-        summary: Some(SummaryPolicy {
-            summary: "Set up a Rust project with error handling.".into(),
-        }),
+        summary: Some(SummaryPolicy::generated(
+            "Set up a Rust project with error handling.",
+        )),
         reasoning: None,
         tool_calls: None,
     });
@@ -1054,9 +1046,7 @@ fn summary_ignores_per_type_policies() {
         timestamp: ts(2),
         from_turn: 0,
         to_turn: 1,
-        summary: Some(SummaryPolicy {
-            summary: "Everything summarized.".into(),
-        }),
+        summary: Some(SummaryPolicy::generated("Everything summarized.")),
         reasoning: Some(ReasoningPolicy::Strip.into()),
         tool_calls: Some(
             ToolCallPolicy::Strip {
@@ -1085,9 +1075,7 @@ fn summary_partial_range() {
         timestamp: ts(2),
         from_turn: 0,
         to_turn: 0,
-        summary: Some(SummaryPolicy {
-            summary: "Project was set up.".into(),
-        }),
+        summary: Some(SummaryPolicy::generated("Project was set up.")),
         reasoning: None,
         tool_calls: None,
     });
@@ -1121,9 +1109,7 @@ fn summary_is_injected_as_its_own_turn() {
         timestamp: ts(2),
         from_turn: 1,
         to_turn: 1,
-        summary: Some(SummaryPolicy {
-            summary: "summary of turn 1".into(),
-        }),
+        summary: Some(SummaryPolicy::generated("summary of turn 1")),
         reasoning: None,
         tool_calls: None,
     });
@@ -1169,9 +1155,7 @@ fn distinct_adjacent_summaries_with_identical_text_stay_separate() {
         timestamp: ts(1),
         from_turn: 0,
         to_turn: 0,
-        summary: Some(SummaryPolicy {
-            summary: "SAME".into(),
-        }),
+        summary: Some(SummaryPolicy::generated("SAME")),
         reasoning: None,
         tool_calls: None,
     });
@@ -1179,9 +1163,7 @@ fn distinct_adjacent_summaries_with_identical_text_stay_separate() {
         timestamp: ts(2),
         from_turn: 1,
         to_turn: 1,
-        summary: Some(SummaryPolicy {
-            summary: "SAME".into(),
-        }),
+        summary: Some(SummaryPolicy::generated("SAME")),
         reasoning: None,
         tool_calls: None,
     });
@@ -1224,9 +1206,7 @@ fn contained_summary_reinjects_outer_summary_tail() {
         timestamp: ts(1),
         from_turn: 0,
         to_turn: 3,
-        summary: Some(SummaryPolicy {
-            summary: "OUTER".into(),
-        }),
+        summary: Some(SummaryPolicy::generated("OUTER")),
         reasoning: None,
         tool_calls: None,
     });
@@ -1234,9 +1214,7 @@ fn contained_summary_reinjects_outer_summary_tail() {
         timestamp: ts(2),
         from_turn: 1,
         to_turn: 2,
-        summary: Some(SummaryPolicy {
-            summary: "INNER".into(),
-        }),
+        summary: Some(SummaryPolicy::generated("INNER")),
         reasoning: None,
         tool_calls: None,
     });
@@ -1424,9 +1402,7 @@ fn summary_wins_over_mechanical_for_same_turns() {
         timestamp: ts(3),
         from_turn: 0,
         to_turn: 1,
-        summary: Some(SummaryPolicy {
-            summary: "All summarized.".into(),
-        }),
+        summary: Some(SummaryPolicy::generated("All summarized.")),
         reasoning: None,
         tool_calls: None,
     });
@@ -1516,9 +1492,7 @@ fn config_deltas_preserved_through_projection() {
         timestamp: ts(2),
         from_turn: 0,
         to_turn: 1,
-        summary: Some(SummaryPolicy {
-            summary: "all gone".into(),
-        }),
+        summary: Some(SummaryPolicy::generated("all gone")),
         reasoning: None,
         tool_calls: None,
     });
@@ -1565,9 +1539,7 @@ fn empty_stream_with_compaction() {
         timestamp: ts(0),
         from_turn: 0,
         to_turn: 0,
-        summary: Some(SummaryPolicy {
-            summary: "nothing here".into(),
-        }),
+        summary: Some(SummaryPolicy::generated("nothing here")),
         reasoning: None,
         tool_calls: None,
     });
@@ -1768,13 +1740,7 @@ fn spec_to_compaction(spec: &CompactionSpec) -> Compaction {
             }),
         ),
         4 => (None, None, Some(ToolCallPolicy::Omit)),
-        _ => (
-            Some(SummaryPolicy {
-                summary: "s".into(),
-            }),
-            None,
-            None,
-        ),
+        _ => (Some(SummaryPolicy::generated("s")), None, None),
     };
 
     Compaction {

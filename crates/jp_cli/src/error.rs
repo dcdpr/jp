@@ -166,8 +166,28 @@ pub(crate) enum Error {
     #[error("Timed out waiting for lock on conversation {0}")]
     LockTimeout(ConversationId),
 
+    /// The interactive picker ran and came back with nothing.
+    ///
+    /// The user declined it, or submitted a multi-select without choosing
+    /// anything.
+    /// Distinct from [`NoConversationTarget`]: the grammar was used correctly
+    /// and the picker did appear, so re-teaching the keywords is noise.
+    ///
+    /// [`NoConversationTarget`]: Self::NoConversationTarget
+    #[error("No conversation selected")]
+    NoConversationSelected,
+
+    /// No conversation could be resolved, and the picker was unavailable.
+    ///
+    /// The flags mirror what the failing command accepts, so the keyword help
+    /// printed alongside describes that command rather than the union of every
+    /// command's grammar.
     #[error("No conversation targeted")]
-    NoConversationTarget,
+    NoConversationTarget {
+        session: bool,
+        multi: bool,
+        allow_new: bool,
+    },
 
     #[error("Cannot start a new conversation together with --fork, --replay, or --id")]
     NewConflictsWithTarget,
@@ -178,6 +198,25 @@ pub(crate) enum Error {
 
     #[error("Compaction error: {0}")]
     Compaction(String),
+
+    /// A summary range would have to grow over text that cannot be re-derived.
+    ///
+    /// Turn numbers are 1-based, as displayed.
+    #[error(
+        "Summary for turns {from}..{to} overlaps an existing summary covering turns \
+         {required_from}..{required_to}"
+    )]
+    SummaryOverlap {
+        /// Whether the summary being created is the verbatim one.
+        ///
+        /// `false` means a generated summary is blocked by verbatim text
+        /// already covering part of the range.
+        authored: bool,
+        from: usize,
+        to: usize,
+        required_from: usize,
+        required_to: usize,
+    },
 
     #[error("Label error: {0}")]
     Label(String),
@@ -190,4 +229,13 @@ pub(crate) enum Error {
     /// different model.
     #[error("Summarization failed for {model}: {reason}")]
     Summarize { model: String, reason: String },
+
+    /// Title generation produced no usable title.
+    ///
+    /// A dedicated variant so the failure names the model that produced
+    /// nothing: a refusal or a schema the model couldn't satisfy is a property
+    /// of the model, not of the conversation, and the fix is to point
+    /// `conversation.title.generate.model` somewhere else.
+    #[error("Title generation failed for {model}: {reason}")]
+    TitleGeneration { model: String, reason: String },
 }

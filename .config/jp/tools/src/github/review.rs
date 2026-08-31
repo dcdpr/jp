@@ -7,7 +7,7 @@ use super::auth;
 use crate::{
     Context, Result,
     github::{ORG, REPO, handle_404},
-    util::{ToolResult, error},
+    util::{ToolResult, error, lang_from_path, preview, quote},
 };
 
 #[allow(clippy::too_many_arguments)]
@@ -245,26 +245,44 @@ async fn format_for_approval(
         .map(|msg| format!("\u{26a0} {msg}")),
         Ok(FileDiff::Unverifiable) | Err(_) => None,
     };
-    let warning = warning.map_or_else(String::new, |w| format!("\n{w}\n"));
 
-    let lang = crate::util::lang_from_path(path);
+    render_comment_preview(
+        pull_number,
+        &location,
+        warning.as_deref(),
+        lang_from_path(path),
+        &snippet,
+        body,
+    )
+}
+
+/// Lay out the approval preview for a new review comment.
+///
+/// The comment body goes inside a blockquote rail, so the reader can tell the
+/// text being posted from the assistant's own prose around it.
+/// The header, the anchor warning and the code snippet stay outside: a warning
+/// in the muted quote color is a warning nobody reads, and a fenced block is
+/// already unmistakable.
+fn render_comment_preview(
+    pull_number: u64,
+    location: &str,
+    warning: Option<&str>,
+    lang: &str,
+    snippet: &str,
+    body: &str,
+) -> String {
+    let warning = warning.map_or_else(String::new, |w| format!("\n{w}\n"));
+    // Five backticks so a fenced block inside the snippet doesn't close it.
     let block = format!("`````{lang}\n{snippet}\n`````");
     let highlighted = Formatter::new().format_terminal(&block).unwrap_or(block);
-
-    // Render the body as markdown so backticks become syntax-highlighted
-    // inline code, lists render as lists, and so on.
-    let body_rendered = Formatter::new()
-        .format_terminal(body)
-        .unwrap_or_else(|_| body.to_owned());
+    let quoted = preview(body);
 
     formatdoc!(
         "
         PR #{pull_number} \u{2014} {location}
         {warning}
         {highlighted}
-
-        {body_rendered}
-        "
+        {quoted}"
     )
 }
 
@@ -632,46 +650,45 @@ async fn format_reply_for_approval(pull_number: u64, comment_id: u64, body: &str
                 .as_ref()
                 .map_or("(unknown)", |u| u.login.as_str());
             let location = format_parent_location(&parent);
-            let parent_quoted = parent
-                .body
-                .lines()
-                .map(|l| format!("> {l}"))
-                .collect::<Vec<_>>()
-                .join("\n");
-            let parent_rendered = Formatter::new()
-                .format_terminal(&parent_quoted)
-                .unwrap_or(parent_quoted);
-            let body_rendered = Formatter::new()
-                .format_terminal(body)
-                .unwrap_or_else(|_| body.to_owned());
 
-            formatdoc!(
-                "
-                PR #{pull_number} \u{2014} replying to {author} on {location}
-
-                {parent_rendered}
-
-                {body_rendered}
-                "
-            )
+            render_reply_preview(pull_number, author, &location, &parent.body, body)
         }
         Err(e) => {
             // Fail soft: still surface the proposed body so the user can
             // approve or reject. Naming the failure helps them spot a
             // stale `comment_id` before posting.
-            let body_rendered = Formatter::new()
-                .format_terminal(body)
-                .unwrap_or_else(|_| body.to_owned());
+            let quoted = preview(body);
             formatdoc!(
                 "
                 PR #{pull_number} \u{2014} replying to comment id={comment_id} (parent preview \
                  unavailable: {e})
 
-                {body_rendered}
-                "
+                {quoted}"
             )
         }
     }
+}
+
+/// Lay out the approval preview for a reply to an existing review comment.
+///
+/// The parent comment and the reply both go inside a blockquote rail, with the
+/// parent quoted one level deeper so it reads as the thing being answered
+/// rather than as part of the reply.
+fn render_reply_preview(
+    pull_number: u64,
+    author: &str,
+    location: &str,
+    parent_body: &str,
+    body: &str,
+) -> String {
+    let quoted = preview(&format!("{}\n{body}", quote(parent_body)));
+
+    formatdoc!(
+        "
+        PR #{pull_number} \u{2014} replying to {author} on {location}
+
+        {quoted}"
+    )
 }
 
 async fn fetch_parent_comment(pull_number: u64, comment_id: u64) -> Result<ReviewComment> {

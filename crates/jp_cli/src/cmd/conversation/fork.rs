@@ -1,22 +1,22 @@
 use std::sync::Arc;
 
-use jp_conversation::{ConversationStream, Error as ConversationError};
+use jp_conversation::{ConversationId, ConversationStream, Error as ConversationError};
 use jp_inquire::prompt::TerminalPromptBackend;
+use jp_printer::Printer;
 use jp_storage::backend::Projection;
 use jp_workspace::{ConversationHandle, ConversationLock};
+use serde_json::Value;
 use tracing::debug;
 
 use crate::{
     cmd::{
         ConversationLoadRequest, Output,
         conversation_id::PositionalIds,
-        label::{
-            self, LabelDirectives,
-            resolve::{Resolver, Trigger},
-        },
-        time::TimeThreshold,
+        label::resolve::{Resolver, Trigger},
+        turn_selection::TurnSelection,
     },
     ctx::Ctx,
+    output::print_json,
 };
 
 #[derive(Debug, clap::Args)]
@@ -27,37 +27,16 @@ pub(crate) struct Fork {
     #[arg(short, long, default_value = "false")]
     activate: bool,
 
-    /// Ignore all conversation events before the specified timestamp.
+    /// Which turns the fork inherits.
     ///
-    /// Inclusive: an event at exactly this timestamp is kept.
-    /// Timestamp can be relative (5days, 2mins, etc) or absolute.
-    /// Composes with `--until` to form a half-open `[from, until)` range.
-    #[arg(long)]
-    from: Option<TimeThreshold>,
-
-    /// Ignore all conversation events at or after the specified timestamp.
-    ///
-    /// Exclusive: an event at exactly this timestamp is dropped.
-    /// Timestamp can be relative (5days, 2mins, etc) or absolute.
-    /// Composes with `--from` to form a half-open `[from, until)` range.
-    #[arg(long)]
-    until: Option<TimeThreshold>,
-
-    /// Fork the first N turns of the conversation.
-    /// Defaults to 1.
-    ///
-    /// Can be combined with `--last` to keep both the leading and trailing
-    /// windows while dropping the turns in between.
-    #[arg(long, short = 'f')]
-    first: Option<Option<usize>>,
-
-    /// Fork the last N turns of the conversation.
-    /// Defaults to 1.
-    ///
-    /// Can be combined with `--first` to keep both the leading and trailing
-    /// windows while dropping the turns in between.
-    #[arg(long, short = 'l')]
-    last: Option<Option<usize>>,
+    /// Without any selector, the fork inherits every turn.
+    /// `--from`/`--to` bound the inherited range; `--first N`/`--last N`
+    /// inherit the first or last N turns (both together keep each window and
+    /// drop the turns in between); `--turn N` inherits a single turn, or
+    /// `--turn A..B` an inclusive range.
+    /// `--keep-first`/`--keep-last` drop turns at either end of the selection.
+    #[command(flatten)]
+    range: TurnSelection,
 
     /// Fork without inheriting any turns.
     ///
@@ -69,7 +48,9 @@ pub(crate) struct Fork {
     #[arg(
         short = 'N',
         long,
-        conflicts_with_all = ["from", "until", "first", "last", "compact"]
+        conflicts_with_all = [
+            "from", "to", "turn", "first", "last", "keep_first", "keep_last", "compact",
+        ]
     )]
     no_turns: bool,
 
@@ -80,12 +61,6 @@ pub(crate) struct Fork {
     /// Set a custom title for the forked conversation.
     #[arg(long, short)]
     title: Option<String>,
-
-    /// Set labels on the forked conversation.
-    ///
-    /// Applied on top of the labels inherited from the source conversation.
-    #[command(flatten)]
-    labels: LabelDirectives<false, true>,
 }
 
 impl Fork {
@@ -94,6 +69,43 @@ impl Fork {
     }
 
     pub(crate) async fn run(self, ctx: &mut Ctx, handles: &[ConversationHandle]) -> Output {
+        let mut forked = Vec::with_capacity(handles.len());
+
+        // A fork is persisted as soon as it is created, so work that fails
+        // after that point leaves it behind. Reporting the IDs either way keeps
+        // the created conversations addressable; the error still propagates, so
+        // the exit status says the run did not finish.
+        let result = self.fork_each(ctx, handles, &mut forked).await;
+        print_forked(&ctx.printer, &forked);
+
+        result
+    }
+
+    /// Fork every source, recording each new conversation's ID as it is
+    /// created.
+    async fn fork_each(
+        &self,
+        ctx: &mut Ctx,
+        handles: &[ConversationHandle],
+        forked: &mut Vec<ConversationId>,
+    ) -> Output {
+        self.range.validate()?;
+
+        // Reject an out-of-range `--turn` against every source before forking any
+        // of them: `fork` accepts multiple sources, and checking inside the loop
+        // would leave the earlier forks created when a later source turns out to
+        // be too short.
+        //
+        // A source that fails to *load* is deliberately skipped rather than
+        // propagated here. That failure is not predictable from the flags, so it
+        // belongs to the mutation loop below, which reports the forks it already
+        // created before returning the error.
+        for source in handles {
+            if let Ok(events) = ctx.workspace.events(source) {
+                self.range.check_turn_range(events.turn_count())?;
+            }
+        }
+
         for source in handles {
             // `--no-turns` folds the source's effective config (base + every
             // delta) into a fresh base config; resolving it here lets the
@@ -118,65 +130,58 @@ impl Fork {
                         .with_created_at(events.created_at);
                     return;
                 }
-                // `retain` invalidates compaction overlays from the earliest
-                // removed turn onward (overlays confined to the untouched prefix
-                // survive), so a time filter that strips whole turns *or* events
-                // inside a surviving turn can't leave a stale overlay pointing at
-                // — or summarizing — content no longer in the fork. The
-                // `--first`/`--last` helpers below inherit the same guarantee.
-                events.retain(|event| {
-                    self.from.is_none_or(|t| event.timestamp >= *t)
-                        && self.until.is_none_or(|t| event.timestamp < *t)
-                });
-
-                let first = self.first.map(|v| v.unwrap_or(1));
-                let last = self.last.map(|v| v.unwrap_or(1));
-                match (first, last) {
-                    (None, None) => {}
-                    (Some(f), None) => events.retain_first_turns(f),
-                    (None, Some(l)) => events.retain_last_turns(l),
-                    (Some(f), Some(l)) => events.retain_first_and_last_turns(f, l),
+                if !self.range.is_set() {
+                    return;
                 }
+
+                // `retain_turns` invalidates compaction overlays from the
+                // earliest removed turn onward (overlays confined to the
+                // untouched prefix survive), so a selection that drops turns
+                // can't leave a stale overlay pointing at — or summarizing —
+                // content no longer in the fork.
+                let selected = self.range.resolve(events);
+                events.retain_turns(|index| selected.contains(index));
             })
             .await?;
 
+            // One mutable scope for both post-fork mutations, so they share a
+            // single write at the closing flush.
+            let mut conv = lock.as_mut();
+
             if self.compact.should_compact() {
                 let cfg = ctx.config();
-                let events_snapshot = lock.events().clone();
+                let events_snapshot = conv.events().clone();
                 let rules = self
                     .compact
                     .effective_rules(&cfg.conversation.compaction.rules)
                     .map_err(|e| crate::error::Error::Compaction(e.to_string()))?;
+                // The fork's turn selection has already been applied to the
+                // stream, so compaction covers the whole fork.
                 let compactions = super::compact::build_compaction_events(
                     &events_snapshot,
                     &cfg,
                     &rules,
-                    crate::cmd::turn_range::Bound::Default,
-                    crate::cmd::turn_range::Bound::Default,
+                    &TurnSelection::default(),
                     // Compaction during a fork is an implicit adjunct; only an
                     // explicit `jp c compact` reports compaction details.
                     None,
                 )
                 .await?;
                 for compaction in compactions {
-                    lock.as_mut()
-                        .update_events(|events| events.add_compaction(compaction));
+                    conv.update_events(|events| events.add_compaction(compaction));
                 }
             }
 
             if let Some(title) = &self.title {
-                lock.as_mut().update_metadata(|m| {
+                conv.update_metadata(|m| {
                     m.title = Some(title.clone());
                 });
             }
 
-            if !self.labels.is_empty() {
-                let directives = self.labels.resolved();
-                let missing = lock
-                    .as_mut()
-                    .update_metadata(|m| label::apply(&mut m.labels, &directives));
-                label::report_missing(&ctx.printer, lock.id(), &missing.missing);
-            }
+            // Write before reporting success, so a failed write is an error
+            // rather than a confirmation the user cannot trust.
+            conv.flush()?;
+            drop(conv);
 
             if self.activate
                 && let Some(session) = &ctx.session
@@ -186,9 +191,28 @@ impl Fork {
             {
                 tracing::warn!(%error, "Failed to record activation.");
             }
+
+            forked.push(lock.id());
         }
-        ctx.printer.println("Conversation forked.");
+
         Ok(())
+    }
+}
+
+/// Report the conversations the fork created.
+///
+/// Text output is one ID per line, in source order, so `FORK_ID="$(jp c fork
+/// ...)"` captures the ID with nothing to strip.
+/// JSON output is a top-level array of IDs.
+fn print_forked(printer: &Printer, ids: &[ConversationId]) {
+    if printer.format().is_json() {
+        let ids = ids.iter().map(|id| Value::String(id.to_string())).collect();
+        print_json(printer, &Value::Array(ids));
+        return;
+    }
+
+    for id in ids {
+        printer.println(id.to_string());
     }
 }
 
@@ -222,7 +246,11 @@ pub(crate) async fn fork_conversation(
     let mut new_conversation = ctx.workspace.metadata(source)?.clone();
     new_conversation.last_activated_at = now;
     new_conversation.expires_at = None;
-    new_conversation.labels.extend(resolved);
+    // A rule replaces the key's set; keys with no matching rule are inherited
+    // untouched.
+    for (key, values) in resolved {
+        new_conversation.labels.set(key, values);
+    }
 
     let mut new_events = ctx.workspace.events(source)?.clone().with_created_at(now);
 

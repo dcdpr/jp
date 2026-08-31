@@ -92,6 +92,13 @@ pub struct NoteSearchRequest {
     /// Filter: only search notes with ANY of these IDs.
     #[serde(default)]
     pub ids: Vec<String>,
+
+    /// Filter: only notes created on or after this date.
+    /// `YYYY-MM-DD` covers from midnight that day; `YYYY-MM-DD HH:MM:SS` is
+    /// honoured to the second.
+    /// Both have to be zero-padded.
+    #[serde(default)]
+    pub created_after: Option<String>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -174,10 +181,11 @@ impl GrizzlyService {
 
     #[tool(
         description = "Search Bear notes by content. Returns metadata (id, title, tags, \
-                       updated_at), a short snippet showing the match, and the line numbers where \
-                       the query matched. The response is size-bounded by design. To read full \
-                       content, follow up with `note_get`, passing the returned line numbers via \
-                       its `lines` parameter."
+                       created_at, updated_at), a short snippet showing the match, and the line \
+                       numbers where the query matched. Pass `created_after` as `YYYY-MM-DD` to \
+                       ask only about recent notes. The response is size-bounded by design. To \
+                       read full content, follow up with `note_get`, passing the returned line \
+                       numbers via its `lines` parameter."
     )]
     async fn note_search(
         &self,
@@ -185,10 +193,20 @@ impl GrizzlyService {
     ) -> Result<CallToolResult, McpError> {
         let db = Self::db()?;
 
+        // Refused rather than approximated: the comparison is lexical, so an
+        // unpadded date would quietly mean a different day and the answer would
+        // look right.
+        let created_after = match req.created_after.as_deref().map(str::parse) {
+            Some(Ok(cutoff)) => Some(cutoff),
+            Some(Err(error)) => return Ok(self.format_error(format!("{error}"))),
+            None => None,
+        };
+
         let params = SearchParams {
             queries: req.queries,
             tags: req.tags,
             ids: req.ids,
+            created_after,
             ..Default::default()
         };
 

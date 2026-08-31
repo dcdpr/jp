@@ -7,7 +7,10 @@ use crate::{
     cmd::{
         ConversationLoadRequest, Output,
         conversation_id::{ConversationIds as _, PositionalIds},
-        target::{ConversationTarget, PickerFilter, resolve_archived_picker, resolve_picker},
+        target::{
+            ConversationTarget, PickerFilter, TargetGrammar, resolve_archived_picker,
+            resolve_picker,
+        },
         time::CreationRange,
     },
     ctx::Ctx,
@@ -18,22 +21,22 @@ use crate::{
 ///
 /// Without flags, `jp c use [ID]` activates the given conversation (or opens a
 /// picker when no target is provided).
-/// `--grep` and `--from`/`--until` restrict the picker's candidate set; when
-/// the combined filter leaves a single conversation, it is activated directly
-/// without prompting.
+/// `--grep` and `--created-since`/`--created-before` restrict the picker's
+/// candidate set; when the combined filter leaves a single conversation, it is
+/// activated directly without prompting.
 #[derive(Debug, clap::Args)]
 pub(crate) struct Use {
     #[command(flatten)]
     target: PositionalIds<true, false>,
 
-    /// Restrict picker candidates to conversations whose title or chat content
-    /// matches.
+    /// Restrict picker candidates to conversations containing the pattern.
     ///
-    /// Substring match.
+    /// Substring match against the title, chat text, reasoning, structured
+    /// output, tool calls, tool results, and inquiry questions.
     /// Case-insensitive unless the pattern contains an uppercase character
     /// (smart-case).
     /// Composable with target keywords (`?`, `?p`, `?s`, `?a`) and with
-    /// `--from` / `--until`.
+    /// `--created-since` / `--created-before`.
     #[arg(long)]
     grep: Option<String>,
 
@@ -51,7 +54,8 @@ impl Use {
             .any(ConversationTarget::is_archived)
     }
 
-    /// Whether any candidate-set filter (`--grep`, `--from`, `--until`) is set.
+    /// Whether any candidate-set filter (`--grep`, `--created-since`,
+    /// `--created-before`) is set.
     /// When true, `Use` resolves its handle internally instead of going through
     /// the standard pipeline.
     fn has_filter(&self) -> bool {
@@ -236,10 +240,11 @@ impl Use {
             let mut filter = sub_filter;
             filter.archived = archived_partition;
             filter.candidate_ids = Some(final_ids);
+            let grammar = TargetGrammar::from_args(&self.target, false);
             if archived_partition {
-                resolve_archived_picker(&ctx.workspace, &filter)?
+                resolve_archived_picker(&ctx.workspace, &filter, grammar)?
             } else {
-                resolve_picker(&ctx.workspace, session, &filter)?
+                resolve_picker(&ctx.workspace, session, &filter, grammar)?
             }
         };
 

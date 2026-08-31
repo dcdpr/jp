@@ -231,6 +231,32 @@ fn counts_comments_without_validating_the_header() {
     assert_eq!(comment_count("no ticket here"), 0);
 }
 
+/// A ticket whose metadata block is missing a field still has a readable title,
+/// and an append never needs the rest of the header.
+#[test]
+fn reads_the_title_without_validating_the_header() {
+    let headerless = indoc! {"
+        # Tool call header misaligned
+
+        - **Status**: Todo
+        - **Kind**: Bug
+        - **Date**: 2026-08-05
+
+        The header renders one column left of the body.
+    "};
+
+    assert_eq!(
+        document(headerless),
+        Err(ParseError::MissingField("Authors"))
+    );
+    assert_eq!(
+        title(headerless).as_deref(),
+        Some("Tool call header misaligned")
+    );
+    assert_eq!(title(PLAIN).as_deref(), Some("Tool call header misaligned"));
+    assert_eq!(title("no ticket here"), None);
+}
+
 #[test]
 fn rejects_a_document_without_a_title() {
     let source = "- **Status**: Todo\n";
@@ -293,6 +319,14 @@ fn splits_metadata_lines() {
     assert_eq!(meta_line("- **Re**:"), Some(("Re", "")));
     assert_eq!(meta_line("- not metadata"), None);
     assert_eq!(meta_line("  - **Indented**: value"), None);
+}
+
+/// A markdown formatter escapes a value that opens with `#`, since the bare
+/// form would read as a heading.
+#[test]
+fn reads_a_value_through_its_markdown_escape() {
+    assert_eq!(meta_line(r"- **Re**: \#1"), Some(("Re", "#1")));
+    assert_eq!(meta_line("- **Re**: #1"), Some(("Re", "#1")));
 }
 
 #[test]

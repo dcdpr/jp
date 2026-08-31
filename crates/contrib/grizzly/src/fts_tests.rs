@@ -41,7 +41,7 @@ fn word_search_finds_content() {
     let (conn, cte) = setup();
     setup_word_table(&conn, &cte).unwrap();
 
-    let results = search_words(&conn, &["productivity".into()], 10).unwrap();
+    let results = search_words(&conn, &["productivity".into()], None, 10).unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].note_id, "note-1");
 }
@@ -51,7 +51,7 @@ fn word_search_phrase() {
     let (conn, cte) = setup();
     setup_word_table(&conn, &cte).unwrap();
 
-    let results = search_words(&conn, &["David Allen".into()], 10).unwrap();
+    let results = search_words(&conn, &["David Allen".into()], None, 10).unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].note_id, "note-1");
 }
@@ -61,7 +61,7 @@ fn word_search_no_match() {
     let (conn, cte) = setup();
     setup_word_table(&conn, &cte).unwrap();
 
-    let results = search_words(&conn, &["xyznonexistent".into()], 10).unwrap();
+    let results = search_words(&conn, &["xyznonexistent".into()], None, 10).unwrap();
     assert!(results.is_empty());
 }
 
@@ -70,7 +70,7 @@ fn word_search_excludes_trashed() {
     let (conn, cte) = setup();
     setup_word_table(&conn, &cte).unwrap();
 
-    let results = search_words(&conn, &["trashed".into()], 10).unwrap();
+    let results = search_words(&conn, &["trashed".into()], None, 10).unwrap();
     assert!(results.is_empty());
 }
 
@@ -79,7 +79,7 @@ fn word_search_multiple_queries_and() {
     let (conn, cte) = setup();
     setup_word_table(&conn, &cte).unwrap();
 
-    let results = search_words(&conn, &["productivity".into(), "David".into()], 10).unwrap();
+    let results = search_words(&conn, &["productivity".into(), "David".into()], None, 10).unwrap();
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].note_id, "note-1");
 }
@@ -90,7 +90,7 @@ fn trigram_substring_match() {
     setup_trigram_table(&conn, &cte).unwrap();
 
     // "producti" is a substring of "productivity" in note-1
-    let results = search_trigrams(&conn, &["producti".into()], 10).unwrap();
+    let results = search_trigrams(&conn, &["producti".into()], None, 10).unwrap();
     assert!(!results.is_empty());
     assert_eq!(results[0].note_id, "note-1");
 }
@@ -101,6 +101,6 @@ fn trigram_no_match_for_short_queries() {
     setup_trigram_table(&conn, &cte).unwrap();
 
     // Trigram tokenizer needs >= 3 characters to produce useful matches
-    let results = search_trigrams(&conn, &["pr".into()], 10).unwrap();
+    let results = search_trigrams(&conn, &["pr".into()], None, 10).unwrap();
     assert!(results.is_empty());
 }

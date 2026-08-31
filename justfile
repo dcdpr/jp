@@ -3,6 +3,7 @@ set fallback
 # see: <https://github.com/cargo-bins/cargo-quickinstall/releases>
 bacon_version        := "3.23.0"
 binstall_version     := "1.20.0"
+cbindgen_version     := "0.29.4"
 deny_version         := "0.19.9"
 expand_version       := "1.0.123"
 insta_version        := "1.48.0"
@@ -122,10 +123,405 @@ stage-and-commit: _install-jp
     out=$(just stage -c style.reasoning.display=hidden)
     just commit "$out - now write me a commit message"
 
+# Merge REF into the current branch and hand any conflicts to jp.
+#
+# A clean merge just reports and exits. When the merge stops on conflicts,
+# prompts where to resolve them (a [p]icked conversation, a [n]ew one, or
+# [q]uit) and sends the merge output plus `git status -sb` as the query. The
+# conflicted files stay in the working tree; jp edits them in place, and does
+# not commit or abort the merge. Exits nonzero, listing what is left, when
+# conflicts remain after the query.
+#
+# Re-running while a merge is already in progress skips the merge itself and
+# hands the outstanding conflicts over again, so a resolution that went
+# sideways can be retried in another conversation. That merge's source is read
+# from MERGE_HEAD, not from REF, so the retry needs no arguments.
+#
+# Refuses to start when unmerged paths exist without a merge in progress: a
+# rebase, cherry-pick, or revert stopped on conflicts is not this recipe's to
+# resolve.
+#
+# A picked conversation keeps its own config; it usually already holds the
+# branch's context. A new one gets `personas/dev`, since the workspace default
+# has no file-editing tools.
+#
+# ARGS are forwarded to `jp query` as flags:
+#
+#   just git-merge main
+#   just git-merge origin/main --edit
+[group('jp')]
+[positional-arguments]
+git-merge REF="main" *ARGS: _install-jp _install-tools
+    #!/usr/bin/env sh
+    set -eu
+
+    ref="$1"
+    shift # remove REF from positional params
+
+    if git rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
+        # This invocation's REF says nothing about the merge already underway;
+        # MERGE_HEAD is the commit actually being merged.
+        ref=$(git name-rev --name-only --always MERGE_HEAD)
+        merge_block="(a merge with ${ref} was already in progress; no new merge was started)"
+        merge_exit=0
+        printf '%s\n' "$merge_block" >&2
+    elif [ -n "$(git diff --name-only --diff-filter=U)" ]; then
+        echo "Unmerged paths exist but no merge is in progress." >&2
+        echo "Finish or abort the rebase/cherry-pick/revert that stopped first." >&2
+        exit 1
+    else
+        set +e
+        merge_out=$(git merge "$ref" 2>&1)
+        merge_exit=$?
+        set -e
+        printf '%s\n' "$merge_out"
+        merge_block=$(printf '$ git merge %s\n%s' "$ref" "$merge_out")
+    fi
+
+    # Unmerged paths, not the exit status, decide whether there's work for jp:
+    # a merge can also fail for reasons it can't help with (dirty tree, unknown
+    # ref), and an in-progress merge may already be fully resolved.
+    conflicts=$(git diff --name-only --diff-filter=U)
+    if [ -z "$conflicts" ]; then
+        exit "$merge_exit"
+    fi
+
+    count=$(printf '%s\n' "$conflicts" | wc -l | tr -d ' ')
+
+    if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+        printf "\n%s file(s) left conflicted.\n" "$count" > /dev/tty
+        printf "  Resolve in a [p]icked conversation / [n]ew conversation / [q]uit: " > /dev/tty
+        IFS= read -r ans < /dev/tty
+    else
+        ans=n
+    fi
+
+    branch=$(git rev-parse --abbrev-ref HEAD)
+    case "$ans" in
+        ""|p|P) jp conversation use '?' ;;
+        n|N)    set -- --new --title "merge:${ref}-into-${branch}" --cfg=personas/dev "$@" ;;
+        q|Q)    exit 0 ;;
+        *)      echo "Unknown choice '$ans'; aborting." >&2; exit 1 ;;
+    esac
+
+    preamble="Please resolve the merge conflicts with ${ref}. Read each conflicted file, \
+    work out what both sides were after, and write the resolution that keeps both intents. \
+    Where the two sides genuinely disagree, stop and tell me instead of picking one. Leave \
+    the merge uncommitted and do not run 'git merge --abort'."
+
+    printf '%s\n\n```sh\n%s\n\n$ git status -sb\n%s\n```\n' \
+        "$preamble" "$merge_block" "$(git status -sb)" \
+        | jp query "$@"
+
+    # `--diff-filter=U` reports index-level unmerged entries, which is exactly
+    # what `git commit` refuses on: a file edited but never staged still counts.
+    remaining=$(git diff --name-only --diff-filter=U)
+    if [ -n "$remaining" ]; then
+        printf "\nStill conflicted:\n" >&2
+        printf '%s\n' "$remaining" | sed 's/^/  /' >&2
+        exit 1
+    fi
+
+    printf "\nReview the resolution, then 'git commit' to conclude the merge.\n" >&2
+
 # Generate changelog for the project.
 [group('build')]
 build-changelog: (_install "jilu@" + jilu_version)
     @jilu
+
+# Build the static library and C header that the macOS app links against, and
+# stage both where the Xcode project expects them.
+#
+# Universal. The app declares no `ARCHS`, so Xcode builds it for
+# `ARCHS_STANDARD` — arm64 and x86_64 — and a Release build links both slices.
+#
+# Xcode runs this from a build phase, so `just` stays the single entry point for
+# building the Rust side rather than Xcode growing a competing one.
+#
+# PROFILE is a cargo profile directory name (`debug`, `release`, ...).
+[group('build')]
+build-ffi PROFILE="debug": (_install "cbindgen@" + cbindgen_version)
+    #!/usr/bin/env sh
+    set -eu
+
+    if ! which jq >/dev/null 2>&1; then
+        echo "jq not found. Install it with: brew install jq" >&2
+        exit 1
+    fi
+
+    # The `dev` profile builds into a `debug` directory, so the profile's name
+    # and its output directory disagree for that one case.
+    if [ "{{PROFILE}}" = "debug" ]; then
+        build_profile="dev"
+    else
+        build_profile="{{PROFILE}}"
+    fi
+
+    # Both slices, every time. A host-only library satisfies the Debug build on
+    # the machine that produced it and nothing else, so the gap stays invisible
+    # until somebody cuts a release or runs the UI suite under Rosetta — at
+    # which point it is a link error a long way from its cause.
+    slices=""
+    for target in aarch64-apple-darwin x86_64-apple-darwin; do
+        rustup target add "$target" >/dev/null
+
+        # Ask cargo which file it wrote rather than reconstructing the path. The
+        # target directory is redirectable: sibling git worktrees here share one
+        # outside the checkout entirely.
+        #
+        # `json-render-diagnostics` and not `json`: the latter would send
+        # compiler errors down the pipe into `jq` instead of to the terminal.
+        #
+        # Deliberately not `{{quiet_flag}}`: a staticlib links the whole
+        # dependency graph, so a cold build runs long enough that silence reads
+        # as a hang. Cargo's status lines go to stderr and the JSON to stdout,
+        # so letting them through costs the pipe nothing.
+        slice=$(cargo build --package jp_ffi --profile "$build_profile" \
+                --target "$target" --message-format=json-render-diagnostics |
+            jq -r 'select(.reason == "compiler-artifact" and .target.name == "jp_ffi")
+                   | .filenames[] | select(endswith(".a"))' |
+            tail -n 1)
+
+        if [ -z "$slice" ] || [ ! -f "$slice" ]; then
+            echo "cargo did not produce a jp_ffi static library for $target" >&2
+            exit 1
+        fi
+
+        slices="$slices $slice"
+    done
+
+    # Stage into a fixed, checkout-local directory. Xcode's search paths are
+    # static build settings, so they need one location that does not move with
+    # the developer's cargo configuration.
+    out="apps/macos/.build/{{PROFILE}}"
+    mkdir -p "$out/include"
+
+    # A debug staticlib bundles every dependency, so joining the slices is worth
+    # skipping when what is staged is already newer than both of them.
+    if [ ! -f "$out/libjp_ffi.a" ] || [ -n "$(find $slices -newer "$out/libjp_ffi.a")" ]; then
+        lipo -create -output "$out/libjp_ffi.a" $slices
+    fi
+
+    cbindgen --config crates/jp_ffi/cbindgen.toml --crate jp_ffi --output "$out/include/jp_ffi.h"
+
+    echo "library: $out/libjp_ffi.a ($(lipo -archs "$out/libjp_ffi.a"))" >&2
+    echo "header:  $out/include/jp_ffi.h" >&2
+
+# Build the `jpdrive` accessibility driver that the `debug_app_*` tools shell out
+# to.
+#
+# A standalone SwiftPM package rather than a target in the app's Xcode project,
+# so the binary lands at a predictable path with no derived-data lookup.
+[group('build')]
+[macos]
+build-drive CONFIG="release":
+    #!/usr/bin/env sh
+    set -eu
+
+    swift build --package-path apps/macos/Tools/jpdrive -c {{CONFIG}}
+
+    bin=$(swift build --package-path apps/macos/Tools/jpdrive -c {{CONFIG}} --show-bin-path)
+    echo "binary: $bin/jpdrive" >&2
+
+# Run the `jpdrive` test suite.
+#
+# Covers the driver's traversal against a fake accessibility tree, so it needs no
+# running app and no accessibility grant.
+[group('test')]
+[macos]
+test-drive *ARGS:
+    swift test --package-path apps/macos/Tools/jpdrive {{ARGS}}
+
+# Report whether this process may read another app's accessibility tree.
+#
+# Run under the terminal, under `just`, and under `serve-tools` to find out
+# whether a TCC grant given to the terminal reaches a tool it started. See
+# `apps/macos/Tools/jpdrive/README.md`.
+#
+# PID is the target application's process id, e.g. `$(pgrep -f JP.app)`.
+[group('debug')]
+[macos]
+drive-doctor PID="": build-drive
+    #!/usr/bin/env sh
+    set -eu
+
+    bin=$(swift build --package-path apps/macos/Tools/jpdrive -c release --show-bin-path)
+
+    if [ -n "{{PID}}" ]; then
+        "$bin/jpdrive" doctor --pid "{{PID}}"
+    else
+        "$bin/jpdrive" doctor
+    fi
+
+# Generate the macOS app's Xcode project from `apps/macos/project.yml`.
+#
+# The project file is generated rather than committed, so `project.yml` stays the
+# reviewable source of truth for targets, build settings, and the Rust build
+# phase.
+[group('build')]
+[macos]
+gen-app:
+    #!/usr/bin/env sh
+    set -eu
+
+    if ! which xcodegen >/dev/null 2>&1; then
+        echo "xcodegen not found. Install it with: brew install xcodegen" >&2
+        exit 1
+    fi
+
+    xcodegen generate --spec apps/macos/project.yml --project apps/macos
+
+# Build the macOS app.
+#
+# The library and its header are built first, not left to the project's own build
+# phase: Xcode scans the bridging header while planning the build, before any
+# script phase runs.
+[group('build')]
+[macos]
+build-app CONFIG="Debug": gen-app
+    #!/usr/bin/env sh
+    set -eu
+
+    if [ "{{CONFIG}}" = "Release" ]; then
+        just build-ffi release
+    else
+        just build-ffi debug
+    fi
+
+    xcodebuild build -project apps/macos/JP.xcodeproj -scheme JP \
+        -configuration {{CONFIG}} -destination platform=macOS -quiet
+
+# Build and launch the macOS app, with its output attached to this terminal.
+#
+# WORKSPACE is the workspace to open, defaulting to this checkout. The app has a
+# File ▸ Open Workspace menu item too; this just saves a step.
+#
+# Runs in the foreground so `tracing` output and crashes are visible, and Ctrl-C
+# quits. Use `open` on the printed bundle path instead to launch it detached.
+[group('build')]
+[macos]
+run-app WORKSPACE=justfile_directory(): build-app
+    #!/usr/bin/env sh
+    set -eu
+
+    if ! which jq >/dev/null 2>&1; then
+        echo "jq not found. Install it with: brew install jq" >&2
+        exit 1
+    fi
+
+    # Ask Xcode where it put the bundle. The derived data directory is keyed by a
+    # hash of the project path, so there is no path to hardcode.
+    app=$(xcodebuild -project apps/macos/JP.xcodeproj -scheme JP -configuration Debug \
+            -showBuildSettings -json |
+        jq -r 'first(.[] | select(.target == "JP") | .buildSettings) |
+               "\(.BUILT_PRODUCTS_DIR)/\(.FULL_PRODUCT_NAME)"')
+
+    if [ ! -d "$app" ]; then
+        echo "Could not locate the built app (looked for '$app')" >&2
+        exit 1
+    fi
+
+    echo "bundle:    $app" >&2
+    echo "workspace: {{WORKSPACE}}" >&2
+
+    JP_WORKSPACE="{{WORKSPACE}}" "$app/Contents/MacOS/JP"
+
+# Build and launch the macOS app through LaunchServices, detached.
+#
+# `run-app` execs the binary inside the bundle directly, which is convenient for
+# watching output but is not how macOS launches an app. Some AppKit behaviour
+# depends on the app being launched and registered normally, so this is the one to
+# reach for when the app misbehaves in ways the code does not explain.
+#
+# Output goes to the system log rather than this terminal, and the workspace comes
+# from the recents list rather than an environment variable.
+[group('build')]
+[macos]
+open-app: build-app
+    #!/usr/bin/env sh
+    set -eu
+
+    if ! which jq >/dev/null 2>&1; then
+        echo "jq not found. Install it with: brew install jq" >&2
+        exit 1
+    fi
+
+    app=$(xcodebuild -project apps/macos/JP.xcodeproj -scheme JP -configuration Debug \
+            -showBuildSettings -json |
+        jq -r 'first(.[] | select(.target == "JP") | .buildSettings) |
+               "\(.BUILT_PRODUCTS_DIR)/\(.FULL_PRODUCT_NAME)"')
+
+    if [ ! -d "$app" ]; then
+        echo "Could not locate the built app (looked for '$app')" >&2
+        exit 1
+    fi
+
+    echo "bundle: $app" >&2
+    open "$app"
+
+# Run the macOS app's unit tests.
+#
+# The UI tests are excluded: they launch the app and drive it through the screen,
+# so they cannot run alongside anything else using the machine. `test-app-ui`
+# runs those.
+[group('test')]
+[macos]
+test-app: gen-app (build-ffi "debug")
+    xcodebuild test -project apps/macos/JP.xcodeproj -scheme JP \
+        -destination platform=macOS -only-testing:JPTests -quiet
+
+# Run every one of the macOS app's UI tests.
+#
+# Takes over the screen for the length of the run. This is the CI job; while
+# writing a test, run it by name through the `swift_test_ui` tool instead, which
+# stops at the first failure.
+#
+# Every test runs here even after one fails, which is what `CI` means to that
+# tool and what a run nobody is watching should do.
+#
+# The result bundle is written into the checkout rather than left in derived
+# data, so a failing run leaves its evidence somewhere a reader or a CI artifact
+# step can reach without deriving a container path. `swift_test_ui` writes to
+# the same place for the same reason.
+[group('test')]
+[macos]
+test-app-ui: gen-app (build-ffi "debug")
+    #!/usr/bin/env sh
+    set -eu
+
+    # Not tidying up: `xcodebuild` refuses to write over an existing bundle, so
+    # without this the second run in a checkout fails before it starts.
+    rm -rf tmp/uitests/run.xcresult
+    mkdir -p tmp/uitests
+
+    # Captured rather than propagated, so the bundle is still reported on the
+    # failing run — which is the only run anybody opens it for.
+    status=0
+    CI=1 xcodebuild test -project apps/macos/JP.xcodeproj -scheme JP \
+        -destination platform=macOS -only-testing:JPUITests \
+        -resultBundlePath tmp/uitests/run.xcresult -quiet || status=$?
+
+    if [ -d tmp/uitests/run.xcresult ]; then
+        echo "result bundle: tmp/uitests/run.xcresult" >&2
+    fi
+
+    exit $status
+
+# Format the macOS app's Swift sources.
+[group('fmt')]
+[macos]
+fmt-app:
+    swift format --in-place --recursive --parallel \
+        apps/macos/Sources apps/macos/Tests apps/macos/UITests \
+        apps/macos/Tools/jpdrive/Sources apps/macos/Tools/jpdrive/Tests
+
+# Check Swift formatting and lints without rewriting anything.
+[group('check')]
+[macos]
+lint-app:
+    swift format lint --strict --recursive --parallel \
+        apps/macos/Sources apps/macos/Tests apps/macos/UITests \
+        apps/macos/Tools/jpdrive/Sources apps/macos/Tools/jpdrive/Tests
 
 [group('profile')]
 [positional-arguments]
@@ -334,6 +730,87 @@ pr-triage NNN *ARGS: _install-jp _install-tools
             --attach "gh:pull/{{NNN}}/reviews?include_outdated=true" \
             $args
     fi
+
+# Archive `pr-review:NNN` / `pr-triage:NNN` conversations whose pull request is
+# no longer open.
+#
+# Fetches dcdpr/jp's open PRs once, then archives every conversation whose title
+# names a PR outside that set (merged, closed, or never existed). Set
+# `JP_GITHUB_TOKEN` or `GITHUB_TOKEN` to avoid GitHub's 60-requests-per-hour
+# anonymous rate limit. Archiving is reversible with `jp c unarchive`.
+[group('jp')]
+pr-gc: _install-jp
+    #!/usr/bin/env sh
+    set -eu
+
+    api="https://api.github.com/repos/dcdpr/jp/pulls?state=open&per_page=100"
+    token="${JP_GITHUB_TOKEN:-${GITHUB_TOKEN:-}}"
+    if [ -n "$token" ]; then
+        body=$(curl -fsSL -H "Authorization: Bearer $token" "$api" || true)
+    else
+        body=$(curl -fsSL "$api" || true)
+    fi
+
+    # A failed request must not read as "no PRs are open", which would archive
+    # every conversation. Insist on a JSON array before going further.
+    if ! printf '%s' "$body" | jq -e 'type == "array"' >/dev/null 2>&1; then
+        echo "Could not list open pull requests for dcdpr/jp." >&2
+        echo "Check your network, or set JP_GITHUB_TOKEN / GITHUB_TOKEN if you're rate-limited." >&2
+        exit 1
+    fi
+    open=$(printf '%s' "$body" | jq -r '[.[].number | tostring] | join(" ")')
+
+    convs=$(jp -F json conversation ls) || {
+        echo "Could not list conversations." >&2
+        exit 1
+    }
+
+    # `<id>:<title>:<number>` per line. Conversation ids carry no colon, so the
+    # id is everything before the first one. The trailing number is the title's
+    # PR number without leading zeros, since `pr-review:0948` and
+    # `pr-review:948` both name pull request 948.
+    convs=$(printf '%s' "$convs" | jq -r '
+        .[]
+        | (.Title // "") as $t
+        | select($t | test("^pr-(review|triage):[0-9]+$"))
+        | ($t | capture(":(?<n>[0-9]+)$") | .n | tonumber | tostring) as $n
+        | "\(.ID):\($t):\($n)"')
+
+    if [ -z "$convs" ]; then
+        echo "No pr-review or pr-triage conversations found."
+        exit 0
+    fi
+
+    stale=""
+    for entry in $convs; do
+        case " $open " in
+            *" ${entry##*:} "*) continue ;;
+        esac
+        stale="${stale} ${entry}"
+    done
+
+    if [ -z "$stale" ]; then
+        echo "Nothing to archive: every conversation tracks an open pull request."
+        exit 0
+    fi
+
+    ids=""
+    echo "These conversations track pull requests that are no longer open:"
+    for entry in $stale; do
+        title=${entry#*:}
+        printf "  %s (%s)\n" "${title%:*}" "${entry%%:*}"
+        ids="${ids} ${entry%%:*}"
+    done
+
+    if [ -r /dev/tty ] && [ -w /dev/tty ]; then
+        printf "Archive them? [Y/n] " > /dev/tty
+        IFS= read -r ans < /dev/tty
+        case "$ans" in
+            n|N|no|No|NO) echo "Nothing archived."; exit 0 ;;
+        esac
+    fi
+
+    jp conversation archive --yes $ids
 
 # Review the current diff with revdiff and send the annotations to jp for
 # triage. The assistant (personas/review-triager: dev/architect knowledge,
@@ -882,6 +1359,11 @@ rfd-supersede NNN MMM:
     ' "$new_file" > "${new_file}.tmp"
     mv "${new_file}.tmp" "$new_file"
 
+    # The superseded RFD is no longer work to prioritise; the replacement
+    # carries it. Whether MMM belongs on the board is a call for whoever
+    # reorders it, so only the old id is dropped.
+    just _rfd-priority-remove "$old_num"
+
     echo "${old_file}: Superseded by RFD ${new_num}"
     echo "${new_file}: Supersedes RFD ${old_num}"
 
@@ -1409,6 +1891,19 @@ rfd-promote NNN: _install-jp _install-comfort _install-ticket
             done
         done
 
+        # The review and triage conversations are titled after the draft id,
+        # which no longer names anything. Archive them; a later cycle starts
+        # fresh under the permanent number.
+        for kind in review triage; do
+            conv_title="rfd-${kind}:${old_draft_id}"
+            conv_id=$(jp -F json conversation ls 2>/dev/null \
+                | jq -r --arg t "$conv_title" 'first(.[] | select(.Title == $t) | .ID) // empty' \
+                2>/dev/null || true)
+            [ -n "$conv_id" ] || continue
+            echo "  archiving conversation ${conv_title} (${conv_id})"
+            jp conversation archive "$conv_id" || true
+        done
+
         echo "${new_file}: Draft -> Discussion (assigned ${num})"
         if [ "$updated" -gt 0 ]; then
             echo "Updated ${updated} cross-reference(s) in RFD files."
@@ -1556,6 +2051,10 @@ rfd-promote NNN: _install-jp _install-comfort _install-ticket
                 echo "  stripped Requires: RFD ${this_n} from ${dep_file}"
             done
         fi
+
+        # The board ranks open work; this RFD is done. Drop it so `rfd-list`
+        # and the web board stop counting it as planned.
+        just _rfd-priority-remove "$rfd_id"
 
         echo "${file}: Accepted -> Implemented"
     fi
@@ -1791,18 +2290,88 @@ _rfd-priority-rewrite OLD NEW:
         | .backlog = ((.backlog // []) | sub_id)
     ' "$priority_file" > "${priority_file}.tmp" && mv "${priority_file}.tmp" "$priority_file"
 
+# Internal: drop RFD ids from the priority board.
+#
+# IDS are canonical ids (`045`, `D12`), space-separated. Each is removed from
+# every list that can hold it: the `planned` milestone groups, `backlog`, and
+# the legacy flat `order`. Ids the board doesn't mention are ignored, so this is
+# safe to call unconditionally. A missing board file is a no-op.
+[private]
+_rfd-priority-remove +IDS:
+    #!/usr/bin/env sh
+    set -eu
+
+    priority_file="docs/rfd/.priority.json"
+    [ -f "$priority_file" ] || exit 0
+    ids=$(printf '%s\n' {{IDS}})
+    jq --arg ids "$ids" '
+        ($ids | split("\n") | map(select(. != ""))) as $drop
+        | def prune: map(select(. as $id | ($drop | index($id)) == null));
+        (if .planned then .planned |= map(.ids |= prune) else . end)
+        | (if .order then .order |= prune else . end)
+        | .backlog = ((.backlog // []) | prune)
+    ' "$priority_file" > "${priority_file}.tmp" && mv "${priority_file}.tmp" "$priority_file"
+
+# Drop terminal RFDs from the priority board.
+#
+# The board ranks work that is still open, so an Implemented, Superseded, or
+# Abandoned RFD has no place on it and the docs build rejects one that lingers.
+# `rfd-promote`, `rfd-abandon`, and `rfd-supersede` prune the id as they change
+# the status; this recipe is the repair path for a status edited by hand.
+[group('rfd')]
+rfd-board-prune:
+    #!/usr/bin/env sh
+    set -eu
+
+    priority_file="docs/rfd/.priority.json"
+    if [ ! -f "$priority_file" ]; then
+        echo "No priority board at ${priority_file}; nothing to prune."
+        exit 0
+    fi
+
+    # Both id spaces: the board ranks published RFDs and drafts alike, and a
+    # draft can be abandoned.
+    stale=""
+    for file in docs/rfd/[0-9][0-9][0-9]-*.md docs/rfd/drafts/D[0-9][0-9]-*.md; do
+        [ -f "$file" ] || continue
+        basename_f=$(basename "$file")
+        case "$basename_f" in 000-*) continue ;; esac
+
+        status=$(sed -n 's/^- \*\*Status\*\*: \([A-Za-z]*\).*/\1/p' "$file" | head -1)
+        case "$status" in
+            Implemented|Superseded|Abandoned) ;;
+            *) continue ;;
+        esac
+
+        num=${basename_f%%-*}
+        if jq -e --arg n "$num" \
+                '[.planned[]?.ids[]?, .order[]?, .backlog[]?] | index($n) != null' \
+                "$priority_file" > /dev/null; then
+            stale="${stale} ${num}"
+        fi
+    done
+
+    if [ -z "$stale" ]; then
+        echo "Priority board is clean."
+        exit 0
+    fi
+
+    just _rfd-priority-remove $stale
+    echo "Pruned from the priority board:${stale}"
+
 # Mark an RFD as abandoned with the given reason.
+#
+# Accepts: a permanent number (41, 041) or a draft ID (D01). A draft the author
+# has decided not to pursue can be abandoned when the rationale is worth keeping
+# as a record, or simply deleted when it isn't (see RFD 001).
 [group('rfd')]
 rfd-abandon NNN +REASON:
     #!/usr/bin/env sh
     set -eu
 
-    n=$(echo "{{NNN}}" | sed 's/^0*//')
-    num=$(printf "%03d" "${n:-0}")
-    file=$(ls docs/rfd/${num}-*.md 2>/dev/null | head -1)
-    if [ -z "$file" ]; then
-        echo "No RFD found with number ${num}." >&2; exit 1
-    fi
+    out=$(just _rfd-resolve "{{NNN}}") || exit 1
+    rfd_id="${out%% *}"
+    file="${out#* }"
 
     current=$(sed -n 's/^- \*\*Status\*\*: \([A-Za-z]*\).*/\1/p' "$file" | head -1)
     case "$current" in
@@ -1819,6 +2388,9 @@ rfd-abandon NNN +REASON:
         { print }
     ' "$file" > "${file}.tmp"
     mv "${file}.tmp" "$file"
+
+    # An abandoned RFD is no longer work to prioritise.
+    just _rfd-priority-remove "$rfd_id"
 
     # Remind the user to close the tracking issue if one exists.
     tracking=$(sed -n 's/^- \*\*Tracking Issue\*\*: \[#\([0-9]*\)\].*/\1/p' "$file" | head -1)
@@ -1838,7 +2410,7 @@ rfd-abandon NNN +REASON:
         for r in $(echo "$required_by_line" | grep -oE 'RFD (D[0-9]+|[0-9]{3})' | awk '{print $2}'); do
             echo "  RFD ${r}" >&2
         done
-        echo "Their dependency on RFD ${num} is now broken — review and update." >&2
+        echo "Their dependency on RFD ${rfd_id} is now broken — review and update." >&2
     fi
 
 # Generate or update AI summaries for RFD documents.
@@ -2255,8 +2827,11 @@ serve-tools CONTEXT TOOL:
 # recipe, so every `jp query` that uses bookworm tools picks up the latest
 # local source automatically.
 [group('tools')]
-serve-bookworm: _build-bookworm
-    @$(cargo metadata --format-version 1 | jq -r .build_directory)/release/bookworm mcp
+serve-bookworm: # _build-bookworm
+    # NOTE: had to patch this, because both `_build-bookworm` and `cargo metadata` require a working
+    # Cargo workspace, and the merge conflicts broke the build.
+    # @$(cargo metadata --format-version 1 | jq -r .build_directory)/release/bookworm mcp
+    /Users/jean/.cargo/bin/bookworm mcp
 
 [private]
 @_build-bookworm:
@@ -2307,16 +2882,23 @@ plugin-build-local: _install-jp (plugin-build "")
     target=$(rustc -vV | sed -n 's/host: //p')
     dir="$(jp path user-local --plugins=command)"
     mkdir -p "$dir"
-    for manifest in crates/plugins/command/*/Cargo.toml; do
-        [ -f "$manifest" ] || continue
-        id=$(cargo metadata --manifest-path "$manifest" --format-version=1 --no-deps \
-            | jq -r '.packages[0].metadata["jp-registry"].id')
+    # `[package.metadata.jp-registry]` marks a plugin as installable. Plugins
+    # without it are built but not installed here; `cargo install --path` them.
+    ids=$(cargo metadata --no-deps --format-version=1 \
+        | jq -r '.packages[] | select(.metadata["jp-registry"]) | .metadata["jp-registry"].id')
+    for id in $ids; do
         src="target/${target}/release/jp-${id}"
         [ -f "$src" ] || continue
         cp "$src" "${dir}/jp-${id}"
         chmod +x "${dir}/jp-${id}"
         echo "Installed jp-${id} → ${dir}/jp-${id}"
     done
+
+# Run all formatting-related tasks
+fmt: (_rustup_component "rustfmt") _install-comfort
+    cargo fmt --all
+    comfort --workspace --language rust --format-markdown --reference-links --prune-reference-links
+    comfort --workspace --language markdown --format-markdown --reference-links --prune-reference-links
 
 # Run all ci tasks.
 [group('ci')]
@@ -2325,6 +2907,25 @@ ci: lint-ci fmt-ci test-ci docs-ci coverage-ci deny-ci insta-ci shear-ci vet-ci
 # Lint the code on CI.
 [group('ci')]
 lint-ci: (_rustup_component "clippy") _install_ci_matchers
+    #!/usr/bin/env sh
+    set -eu
+
+    # `env!("CARGO_MANIFEST_DIR")` is resolved when the binary is compiled. With
+    # a target directory shared between git worktrees, the binary that runs is
+    # not always the one this worktree compiled, so the baked path can point at
+    # a sibling worktree: fixtures and snapshots then resolve against the wrong
+    # checkout. Read the variable at runtime instead, via
+    # `jp_test::fixtures_dir()` or `std::env::var`, which stays correct wherever
+    # the binary was built.
+    #
+    # Matches `option_env!` and the two-argument form too. A newline between the
+    # macro's paren and the string would slip past this line-oriented check, but
+    # `fmt-ci` collapses that spelling onto one line.
+    if grep -rnE --include='*.rs' '(env|option_env)!\s*\(\s*"CARGO_MANIFEST_DIR"' crates .config/jp/tools; then
+        echo "error: resolve the paths above at runtime, not at compile time" >&2
+        exit 1
+    fi
+
     cargo clippy --locked --workspace --all-targets --all-features --no-deps --profile=lint -- --deny warnings
 
 # Check code formatting on CI.

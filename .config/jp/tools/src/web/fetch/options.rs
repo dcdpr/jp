@@ -34,12 +34,23 @@ pub(super) struct WebFetchOptions {
     /// Keys are hostnames (exact match) or `*.suffix` wildcards.
     #[serde(default)]
     domains: HashMap<String, Strategy>,
+
+    /// Whether the `headless` argument is honoured.
+    ///
+    /// Off unless set, so the tool makes no local process spawns until someone
+    /// configuring it opts in.
+    #[serde(default)]
+    allow_headless: bool,
 }
 
 impl WebFetchOptions {
     pub(super) fn parse(options: &Map<String, Value>) -> Result<Self, Error> {
         serde_json::from_value(Value::Object(options.clone()))
             .map_err(|e| format!("invalid web_fetch options: {e}").into())
+    }
+
+    pub(super) const fn allows_headless(&self) -> bool {
+        self.allow_headless
     }
 
     /// Pick the strategy to use for the given URL.

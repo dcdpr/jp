@@ -1,5 +1,5 @@
 use assert_matches::assert_matches;
-use schematic::{SchemaBuilder, SchemaType};
+use schematic::{SchemaBuilder, SchemaType, schema::LiteralValue};
 use serde_json::json;
 
 use super::*;
@@ -395,21 +395,54 @@ fn test_tool_config_command() {
     });
 }
 
+/// `EnableConfig`'s schema describes every shape its `Deserialize` accepts: a
+/// bool, one of the legacy strings, or the `{ state, allow_toggle }` table.
+///
+/// The hand-written `Deserialize` accepts more than the derived struct schema
+/// can infer, so the extra shapes are declared via `schema_union_with`.
+/// Without them a schema consumer would reject `enable = true`, which is the
+/// form most configs use.
 #[test]
 fn test_enable_schema() {
-    // `EnableConfig`'s root schema is a struct exposing `state` and
-    // `allow_toggle` as real fields (not a bool|string union like the old
-    // `Enable`). This is the type's own schema: in `AppConfig::fields()` the
-    // `enable` field stays a flat leaf (`conversation.tools.*.enable`) because
-    // it's a `no_deserialize_derive` config.
     let schema = SchemaBuilder::build_root::<EnableConfig>();
-    let SchemaType::Struct(s) = schema.ty else {
-        panic!("expected struct, got {:?}", schema.ty)
+    let SchemaType::Union(union) = schema.ty else {
+        panic!("expected a union, got {:?}", schema.ty)
     };
-    assert!(s.fields.contains_key("state"), "missing `state` field");
+
+    let mut has_bool = false;
+    let mut legacy_strings = None;
+    let mut table_fields = None;
+
+    for variant in union.variants_types {
+        match variant.ty {
+            SchemaType::Boolean(_) => has_bool = true,
+            SchemaType::Enum(e) => legacy_strings = Some(e.values),
+            SchemaType::Struct(s) => table_fields = Some(s.fields),
+            ty => panic!("unexpected variant: {ty:?}"),
+        }
+    }
+
+    assert!(has_bool, "`enable = true` must be described");
+
+    let legacy = legacy_strings.expect("the legacy string forms are described");
+    assert_eq!(legacy, [
+        LiteralValue::String("on".into()),
+        LiteralValue::String("off".into()),
+        LiteralValue::String("always".into()),
+        LiteralValue::String("explicit".into()),
+    ]);
+
+    // The table form keeps the derived field schema, so field names and their
+    // doc comments still reach the schema.
+    let fields = table_fields.expect("the table form is described");
+    assert!(fields.contains_key("state"), "missing `state` field");
     assert!(
-        s.fields.contains_key("allow_toggle"),
+        fields.contains_key("allow_toggle"),
         "missing `allow_toggle` field"
+    );
+    assert!(
+        fields["state"].comment.is_some(),
+        "field doc comments survive the union"
     );
 }
 

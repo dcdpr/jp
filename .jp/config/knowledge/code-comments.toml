@@ -76,6 +76,12 @@ content = """\
 Patterns that look like documentation but harm the reader. All of these have \
 been produced in this project and corrected.
 
+The Voice anti-patterns and the forbidden words apply to comment prose \
+exactly as they do to a chat reply: no aphorism formulas, no false-depth \
+framing, no forced triads, no manufactured drama. A `///` is prose you are \
+writing for a reader, and the same tells give it away. The patterns below \
+are additional, and specific to comments.
+
 - **History references.** *now*, *previously*, *no longer*, *used to*, *was \
   renamed from*, *originally*, *today*, *instead of [old approach]*. The \
   reader has no prior model to update. If the code exists in one shape, that \
@@ -111,6 +117,16 @@ been produced in this project and corrected.
 - **Apology comments.** "// This is ugly but..." or "// Hack: TODO fix \
   later." If the code is bad, fix it or file an issue. If it has to look \
   this way, explain *why* — that's a useful comment, not an apology.
+
+- **Metaphor carrying the meaning.** "These are the rules, not the \
+  furniture." If the reader has to decode an image before they learn what \
+  the code does, the image is doing the job the words should be doing. Name \
+  the thing: which types, which files, which values.
+
+- **Unfalsifiable claims.** "A caller would not thank us for this", "this \
+  keeps the design honest", "the reader deserves better than that". A \
+  sentence that cannot be confirmed or refuted by reading the code is \
+  decoration. Apply the test line by line and delete what fails it.
 """
 
 [[assistant.instructions]]
@@ -152,6 +168,14 @@ items = [
     """\
     **Don't write apology comments.** Explain why the code has to be that \
     way, or fix it.\
+    """,
+    """\
+    **Don't let a metaphor carry the meaning.** Name what the code does; an \
+    image is not a substitute for the fact.\
+    """,
+    """\
+    **Don't write what can't be checked against the code.** If a reader \
+    cannot confirm or refute the sentence by reading, cut it.\
     """,
 ]
 
@@ -308,4 +332,42 @@ reason = """\
 The bad comment apologizes without explaining why the code looks the way it \
 does. The good version names the invariant that makes the choice safe, so \
 the next reader knows what they need to preserve.\
+"""
+
+[[assistant.instructions.examples]]
+good = """\
+/// Assemble the provider request from a thread and the resolved config.
+///
+/// Attachments are already resolved to text by the caller; this only
+/// formats what it is given, and performs no I/O.
+pub fn build_request(thread: &Thread, config: &AppConfig) -> Request { ... }\
+"""
+bad = """\
+/// Everything that decides what gets asked, and nothing that fetches it.
+///
+/// The plumbing, not the water: callers bring their own buckets.
+pub fn build_request(thread: &Thread, config: &AppConfig) -> Request { ... }\
+"""
+reason = """\
+The bad version makes the reader decode two images before they learn \
+anything, and after decoding they still don't know that the function does \
+no I/O or that attachments arrive pre-resolved. The good version states \
+both facts and needs no decoding.\
+"""
+
+[[assistant.instructions.examples]]
+good = """\
+// Only the first 4 KiB reaches the terminal; the event keeps the full value.
+let preview = truncate(&result, 4096);\
+"""
+bad = """\
+// Truncating here keeps the output honest and respects the reader's
+// attention, which nobody would thank us for wasting.
+let preview = truncate(&result, 4096);\
+"""
+reason = """\
+Nothing in the bad version can be checked against the code: "honest" and \
+"respects the reader's attention" are opinions about the change, not facts \
+about the line. The good version answers the question the reader actually \
+has, which is whether truncating here loses the data.\
 """

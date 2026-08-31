@@ -106,15 +106,17 @@ impl clap::Args for CompactFlag {
                      `--compact=SPEC` flags add multiple rules.\n\nBoth forms compose: bare \
                      `--compact` includes config rules, each `--compact=SPEC` adds a DSL \
                      rule.\n\nDSL format: POLICIES[:RANGE]\n\nPolicies are joined with `+`:\n- \
-                     `r` / `reasoning`: strip reasoning blocks\n- `s` / `summarize`: generate an \
+                     `r` / `reasoning`: strip reasoning blocks\n- `s` / `summary`: generate an \
                      LLM summary\n- `t` / `tools` (or `t=MODE`): strip tool calls; bare strips \
                      both, or MODE is one of `strip`/`s`, `strip-requests`/`sreq`, \
                      `strip-responses`/`sres`, `omit`/`o`\n\nA policy can carry options after a \
                      `,`:\n- `over=SIZE`: compact only items larger than SIZE (`512KB`, `1MB`, or \
                      a byte count). Each half of a tool call is judged on its own size; `omit` is \
-                     judged on the pair combined. Not accepted on `summarize`.\n\nRange: FROM..TO \
+                     judged on the pair combined. Not accepted on `summary`.\n\nRange: FROM..TO \
                      (1-based, inclusive on both ends, so 1..5 is turns 1-5), single number, or \
-                     .. for all\n\nExamples: s:..-3, r+t, t=sreq:5..-3, r:-20, t=sres,over=1mb, \
+                     .. for all\n\nA negative bound counts from the end, where -1 is the last \
+                     turn: ..-3 compacts through the third turn from the end, leaving the final \
+                     two alone\n\nExamples: s:..-3, r+t, t=sreq:5..-3, r:-20, t=sres,over=1mb, \
                      r,over=16kb+t=sres,over=1mb:..-3",
                 )
                 .action(ArgAction::Append)
@@ -171,7 +173,7 @@ pub(crate) struct CompactSpec {
     /// The mode mirrors the `--tools` flag, plus the policy's own `over`
     /// threshold.
     pub tools: Option<PolicySpec<ToolCallsMode>>,
-    pub summarize: bool,
+    pub summary: bool,
     /// `None` = use config defaults for range.
     pub range: Option<DslRange>,
 }
@@ -199,7 +201,7 @@ impl CompactSpec {
             ..Default::default()
         };
 
-        if self.summarize {
+        if self.summary {
             rule.summary = Some(PartialSummaryConfig::default());
         }
 
@@ -226,7 +228,7 @@ impl FromStr for CompactSpec {
 
         let mut reasoning: Option<PolicySpec<ReasoningMode>> = None;
         let mut tools: Option<PolicySpec<ToolCallsMode>> = None;
-        let mut summarize = false;
+        let mut summary = false;
 
         for term in policies_str.split('+') {
             // Options bind to the policy they qualify, so `over` cannot be
@@ -250,9 +252,11 @@ impl FromStr for CompactSpec {
                         over,
                     });
                 }
-                "s" | "summarize" => {
+                // `summarize` predates the `summary` spelling and stays
+                // accepted so existing specs keep parsing.
+                "s" | "summary" | "summarize" => {
                     if value.is_some() {
-                        return Err("`summarize` does not take a value".into());
+                        return Err("`summary` does not take a value".into());
                     }
                     if over.is_some() {
                         // A summary replaces its whole range rather than acting
@@ -260,7 +264,7 @@ impl FromStr for CompactSpec {
                         // select.
                         return Err("`summarize` does not take an `over` threshold".into());
                     }
-                    summarize = true;
+                    summary = true;
                 }
                 "t" | "tools" => {
                     tools = Some(PolicySpec {
@@ -277,7 +281,7 @@ impl FromStr for CompactSpec {
             }
         }
 
-        if reasoning.is_none() && tools.is_none() && !summarize {
+        if reasoning.is_none() && tools.is_none() && !summary {
             return Err("at least one policy required (r, t=MODE, s)".into());
         }
 
@@ -286,7 +290,7 @@ impl FromStr for CompactSpec {
         Ok(CompactSpec {
             reasoning,
             tools,
-            summarize,
+            summary,
             range,
         })
     }
@@ -325,13 +329,16 @@ fn parse_policy_options<'a>(
 }
 
 /// Parse one DSL range bound: a positive integer is a 1-based absolute turn
-/// index, a negative integer is an offset from the end.
+/// index, a negative integer counts back from the last turn (`-1`).
 fn parse_dsl_bound(s: &str) -> Result<RuleBound, String> {
     if let Some(rest) = s.strip_prefix('-') {
-        let n = rest
+        let n: usize = rest
             .parse()
             .map_err(|_| format!("invalid bound '-{rest}'"))?;
-        Ok(RuleBound::FromEnd(n))
+        if n == 0 {
+            return Err("from-end offsets are 1-based; use `-1` for the last turn".to_owned());
+        }
+        Ok(RuleBound::FromEnd(n - 1))
     } else {
         let n: usize = s.parse().map_err(|_| format!("invalid bound '{s}'"))?;
         if n == 0 {
@@ -359,8 +366,8 @@ fn parse_dsl_range(s: &str) -> Result<DslRange, String> {
         return Ok(DslRange { from, to });
     }
 
-    // Single-number shorthand: positive `N` = `N..` (keep first N), negative
-    // `-N` = `..-N` (keep last N).
+    // Single-number shorthand: positive `N` = `N..` (compact from turn N on),
+    // negative `-N` = `..-N` (compact through the Nth turn from the end).
     match parse_dsl_bound(s)? {
         bound @ RuleBound::FromEnd(_) => Ok(DslRange {
             from: None,
