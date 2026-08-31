@@ -23,6 +23,13 @@
 //! content, [`EventOverlay`] can gain an optional scope without changing what
 //! is already stored.
 //!
+//! The nested [`OverlayMatcher`] and [`OverlayAction`] vocabularies are read by
+//! exact tag: a build that meets a tag it does not know fails the conversation
+//! load rather than skipping the event.
+//! An addition older builds cannot understand therefore ships under a new
+//! top-level `type` tag, where the unknown-event path preserves it verbatim and
+//! round-trips it on save.
+//!
 //! These types mirror the provider-facing vocabulary in `jp_llm`.
 //! The duplication is deliberate: the conversation crate owns what is
 //! persisted, and must not depend on the LLM crate to say what a stored patch
@@ -31,12 +38,16 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-/// An appended instruction to rewrite how earlier events are projected.
+/// An appended instruction to rewrite how matched events are projected.
 ///
 /// Overlays never modify or remove the events they target.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventOverlay {
     /// When the overlay was recorded.
+    #[serde(
+        serialize_with = "crate::serialize_dt",
+        deserialize_with = "crate::deserialize_dt"
+    )]
     pub timestamp: DateTime<Utc>,
 
     /// Patches to apply, in order.

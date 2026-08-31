@@ -57,11 +57,7 @@ pub async fn generate_summary(
     // is reused for provider lookup below.
     let model_id = model.id.resolved().clone();
 
-    let range_events = collect_range_events(events, range_from, range_to);
-
-    // Rebuild a clean stream with just the range events.
-    let mut stream = ConversationStream::new(events.base_config());
-    stream.extend(range_events);
+    let mut stream = build_range_stream(events, range_from, range_to);
 
     // Override the full assistant model (id plus parameters) so a
     // summary-specific model can also set max tokens, temperature, reasoning,
@@ -324,6 +320,28 @@ fn failure_reason(finish: Option<&FinishReason>) -> String {
         Some(FinishReason::Retry) => "the provider asked to rebuild the request".to_owned(),
         Some(FinishReason::Completed) | None => "the model returned an empty response".to_owned(),
     }
+}
+
+/// Build the throwaway stream a summary request is made from.
+///
+/// Holds the range's conversation events plus the source's patch overlays.
+/// The overlays repair metadata a provider already rejected; without them this
+/// request replays the stale metadata and pays for the same repair again.
+/// Overlays match by value, so copying all of them is safe: one whose target
+/// falls outside the range matches nothing.
+fn build_range_stream(
+    events: &ConversationStream,
+    range_from: usize,
+    range_to: usize,
+) -> ConversationStream {
+    let mut stream = ConversationStream::new(events.base_config());
+    stream.extend(collect_range_events(events, range_from, range_to));
+
+    for overlay in events.overlays() {
+        stream.add_overlay(overlay.patches.clone());
+    }
+
+    stream
 }
 
 /// Collect all events in the inclusive turn range `[range_from, range_to]`.

@@ -271,8 +271,13 @@ pub(crate) async fn fork_conversation(
         projection,
     )?;
 
+    // A wholesale copy, not an `extend`: the fork has to inherit the source's
+    // compactions and patch overlays. Dropping a compaction would only make the
+    // fork see more history than the source, but dropping a patch overlay
+    // replays metadata the provider already rejected, wedging the fork on its
+    // first query.
     lock.as_mut()
-        .update_events(|events| events.extend(new_events));
+        .update_events(|events| events.append_stream(new_events));
 
     debug!(
         source = source.id().to_string(),

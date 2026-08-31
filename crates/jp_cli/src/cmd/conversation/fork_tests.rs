@@ -8,7 +8,8 @@ use camino_tempfile::tempdir;
 use chrono::{DateTime, TimeZone as _, Utc};
 use jp_config::{AppConfig, PartialAppConfig};
 use jp_conversation::{
-    Conversation, ConversationEvent, ConversationId, ConversationStream, Labels,
+    Conversation, ConversationEvent, ConversationId, ConversationStream, Labels, OverlayAction,
+    OverlayMatcher, OverlayPatch,
     event::{ChatRequest, ChatResponse, TurnStart},
 };
 use jp_printer::{OutputFormat, Printer};
@@ -1561,6 +1562,68 @@ fn fork_inherits_local_only_projection() {
         lock.projection(),
         Projection::LocalOnly,
         "a fork of a local-only conversation stays local-only"
+    );
+}
+
+/// A fork inherits the source's recorded repairs.
+///
+/// Overlays sit beside the events rather than inside them, so a fork built by
+/// iterating conversation events replays metadata the provider already rejected
+/// and is wedged on its first query.
+#[test]
+fn fork_inherits_patch_overlays() {
+    let tmp = tempdir().unwrap();
+    let (printer, _, _) = Printer::memory(OutputFormat::TextPretty);
+    let config = AppConfig::new_test();
+    let workspace = Workspace::in_memory(tmp.path());
+    let mut ctx = Ctx::new(
+        crate::bootstrap::ExecutionContext::for_workspace(&workspace),
+        workspace,
+        None,
+        Runtime::new().unwrap(),
+        Globals::default(),
+        config,
+        None,
+        printer,
+    );
+
+    let id = ConversationId::try_from(ctx.now()).unwrap();
+    ctx.workspace.create_conversation_with_id(
+        id,
+        Conversation::default().with_last_activated_at(ctx.now()),
+        ctx.config(),
+    );
+
+    let handle = ctx.workspace.acquire_conversation(&id).unwrap();
+    let lock = ctx.workspace.test_lock(handle);
+    lock.as_mut().update_events(|e| {
+        e.start_turn(ChatRequest::from("Q1"));
+        e.extend([ConversationEvent::now(ChatResponse::message("A1"))
+            .with_metadata_field("anthropic_thinking_signature", "stale")]);
+        e.add_overlay(vec![OverlayPatch {
+            matcher: OverlayMatcher::MetadataValue {
+                key: "anthropic_thinking_signature".to_owned(),
+                value: "stale".to_owned(),
+            },
+            action: OverlayAction::RemoveMetadata {
+                key: "anthropic_thinking_signature".to_owned(),
+            },
+        }]);
+    });
+    drop(lock);
+
+    ctx.set_now(ctx.now() + Duration::from_secs(1));
+
+    let source = ctx.workspace.acquire_conversation(&id).unwrap();
+    let fork_lock = Runtime::new()
+        .unwrap()
+        .block_on(fork_conversation(&mut ctx, &source, |_| {}))
+        .unwrap();
+
+    assert_eq!(
+        fork_lock.events().overlays().count(),
+        1,
+        "the fork inherits the source's repair"
     );
 }
 

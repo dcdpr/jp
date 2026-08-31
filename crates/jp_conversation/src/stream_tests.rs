@@ -2130,6 +2130,78 @@ fn test_internal_event_overlay_roundtrip() {
     assert_eq!(result, overlay);
 }
 
+/// An overlay timestamp reads in the same formats as every other event's.
+///
+/// Overlays are recorded on conversations a user has hand-edited, so the field
+/// has to accept the spelling used by the surrounding events — `time`'s
+/// human-readable format — not only the RFC 3339 form it writes.
+#[test]
+fn test_internal_event_overlay_timestamp_accepts_storage_format() {
+    let json = serde_json::json!({
+        "type": "event_overlay",
+        "timestamp": "2026-08-27 12:00:00.0",
+        "patches": [{
+            "matcher": {"matcher": "metadata_value", "key": "k", "value": "v"},
+            "action": {"action": "remove_metadata", "key": "k"},
+        }],
+    });
+
+    let deserialized: InternalEvent = serde_json::from_value(json).unwrap();
+    let InternalEvent::Overlay(result) = deserialized else {
+        panic!("expected Overlay");
+    };
+
+    assert_eq!(
+        result.timestamp,
+        "2026-08-27T12:00:00Z"
+            .parse::<chrono::DateTime<Utc>>()
+            .unwrap()
+    );
+
+    // And what it writes is the same format the siblings write, so a hand-edited
+    // conversation round-trips byte-identically.
+    let json = serde_json::to_value(InternalEvent::Overlay(result)).unwrap();
+    assert_eq!(json["timestamp"], "2026-08-27 12:00:00.0");
+}
+
+/// A wholesale copy carries the globals; iterating for events does not.
+///
+/// `Extend` consumes an iterator over conversation events, so it silently drops
+/// overlays and compactions.
+/// Forking a repaired conversation that way replays metadata the provider
+/// already rejected.
+#[test]
+fn test_append_stream_preserves_overlays_and_compactions() {
+    let mut source = ConversationStream::new_test();
+    source.start_turn("hello");
+    source.add_compaction(make_compaction(0, 0));
+    source.add_overlay(vec![OverlayPatch {
+        matcher: OverlayMatcher::MetadataValue {
+            key: "anthropic_thinking_signature".to_owned(),
+            value: "stale".to_owned(),
+        },
+        action: OverlayAction::RemoveMetadata {
+            key: "anthropic_thinking_signature".to_owned(),
+        },
+    }]);
+
+    let mut copy = ConversationStream::new(source.base_config());
+    copy.append_stream(source.clone());
+
+    assert_eq!(copy.overlays().count(), 1, "overlay survives the copy");
+    assert_eq!(
+        copy.compactions().count(),
+        1,
+        "compaction survives the copy"
+    );
+
+    // What `Extend` does with the same input, for contrast.
+    let mut extended = ConversationStream::new(source.base_config());
+    extended.extend(source);
+    assert_eq!(extended.overlays().count(), 0);
+    assert_eq!(extended.compactions().count(), 0);
+}
+
 /// An overlay is global: it applies wherever its matcher hits, so pruning the
 /// turn it was recorded in must not discard it.
 #[test]

@@ -102,7 +102,7 @@ conversation it came from.
 
 **Not the same as** a [Workspace Projection](#workspace-projection).
 The word "projection" carries two unrelated meanings in the codebase: applying
-compaction overlays (`jp_conversation::stream::projection`) and writing a
+conversation overlays (`jp_conversation::stream::projection`) and writing a
 conversation into the workspace directory (`Projection` in `jp_storage`).
 
 ### Compaction

@@ -209,9 +209,11 @@ impl PatchAction {
 /// The patches are appended as an overlay: the stored events keep their
 /// metadata, and the removal happens when the stream is projected to build a
 /// request.
-/// A repair made for one provider therefore does not destroy metadata another
-/// provider or model could still use, and the conversation stays an append-only
-/// log.
+/// The conversation therefore stays an append-only log and the original
+/// metadata remains available for inspection and export, but the removal itself
+/// applies to every request built from this conversation, whatever provider or
+/// model it targets.
+/// See `jp_conversation::patch` for why that is unconditional.
 ///
 /// A return value of `0` means the projection is unchanged, so resending a
 /// request built from it would hit the same provider complaint.

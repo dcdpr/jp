@@ -52,7 +52,7 @@ enum InternalEvent {
     /// when building the LLM request.
     /// Does not modify or delete any existing events.
     Compaction(Compaction),
-    /// A patch overlay that rewrites how preceding events are projected when
+    /// A patch overlay that rewrites how matched events are projected when
     /// building the LLM request.
     /// Does not modify or delete any existing events.
     Overlay(EventOverlay),
@@ -674,6 +674,30 @@ impl ConversationStream {
             InternalEvent::Compaction(c) => Some(c),
             _ => None,
         })
+    }
+
+    /// Returns an iterator over the [`EventOverlay`] events in the stream.
+    pub fn overlays(&self) -> impl Iterator<Item = &EventOverlay> {
+        self.events.iter().filter_map(|e| match e {
+            InternalEvent::Overlay(o) => Some(o),
+            _ => None,
+        })
+    }
+
+    /// Append every event from `other`, overlays and config deltas included.
+    ///
+    /// [`Extend`] copies conversation events only, because it consumes an
+    /// iterator over them: it suits moving events between streams whose config
+    /// state differs, and recomputes config deltas to suit the target.
+    /// This is the tool for duplicating a stream wholesale, where compactions,
+    /// patch overlays and events this build does not recognize have to survive
+    /// as well.
+    ///
+    /// `other`'s config deltas are appended verbatim rather than recomputed, so
+    /// the two streams must share a base config for the result to resolve the
+    /// same way.
+    pub fn append_stream(&mut self, other: Self) {
+        self.events.extend(other.events);
     }
 
     /// Apply projection to the stream.

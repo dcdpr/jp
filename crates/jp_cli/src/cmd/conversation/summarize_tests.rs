@@ -10,8 +10,8 @@ use jp_llm::{
 };
 
 use super::{
-    Error, StreamOutcome, collect_range_events, failure_reason, summarize_events, summarize_stream,
-    window_overflow,
+    Error, StreamOutcome, build_range_stream, collect_range_events, failure_reason,
+    summarize_events, summarize_stream, window_overflow,
 };
 
 /// A stream that produced `text` and then stopped for `reason`.
@@ -170,6 +170,42 @@ fn an_unknown_window_never_overflows() {
     }
 
     assert_eq!(window_overflow(&stream, None, 0), None);
+}
+
+/// A repair already recorded on the source applies to the summary request too.
+///
+/// Overlays live beside the events rather than inside them, so a range stream
+/// built from conversation events alone replays metadata the provider already
+/// rejected and pays for the same repair a second time.
+#[test]
+fn range_stream_carries_the_source_repairs() {
+    let mut source = range_stream(&["stale"]);
+    let changed = source.add_overlay(
+        [EventPatch {
+            matcher: EventMatcher::MetadataValue {
+                key: "signature".to_owned(),
+                value: "stale".to_owned(),
+            },
+            action: PatchAction::RemoveMetadata("signature".to_owned()),
+        }]
+        .iter()
+        .map(Into::into)
+        .collect(),
+    );
+    assert_eq!(changed, 1, "the overlay changes the source projection");
+
+    let mut range = build_range_stream(&source, 0, 0);
+    range.apply_projection();
+
+    let signatures: Vec<_> = range
+        .iter()
+        .filter_map(|e| e.event.metadata.get("signature").cloned())
+        .collect();
+
+    assert!(
+        signatures.is_empty(),
+        "stale signature reaches the summary request: {signatures:?}"
+    );
 }
 
 #[test]
