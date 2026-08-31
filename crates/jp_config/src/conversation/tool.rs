@@ -110,14 +110,33 @@ impl FillDefaults for PartialToolsConfig {
 
 impl ToPartial for ToolsConfig {
     fn to_partial(&self) -> Self::Partial {
-        Self::Partial {
-            defaults: self.defaults.to_partial(),
-            tools: self
-                .tools
-                .iter()
-                .map(|(k, v)| (k.clone(), v.to_partial()))
-                .collect(),
-        }
+        let defaults = self.defaults.to_partial();
+
+        // A per-tool style field that merely equals the `*` value holds no
+        // choice of the tool's: `fill_from` put it there. Recording it as a
+        // per-tool key would pin it, and a later layer changing `*` could never
+        // reach the tool again.
+        //
+        // Equality is the only signal available here. A resolved `ToolConfig`
+        // records values, not whether the user wrote them, so a style field
+        // deliberately set to the same value as the `*` block is
+        // indistinguishable from an inherited one and is dropped. It then
+        // follows a later `*`-only change instead of holding its own value.
+        let tools = self
+            .tools
+            .iter()
+            .map(|(name, tool)| {
+                let mut tool = tool.to_partial();
+                tool.style = tool
+                    .style
+                    .map(|style| defaults.style.delta(style))
+                    .filter(|style| !style.is_empty());
+
+                (name.clone(), tool)
+            })
+            .collect();
+
+        Self::Partial { defaults, tools }
     }
 }
 
