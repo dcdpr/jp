@@ -28,6 +28,7 @@ In disagreements between code and docs, the code is authoritative.
     - [Conversation](#conversation)
     - [Conversation Event](#conversation-event)
     - [EditorBackend](#editorbackend)
+    - [Event Overlay](#event-overlay)
     - [InlineReply](#inlinereply)
     - [Inquiry](#inquiry)
     - [Match](#match)
@@ -89,7 +90,7 @@ itself.
 ### Compacted View
 
 What the LLM actually receives for a conversation: the raw event stream with
-every [Compaction](#compaction) overlay applied.
+every [Compaction](#compaction) and [Event Overlay](#event-overlay) applied.
 Produced by `ConversationStream::apply_projection` in `jp_conversation`, which
 also returns a `TurnOrigin` per resulting turn mapping it back to the raw turn
 number(s) it stands for.
@@ -101,7 +102,7 @@ conversation it came from.
 
 **Not the same as** a [Workspace Projection](#workspace-projection).
 The word "projection" carries two unrelated meanings in the codebase: applying
-compaction overlays (`jp_conversation::stream::projection`) and writing a
+conversation overlays (`jp_conversation::stream::projection`) and writing a
 conversation into the workspace directory (`Projection` in `jp_storage`).
 
 ### Compaction
@@ -161,6 +162,22 @@ as a local process via `EditorConfig::command()`, and `MockEditorBackend`
 scripts outcomes for tests.
 Defined as the `EditorBackend` trait in `jp_editor`; call sites obtain one
 through `build_editor_backend` in `jp_cli`.
+
+### Event Overlay
+
+A non-destructive overlay that rewrites the metadata of the events it matches
+when the [Compacted View](#compacted-view) is built.
+Recorded when a provider rejects metadata on events already in the stream —
+most often a reasoning signature that no longer covers the content beneath it.
+The events themselves are never modified: the overlay is appended to the
+conversation stream, so the stored history stays byte-identical.
+Implemented as `EventOverlay` in `jp_conversation::patch`, matching events by
+metadata value rather than by position.
+
+**Not the same as** a [Compaction](#compaction), which is also a non-destructive
+overlay.
+An Event Overlay changes the metadata of individual events; a Compaction reduces
+what a range of turns contributes.
 
 ### InlineReply
 

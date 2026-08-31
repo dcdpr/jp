@@ -16,7 +16,7 @@ pub use turn_iter::{IterTurns, Turn};
 pub use turn_mut::TurnMut;
 
 use crate::{
-    Compaction,
+    Compaction, EventOverlay, OverlayPatch,
     compat::deserialize_partial_config,
     event::{ChatRequest, ConversationEvent, EventKind, InquiryId, ToolCallResponse, TurnStart},
     storage::{decode_event_value, encode_event},
@@ -52,6 +52,10 @@ enum InternalEvent {
     /// when building the LLM request.
     /// Does not modify or delete any existing events.
     Compaction(Compaction),
+    /// A patch overlay that rewrites how matched events are projected when
+    /// building the LLM request.
+    /// Does not modify or delete any existing events.
+    Overlay(EventOverlay),
     /// An event whose `type` tag this build does not recognize.
     ///
     /// Conversations are an append-only log that a newer `jp` may have written.
@@ -104,6 +108,21 @@ impl Serialize for InternalEvent {
                 }
                 .serialize(serializer)
             }
+            Self::Overlay(overlay) => {
+                #[derive(Serialize)]
+                struct Tagged<'a> {
+                    #[serde(rename = "type")]
+                    tag: &'static str,
+                    #[serde(flatten)]
+                    inner: &'a EventOverlay,
+                }
+
+                Tagged {
+                    tag: "event_overlay",
+                    inner: overlay,
+                }
+                .serialize(serializer)
+            }
             Self::Unknown(value) => value.serialize(serializer),
         }
     }
@@ -133,7 +152,9 @@ impl InternalEvent {
     fn into_event(self) -> Option<ConversationEvent> {
         match self {
             Self::Event(event) => Some(*event),
-            Self::ConfigDelta(_) | Self::Compaction(_) | Self::Unknown(_) => None,
+            Self::ConfigDelta(_) | Self::Compaction(_) | Self::Overlay(_) | Self::Unknown(_) => {
+                None
+            }
         }
     }
 
@@ -142,7 +163,9 @@ impl InternalEvent {
     fn as_event(&self) -> Option<&ConversationEvent> {
         match self {
             Self::Event(event) => Some(event),
-            Self::ConfigDelta(_) | Self::Compaction(_) | Self::Unknown(_) => None,
+            Self::ConfigDelta(_) | Self::Compaction(_) | Self::Overlay(_) | Self::Unknown(_) => {
+                None
+            }
         }
     }
 
@@ -151,7 +174,9 @@ impl InternalEvent {
     #[must_use]
     const fn scope(&self) -> EventScope {
         match self {
-            Self::ConfigDelta(_) | Self::Compaction(_) | Self::Unknown(_) => EventScope::Global,
+            Self::ConfigDelta(_) | Self::Compaction(_) | Self::Overlay(_) | Self::Unknown(_) => {
+                EventScope::Global
+            }
             Self::Event(_) => EventScope::Turn,
         }
     }
@@ -429,9 +454,10 @@ impl ConversationStream {
         let mut partial = self.base_config.to_partial();
         let iter = self.events.iter().filter_map(|event| match event {
             InternalEvent::ConfigDelta(delta) => Some(delta.clone()),
-            InternalEvent::Event(_) | InternalEvent::Compaction(_) | InternalEvent::Unknown(_) => {
-                None
-            }
+            InternalEvent::Event(_)
+            | InternalEvent::Compaction(_)
+            | InternalEvent::Overlay(_)
+            | InternalEvent::Unknown(_) => None,
         });
 
         for delta in iter {
@@ -561,6 +587,57 @@ impl ConversationStream {
         self.events.push(InternalEvent::Compaction(compaction));
     }
 
+    /// Append a patch overlay, returning how many events its patches change in
+    /// the projected stream.
+    ///
+    /// The stored events are left untouched; the patches take effect when the
+    /// stream is projected for a request.
+    ///
+    /// A return value of `0` means the projection is unchanged, so a caller
+    /// retrying a rejected request would send exactly what it sent before.
+    /// That happens when the patches match nothing, or when an earlier overlay
+    /// already removed the same metadata.
+    pub fn add_overlay(&mut self, patches: Vec<OverlayPatch>) -> usize {
+        let changed = self.count_overlay_changes(&patches);
+
+        self.events.push(InternalEvent::Overlay(EventOverlay {
+            timestamp: Utc::now(),
+            patches,
+        }));
+
+        changed
+    }
+
+    /// How many events `patches` would change, given the overlays already in
+    /// the stream.
+    fn count_overlay_changes(&self, patches: &[OverlayPatch]) -> usize {
+        let existing: Vec<&OverlayPatch> = self
+            .events
+            .iter()
+            .filter_map(|e| match e {
+                InternalEvent::Overlay(overlay) => Some(&overlay.patches),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+
+        self.events
+            .iter()
+            .filter_map(InternalEvent::as_event)
+            .filter(|event| {
+                // Project this event's metadata through the existing overlays
+                // first: metadata an earlier overlay already dropped is not
+                // there to drop again.
+                let mut metadata = event.metadata.clone();
+                for patch in &existing {
+                    patch.apply(&mut metadata);
+                }
+
+                patches.iter().any(|patch| patch.apply(&mut metadata))
+            })
+            .count()
+    }
+
     /// Remove all compaction events from the stream.
     ///
     /// Returns the number of compaction events removed.
@@ -599,17 +676,43 @@ impl ConversationStream {
         })
     }
 
-    /// Apply compaction projection to the stream.
+    /// Returns an iterator over the [`EventOverlay`] events in the stream.
+    pub fn overlays(&self) -> impl Iterator<Item = &EventOverlay> {
+        self.events.iter().filter_map(|e| match e {
+            InternalEvent::Overlay(o) => Some(o),
+            _ => None,
+        })
+    }
+
+    /// Append every event from `other`, overlays and config deltas included.
     ///
-    /// Reads all compaction overlays and transforms the event list so that the
-    /// projected view reflects the compaction policies.
+    /// [`Extend`] copies conversation events only, because it consumes an
+    /// iterator over them: it suits moving events between streams whose config
+    /// state differs, and recomputes config deltas to suit the target.
+    /// This is the tool for duplicating a stream wholesale, where compactions,
+    /// patch overlays and events this build does not recognize have to survive
+    /// as well.
+    ///
+    /// `other`'s config deltas are appended verbatim rather than recomputed, so
+    /// the two streams must share a base config for the result to resolve the
+    /// same way.
+    pub fn append_stream(&mut self, other: Self) {
+        self.events.extend(other.events);
+    }
+
+    /// Apply projection to the stream.
+    ///
+    /// Reads all patch overlays and compaction overlays and transforms the
+    /// event list so that the projected view reflects both: patches rewrite
+    /// metadata on the events they match, compactions reduce what a range of
+    /// turns contributes.
     /// After this call, the stream's conversation events represent what the LLM
     /// should see.
     ///
     /// Returns one [`TurnOrigin`] per resulting turn, in turn order, mapping
     /// each projected turn back to the raw turn number(s) it represents.
-    /// When no compaction events are present the events are left unchanged and
-    /// every turn maps to its own index.
+    /// When the stream carries neither patch overlays nor compactions, the
+    /// events are left unchanged and every turn maps to its own index.
     ///
     /// This method is called by [`Thread::into_parts()`] before provider
     /// visibility filtering.
@@ -953,6 +1056,7 @@ impl ConversationStream {
             match event {
                 InternalEvent::ConfigDelta(_)
                 | InternalEvent::Compaction(_)
+                | InternalEvent::Overlay(_)
                 | InternalEvent::Unknown(_) => true,
                 InternalEvent::Event(e) => e.is_turn_start(),
             }
@@ -1500,7 +1604,9 @@ impl Iterator for IntoIter {
                         config: self.current_config.clone(),
                     });
                 }
-                InternalEvent::Compaction(_) | InternalEvent::Unknown(_) => {}
+                InternalEvent::Compaction(_)
+                | InternalEvent::Overlay(_)
+                | InternalEvent::Unknown(_) => {}
             }
         }
     }
@@ -1514,6 +1620,7 @@ impl DoubleEndedIterator for IntoIter {
             match event {
                 InternalEvent::ConfigDelta(_)
                 | InternalEvent::Compaction(_)
+                | InternalEvent::Overlay(_)
                 | InternalEvent::Unknown(_) => {
                     // A delta/compaction at the very end of the list affects
                     // nothing that follows it, and it doesn't affect previous
@@ -1580,7 +1687,9 @@ impl<'a> Iterator for Iter<'a> {
                         config: self.front_config.clone(),
                     });
                 }
-                InternalEvent::Compaction(_) | InternalEvent::Unknown(_) => {}
+                InternalEvent::Compaction(_)
+                | InternalEvent::Overlay(_)
+                | InternalEvent::Unknown(_) => {}
             }
         }
 
@@ -1640,7 +1749,9 @@ impl<'a> Iterator for IterMut<'a> {
                         config: self.front_config.clone(),
                     });
                 }
-                InternalEvent::Compaction(_) | InternalEvent::Unknown(_) => {}
+                InternalEvent::Compaction(_)
+                | InternalEvent::Overlay(_)
+                | InternalEvent::Unknown(_) => {}
             }
         }
 
@@ -1969,6 +2080,12 @@ impl<'de> Deserialize<'de> for InternalEvent {
         if tag == "compaction" {
             return serde_json::from_value(value)
                 .map(Self::Compaction)
+                .map_err(serde::de::Error::custom);
+        }
+
+        if tag == "event_overlay" {
+            return serde_json::from_value(value)
+                .map(Self::Overlay)
                 .map_err(serde::de::Error::custom);
         }
 

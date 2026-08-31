@@ -1,6 +1,13 @@
-//! Compaction projection logic.
+//! Projection logic.
 //!
-//! Transforms a conversation event stream by applying compaction overlays.
+//! Transforms a conversation event stream by applying the overlays appended to
+//! it, in two passes:
+//!
+//! 1. Patch overlays rewrite metadata on the events they match.
+//! 2. Compaction overlays reduce what a range of turns contributes.
+//!
+//! Patches run first so both the compacting and non-compacting paths see the
+//! same patched metadata.
 //! The original events are consumed and a new projected event list is produced.
 //!
 //! See [`apply`] for the entry point.
@@ -56,6 +63,45 @@ impl TurnOrigin {
     }
 }
 
+/// Apply every patch overlay to the events it matches, then drop the overlays.
+///
+/// Runs before compaction so both the compacting and non-compacting paths see
+/// patched metadata.
+///
+/// Matching is by metadata value and spans the whole stream, not only the
+/// events recorded before the overlay.
+/// That is deliberate: an overlay has to survive compaction replacing turns and
+/// pruning removing them, so it cannot be anchored to a position.
+/// The consequence is that an event recorded later carrying the same `(key,
+/// value)` is patched too.
+/// The values matched are opaque provider signatures, unique per reasoning
+/// block, so in practice an overlay recorded for one event cannot collide with
+/// another.
+fn apply_overlays(events: &mut Vec<InternalEvent>) {
+    let patches: Vec<_> = events
+        .iter()
+        .filter_map(|e| match e {
+            InternalEvent::Overlay(overlay) => Some(overlay.patches.clone()),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+
+    if patches.is_empty() {
+        return;
+    }
+
+    for event in events.iter_mut() {
+        if let InternalEvent::Event(conv_event) = event {
+            for patch in &patches {
+                patch.apply(&mut conv_event.metadata);
+            }
+        }
+    }
+
+    events.retain(|e| !matches!(e, InternalEvent::Overlay(_)));
+}
+
 /// Resolved compaction policies for a single turn.
 struct TurnPolicy {
     /// Summary covering this turn.
@@ -107,6 +153,8 @@ struct ResolvedSummary {
 ///
 /// [`Compaction`]: crate::Compaction
 pub(super) fn apply(events: &mut Vec<InternalEvent>) -> Vec<TurnOrigin> {
+    apply_overlays(events);
+
     let compactions: Vec<_> = events
         .iter()
         .filter_map(|e| match e {
@@ -162,7 +210,8 @@ pub(super) fn apply(events: &mut Vec<InternalEvent>) -> Vec<TurnOrigin> {
             }
             // Compaction events are consumed by projection — they've been
             // applied and should not survive into the projected stream.
-            InternalEvent::Compaction(_) => {}
+            // Patch overlays were consumed by `apply_overlays` above.
+            InternalEvent::Compaction(_) | InternalEvent::Overlay(_) => {}
             InternalEvent::Event(conv_event) => {
                 let Some(policy) = policies.get(turn) else {
                     projected.push(InternalEvent::Event(conv_event));
@@ -421,6 +470,7 @@ pub(super) fn assign_turn_indices(events: &[InternalEvent]) -> Vec<usize> {
             }
             InternalEvent::ConfigDelta(_)
             | InternalEvent::Compaction(_)
+            | InternalEvent::Overlay(_)
             | InternalEvent::Unknown(_) => {
                 indices.push(turn);
             }

@@ -100,11 +100,11 @@ pub struct StreamRetryState {
     consecutive_failures: u32,
 
     /// Whether any provider patch set in this cycle changed the conversation
-    /// stream.
-    patch_changed_stream: bool,
+    /// projection.
+    patch_changed_projection: bool,
 
     /// Whether every provider patch set in this cycle strictly shrinks the
-    /// stream.
+    /// projection.
     ///
     /// Accumulated rather than replaced, so a later set that shrinks cannot
     /// erase an earlier one that may not.
@@ -130,7 +130,7 @@ impl StreamRetryState {
         Self {
             config,
             consecutive_failures: 0,
-            patch_changed_stream: false,
+            patch_changed_projection: false,
             patch_sets_shrink: true,
             consecutive_rebuilds: 0,
             line_active: false,
@@ -146,33 +146,33 @@ impl StreamRetryState {
     /// mid-response) don't permanently consume the retry budget.
     pub fn reset(&mut self) {
         self.consecutive_failures = 0;
-        self.patch_changed_stream = false;
+        self.patch_changed_projection = false;
         self.patch_sets_shrink = true;
         self.consecutive_rebuilds = 0;
     }
 
     /// Record the outcome of one provider patch set.
     ///
-    /// `applied` is how many events it changed, and `shrinks` whether every
-    /// action in the set strictly shrinks the stream (see
-    /// [`PatchAction::shrinks_stream`]).
+    /// `applied` is how many events it changes in the projection, and `shrinks`
+    /// whether every action in the set strictly shrinks that projection (see
+    /// [`PatchAction::shrinks_projection`]).
     ///
     /// Outcomes accumulate until a rebuild consumes them, because a provider
     /// may send several patch sets before asking for the rebuild: the rebuilt
-    /// request differs if any set changed the stream, and the loop only
+    /// request differs if any set changed the projection, and the loop only
     /// terminates if every set shrinks it.
     ///
-    /// [`PatchAction::shrinks_stream`]: jp_llm::event::PatchAction::shrinks_stream
+    /// [`PatchAction::shrinks_projection`]: jp_llm::event::PatchAction::shrinks_projection
     pub fn record_patch(&mut self, applied: usize, shrinks: bool) {
-        self.patch_changed_stream |= applied > 0;
+        self.patch_changed_projection |= applied > 0;
         self.patch_sets_shrink &= shrinks;
     }
 
     /// Authorize a provider-requested rebuild, or explain why it is refused.
     ///
-    /// A provider that patches the conversation stream and asks for a rebuild
-    /// reports no error, so these attempts never reach [`handle_stream_error`]
-    /// and consume no part of the stream-error budget.
+    /// A provider that patches the conversation and asks for a rebuild reports
+    /// no error, so these attempts never reach [`handle_stream_error`] and
+    /// consume no part of the stream-error budget.
     /// They are bounded two ways: each rebuild must follow a patch that made
     /// progress, which is what guarantees the loop ends, and the number in a
     /// row is capped, which keeps a terminating-but-expensive repair from
@@ -181,7 +181,7 @@ impl StreamRetryState {
     /// Consumes the accumulated patch record, so one patch cannot authorize two
     /// rebuilds.
     pub fn authorize_rebuild(&mut self) -> Result<(), RebuildRefusal> {
-        let changed = mem::take(&mut self.patch_changed_stream);
+        let changed = mem::take(&mut self.patch_changed_projection);
         let shrinks = mem::replace(&mut self.patch_sets_shrink, true);
 
         if !(changed && shrinks) {
