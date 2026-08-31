@@ -7,7 +7,7 @@ use serde_json::json;
 use serial_test::serial;
 
 use super::*;
-use crate::editor::CUT_MARKER;
+use crate::{editor::CUT_MARKER, env_testing::EnvVarGuard};
 
 /// A workspace no request in these tests reaches into, so it needs no storage.
 fn bare_workspace() -> Workspace {
@@ -756,8 +756,7 @@ fn message_loop_refuses_a_plugin_needing_a_newer_protocol() {
 fn list_configs_reports_the_user_global_root() {
     let tmp = tempdir().unwrap();
     let global_dir = tmp.path().join("global");
-
-    unsafe { std::env::set_var("JP_GLOBAL_CONFIG_DIR", global_dir.as_str()) };
+    let _env = EnvVarGuard::set("JP_GLOBAL_CONFIG_DIR", global_dir.as_str());
 
     let path = global_dir.join("config/profiles/skill/rfd.toml");
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -772,8 +771,6 @@ fn list_configs_reports_the_user_global_root() {
         None,
         None,
     );
-
-    unsafe { std::env::remove_var("JP_GLOBAL_CONFIG_DIR") };
 
     let HostToPlugin::Configs(configs) = response else {
         panic!("expected a configs response, got {response:?}");
