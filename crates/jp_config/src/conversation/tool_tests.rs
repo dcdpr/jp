@@ -196,10 +196,7 @@ fn a_global_style_change_reaches_a_tool_through_a_resolved_config() {
 
 #[test]
 fn a_global_style_change_is_not_recorded_as_a_per_tool_override() {
-    use crate::{
-        PartialAppConfig, conversation::tool::style::InlineResults, delta::PartialConfigDelta as _,
-        util::build,
-    };
+    use crate::{PartialAppConfig, conversation::tool::style::InlineResults, util::build};
 
     // The conversation stream records the diff between its own config and the
     // invocation's (`get_config_delta_from_cli`). A `*`-only change must not
