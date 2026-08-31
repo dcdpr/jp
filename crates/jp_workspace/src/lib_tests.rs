@@ -783,6 +783,76 @@ fn lock_refreshes_a_conversation_read_before_acquisition() {
     assert_eq!(lock.metadata().title.as_deref(), Some("after"));
 }
 
+/// Regression: the projection decides whether a write creates or drops the
+/// workspace copy, so a locality change made while this process waited for the
+/// lock has to be read back — otherwise the next flush recreates the
+/// projection `jp conversation edit --local` just removed.
+#[test]
+fn lock_reads_the_projection_from_the_store_after_a_wait() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path().join("root");
+    let storage = root.join("storage");
+    let user = tmp.path().join("user-data");
+    let config = Arc::new(AppConfig::new_test());
+    let id = ConversationId::try_from(datetime!(2024-09-02 09:00:00 Z)).unwrap();
+
+    // Both roots: with user-local storage disabled, a persist ignores the
+    // projection entirely and there is no workspace copy to create or drop.
+    let backend = || {
+        FsStorageBackend::new(&storage)
+            .unwrap()
+            .with_user_storage(&user, None, "wsid")
+            .unwrap()
+    };
+
+    {
+        let mut seed = workspace_with_fs(&root, &backend());
+        seed.create_conversation_with_id(id, Conversation::default(), config.clone());
+        let h = seed.acquire_conversation(&id).unwrap();
+        let mut conv = seed.test_lock(h).into_mut();
+        conv.update_metadata(|_| {});
+        conv.flush().unwrap();
+    }
+
+    let mut ws = workspace_with_fs(&root, &backend());
+    ws.load_conversation_index();
+    let handle = ws.acquire_conversation(&id).unwrap();
+    assert_eq!(
+        ws.conversation_presence(&id),
+        Some(StoragePresence::Projected),
+        "the index this command read before waiting says projected"
+    );
+
+    // The lock holder makes the conversation local-only and releases the lock.
+    {
+        let mut other = workspace_with_fs(&root, &backend());
+        other.load_conversation_index();
+        let h = other.acquire_conversation(&id).unwrap();
+        let mut conv = other.test_lock(h).into_mut();
+        conv.set_projection(Projection::LocalOnly);
+        conv.flush().unwrap();
+    }
+
+    let LockResult::Acquired(lock) = ws.lock_conversation(handle, None).unwrap() else {
+        panic!("the lock is free");
+    };
+
+    assert_eq!(
+        lock.projection(),
+        Projection::LocalOnly,
+        "the lock writes with the locality the other process left behind"
+    );
+
+    let mut conv = lock.into_mut();
+    conv.update_metadata(|meta| meta.title = Some("after".to_owned()));
+    conv.flush().unwrap();
+
+    assert!(
+        !jp_storage::load::projected_conversation_ids(&storage).contains(&id),
+        "a local-only conversation stays out of the workspace projection"
+    );
+}
+
 #[test]
 fn test_archive_removes_from_index() {
     let tmp = tempdir().unwrap();

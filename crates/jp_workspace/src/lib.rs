@@ -622,6 +622,26 @@ impl Workspace {
             .map_or(Projection::Projected, Projection::from)
     }
 
+    /// The write projection for a lock being acquired on `id`.
+    ///
+    /// Read from the store rather than the workspace index: another process can
+    /// change a conversation's locality (`jp conversation edit --local`) while
+    /// this one waits for the flock, and the projection decides whether the
+    /// next write creates or drops the workspace copy.
+    /// A conversation the store does not have falls back to its recorded
+    /// presence, which for an unpersisted conversation is the intent it was
+    /// created with.
+    fn acquired_lock_projection(&self, id: &ConversationId) -> Projection {
+        self.loader
+            .load_conversation_index(ConversationFilter::default())
+            .into_iter()
+            .find(|entry| entry.id == *id)
+            .map_or_else(
+                || self.lock_projection(id),
+                |entry| Projection::from(entry.presence),
+            )
+    }
+
     /// Returns the globally unique ID of the workspace.
     #[must_use]
     pub fn id(&self) -> &Id {
@@ -696,7 +716,12 @@ impl Workspace {
     /// reflects whatever the previous lock holder wrote rather than a copy this
     /// process cached earlier.
     /// A value read through [`events`] or [`metadata`] before the lock was held
-    /// is superseded by that read.
+    /// is superseded by that read, and the guard it returned must be dropped
+    /// first: the refresh takes the write side of the same lock.
+    ///
+    /// The write projection is resolved from the store at acquisition too, so a
+    /// locality change made while this process waited decides which roots the
+    /// next write reaches.
     ///
     /// Returns an error if conversation data cannot be loaded from the backing
     /// store (e.g. the user deleted a required file).
@@ -733,7 +758,7 @@ impl Workspace {
             .ok_or_else(|| Error::not_found("Conversation events", &id))?
             .clone();
 
-        let projection = self.lock_projection(&id);
+        let projection = self.acquired_lock_projection(&id);
         Ok(LockResult::Acquired(ConversationLock::new(
             handle,
             metadata,
@@ -874,9 +899,11 @@ impl Workspace {
     /// The cached `Arc`s are updated in place, so scopes already sharing them
     /// observe the refreshed data.
     ///
-    /// A conversation the store does not have keeps its cached copy: an
-    /// in-memory conversation that was never persisted is the whole truth about
-    /// itself.
+    /// A conversation the store does not have keeps its cached copy, covering
+    /// an in-memory conversation that was never persisted.
+    /// This does not distinguish that case from a conversation another process
+    /// removed or archived while this one waited, which the next write
+    /// recreates.
     /// Any other load failure is returned rather than leaving a stale copy in
     /// place for the next write to persist.
     fn sync_conversation(&self, id: &ConversationId) -> Result<()> {
