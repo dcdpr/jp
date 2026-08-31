@@ -1,4 +1,4 @@
-use std::{cell::RefCell, io::Cursor};
+use std::{cell::RefCell, env, io::Cursor};
 
 use jp_plugin::message::{PathsInfo, ReadyMessage, WorkspaceInfo};
 use pretty_assertions::assert_eq;
@@ -54,6 +54,17 @@ fn init_message(root: &str, args: &[&str]) -> String {
         "{}\n",
         serde_json::to_string(&HostToPlugin::Init(init)).unwrap()
     )
+}
+
+/// This crate's directory, read at runtime.
+///
+/// `env!` would bake the path in when the test binary is compiled.
+/// With a target directory shared between worktrees the binary that runs is not
+/// always the one this worktree built, so the baked path can name a sibling
+/// checkout.
+/// Cargo sets the same variable when it runs the test, which stays correct.
+fn manifest_dir() -> String {
+    env::var("CARGO_MANIFEST_DIR").expect("cargo sets this when it runs a test")
 }
 
 /// Run the plugin against one host message, returning what it wrote back.
@@ -147,13 +158,10 @@ fn rejects_an_unknown_option() {
 #[test]
 fn rejects_a_path_outside_the_workspace() {
     let launcher = RecordingLauncher::default();
-    let tmp = std::env::temp_dir();
+    let tmp = env::temp_dir();
     let outside = tmp.to_string_lossy().into_owned();
 
-    let sent = exchange(
-        &init_message(env!("CARGO_MANIFEST_DIR"), &[&outside]),
-        &launcher,
-    );
+    let sent = exchange(&init_message(&manifest_dir(), &[&outside]), &launcher);
 
     assert!(
         launcher.launched.borrow().is_empty(),
@@ -177,9 +185,9 @@ fn rejects_a_path_outside_the_workspace() {
 #[test]
 fn accepts_a_path_inside_the_workspace() {
     let launcher = RecordingLauncher::default();
-    let root = env!("CARGO_MANIFEST_DIR");
+    let root = manifest_dir();
 
-    exchange(&init_message(root, &[&format!("{root}/src")]), &launcher);
+    exchange(&init_message(&root, &[&format!("{root}/src")]), &launcher);
 
     assert_eq!(launcher.launched.borrow().len(), 1);
 }
