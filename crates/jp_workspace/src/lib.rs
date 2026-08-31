@@ -622,6 +622,26 @@ impl Workspace {
             .map_or(Projection::Projected, Projection::from)
     }
 
+    /// The write projection for a lock being acquired on `id`.
+    ///
+    /// Read from the store rather than the workspace index: another process can
+    /// change a conversation's locality (`jp conversation edit --local`) while
+    /// this one waits for the flock, and the projection decides whether the
+    /// next write creates or drops the workspace copy.
+    /// A conversation the store does not have falls back to its recorded
+    /// presence, which for an unpersisted conversation is the intent it was
+    /// created with.
+    fn acquired_lock_projection(&self, id: &ConversationId) -> Projection {
+        self.loader
+            .load_conversation_index(ConversationFilter::default())
+            .into_iter()
+            .find(|entry| entry.id == *id)
+            .map_or_else(
+                || self.lock_projection(id),
+                |entry| Projection::from(entry.presence),
+            )
+    }
+
     /// Returns the globally unique ID of the workspace.
     #[must_use]
     pub fn id(&self) -> &Id {
@@ -692,8 +712,22 @@ impl Workspace {
     /// `Ok(LockResult::AlreadyLocked(handle))` if another process holds it,
     /// giving the handle back so the caller can retry.
     ///
+    /// An acquired lock reads the conversation from the backing store, so it
+    /// reflects whatever the previous lock holder wrote rather than a copy this
+    /// process cached earlier.
+    /// A value read through [`events`] or [`metadata`] before the lock was held
+    /// is superseded by that read, and the guard it returned must be dropped
+    /// first: the refresh takes the write side of the same lock.
+    ///
+    /// The write projection is resolved from the store at acquisition too, so a
+    /// locality change made while this process waited decides which roots the
+    /// next write reaches.
+    ///
     /// Returns an error if conversation data cannot be loaded from the backing
     /// store (e.g. the user deleted a required file).
+    ///
+    /// [`events`]: Self::events
+    /// [`metadata`]: Self::metadata
     pub fn lock_conversation(
         &self,
         handle: ConversationHandle,
@@ -706,12 +740,7 @@ impl Workspace {
             return Ok(LockResult::AlreadyLocked(handle));
         };
 
-        if let Some(cell) = self.state.conversations.get(&id) {
-            maybe_init_conversation(&*self.loader, (&id, cell));
-        }
-        if let Some(cell) = self.state.events.get(&id) {
-            maybe_init_events(&*self.loader, (&id, cell));
-        }
+        self.sync_conversation(&id)?;
 
         let metadata = self
             .state
@@ -729,7 +758,7 @@ impl Workspace {
             .ok_or_else(|| Error::not_found("Conversation events", &id))?
             .clone();
 
-        let projection = self.lock_projection(&id);
+        let projection = self.acquired_lock_projection(&id);
         Ok(LockResult::Acquired(ConversationLock::new(
             handle,
             metadata,
@@ -859,6 +888,48 @@ impl Workspace {
         self.state.conversations.remove(&id);
         self.state.events.remove(&id);
         self.state.presence.remove(&id);
+    }
+
+    /// Bring a conversation's in-memory copy in line with the backing store.
+    ///
+    /// Data cached before the flock was held can predate a write by whoever
+    /// held it, and a persist writes the whole conversation: without this,
+    /// mutating through a lock acquired after a wait would drop every event the
+    /// other writer appended.
+    /// The cached `Arc`s are updated in place, so scopes already sharing them
+    /// observe the refreshed data.
+    ///
+    /// A conversation the store does not have keeps its cached copy, covering
+    /// an in-memory conversation that was never persisted.
+    /// This does not distinguish that case from a conversation another process
+    /// removed or archived while this one waited, which the next write
+    /// recreates.
+    /// Any other load failure is returned rather than leaving a stale copy in
+    /// place for the next write to persist.
+    fn sync_conversation(&self, id: &ConversationId) -> Result<()> {
+        if let Some(cell) = self.state.conversations.get(id) {
+            match cell.get() {
+                None => maybe_init_conversation(&*self.loader, (id, cell)),
+                Some(arc) => match self.loader.load_conversation_metadata(id) {
+                    Ok(metadata) => *arc.write() = metadata,
+                    Err(error) if error.kind().is_missing() => {}
+                    Err(error) => return Err(error.into()),
+                },
+            }
+        }
+
+        if let Some(cell) = self.state.events.get(id) {
+            match cell.get() {
+                None => maybe_init_events(&*self.loader, (id, cell)),
+                Some(arc) => match self.loader.load_conversation_stream(id) {
+                    Ok(stream) => *arc.write() = stream,
+                    Err(error) if error.kind().is_missing() => {}
+                    Err(error) => return Err(error.into()),
+                },
+            }
+        }
+
+        Ok(())
     }
 
     /// Read the lock holder info for a conversation.
