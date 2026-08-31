@@ -74,6 +74,9 @@ pub fn shortenings_from(
     cargo: Option<&str>,
     rustup: Option<&str>,
 ) -> Vec<Shortening> {
+    // Joined with `/` rather than with `Utf8Path::join`, which uses the
+    // platform separator. Every prefix here is matched against a `/`-separated
+    // path, so a `\` in one would build a prefix that matches nothing.
     let under_home = |explicit: Option<&str>, default: &str| -> Option<String> {
         explicit
             .map(str::to_owned)
