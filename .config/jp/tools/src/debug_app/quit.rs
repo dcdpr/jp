@@ -48,6 +48,12 @@ enum Termination {
     /// Already gone when the tool ran.
     Absent,
 
+    /// Alive under the recorded pid, but not the app that was launched.
+    ///
+    /// The app exited and the kernel handed its number to something else.
+    /// Nothing is signalled: whatever holds it now belongs to somebody.
+    Reassigned,
+
     /// Exited after `SIGTERM`.
     Terminated,
 
@@ -68,7 +74,7 @@ pub(crate) async fn debug_app_quit(ctx: &Context, _t: &Tool) -> ToolResult {
         );
     }
 
-    let dir = Session::dir(&ctx.root, &Slot::for_context(ctx));
+    let dir = Session::dir(&ctx.root, &Slot::for_context(ctx)?);
     run(&ctx.root, &dir, TERM_GRACE, &RealSignals)
 }
 
@@ -97,6 +103,14 @@ struct Closed {
 
     /// The summary that replaced the bundle, or why there is none.
     summary: Result<Summary, String>,
+
+    /// What went wrong putting the recording away, if anything.
+    ///
+    /// Kept rather than dropped: a system-wide bundle that failed to delete
+    /// holds the environment of every process it recorded, and the session
+    /// record that names it is about to go.
+    /// Saying nothing would leave it on disk with nothing pointing at it.
+    cleanup: Vec<String>,
 }
 
 /// Close a bracket that was left open, and destroy its bundle.
@@ -111,6 +125,7 @@ fn close(
     let (stop, elapsed) = capture::stop(recording.recorder_pid, signals, timeout);
     let said = recording.said(dir);
     let mut recording = recording.clone();
+    let mut cleanup = Vec::new();
 
     let summary = if stop == Stop::Stuck {
         Err(format!(
@@ -128,17 +143,26 @@ fn close(
         // this is the last moment at which the recording can be told what it was
         // recording.
         let target = Target::for_session(session);
-        drop(recording.close(Some(target.clone()), dir));
+        if let Err(e) = recording.close(Some(target.clone()), dir) {
+            cleanup.push(format!(
+                "Failed to record that `{}` closed: {e}",
+                recording.id
+            ));
+        }
 
         // A system-wide bundle goes whatever the read did: it is credential
         // material, and a failure that leaves one behind is the case nobody is
         // watching.
         let read = hotspots::summarize(&recording, dir, Some(&target), shortenings)
             .map_err(|e| e.to_string());
-        drop(recording.retire(dir));
+        if let Err(e) = recording.retire(dir) {
+            cleanup.push(e.to_string());
+        }
         read
     } else {
-        drop(recording.discard(dir));
+        if let Err(e) = recording.discard(dir) {
+            cleanup.push(e.to_string());
+        }
         Err(format!(
             "The recorder left no bundle for `{}`. It said:\n\n```\n{}\n```",
             recording.id,
@@ -156,6 +180,7 @@ fn close(
             String::new()
         },
         summary,
+        cleanup,
     }
 }
 
@@ -183,10 +208,30 @@ fn run(root: &Utf8Path, dir: &Utf8Path, grace: Duration, signals: &dyn Signals) 
         )
     });
 
-    let termination = if session.is_running() {
+    // A recorder still writing is a reason to stop here rather than to carry on
+    // into the app. `xctrace` attached to a process that is going away has no
+    // defined behaviour, and removing the session record below would take with
+    // it the only thing naming either of them.
+    if let Some(closed) = &closed
+        && closed.stop == Stop::Stuck
+    {
+        return error(match &closed.summary {
+            Err(why) => why.clone(),
+            Ok(_) => format!(
+                "The recorder for `{}` was still writing after {:.1}s, so the app was left \
+                 running and the session record kept. Stop it again once it has finished.",
+                closed.id,
+                closed.elapsed.as_secs_f64()
+            ),
+        });
+    }
+
+    let termination = if !session.is_running() {
+        Termination::Absent
+    } else if signals.is(session.pid, session.bundle.as_str()) {
         stop(session.pid, grace, signals)?
     } else {
-        Termination::Absent
+        Termination::Reassigned
     };
 
     // Read the console before dropping the record: these offsets are the only
@@ -197,7 +242,7 @@ fn run(root: &Utf8Path, dir: &Utf8Path, grace: Duration, signals: &dyn Signals) 
     let path = Session::path(dir);
     std::fs::remove_file(&path).map_err(|e| format!("Failed to remove {path}: {e}"))?;
 
-    let swept = capture::sweep(dir);
+    let swept = capture::sweep(dir, signals);
 
     Ok(Outcome::Success {
         content: report(
@@ -213,6 +258,8 @@ fn run(root: &Utf8Path, dir: &Utf8Path, grace: Duration, signals: &dyn Signals) 
 }
 
 /// Signal the app and wait for it to go away, escalating once.
+///
+/// Called only once the pid has been confirmed to be the app that was launched.
 fn stop(pid: u32, grace: Duration, signals: &dyn Signals) -> Result<Termination, Error> {
     signals.send(pid, Signal::Term);
     if wait_for_exit(pid, grace, signals) {
@@ -260,6 +307,11 @@ fn report(
             "The app recorded as pid {} was already gone. Cleared the session record.\n",
             session.pid
         ),
+        Termination::Reassigned => format!(
+            "The app recorded as pid {} is gone, and that number now belongs to another process. \
+             Nothing was signalled, and the session record is cleared.\n",
+            session.pid
+        ),
         Termination::Terminated => {
             format!("Stopped the app (pid {}) with SIGTERM.\n", session.pid)
         }
@@ -278,6 +330,18 @@ fn report(
 
     if let Some(closed) = closed {
         report.push_str(&render_closed(closed, shortenings));
+
+        // Loudly, and before the summary reads as a tidy ending: the session
+        // record naming this bundle is gone by the time anyone reads it, so
+        // whatever is left has to be named here or not at all.
+        if !closed.cleanup.is_empty() {
+            report.push_str(&format!(
+                "\n**Something was left behind.**\n\n```\n{}\n```\n\nA bundle recorded \
+                 system-wide holds the environment of every process on the machine. Delete it by \
+                 hand and do not attach it to anything.\n",
+                closed.cleanup.join("\n")
+            ));
+        }
     }
 
     report.push_str(&swept_note(swept));

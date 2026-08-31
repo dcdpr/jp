@@ -67,8 +67,15 @@ impl Mark {
     /// Called with the moment an interval began.
     /// See the module documentation for why that rather than the moment it
     /// ended.
+    ///
+    /// Half-open, so no moment belongs to two steps.
+    /// One step's `ended_ms` and the next one's `began_ms` are separate
+    /// readings of the clock with only bookkeeping between them, which lands in
+    /// the same millisecond often enough — and counting one interval under
+    /// both steps would inflate the counts this whole feature exists to make
+    /// comparable.
     pub(crate) const fn holds(&self, at_ms: u64) -> bool {
-        at_ms >= self.began_ms && at_ms <= self.ended_ms
+        at_ms >= self.began_ms && at_ms < self.ended_ms
     }
 }
 

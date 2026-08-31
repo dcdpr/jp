@@ -19,9 +19,26 @@ fn a_mark_holds_the_moments_inside_its_window() {
 
     assert!(mark.holds(1_000));
     assert!(mark.holds(1_500));
-    assert!(mark.holds(2_000));
+    assert!(mark.holds(1_999));
     assert!(!mark.holds(999));
     assert!(!mark.holds(2_001));
+}
+
+/// Two steps meeting in one millisecond is the ordinary case with `reads:
+/// "none"`, where only bookkeeping separates one step's last reading of the
+/// clock from the next one's first.
+///
+/// An interval beginning at that instant belongs to the step that was starting,
+/// not to both.
+/// Counted twice it inflates exactly the numbers a caller compares between
+/// runs.
+#[test]
+fn a_moment_two_steps_share_belongs_to_the_later_one() {
+    let first = mark("drive-1", 1, 1_000, 2_000);
+    let second = mark("drive-1", 2, 2_000, 3_000);
+
+    assert!(!first.holds(2_000));
+    assert!(second.holds(2_000));
 }
 
 #[test]

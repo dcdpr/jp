@@ -102,11 +102,15 @@ The app's own stream is archived rather than truncated at each launch, so the pe
 an earlier run stay readable. That is what `against` compares against, and it is worth more than \
 the bundles: those counts live there and nowhere else.
 
-Everything a run touches is scoped to a *slot*, named by `JP_DEBUG_APP_SLOT` and defaulting to \
-`default`. A slot owns its session record, its state and conversation-store directories, its \
-console files, its scratch workspace, and its own copy of the app bundle under \
-`tmp/debug-app/<slot>/`. Two agents that set different slots do not collide; two that share one \
-will, and it shows up as a session record vanishing mid-sequence.
+Everything a run touches is scoped to a *slot*, and the slot is your conversation's id unless \
+`JP_DEBUG_APP_SLOT` overrides it — `default` is only the fallback when neither yields a usable \
+name. So artifacts are under `tmp/debug-app/<conversation-id>/` rather than under \
+`tmp/debug-app/default/`, which is worth knowing before going to look for them. A slot owns its \
+session record, its state and conversation-store directories, its console files, its scratch \
+workspace, and its own copy of the app bundle. Deriving it from the conversation is what keeps \
+two agents apart without either of them choosing to; two that share one slot collide, and it \
+shows up as a session record vanishing mid-sequence. An override that is not letters, digits and \
+hyphens is refused rather than quietly reduced to them.
 
 The bundle copy is what isolates window state. `@SceneStorage` is keyed by bundle identifier \
 rather than by environment, so each slot's copy carries its own identifier and neither the \

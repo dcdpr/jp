@@ -68,6 +68,25 @@ struct TreeOptions {
     let maxDepth: Int
     let maxSiblings: Int
     let frames: Bool
+
+    /// Whether to ask each kept element what it can be asked to do.
+    ///
+    /// Off by default because it is a round-trip per element and most callers
+    /// discard the answer. A reading of a whole application is thousands of
+    /// elements, so this is the difference between one accessibility call per
+    /// node and two.
+    let actions: Bool
+
+    /// Whether to walk into the menu bar.
+    ///
+    /// Off by default because most of what hangs off it belongs to macOS rather
+    /// than to the app — the Apple menu, Services, the window tiling submenus —
+    /// and it runs to a couple of hundred elements around the handful
+    /// describing the window.
+    ///
+    /// The bar itself is still reported, with its children counted as elided,
+    /// so a reader can see it is there and ask for it.
+    let menus: Bool
 }
 
 /// Reads an application's accessibility tree into something a person can scan.
@@ -142,7 +161,13 @@ enum Tree {
         // The count is what tells a reader there is more here; without it a node
         // stopped at the depth limit is indistinguishable from a leaf.
         let available = reading.children
-        let all = depth < options.maxDepth ? available : []
+
+        // The menu bar is skipped here rather than filtered out of the rendered
+        // result, so the elements under it are never read at all. Reading and
+        // discarding them is the same couple of hundred round-trips as reading
+        // and showing them.
+        let unwalkedMenus = !options.menus && text[0] == "AXMenuBar"
+        let all = depth < options.maxDepth && !unwalkedMenus ? available : []
 
         // The sibling cap is for reading an unfiltered tree, where every level is
         // worth seeing but a thousand copies of one row are not. Under a filter the
@@ -179,9 +204,10 @@ enum Tree {
             enabled: text[6].axFlag,
             focused: text[7].axFlag,
             frame: options.frames ? text[8] : nil,
-            // Read only for a node being kept. Actions cost their own round-trip and
-            // most elements a filtered walk passes through are discarded.
-            actions: element.actions,
+            // Read only for a node being kept, and only when asked for: this is
+            // a round-trip of its own, and a caller that is not going to show
+            // them should not pay for them.
+            actions: options.actions ? element.actions : [],
             children: children,
             elidedChildren: available.count > children.count
                 ? available.count - children.count

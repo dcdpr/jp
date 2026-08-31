@@ -153,23 +153,40 @@ pub fn shorten_within(text: &str, shortenings: &[Shortening]) -> String {
     out
 }
 
-/// Replace every occurrence of `prefix` in `text` that ends on a component
-/// boundary.
+/// Whether `c` can continue a path component, and so cannot sit against the
+/// edge of a match.
 ///
-/// The boundary test is what keeps `/Users/jean` from rewriting the front of
-/// `/Users/jeanne`.
-/// A path continues into `/`, and stops at anything that cannot be part of a
-/// name.
+/// `/` is not one: a match starting right after a separator starts at a
+/// component of its own, which is what makes `file:///Users/jean` shorten while
+/// `/Volumes/Backup/Users/jean` does not.
+fn continues_component(c: char) -> bool {
+    c.is_alphanumeric() || matches!(c, '-' | '_' | '.')
+}
+
+/// Replace every occurrence of `prefix` in `text` that stands on component
+/// boundaries at both ends.
+///
+/// Both ends are checked, and for the same reason.
+/// Without the trailing test `/Users/jean` rewrites the front of
+/// `/Users/jeanne`; without the leading one it rewrites the middle of
+/// `/Volumes/Backup/Users/jean`, which is a different file on a mounted disk.
 fn replace_at_boundaries(text: &str, prefix: &str, label: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
 
     while let Some(at) = rest.find(prefix) {
         let after = &rest[at + prefix.len()..];
-        let boundary = after
-            .chars()
-            .next()
-            .is_none_or(|c| !(c.is_alphanumeric() || matches!(c, '-' | '_' | '.')));
+
+        // What precedes the match is the tail of this window, or of what has
+        // already been written when the match sits at the front of it.
+        let before = if at > 0 {
+            rest[..at].chars().last()
+        } else {
+            out.chars().last()
+        };
+
+        let boundary = before.is_none_or(|c| !continues_component(c))
+            && after.chars().next().is_none_or(|c| !continues_component(c));
 
         out.push_str(&rest[..at]);
         if !boundary {

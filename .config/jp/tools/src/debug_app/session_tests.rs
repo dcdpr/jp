@@ -75,10 +75,13 @@ fn write_pid(session: &Session, pid: u32) {
 /// either of them choosing to.
 #[test]
 fn slot_comes_from_the_conversation() {
-    assert_eq!(Slot::named(None, "jp-c12345").as_str(), "jp-c12345");
+    assert_eq!(
+        Slot::named(None, "jp-c12345").unwrap().as_str(),
+        "jp-c12345"
+    );
     assert_ne!(
-        Slot::named(None, "jp-c12345"),
-        Slot::named(None, "jp-c67890")
+        Slot::named(None, "jp-c12345").unwrap(),
+        Slot::named(None, "jp-c67890").unwrap()
     );
 }
 
@@ -86,27 +89,61 @@ fn slot_comes_from_the_conversation() {
 /// takes an explicit name.
 #[test]
 fn an_override_wins_over_the_conversation() {
-    assert_eq!(Slot::named(Some("shared"), "jp-c12345").as_str(), "shared");
-}
-
-/// The slot lands inside a reverse-DNS bundle identifier, which accepts only
-/// letters, digits and hyphens.
-#[test]
-fn slot_keeps_only_what_a_bundle_identifier_accepts() {
     assert_eq!(
-        Slot::named(Some("agent_two/../etc"), "").as_str(),
-        "agenttwoetc"
+        Slot::named(Some("shared"), "jp-c12345").unwrap().as_str(),
+        "shared"
     );
-    assert_eq!(Slot::named(None, "jp/c/123").as_str(), "jpc123");
 }
 
-/// A name left with nothing usable falls through to the conversation, and a
+/// A conversation id is nobody's choice, so what a bundle identifier cannot
+/// take is dropped from it rather than reported.
+#[test]
+fn a_conversation_id_is_reduced_to_what_an_identifier_accepts() {
+    assert_eq!(Slot::named(None, "jp/c/123").unwrap().as_str(), "jpc123");
+}
+
+/// An override is somebody's choice, and filtering it answers a different
+/// question than the one asked: `my slot` would run under `myslot`, whose
+/// artifacts are not where the caller goes looking.
+///
+/// Two names that differ only in what a filter removes would also collapse into
+/// one, so two agents deliberately kept apart would drive the same app.
+#[test]
+fn an_override_naming_something_unusable_is_refused() {
+    let error = Slot::named(Some("agent_two/../etc"), "jp-c12345")
+        .unwrap_err()
+        .to_string();
+
+    assert!(
+        error.starts_with("`JP_DEBUG_APP_SLOT` is \"agent_two/../etc\", which cannot name a slot"),
+        "unexpected error: {error}"
+    );
+
+    assert!(Slot::named(Some("///"), "jp-c12345").is_err());
+    assert!(Slot::named(Some("my slot"), "jp-c12345").is_err());
+}
+
+/// Two names a filter would have reduced to one stay distinct, because neither
+/// is accepted in the first place.
+#[test]
+fn two_overrides_a_filter_would_merge_are_both_refused() {
+    assert!(Slot::named(Some("agent_one"), "").is_err());
+    assert_eq!(
+        Slot::named(Some("agentone"), "").unwrap().as_str(),
+        "agentone"
+    );
+}
+
+/// An unset variable is not a name, so it defers to the conversation, and a
 /// conversation with nothing usable falls back rather than failing.
 #[test]
 fn slot_falls_through_then_back() {
-    assert_eq!(Slot::named(Some("///"), "jp-c12345").as_str(), "jp-c12345");
-    assert_eq!(Slot::named(None, "").as_str(), "default");
-    assert_eq!(Slot::named(Some(""), "///").as_str(), "default");
+    assert_eq!(
+        Slot::named(Some(""), "jp-c12345").unwrap().as_str(),
+        "jp-c12345"
+    );
+    assert_eq!(Slot::named(None, "").unwrap().as_str(), "default");
+    assert_eq!(Slot::named(Some(""), "///").unwrap().as_str(), "default");
 }
 
 #[test]

@@ -100,7 +100,7 @@ pub(crate) async fn debug_app_screenshot(ctx: &Context, _t: &Tool) -> ToolResult
         .duration_since(UNIX_EPOCH)
         .map_or(0, |since| since.as_millis());
 
-    let dir = Session::dir(&ctx.root, &Slot::for_context(ctx));
+    let dir = Session::dir(&ctx.root, &Slot::for_context(ctx)?);
     run(&ctx.root, &dir, millis, &DuctProcessRunner)
 }
 

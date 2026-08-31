@@ -1,6 +1,6 @@
 pub mod diff;
-pub mod root;
 pub mod paths;
+pub mod root;
 pub mod runner;
 pub mod trace;
 pub mod xml;

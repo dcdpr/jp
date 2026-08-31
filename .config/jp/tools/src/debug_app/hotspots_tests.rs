@@ -62,6 +62,7 @@ fn target() -> Target {
         dsym: None,
         slide: None,
         configuration: "Debug".to_owned(),
+        uuid: None,
     }
 }
 

@@ -79,7 +79,7 @@ pub(crate) async fn debug_app_profile(ctx: &Context, t: &Tool) -> ToolResult {
 
             start(
                 &ctx.root,
-                &Session::dir(&ctx.root, &Slot::for_context(ctx)),
+                &Session::dir(&ctx.root, &Slot::for_context(ctx)?),
                 &tiers,
                 &DuctProcessRunner,
                 &capture::RealSpawner,
@@ -105,7 +105,7 @@ pub(crate) async fn debug_app_profile(ctx: &Context, t: &Tool) -> ToolResult {
 
             stop(
                 &ctx.root,
-                &Session::dir(&ctx.root, &Slot::for_context(ctx)),
+                &Session::dir(&ctx.root, &Slot::for_context(ctx)?),
                 discard,
                 &RealSignals,
             )
@@ -132,7 +132,7 @@ pub(crate) async fn debug_app_profile(ctx: &Context, t: &Tool) -> ToolResult {
 
             report::run(
                 &ctx.root,
-                &Session::dir(&ctx.root, &Slot::for_context(ctx)),
+                &Session::dir(&ctx.root, &Slot::for_context(ctx)?),
                 &request,
             )
         }
@@ -199,11 +199,13 @@ fn preview_start(tiers: &[Tier]) -> String {
 
     let allocations = if tiers.contains(&Tier::Allocations) {
         "\nAllocation attribution needs `MallocStackLogging` in the app's environment, and \
-         libmalloc\nreads that at process start. Against a running session this only works if the \
-         app was\nlaunched for it; otherwise start the bracket first and launch into it.\n\nWhat \
-         comes back is a bundle for Instruments, not a table: `xctrace export` surfaces\nnone of \
-         the Allocations instrument's data. For a machine-readable number, `mode:\n\"report\"` \
-         with `view: \"allocations\"` reports the footprint the app measures for itself.\n"
+         libmalloc\nreads that at process start, so it is decided at launch and cannot be added to \
+         a\nrunning app. The instrument also refuses a target of all processes, so there is \
+         exactly\none order that works: `debug_app_launch` with `allocation_stacks: true`, then \
+         open this\nbracket against it.\n\nWhat comes back is a bundle for Instruments, not a \
+         table: `xctrace export` surfaces\nnone of the Allocations instrument's data. For a \
+         machine-readable number, `mode:\n\"report\"` with `view: \"allocations\"` reports the \
+         footprint the app measures for itself.\n"
     } else {
         ""
     };
@@ -256,7 +258,7 @@ fn start(
     runner: &dyn ProcessRunner,
     spawner: &dyn Spawner,
 ) -> ToolResult {
-    let swept = capture::sweep(dir);
+    let swept = capture::sweep(dir, &RealSignals);
 
     if let Some(open) = pending(dir) {
         return error(format!(
@@ -309,7 +311,17 @@ fn start(
         recorder_pid: 0,
         started_unix,
         stopped_unix: None,
-        target: None,
+
+        // Known now for an attached bracket, and only now. If this app crashes
+        // mid-bracket the session stops being "running", `debug_app_launch`
+        // stops refusing, and a replacement can be recorded before anything
+        // closes this — at which point reading the session would attribute this
+        // trace to another app's pid, binary and load address.
+        //
+        // A system-wide bracket has nothing to name yet, by construction: it is
+        // opened precisely because no app is running. That one is filled in at
+        // stop.
+        target: session.as_ref().map(Target::for_session),
     };
 
     let bundle = recording.bundle(dir);
@@ -390,7 +402,14 @@ fn stop(root: &Utf8Path, dir: &Utf8Path, discard: bool, signals: &dyn Signals) -
     // Stamped and stored before the read, for two reasons. A read that failed
     // must not leave a bracket that looks open, and a retained recording has to
     // answer for itself once `debug_app_quit` has removed the session record.
-    let target = Session::load(dir)?.as_ref().map(Target::for_session);
+    //
+    // An attached bracket recorded its target when it opened, and that is the
+    // app it recorded whatever is running now. Only a bracket that had nothing
+    // to name then looks for one here.
+    let target = match recording.target.clone() {
+        Some(target) => Some(target),
+        None => Session::load(dir)?.as_ref().map(Target::for_session),
+    };
     recording.close(target.clone(), dir)?;
 
     // A system-wide bundle goes whatever the read did: it is credential

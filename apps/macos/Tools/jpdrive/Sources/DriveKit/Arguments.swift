@@ -57,7 +57,8 @@ enum Arguments {
     static let usage = """
         usage: jpdrive doctor   [--pid <pid>]
                jpdrive tree     --pid <pid> [--identifier <prefix>] [--max-matches <n>]
-                                [--frames] [--depth <n>] [--max-siblings <n>]
+                                [--frames] [--actions] [--menus] [--depth <n>]
+                                [--max-siblings <n>]
                jpdrive windows  --pid <pid>
                jpdrive windowid --pid <pid>
                jpdrive menu     --pid <pid> [--depth <n>] [--max-siblings <n>]
@@ -133,7 +134,9 @@ enum Arguments {
                     maxMatches: options.matches ?? defaultMatches,
                     maxDepth: options.depth ?? defaultDepth,
                     maxSiblings: options.siblings ?? defaultSiblings,
-                    frames: options.frames
+                    frames: options.frames,
+                    actions: options.actions,
+                    menus: options.menus
                 )
             )
 
@@ -189,7 +192,13 @@ enum Arguments {
                     // them is a thing you might press, so the default that keeps a
                     // thousand-row list readable would only hide half the verbs.
                     maxSiblings: options.siblings ?? 0,
-                    frames: options.frames
+                    frames: options.frames,
+                    // Neither is a choice here. Walking the menu bar is the whole
+                    // of what this subcommand does, and an item reported without
+                    // the action that activates it is not something a caller can
+                    // press.
+                    actions: true,
+                    menus: true
                 )
             )
 
@@ -262,6 +271,8 @@ enum Arguments {
         var identifier: String?
         var json: String?
         var frames = false
+        var actions = false
+        var menus = false
         var image: String?
         var scan: PixelOptions.Axis?
         var at: Int?
@@ -329,6 +340,12 @@ enum Arguments {
 
             case "--frames":
                 options.frames = true
+
+            case "--actions":
+                options.actions = true
+
+            case "--menus":
+                options.menus = true
 
             case "--identifier":
                 guard let value = rest.next() else {

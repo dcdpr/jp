@@ -78,7 +78,7 @@ pub(crate) async fn debug_app_drive(ctx: &Context, t: &Tool) -> ToolResult {
         return error("debug_app_drive only supports macOS: it drives an AppKit application.");
     }
 
-    let dir = Session::dir(&ctx.root, &Slot::for_context(ctx));
+    let dir = Session::dir(&ctx.root, &Slot::for_context(ctx)?);
     run(&ctx.root, &dir, &steps, &opts, reads, &DuctProcessRunner)
 }
 
@@ -190,16 +190,37 @@ fn run(
     let run = marks::new_run();
     let mut marked = Vec::new();
 
+    // Collected rather than propagated from inside the loop. Everything below is
+    // owed whichever way the run went — the borrowed focus and pointer go back,
+    // the console offsets record what has been reported, the marks record when
+    // the steps ran — and a `?` in the loop would skip all three on exactly the
+    // run that needs them most.
+    let mut failure = None;
+
     for (index, step) in steps.iter().enumerate() {
         let began_ms = marks::now_ms();
-        let acted = act(&bin, session.pid, step, root, runner)?;
-        let after = if reads.is_none() {
-            String::new()
-        } else {
-            reading(&bin, session.pid, opts, root, runner)?
+
+        let step_result = (|| {
+            let acted = act(&bin, session.pid, step, root, runner)?;
+            let after = if reads.is_none() {
+                String::new()
+            } else {
+                reading(&bin, session.pid, opts, root, runner)?
+            };
+            let out = session.stdout.delta()?;
+            let err = session.stderr.delta()?;
+
+            Ok::<_, Error>((acted, after, out, err))
+        })();
+
+        let (acted, after, out, err) = match step_result {
+            Ok(read) => read,
+            Err(e) => {
+                failure = Some(e);
+                stopped = true;
+                break;
+            }
         };
-        let out = session.stdout.delta()?;
-        let err = session.stderr.delta()?;
 
         marked.push(Mark {
             run: run.clone(),
@@ -246,6 +267,12 @@ fn run(
     // record of when the steps that did run ran.
     session.store(dir)?;
     marks::append(dir, &marked)?;
+
+    // After the housekeeping above, so a driver that died mid-run still hands
+    // the desktop back before the error is reported.
+    if let Some(e) = failure {
+        return Err(e);
+    }
 
     let report = format!(
         "{}{body}",

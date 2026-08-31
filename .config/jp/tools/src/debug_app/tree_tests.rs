@@ -50,6 +50,10 @@ fn tree() -> TreeNode {
 /// The rendering is the diff surface, so it is pinned exactly rather than
 /// spot-checked: a stray blank line or a reordered marker would make every
 /// comparison noisy.
+///
+/// The fixture carries actions because it models a read that asked for them.
+/// Whether to read them at all is the driver's decision now, so everything that
+/// arrives is shown.
 #[test]
 fn renders_one_line_per_element() {
     let mut out = String::new();
@@ -57,27 +61,25 @@ fn renders_one_line_per_element() {
 
     assert_eq!(
         out,
-        "AXApplication\n  AXWindow \"mac-app\"\n    AXTable #sidebar.conversations \
-         \"Conversations\" (+411 not shown)\n      AXRow #jp-c12345 \"A conversation, 12 events\" \
-         [focused]\n    AXButton #transcript.copy \"Copy Link\" [disabled]\n"
-    );
-}
-
-#[test]
-fn renders_actions_only_when_asked() {
-    let opts = Options {
-        actions: true,
-        ..Options::default()
-    };
-    let mut out = String::new();
-    render(&tree(), 0, &opts, &mut out);
-
-    assert_eq!(
-        out,
         "AXApplication\n  AXWindow \"mac-app\" (AXRaise)\n    AXTable #sidebar.conversations \
          \"Conversations\" (+411 not shown)\n      AXRow #jp-c12345 \"A conversation, 12 events\" \
          [focused] (AXPress)\n    AXButton #transcript.copy \"Copy Link\" [disabled] (AXPress)\n"
     );
+}
+
+/// A default read asks for no actions, so the driver reports none and there is
+/// nothing to leave out.
+#[test]
+fn renders_no_actions_when_the_driver_reported_none() {
+    let node: TreeNode = serde_json::from_str(
+        r#"{"role": "AXButton", "identifier": "transcript.copy", "actions": [], "children": []}"#,
+    )
+    .unwrap();
+
+    let mut out = String::new();
+    render(&node, 0, &Options::default(), &mut out);
+
+    assert_eq!(out, "AXButton #transcript.copy\n");
 }
 
 #[test]
@@ -121,22 +123,19 @@ fn a_selection_change_moves_one_line() {
 
 /// Left unwalked, the Apple menu, Services, and the window tiling submenus run
 /// to some two hundred lines around the handful describing the window.
+///
+/// The driver stops before reading them, so they arrive as a count rather than
+/// as elements.
+/// The note says so, because this is the one elision a caller can undo.
 #[test]
-fn leaves_the_menu_bar_unwalked_by_default() {
+fn names_the_menus_the_driver_left_unwalked() {
     let node: TreeNode = serde_json::from_str(
         r#"{
           "role": "AXApplication",
           "actions": [],
           "children": [
             {"role": "AXWindow", "label": "mac-app", "actions": [], "children": []},
-            {
-              "role": "AXMenuBar",
-              "actions": [],
-              "children": [
-                {"role": "AXMenuBarItem", "label": "Apple", "actions": [], "children": []},
-                {"role": "AXMenuBarItem", "label": "File", "actions": [], "children": []}
-              ]
-            }
+            {"role": "AXMenuBar", "actions": [], "children": [], "elided_children": 2}
           ]
         }"#,
     )
@@ -144,22 +143,39 @@ fn leaves_the_menu_bar_unwalked_by_default() {
 
     let mut out = String::new();
     render(&node, 0, &Options::default(), &mut out);
+
     assert_eq!(
         out,
         "AXApplication\n  AXWindow \"mac-app\"\n  AXMenuBar (2 menus not walked, pass `menus` for \
          them)\n"
     );
+}
+
+/// Asked for, the driver walks them and they render like anything else.
+#[test]
+fn renders_the_menus_when_the_driver_walked_them() {
+    let node: TreeNode = serde_json::from_str(
+        r#"{
+          "role": "AXMenuBar",
+          "actions": [],
+          "children": [
+            {"role": "AXMenuBarItem", "label": "Apple", "actions": [], "children": []},
+            {"role": "AXMenuBarItem", "label": "File", "actions": [], "children": []}
+          ]
+        }"#,
+    )
+    .unwrap();
 
     let opts = Options {
         menus: true,
         ..Options::default()
     };
-    let mut walked = String::new();
-    render(&node, 0, &opts, &mut walked);
+    let mut out = String::new();
+    render(&node, 0, &opts, &mut out);
+
     assert_eq!(
-        walked,
-        "AXApplication\n  AXWindow \"mac-app\"\n  AXMenuBar\n    AXMenuBarItem \"Apple\"\n    \
-         AXMenuBarItem \"File\"\n"
+        out,
+        "AXMenuBar\n  AXMenuBarItem \"Apple\"\n  AXMenuBarItem \"File\"\n"
     );
 }
 
@@ -213,4 +229,28 @@ fn args_carry_every_option() {
         "12",
         "--frames",
     ]);
+}
+
+/// Both cost the driver work it would otherwise do and throw away: actions are
+/// an accessibility round-trip per kept element, and the menu bar is a couple
+/// of hundred elements belonging to macOS rather than to the app.
+///
+/// Filtering them out of the answer, as this once did, pays for them anyway.
+#[test]
+fn args_ask_for_actions_and_menus_rather_than_dropping_them_after() {
+    let opts = Options {
+        actions: true,
+        menus: true,
+        ..Options::default()
+    };
+
+    let asked = args(4321, &opts);
+
+    assert!(asked.contains(&"--actions".to_owned()), "{asked:?}");
+    assert!(asked.contains(&"--menus".to_owned()), "{asked:?}");
+
+    let default = args(4321, &Options::default());
+
+    assert!(!default.contains(&"--actions".to_owned()), "{default:?}");
+    assert!(!default.contains(&"--menus".to_owned()), "{default:?}");
 }

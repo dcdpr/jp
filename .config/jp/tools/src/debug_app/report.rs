@@ -485,7 +485,7 @@ fn from_stream(
 
     let Some(compared) = compared else {
         return Ok(match view {
-            View::Timeline => render_timeline(&selected, &steps, window, dir),
+            View::Timeline => render_timelines(&selected, &steps, window, dir),
             View::Spans | View::Views => render_tally(view, &selected, request.span.as_deref()),
             _ => unreachable!("bundle-backed views do not reach the stream"),
         });
@@ -646,6 +646,60 @@ fn steps_in(
             .collect(),
         Some(step) => run.into_iter().filter(|mark| mark.step == step).collect(),
     }
+}
+
+/// Split marks into runs, oldest run first, each in step order.
+///
+/// A recording's window can hold several drives — a session is meant to hold
+/// several, and a bracket left open across two of them is ordinary.
+/// Rendering them as one table repeats step numbers and labels the lot with
+/// whichever run happened to come first, so each is kept whole instead.
+fn by_run(marks: &[Mark]) -> Vec<Vec<Mark>> {
+    let mut runs: Vec<Vec<Mark>> = Vec::new();
+
+    for mark in marks {
+        match runs.iter_mut().find(|run| run[0].run == mark.run) {
+            Some(run) => run.push(mark.clone()),
+            None => runs.push(vec![mark.clone()]),
+        }
+    }
+
+    for run in &mut runs {
+        run.sort_by_key(|mark| mark.step);
+    }
+
+    runs.sort_by_key(|run| run[0].began_ms);
+    runs
+}
+
+/// Render one table per driven run in the window.
+fn render_timelines(
+    selected: &[&Interval],
+    steps: &[Mark],
+    window: Window,
+    dir: &Utf8Path,
+) -> String {
+    let runs = by_run(steps);
+
+    if runs.len() < 2 {
+        return render_timeline(selected, steps, window, dir);
+    }
+
+    let mut out = format!(
+        "{} driven runs fall in this window, kept apart because a step number means something \
+         different in each.\n\n",
+        runs.len()
+    );
+
+    out.push_str(
+        &runs
+            .iter()
+            .map(|run| render_timeline(selected, run, window, dir))
+            .collect::<Vec<_>>()
+            .join("\n"),
+    );
+
+    out
 }
 
 /// Render the per-step table.
@@ -868,19 +922,30 @@ fn compare_timeline(
     out.push_str("| # | Step | View bodies | Δ | FFI calls | Δ |\n");
     out.push_str("| -: | :--- | ---: | ---: | ---: | ---: |\n");
 
+    let mut mismatched = false;
+
     for mark in steps.iter().take(MAX_ROWS) {
         let here = counts_for(selected, mark);
-        let there = against_steps
-            .iter()
-            .find(|other| other.step == mark.step)
+        let at_position = against_steps.iter().find(|other| other.step == mark.step);
+
+        // Paired on the label as well as the number. Two runs of different lists
+        // can hold the same count of steps, and then position alone pairs a
+        // selection against a resize and prints the difference as though the two
+        // measured one thing.
+        let there = at_position
+            .filter(|other| other.label == mark.label)
             .map(|other| counts_for(against_selected, other));
 
-        let (bodies, calls) = match &there {
-            Some(there) => (
+        let (bodies, calls) = match (&there, at_position) {
+            (Some(there), _) => (
                 delta(here.view_bodies, there.view_bodies),
                 delta(here.ffi_calls, there.ffi_calls),
             ),
-            None => ("(absent)".to_owned(), "(absent)".to_owned()),
+            (None, Some(_)) => {
+                mismatched = true;
+                ("(other step)".to_owned(), "(other step)".to_owned())
+            }
+            (None, None) => ("(absent)".to_owned(), "(absent)".to_owned()),
         };
 
         out.push_str(&format!(
@@ -905,6 +970,14 @@ fn compare_timeline(
         out.push_str(
             "\nThe two runs drove different numbers of steps, so a step number does not \
              necessarily name the same action on both sides. Check the labels.\n",
+        );
+    }
+
+    if mismatched {
+        out.push_str(
+            "\nRows marked `(other step)` hold that position in both runs but do not do the same \
+             thing, so there is no difference to report between them. Compare two runs of the \
+             same list.\n",
         );
     }
 
@@ -1022,6 +1095,12 @@ fn from_bundle(
         )
         .into());
     };
+
+    // Before the bundle is opened, because the answer would otherwise be a full
+    // table of names belonging to a build that never ran.
+    if let Some(stale) = target.stale() {
+        return Err(format!("`{}` cannot be read. {stale}", recording.id).into());
+    }
 
     let bundle = TraceBundle::open(recording.bundle(dir).as_std_path())?;
     let top = request.top.unwrap_or(DEFAULT_TOP);
@@ -1217,11 +1296,18 @@ fn render_allocations(bundle: &TraceBundle, recording: &Recording, dir: &Utf8Pat
 
     let window = window_of(recording, unix_millis());
     let intervals = stream::load(dir);
-    let sampled: Vec<&Interval> = intervals
+    let mut sampled: Vec<&Interval> = intervals
         .iter()
         .filter(|interval| window.holds(interval.started_ms))
         .filter(|interval| interval.footprint_mb.is_some())
         .collect();
+
+    // By when each sample was taken, which is when its interval *ended*.
+    // `stream::load` orders by start, and an outer interval containing shorter
+    // nested ones starts first and ends last — so taking the ends of the slice
+    // as given reports the newest figure as "before" and an older one as
+    // "after", reversing the trajectory and the conclusion drawn from it.
+    sampled.sort_by_key(|interval| interval.at_ms);
 
     let mut out = String::new();
 

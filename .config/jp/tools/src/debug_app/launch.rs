@@ -36,7 +36,7 @@ use serde::Deserialize;
 use crate::{
     Context, Error, Tool,
     debug_app::{
-        capture,
+        capture::{self, app_binary},
         session::{Console, Session, Slot, state_dir, trace_path},
     },
     util::{
@@ -189,7 +189,7 @@ pub(crate) async fn debug_app_launch(ctx: &Context, t: &Tool) -> ToolResult {
         );
     }
 
-    let slot = Slot::for_context(ctx);
+    let slot = Slot::for_context(ctx)?;
     run(
         &ctx.root,
         &slot,
@@ -346,7 +346,24 @@ fn run(
         ));
     }
 
-    let pid = wait_for_pid(&spec.state_dir, PID_TIMEOUT)?;
+    let pid = match wait_for_pid(&spec.state_dir, PID_TIMEOUT) {
+        Ok(pid) => pid,
+
+        // The app is running whether or not it said so, and nothing has recorded
+        // it: `open` reports no pid of its own, and the file this was waiting on
+        // is the only place one ever appears. Left alone it is a window nobody
+        // can address, and the next launch would start a second instance against
+        // the same state directory.
+        //
+        // Addressable anyway, because the staged bundle belongs to this slot and
+        // was copied fresh a moment ago: nothing else on the machine is running
+        // out of that path.
+        Err(e) => {
+            let stopped = terminate_staged(&spec.bundle, root, runner);
+
+            return error(format!("{e}\n\n{stopped}"));
+        }
+    };
 
     let mut session = Session {
         pid,
@@ -626,6 +643,29 @@ fn bundle_path(raw: &str) -> Result<Utf8PathBuf, Error> {
         "{}/{}",
         target.settings.products_dir, target.settings.product_name
     )))
+}
+
+/// Stop whatever is running out of `bundle`, and say what happened.
+///
+/// For the launch that could not be confirmed.
+/// The staged bundle is this slot's own copy, remade on every launch, so
+/// matching on its path cannot reach the developer's build or another slot's.
+fn terminate_staged(bundle: &Utf8Path, root: &Utf8Path, runner: &dyn ProcessRunner) -> String {
+    let binary = app_binary(bundle);
+    let Ok(output) = runner.run("pkill", &["-f", binary.as_str()], root) else {
+        return format!(
+            "An instance may still be running from `{bundle}`, and `pkill` could not be started \
+             to stop it. Quit it by hand before launching again."
+        );
+    };
+
+    // `pkill` exits 1 when nothing matched, which is the good case here: the app
+    // never started, so there is nothing to report.
+    if output.status.is_success() {
+        return format!("Stopped the instance that had started from `{bundle}`.");
+    }
+
+    "Nothing was running from the staged bundle, so no instance was left behind.".to_owned()
 }
 
 /// Wait for the app to write its pid.

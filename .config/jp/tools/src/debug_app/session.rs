@@ -198,31 +198,47 @@ pub(crate) struct Slot(String);
 
 impl Slot {
     /// The slot this invocation is scoped to.
-    pub(crate) fn for_context(ctx: &Context) -> Slot {
+    pub(crate) fn for_context(ctx: &Context) -> Result<Slot, Error> {
         let named = std::env::var(SLOT_VAR).ok();
         Slot::named(named.as_deref(), &ctx.conversation_id)
     }
 
     /// The slot an override and a conversation resolve to.
     ///
-    /// Reduced to what a bundle identifier accepts: the slot ends up inside a
-    /// reverse-DNS identifier, which takes only letters, digits and hyphens.
-    /// Anything else is dropped rather than rejected, and a name left with
-    /// nothing usable falls through — a slot that cannot be spelled is a
-    /// naming problem, not a reason for the tools to stop working.
-    fn named(overridden: Option<&str>, conversation: &str) -> Slot {
-        for candidate in [overridden.unwrap_or_default(), conversation] {
-            let cleaned: String = candidate
-                .chars()
-                .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
-                .collect();
-
-            if !cleaned.is_empty() {
-                return Slot(cleaned);
+    /// A slot ends up inside a reverse-DNS bundle identifier and in every path
+    /// a run writes, so it is limited to letters, digits and hyphens.
+    ///
+    /// An override is held to that rather than filtered down to it.
+    /// Filtering silently answers a different question than the one asked: `my
+    /// slot` would become `myslot`, whose artifacts are not where the caller
+    /// looks, and two deliberately distinct names could reduce to one and share
+    /// an app.
+    /// A conversation id is filtered instead, because nobody chose it and there
+    /// is nobody to report it back to.
+    fn named(overridden: Option<&str>, conversation: &str) -> Result<Slot, Error> {
+        if let Some(given) = overridden.filter(|given| !given.is_empty()) {
+            if !given.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+                return Err(format!(
+                    "`{SLOT_VAR}` is {given:?}, which cannot name a slot: a slot is used as a \
+                     directory name and inside the app's bundle identifier, so it takes only \
+                     letters, digits and hyphens."
+                )
+                .into());
             }
+
+            return Ok(Slot(given.to_owned()));
         }
 
-        Slot(FALLBACK_SLOT.to_owned())
+        let cleaned: String = conversation
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+            .collect();
+
+        if cleaned.is_empty() {
+            return Ok(Slot(FALLBACK_SLOT.to_owned()));
+        }
+
+        Ok(Slot(cleaned))
     }
 
     pub(crate) fn as_str(&self) -> &str {
@@ -388,12 +404,45 @@ pub(crate) trait Signals {
     fn send(&self, pid: u32, signal: Signal);
 
     fn is_alive(&self, pid: u32) -> bool;
+
+    /// Whether `pid` is running something whose command holds `expected`.
+    ///
+    /// A process id is not an identity.
+    /// The app or the recorder can exit leaving the record that names its pid
+    /// behind, and the kernel hands that number out again — macOS wraps at
+    /// five digits, so on a busy machine that is hours rather than never.
+    /// Signalling on the number alone would then send `SIGTERM`, and in the
+    /// escalation `SIGKILL`, to a stranger.
+    ///
+    /// Defaults to `true`, for fakes standing in for a process that is what it
+    /// says it is.
+    fn is(&self, _pid: u32, _expected: &str) -> bool {
+        true
+    }
 }
 
 /// Production [`Signals`]: real `kill(2)`.
 pub(crate) struct RealSignals;
 
 impl Signals for RealSignals {
+    /// Asked of `ps`, which is the only thing that knows.
+    ///
+    /// A process that cannot be read is reported as not matching: refusing to
+    /// signal degrades to the behaviour for one already gone, which is reported
+    /// and harmless, where signalling wrongly is neither.
+    fn is(&self, pid: u32, expected: &str) -> bool {
+        let Ok(output) = std::process::Command::new("ps")
+            .args(["-p", &pid.to_string(), "-o", "comm="])
+            .output()
+        else {
+            return false;
+        };
+
+        String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .contains(expected)
+    }
+
     #[cfg(unix)]
     fn send(&self, pid: u32, signal: Signal) {
         let sig = match signal {

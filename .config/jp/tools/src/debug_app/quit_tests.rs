@@ -86,6 +86,56 @@ impl Signals for IgnoresTerm {
     }
 }
 
+/// Real signals, with the identity check answered `true`.
+///
+/// The process driven below is a `sleep`, which is of course not the app the
+/// session names.
+/// What that test is for is the escalation ladder against a process that really
+/// exits; identity is the subject of its own test, with a fake that can assert
+/// nothing was sent.
+struct RealSignalsAnyProcess;
+
+impl Signals for RealSignalsAnyProcess {
+    fn send(&self, pid: u32, signal: Signal) {
+        RealSignals.send(pid, signal);
+    }
+
+    fn is_alive(&self, pid: u32) -> bool {
+        RealSignals.is_alive(pid)
+    }
+}
+
+/// A live pid that belongs to something other than the recorded app.
+struct NotTheApp {
+    sent: Mutex<Vec<Signal>>,
+}
+
+impl NotTheApp {
+    fn new() -> Self {
+        Self {
+            sent: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn sent(&self) -> Vec<Signal> {
+        self.sent.lock().unwrap().clone()
+    }
+}
+
+impl Signals for NotTheApp {
+    fn send(&self, _pid: u32, signal: Signal) {
+        self.sent.lock().unwrap().push(signal);
+    }
+
+    fn is_alive(&self, _pid: u32) -> bool {
+        true
+    }
+
+    fn is(&self, _pid: u32, _expected: &str) -> bool {
+        false
+    }
+}
+
 /// Record a session for `pid`, including the pid file the app writes.
 fn record(root: &Utf8Path, pid: u32) -> Session {
     let dir = dir_for(root);
@@ -166,7 +216,7 @@ fn stops_a_running_process_with_sigterm() {
 
     let session = record(root, spawn_reaped("sleep", &["30"]));
 
-    let report = content(run(root, &dir_for(root), GRACE, &RealSignals).unwrap());
+    let report = content(run(root, &dir_for(root), GRACE, &RealSignalsAnyProcess).unwrap());
 
     assert!(
         report.starts_with(&format!(
@@ -176,6 +226,37 @@ fn stops_a_running_process_with_sigterm() {
         "unexpected report: {report}"
     );
     assert!(!pid_is_alive(session.pid));
+    assert!(!Session::path(&dir_for(root)).exists());
+}
+
+/// A process id is not an identity.
+/// The app can exit leaving the record that names its pid, and the kernel hands
+/// that number out again — macOS wraps at five digits, so on a busy machine
+/// that is hours rather than never.
+///
+/// Signalling on the number alone would then `SIGTERM` a stranger, and escalate
+/// to `SIGKILL` when it did not die.
+/// Nothing may be sent.
+#[test]
+fn does_not_signal_a_pid_that_belongs_to_something_else_now() {
+    let workspace = camino_tempfile::tempdir().unwrap();
+    let root = workspace.path();
+    let session = record(root, std::process::id());
+    let signals = NotTheApp::new();
+
+    let report = content(run(root, &dir_for(root), GRACE, &signals).unwrap());
+
+    assert!(
+        report.starts_with(&format!(
+            "The app recorded as pid {} is gone, and that number now belongs to another process.",
+            session.pid
+        )),
+        "unexpected report: {report}"
+    );
+    assert_eq!(signals.sent(), vec![]);
+
+    // Still cleared: the record describes a process that no longer exists, so
+    // keeping it would only block the next launch.
     assert!(!Session::path(&dir_for(root)).exists());
 }
 

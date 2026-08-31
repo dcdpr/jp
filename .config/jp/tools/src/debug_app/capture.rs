@@ -58,6 +58,12 @@ use crate::{
 /// The recorder, resolved through `xcrun` so it follows the selected Xcode.
 const RECORDER: &str = "xcrun";
 
+/// What the recorder's process is called once `xcrun` has handed off to it.
+///
+/// Checked before signalling, because a recorder that exited leaves its pid in
+/// a record that outlives it, and the kernel hands that number out again.
+const RECORDER_PROCESS: &str = "xctrace";
+
 /// Where every recording's artifacts live, inside a slot's directory.
 const PROFILES_DIR: &str = "profiles";
 
@@ -221,25 +227,78 @@ pub(crate) struct Target {
     pub slide: Option<Slide>,
 
     pub configuration: String,
+
+    /// The `LC_UUID` of the binary this recording's samples came from.
+    ///
+    /// The paths above do not survive a rebuild.
+    /// `binary` points into the slot's staged bundle, which every launch
+    /// deletes and copies afresh, and `dsym` into derived data, which Xcode
+    /// overwrites in place.
+    /// A recording is kept for two days, so record, edit, rebuild, report is
+    /// both the ordinary loop and enough to leave those paths holding a
+    /// different build.
+    ///
+    /// Symbolicating against the wrong binary does not fail.
+    /// It resolves each address to whatever now lives at that offset, so the
+    /// table comes back full of plausible names for code that never ran.
+    /// The UUID is what makes that detectable: it is stamped into the binary at
+    /// link time, so a rebuild changes it even when the path does not.
+    ///
+    /// `None` for a binary that could not be read when the bracket closed,
+    /// which leaves the read unguarded rather than refused.
+    #[serde(default)]
+    pub uuid: Option<[u8; 16]>,
 }
 
 impl Target {
     /// What a running session says about the app a bracket is recording.
     pub(crate) fn for_session(session: &Session) -> Target {
+        let binary = app_binary(&session.bundle);
+
         Target {
+            uuid: binary_uuid(&binary),
             pid: session.pid,
-            binary: app_binary(&session.bundle),
+            binary,
             dsym: session.dsym.clone(),
             slide: session.reported_slide(),
             configuration: session.configuration.clone(),
         }
     }
+
+    /// Why this recording's binary can no longer be trusted, if it cannot.
+    ///
+    /// `None` when the binary still matches, or when there is nothing to
+    /// compare: a recording made before the UUID was stored, or a binary that
+    /// could not be read either time, is read as it always was.
+    pub(crate) fn stale(&self) -> Option<String> {
+        let recorded = self.uuid?;
+        let found = binary_uuid(&self.binary)?;
+
+        if found == recorded {
+            return None;
+        }
+
+        Some(format!(
+            "The binary at `{}` is not the one this was recorded from \u{2014} it has been \
+             rebuilt since. Symbolicating against it would name whatever now sits at each \
+             address, which reads as a plausible answer and is not one. Record a new bracket \
+             against the current build.",
+            self.binary
+        ))
+    }
+}
+
+/// The `LC_UUID` of a Mach-O binary, or `None` when it cannot be read.
+fn binary_uuid(binary: &Utf8Path) -> Option<[u8; 16]> {
+    xct2cli::symbol::macho::BinaryInfo::open(binary.as_std_path())
+        .ok()?
+        .uuid
 }
 
 /// The executable inside a launched app bundle.
 ///
 /// Named after the bundle, which is what Xcode does and what staging preserves.
-fn app_binary(bundle: &Utf8Path) -> Utf8PathBuf {
+pub(crate) fn app_binary(bundle: &Utf8Path) -> Utf8PathBuf {
     let name = bundle.file_stem().unwrap_or("JP");
 
     bundle.join("Contents/MacOS").join(name)
@@ -322,13 +381,28 @@ impl Recording {
     }
 
     /// Write the record beside its bundle.
+    ///
+    /// Through a temporary file and a rename, so the record is either the
+    /// previous one or the new one and never half of either.
+    /// A partial write would be worse than no write at all: `recordings` cannot
+    /// parse it, so the recording disappears from `pending` and from every
+    /// sweep, while `orphaned_bundles` sees a file with the right name and
+    /// leaves the bundle alone.
+    /// A live recorder and a bundle holding recorded environments would then
+    /// sit there with nothing able to name either.
     pub(crate) fn store(&self, dir: &Utf8Path) -> Result<(), Error> {
         let path = self.sidecar(dir);
         fs::create_dir_all(profiles_dir(dir))?;
         let json = serde_json::to_string_pretty(self)?;
 
-        fs::write(&path, format!("{json}\n"))
-            .map_err(|e| format!("Failed to write {path}: {e}").into())
+        // Beside the destination rather than in the system temp directory, so
+        // the rename stays on one filesystem and cannot degrade to a copy.
+        let staging = path.with_extension("json.writing");
+        fs::write(&staging, format!("{json}\n"))
+            .map_err(|e| format!("Failed to write {staging}: {e}"))?;
+
+        fs::rename(&staging, &path)
+            .map_err(|e| format!("Failed to move {staging} into place at {path}: {e}").into())
     }
 
     /// Whether this bracket is still open.
@@ -466,7 +540,7 @@ pub(crate) fn recordings(dir: &Utf8Path) -> Vec<Recording> {
 /// Summaries are never swept.
 /// They are small, they are the product, and they hold none of what the bundle
 /// held.
-pub(crate) fn sweep(dir: &Utf8Path) -> Vec<String> {
+pub(crate) fn sweep(dir: &Utf8Path, signals: &dyn Signals) -> Vec<String> {
     let mut swept = Vec::new();
     let mut retained = Vec::new();
 
@@ -478,6 +552,26 @@ pub(crate) fn sweep(dir: &Utf8Path) -> Vec<String> {
     for recording in recordings(dir) {
         if recording.is_pending(dir) {
             continue;
+        }
+
+        // A bracket that aged out of `is_pending` may still have a recorder
+        // behind it, and everything below this deletes the record naming its
+        // pid. Interrupted first, or `xctrace` goes on writing to a path that
+        // no longer exists with nothing left able to stop it.
+        //
+        // Liveness deliberately does not decide whether a bracket is *pending*
+        // — a recorder that failed on its own still left a bundle and a reason
+        // worth reading. It decides whether one can be *deleted*, which is a
+        // different question with a different answer.
+        if recording.stopped_unix.is_none()
+            && signals.is_alive(recording.recorder_pid)
+            && signals.is(recording.recorder_pid, RECORDER_PROCESS)
+        {
+            let (outcome, _) = stop(recording.recorder_pid, signals, FINALIZE_TIMEOUT);
+            swept.push(format!(
+                "stopped the recorder abandoned by `{}` ({outcome:?})",
+                recording.id
+            ));
         }
 
         if !recording.keeps_bundle()
@@ -640,10 +734,20 @@ fn orphaned_bundles(dir: &Utf8Path) -> Vec<String> {
             continue;
         }
 
+        // Read rather than merely counted: a file that cannot be parsed names
+        // nothing, so a bundle beside it is as unowned as one with no file at
+        // all. Treating the name as proof of ownership is what would leave a
+        // recorded environment on disk after an interrupted write.
         let id = path.file_stem().unwrap_or_default().to_owned();
-        if profiles_dir(dir).join(format!("{id}.json")).exists() {
+        let sidecar = profiles_dir(dir).join(format!("{id}.json"));
+        if fs::read_to_string(&sidecar)
+            .ok()
+            .is_some_and(|raw| serde_json::from_str::<Recording>(&raw).is_ok())
+        {
             continue;
         }
+
+        drop(remove_file(&sidecar));
 
         if remove_dir(&path).is_ok() {
             swept.push(id);

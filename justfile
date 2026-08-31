@@ -327,10 +327,47 @@ build-drive CONFIG="release":
 #
 # Covers the driver's traversal against a fake accessibility tree, so it needs no
 # running app and no accessibility grant.
+#
+# The runner narrates every test twice, once as it starts and once as it passes,
+# which for this suite is some three hundred lines around the handful worth
+# reading — and it interleaves them, so a failure lands in the middle of the
+# successes rather than at the end. Only the issues and the closing count are
+# kept.
+#
+# Pass `--verbose` for the whole thing, which is what to do when a test is
+# hanging rather than failing and the question is which one it stopped at.
 [group('test')]
 [macos]
 test-drive *ARGS:
-    swift test --package-path apps/macos/Tools/jpdrive {{ARGS}}
+    #!/usr/bin/env sh
+    set -u
+
+    case " {{ARGS}} " in
+        *" --verbose "*|*" -v "*)
+            exec swift test --package-path apps/macos/Tools/jpdrive {{ARGS}}
+            ;;
+    esac
+
+    log=$(mktemp)
+    trap 'rm -f "$log"' EXIT
+
+    swift test --package-path apps/macos/Tools/jpdrive {{ARGS}} >"$log" 2>&1
+    status=$?
+
+    # No closing count means it never got as far as running the tests: a compile
+    # error, a missing package, a runner that died. Whatever it said is all there
+    # is, so none of it is thrown away.
+    #
+    # Matched on the words rather than on the glyph the runner prefixes them
+    # with. Those are private-use symbols, and one mistranscribed byte would
+    # silently swallow every failure.
+    if grep -q 'Test run with' "$log"; then
+        grep -e 'recorded an issue' -e 'failed after' -e 'Test run with' "$log" || true
+    else
+        cat "$log"
+    fi
+
+    exit $status
 
 # Report whether this process may read another app's accessibility tree.
 #

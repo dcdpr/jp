@@ -188,6 +188,7 @@ fn recorded(dir: &Utf8Path, id: &str, tiers: Vec<Tier>, from_ms: u64, to_ms: Opt
             dsym: None,
             slide: None,
             configuration: "Debug".to_owned(),
+            uuid: None,
         }),
     };
 

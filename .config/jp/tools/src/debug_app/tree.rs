@@ -75,6 +75,18 @@ pub(crate) fn args(pid: u32, opts: &Options) -> Vec<String> {
         args.push("--frames".to_owned());
     }
 
+    // Passed rather than filtered out of what comes back. Both cost the driver
+    // accessibility round-trips it would otherwise make and discard: actions are
+    // a call per kept element, and the menu bar is a couple of hundred elements
+    // that belong to macOS rather than to the app.
+    if opts.actions {
+        args.push("--actions".to_owned());
+    }
+
+    if opts.menus {
+        args.push("--menus".to_owned());
+    }
+
     args
 }
 
@@ -188,27 +200,22 @@ pub(crate) fn render(node: &TreeNode, depth: usize, opts: &Options, out: &mut St
         out.push_str(&format!(" @{frame}"));
     }
 
-    if opts.actions && !node.actions.is_empty() {
+    if !node.actions.is_empty() {
         out.push_str(&format!(" ({})", node.actions.join(", ")));
     }
 
-    if let Some(elided) = node.elided_children {
-        out.push_str(&format!(" (+{elided} not shown)"));
-    }
-
-    let skip_menus = node.role == MENU_BAR_ROLE && !opts.menus;
-    if skip_menus && !node.children.is_empty() {
-        out.push_str(&format!(
-            " ({} menus not walked, pass `menus` for them)",
-            node.children.len()
-        ));
+    // The driver leaves the menu bar unwalked unless asked, so its children
+    // arrive as a count rather than as elements. Named here rather than left as
+    // a bare elision, because it is the one elision a caller can undo.
+    match node.elided_children {
+        Some(elided) if node.role == MENU_BAR_ROLE && !opts.menus => out.push_str(&format!(
+            " ({elided} menus not walked, pass `menus` for them)"
+        )),
+        Some(elided) => out.push_str(&format!(" (+{elided} not shown)")),
+        None => {}
     }
 
     out.push('\n');
-
-    if skip_menus {
-        return;
-    }
 
     for child in &node.children {
         render(child, depth + 1, opts, out);

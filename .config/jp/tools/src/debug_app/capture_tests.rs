@@ -287,7 +287,7 @@ fn an_open_bracket_is_pending_and_survives_a_sweep() {
     on_disk(&dir, &open);
 
     assert_eq!(pending(&dir).map(|r| r.id), Some("profile-1".to_owned()));
-    assert_eq!(sweep(&dir), Vec::<String>::new());
+    assert_eq!(sweep(&dir, &Recorded::gone()), Vec::<String>::new());
     assert!(open.bundle(&dir).exists());
 }
 
@@ -308,7 +308,7 @@ fn a_bracket_whose_recorder_died_is_still_pending() {
     .unwrap();
 
     assert_eq!(pending(&dir).map(|r| r.id), Some("profile-1".to_owned()));
-    assert_eq!(sweep(&dir), Vec::<String>::new());
+    assert_eq!(sweep(&dir, &Recorded::gone()), Vec::<String>::new());
     assert!(failed.bundle(&dir).exists());
 }
 
@@ -325,7 +325,7 @@ fn a_bracket_older_than_the_window_is_swept() {
     on_disk(&dir, &stale);
 
     assert_eq!(pending(&dir), None);
-    assert_eq!(sweep(&dir), vec!["profile-1".to_owned()]);
+    assert_eq!(sweep(&dir, &Recorded::gone()), vec!["profile-1".to_owned()]);
     assert!(!stale.bundle(&dir).exists());
     assert!(!stale.log(&dir).exists());
     assert!(!stale.sidecar(&dir).exists());
@@ -354,7 +354,7 @@ fn sweeping_keeps_the_summary() {
     on_disk(&dir, &closed);
     fs::write(closed.summary(&dir), "# profile-1\n").unwrap();
 
-    sweep(&dir);
+    sweep(&dir, &Recorded::gone());
 
     assert!(!closed.bundle(&dir).exists());
     assert_eq!(
@@ -383,7 +383,7 @@ fn a_closed_attach_recording_keeps_its_bundle_and_a_system_one_does_not() {
     on_disk(&dir, &system);
     fs::write(system.summary(&dir), "# profile-2\n").unwrap();
 
-    assert_eq!(sweep(&dir), vec!["profile-2".to_owned()]);
+    assert_eq!(sweep(&dir, &Recorded::gone()), vec!["profile-2".to_owned()]);
 
     assert!(attached.bundle(&dir).exists());
     assert!(attached.sidecar(&dir).exists());
@@ -428,6 +428,7 @@ fn a_closed_recording_carries_what_it_was_recording() {
                 dsym: None,
                 slide: Some(xct2cli::Slide::new(0x4000)),
                 configuration: "Debug".to_owned(),
+                uuid: None,
             }),
             &dir,
         )
@@ -521,7 +522,9 @@ fn an_archived_stream_older_than_the_window_is_swept() {
     fs::create_dir_all(profiles_dir(&dir)).unwrap();
     fs::write(&path, "{}\n").unwrap();
 
-    assert_eq!(sweep(&dir), vec![format!("trace-{stale_ms}")]);
+    assert_eq!(sweep(&dir, &Recorded::gone()), vec![format!(
+        "trace-{stale_ms}"
+    )]);
     assert!(!path.exists());
 }
 
@@ -534,7 +537,9 @@ fn a_bundle_with_no_record_is_swept() {
     let stray = profiles_dir(&dir).join("profile-orphan.trace");
     fs::create_dir_all(&stray).unwrap();
 
-    assert_eq!(sweep(&dir), vec!["profile-orphan".to_owned()]);
+    assert_eq!(sweep(&dir, &Recorded::gone()), vec![
+        "profile-orphan".to_owned()
+    ]);
     assert!(!stray.exists());
 }
 
@@ -542,7 +547,7 @@ fn a_bundle_with_no_record_is_swept() {
 fn sweeping_a_slot_that_never_recorded_finds_nothing() {
     let (_workspace, dir) = temp();
 
-    assert_eq!(sweep(&dir), Vec::<String>::new());
+    assert_eq!(sweep(&dir, &Recorded::gone()), Vec::<String>::new());
     assert_eq!(pending(&dir), None);
 }
 

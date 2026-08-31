@@ -59,7 +59,7 @@ pub(crate) async fn debug_app_snapshot(ctx: &Context, t: &Tool) -> ToolResult {
         );
     }
 
-    let dir = Session::dir(&ctx.root, &Slot::for_context(ctx));
+    let dir = Session::dir(&ctx.root, &Slot::for_context(ctx)?);
     run(&ctx.root, &dir, &opts, pasteboard, &DuctProcessRunner)
 }
 
