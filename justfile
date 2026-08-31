@@ -2894,6 +2894,12 @@ plugin-build-local: _install-jp (plugin-build "")
         echo "Installed jp-${id} → ${dir}/jp-${id}"
     done
 
+# Run all formatting-related tasks
+fmt: (_rustup_component "rustfmt") _install-comfort
+    cargo fmt --all
+    comfort --check --workspace --language rust --format-markdown --reference-links --prune-reference-links
+    comfort --check --workspace --language markdown --format-markdown --reference-links --prune-reference-links
+
 # Run all ci tasks.
 [group('ci')]
 ci: lint-ci fmt-ci test-ci docs-ci coverage-ci deny-ci insta-ci shear-ci vet-ci
