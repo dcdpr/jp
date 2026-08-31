@@ -101,7 +101,7 @@ pub enum CommittedEvent {
 /// Actions returned by the Turn Coordinator to be executed by the shell.
 ///
 /// The coordinator is a pure state machine - it doesn't perform I/O directly.
-/// Instead, it returns actions that the shell (the `handle_turn` loop)
+/// Instead, it returns actions that the shell (the `run_turn_loop` loop)
 /// executes.
 #[derive(Debug)]
 pub enum Action {

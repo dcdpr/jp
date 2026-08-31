@@ -1105,7 +1105,7 @@ fn query_model_override_is_persisted_as_config_delta() {
         .unwrap();
     let runtime_config = build(partial).unwrap();
 
-    let delta = get_config_delta_from_cli(&runtime_config, &lock)
+    let delta = turn_config_delta(&runtime_config, &lock)
         .unwrap()
         .expect("expected query model override to produce a config delta");
 
@@ -1162,7 +1162,7 @@ fn query_cfg_sourced_compaction_persists_as_config_delta() {
     }]);
     let runtime_config = build(partial).unwrap();
 
-    let delta = get_config_delta_from_cli(&runtime_config, &lock)
+    let delta = turn_config_delta(&runtime_config, &lock)
         .unwrap()
         .expect("cfg-sourced compaction config should produce a delta");
 
@@ -1396,7 +1396,7 @@ async fn query_sequence_new_cfg_profile_then_model_override_persists_for_plain_q
     };
     let cfg2 = build_query_config(&workspace, base.clone(), &[], &query2, Some(&handle2));
     let lock2 = workspace.test_lock(handle2);
-    let delta = get_config_delta_from_cli(&cfg2, &lock2)
+    let delta = turn_config_delta(&cfg2, &lock2)
         .unwrap()
         .expect("expected model override to persist");
     lock2

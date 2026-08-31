@@ -1,3 +1,4 @@
+use camino::Utf8Path;
 use jp_attachment_agentic_shepherd as _;
 use jp_attachment_bear_note as _;
 use jp_attachment_cmd_output as _;
@@ -100,6 +101,52 @@ pub(crate) fn validate_attachment(uri: &Url) -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Whether resolving this attachment reads from a running MCP server.
+///
+/// Such an attachment can only be resolved once the server is up:
+/// [`jp_mcp::Client::get_resource_contents`] reads the running-services map and
+/// does not start a server on demand.
+pub(crate) fn needs_mcp_server(uri: &Url) -> bool {
+    attachment_scheme(uri) == "mcp"
+}
+
+/// Resolve attachments through their handlers, without a [`Ctx`].
+///
+/// Takes the two things a handler is given so a caller that no longer holds the
+/// context can still resolve one.
+/// `jp://` is not handled here: reading a conversation needs the workspace.
+pub(crate) async fn resolve_attachments(
+    root: &Utf8Path,
+    mcp_client: &jp_mcp::Client,
+    urls: Vec<Url>,
+) -> Result<Vec<jp_attachment::Attachment>> {
+    let futs = urls.into_iter().map(|uri| async move {
+        let scheme = attachment_scheme(&uri);
+        let Some(mut handler) = jp_attachment::find_handler_by_scheme(scheme) else {
+            return Err(Error::NotFound("Attachment handler", scheme.to_string()));
+        };
+
+        handler
+            .add(&uri, root)
+            .await
+            .map_err(|source| Error::AttachmentFailed {
+                uri: uri.clone(),
+                source,
+            })?;
+
+        handler
+            .get(root, mcp_client.clone())
+            .await
+            .map_err(|source| Error::AttachmentFailed { uri, source })
+    });
+
+    Ok(futures::future::try_join_all(futs)
+        .await?
+        .into_iter()
+        .flatten()
+        .collect())
 }
 
 pub(crate) async fn register_attachment(
