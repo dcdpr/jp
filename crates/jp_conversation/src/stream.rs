@@ -11,7 +11,7 @@ use tracing::{error, warn};
 mod projection;
 pub mod turn_iter;
 pub mod turn_mut;
-pub use projection::TurnOrigin;
+pub use projection::{AffectedItem, TurnOrigin};
 pub use turn_iter::{IterTurns, Turn};
 pub use turn_mut::TurnMut;
 
@@ -617,6 +617,20 @@ impl ConversationStream {
     /// [`Thread::into_parts()`]: crate::thread::Thread::into_parts
     pub fn apply_projection(&mut self) -> Vec<TurnOrigin> {
         projection::apply(&mut self.events)
+    }
+
+    /// List the items `compaction`'s mechanical policies reach, in stream
+    /// order.
+    ///
+    /// A policy narrowed by a size threshold reaches an unpredictable subset of
+    /// its range, so this reports which items it actually selects.
+    /// A policy without a threshold reaches everything in range, and a summary
+    /// replaces its range rather than selecting from it.
+    ///
+    /// The stream is not modified.
+    #[must_use]
+    pub fn affected_items(&self, compaction: &Compaction) -> Vec<AffectedItem> {
+        projection::affected_items(&self.events, compaction)
     }
 
     /// Start a new turn with the given chat request.

@@ -26,6 +26,12 @@ use crate::{
     log_layer::{ProtocolLogHandle, ProtocolLogLayer},
 };
 
+/// The protocol version this plugin needs from the host.
+///
+/// It reads conversations, events, and config, all of which the first version
+/// carries.
+const REQUIRED_PROTOCOL: u32 = 1;
+
 const HELP_TEXT: &str = "\
 Start the read-only web interface for browsing JP conversations.
 
@@ -141,7 +147,10 @@ fn run_server(
     }
 
     // Send early protocol messages before sharing stdout.
-    send(&mut stdout, &PluginToHost::Ready)?;
+    match jp_plugin::ready(REQUIRED_PROTOCOL, init.version) {
+        Ok(ready) => send(&mut stdout, &PluginToHost::Ready(ready))?,
+        Err(exit) => return send(&mut stdout, &PluginToHost::Exit(exit)),
+    }
     send(
         &mut stdout,
         &PluginToHost::Print(PrintMessage {

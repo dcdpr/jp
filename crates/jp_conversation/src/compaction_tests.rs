@@ -10,7 +10,7 @@ use crate::ConversationStream;
 #[test]
 fn builder_with_reasoning() {
     let c = Compaction::new(0, 5).with_reasoning(ReasoningPolicy::Strip);
-    assert_eq!(c.reasoning, Some(ReasoningPolicy::Strip));
+    assert_eq!(c.reasoning, Some(ReasoningPolicy::Strip.into()));
     assert!(c.tool_calls.is_none());
     assert!(c.summary.is_none());
 }
@@ -18,7 +18,7 @@ fn builder_with_reasoning() {
 #[test]
 fn builder_with_tool_calls() {
     let c = Compaction::new(0, 5).with_tool_calls(ToolCallPolicy::Omit);
-    assert_eq!(c.tool_calls, Some(ToolCallPolicy::Omit));
+    assert_eq!(c.tool_calls, Some(ToolCallPolicy::Omit.into()));
 }
 
 #[test]
@@ -44,11 +44,14 @@ fn sample_compaction() -> Compaction {
         from_turn: 0,
         to_turn: 5,
         summary: None,
-        reasoning: Some(ReasoningPolicy::Strip),
-        tool_calls: Some(ToolCallPolicy::Strip {
-            request: true,
-            response: true,
-        }),
+        reasoning: Some(ReasoningPolicy::Strip.into()),
+        tool_calls: Some(
+            ToolCallPolicy::Strip {
+                request: true,
+                response: true,
+            }
+            .into(),
+        ),
     }
 }
 
@@ -85,7 +88,7 @@ fn none_policies_omitted_from_json() {
         from_turn: 0,
         to_turn: 3,
         summary: None,
-        reasoning: Some(ReasoningPolicy::Strip),
+        reasoning: Some(ReasoningPolicy::Strip.into()),
         tool_calls: None,
     };
 
@@ -344,7 +347,7 @@ fn extend_ignores_mechanical_compactions() {
         from_turn: 0,
         to_turn: 9,
         summary: None,
-        reasoning: Some(ReasoningPolicy::Strip),
+        reasoning: Some(ReasoningPolicy::Strip.into()),
         tool_calls: None,
     });
 

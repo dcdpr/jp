@@ -1522,11 +1522,14 @@ fn make_compaction(from: usize, to: usize) -> Compaction {
         from_turn: from,
         to_turn: to,
         summary: None,
-        reasoning: Some(ReasoningPolicy::Strip),
-        tool_calls: Some(ToolCallPolicy::Strip {
-            request: true,
-            response: true,
-        }),
+        reasoning: Some(ReasoningPolicy::Strip.into()),
+        tool_calls: Some(
+            ToolCallPolicy::Strip {
+                request: true,
+                response: true,
+            }
+            .into(),
+        ),
     }
 }
 
@@ -1828,7 +1831,7 @@ fn test_compaction_roundtrip_via_to_parts_from_parts() {
     let c = restored.compactions().next().unwrap();
     assert_eq!(c.from_turn, 0);
     assert_eq!(c.to_turn, 0);
-    assert_eq!(c.reasoning, Some(ReasoningPolicy::Strip));
+    assert_eq!(c.reasoning, Some(ReasoningPolicy::Strip.into()));
 }
 
 #[test]

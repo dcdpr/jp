@@ -7,9 +7,12 @@
 use std::str::FromStr;
 
 use clap::{Arg, ArgAction, ArgMatches, Command};
-use jp_config::conversation::compaction::{
-    CompactionConfig, CompactionRuleConfig, PartialCompactionRuleConfig, PartialSummaryConfig,
-    ReasoningMode, RuleBound, ToolCallsMode,
+use jp_config::{
+    conversation::compaction::{
+        CompactionConfig, CompactionRuleConfig, PartialCompactionRuleConfig, PartialSummaryConfig,
+        ReasoningMode, RuleBound, ToolCallsMode,
+    },
+    types::{byte_size::ByteSize, policy_spec::PolicySpec},
 };
 
 /// Shared compaction flag that can be embedded in any command.
@@ -106,11 +109,15 @@ impl clap::Args for CompactFlag {
                      `r` / `reasoning`: strip reasoning blocks\n- `s` / `summary`: generate an \
                      LLM summary\n- `t` / `tools` (or `t=MODE`): strip tool calls; bare strips \
                      both, or MODE is one of `strip`/`s`, `strip-requests`/`sreq`, \
-                     `strip-responses`/`sres`, `omit`/`o`\n\nRange: FROM..TO (1-based, inclusive \
-                     on both ends, so 1..5 is turns 1-5), single number, or .. for all\n\nA \
-                     negative bound counts from the end, where -1 is the last turn: ..-3 compacts \
-                     through the third turn from the end, leaving the final two \
-                     alone\n\nExamples: s:..-3, r+t, t=sreq:5..-3, r:-20",
+                     `strip-responses`/`sres`, `omit`/`o`\n\nA policy can carry options after a \
+                     `,`:\n- `over=SIZE`: compact only items larger than SIZE (`512KB`, `1MB`, or \
+                     a byte count). Each half of a tool call is judged on its own size; `omit` is \
+                     judged on the pair combined. Not accepted on `summary`.\n\nRange: FROM..TO \
+                     (1-based, inclusive on both ends, so 1..5 is turns 1-5), single number, or \
+                     .. for all\n\nA negative bound counts from the end, where -1 is the last \
+                     turn: ..-3 compacts through the third turn from the end, leaving the final \
+                     two alone\n\nExamples: s:..-3, r+t, t=sreq:5..-3, r:-20, t=sres,over=1mb, \
+                     r,over=16kb+t=sres,over=1mb:..-3",
                 )
                 .action(ArgAction::Append)
                 .num_args(0..=1)
@@ -159,10 +166,13 @@ impl clap::FromArgMatches for CompactFlag {
 /// A parsed compaction DSL spec: `POLICIES[:RANGE]`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CompactSpec {
-    pub reasoning: bool,
+    /// `None` = no reasoning policy.
+    /// Carries the policy's own `over` threshold, if any.
+    pub reasoning: Option<PolicySpec<ReasoningMode>>,
     /// `None` = no tool-call policy.
-    /// The mode mirrors the `--tools` flag.
-    pub tools: Option<ToolCallsMode>,
+    /// The mode mirrors the `--tools` flag, plus the policy's own `over`
+    /// threshold.
+    pub tools: Option<PolicySpec<ToolCallsMode>>,
     pub summary: bool,
     /// `None` = use config defaults for range.
     pub range: Option<DslRange>,
@@ -185,12 +195,12 @@ pub(crate) struct DslRange {
 
 impl CompactSpec {
     fn to_partial_rule(&self) -> PartialCompactionRuleConfig {
-        let mut rule = PartialCompactionRuleConfig::default();
+        let mut rule = PartialCompactionRuleConfig {
+            reasoning: self.reasoning,
+            tool_calls: self.tools,
+            ..Default::default()
+        };
 
-        if self.reasoning {
-            rule.reasoning = Some(ReasoningMode::Strip);
-        }
-        rule.tool_calls = self.tools;
         if self.summary {
             rule.summary = Some(PartialSummaryConfig::default());
         }
@@ -216,12 +226,17 @@ impl FromStr for CompactSpec {
             None => (s, None),
         };
 
-        let mut reasoning = false;
-        let mut tools: Option<ToolCallsMode> = None;
+        let mut reasoning: Option<PolicySpec<ReasoningMode>> = None;
+        let mut tools: Option<PolicySpec<ToolCallsMode>> = None;
         let mut summary = false;
 
-        for policy in policies_str.split('+') {
-            let policy = policy.trim();
+        for term in policies_str.split('+') {
+            // Options bind to the policy they qualify, so `over` cannot be
+            // written without one: `r,over=16kb+t=sres,over=1mb`.
+            let mut parts = term.split(',');
+            let policy = parts.next().unwrap_or_default().trim();
+            let over = parse_policy_options(parts)?;
+
             let (key, value) = match policy.split_once('=') {
                 Some((k, v)) => (k.trim(), Some(v.trim())),
                 None => (policy, None),
@@ -232,7 +247,10 @@ impl FromStr for CompactSpec {
                     if value.is_some() {
                         return Err("`reasoning` does not take a value".into());
                     }
-                    reasoning = true;
+                    reasoning = Some(PolicySpec {
+                        policy: ReasoningMode::Strip,
+                        over,
+                    });
                 }
                 // `summarize` predates the `summary` spelling and stays
                 // accepted so existing specs keep parsing.
@@ -240,13 +258,22 @@ impl FromStr for CompactSpec {
                     if value.is_some() {
                         return Err("`summary` does not take a value".into());
                     }
+                    if over.is_some() {
+                        // A summary replaces its whole range rather than acting
+                        // per item, so there is nothing for a size threshold to
+                        // select.
+                        return Err("`summary` does not take an `over` threshold".into());
+                    }
                     summary = true;
                 }
                 "t" | "tools" => {
-                    tools = Some(match value {
-                        Some(v) => v.parse().map_err(|e| format!("{e}"))?,
-                        // Bare `t` mirrors `--tools` without a value.
-                        None => ToolCallsMode::Strip,
+                    tools = Some(PolicySpec {
+                        policy: match value {
+                            Some(v) => v.parse().map_err(|e| format!("{e}"))?,
+                            // Bare `t` mirrors `--tools` without a value.
+                            None => ToolCallsMode::Strip,
+                        },
+                        over,
                     });
                 }
                 "" => return Err("empty policy".into()),
@@ -254,7 +281,7 @@ impl FromStr for CompactSpec {
             }
         }
 
-        if !reasoning && tools.is_none() && !summary {
+        if reasoning.is_none() && tools.is_none() && !summary {
             return Err("at least one policy required (r, t=MODE, s)".into());
         }
 
@@ -267,6 +294,38 @@ impl FromStr for CompactSpec {
             range,
         })
     }
+}
+
+/// Parse the `key=value` options trailing a DSL policy term.
+///
+/// `over` is the only option today, so the result is just its value.
+fn parse_policy_options<'a>(
+    options: impl Iterator<Item = &'a str>,
+) -> Result<Option<ByteSize>, String> {
+    let mut over = None;
+
+    for option in options {
+        let (key, value) = option.split_once('=').ok_or_else(|| {
+            format!(
+                "invalid policy option '{}': expected `key=value`",
+                option.trim()
+            )
+        })?;
+
+        match key.trim() {
+            "over" => {
+                over = Some(
+                    value
+                        .trim()
+                        .parse::<ByteSize>()
+                        .map_err(|e| format!("{e}"))?,
+                );
+            }
+            other => return Err(format!("unknown policy option '{other}'")),
+        }
+    }
+
+    Ok(over)
 }
 
 /// Parse one DSL range bound: a positive integer is a 1-based absolute turn

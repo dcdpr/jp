@@ -498,10 +498,25 @@ fn map_completion(
         "Received event from OpenRouter API."
     );
 
+    // A failure after the response is committed arrives as a top-level `error`
+    // on an otherwise ordinary chunk. The accompanying `choices` array may be
+    // empty, in which case this is the only place the failure is reported.
+    if let Some(error) = v.error {
+        return vec![Err(map_error(error))];
+    }
+
     v.choices
         .into_iter()
         .flat_map(|v| map_event(v, state))
         .collect()
+}
+
+/// Classify an OpenRouter error payload by its status code.
+fn map_error(error: response::ErrorResponse) -> StreamError {
+    StreamError::from(jp_openrouter::Error::Api {
+        code: error.code,
+        message: error.message,
+    })
 }
 
 #[expect(clippy::too_many_lines)]
@@ -539,17 +554,7 @@ fn map_event(
     let reasoning_details = MultiProviderMetadata::from_details(reasoning_details);
 
     if let Some(error) = error {
-        if looks_like_quota_error(&error.message) {
-            return vec![Err(StreamError::new(
-                StreamErrorKind::InsufficientQuota,
-                format!(
-                    "Insufficient API quota. Check your credits \
-                     at https://openrouter.ai/settings/credits. ({})",
-                    error.message
-                ),
-            ))];
-        }
-        return vec![Err(StreamError::other(error.message))];
+        return vec![Err(map_error(error))];
     }
 
     let mut events = vec![];

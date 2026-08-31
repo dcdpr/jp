@@ -4,7 +4,7 @@ pub(crate) mod workspace;
 
 use indexmap::IndexSet;
 use jp_config::types::color::Color;
-use jp_conversation::{Compaction, Labels, ToolCallPolicy};
+use jp_conversation::{ByteSize, Compaction, Labels, ToolCallPolicy};
 use jp_term::table::DetailItem;
 use serde_json::json;
 use url::Url;
@@ -127,10 +127,10 @@ pub(crate) fn label_lines(labels: &Labels) -> Vec<String> {
 /// inclusive), `reasoning`, `tool_calls`, and `summary` (the full generated
 /// text, or `null`).
 ///
-/// `tool_calls` mirrors [`ToolCallPolicy`]'s own serialized shape (e.g.
+/// `reasoning` and `tool_calls` mirror their own serialized shapes (e.g.
 /// `{"policy": "strip", "request": true, "response": true}`) rather than the
 /// `--tools` flag vocabulary, since a policy can carry `request`/`response`
-/// combinations the flag can't express.
+/// combinations the flag can't express, plus an `over` size threshold.
 pub(crate) fn compaction_detail_item(compaction: &Compaction) -> DetailItem {
     let from = compaction.from_turn + 1;
     let to = compaction.to_turn + 1;
@@ -152,7 +152,7 @@ pub(crate) fn compaction_detail_item(compaction: &Compaction) -> DetailItem {
         json!({
             "from_turn": from,
             "to_turn": to,
-            "reasoning": compaction.reasoning.is_some(),
+            "reasoning": compaction.reasoning.as_ref(),
             "tool_calls": compaction.tool_calls.as_ref(),
             "summary": compaction.summary.as_ref().map(|s| &s.summary),
         }),
@@ -162,33 +162,45 @@ pub(crate) fn compaction_detail_item(compaction: &Compaction) -> DetailItem {
 /// Describe a compaction's mechanical policies (reasoning / tool calls), e.g.
 /// `reasoning + tools`.
 ///
+/// A policy narrowed by a size threshold reads as `tool responses over 1MB`, so
+/// the label distinguishes a rule that compacted everything in its range from
+/// one that only reached the large items.
+///
 /// Summaries take precedence over mechanical policies and are labeled
 /// separately by the caller.
 /// Returns `None` when the compaction carries no mechanical policy.
 pub(crate) fn compaction_policy_label(compaction: &Compaction) -> Option<String> {
-    let mut parts = Vec::new();
-    if compaction.reasoning.is_some() {
-        parts.push("reasoning");
+    /// Append a policy's threshold, when it has one.
+    fn qualified(name: &str, over: Option<ByteSize>) -> String {
+        over.map_or_else(|| name.to_owned(), |size| format!("{name} over {size}"))
     }
-    if let Some(policy) = &compaction.tool_calls {
-        match policy {
+
+    let mut parts = Vec::new();
+    if let Some(spec) = &compaction.reasoning {
+        parts.push(qualified("reasoning", spec.over));
+    }
+    if let Some(spec) = &compaction.tool_calls {
+        let name = match spec.policy {
             ToolCallPolicy::Strip {
                 request: true,
                 response: true,
-            } => parts.push("tools"),
+            } => Some("tools"),
             ToolCallPolicy::Strip {
                 request: true,
                 response: false,
-            } => parts.push("tool requests"),
+            } => Some("tool requests"),
             ToolCallPolicy::Strip {
                 request: false,
                 response: true,
-            } => parts.push("tool responses"),
+            } => Some("tool responses"),
             ToolCallPolicy::Strip {
                 request: false,
                 response: false,
-            } => {}
-            ToolCallPolicy::Omit => parts.push("tools omitted"),
+            } => None,
+            ToolCallPolicy::Omit => Some("tools omitted"),
+        };
+        if let Some(name) = name {
+            parts.push(qualified(name, spec.over));
         }
     }
 
