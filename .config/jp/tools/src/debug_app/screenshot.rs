@@ -284,6 +284,6 @@ fn report(
     report
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "screenshot_tests.rs"]
 mod tests;

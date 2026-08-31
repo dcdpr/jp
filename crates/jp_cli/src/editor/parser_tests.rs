@@ -206,6 +206,17 @@ fn test_query_config_section_display() {
     }
 }
 
+/// Reading a stored draft yields the message, not the metadata the editor
+/// renders below the cut marker.
+#[test]
+fn test_draft_query_text() {
+    let document = format!("half a thought\n\n{CUT_MARKER}\n\n# Active Configuration\n");
+
+    assert_eq!(draft_query_text(&document), "half a thought");
+    assert_eq!(draft_query_text("half a thought\n"), "half a thought");
+    assert_eq!(draft_query_text(""), "");
+}
+
 #[test]
 fn test_query_document() {
     struct TestCase {

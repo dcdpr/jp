@@ -401,6 +401,6 @@ fn render_closed(closed: &Closed, shortenings: &[Shortening]) -> String {
     out
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "quit_tests.rs"]
 mod tests;

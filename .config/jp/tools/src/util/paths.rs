@@ -74,20 +74,23 @@ pub fn shortenings_from(
     cargo: Option<&str>,
     rustup: Option<&str>,
 ) -> Vec<Shortening> {
-    let under_home = |explicit: Option<&str>, default: &str| -> Option<Utf8PathBuf> {
+    // Joined with `/` rather than with `Utf8Path::join`, which uses the
+    // platform separator. Every prefix here is matched against a `/`-separated
+    // path, so a `\` in one would build a prefix that matches nothing.
+    let under_home = |explicit: Option<&str>, default: &str| -> Option<String> {
         explicit
-            .map(Utf8PathBuf::from)
-            .or_else(|| home.map(|home| Utf8Path::new(home).join(default)))
+            .map(str::to_owned)
+            .or_else(|| home.map(|home| format!("{}/{default}", home.trim_end_matches('/'))))
     };
 
     let mut out: Vec<Shortening> = Vec::new();
     out.extend(Shortening::new(root.as_str(), ""));
 
     if let Some(path) = under_home(cargo, ".cargo") {
-        out.extend(Shortening::new(path.as_str(), "$CARGO_HOME"));
+        out.extend(Shortening::new(&path, "$CARGO_HOME"));
     }
     if let Some(path) = under_home(rustup, ".rustup") {
-        out.extend(Shortening::new(path.as_str(), "$RUSTUP_HOME"));
+        out.extend(Shortening::new(&path, "$RUSTUP_HOME"));
     }
     if let Some(home) = home {
         out.extend(Shortening::new(home, "$HOME"));

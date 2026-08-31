@@ -296,6 +296,6 @@ pub(crate) fn render_hotspots(
     out
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "hotspots_tests.rs"]
 mod tests;

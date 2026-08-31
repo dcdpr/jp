@@ -5,7 +5,8 @@
 
 use std::{
     collections::HashSet,
-    io::{BufRead, BufReader, Write},
+    fs,
+    io::{self, BufRead, BufReader, Write},
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
     sync::{
         Arc, Mutex,
@@ -16,6 +17,7 @@ use std::{
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
+use camino_tempfile::NamedUtf8TempFile;
 use jp_config::{
     AppConfig,
     plugins::{
@@ -33,18 +35,23 @@ use jp_plugin::{
     PROTOCOL_VERSION,
     message::{
         ComposeMode, ComposeOption, ComposeRequest, ComposeResponse, ConfigResponse,
-        ConversationSummary, ConversationsResponse, DescribeResponse, DoneResponse, ErrorResponse,
-        EventsResponse, HostToPlugin, InitMessage, LogMessage, PathsInfo, PluginToHost,
-        SetTitleRequest, WorkspaceInfo,
+        ConversationSummary, ConversationsResponse, DescribeResponse, DoneResponse, DraftResponse,
+        ErrorResponse, EventsResponse, HostToPlugin, InitMessage, LogMessage, PathsInfo,
+        PluginToHost, SetTitleRequest, WorkspaceInfo, WriteDraftRequest,
     },
 };
 use jp_printer::Printer;
+use jp_storage::backend::FsStorageBackend;
 use jp_workspace::{ConversationLock, LockResult, Workspace, session::Session};
 use serde_json::Value;
 use tracing::{debug, error, trace, warn};
 
 use super::registry;
-use crate::{Ctx, cmd, cmd::query::interrupt::reply_edit_mode, editor::report_editor_failure};
+use crate::{
+    Ctx, cmd,
+    cmd::query::interrupt::reply_edit_mode,
+    editor::{draft_query_text, draft_revision, report_editor_failure},
+};
 
 /// Runs the prompts a plugin asks for.
 ///
@@ -281,6 +288,7 @@ pub(crate) fn run_plugin(
     let child_cwd = ctx.exec.child_cwd().map(ToOwned::to_owned);
     let storage = ctx.storage_path().map(ToOwned::to_owned);
     let user_storage = ctx.user_storage_path().map(ToOwned::to_owned);
+    let fs_backend = ctx.fs_backend.clone();
 
     let paths = PluginPaths {
         child_cwd: child_cwd.as_deref(),
@@ -370,6 +378,7 @@ pub(crate) fn run_plugin(
         &shutdown_sent,
         &composer,
         ctx.session.as_ref(),
+        fs_backend.as_deref(),
     );
 
     // A plugin that asked a question the host answered with an error is still
@@ -517,6 +526,7 @@ fn message_loop(
     shutdown_sent: &AtomicBool,
     composer: &Composer<'_>,
     session: Option<&Session>,
+    fs_backend: Option<&FsStorageBackend>,
 ) -> Result<(), cmd::Error> {
     for line in reader.lines() {
         let line =
@@ -548,7 +558,15 @@ fn message_loop(
 
         let mut writer = stdin.lock().expect("stdin lock poisoned");
 
-        if handle_request(msg, &mut *writer, workspace, config_json, session)? == Flow::Stop {
+        if handle_request(
+            msg,
+            &mut *writer,
+            workspace,
+            config_json,
+            session,
+            fs_backend,
+        )? == Flow::Stop
+        {
             return Ok(());
         }
     }
@@ -588,6 +606,7 @@ fn handle_request(
     workspace: &mut Workspace,
     config_json: &Value,
     session: Option<&Session>,
+    fs_backend: Option<&FsStorageBackend>,
 ) -> Result<Flow, cmd::Error> {
     match msg {
         PluginToHost::Ready(ready) => {
@@ -626,6 +645,16 @@ fn handle_request(
 
         PluginToHost::SetTitle(req) => {
             let response = handle_set_title(workspace, session, req);
+            write_message(writer, &response)?;
+        }
+
+        PluginToHost::ReadDraft(req) => {
+            let response = handle_read_draft(fs_backend, workspace, &req.conversation, req.id);
+            write_message(writer, &response)?;
+        }
+
+        PluginToHost::WriteDraft(req) => {
+            let response = handle_write_draft(fs_backend, workspace, req);
             write_message(writer, &response)?;
         }
 
@@ -768,6 +797,231 @@ fn parse_conversation_id(conversation: &str) -> Result<ConversationId, String> {
         .parse()
         .or_else(|_| ConversationId::try_from_deciseconds_str(conversation))
         .map_err(|error| format!("invalid conversation ID `{conversation}`: {error}"))
+}
+
+/// Where a conversation's query draft lives, if user-local storage is
+/// configured.
+///
+/// The same file `jp query` seeds an editor from and writes on interrupt.
+/// It is deliberately user-local and never projected into the workspace tree,
+/// so a half-written message is not something a teammate can end up with.
+///
+/// With `create`, a path is derived for a conversation that has no directory
+/// yet; without it, an absent directory means an absent draft.
+fn draft_path(
+    fs_backend: Option<&FsStorageBackend>,
+    workspace: &Workspace,
+    id: &ConversationId,
+    create: bool,
+) -> Option<Utf8PathBuf> {
+    let fs = fs_backend?;
+
+    // A backend with no user store resolves the conversations directory to the
+    // workspace tree, which is the one place a draft may not be written.
+    fs.user_storage_path()?;
+
+    if let Some(dir) = fs.find_user_local_conversation_dir(id) {
+        return Some(dir.join(crate::editor::QUERY_FILENAME));
+    }
+
+    if !create {
+        return None;
+    }
+
+    // No directory yet, so derive the one `jp query` would use, which puts the
+    // conversation's title in the name.
+    let title = workspace.acquire_conversation(id).ok().and_then(|handle| {
+        workspace
+            .metadata(&handle)
+            .ok()
+            .and_then(|meta| meta.title.clone())
+    });
+
+    Some(
+        fs.build_conversation_dir(id, title.as_deref(), true)
+            .join(crate::editor::QUERY_FILENAME),
+    )
+}
+
+/// Read the stored draft, or `None` when there is none.
+///
+/// Only an absent file counts as an absent draft.
+/// Anything else — unreadable permissions, a failed read, bytes that are not
+/// UTF-8 — is an error, so a draft the host cannot see is never reported as
+/// one that isn't there.
+fn read_draft_file(path: &Utf8Path) -> Result<Option<String>, String> {
+    match fs::read_to_string(path) {
+        Ok(content) => Ok(Some(content)),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(format!("failed to read the draft: {error}")),
+    }
+}
+
+/// Replace the stored draft, leaving the old text in place if the write fails.
+///
+/// The content goes to a temporary file beside the target and is renamed over
+/// it, so a write that runs out of disk partway cannot leave a truncated draft:
+/// the text is either replaced or untouched.
+fn write_draft_file(path: &Utf8Path, content: &str) -> Result<(), String> {
+    let dir = path.parent().unwrap_or_else(|| Utf8Path::new("."));
+
+    let mut tmp = NamedUtf8TempFile::new_in(dir)
+        .map_err(|error| format!("failed to open a temporary draft file: {error}"))?;
+
+    tmp.write_all(content.as_bytes())
+        .map_err(|error| format!("failed to write the draft: {error}"))?;
+
+    tmp.persist(path)
+        .map_err(|error| format!("failed to replace the draft: {error}"))?;
+
+    Ok(())
+}
+
+/// Read a conversation's query draft.
+///
+/// An absent draft is not an error: most conversations do not have one, and the
+/// answer is an empty draft with no revision.
+/// The revision covers the stored file, of which the answer's content is the
+/// query section.
+fn handle_read_draft(
+    fs_backend: Option<&FsStorageBackend>,
+    workspace: &Workspace,
+    conversation: &str,
+    req_id: Option<String>,
+) -> HostToPlugin {
+    let failed = |message: String| {
+        HostToPlugin::Error(ErrorResponse {
+            id: req_id.clone(),
+            request: Some("read_draft".to_owned()),
+            message,
+        })
+    };
+
+    let id = match parse_conversation_id(conversation) {
+        Ok(id) => id,
+        Err(message) => return failed(message),
+    };
+
+    let stored = match draft_path(fs_backend, workspace, &id, false) {
+        Some(path) => match read_draft_file(&path) {
+            Ok(stored) => stored,
+            Err(message) => return failed(message),
+        },
+        None => None,
+    };
+
+    HostToPlugin::Draft(DraftResponse {
+        id: req_id,
+        conversation: conversation.to_owned(),
+        revision: stored.as_deref().map(draft_revision),
+        content: stored
+            .as_deref()
+            .map(draft_query_text)
+            .unwrap_or_default()
+            .to_owned(),
+        conflict: false,
+    })
+}
+
+/// Replace a conversation's query draft.
+///
+/// The `revision` names the version the caller edited.
+/// A draft that has moved on since is reported back rather than overwritten:
+/// the other writer's text is exactly what the caller has not seen.
+///
+/// A conversation that does not exist is an error, rather than a draft written
+/// somewhere nothing will read it.
+fn handle_write_draft(
+    fs_backend: Option<&FsStorageBackend>,
+    workspace: &Workspace,
+    req: WriteDraftRequest,
+) -> HostToPlugin {
+    let failed = |message: String| {
+        HostToPlugin::Error(ErrorResponse {
+            id: req.id.clone(),
+            request: Some("write_draft".to_owned()),
+            message,
+        })
+    };
+
+    let id = match parse_conversation_id(&req.conversation) {
+        Ok(id) => id,
+        Err(message) => return failed(message),
+    };
+
+    let Some(path) = draft_path(fs_backend, workspace, &id, true) else {
+        return failed("this workspace has no user-local storage for drafts".to_owned());
+    };
+
+    // A conversation that is gone — archived, or removed — gets no draft
+    // directory of its own: `jp query` never looks there, and unarchiving one
+    // deletes whatever occupies the live path.
+    //
+    // Asked of the store rather than of the conversation index: the index is a
+    // snapshot taken when the host started, and a host that stays up for hours
+    // holds it while another process archives.
+    if fs_backend.is_none_or(|fs| fs.find_conversation_dir(&id).is_none()) {
+        return failed(format!(
+            "conversation `{}` does not exist",
+            req.conversation
+        ));
+    }
+
+    let current = match read_draft_file(&path) {
+        Ok(current) => current,
+        Err(message) => return failed(message),
+    };
+    let current_revision = current.as_deref().map(draft_revision);
+
+    if current_revision != req.revision {
+        return HostToPlugin::Draft(DraftResponse {
+            id: req.id,
+            conversation: req.conversation,
+            content: current
+                .as_deref()
+                .map(draft_query_text)
+                .unwrap_or_default()
+                .to_owned(),
+            revision: current_revision,
+            conflict: true,
+        });
+    }
+
+    // An empty draft is no draft: a blank file left behind would have the CLI
+    // seed an editor with nothing and treat it as a recovery copy.
+    if req.content.is_empty() {
+        match fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return failed(format!("failed to remove the draft: {error}")),
+        }
+
+        return HostToPlugin::Draft(DraftResponse {
+            id: req.id,
+            conversation: req.conversation,
+            content: String::new(),
+            revision: None,
+            conflict: false,
+        });
+    }
+
+    if let Some(parent) = path.parent()
+        && let Err(error) = fs::create_dir_all(parent)
+    {
+        return failed(format!("failed to create the draft directory: {error}"));
+    }
+
+    if let Err(message) = write_draft_file(&path, &req.content) {
+        return failed(message);
+    }
+
+    HostToPlugin::Draft(DraftResponse {
+        id: req.id,
+        conversation: req.conversation,
+        revision: Some(draft_revision(&req.content)),
+        content: req.content,
+        conflict: false,
+    })
 }
 
 fn handle_list_conversations(workspace: &Workspace, req_id: Option<String>) -> HostToPlugin {

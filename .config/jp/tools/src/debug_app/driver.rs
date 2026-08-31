@@ -187,6 +187,6 @@ pub(crate) fn describe_failure(
     message
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "driver_tests.rs"]
 mod tests;

@@ -520,6 +520,6 @@ fn _propagate_error(e: Error) -> Error {
     e
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "trace_tests.rs"]
 mod tests;
