@@ -88,8 +88,13 @@ struct AppUnderTest {
 
     /// The frame every launched app starts at, as `<width>x<height>`.
     ///
-    /// Small enough to leave room on any screen worth running tests on, for a
-    /// test that drags the window wider. Large enough to show a conversation.
+    /// Large enough to show a conversation, and far enough above the window's
+    /// minimum width that a test can drag an edge inwards and still have the
+    /// window resize the whole way.
+    ///
+    /// The app clamps this to what the screen can show, so a display too narrow
+    /// for it yields a narrower window rather than one with an edge off the side
+    /// of the screen, where nothing can press it.
     static let windowFrame = "1000x700"
 
     /// The variable the app reads that frame from.

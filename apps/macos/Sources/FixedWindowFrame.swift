@@ -40,6 +40,28 @@ struct FixedWindowFrame: ViewModifier {
         return CGSize(width: width, height: height)
     }
 
+    /// Gap left between the window and the edges of the screen it is placed
+    /// against.
+    ///
+    /// Also the slack ``contentSize(pinning:within:)`` leaves, which is why it is
+    /// larger than a margin needs to be: a content size that exactly filled the
+    /// screen would still produce a frame wider than the screen once window
+    /// chrome is added.
+    nonisolated static let inset: CGFloat = 40
+
+    /// `pin`, reduced to what a screen showing `visible` can display.
+    ///
+    /// A window pinned wider than the display keeps the width it was asked for
+    /// and puts its right edge past the screen. Nothing can press an edge out
+    /// there: a pointer stops at the display bounds, so a gesture aimed at it
+    /// lands on whatever is at the edge instead.
+    nonisolated static func contentSize(pinning pin: CGSize, within visible: CGRect) -> CGSize {
+        CGSize(
+            width: min(pin.width, visible.width - inset * 2),
+            height: min(pin.height, visible.height - inset * 2)
+        )
+    }
+
     func body(content: Content) -> some View {
         guard let size = Self.requested else {
             return AnyView(content)
@@ -85,14 +107,22 @@ private final class WindowPinningView: NSView {
         // Emptying the autosave name is what stops this run from writing its
         // size back over the default the next one reads.
         _ = window.setFrameAutosaveName("")
-        window.setContentSize(pin)
 
-        // Placed toward the left of the screen rather than centred, so a test
-        // dragging the right edge outwards has room whatever the screen size.
-        if let visible = window.screen?.visibleFrame {
-            window.setFrameOrigin(
-                CGPoint(x: visible.minX + 40, y: visible.maxY - window.frame.height - 40)
-            )
+        guard let visible = window.screen?.visibleFrame else {
+            window.setContentSize(pin)
+            return
         }
+
+        window.setContentSize(FixedWindowFrame.contentSize(pinning: pin, within: visible))
+
+        // Placed toward the left of the screen rather than centred, so the whole
+        // window — both vertical edges included — is on screen. Read from the
+        // frame rather than the content size, so window chrome is counted.
+        window.setFrameOrigin(
+            CGPoint(
+                x: visible.minX + FixedWindowFrame.inset,
+                y: visible.maxY - window.frame.height - FixedWindowFrame.inset
+            )
+        )
     }
 }

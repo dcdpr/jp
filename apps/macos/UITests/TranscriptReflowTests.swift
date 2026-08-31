@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 import XCTest
@@ -16,10 +17,15 @@ extension UISuite {
 
         /// How far the drag moves the window's right edge, in points.
         ///
-        /// Outwards, which is always possible: every launch pins the window to
-        /// ``AppUnderTest/windowFrame`` at the left of the screen, so there is room
-        /// to the right of it whatever the last run did.
-        private static let dragBy: CGFloat = 220
+        /// Inwards, which needs no room beyond the window itself and so works on
+        /// any display that can show the window at all. Growing instead would need
+        /// the pointer to travel past the window's right edge, and a pointer stops
+        /// at the bounds of the display.
+        ///
+        /// Small enough to stay above the window's minimum width, which is what
+        /// makes the drag deliver frames the whole way rather than stopping short:
+        /// ``AppUnderTest/windowFrame`` is 1000 wide against a 621 minimum.
+        private static let dragBy: CGFloat = -220
 
         /// The whole point: text re-wraps on every frame of a window drag, not
         /// once the mouse comes up.
@@ -48,11 +54,17 @@ extension UISuite {
             else { return }
 
             scrollToTheEnd(of: driven)
-            dragTheWindowEdge(of: driven, fixture)
+            let dragged = dragTheWindowEdge(of: driven, fixture)
 
             let record = try #require(
                 fixture.lastTracedInterval(named: Self.drag),
-                "the app traced no window drag, so the gesture never reached it"
+                """
+                the app traced no window drag, so the gesture never reached it. \
+                The window was at \(dragged) and the screen's visible frame is \
+                \(NSScreen.main.map { "\($0.visibleFrame)" } ?? "unknown"): a \
+                window edge outside that frame cannot be pressed, because the \
+                pointer stops at the display bounds.
+                """
             )
 
             // Two preconditions before the assertion, because each of them failing
@@ -97,7 +109,8 @@ extension UISuite {
             driven.app.typeKey(.downArrow, modifierFlags: .command)
         }
 
-        /// Drag the window's right edge outwards, once.
+        /// Drag the window's right edge, once, and report the frame it started
+        /// from.
         ///
         /// One gesture, and no attempt to put the window back. A coordinate is
         /// resolved against its element's frame at the moment it is *used*, not
@@ -107,21 +120,28 @@ extension UISuite {
         /// stretch of empty transcript instead of the edge.
         ///
         /// Nothing needs the width restored, and nothing depends on where the last
-        /// run left it: every launch pins the frame. Before that, the runs walked
-        /// the window rightwards until it met the screen, after which this drag
-        /// moved the pointer, resized nothing, delivered no frames, and failed with
-        /// "the app traced no window drag".
+        /// run left it: every launch pins the frame.
+        ///
+        /// The returned frame is what the caller names when no drag was traced,
+        /// which is the shape of failure a window edge off the side of the screen
+        /// produces.
         ///
         /// The window is raised by the click that preceded this, so the edge is
         /// where the tree says it is.
-        private func dragTheWindowEdge(of driven: AppUnderTest, _ fixture: WorkspaceFixture) {
+        private func dragTheWindowEdge(
+            of driven: AppUnderTest,
+            _ fixture: WorkspaceFixture
+        ) -> CGRect {
             let window = driven.workspaceWindow(fixture)
+            let before = window.frame
             let edge = window.coordinate(withNormalizedOffset: CGVector(dx: 1, dy: 0.5))
 
             edge.press(
                 forDuration: 0.1,
                 thenDragTo: edge.withOffset(CGVector(dx: Self.dragBy, dy: 0))
             )
+
+            return before
         }
     }
 }
