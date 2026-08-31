@@ -54,9 +54,9 @@ For built-in commands, the set of conversations whose events need loading is
 determined entirely by the command and its arguments — it is known before
 command execution begins.
 Even bulk commands like `conversation grep` (all conversations) and
-`conversation rm --from/--until` (a filtered subset) can express their scope
-through `filter_needs` — the data requirements are known statically, only the
-exact IDs are resolved at startup.
+`conversation rm --created-since/--created-before` (a filtered subset) can
+express their scope through `filter_needs` — the data requirements are known
+statically, only the exact IDs are resolved at startup.
 
 Two mechanisms serve bulk commands:
 
@@ -270,9 +270,9 @@ The `conversation_load_request()` method will need to branch on whether
 does not yet make this distinction.
 The table shows both modes as separate rows.
 
-For `rm --from/--until`, the range filter currently loads all conversations
-inside `run()` and does not actually filter by the `from`/`until` values — this
-is a pre-existing gap in the implementation.
+For `rm --created-since/--created-before`, the range filter currently loads all
+conversations inside `run()` and does not actually filter by the
+`since`/`before` values — this is a pre-existing gap in the implementation.
 With the new model, range mode should declare `filter_needs: METADATA` (so
 metadata is available for date-based filtering) and a target set derived from
 the range.

@@ -1,4 +1,4 @@
-use jp_tool::Context;
+use camino::Utf8Path;
 
 use super::MAX_DIAGNOSTIC_BYTES;
 use crate::util::{
@@ -14,25 +14,38 @@ use crate::util::{
 const MAX_EXPANDED_BYTES: usize = 100_000;
 
 pub(crate) async fn cargo_expand(
-    ctx: &Context,
+    root: &Utf8Path,
+    profile: Option<&str>,
     item: String,
     package: Option<String>,
     checksum_freshness: bool,
 ) -> ToolResult {
-    cargo_expand_impl(ctx, &item, package, checksum_freshness, &DuctProcessRunner)
+    cargo_expand_impl(
+        root,
+        profile,
+        &item,
+        package,
+        checksum_freshness,
+        &DuctProcessRunner,
+    )
 }
 
 fn cargo_expand_impl<R: ProcessRunner>(
-    ctx: &Context,
+    root: &Utf8Path,
+    profile: Option<&str>,
     item: &str,
     package: Option<String>,
     checksum_freshness: bool,
     runner: &R,
 ) -> ToolResult {
     let package = package.map(|v| format!("--package={v}"));
+    let profile_arg = profile.map(|name| format!("--profile={name}"));
     let mut args = vec!["--quiet", "expand", "--color=never"];
     if let Some(package) = package.as_deref() {
         args.push(package);
+    }
+    if let Some(profile) = profile_arg.as_deref() {
+        args.push(profile);
     }
     args.push(item);
 
@@ -49,7 +62,7 @@ fn cargo_expand_impl<R: ProcessRunner>(
         stdout,
         stderr,
         status,
-    } = runner.run_with_env("cargo", &args, &ctx.root, &env)?;
+    } = runner.run_with_env("cargo", &args, root, &env)?;
 
     if !status.is_success() {
         return Err(format!(

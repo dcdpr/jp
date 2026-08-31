@@ -3,6 +3,15 @@
 // (`rfd-shared.mjs`) and the browser-side board (`RfdBoard.vue`) both consume
 // this module, so it must run in either environment.
 
+// Statuses that take an RFD off the priority board. The board ranks the work
+// that is still open (Draft, Discussion, Accepted); everything else is done or
+// dead and holds no position.
+export const TERMINAL_STATUSES = new Set([
+    'Implemented',
+    'Superseded',
+    'Abandoned',
+])
+
 // Normalize a raw priority record into a fixed shape:
 //
 // - `planned`: milestone groups in board order. Each group's `ids` are the

@@ -67,11 +67,12 @@ pub enum FieldValue {
         item: Type,
         item_info: TypeInfo,
     },
-    // HashMap<key, value>
+    // HashMap<key, value>, or a single-generic wrapper such as
+    // `MergeableMap<value>` whose key type is fixed (`key` is then `None`).
     NestedMap {
         collection: Ident,
         collection_info: TypeInfo,
-        key: Type,
+        key: Option<Type>,
         value: Box<Type>,
         value_info: TypeInfo,
     },
@@ -122,8 +123,15 @@ impl FieldValue {
                 panic!("Received a {name} without inner arguments!");
             };
 
-            let Some(GenericArgument::Type(key_ty)) = args.args.first() else {
-                panic!("{name} key type must be a path!");
+            // A wrapper with a single generic (e.g. `MergeableMap<T>`) fixes
+            // its own key type, so only the value type is spelled out here.
+            let key_ty = if args.args.len() > 1 {
+                let Some(GenericArgument::Type(key_ty)) = args.args.first() else {
+                    panic!("{name} key type must be a path!");
+                };
+                Some(key_ty.clone())
+            } else {
+                None
             };
 
             let Some(GenericArgument::Type(value_ty)) = args.args.last() else {
@@ -136,7 +144,7 @@ impl FieldValue {
             Self::NestedMap {
                 collection: segment.ident.clone(),
                 collection_info: outer_info,
-                key: key_ty.clone(),
+                key: key_ty,
                 value: Box::new(value.clone()),
                 value_info: inner_info,
             }
@@ -203,12 +211,22 @@ impl ToTokens for FieldValue {
             }
             Self::NestedMap {
                 collection,
-                key,
+                key: Some(key),
                 value,
                 ..
             } => {
                 quote! {
                     #collection<#key, <#value as schematic::Config>::Partial>
+                }
+            }
+            Self::NestedMap {
+                collection,
+                key: None,
+                value,
+                ..
+            } => {
+                quote! {
+                    #collection<<#value as schematic::Config>::Partial>
                 }
             }
             Self::NestedValue { value, info } => {

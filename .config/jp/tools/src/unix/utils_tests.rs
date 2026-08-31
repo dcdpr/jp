@@ -30,6 +30,7 @@ fn ctx() -> (camino_tempfile::Utf8TempDir, Context) {
 fn test_exists(p: &Path) -> bool {
     let s = p.to_string_lossy().replace('\\', "/");
     [
+        "/",
         "/etc/passwd",
         "/etc/shadow",
         "/etc/hosts",
@@ -206,6 +207,23 @@ fn validate_args_cases() {
     }
 }
 
+/// Arithmetic in `jq` and `bc` programs yields a bare `/` once the argument is
+/// split on whitespace.
+/// The filesystem root exists and sits outside the workspace, so scanning it as
+/// a path reference rejects valid programs.
+#[test]
+fn validate_args_allows_division_operator() {
+    let root = Utf8Path::new("/workspace");
+
+    let program = "[ .chat_messages[] | .parent_message_uuid ] | { ratio: ((map(add) | add) / \
+                   5883 * 100 | floor / 100) }";
+    let args = vec![program.to_owned(), "conversations.json".to_owned()];
+    assert!(validate_args(root, &args, test_exists).is_ok());
+
+    let args = vec!["3 / 4".to_owned()];
+    assert!(validate_args(root, &args, test_exists).is_ok());
+}
+
 #[test]
 fn validate_args_scans_all_positions() {
     let root = Utf8Path::new("/workspace");
@@ -275,8 +293,8 @@ fn safe_path_reaches_runner() {
 /// rejects, or silently hides utilities it supports.
 #[test]
 fn tool_definition_enum_matches_allowlist() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../.jp/mcp/tools/unix/utils.toml");
-    let content = std::fs::read_to_string(&path)
+    let path = Path::new("../../../.jp/mcp/tools/unix/utils.toml");
+    let content = std::fs::read_to_string(path)
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
     let value: toml::Value = toml::from_str(&content).expect("valid TOML");
 

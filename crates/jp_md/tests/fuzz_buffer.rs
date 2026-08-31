@@ -88,8 +88,8 @@ fn chunks_strategy(text: String) -> impl Strategy<Value = Vec<String>> {
 }
 
 fn fixture_content_strategy() -> impl Strategy<Value = (String, String)> {
-    let glob_pattern = format!("{}/tests/fixtures/*.md", env!("CARGO_MANIFEST_DIR"));
-    let paths: Vec<_> = glob::glob(&glob_pattern)
+    let glob_pattern = "tests/fixtures/*.md";
+    let paths: Vec<_> = glob::glob(glob_pattern)
         .expect("Failed to read glob pattern")
         .filter_map(Result::ok)
         .collect();

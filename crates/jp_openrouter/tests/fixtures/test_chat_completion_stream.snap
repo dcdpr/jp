@@ -31,6 +31,7 @@ expression: v
         object: ChatCompletionChunk,
         system_fingerprint: None,
         usage: None,
+        error: None,
     },
     ChatCompletion {
         id: "gen-1771242469-Y6Pl7tMhHtBIFcYGon8E",
@@ -60,6 +61,7 @@ expression: v
         object: ChatCompletionChunk,
         system_fingerprint: None,
         usage: None,
+        error: None,
     },
     ChatCompletion {
         id: "gen-1771242469-Y6Pl7tMhHtBIFcYGon8E",
@@ -89,6 +91,7 @@ expression: v
         object: ChatCompletionChunk,
         system_fingerprint: None,
         usage: None,
+        error: None,
     },
     ChatCompletion {
         id: "gen-1771242469-Y6Pl7tMhHtBIFcYGon8E",
@@ -118,6 +121,7 @@ expression: v
         object: ChatCompletionChunk,
         system_fingerprint: None,
         usage: None,
+        error: None,
     },
     ChatCompletion {
         id: "gen-1771242469-Y6Pl7tMhHtBIFcYGon8E",
@@ -147,6 +151,7 @@ expression: v
         object: ChatCompletionChunk,
         system_fingerprint: None,
         usage: None,
+        error: None,
     },
     ChatCompletion {
         id: "gen-1771242469-Y6Pl7tMhHtBIFcYGon8E",
@@ -176,6 +181,7 @@ expression: v
         object: ChatCompletionChunk,
         system_fingerprint: None,
         usage: None,
+        error: None,
     },
     ChatCompletion {
         id: "gen-1771242469-Y6Pl7tMhHtBIFcYGon8E",
@@ -205,6 +211,7 @@ expression: v
         object: ChatCompletionChunk,
         system_fingerprint: None,
         usage: None,
+        error: None,
     },
     ChatCompletion {
         id: "gen-1771242469-Y6Pl7tMhHtBIFcYGon8E",
@@ -234,6 +241,7 @@ expression: v
         object: ChatCompletionChunk,
         system_fingerprint: None,
         usage: None,
+        error: None,
     },
     ChatCompletion {
         id: "gen-1771242469-Y6Pl7tMhHtBIFcYGon8E",
@@ -263,6 +271,7 @@ expression: v
         object: ChatCompletionChunk,
         system_fingerprint: None,
         usage: None,
+        error: None,
     },
     ChatCompletion {
         id: "gen-1771242469-Y6Pl7tMhHtBIFcYGon8E",
@@ -292,5 +301,6 @@ expression: v
         object: ChatCompletionChunk,
         system_fingerprint: None,
         usage: None,
+        error: None,
     },
 ]

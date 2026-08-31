@@ -1,5 +1,5 @@
 use assert_matches::assert_matches;
-use schematic::{SchemaBuilder, SchemaType};
+use schematic::{SchemaBuilder, SchemaType, schema::LiteralValue};
 use serde_json::json;
 
 use super::*;
@@ -68,6 +68,167 @@ fn access_on_local_tool_is_accepted_by_validation() {
         });
 
     assert!(build(partial).is_ok());
+}
+
+#[test]
+fn tool_style_fills_unset_fields_from_the_global_defaults() {
+    use crate::{
+        PartialAppConfig,
+        conversation::tool::style::{InlineResults, PartialDisplayStyleConfig},
+        util::build,
+    };
+
+    let mut partial = PartialAppConfig::new_test();
+    partial.conversation.tools.defaults.style.hidden = Some(true);
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("my_tool".to_owned(), PartialToolConfig {
+            source: Some(ToolSource::Local { tool: None }),
+            style: Some(PartialDisplayStyleConfig {
+                inline_results: Some(InlineResults::Full),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+
+    let config = build(partial).unwrap();
+    let tool = config.conversation.tools.get("my_tool").unwrap();
+
+    assert!(tool.style().hidden);
+    assert_eq!(tool.style().inline_results, InlineResults::Full);
+}
+
+#[test]
+fn tool_style_overrides_the_global_default_per_field() {
+    use crate::{
+        PartialAppConfig,
+        conversation::tool::style::{InlineResults, PartialDisplayStyleConfig},
+        util::build,
+    };
+
+    let mut partial = PartialAppConfig::new_test();
+    partial.conversation.tools.defaults.style.hidden = Some(true);
+    partial.conversation.tools.defaults.style.inline_results = Some(InlineResults::Off);
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("my_tool".to_owned(), PartialToolConfig {
+            source: Some(ToolSource::Local { tool: None }),
+            style: Some(PartialDisplayStyleConfig {
+                hidden: Some(false),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+
+    let config = build(partial).unwrap();
+    let tool = config.conversation.tools.get("my_tool").unwrap();
+
+    assert!(!tool.style().hidden);
+    assert_eq!(tool.style().inline_results, InlineResults::Off);
+}
+
+#[test]
+fn resolved_tool_style_omits_fields_taken_from_the_global_defaults() {
+    use crate::{PartialAppConfig, conversation::tool::style::InlineResults, util::build};
+
+    let mut partial = PartialAppConfig::new_test();
+    partial.conversation.tools.defaults.style.hidden = Some(true);
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("my_tool".to_owned(), PartialToolConfig {
+            source: Some(ToolSource::Local { tool: None }),
+            style: Some(PartialDisplayStyleConfig {
+                inline_results: Some(InlineResults::Full),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+
+    let round_tripped = build(partial).unwrap().conversation.tools.to_partial();
+
+    assert_eq!(round_tripped.defaults.style.hidden, Some(true));
+    assert_eq!(
+        round_tripped.tools.get("my_tool").unwrap().style,
+        Some(PartialDisplayStyleConfig {
+            inline_results: Some(InlineResults::Full),
+            ..Default::default()
+        }),
+        "only the field the tool asked for survives the round-trip"
+    );
+}
+
+#[test]
+fn a_global_style_change_reaches_a_tool_through_a_resolved_config() {
+    use crate::{PartialAppConfig, conversation::tool::style::InlineResults, util::build};
+
+    // A conversation's config layer is a resolved config put back through
+    // `to_partial` (`ConversationStream::config`). A `*` change layered on top
+    // of it has to reach a tool that never set `hidden` itself.
+    let mut partial = PartialAppConfig::new_test();
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("my_tool".to_owned(), PartialToolConfig {
+            source: Some(ToolSource::Local { tool: None }),
+            style: Some(PartialDisplayStyleConfig {
+                inline_results: Some(InlineResults::Full),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+
+    let mut layered = build(partial).unwrap().to_partial();
+    layered.conversation.tools.defaults.style.hidden = Some(true);
+
+    let config = build(layered).unwrap();
+    let tool = config.conversation.tools.get("my_tool").unwrap();
+
+    assert!(tool.style().hidden);
+    assert_eq!(tool.style().inline_results, InlineResults::Full);
+}
+
+#[test]
+fn a_global_style_change_is_not_recorded_as_a_per_tool_override() {
+    use crate::{PartialAppConfig, conversation::tool::style::InlineResults, util::build};
+
+    // The conversation stream records the diff between its own config and the
+    // invocation's (`get_config_delta_from_cli`). A `*`-only change must not
+    // enter that diff as a key of the tool's own, or a later `*` change can
+    // never override it again.
+    let mut before = PartialAppConfig::new_test();
+    before
+        .conversation
+        .tools
+        .tools
+        .insert("my_tool".to_owned(), PartialToolConfig {
+            source: Some(ToolSource::Local { tool: None }),
+            style: Some(PartialDisplayStyleConfig {
+                inline_results: Some(InlineResults::Full),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+
+    let mut after = before.clone();
+    after.conversation.tools.defaults.style.hidden = Some(true);
+
+    let before = build(before).unwrap().to_partial();
+    let after = build(after).unwrap().to_partial();
+    let delta = before.delta(after);
+
+    assert_eq!(delta.conversation.tools.defaults.style.hidden, Some(true));
+    assert!(
+        delta.conversation.tools.tools.is_empty(),
+        "the tool inherited the change, it did not make one: {:?}",
+        delta.conversation.tools.tools
+    );
 }
 
 #[test]
@@ -395,21 +556,54 @@ fn test_tool_config_command() {
     });
 }
 
+/// `EnableConfig`'s schema describes every shape its `Deserialize` accepts: a
+/// bool, one of the legacy strings, or the `{ state, allow_toggle }` table.
+///
+/// The hand-written `Deserialize` accepts more than the derived struct schema
+/// can infer, so the extra shapes are declared via `schema_union_with`.
+/// Without them a schema consumer would reject `enable = true`, which is the
+/// form most configs use.
 #[test]
 fn test_enable_schema() {
-    // `EnableConfig`'s root schema is a struct exposing `state` and
-    // `allow_toggle` as real fields (not a bool|string union like the old
-    // `Enable`). This is the type's own schema: in `AppConfig::fields()` the
-    // `enable` field stays a flat leaf (`conversation.tools.*.enable`) because
-    // it's a `no_deserialize_derive` config.
     let schema = SchemaBuilder::build_root::<EnableConfig>();
-    let SchemaType::Struct(s) = schema.ty else {
-        panic!("expected struct, got {:?}", schema.ty)
+    let SchemaType::Union(union) = schema.ty else {
+        panic!("expected a union, got {:?}", schema.ty)
     };
-    assert!(s.fields.contains_key("state"), "missing `state` field");
+
+    let mut has_bool = false;
+    let mut legacy_strings = None;
+    let mut table_fields = None;
+
+    for variant in union.variants_types {
+        match variant.ty {
+            SchemaType::Boolean(_) => has_bool = true,
+            SchemaType::Enum(e) => legacy_strings = Some(e.values),
+            SchemaType::Struct(s) => table_fields = Some(s.fields),
+            ty => panic!("unexpected variant: {ty:?}"),
+        }
+    }
+
+    assert!(has_bool, "`enable = true` must be described");
+
+    let legacy = legacy_strings.expect("the legacy string forms are described");
+    assert_eq!(legacy, [
+        LiteralValue::String("on".into()),
+        LiteralValue::String("off".into()),
+        LiteralValue::String("always".into()),
+        LiteralValue::String("explicit".into()),
+    ]);
+
+    // The table form keeps the derived field schema, so field names and their
+    // doc comments still reach the schema.
+    let fields = table_fields.expect("the table form is described");
+    assert!(fields.contains_key("state"), "missing `state` field");
     assert!(
-        s.fields.contains_key("allow_toggle"),
+        fields.contains_key("allow_toggle"),
         "missing `allow_toggle` field"
+    );
+    assert!(
+        fields["state"].comment.is_some(),
+        "field doc comments survive the union"
     );
 }
 

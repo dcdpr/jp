@@ -8,7 +8,7 @@ const trail = ref([])
 const origin = ref(null)
 
 // One trail across both kinds, so following an RFD link out of a ticket reads
-// `Tickets / T0001 / 042`. Entries store the path; everything else is looked up
+// `Tickets / T-005zd00 / 042`. Entries store the path; everything else is looked up
 // on render.
 const STORAGE_KEY = 'doc-trail'
 

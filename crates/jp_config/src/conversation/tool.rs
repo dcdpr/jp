@@ -82,23 +82,61 @@ impl PartialConfigDelta for PartialToolsConfig {
 
 impl FillDefaults for PartialToolsConfig {
     fn fill_from(self, defaults: Self) -> Self {
+        let tool_defaults = self.defaults.fill_from(defaults.defaults);
+
+        // A tool declaring any `style` field of its own resolves to a whole
+        // `DisplayStyleConfig`, at which point the fields it didn't set are
+        // indistinguishable from the ones it did. Fill the gaps from the `*`
+        // block here, while the partial still records what the tool asked for,
+        // so a single `[conversation.tools.'*'.style]` key reaches every tool.
+        let tools = self
+            .tools
+            .into_iter()
+            .map(|(name, mut tool)| {
+                tool.style = tool
+                    .style
+                    .map(|style| style.fill_from(tool_defaults.style.clone()));
+
+                (name, tool)
+            })
+            .collect();
+
         Self {
-            defaults: self.defaults.fill_from(defaults.defaults),
-            tools: self.tools,
+            defaults: tool_defaults,
+            tools,
         }
     }
 }
 
 impl ToPartial for ToolsConfig {
     fn to_partial(&self) -> Self::Partial {
-        Self::Partial {
-            defaults: self.defaults.to_partial(),
-            tools: self
-                .tools
-                .iter()
-                .map(|(k, v)| (k.clone(), v.to_partial()))
-                .collect(),
-        }
+        let defaults = self.defaults.to_partial();
+
+        // A per-tool style field that merely equals the `*` value holds no
+        // choice of the tool's: `fill_from` put it there. Recording it as a
+        // per-tool key would pin it, and a later layer changing `*` could never
+        // reach the tool again.
+        //
+        // Equality is the only signal available here. A resolved `ToolConfig`
+        // records values, not whether the user wrote them, so a style field
+        // deliberately set to the same value as the `*` block is
+        // indistinguishable from an inherited one and is dropped. It then
+        // follows a later `*`-only change instead of holding its own value.
+        let tools = self
+            .tools
+            .iter()
+            .map(|(name, tool)| {
+                let mut tool = tool.to_partial();
+                tool.style = tool
+                    .style
+                    .map(|style| defaults.style.delta(style))
+                    .filter(|style| !style.is_empty());
+
+                (name.clone(), tool)
+            })
+            .collect();
+
+        Self::Partial { defaults, tools }
     }
 }
 
@@ -430,7 +468,8 @@ pub struct ToolConfig {
 
     /// How to display the results of the tool in the terminal.
     ///
-    /// Overrides the global default.
+    /// Overrides the global default field by field: keys set here win, keys
+    /// left out take their value from `conversation.tools.'*'.style`.
     /// The error overlay lives at `style.error.*` (see
     /// [`DisplayStyleConfig::error`]).
     #[setting(nested)]
@@ -1210,6 +1249,9 @@ impl ToolConfigWithDefaults {
     }
 
     /// Return the display style of the tool.
+    ///
+    /// Fields the tool does not set carry the value from the global `*`
+    /// defaults, so the returned style is already fully resolved.
     #[must_use]
     pub fn style(&self) -> &DisplayStyleConfig {
         self.tool.style.as_ref().unwrap_or(&self.defaults.style)
@@ -1264,8 +1306,12 @@ pub struct QuestionConfig {
 
     /// The fixed answer to the question.
     ///
-    /// If this is set, the question will not be presented to the target, but
-    /// will always be answered with the given value.
+    /// If set, the question is never presented to the target: when the tool
+    /// asks it, the configured value is supplied automatically (no prompt is
+    /// shown and no assistant round-trip happens) and the tool is re-invoked
+    /// with the answer.
+    /// The exchange is still recorded in the conversation as an inquiry
+    /// request/response pair.
     // TODO: We should add an enumeration of possible options:
     //
     // - Fixed answer
@@ -1505,7 +1551,11 @@ impl Enable {
 /// The legacy strings `"on"`, `"off"`, `"always"` (= locked-on), and
 /// `"explicit"` (= off-unless-named) are still accepted on input.
 #[derive(Debug, Clone, PartialEq, Config)]
-#[config(rename_all = "snake_case", no_deserialize_derive)]
+#[config(
+    rename_all = "snake_case",
+    no_deserialize_derive,
+    schema_union_with = enable_input_shapes
+)]
 pub struct EnableConfig {
     /// Whether the tool is enabled.
     ///
@@ -1566,6 +1616,25 @@ impl PartialEnableConfig {
                 .unwrap_or_default(),
         }
     }
+}
+
+/// The non-table shapes `enable` accepts, for the schema.
+///
+/// The table form is described by the derived struct schema; these are the
+/// shorthands its hand-written `Deserialize` also accepts, which the derive
+/// cannot see.
+fn enable_input_shapes(schema: &schematic::SchemaBuilder) -> Vec<schematic::Schema> {
+    use schematic::schema::{BooleanType, EnumType, LiteralValue};
+
+    vec![
+        schema.nest().boolean(BooleanType::default()),
+        schema.nest().enumerable(EnumType::new([
+            LiteralValue::String("on".into()),
+            LiteralValue::String("off".into()),
+            LiteralValue::String("always".into()),
+            LiteralValue::String("explicit".into()),
+        ])),
+    ]
 }
 
 impl From<bool> for PartialEnableConfig {

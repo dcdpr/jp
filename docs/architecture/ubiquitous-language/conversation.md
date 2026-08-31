@@ -2,7 +2,7 @@
 
 The Conversation cluster covers JP's central abstraction: the persistent record
 of "talking to the assistant" and the event log that backs it.
-Six terms work together here — a **Conversation** is the stored entity, a
+Six terms describe its structure — a **Conversation** is the stored entity, a
 **Turn** is one slice of it, an **Event** is the atomic unit inside a Turn,
 **Tool Calls** and **Inquiries** are specific event kinds, and a **Thread** is
 the projection of a Conversation that gets sent to an LLM provider.
@@ -11,9 +11,14 @@ These terms are tightly coupled — paraphrasing one usually breaks the model fo
 another.
 Use them as written.
 
+The cluster also covers a conversation's *state*: where it sits and how it is
+annotated.
+**Active**, **Live**, and **Archived** answer the first; **Label** answers the
+second.
+
 > [!NOTE]
-> Cluster status: **Turn**, **Active Conversation**, **Live Conversation**, and
-> **Archived Conversation** are defined below.
+> Cluster status: **Turn**, **Active Conversation**, **Live Conversation**,
+> **Archived Conversation**, and **Label** are defined below.
 > The remaining terms are placeholders and will land in subsequent passes.
 > Until then, see the [legacy single-page glossary] for the older definitions of
 > the unfilled terms.
@@ -80,6 +85,54 @@ is the source of truth.
 
 **Not the same as.** A removed conversation (archiving is reversible with `jp c
 unarchive`; removal is not).
+
+### Label
+
+A `key=value` annotation on a conversation, used to find it later by the context
+it was created in: the VCS branch, the crates it touches, a review stage.
+A key holds a set of values, so `crate=jp_config` and `crate=jp_llm` coexist.
+A label with an empty value is a *bare* label, and filters treat it as "key
+present, any value".
+
+Labels live in two places with distinct roles.
+The **rules** that produce them are configuration, declared under
+`conversation.labels.<key>` and layered like any other config; a rule's value is
+a literal string, a list of them, or a command producing one value per line of
+stdout.
+The **resolved set** is the labels themselves, written at creation, on fork, and
+by `jp c label`.
+A rule is not a label until it has been resolved.
+
+**Implementation.** `Conversation::labels` in `jp_conversation`, a `Labels`
+persisted in `metadata.json`.
+`Labels` maps a key to an ordered set of values and enforces the empty-set
+invariant; a value is read as either a string or an array of strings, and is
+always written as an array.
+Rules are `LabelConfig` in `jp_config::conversation::label`, turned into labels
+by the resolver in `jp_cli::cmd::label::resolve`.
+Keys match `[A-Za-z][A-Za-z0-9_-]*`; every excluded character is significant
+somewhere else — `.` separates dotted config paths, `=` splits a key from its
+value, `:` marks a rule reference, and a leading `-` would read as a flag where
+keys are written as bare command arguments.
+Values carry no such restriction.
+
+**In context.** A key never holds an empty set: removing the last value removes
+the key.
+`jp c label add` inserts into the key's set, `set` replaces it, and `rm` takes
+either a whole key or a single `key=value`.
+Mutation lives on `jp c label` alone — neither `jp query` nor `jp c fork` sets
+labels — while filters (`--label` on `jp c ls` and `jp c grep`) match on set
+membership.
+Labels are a fact recorded *about* a conversation: they are not sent to the LLM
+and not exposed to tools.
+
+**Not the same as.** A conversation's **title**, which is free-form, singular,
+and serves as the conversation's name rather than a fact about it.
+Also not an **Attachment**, which is content added *to* a conversation.
+
+**Avoid.** *Tag*, *annotation*, *marker*.
+When you mean a `key=value` pair stored on a conversation, the word is
+**Label**.
 
 ### Turn
 

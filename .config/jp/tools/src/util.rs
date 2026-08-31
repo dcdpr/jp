@@ -1,7 +1,9 @@
 pub mod diff;
+pub mod root;
 pub mod runner;
 pub mod xml;
 
+use jp_md::format::Formatter;
 use jp_tool::Outcome;
 use serde::{Deserialize, Deserializer, Serialize, de::DeserializeOwned};
 use serde_json::Value;
@@ -62,6 +64,39 @@ pub fn truncate(s: &str, max: usize) -> String {
         &s[..end],
         s.len()
     )
+}
+
+/// Prefix every line of `document` with a markdown blockquote marker.
+///
+/// Empty lines get a bare `>` so the rail stays unbroken without trailing
+/// whitespace.
+/// Quoting an already-quoted document nests it one level deeper.
+#[must_use]
+pub fn quote(document: &str) -> String {
+    let mut quoted = String::with_capacity(document.len() * 2);
+    for line in document.lines() {
+        quoted.push('>');
+        if !line.is_empty() {
+            quoted.push(' ');
+            quoted.push_str(line);
+        }
+        quoted.push('\n');
+    }
+
+    quoted
+}
+
+/// Style a document for the terminal as a tool-call preview.
+///
+/// The document is quoted first, so the transcript carries a marker down the
+/// whole preview and the reader can see where the tool output ends and the
+/// conversation resumes.
+/// Falls back to the unstyled source if the markdown can't be formatted.
+#[must_use]
+pub fn preview(document: &str) -> String {
+    let quoted = quote(document);
+
+    Formatter::new().format_terminal(&quoted).unwrap_or(quoted)
 }
 
 #[expect(clippy::unnecessary_wraps)]

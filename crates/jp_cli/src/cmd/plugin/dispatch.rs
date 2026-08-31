@@ -12,6 +12,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
     thread,
+    time::{Duration, Instant},
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
@@ -23,7 +24,10 @@ use jp_config::{
     },
 };
 use jp_editor::{EditOutcome, EditorBackend};
-use jp_inquire::{InlineOption, InlineReply, InlineSelect, ReplyOutcome};
+use jp_inquire::{
+    InlineOption, InlineSelect, ReplyEditMode, ReplyOutcome,
+    prompt::{PromptBackend, TerminalPromptBackend},
+};
 use jp_plugin::{
     PROTOCOL_VERSION,
     message::{
@@ -39,7 +43,10 @@ use serde_json::Value;
 use tracing::{debug, error, trace, warn};
 
 use super::registry;
-use crate::{Ctx, cmd, editor::report_editor_failure, signals::SignalRouter};
+use crate::{
+    Ctx, cmd, cmd::query::interrupt::reply_edit_mode, editor::report_editor_failure,
+    signals::SignalRouter,
+};
 
 /// Runs the prompts a plugin asks for.
 ///
@@ -48,7 +55,16 @@ use crate::{Ctx, cmd, editor::report_editor_failure, signals::SignalRouter};
 /// to read keys from, and only the host knows which editor `Ctrl+X` opens.
 pub(crate) struct Composer<'a> {
     printer: &'a Printer,
+
+    /// Renders the widgets, rather than the composer building them.
+    ///
+    /// Everything the widget owns — its keybindings, and the hints that
+    /// describe them — lives behind here, so a second caller cannot quietly
+    /// ship a reply buffer with the wrong edit mode or no key hints at all.
+    prompts: &'a dyn PromptBackend,
+
     editor: Option<Arc<dyn EditorBackend>>,
+    edit_mode: ReplyEditMode,
     is_tty: bool,
 }
 
@@ -148,14 +164,16 @@ impl Composer<'_> {
         let mut buffer = initial.to_owned();
 
         loop {
-            let mut reply = InlineReply::new(request.message.as_str())
-                .with_initial_text(buffer.as_str())
-                .with_editor_escape(self.editor.is_some());
-            if let Some(help) = &request.help {
-                reply = reply.with_help_message(help.as_str());
-            }
+            let outcome = self.prompts.inline_reply(
+                request.message.as_str(),
+                buffer.as_str(),
+                self.edit_mode,
+                self.editor.is_some(),
+                request.help.as_deref(),
+                Box::new(self.printer.owned_prompt_writer()),
+            );
 
-            match reply.prompt(Box::new(self.printer.owned_prompt_writer())) {
+            match outcome {
                 Ok(ReplyOutcome::Submit(text)) => return Some(text),
                 Ok(ReplyOutcome::Cancelled) => return None,
                 Ok(ReplyOutcome::OpenEditor { current_text }) => {
@@ -184,22 +202,38 @@ impl Composer<'_> {
     }
 }
 
-/// Run a plugin binary, handling the full protocol lifecycle.
+/// Where a plugin run reads and writes.
 ///
-/// `binary` is the path to the plugin executable.
-/// `args` are the remaining CLI arguments to forward.
-pub(crate) fn run_plugin(
+/// Grouped because they arrive together and are all optional paths: as separate
+/// parameters, two of them could be transposed at the call site and nothing
+/// would say so.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PluginPaths<'a> {
+    /// The bootstrap-resolved working directory for the child (RFD 087).
+    ///
+    /// `Some` when JP operates on a workspace other than the launch cwd's own,
+    /// `None` to inherit the process cwd.
+    pub(crate) child_cwd: Option<&'a Utf8Path>,
+
+    /// The workspace's storage directory.
+    pub(crate) storage: Option<&'a Utf8Path>,
+
+    /// The user-local storage directory for this workspace, when there is one.
+    pub(crate) user_storage: Option<&'a Utf8Path>,
+}
+
+/// The `init` message a plugin is greeted with, and the config it carries.
+///
+/// The config is returned alongside because the message loop answers
+/// `read_config` from the same value, rather than serializing it twice.
+fn init_message(
     name: &str,
-    binary: &Utf8Path,
     args: &[String],
     workspace: &Workspace,
-    storage_path: Option<&Utf8Path>,
-    user_storage_path: Option<&Utf8Path>,
+    paths: PluginPaths<'_>,
     config: &Arc<AppConfig>,
-    signals: &SignalRouter,
     log_level: u8,
-    composer: &Composer<'_>,
-) -> Result<(), cmd::Error> {
+) -> Result<(HostToPlugin, Value), cmd::Error> {
     let config_json = serde_json::to_value(config.as_ref().to_partial())
         .map_err(|e| cmd::Error::from(format!("failed to serialize config: {e}")))?;
 
@@ -212,28 +246,48 @@ pub(crate) fn run_plugin(
         .cloned()
         .unwrap_or_default();
 
-    let storage_path = storage_path.ok_or("workspace has no storage configured")?;
+    let storage = paths.storage.ok_or("workspace has no storage configured")?;
 
     let init = HostToPlugin::Init(InitMessage {
         version: PROTOCOL_VERSION,
         workspace: WorkspaceInfo {
             root: workspace.root().to_owned(),
-            storage: storage_path.to_owned(),
+            storage: storage.to_owned(),
             id: workspace.id().to_string(),
         },
-        paths: well_known_paths(user_storage_path),
+        paths: well_known_paths(paths.user_storage),
         config: config_json.clone(),
         options,
         args: args.to_vec(),
         log_level,
     });
 
+    Ok((init, config_json))
+}
+
+/// Run a plugin binary, handling the full protocol lifecycle.
+///
+/// `binary` is the path to the plugin executable.
+/// `args` are the remaining CLI arguments to forward.
+pub(crate) fn run_plugin(
+    name: &str,
+    binary: &Utf8Path,
+    args: &[String],
+    workspace: &Workspace,
+    paths: PluginPaths<'_>,
+    config: &Arc<AppConfig>,
+    signals: &SignalRouter,
+    log_level: u8,
+    composer: &Composer<'_>,
+) -> Result<(), cmd::Error> {
+    let (init, config_json) = init_message(name, args, workspace, paths, config, log_level)?;
+
     let PluginProcess {
         mut child,
         stdin,
         stdout,
         stderr_handle,
-    } = spawn_plugin(binary)?;
+    } = spawn_plugin(binary, paths.child_cwd)?;
 
     // Shutdown thread: sends `Shutdown` directly to the plugin's stdin when
     // an interrupt or a graceful shutdown request arrives. If the plugin
@@ -250,7 +304,13 @@ pub(crate) fn run_plugin(
     let shutdown_handle = thread::spawn(move || {
         let interrupted = futures::executor::block_on(async {
             tokio::select! {
-                notified = interrupt_rx.recv() => notified.is_some(),
+                // Asking the plugin to shut down acts on the press, so it
+                // leaves the escalation ladder; a further press then reaches
+                // the router with a fresh count.
+                notified = interrupt_rx.recv() => notified.is_some_and(|notice| {
+                    notice.handled();
+                    true
+                }),
                 () = shutdown_token.cancelled() => true,
             }
         });
@@ -260,7 +320,12 @@ pub(crate) fn run_plugin(
             return;
         }
 
-        stop_plugin(&shutdown_writer, &shutdown_flag, child_id);
+        stop_plugin(
+            &shutdown_writer,
+            &shutdown_flag,
+            child_id,
+            Duration::from_secs(5),
+        );
     });
 
     // Send init.
@@ -281,6 +346,18 @@ pub(crate) fn run_plugin(
         composer,
     );
 
+    // A plugin that asked a question the host answered with an error is still
+    // waiting for the reply. Nothing here closes its stdin — this scope holds a
+    // handle and so does the shutdown thread — so waiting on it without saying
+    // anything first is a wait for a process that has no reason to exit, and the
+    // error above never reaches the caller.
+    //
+    // Short grace: unlike an interrupt, there is no work in flight worth letting
+    // finish.
+    if result.is_err() {
+        stop_plugin(&stdin, &shutdown_sent, child_id, Duration::from_secs(1));
+    }
+
     // Always clean up, even on error.
     drop(child.wait());
     drop(stderr_handle.join());
@@ -288,9 +365,6 @@ pub(crate) fn run_plugin(
 
     result
 }
-
-/// How long a plugin gets to exit on its own after being told to stop.
-const SHUTDOWN_GRACE_MS: u64 = 5_000;
 
 /// A spawned plugin process and its wired-up pipes.
 struct PluginProcess {
@@ -309,13 +383,23 @@ struct PluginProcess {
 ///
 /// Its stderr is forwarded to tracing from a thread, so a plugin that logs
 /// heavily cannot fill the pipe and block on a write nobody is draining.
-fn spawn_plugin(binary: &Utf8Path) -> Result<PluginProcess, cmd::Error> {
+fn spawn_plugin(
+    binary: &Utf8Path,
+    child_cwd: Option<&Utf8Path>,
+) -> Result<PluginProcess, cmd::Error> {
     debug!(%binary, "Spawning plugin.");
 
     let mut cmd = Command::new(binary);
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+
+    // The root-as-working-directory invariant (RFD 087): when JP operates on
+    // a workspace other than the launch cwd's own, plugins run as if launched
+    // from the selected workspace root.
+    if let Some(cwd) = child_cwd {
+        cmd.current_dir(cwd);
+    }
 
     // Prevent the child from receiving SIGINT/SIGTERM directly. The host
     // sends `Shutdown` over the protocol instead, giving the plugin a
@@ -355,22 +439,26 @@ fn spawn_plugin(binary: &Utf8Path) -> Result<PluginProcess, cmd::Error> {
     })
 }
 
-/// Ask the plugin to stop, and kill it if it will not.
+/// Ask a plugin to stop, and make sure it does.
 ///
-/// `shutdown_sent` is raised once the request is out, so a stdout that closes
-/// without an `exit` is read as the plugin obeying rather than as a crash.
-/// It is raised after the write for that reason: before it, a closed stdout
-/// still means something went wrong.
-fn stop_plugin(stdin: &Mutex<impl Write>, shutdown_sent: &AtomicBool, child_id: u32) {
-    if let Ok(mut writer) = stdin.lock() {
+/// Sends `Shutdown` over the protocol, gives the plugin `grace` to act on it,
+/// and kills it if it doesn't.
+/// `sent` marks the request so the two callers don't both make it.
+///
+/// Killing rather than closing stdin: the handle is shared, so no single holder
+/// can produce the EOF that would let a reading plugin notice on its own.
+fn stop_plugin(stdin: &Mutex<impl Write>, sent: &AtomicBool, child_id: u32, grace: Duration) {
+    if !sent.swap(true, Ordering::AcqRel)
+        && let Ok(mut writer) = stdin.lock()
+    {
         drop(write_message(&mut *writer, &HostToPlugin::Shutdown));
     }
-    shutdown_sent.store(true, Ordering::Release);
 
-    // Polled in short intervals so a prompt exit doesn't hold up cleanup.
-    let interval = std::time::Duration::from_millis(100);
-    for _ in 0..(SHUTDOWN_GRACE_MS / 100) {
-        thread::sleep(interval);
+    // Polled in short intervals, so a plugin that goes quietly doesn't hold up
+    // cleanup for the whole grace period.
+    let deadline = Instant::now() + grace;
+    while Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(50));
         if !is_process_alive(child_id) {
             return;
         }
@@ -538,6 +626,7 @@ fn handle_list_conversations(workspace: &Workspace, req_id: Option<String>) -> H
             id: id.as_deciseconds().to_string(),
             title: meta.title.clone(),
             last_activated_at: meta.last_activated_at,
+            pinned_at: meta.pinned_at,
             events_count: meta.events_count,
         })
         .collect();
@@ -670,6 +759,7 @@ fn is_process_alive(pid: u32) -> bool {
     unsafe { libc::kill(libc::pid_t::from(pid.cast_signed()), 0) == 0 }
 }
 
+/// Check if a process is still alive by PID.
 #[cfg(windows)]
 fn is_process_alive(pid: u32) -> bool {
     use windows_sys::Win32::{
@@ -702,6 +792,10 @@ fn kill_child(pid: u32) {
     debug!(pid, "Sent SIGKILL to plugin after grace period.");
 }
 
+/// Terminate a child process by PID.
+///
+/// Used as a last resort when the plugin doesn't exit within the grace period
+/// after receiving `Shutdown`.
 #[cfg(windows)]
 fn kill_child(pid: u32) {
     use windows_sys::Win32::{
@@ -1150,9 +1244,13 @@ pub(crate) async fn run_external(args: &[String], ctx: &Ctx) -> cmd::Output {
 
     debug!(%binary, subcommand, "Dispatching to plugin.");
 
+    let prompts = TerminalPromptBackend;
     let composer = Composer {
         printer: &ctx.printer,
+        prompts: &prompts,
         editor: crate::editor::build_editor_backend(&config.editor),
+        // The configured mode, as every other inline reply in the CLI uses.
+        edit_mode: reply_edit_mode(config.editor.inline.edit_mode),
         is_tty: ctx.term.is_tty,
     };
 
@@ -1161,8 +1259,11 @@ pub(crate) async fn run_external(args: &[String], ctx: &Ctx) -> cmd::Output {
         &binary,
         plugin_args,
         &ctx.workspace,
-        ctx.storage_path(),
-        ctx.user_storage_path(),
+        PluginPaths {
+            child_cwd: ctx.exec.child_cwd(),
+            storage: ctx.storage_path(),
+            user_storage: ctx.user_storage_path(),
+        },
         &config,
         &ctx.signals,
         ctx.term.args.verbose,

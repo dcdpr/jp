@@ -83,7 +83,7 @@ title = "Conventional Commit: Commit Message Header Format"
 description = "[type]([scope])[!]: [subject line]"
 items = [
     """\
-    [type]: Commit Type: build|ci|docs|feat|enhance|fix|perf|refactor|test\
+    [type]: Commit Type: build|chore|ci|docs|feat|enhance|fix|perf|refactor|test\
     """,
     """\
     [scope]: Commit Scope: One or more comma-space-separated scopes relevant to the changes.\
@@ -112,6 +112,10 @@ items = [
     npm)\
     """,
     """\
+    chore: Changes to the project's own development workflow, with no effect on JP's behaviour \
+    (example scopes: tools, personas, knowledge, justfile, tickets)\
+    """,
+    """\
     ci: Changes to our CI configuration files and scripts (example scopes: github-actions, travis)\
     """,
     """\
@@ -130,7 +134,9 @@ items = [
     perf: A code change that improves performance\
     """,
     """\
-    refactor: A code change that has no impact on the user experience\
+    refactor: A code change that has no impact on the user experience. Reach for `chore` instead \
+    when the change is to tooling JP's users never run, even if it adds or removes behaviour \
+    there\
     """,
     """\
     test: Adding missing tests or correcting existing tests\
@@ -161,6 +167,11 @@ items = [
     """,
     """\
     For any RFD/ADR-related changes, add the scope `rfd`.\
+    """,
+    """\
+    A `chore` scope names the part of the workflow that changed rather than a crate, since the \
+    code often lives outside `crates/`: `tools` for `.config/jp/tools`, `personas`, `knowledge`, \
+    `justfile`.\
     """,
 ]
 

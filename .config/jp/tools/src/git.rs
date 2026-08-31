@@ -1,8 +1,13 @@
+use jp_tool::Capability;
 use serde_json::{Map, Value};
 
 use crate::{
     Context, Tool,
-    util::{ToolResult, unknown_tool},
+    util::{
+        ToolResult, error,
+        root::{GIT_DIR, configured_root, note_root, resolve_root},
+        unknown_tool,
+    },
 };
 
 mod add_intent;
@@ -38,30 +43,52 @@ use unstage::git_unstage;
 
 pub async fn run(ctx: Context, t: Tool) -> ToolResult {
     let opts = &t.options;
+    let subcommand = t.name.trim_start_matches("git_");
 
-    match t.name.trim_start_matches("git_") {
-        "add_intent" => git_add_intent(&ctx.root, t.req("paths")?, opts).await,
+    // Which repository to operate in. Defaults to the root the tool was invoked
+    // with; set `options.root` in the tool config to point the git tooling at
+    // another checkout in the workspace.
+    let configured = match configured_root(opts) {
+        Ok(configured) => configured,
+        Err(message) => return error(message),
+    };
 
-        "commit" => git_commit(ctx.root, t.req("message")?, opts).await,
+    let root = match resolve_root(
+        &ctx.root,
+        configured,
+        ctx.access.as_ref(),
+        required_capabilities(subcommand),
+        &GIT_DIR,
+    ) {
+        Ok(root) => root,
+        Err(message) => return error(message),
+    };
 
-        "stage_patch" => git_stage_patch(ctx, &t.answers, t.req("patches")?, opts).await,
+    let outcome = match subcommand {
+        "add_intent" => git_add_intent(&root, t.req("paths")?, opts).await,
+
+        "commit" => git_commit(&root, t.req("message")?, opts).await,
+
+        "stage_patch" => {
+            git_stage_patch(&root, &ctx.action, &t.answers, t.req("patches")?, opts).await
+        }
 
         "stage_patch_lines" => {
             let path: String = t.req("path")?;
             let patch_id: String = t.req("patch_id")?;
             let lines: Vec<Value> = t.req("lines")?;
-            git_stage_patch_lines(&ctx.root, &path, &patch_id, lines, opts)
+            git_stage_patch_lines(&root, &path, &patch_id, lines, opts)
         }
 
-        "list_patches" => git_list_patches(&ctx.root, t.opt("files")?, opts),
+        "list_patches" => git_list_patches(&root, t.opt("files")?, opts),
 
-        "unstage" => git_unstage(&ctx.root, t.req("paths")?, opts).await,
+        "unstage" => git_unstage(&root, t.req("paths")?, opts).await,
 
-        "diff" => git_diff(ctx.root, t.opt("paths")?, t.req("status")?, opts).await,
+        "diff" => git_diff(&root, t.opt("paths")?, t.req("status")?, opts).await,
 
         "log" => {
             git_log(
-                ctx.root,
+                &root,
                 t.opt("query")?,
                 t.opt("content")?,
                 t.opt("content_regex")?,
@@ -73,13 +100,13 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
             .await
         }
 
-        "show" => git_show(ctx.root, t.req("revision")?, opts).await,
+        "show" => git_show(&root, t.req("revision")?, opts).await,
 
-        "status" => git_status(ctx.root, opts).await,
+        "status" => git_status(&root, opts).await,
 
         "blame" => {
             git_blame(
-                ctx.root,
+                &root,
                 t.req("path")?,
                 t.req("start_line")?,
                 t.req("end_line")?,
@@ -92,7 +119,7 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
 
         "diff_commit" => {
             git_diff_commit(
-                ctx.root,
+                &root,
                 t.req("revision")?,
                 t.req("paths")?,
                 t.opt("pattern")?,
@@ -106,7 +133,7 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
 
         "diff_file" => {
             git_diff_file(
-                ctx.root,
+                &root,
                 t.req("status")?,
                 t.req("paths")?,
                 t.opt("pattern")?,
@@ -118,24 +145,71 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
             .await
         }
 
-        _ => unknown_tool(t),
+        _ => return unknown_tool(t),
+    };
+
+    if root == ctx.root {
+        return outcome;
+    }
+
+    note_root(outcome, &root, "git")
+}
+
+/// Capabilities a git subcommand needs on the repository it runs in.
+///
+/// These gate whether git is spawned at all; they cannot bound what it does
+/// once running, because the subprocess is not sandboxed.
+///
+/// Reading commands are declared read-only even though git refreshes
+/// `.git/index` as it goes.
+/// Declaring that write would make every grant that allows reading history also
+/// allow rewriting it, which is the larger of the two inaccuracies.
+fn required_capabilities(subcommand: &str) -> &'static [Capability] {
+    match subcommand {
+        // Write the index, and create it in a repository that has none yet.
+        "add_intent" | "stage_patch" | "stage_patch_lines" | "unstage" => {
+            &[Capability::Read, Capability::Create, Capability::Update]
+        }
+        // Writes objects and refs, and runs hooks — arbitrary code carrying the
+        // process's own filesystem access.
+        "commit" => &[
+            Capability::Read,
+            Capability::Create,
+            Capability::Update,
+            Capability::Execute,
+        ],
+        _ => &[Capability::Read],
     }
 }
 
-/// Extract environment variables from the `env` tool option.
+/// Build the environment for a git subprocess.
 ///
-/// Returns a list of (key, value) pairs that should be passed to git
-/// subprocesses.
-/// This allows callers (e.g. integration tests) to inject env vars like
-/// `GIT_CONFIG_GLOBAL` to isolate git from host config.
+/// Starts from the defaults every git invocation gets, then appends the pairs
+/// in the `env` tool option, which lets a caller (an integration test injecting
+/// `GIT_CONFIG_GLOBAL` to isolate git from host config) both add variables and
+/// override a default: the runner applies the pairs in order, so a later entry
+/// wins.
 fn env_from_options(options: &Map<String, Value>) -> Vec<(&str, &str)> {
-    options
-        .get("env")
-        .and_then(Value::as_object)
-        .map(|m| {
-            m.iter()
-                .filter_map(|(k, v)| v.as_str().map(|s| (k.as_str(), s)))
-                .collect()
-        })
-        .unwrap_or_default()
+    // Reading commands refresh `.git/index` as they go, which takes a lock and
+    // rewrites the file — a write from a command declared read-only. Dropping
+    // the optional lock leaves the declaration honest. Commands that need a
+    // lock to do their job at all, `commit` and `apply`, still take one.
+    let mut env = vec![("GIT_OPTIONAL_LOCKS", "0")];
+
+    env.extend(
+        options
+            .get("env")
+            .and_then(Value::as_object)
+            .into_iter()
+            .flat_map(|m| {
+                m.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|s| (k.as_str(), s)))
+            }),
+    );
+
+    env
 }
+
+#[cfg(test)]
+#[path = "git_tests.rs"]
+mod tests;

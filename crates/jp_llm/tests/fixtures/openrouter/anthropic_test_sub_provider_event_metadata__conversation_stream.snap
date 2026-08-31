@@ -88,6 +88,11 @@ expression: v
         "strategy": "replace",
         "discard_when_merged": false
       },
+      "labels": {
+        "value": {},
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
       "start_local": false
     },
     "style": {
@@ -218,6 +223,7 @@ expression: v
         "assistant": {
           "model": {
             "id": {
+              "provider": "openrouter",
               "name": "anthropic/claude-haiku-4.5"
             }
           }

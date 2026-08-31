@@ -13,7 +13,10 @@ use crate::{
     internal::merge::vec_with_strategy,
     model::{ModelConfig, PartialModelConfig},
     partial::{ToPartial, partial_opt_config, partial_opts},
-    types::vec::{MergeableVec, MergedVec, vec_to_mergeable_partial},
+    types::{
+        policy_spec::PolicySpec,
+        vec::{MergeableVec, MergedVec, vec_to_mergeable_partial},
+    },
 };
 
 /// Compaction configuration.
@@ -62,8 +65,8 @@ impl PartialCompactionConfig {
     #[must_use]
     pub fn builtin_rules() -> Vec<PartialCompactionRuleConfig> {
         vec![PartialCompactionRuleConfig {
-            reasoning: Some(ReasoningMode::Strip),
-            tool_calls: Some(ToolCallsMode::Strip),
+            reasoning: Some(ReasoningMode::Strip.into()),
+            tool_calls: Some(ToolCallsMode::Strip.into()),
             ..Default::default()
         }]
     }
@@ -172,35 +175,90 @@ impl CompactionConfig {
 #[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct CompactionRuleConfig {
-    /// Number of turns to preserve at the start of the conversation.
+    /// Start bound for compaction: where the compacted range begins.
     ///
-    /// Accepts a positive integer (turn count) or a duration string (e.g.
-    /// `"5h"` — preserve turns from the first 5 hours of the conversation).
+    /// Defaults to `1`, preserving the initial request.
     ///
-    /// Defaults to 1 (preserve the initial request).
+    /// Accepts:
+    ///
+    /// - a turn count (`1` — preserve the first turn),
+    /// - a duration (`"5h"` — preserve turns from the first 5 hours),
+    /// - a turn position counted from the end (`"-5"` — begin at the fifth
+    ///   turn from the last, so how many turns are preserved depends on the
+    ///   length of the conversation),
+    /// - `"last-compaction"` — begin after the most recent compaction.
+    ///
+    /// Absolute turn numbers are not accepted: a rule is written once and
+    /// applied to every conversation, so its bounds have to mean the same thing
+    /// in a conversation of any length.
     #[setting(default = default_keep_first)]
     pub keep_first: RuleBound,
 
-    /// Number of turns to preserve at the end of the conversation.
+    /// End bound for compaction: where the compacted range ends.
     ///
-    /// Accepts a positive integer (turn count) or a duration string (e.g.
-    /// `"3h"` — preserve turns from the last 3 hours).
+    /// Defaults to `1`, keeping the final turn.
     ///
-    /// Defaults to 1 (keep the final turn).
+    /// Accepts:
+    ///
+    /// - a turn count (`3` — preserve the last three turns),
+    /// - a duration (`"3h"` — preserve turns from the last 3 hours),
+    /// - a turn position counted from the end (`"-4"` — end at the fourth turn
+    ///   from the last, preserving the final three).
+    ///
+    /// Absolute turn numbers are not accepted: a rule is written once and
+    /// applied to every conversation, so its bounds have to mean the same thing
+    /// in a conversation of any length.
     #[setting(default = default_keep_last)]
     pub keep_last: RuleBound,
 
-    /// Policy for reasoning (thinking) blocks.
-    pub reasoning: Option<ReasoningMode>,
-
-    /// Policy for tool call arguments and responses.
-    pub tool_calls: Option<ToolCallsMode>,
-
-    /// Summarization configuration.
+    /// What to do with reasoning (thinking) blocks in the compacted range.
     ///
-    /// When set, all events in the compacted range are replaced by a single
-    /// LLM-generated summary.
-    /// This takes precedence over `reasoning` and `tool_calls`.
+    /// The only mode is `"strip"`, which drops the blocks from the view sent to
+    /// the model.
+    /// If unset, reasoning blocks in the range are left alone.
+    ///
+    /// A table form adds a size threshold:
+    ///
+    /// ```toml
+    /// reasoning = { policy = "strip", over = "16KB" }
+    /// ```
+    ///
+    /// With `over` set, only blocks larger than that are stripped.
+    /// Sizes accept `"512KB"`, `"1MB"`, or a bare byte count, and the
+    /// comparison is strict: a block of exactly the threshold is left alone.
+    pub reasoning: Option<PolicySpec<ReasoningMode>>,
+
+    /// What to do with tool call arguments and responses in the compacted
+    /// range.
+    ///
+    /// - `"strip"`: replace request arguments *and* response content.
+    /// - `"strip-requests"`: replace request arguments, keep responses.
+    /// - `"strip-responses"`: replace response content, keep arguments.
+    /// - `"omit"`: remove the request and response entirely.
+    ///
+    /// If unset, tool calls in the range are left alone.
+    ///
+    /// A table form adds a size threshold:
+    ///
+    /// ```toml
+    /// tool_calls = { policy = "strip-responses", over = "1MB" }
+    /// ```
+    ///
+    /// With `over` set, only the large parts of a call are compacted.
+    /// Each half is judged on its own size, so `"strip"` on a call with a short
+    /// request and a huge response drops only the response.
+    /// `"omit"` removes whole pairs, so it is judged on the request and
+    /// response combined.
+    pub tool_calls: Option<PolicySpec<ToolCallsMode>>,
+
+    /// Replace the events in the compacted range with a single summary.
+    ///
+    /// Set `summary.text` to supply the summary yourself; otherwise it is
+    /// generated by a model reading the events in the range.
+    /// Takes precedence over `reasoning` and `tool_calls`, which are ignored
+    /// for the turns it covers.
+    /// If unset, the range keeps its events and only the mechanical policies
+    /// apply.
     #[setting(nested)]
     pub summary: Option<SummaryConfig>,
 }
@@ -281,6 +339,14 @@ impl ToPartial for CompactionRuleConfig {
 #[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct SummaryConfig {
+    /// Use this exact text as the summary instead of generating one.
+    ///
+    /// No model is called for this rule: the text is stored as-is and replaces
+    /// the compacted turns.
+    /// `model`, `instructions`, and `context` have no effect alongside it.
+    /// If unset, the summary is generated.
+    pub text: Option<String>,
+
     /// Model to use for summarization.
     ///
     /// If not set, the main assistant model is used.
@@ -307,6 +373,7 @@ impl AssignKeyValue for PartialSummaryConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
+            "text" => self.text = kv.try_some_string()?,
             _ if kv.p("model") => self.model.assign(kv)?,
             "instructions" => self.instructions = kv.try_some_string()?,
             "context" => self.context = kv.try_some_string()?,
@@ -320,6 +387,7 @@ impl AssignKeyValue for PartialSummaryConfig {
 impl PartialConfigDelta for PartialSummaryConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
+            text: delta_opt(self.text.as_ref(), next.text),
             model: delta_opt_partial(self.model.as_ref(), next.model),
             instructions: delta_opt(self.instructions.as_ref(), next.instructions),
             context: delta_opt(self.context.as_ref(), next.context),
@@ -330,6 +398,7 @@ impl PartialConfigDelta for PartialSummaryConfig {
 impl FillDefaults for PartialSummaryConfig {
     fn fill_from(self, defaults: Self) -> Self {
         Self {
+            text: self.text.or(defaults.text),
             model: fill::fill_opt(self.model, defaults.model),
             instructions: self.instructions.or(defaults.instructions),
             context: self.context.or(defaults.context),
@@ -340,6 +409,7 @@ impl FillDefaults for PartialSummaryConfig {
 impl ToPartial for SummaryConfig {
     fn to_partial(&self) -> Self::Partial {
         Self::Partial {
+            text: partial_opts(self.text.as_ref(), None),
             model: partial_opt_config(self.model.as_ref(), None),
             instructions: partial_opts(self.instructions.as_ref(), None),
             context: partial_opts(self.context.as_ref(), None),
@@ -349,21 +419,26 @@ impl ToPartial for SummaryConfig {
 
 /// A range bound for compaction rules.
 ///
-/// Config rules use the relative [`Turns`] form (a "keep N" count), which is
-/// stable as the conversation grows.
-/// The CLI `--from`/`--to` flags and the inline DSL extend this with absolute
-/// and from-end bounds for one-shot invocations.
+/// Every form a config rule may use is *conversation-independent*: a count, a
+/// duration, a from-end position, or the last-compaction marker all mean the
+/// same thing in a conversation of any length, so one stored rule applies to
+/// every conversation.
+/// [`Absolute`] is the exception and has no config spelling — it exists for
+/// the inline DSL, which runs once against a conversation the user is looking
+/// at.
 ///
-/// [`Turns`]: Self::Turns
+/// [`Absolute`]: Self::Absolute
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuleBound {
-    /// A number of turns to preserve (relative; the stable config form).
+    /// A number of turns to preserve.
     Turns(usize),
     /// An absolute, 1-based turn index (the first turn is `1`).
-    /// Written `@N` as a string.
+    ///
+    /// Reachable only from the inline compaction DSL (`5..8`); it cannot be
+    /// parsed from, or serialized into, a config value.
     Absolute(usize),
-    /// An offset from the end (`FromEnd(3)` = three turns before the last).
-    /// Written `-N` as a string.
+    /// A 0-based offset from the end (`FromEnd(0)` is the last turn).
+    /// Written `-N` as a string, where `-1` is the last turn.
     FromEnd(usize),
     /// Preserve turns within this duration, e.g. `"5h"`, `"2days"`.
     Duration(std::time::Duration),
@@ -376,26 +451,20 @@ impl FromStr for RuleBound {
     type Err = BoxedError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // `last-compaction` is canonical; `last` is a deprecated alias.
-        if s.eq_ignore_ascii_case("last-compaction") || s.eq_ignore_ascii_case("last") {
+        if s.eq_ignore_ascii_case("last-compaction") {
             return Ok(Self::AfterLastCompaction);
         }
 
-        if let Some(rest) = s.strip_prefix('@') {
+        // From-end positions are 1-based, so `-1` is the last turn and the
+        // stored offset is one lower.
+        if let Some(rest) = s.strip_prefix('-') {
             let n: usize = rest
                 .parse()
-                .map_err(|_| format!("invalid absolute turn `{s}`"))?;
+                .map_err(|_| format!("invalid from-end bound `{s}`"))?;
             if n == 0 {
-                return Err("absolute turns are 1-based; `@0` is not a valid turn".into());
+                return Err("from-end offsets are 1-based; use `-1` for the last turn".into());
             }
-            return Ok(Self::Absolute(n));
-        }
-
-        if let Some(rest) = s.strip_prefix('-') {
-            return rest
-                .parse()
-                .map(Self::FromEnd)
-                .map_err(|_| format!("invalid from-end bound `{s}`").into());
+            return Ok(Self::FromEnd(n - 1));
         }
 
         if let Ok(n) = s.parse::<usize>() {
@@ -413,7 +482,7 @@ impl fmt::Display for RuleBound {
         match self {
             Self::Turns(n) => write!(f, "{n}"),
             Self::Absolute(n) => write!(f, "@{n}"),
-            Self::FromEnd(n) => write!(f, "-{n}"),
+            Self::FromEnd(n) => write!(f, "-{}", n + 1),
             Self::Duration(d) => write!(f, "{}", humantime::format_duration(*d)),
             Self::AfterLastCompaction => write!(f, "last-compaction"),
         }
@@ -422,6 +491,16 @@ impl fmt::Display for RuleBound {
 
 impl Serialize for RuleBound {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        // An absolute turn is a fact about one conversation, so it must not
+        // reach a config file. Refusing it here keeps `Display` free to render
+        // it for humans without opening a path into stored config.
+        if let Self::Absolute(n) = self {
+            return Err(serde::ser::Error::custom(format!(
+                "absolute turn `@{n}` cannot be stored in a config rule; use a turn count, a \
+                 duration, or a from-end position like `-3`"
+            )));
+        }
+
         serializer.serialize_str(&self.to_string())
     }
 }
@@ -434,8 +513,10 @@ impl<'de> Deserialize<'de> for RuleBound {
             type Value = RuleBound;
 
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-                formatter
-                    .write_str("a turn count, a duration string like `5h`, or `last-compaction`")
+                formatter.write_str(
+                    "a turn count, a from-end position like `-4`, a duration like `5h`, or \
+                     `last-compaction`",
+                )
             }
 
             fn visit_u64<E: serde::de::Error>(self, v: u64) -> Result<RuleBound, E> {
@@ -473,7 +554,8 @@ impl Default for RuleBound {
 impl schematic::Schematic for RuleBound {
     fn build_schema(mut schema: schematic::SchemaBuilder) -> schematic::Schema {
         // Accepts either a bare integer (turn count, `keep_first = 1`) or a
-        // string (`"5h"`, `"last"`), matching what the deserializer takes.
+        // string (`"5h"`, `"-4"`, `"last-compaction"`), matching what the
+        // deserializer takes.
         schema.union(schematic::schema::UnionType {
             variants_types: vec![
                 Box::new(schema.infer::<usize>()),

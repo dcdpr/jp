@@ -10,7 +10,7 @@
 //! A ticket is read far more often than it is written, and by hand as often as
 //! by tooling, so the file is never round-tripped through the parser.
 
-use crate::{Comment, Kind, Status, TicketId, parse};
+use crate::{Comment, Kind, Status, parse};
 
 /// Render a new ticket, opened at `Todo`.
 ///
@@ -18,7 +18,6 @@ use crate::{Comment, Kind, Status, TicketId, parse};
 /// RFD's implementation plan.
 #[must_use]
 pub fn ticket(
-    id: TicketId,
     title: &str,
     kind: Kind,
     authors: &str,
@@ -26,7 +25,7 @@ pub fn ticket(
     implements: Option<&str>,
     description: &str,
 ) -> String {
-    let mut out = format!("# {id}: {title}\n\n");
+    let mut out = format!("# {title}\n\n");
     out.push_str(&format!("- **Status**: {}\n", Status::Todo));
     out.push_str(&format!("- **Kind**: {kind}\n"));
     out.push_str(&format!("- **Authors**: {authors}\n"));
@@ -70,7 +69,6 @@ pub fn append_comment(document: &str, comment: &Comment) -> String {
 #[must_use]
 pub fn replace_content(
     document: &str,
-    id: TicketId,
     title: &str,
     description: &str,
     comments: &[Comment],
@@ -78,7 +76,7 @@ pub fn replace_content(
     let header = parse::metadata_range(document)?;
     let lines: Vec<&str> = document.lines().collect();
 
-    let mut out = format!("# {id}: {title}\n\n");
+    let mut out = format!("# {title}\n\n");
     for index in header {
         out.push_str(lines[index]);
         out.push('\n');
@@ -100,13 +98,13 @@ pub fn replace_content(
     Some(out)
 }
 
-/// Write one comment: the separator that opens it, its metadata, and its body.
+/// Render one comment: the separator that opens it, its metadata, and its body.
 ///
 /// A comment carries its own separator, so appending one never has to touch
 /// what is already there.
-/// Expects `out` not to end in a newline.
-fn push_comment(out: &mut String, comment: &Comment) {
-    out.push_str("\n\n-----\n\n");
+#[must_use]
+pub fn comment(comment: &Comment) -> String {
+    let mut out = String::from("-----\n\n");
     out.push_str(&format!("- **From**: {}\n", comment.from));
     out.push_str(&format!("- **Date**: {}\n", comment.date));
     if let Some(re) = &comment.re {
@@ -115,6 +113,60 @@ fn push_comment(out: &mut String, comment: &Comment) {
     out.push('\n');
     out.push_str(comment.body.trim());
     out.push('\n');
+
+    out
+}
+
+/// Append one comment to a document.
+///
+/// Expects `out` not to end in a newline.
+fn push_comment(out: &mut String, entry: &Comment) {
+    out.push_str("\n\n");
+    out.push_str(&comment(entry));
+}
+
+/// Un-embed `id` from a document that names itself.
+///
+/// Tickets written before RFD 102 carried their id in two places inside the
+/// file: the title heading, and the reply target of every comment answering
+/// another on the same ticket.
+/// Both become the id-free form, so the filename is the only thing naming the
+/// ticket.
+///
+/// `id` is matched exactly, so a title that merely contains a colon — `Fix:
+/// the thing` — and a reply naming a *different* ticket are both left alone.
+/// A document with nothing to convert comes back unchanged.
+#[must_use]
+pub fn strip_ids(document: &str, id: &str) -> String {
+    let mut lines: Vec<String> = document.lines().map(ToOwned::to_owned).collect();
+
+    if let Some(index) = lines.iter().position(|line| !line.trim().is_empty())
+        && let Some(title) = lines[index]
+            .strip_prefix("# ")
+            .and_then(|rest| rest.strip_prefix(id))
+            .and_then(|rest| rest.strip_prefix(':'))
+    {
+        lines[index] = format!("# {}", title.trim());
+    }
+
+    for line in &mut lines {
+        let replacement = parse::meta_line(line)
+            .filter(|(key, _)| key.eq_ignore_ascii_case("re"))
+            .and_then(|(_, value)| value.strip_prefix(id))
+            .and_then(|rest| rest.strip_prefix('#'))
+            .map(|position| format!("- **Re**: #{position}"));
+
+        if let Some(replacement) = replacement {
+            *line = replacement;
+        }
+    }
+
+    let mut out = lines.join("\n");
+    if document.ends_with('\n') {
+        out.push('\n');
+    }
+
+    out
 }
 
 /// Set a field in the ticket's metadata block, returning the new document.

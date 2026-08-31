@@ -46,7 +46,7 @@
 //! [`ToolCallResponse`]: jp_conversation::event::ToolCallResponse
 //! [`TurnCoordinator`]: turn::coordinator::TurnCoordinator
 
-mod interrupt;
+pub(crate) mod interrupt;
 mod stream;
 pub(crate) mod tool;
 mod turn;
@@ -62,6 +62,7 @@ use std::{
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
+use chrono::{DateTime, Utc};
 use clap::{ArgAction, builder::TypedValueParser as _};
 use indexmap::IndexMap;
 use jp_attachment::Attachment;
@@ -84,11 +85,12 @@ use jp_config::{
     style::{mcp_startup::McpStartupConfig, reasoning::ReasoningDisplayConfig},
 };
 use jp_conversation::{
-    Conversation, ConversationEvent, ConversationId, ConversationStream,
+    Conversation, ConversationEvent, ConversationId, ConversationStream, Labels,
     event::{ChatRequest, ChatResponse},
+    stream::{ApplyDelta, ResetDelta},
     thread::{Thread, ThreadBuilder},
 };
-use jp_inquire::prompt::TerminalPromptBackend;
+use jp_inquire::prompt::{PromptBackend, TerminalPromptBackend};
 use jp_llm::{
     ToolError, provider,
     tool::{
@@ -113,6 +115,7 @@ use super::{
     attachment::load_conversation_attachments,
     conversation_id::{ConversationIds, FlagIds},
     lock::LockOutcome,
+    target::TargetGrammar,
 };
 use crate::{
     Ctx, PATH_STRING_PREFIX,
@@ -124,8 +127,10 @@ use crate::{
     cmd::{
         self,
         conversation::fork,
+        label::resolve::{Resolver, Trigger},
         lock::{LockRequest, acquire_lock},
     },
+    config_pipeline::{ConfigReset, ConfigResetEvents},
     ctx::IntoPartialAppConfig,
     editor,
     error::{Error, Result},
@@ -293,14 +298,22 @@ pub(crate) struct Query {
     /// The tool to use.
     ///
     /// If a value is provided, the tool matching the value will be used.
+    /// The named tool runs for this query even when it is disabled, so it does
+    /// not have to be enabled separately; a tool whose policy locks it off is
+    /// refused.
     ///
-    /// Note that this setting is *not* persisted across queries.
+    /// This applies to a single query and is *not* persisted: the next query
+    /// forces nothing, and a tool that was disabled stays disabled.
     /// To persist tool choice behavior, set the `assistant.tool_choice` field
     /// in a configuration file.
     #[arg(short = 'u', long = "tool-use")]
     tool_use: Option<Option<String>>,
 
     /// Disable tool use by the assistant.
+    ///
+    /// This applies to a single query and is *not* persisted.
+    /// To keep tools off, use `--no-tool`, which disables them for every future
+    /// query on the conversation.
     #[arg(short = 'U', long = "no-tool-use")]
     no_tool_use: bool,
 
@@ -322,7 +335,6 @@ pub(crate) struct Query {
 }
 
 impl Query {
-    #[expect(clippy::too_many_lines)]
     pub(crate) async fn run(
         self,
         ctx: &mut Ctx,
@@ -331,8 +343,6 @@ impl Query {
     ) -> Output {
         debug!("Running `query` command.");
         trace!(args = ?self, "Received arguments.");
-        let now = ctx.now();
-        let cfg = ctx.config();
 
         // Resolve the query before any conversation or session state is
         // touched: an unreadable `@path` must not leave a conversation created
@@ -346,7 +356,34 @@ impl Query {
         // 2. picker "start new": `start_new` is set, create a fresh conversation.
         // 3. --fork/--id/session: resolve an existing conversation, lock it.
         // 4. Lock contention: user picks "new" or "fork" from the prompt.
-        let lock = self.acquire_lock(ctx, handle, start_new).await?;
+        let (lock, fresh) = self.acquire_lock(ctx, handle, start_new).await?;
+
+        let result = self.run_locked(ctx, &lock, query, fresh).await;
+
+        // Every exit from the locked region lands here, which is what makes
+        // this the one reliable drain point: a mutation scope that dropped
+        // while dirty recorded its persist failure on the lock, and any `?` in
+        // the region above returns past every other candidate site.
+        cmd::fold_persist_failure(result, lock.take_persist_failure())
+    }
+
+    /// Run the query against an already-locked conversation.
+    ///
+    /// `fresh` is `true` when this run created the conversation, so no config
+    /// state predates its base config.
+    ///
+    /// Errors propagate freely: the caller drains any persist failure the
+    /// unwinding left behind.
+    #[expect(clippy::too_many_lines)]
+    async fn run_locked(
+        self,
+        ctx: &mut Ctx,
+        lock: &ConversationLock,
+        query: Option<String>,
+        fresh: bool,
+    ) -> Output {
+        let now = ctx.now();
+        let cfg = ctx.config();
 
         // Create symlinks and seed approvals for any `--mount` flags before the
         // turn runs, so tools can reach the mounted paths.
@@ -355,13 +392,13 @@ impl Query {
         // The two flags are mutually exclusive (enforced by clap), and the
         // resolved conversation may be new, freshly forked (which clones the
         // source's metadata, including any title), or resumed.
-        apply_title_override(&lock, self.title.as_deref(), self.no_title);
+        apply_title_override(lock, self.title.as_deref(), self.no_title);
 
         // Record this conversation as the session's active conversation.
         if let Some(session) = &ctx.session
             && let Err(error) = ctx
                 .workspace
-                .activate_session_conversation(&lock, session, now)
+                .activate_session_conversation(lock, session, now)
         {
             warn!(%error, "Failed to record activation.");
         }
@@ -383,10 +420,16 @@ impl Query {
 
         // Compact the conversation before querying, if requested.
         if self.compact.should_compact() {
-            self.apply_pre_query_compaction(&lock, &cfg).await?;
+            self.apply_pre_query_compaction(lock, &cfg).await?;
         }
 
-        let mcp_servers_handle = ctx.configure_active_mcp_servers().await?;
+        // `-u`/`-U` never enter the config, so the turn's choice is resolved
+        // from the flags here and carried through to the tool list and the turn
+        // loop.
+        let tool_choice = self.effective_tool_choice(&cfg);
+        let forced_tool = tool_choice.function_name();
+
+        let mcp_servers_handle = ctx.configure_active_mcp_servers(forced_tool).await?;
 
         let conv_title = lock.metadata().title.clone();
 
@@ -486,21 +529,44 @@ impl Query {
             echo.render_user_request(&chat_request);
         }
 
-        // Record the CLI-provided config delta (`--cfg`) now that the query is
-        // known to be non-empty. Recording it before the empty-query check
-        // would leave a config event behind for a query that was ultimately
-        // ignored.
-        if let Some(delta) = get_config_delta_from_cli(&cfg, &lock)? {
-            lock.as_mut()
-                .update_events(|events| events.add_config_delta(delta));
+        // One mutable scope for the whole pre-turn setup. Every mutation below
+        // shares its single write at the closing `flush`, instead of each
+        // statement persisting the entire conversation on its own drop.
+        let mut setup = lock.as_mut();
+
+        // Persist config state changes into the conversation stream, now that
+        // the query is known to be non-empty. Recording them before the
+        // empty-query check would leave config events behind for a query that
+        // was ultimately ignored.
+        //
+        // A fresh conversation needs neither branch: its base config was
+        // written from this invocation's resolved config at creation time
+        // (that also absorbs any `--cfg` reset keyword, per [RFD 038]).
+        //
+        // A conversation carrying earlier config state — continuing or forked
+        // — records a `--cfg` reset keyword as its stream events, appended
+        // directly: between the `Reset` and whichever `Apply` restores the
+        // required fields the stream does not resolve to a valid config, so
+        // the empty-diff suppression path in `add_config_delta` cannot run.
+        //
+        // Without a reset keyword, any divergence between the stream's config
+        // and this invocation's resolved config is appended as a single
+        // suppression-checked `Apply` diff.
+        //
+        // [RFD 038]: https://jp.computer/rfd/038
+        if let Some(reset_events) = ctx.config_reset.take() {
+            if !fresh {
+                setup.update_events(|events| persist_config_reset(events, reset_events, now));
+            }
+        } else if let Some(delta) = get_config_delta_from_cli(&cfg, lock)? {
+            setup.update_events(|events| events.add_config_delta(delta));
         }
 
         if !editor_provided_config.is_empty() {
             // Resolve any model aliases before storing in the stream so
             // that per-event configs always contain concrete model IDs.
             editor_provided_config.resolve_model_aliases(&cfg.providers.llm.aliases);
-            lock.as_mut()
-                .update_events(|events| events.add_config_delta(editor_provided_config));
+            setup.update_events(|events| events.add_config_delta(editor_provided_config));
         }
 
         // Snapshot the stream for title generation and thread assembly. The
@@ -509,7 +575,7 @@ impl Query {
         // stream is only trimmed at the turn-start commit point), the new
         // request not yet appended.
         let stream = {
-            let mut stream = lock.events().clone();
+            let mut stream = setup.events().clone();
             pending_trim.apply(&mut stream);
             stream
         };
@@ -533,8 +599,7 @@ impl Query {
             ) {
                 NewTitle::FromHeading(title) => {
                     debug!("Using leading markdown heading as conversation title");
-                    lock.as_mut()
-                        .update_metadata(|m| m.title = Some(title.clone()));
+                    setup.update_metadata(|m| m.title = Some(title.clone()));
                     if ctx.term.is_tty {
                         jp_term::osc::set_title(format!("{cid}: {title}"));
                     }
@@ -568,7 +633,6 @@ impl Query {
         )
         .await?;
 
-        let forced_tool = cfg.assistant.tool_choice.function_name();
         let tools =
             tool_definitions(cfg.conversation.tools.iter(), &ctx.mcp_client, forced_tool).await?;
 
@@ -588,14 +652,20 @@ impl Query {
 
         // Sanitize any structural issues (orphaned tool calls, missing
         // user messages, etc.) before sending the stream to the provider.
-        lock.as_mut().update_events(ConversationStream::sanitize);
+        setup.update_events(ConversationStream::sanitize);
+
+        // Commit the setup phase before the turn starts. Errors propagate here
+        // rather than being swallowed by a drop, and the turn loop's own
+        // checkpoints take over from this point.
+        setup.flush()?;
+        drop(setup);
 
         let invocation = InvocationContext {
             workspace_id: ctx.workspace.id().to_string(),
             conversation_id: lock.id().to_string(),
         };
 
-        let turn_result = self
+        let mut turn_result = self
             .handle_turn(
                 &cfg,
                 &ctx.signals,
@@ -603,8 +673,8 @@ impl Query {
                 root,
                 ctx.term.is_tty,
                 &thread.attachments,
-                &lock,
-                cfg.assistant.tool_choice.clone(),
+                lock,
+                tool_choice.clone(),
                 &tools,
                 ctx.printer.clone(),
                 approvals,
@@ -614,6 +684,19 @@ impl Query {
             )
             .await
             .map_err(|error| cmd::Error::from(error).with_persistence(true));
+
+        // Fold a drop-time persist failure into the turn's result before
+        // anything downstream treats the turn as a success. Both gates below
+        // key off `is_ok`, and the scratch file one of them deletes is the
+        // user's only recovery copy of a request that was never saved.
+        //
+        // `run` drains again for the exits that never reach this point; the
+        // failure is only ever handed out once.
+        if turn_result.is_ok()
+            && let Some(error) = lock.take_persist_failure()
+        {
+            turn_result = Err(cmd::Error::from(Error::Workspace(error)));
+        }
 
         // Extract structured data from the conversation after the turn.
         if self.schema.is_some() && turn_result.is_ok() {
@@ -774,17 +857,32 @@ impl Query {
     }
 
     /// Create a new conversation and return an exclusive lock.
-    fn create_new_conversation(&self, ctx: &mut Ctx) -> Result<ConversationLock> {
+    async fn create_new_conversation(&self, ctx: &mut Ctx) -> Result<ConversationLock> {
         let cfg = ctx.config();
-        let ws = &mut ctx.workspace;
 
+        // Resolved before the conversation exists so a rule that needs
+        // confirmation, and finds no terminal to ask on, aborts without leaving
+        // a half-labelled conversation behind.
+        let prompts = TerminalPromptBackend;
+        // A rule that produced no values names no label on a fresh
+        // conversation: there is nothing here for it to replace.
+        let labels: Labels = label_resolver(ctx, &cfg, &prompts)
+            .automatic(Trigger::New)
+            .await?
+            .into_iter()
+            .collect();
+
+        let ws = &mut ctx.workspace;
         let projection = if self.is_local(&cfg.conversation) {
             Projection::LocalOnly
         } else {
             Projection::Projected
         };
         let lock = ws.create_and_lock_conversation_with_projection(
-            Conversation::default(),
+            Conversation {
+                labels,
+                ..Conversation::default()
+            },
             cfg.clone(),
             ctx.session.as_ref(),
             projection,
@@ -1048,8 +1146,9 @@ impl Query {
             &events,
             cfg,
             &rules,
-            crate::cmd::turn_range::Bound::Default,
-            crate::cmd::turn_range::Bound::Default,
+            // `--compact` on a query applies the configured rules to the whole
+            // conversation; there are no turn-selection flags to honour.
+            &crate::cmd::turn_selection::TurnSelection::default(),
             // `--compact` on a query is a quick adjunct; apply it silently so
             // compaction details don't clutter the query output.
             None,
@@ -1061,15 +1160,22 @@ impl Query {
         Ok(())
     }
 
+    /// Resolve the target conversation and return its exclusive lock.
+    ///
+    /// The second element is `true` when the conversation was freshly created
+    /// by this call: its base config is this invocation's resolved config, so
+    /// no config state predates it.
+    /// Forks return `false` — a fork copies the source's base config and
+    /// events, and therefore carries config state from before this invocation.
     async fn acquire_lock(
         &self,
         ctx: &mut Ctx,
         handle: Option<ConversationHandle>,
         start_new: bool,
-    ) -> Result<ConversationLock> {
+    ) -> Result<(ConversationLock, bool)> {
         // Handle --new: create a fresh conversation.
         if self.is_new() {
-            return self.create_new_conversation(ctx);
+            return Ok((self.create_new_conversation(ctx).await?, true));
         }
 
         // Handle the picker's "start a new conversation" choice. It carries no
@@ -1079,14 +1185,17 @@ impl Query {
             if !self.allows_new_from_picker() {
                 return Err(Error::NewConflictsWithTarget);
             }
-            return self.create_new_conversation(ctx);
+            return Ok((self.create_new_conversation(ctx).await?, true));
         }
 
-        let handle = handle.ok_or(Error::NoConversationTarget)?;
+        // `--new` is only worth suggesting when it wouldn't conflict with a
+        // flag already given; the same predicate gates the picker's offer.
+        let grammar = TargetGrammar::from_args(&self.target, self.allows_new_from_picker());
+        let handle = handle.ok_or_else(|| Error::from(grammar))?;
 
         // Handle --fork: fork the conversation before locking.
         if let Some(fork_turns) = &self.fork {
-            return fork_conversation(ctx, &handle, *fork_turns);
+            return Ok((fork_conversation(ctx, &handle, *fork_turns).await?, false));
         }
 
         let req = LockRequest::from_ctx(handle, ctx)
@@ -1094,9 +1203,11 @@ impl Query {
             .allow_fork(true);
 
         match acquire_lock(req).await? {
-            LockOutcome::Acquired(lock) => Ok(lock),
-            LockOutcome::NewConversation => self.create_new_conversation(ctx),
-            LockOutcome::ForkConversation(handle) => fork_conversation(ctx, &handle, None),
+            LockOutcome::Acquired(lock) => Ok((lock, false)),
+            LockOutcome::NewConversation => Ok((self.create_new_conversation(ctx).await?, true)),
+            LockOutcome::ForkConversation(handle) => {
+                Ok((fork_conversation(ctx, &handle, None).await?, false))
+            }
         }
     }
 }
@@ -1545,11 +1656,13 @@ impl clap::Args for ToolDirectives {
                 .help("The tool(s) to enable")
                 .long_help(
                     "The tool(s) to enable.\n\nIf an existing tool is configured with a matching \
-                     name, it will be enabled for the duration of the query.\n\nIf no arguments \
-                     are provided, all configured tools will be enabled.\n\nYou can provide this \
-                     flag multiple times to enable multiple tools. Flags are evaluated \
-                     left-to-right, so `--no-tools --tool=write` first disables everything, then \
-                     re-enables only 'write'.",
+                     name, it is enabled for this query and every later one on the conversation; \
+                     use `--no-tool` to turn it back off.\n\nTo run a disabled tool just once, \
+                     use `--tool-use NAME` instead.\n\nIf no arguments are provided, all \
+                     configured tools will be enabled.\n\nYou can provide this flag multiple \
+                     times to enable multiple tools. Flags are evaluated left-to-right, so \
+                     `--no-tools --tool=write` first disables everything, then re-enables only \
+                     'write'.",
                 )
                 .action(ArgAction::Append)
                 .num_args(0..=1)
@@ -1564,7 +1677,10 @@ impl clap::Args for ToolDirectives {
                 .long_help(
                     "Disable tool(s).\n\nIf provided without a value, all enabled tools will be \
                      disabled, otherwise pass the argument multiple times to disable one or more \
-                     tools.\n\nFlags are evaluated left-to-right together with `--tool`.",
+                     tools.\n\nThe change applies to this query and every later one on the \
+                     conversation; use `--tool` to turn tools back on. To suppress tools for a \
+                     single query, use `--no-tool-use`.\n\nFlags are evaluated left-to-right \
+                     together with `--tool`.",
                 )
                 .action(ArgAction::Append)
                 .num_args(0..=1)
@@ -1578,7 +1694,7 @@ impl clap::Args for ToolDirectives {
 }
 
 /// Fork a conversation and return the new conversation's lock.
-fn fork_conversation(
+async fn fork_conversation(
     ctx: &mut Ctx,
     source: &ConversationHandle,
     fork_turns: Option<usize>,
@@ -1588,6 +1704,25 @@ fn fork_conversation(
             events.retain_last_turns(n);
         }
     })
+    .await
+}
+
+/// Build a label resolver for this run.
+///
+/// Commands run at the workspace root so a rule produces the same value
+/// wherever in the tree the user invoked JP from.
+fn label_resolver<'a>(
+    ctx: &'a Ctx,
+    cfg: &'a AppConfig,
+    prompts: &'a dyn PromptBackend,
+) -> Resolver<'a> {
+    Resolver::new(
+        &cfg.conversation.labels,
+        ctx.workspace.root(),
+        ctx.term.is_tty,
+        &ctx.printer,
+        prompts,
+    )
 }
 
 /// Where the outgoing chat request's content came from.
@@ -1661,6 +1796,34 @@ fn apply_title_override(lock: &ConversationLock, title: Option<&str>, no_title: 
     }
 }
 
+/// Append a `--cfg` reset keyword's events to a conversation stream.
+///
+/// Persists the reset-then-layer sequence from [RFD 038]: a [`ResetDelta`]
+/// marking the reset point, then the workspace partial for `WORKSPACE` resets,
+/// then whatever state this invocation layered on top of the reset point.
+/// Empty layers are skipped by [`ConversationStream::add_config_reset`], which
+/// also documents why the sequence bypasses diff-suppression.
+///
+/// [RFD 038]: https://jp.computer/rfd/038
+fn persist_config_reset(
+    events: &mut ConversationStream,
+    reset: ConfigResetEvents,
+    timestamp: DateTime<Utc>,
+) {
+    let mut layers = Vec::with_capacity(2);
+
+    if let ConfigReset::Workspace(delta) = reset.reset {
+        layers.push(ApplyDelta { timestamp, delta });
+    }
+
+    layers.push(ApplyDelta {
+        timestamp,
+        delta: reset.post,
+    });
+
+    events.add_config_reset(ResetDelta { timestamp }, layers);
+}
+
 fn get_config_delta_from_cli(
     cfg: &AppConfig,
     lock: &ConversationLock,
@@ -1700,7 +1863,7 @@ impl IntoPartialAppConfig for Query {
             no_edit: _,
             input: _,
             tool_use,
-            no_tool_use,
+            no_tool_use: _,
             parameters,
             hide_reasoning,
             hide_tool_calls,
@@ -1718,22 +1881,12 @@ impl IntoPartialAppConfig for Query {
 
         apply_model(&mut partial, model.as_deref(), merged_config);
 
-        // Inject builtin tool configs before tool-enable processing.
-        for (name, config) in tool::builtins::all() {
-            partial
-                .conversation
-                .tools
-                .tools
-                .entry(name)
-                .or_insert(config);
-        }
+        // Must run before tool-enable processing, which reads the injected
+        // `enable` blocks.
+        inject_builtin_tools(&mut partial)?;
 
         apply_enable_tools(&mut partial, tool_directives, merged_config)?;
-        apply_tool_use(
-            &mut partial,
-            tool_use.as_ref().map(|v| v.as_deref()),
-            *no_tool_use,
-        )?;
+        validate_tool_use(&partial, tool_use.as_ref().map(|v| v.as_deref()))?;
         apply_attachments(&mut partial, attachments, workspace)?;
         apply_mounts(&mut partial, mount, workspace, merged_config)?;
         apply_reasoning(&mut partial, reasoning.as_ref(), *no_reasoning);
@@ -1918,6 +2071,30 @@ fn effective_enable(
     }
 }
 
+impl Query {
+    /// The tool choice for this turn.
+    ///
+    /// `-u`/`-U` are invocation-scoped, so they are read here rather than
+    /// written into the config: forcing a tool binds this turn and no other.
+    /// With neither flag, the conversation's configured `assistant.tool_choice`
+    /// applies.
+    ///
+    /// `-t`/`-T` are the durable counterparts and do reach the config, through
+    /// [`apply_enable_tools`].
+    fn effective_tool_choice(&self, cfg: &AppConfig) -> ToolChoice {
+        if self.no_tool_use {
+            return ToolChoice::None;
+        }
+
+        match self.tool_use.as_ref().map(|v| v.as_deref()) {
+            None => cfg.assistant.tool_choice.clone(),
+            Some(None | Some("true")) => ToolChoice::Required,
+            Some(Some("false")) => ToolChoice::None,
+            Some(Some(name)) => ToolChoice::Function(name.to_owned()),
+        }
+    }
+}
+
 /// Apply a single tool directive to one tool's partial `enable`.
 ///
 /// `scope` identifies the directive kind (bulk vs named) and `desired_state` is
@@ -1963,50 +2140,80 @@ fn apply_directive_to_tool(
     Ok(())
 }
 
-/// Apply the CLI tool use configuration to the partial configuration.
+/// Merge the built-in tool configs into the partial configuration.
 ///
-/// NOTE: This has to run *after* `apply_enable_tools` because it will return an
-/// error if the tool of choice is not enabled.
-fn apply_tool_use(
-    partial: &mut PartialAppConfig,
+/// The built-in block is the *lower*-priority side of each merge: a user who
+/// sets one field (`conversation.tools.describe_tools.result = "ask"`) keeps
+/// the built-in's `source`, `enable`, `style`, and parameter schema, rather
+/// than replacing the whole block with a one-field partial.
+///
+/// Merging in place preserves each tool's position in the map, which is the
+/// order tools are presented to the provider.
+///
+/// An entry that names a built-in's key but declares a different `source`
+/// merges the same way: the user's `source` wins and their executor runs, but
+/// the built-in's `run`, `style`, `enable`, and `parameters` survive unless the
+/// user overrides those too (RFD 083).
+fn inject_builtin_tools(partial: &mut PartialAppConfig) -> BoxedResult<()> {
+    for (name, defaults) in tool::builtins::all() {
+        let tools = &mut partial.conversation.tools.tools;
+        match tools.get_mut(&name) {
+            Some(user) => {
+                let mut merged = defaults;
+                merged
+                    .merge(&(), std::mem::take(user))
+                    .map_err(|error| error.to_full_string())?;
+                *user = merged;
+            }
+            None => {
+                tools.insert(name, defaults);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Reject a `-u NAME` the turn could not honour.
+///
+/// Writes nothing: `-u`/`-U` bind a single turn, so the choice is read from the
+/// flags at query time (see [`Query::effective_tool_choice`]) rather than
+/// layered into the conversation's config.
+///
+/// Forcing a tool implies running it even when it is disabled, which
+/// [`tool_definitions`] already allows.
+/// A tool whose `allow_toggle` policy locks it off cannot be forced, and naming
+/// it here surfaces that before MCP boot and the editor, instead of leaving the
+/// tool to be dropped silently from the tool list later.
+fn validate_tool_use(
+    partial: &PartialAppConfig,
     tool_choice: Option<Option<&str>>,
-    no_tool_choice: bool,
 ) -> BoxedResult<()> {
-    if no_tool_choice || matches!(tool_choice, Some(Some("false"))) {
-        partial.assistant.tool_choice = Some(ToolChoice::None);
+    let Some(Some(name)) = tool_choice else {
+        return Ok(());
+    };
+
+    if name == "true" || name == "false" {
         return Ok(());
     }
 
-    let Some(tool) = tool_choice else {
-        return Ok(());
+    let defaults = partial
+        .conversation
+        .tools
+        .defaults
+        .enable
+        .clone()
+        .unwrap_or_default();
+
+    let Some(tool) = partial.conversation.tools.tools.get(name) else {
+        return Err(format!("tool choice '{name}' does not match any known tools").into());
     };
 
-    partial.assistant.tool_choice = match tool {
-        None | Some("true") => Some(ToolChoice::Required),
-        Some(v) => {
-            let defaults = partial
-                .conversation
-                .tools
-                .defaults
-                .enable
-                .clone()
-                .unwrap_or_default();
-            if !partial
-                .conversation
-                .tools
-                .tools
-                .iter()
-                .filter(|(_, cfg)| effective_enable(cfg.enable.as_ref(), &defaults).state)
-                .any(|(name, _)| name == v)
-            {
-                return Err(format!("tool choice '{v}' does not match any enabled tools").into());
-            }
-
-            Some(ToolChoice::Function(v.to_owned()))
-        }
-    };
-
-    Ok(())
+    // Probe a copy so the flip is discarded: this only asks whether the policy
+    // would permit it, and `apply_directive_to_tool` stays the single place
+    // that decides what a locked tool refuses. A tool already enabled is a
+    // no-op there, so a locked-*on* tool (e.g. a builtin) stays selectable.
+    apply_directive_to_tool(name, &mut tool.clone(), &defaults, ToggleScope::Named, true)
 }
 
 /// Apply the CLI attachments to the partial configuration.

@@ -2,7 +2,7 @@ use std::{io, sync::Mutex};
 
 use camino::Utf8Path;
 use camino_tempfile::tempdir;
-use jp_tool::Action;
+use jp_tool::{Action, Context};
 
 use super::*;
 use crate::util::runner::{MockProcessRunner, RunnerOpts};
@@ -21,7 +21,7 @@ fn test_cargo_test_success() {
     let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;
     let runner = MockProcessRunner::success(stdout);
 
-    let result = cargo_test_impl(&ctx, None, None, false, false, &runner)
+    let result = cargo_test_impl(&ctx.root, None, None, None, false, false, &runner)
         .unwrap()
         .into_content()
         .unwrap();
@@ -43,7 +43,7 @@ fn test_cargo_test_with_failure() {
     let stdout = r#"{"type":"test","event":"failed","name":"my_crate$tests::my_test","stdout":"assertion failed"}"#;
     let runner = MockProcessRunner::success(stdout);
 
-    let result = cargo_test_impl(&ctx, None, None, false, false, &runner)
+    let result = cargo_test_impl(&ctx.root, None, None, None, false, false, &runner)
         .unwrap()
         .into_content()
         .unwrap();
@@ -82,7 +82,7 @@ fn no_tests_ran_error_is_bounded() {
         .expect_any()
         .returns_error(&stderr);
 
-    let error = cargo_test_impl(&ctx, None, None, false, false, &runner)
+    let error = cargo_test_impl(&ctx.root, None, None, None, false, false, &runner)
         .expect_err("a run with zero tests is an error")
         .to_string();
 
@@ -125,7 +125,7 @@ fn failure_output_is_bounded_across_the_whole_run() {
         .join("\n");
     let runner = MockProcessRunner::success(stdout);
 
-    let content = cargo_test_impl(&ctx, None, None, false, false, &runner)
+    let content = cargo_test_impl(&ctx.root, None, None, None, false, false, &runner)
         .unwrap()
         .unwrap_content();
 
@@ -174,7 +174,7 @@ fn failure_blocks_are_bounded_when_captured_output_is_empty() {
         .join("\n");
     let runner = MockProcessRunner::success(stdout);
 
-    let content = cargo_test_impl(&ctx, None, None, false, false, &runner)
+    let content = cargo_test_impl(&ctx.root, None, None, None, false, false, &runner)
         .unwrap()
         .unwrap_content();
 
@@ -193,6 +193,55 @@ fn failure_blocks_are_bounded_when_captured_output_is_empty() {
         "got tail: {}",
         &content[content.len() - 200..]
     );
+}
+
+/// The cargo profile has to reach nextest under its own flag, and the
+/// positional filter has to stay last.
+///
+/// Nextest's `--profile` selects one of *its* profiles, so a cargo profile
+/// passed under that name would be silently misread as a nextest one.
+#[test]
+fn cargo_profile_is_passed_through_to_nextest() {
+    let dir = tempdir().unwrap();
+    let ctx = Context {
+        root: dir.path().to_owned(),
+        action: Action::Run,
+        access: None,
+        workspace_id: "test".into(),
+        conversation_id: "test".into(),
+    };
+
+    let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;
+    let runner = MockProcessRunner::builder()
+        .expect("cargo")
+        .args(&[
+            "nextest",
+            "run",
+            "--workspace",
+            "--cargo-quiet",
+            "--no-fail-fast",
+            "--hide-progress-bar",
+            "--final-status-level=none",
+            "--status-level=fail",
+            "--message-format=libtest-json-plus",
+            "--cargo-profile=agent",
+            "my_test",
+        ])
+        .returns_success(stdout);
+
+    let content = cargo_test_impl(
+        &ctx.root,
+        Some("agent"),
+        None,
+        Some("my_test".to_owned()),
+        false,
+        false,
+        &runner,
+    )
+    .unwrap()
+    .unwrap_content();
+
+    assert_eq!(content, "Ran 1/1 tests, of which 0 failed.\n");
 }
 
 /// A runner that captures the environment variables passed to it, so we can
@@ -248,7 +297,7 @@ fn test_backtrace_disabled_by_default() {
 
     let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;
     let runner: EnvCapturingRunner = MockProcessRunner::success(stdout).into();
-    let _result = cargo_test_impl(&ctx, None, None, false, false, &runner).unwrap();
+    let _result = cargo_test_impl(&ctx.root, None, None, None, false, false, &runner).unwrap();
 
     assert_eq!(
         runner
@@ -273,7 +322,7 @@ fn test_checksum_freshness_disabled_by_default() {
 
     let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;
     let runner: EnvCapturingRunner = MockProcessRunner::success(stdout).into();
-    let _result = cargo_test_impl(&ctx, None, None, false, false, &runner).unwrap();
+    let _result = cargo_test_impl(&ctx.root, None, None, None, false, false, &runner).unwrap();
 
     assert!(
         !runner
@@ -297,7 +346,7 @@ fn test_checksum_freshness_enabled() {
 
     let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;
     let runner: EnvCapturingRunner = MockProcessRunner::success(stdout).into();
-    let _result = cargo_test_impl(&ctx, None, None, false, true, &runner).unwrap();
+    let _result = cargo_test_impl(&ctx.root, None, None, None, false, true, &runner).unwrap();
 
     assert_eq!(
         runner
@@ -322,7 +371,7 @@ fn test_backtrace_enabled() {
 
     let stdout = r#"{"type":"test","event":"ok","name":"my_test","stdout":""}"#;
     let runner: EnvCapturingRunner = MockProcessRunner::success(stdout).into();
-    let _result = cargo_test_impl(&ctx, None, None, true, false, &runner).unwrap();
+    let _result = cargo_test_impl(&ctx.root, None, None, None, true, false, &runner).unwrap();
 
     assert_eq!(
         runner

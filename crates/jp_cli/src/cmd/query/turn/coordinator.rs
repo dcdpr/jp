@@ -572,9 +572,13 @@ impl TurnCoordinator {
 
             // Resume and tool-related actions don't change state during
             // streaming.
+            // `PromptFailed` decided nothing at all, so it must not commit
+            // partial content or move the phase either; callers filter it out
+            // before reaching here.
             InterruptAction::Resume
             | InterruptAction::ToolCancelled { .. }
-            | InterruptAction::RestartTool => {}
+            | InterruptAction::RestartTool
+            | InterruptAction::PromptFailed => {}
         }
 
         self.state

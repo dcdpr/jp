@@ -1,0 +1,41 @@
+[conversation.tools.swift_test]
+enable = false
+run = "unattended"
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "Run the fast Swift test suites: the macOS app's unit tests, and the `jpdrive` accessibility driver package. Unit tests link the `jp_ffi` static library and call it, so a failure there can mean either the Swift or the FFI boundary is broken. Builds the library and regenerates the Xcode project first, so no setup step is needed. The driver package needs neither, and runs first because it is fast. The app's UI tests are deliberately out of reach here — they launch the app and take over the screen; use `swift_test_ui` and name the ones you want."
+
+examples = """
+```json
+{}
+```
+Runs everything.
+
+```json
+{"target": "drive"}
+```
+Runs the driver package only, skipping the Xcode build entirely.
+
+```json
+{"target": "app", "testname": "WorkspaceReaderTests"}
+```
+Runs one suite of the app's unit tests.
+
+```json
+{"target": "drive", "testname": "Tree"}
+```
+Runs one suite of the driver package.
+"""
+
+[conversation.tools.swift_test.style]
+inline_results = "full"
+results_file_link = "off"
+parameters = "function_call"
+
+[conversation.tools.swift_test.parameters.testname]
+summary = "Restrict the run to a suite (`SuiteName`) or a single test (`SuiteName/testName()`). Runs everything when unspecified. A nested suite is named by its whole type path, and a swift-testing function keeps its trailing `()`. Pair this with `target`: a name that matches nothing in one of the suites fails the run, and a suite name almost never exists in both."
+type = "string"
+
+[conversation.tools.swift_test.parameters.target]
+summary = "Which suites to run: `app` for the macOS app's unit tests, `drive` for the `jpdrive` accessibility driver package, or `all` for both. Defaults to `all`."
+type = "string"
