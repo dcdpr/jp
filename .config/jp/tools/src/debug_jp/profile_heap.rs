@@ -211,6 +211,6 @@ fn unix_seconds() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "profile_heap_tests.rs"]
 mod tests;

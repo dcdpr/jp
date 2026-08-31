@@ -40,6 +40,6 @@ pub(crate) fn with_termination_note(report: String, result: &launch::LaunchResul
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "util_tests.rs"]
 mod tests;

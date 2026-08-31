@@ -269,6 +269,6 @@ fn parse_line(line: &str) -> Option<LineKind> {
     }))
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "profile_sampling_parse_tests.rs"]
 mod tests;

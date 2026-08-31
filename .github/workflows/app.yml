@@ -133,13 +133,8 @@ jobs:
       - if: ${{ steps.task.outputs.run == 'true' && (matrix.task == 'test-app' || matrix.task == 'test-app-ui') }}
         uses: Swatinem/rust-cache@7e1e2d0a10862b34e5df481373b2b0f295d1a2ef # v2
         with:
-          # One key for both tasks, not one each. They build the same `jp_ffi`
-          # from the same lockfile, so separate entries would double the storage
-          # for identical artifacts and halve the chance either finds one.
           key: app
-          # `cbindgen` is the only installed binary here and the justfile pins
-          # its version, so a cached one cannot go stale unnoticed.
-          cache-bin: true
+          cache-bin: false
           cache-workspace-crates: true
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - if: ${{ steps.task.outputs.run == 'true' }}

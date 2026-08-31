@@ -308,6 +308,6 @@ pub(crate) fn missing(dir: &Utf8Path) -> Error {
     .into()
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "stream_tests.rs"]
 mod tests;

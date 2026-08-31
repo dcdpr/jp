@@ -322,6 +322,6 @@ fn format_duration(d: Duration) -> String {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "trace_render_tests.rs"]
 mod tests;

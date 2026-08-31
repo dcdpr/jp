@@ -562,6 +562,6 @@ pub(crate) fn swept_note(swept: &[String]) -> String {
     )
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "profile_tests.rs"]
 mod tests;

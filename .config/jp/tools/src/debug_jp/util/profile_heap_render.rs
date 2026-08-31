@@ -207,6 +207,6 @@ fn escape_pipes(s: &str) -> String {
     s.replace('|', "\\|")
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "profile_heap_render_tests.rs"]
 mod tests;

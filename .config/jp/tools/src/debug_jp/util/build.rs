@@ -81,6 +81,6 @@ pub(crate) fn build(
     Ok(binary)
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "build_tests.rs"]
 mod tests;
