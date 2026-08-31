@@ -28,6 +28,12 @@ Arguments:
 /// The app's bundle identifier, which is how macOS finds it without a path.
 const BUNDLE_ID: &str = "computer.jp.jean-pierre";
 
+/// The protocol version this plugin needs from the host.
+///
+/// It reads the workspace root out of `init` and launches an app, which the
+/// first version carries, so anything able to spawn it will do.
+const REQUIRED_PROTOCOL: u32 = 1;
+
 fn main() {
     if io::stdin().is_terminal() {
         let mut err = io::stderr().lock();
@@ -63,7 +69,11 @@ fn run(
     match read_message(&mut stdin)? {
         HostToPlugin::Describe => send_describe(&mut stdout),
         HostToPlugin::Init(init) => {
-            send(&mut stdout, &PluginToHost::Ready)?;
+            match jp_plugin::ready(REQUIRED_PROTOCOL, init.version) {
+                Ok(ready) => send(&mut stdout, &PluginToHost::Ready(ready))?,
+                Err(exit) => return send(&mut stdout, &PluginToHost::Exit(exit)),
+            }
+
             open(&init, &mut stdout, launcher)
         }
         other => Err(format!("expected init or describe, got: {other:?}")),

@@ -12,6 +12,23 @@ pub(crate) trait Launcher {
 /// Launches through macOS Launch Services.
 pub(crate) struct SystemLauncher;
 
+/// Why `target_os` cannot open the app, or `None` if it can.
+///
+/// The plugin builds and publishes for every target the release workflow
+/// covers, because the registry has no way to say a plugin is macOS-only.
+/// So a Linux or Windows user can install it, and what they get should name the
+/// reason rather than fail reaching for a `macos` binary that was never going
+/// to be there.
+pub(crate) fn unsupported_platform(target_os: &str) -> Option<String> {
+    if target_os == "macos" {
+        return None;
+    }
+
+    Some(format!(
+        "`jp gui` opens the JP macOS app, which does not run on {target_os}."
+    ))
+}
+
 impl Launcher for SystemLauncher {
     /// Hands the workspace over as `JP_WORKSPACE`, which is what the app reads
     /// when a window opens with no workspace of its own.
@@ -22,6 +39,10 @@ impl Launcher for SystemLauncher {
     /// on screen should bring that window forward rather than start a second
     /// copy of the app.
     fn launch(&self, bundle_id: &str, path: &str) -> Result<(), String> {
+        if let Some(reason) = unsupported_platform(std::env::consts::OS) {
+            return Err(reason);
+        }
+
         let status = Command::new("open")
             .arg("-b")
             .arg(bundle_id)

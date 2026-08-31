@@ -1,6 +1,6 @@
 use std::{cell::RefCell, io::Cursor};
 
-use jp_plugin::message::{PathsInfo, WorkspaceInfo};
+use jp_plugin::message::{PathsInfo, ReadyMessage, WorkspaceInfo};
 use pretty_assertions::assert_eq;
 
 use super::*;
@@ -79,7 +79,9 @@ fn opens_the_workspace_the_host_resolved() {
         "/tmp/my-workspace".to_owned()
     )]);
     assert_eq!(sent, vec![
-        PluginToHost::Ready,
+        PluginToHost::Ready(ReadyMessage {
+            protocol: REQUIRED_PROTOCOL
+        }),
         PluginToHost::Exit(ExitMessage {
             code: 0,
             reason: None
@@ -107,7 +109,9 @@ fn reports_a_failed_launch() {
     let sent = exchange(&init_message("/tmp/my-workspace", &[]), &launcher);
 
     assert_eq!(sent, vec![
-        PluginToHost::Ready,
+        PluginToHost::Ready(ReadyMessage {
+            protocol: REQUIRED_PROTOCOL
+        }),
         PluginToHost::Exit(ExitMessage {
             code: 1,
             reason: Some("the app is not installed".to_owned())
@@ -178,6 +182,23 @@ fn accepts_a_path_inside_the_workspace() {
     exchange(&init_message(root, &[&format!("{root}/src")]), &launcher);
 
     assert_eq!(launcher.launched.borrow().len(), 1);
+}
+
+/// Every target the release workflow builds gets a `jp-gui` binary, because the
+/// registry cannot express "macOS only".
+/// The one a Linux user runs should say so.
+#[test]
+fn names_the_platform_when_it_cannot_open_the_app() {
+    assert_eq!(launch::unsupported_platform("macos"), None);
+
+    assert_eq!(
+        launch::unsupported_platform("linux").as_deref(),
+        Some("`jp gui` opens the JP macOS app, which does not run on linux.")
+    );
+    assert_eq!(
+        launch::unsupported_platform("windows").as_deref(),
+        Some("`jp gui` opens the JP macOS app, which does not run on windows.")
+    );
 }
 
 #[test]
