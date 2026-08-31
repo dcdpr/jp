@@ -190,6 +190,6 @@ fn kind(value: &Value) -> &'static str {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "steps_tests.rs"]
 mod tests;

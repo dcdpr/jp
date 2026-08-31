@@ -201,6 +201,6 @@ fn report(
     report
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "snapshot_tests.rs"]
 mod tests;

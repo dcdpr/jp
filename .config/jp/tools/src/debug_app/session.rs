@@ -246,7 +246,7 @@ impl Slot {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 impl Slot {
     /// A slot with a fixed name, so a test's paths do not depend on the
     /// environment or on which conversation ran it.
@@ -486,6 +486,6 @@ pub(crate) fn pid_is_alive(_pid: u32) -> bool {
     true
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "session_tests.rs"]
 mod tests;

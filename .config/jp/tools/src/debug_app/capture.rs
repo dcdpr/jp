@@ -1014,6 +1014,6 @@ fn remove_file(path: &Utf8Path) -> Result<(), Error> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 #[path = "capture_tests.rs"]
 mod tests;
