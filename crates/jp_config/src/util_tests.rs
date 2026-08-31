@@ -613,6 +613,98 @@ fn test_load_partial_at_path_recursive() {
     }
 }
 
+/// The inverse of `find_file_in_load_path`: every segment it could resolve.
+///
+/// Nested directories are part of the segment, since that is what selects the
+/// file, and non-config files are not selectable at all.
+#[test]
+fn test_list_configs_in_load_path() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+
+    write_config(&root.join("default.toml"), "");
+    write_config(&root.join("skill/rfd.toml"), "");
+    write_config(&root.join("skill/web.yaml"), "");
+    write_config(&root.join("persona/deep/nested.json"), "");
+
+    // Neither is a configuration file, so neither is selectable.
+    fs::write(root.join("README.md"), "").unwrap();
+    fs::write(root.join("skill/notes.txt"), "").unwrap();
+
+    assert_eq!(list_configs_in_load_path(&root), vec![
+        "default".to_owned(),
+        "persona/deep/nested".to_owned(),
+        "skill/rfd".to_owned(),
+        "skill/web".to_owned(),
+    ]);
+}
+
+/// A load path that isn't there holds nothing, which is not an error: a
+/// workspace need not have every directory the load path names.
+#[test]
+fn test_list_configs_in_missing_load_path() {
+    let tmp = tempdir().unwrap();
+
+    assert!(list_configs_in_load_path(&tmp.path().join("absent")).is_empty());
+}
+
+/// Each listed segment resolves back to its own file, which is the contract
+/// that makes a listed segment usable as `--cfg`.
+///
+/// A dotted stem is the case a substituting lookup gets wrong: `review.v2` has
+/// to find `review.v2.toml` rather than the `review.toml` next to it, and
+/// `model/gpt-4.1` has to resolve at all.
+#[test]
+fn test_listed_segments_resolve_back_to_their_files() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+
+    write_config(&root.join("default.toml"), "");
+    write_config(&root.join("skill/rfd.toml"), "");
+    write_config(&root.join("review.toml"), "");
+    write_config(&root.join("review.v2.toml"), "");
+    write_config(&root.join("model/gpt-4.1.toml"), "");
+
+    let want = [
+        ("default", "default.toml"),
+        ("model/gpt-4.1", "model/gpt-4.1.toml"),
+        ("review", "review.toml"),
+        ("review.v2", "review.v2.toml"),
+        ("skill/rfd", "skill/rfd.toml"),
+    ];
+
+    assert_eq!(
+        list_configs_in_load_path(&root),
+        want.iter()
+            .map(|(s, _)| (*s).to_owned())
+            .collect::<Vec<_>>()
+    );
+
+    for (segment, file) in want {
+        assert_eq!(
+            find_file_in_load_path(&segment, &root),
+            Some(root.join(file).into_std_path_buf()),
+            "`{segment}` did not resolve to `{file}`"
+        );
+    }
+}
+
+/// A name carrying an extension that matches no file still finds a same-named
+/// configuration, which is how `--cfg persona/dev.yaml` has always found
+/// `persona/dev.toml`.
+#[test]
+fn test_find_file_in_load_path_substitutes_an_unmatched_extension() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+
+    write_config(&root.join("persona/dev.toml"), "");
+
+    assert_eq!(
+        find_file_in_load_path(&"persona/dev.yaml", &root),
+        Some(root.join("persona/dev.toml").into_std_path_buf())
+    );
+}
+
 #[test]
 fn test_load_partial_at_path_self_extending_cycle() {
     let tmp = tempdir().unwrap();

@@ -13,7 +13,8 @@ use crate::message::{ExitMessage, ReadyMessage};
 /// | 2       | `compose` / `composed`, for host-run prompts.                   |
 /// | 3       | `archive_conversation` and `set_title`, answered with `done`.   |
 /// | 4       | `read_draft` / `write_draft`, for a conversation's query draft. |
-pub const PROTOCOL_VERSION: u32 = 4;
+/// | 5       | `list_configs`, naming the configurations a query can select.   |
+pub const PROTOCOL_VERSION: u32 = 5;
 
 /// Answer a host's `init`, refusing it when it is too old to serve this plugin.
 ///

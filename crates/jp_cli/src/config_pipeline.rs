@@ -276,6 +276,42 @@ impl ConfigPipeline {
     }
 }
 
+/// The roots a `--cfg <name>` lookup searches, in precedence order (lowest
+/// first):
+///
+/// 1. User-global: `$XDG_CONFIG_HOME/jp/config/`
+/// 2. Workspace: `<workspace_root>/`
+/// 3. User-workspace: `$XDG_DATA_HOME/jp/workspace/<name>-<id>/config/`
+///
+/// Every `config_load_paths` entry is resolved against each of these ([RFD
+/// 035]), so anything reporting on the search space has to produce the same
+/// three paths as the lookup itself.
+///
+/// The home directory is read here rather than taken by parameter: it exists
+/// only to expand a `~` in `JP_GLOBAL_CONFIG_DIR`, and a caller passing `None`
+/// loses that override without saying so.
+///
+/// [RFD 035]: https://jp.computer/rfd/035
+pub(crate) fn config_search_roots(
+    workspace: Option<&Workspace>,
+    fs: Option<&FsStorageBackend>,
+) -> Vec<Utf8PathBuf> {
+    let home = std::env::home_dir().and_then(|p| Utf8PathBuf::from_path_buf(p).ok());
+    let mut roots = Vec::new();
+
+    if let Some(global_dir) = user_global_config_dir(home.as_deref()) {
+        roots.push(global_dir.join("config"));
+    }
+    if let Some(workspace) = workspace {
+        roots.push(workspace.root().to_owned());
+    }
+    if let Some(path) = fs.and_then(|f| f.user_storage_with_path(RelativePath::new("config"))) {
+        roots.push(path);
+    }
+
+    roots
+}
+
 /// Resolve `--cfg` arguments into their in-memory representations.
 ///
 /// File paths are searched and loaded from disk here, exactly once.
@@ -286,7 +322,6 @@ fn resolve_cfg_args(
     workspace: Option<&Workspace>,
     fs: Option<&FsStorageBackend>,
 ) -> Result<Vec<ResolvedCfgArg>> {
-    let home = std::env::home_dir().and_then(|p| Utf8PathBuf::from_path_buf(p).ok());
     let mut resolved = Vec::with_capacity(overrides.len());
 
     // A `NONE` keyword positionally discards everything before it, so the
@@ -317,24 +352,7 @@ fn resolve_cfg_args(
                 }
             }
             KeyValueOrPath::Path(path) => {
-                // Build search roots in precedence order (lowest first).
-                //
-                // 1. User-global:    $XDG_CONFIG_HOME/jp/config/
-                // 2. Workspace:      <workspace_root>/
-                // 3. User-workspace: $XDG_DATA_HOME/jp/workspace/<name>-<id>/config/
-                let mut roots: Vec<Utf8PathBuf> = Vec::new();
-
-                if let Some(global_dir) = user_global_config_dir(home.as_deref()) {
-                    roots.push(global_dir.join("config"));
-                }
-                if let Some(w) = workspace {
-                    roots.push(w.root().to_owned());
-                }
-                if let Some(path) =
-                    fs.and_then(|f| f.user_storage_with_path(RelativePath::new("config")))
-                {
-                    roots.push(path);
-                }
+                let roots = config_search_roots(workspace, fs);
 
                 let mut matches: Vec<CfgEntry> = Vec::new();
                 let mut searched: Vec<Utf8PathBuf> = Vec::new();

@@ -21,6 +21,7 @@ use serial_test::serial;
 use test_log::test;
 
 use super::*;
+use crate::env_testing::EnvVarGuard;
 
 #[test]
 fn a_piped_successful_run_never_announces_its_trace_log() {
@@ -289,7 +290,7 @@ fn test_load_cli_cfg_args_user_global_root() {
     let tmp = tempdir().unwrap();
     let global_dir = tmp.path().join("global");
 
-    unsafe { std::env::set_var("JP_GLOBAL_CONFIG_DIR", global_dir.as_str()) };
+    let _global = EnvVarGuard::set("JP_GLOBAL_CONFIG_DIR", global_dir.as_str());
 
     write_config(
         &global_dir.join("config/.jp/config/skill/web.toml"),
@@ -301,8 +302,6 @@ fn test_load_cli_cfg_args_user_global_root() {
 
     let result = build_cfg(partial, &overrides, None).unwrap();
     assert_eq!(result.assistant.name.as_deref(), Some("from-global"));
-
-    unsafe { std::env::remove_var("JP_GLOBAL_CONFIG_DIR") };
 }
 
 #[test]
@@ -312,7 +311,7 @@ fn test_load_cli_cfg_args_merges_global_and_workspace() {
     let global_dir = tmp.path().join("global");
     let ws_root = tmp.path().join("workspace");
 
-    unsafe { std::env::set_var("JP_GLOBAL_CONFIG_DIR", global_dir.as_str()) };
+    let _global = EnvVarGuard::set("JP_GLOBAL_CONFIG_DIR", global_dir.as_str());
 
     let workspace = Workspace::in_memory(&ws_root);
 
@@ -335,8 +334,6 @@ fn test_load_cli_cfg_args_merges_global_and_workspace() {
         result.providers.llm.openrouter.api_key_env.as_deref(),
         Some("FROM_WS")
     );
-
-    unsafe { std::env::remove_var("JP_GLOBAL_CONFIG_DIR") };
 }
 
 #[test]
@@ -346,7 +343,7 @@ fn test_load_cli_cfg_args_workspace_overrides_global() {
     let global_dir = tmp.path().join("global");
     let ws_root = tmp.path().join("workspace");
 
-    unsafe { std::env::set_var("JP_GLOBAL_CONFIG_DIR", global_dir.as_str()) };
+    let _global = EnvVarGuard::set("JP_GLOBAL_CONFIG_DIR", global_dir.as_str());
 
     let workspace = Workspace::in_memory(&ws_root);
 
@@ -364,8 +361,6 @@ fn test_load_cli_cfg_args_workspace_overrides_global() {
 
     let result = build_cfg(partial, &overrides, Some(&workspace)).unwrap();
     assert_eq!(result.assistant.name.as_deref(), Some("from-workspace"));
-
-    unsafe { std::env::remove_var("JP_GLOBAL_CONFIG_FILE") };
 }
 
 #[test]
@@ -511,7 +506,7 @@ fn test_load_cli_cfg_args_global_only_when_workspace_has_no_match() {
     let global_dir = tmp.path().join("global");
     let ws_root = tmp.path().join("workspace");
 
-    unsafe { std::env::set_var("JP_GLOBAL_CONFIG_DIR", global_dir.as_str()) };
+    let _global = EnvVarGuard::set("JP_GLOBAL_CONFIG_DIR", global_dir.as_str());
 
     let workspace = Workspace::in_memory(&ws_root);
 
@@ -525,8 +520,6 @@ fn test_load_cli_cfg_args_global_only_when_workspace_has_no_match() {
 
     let result = build_cfg(partial, &overrides, Some(&workspace)).unwrap();
     assert_eq!(result.assistant.name.as_deref(), Some("from-global"));
-
-    unsafe { std::env::remove_var("JP_GLOBAL_CONFIG_FILE") };
 }
 
 #[test]
@@ -538,16 +531,14 @@ fn query_model_override_persists_config_delta_through_run_inner() {
     let global_dir = root.join("global");
     let user_data = root.join("user_data");
     let previous_cwd = env::current_dir().unwrap();
-    let previous_jp_editor = env::var("JP_EDITOR").ok();
-    let previous_visual = env::var("VISUAL").ok();
-    let previous_editor = env::var("EDITOR").ok();
 
-    unsafe { env::set_var("JP_GLOBAL_CONFIG_DIR", global_dir.as_str()) };
-    unsafe { env::set_var("JP_USER_DATA_DIR", user_data.as_str()) };
-    unsafe { env::set_var("JP_TEST_DUMMY_OPENAI_API_KEY", "dummy") };
-    unsafe { env::remove_var("JP_EDITOR") };
-    unsafe { env::remove_var("VISUAL") };
-    unsafe { env::remove_var("EDITOR") };
+    let _global = EnvVarGuard::set("JP_GLOBAL_CONFIG_DIR", global_dir.as_str());
+    let _user_data = EnvVarGuard::set("JP_USER_DATA_DIR", user_data.as_str());
+    let _api_key = EnvVarGuard::set("JP_TEST_DUMMY_OPENAI_API_KEY", "dummy");
+    let _jp_editor = EnvVarGuard::remove("JP_EDITOR");
+    let _visual = EnvVarGuard::remove("VISUAL");
+    let _editor = EnvVarGuard::remove("EDITOR");
+
     env::set_current_dir(root).unwrap();
 
     let fs_backend = Arc::new(FsStorageBackend::new(&storage).unwrap());
@@ -624,22 +615,6 @@ fn query_model_override_persists_config_delta_through_run_inner() {
     );
 
     env::set_current_dir(previous_cwd).unwrap();
-    unsafe { env::remove_var("JP_GLOBAL_CONFIG_DIR") };
-    unsafe { env::remove_var("JP_USER_DATA_DIR") };
-    unsafe { env::remove_var("JP_TEST_DUMMY_OPENAI_API_KEY") };
-
-    match previous_jp_editor {
-        Some(value) => unsafe { env::set_var("JP_EDITOR", value) },
-        None => unsafe { env::remove_var("JP_EDITOR") },
-    }
-    match previous_visual {
-        Some(value) => unsafe { env::set_var("VISUAL", value) },
-        None => unsafe { env::remove_var("VISUAL") },
-    }
-    match previous_editor {
-        Some(value) => unsafe { env::set_var("EDITOR", value) },
-        None => unsafe { env::remove_var("EDITOR") },
-    }
 }
 
 #[test]
@@ -651,18 +626,15 @@ fn query_model_override_persists_config_delta_through_session_targeting() {
     let global_dir = root.join("global");
     let user_data = root.join("user_data");
     let previous_cwd = env::current_dir().unwrap();
-    let previous_jp_session = env::var("JP_SESSION").ok();
-    let previous_jp_editor = env::var("JP_EDITOR").ok();
-    let previous_visual = env::var("VISUAL").ok();
-    let previous_editor = env::var("EDITOR").ok();
 
-    unsafe { env::set_var("JP_GLOBAL_CONFIG_DIR", global_dir.as_str()) };
-    unsafe { env::set_var("JP_USER_DATA_DIR", user_data.as_str()) };
-    unsafe { env::set_var("JP_SESSION", "jp-cli-test-session") };
-    unsafe { env::set_var("JP_TEST_DUMMY_OPENAI_API_KEY", "dummy") };
-    unsafe { env::remove_var("JP_EDITOR") };
-    unsafe { env::remove_var("VISUAL") };
-    unsafe { env::remove_var("EDITOR") };
+    let _global = EnvVarGuard::set("JP_GLOBAL_CONFIG_DIR", global_dir.as_str());
+    let _user_data = EnvVarGuard::set("JP_USER_DATA_DIR", user_data.as_str());
+    let _session = EnvVarGuard::set("JP_SESSION", "jp-cli-test-session");
+    let _api_key = EnvVarGuard::set("JP_TEST_DUMMY_OPENAI_API_KEY", "dummy");
+    let _jp_editor = EnvVarGuard::remove("JP_EDITOR");
+    let _visual = EnvVarGuard::remove("VISUAL");
+    let _editor = EnvVarGuard::remove("EDITOR");
+
     env::set_current_dir(root).unwrap();
 
     let mut workspace = Workspace::in_memory(root);
@@ -749,26 +721,6 @@ fn query_model_override_persists_config_delta_through_session_targeting() {
     );
 
     env::set_current_dir(previous_cwd).unwrap();
-    unsafe { env::remove_var("JP_GLOBAL_CONFIG_DIR") };
-    unsafe { env::remove_var("JP_USER_DATA_DIR") };
-    unsafe { env::remove_var("JP_TEST_DUMMY_OPENAI_API_KEY") };
-
-    match previous_jp_session {
-        Some(value) => unsafe { env::set_var("JP_SESSION", value) },
-        None => unsafe { env::remove_var("JP_SESSION") },
-    }
-    match previous_jp_editor {
-        Some(value) => unsafe { env::set_var("JP_EDITOR", value) },
-        None => unsafe { env::remove_var("JP_EDITOR") },
-    }
-    match previous_visual {
-        Some(value) => unsafe { env::set_var("VISUAL", value) },
-        None => unsafe { env::remove_var("VISUAL") },
-    }
-    match previous_editor {
-        Some(value) => unsafe { env::set_var("EDITOR", value) },
-        None => unsafe { env::remove_var("EDITOR") },
-    }
 }
 
 /// Verify that `resolve_config` consumes `default_id` so it doesn't leak into

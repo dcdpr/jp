@@ -14,12 +14,9 @@ use schematic::{ConfigLoader, MergeError, MergeResult, PartialConfig};
 use tracing::{debug, error, info, trace, warn};
 
 use crate::{
-    AppConfig, BoxedError, PartialAppConfig, error::Error, loader::PartialLoaderConfig,
-    types::extending_path::ExtendingRelativePath,
+    AppConfig, BoxedError, PartialAppConfig, error::Error, fs::CONFIG_FILE_EXTENSIONS,
+    loader::PartialLoaderConfig, types::extending_path::ExtendingRelativePath,
 };
-
-/// Valid file extensions for configuration files.
-const VALID_CONFIG_FILE_EXTS: &[&str] = &["toml", "json", "json5", "yaml", "yml"];
 
 /// Maximum `extends` recursion depth.
 ///
@@ -128,39 +125,158 @@ pub fn find_file_in_load_path(
     load_path: &dyn AsRef<Path>,
 ) -> Option<PathBuf> {
     let segment = segment.as_ref();
-    let load_path = load_path.as_ref();
 
     // Segment has to be relative to a load path.
     if segment.has_root() {
         return None;
     }
 
-    let path = load_path.join(segment);
+    let path = resolve_config_file(&load_path.as_ref().join(segment))?;
+    info!(path = %path.display(), "Found configuration file in load path.");
+    Some(path)
+}
 
-    // If the segment matches a file, return the path as-is.
-    if path.is_file() {
-        return Some(path);
+/// Resolve `base` to a configuration file on disk.
+///
+/// Three passes, in order: `base` as given, then each supported extension
+/// appended to it, then each substituted for the extension `base` already
+/// carries.
+///
+/// Appending before substituting is what lets a dotted name find itself.
+/// `review.v2` names `review.v2.toml`, and substituting first hands back the
+/// `review.toml` sitting next to it, a different file.
+/// Substitution still runs last, so a name written with an extension that
+/// matches no file (`persona/dev.yaml` where only `persona/dev.toml` exists)
+/// keeps resolving.
+fn resolve_config_file(base: &Path) -> Option<PathBuf> {
+    if base.is_file() {
+        return Some(base.to_path_buf());
     }
 
-    // Try and find the file in the load path, trying all valid extensions.
-    for ext in VALID_CONFIG_FILE_EXTS {
-        let path = path.with_extension(ext);
-        if !path.is_file() {
-            continue;
-        }
+    for ext in CONFIG_FILE_EXTENSIONS {
+        let mut candidate = base.as_os_str().to_os_string();
+        candidate.push(".");
+        candidate.push(ext);
 
-        info!(path = %path.display(), "Found configuration file in load path.");
-        return Some(path);
+        let candidate = PathBuf::from(candidate);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+
+    // Nothing to substitute into: with no extension on `base`, the pass below
+    // would repeat the one above.
+    base.extension()?;
+
+    for ext in CONFIG_FILE_EXTENSIONS {
+        let candidate = base.with_extension(ext);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
     }
 
     None
 }
 
+/// List every segment [`find_file_in_load_path`] can resolve within a load
+/// path.
+///
+/// The inverse of that lookup: instead of asking where one name lives, this
+/// walks the load path and reports every configuration file as the segment that
+/// selects it, the path relative to `load_path` without its extension.
+/// Directories are part of that segment, so `<load_path>/skill/rfd.toml` is
+/// reported as `skill/rfd`, and passing that back to `--cfg` finds the same
+/// file.
+///
+/// Segments are sorted, and a load path that does not exist yields nothing
+/// rather than an error: an absent directory is a load path with nothing in it.
+pub fn list_configs_in_load_path(load_path: &dyn AsRef<Path>) -> Vec<String> {
+    let root = load_path.as_ref();
+    let mut segments = Vec::new();
+
+    collect_config_segments(root, root, &mut segments);
+    segments.sort();
+    segments.dedup();
+    segments
+}
+
+/// Recurse `dir`, pushing each configuration file's segment relative to `root`.
+///
+/// A directory that cannot be read is skipped with a warning rather than
+/// failing the walk: one unreadable load path should not cost the caller the
+/// listings of the others.
+fn collect_config_segments(root: &Path, dir: &Path, out: &mut Vec<String>) {
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(error) => {
+            warn!(
+                dir = %dir.display(),
+                error = %error,
+                "Could not list a configuration load path; skipping it."
+            );
+            return;
+        }
+    };
+
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                warn!(
+                    dir = %dir.display(),
+                    error = %error,
+                    "Could not read a configuration load path entry; skipping it."
+                );
+                continue;
+            }
+        };
+
+        let path = entry.path();
+
+        if path.is_dir() {
+            collect_config_segments(root, &path, out);
+            continue;
+        }
+
+        let is_config = path
+            .extension()
+            .and_then(OsStr::to_str)
+            .is_some_and(|ext| CONFIG_FILE_EXTENSIONS.contains(&ext));
+
+        if !is_config {
+            continue;
+        }
+
+        let Ok(relative) = path.strip_prefix(root) else {
+            continue;
+        };
+
+        if let Some(segment) = config_segment(&relative.with_extension("")) {
+            out.push(segment);
+        }
+    }
+}
+
+/// Join `relative`'s components with `/`, the separator a segment uses on every
+/// platform.
+///
+/// Joining components rather than rewriting separators leaves a `\` that
+/// belongs to a Unix file name intact.
+/// `None` if any component is not valid UTF-8: a name that does not survive the
+/// round trip could not have been typed as a `--cfg` argument either, so
+/// dropping it loses nothing selectable.
+fn config_segment(relative: &Path) -> Option<String> {
+    relative
+        .components()
+        .map(|component| component.as_os_str().to_str())
+        .collect::<Option<Vec<_>>>()
+        .map(|parts| parts.join("/"))
+}
+
 /// Load a partial configuration from a file at `path`, if it exists.
 ///
-/// This loads either the file directly, or tries to load a file with the same
-/// name, but the extension replaced with one of the valid
-/// `VALID_CONFIG_FILE_EXTS`.
+/// This loads either the file directly, or tries the same name with each
+/// supported extension appended, then substituted.
 ///
 /// # Errors
 ///
@@ -357,8 +473,8 @@ struct ExtendsEntry {
 /// A file reached through several branches appears once per branch; use
 /// [`dedup_keep_last`] to reduce the result to one entry per file.
 ///
-/// If the file does not exist, the same file name is retried with each of the
-/// valid `VALID_CONFIG_FILE_EXTS` extensions.
+/// If the file does not exist, the same name is retried with each supported
+/// extension appended, then substituted.
 ///
 /// # Errors
 ///
@@ -373,18 +489,15 @@ fn resolve_extends_graph<P: Into<PathBuf>>(
     stack: &mut ExtendsStack,
     entries: &mut Vec<ExtendsEntry>,
 ) -> Result<(), Error> {
-    let mut path: PathBuf = path.into();
+    let path: PathBuf = path.into();
 
     trace!(path = %path.display(), "Trying to open configuration file.");
-    let found = path.is_file()
-        || VALID_CONFIG_FILE_EXTS.iter().any(|ext| {
-            path.set_extension(ext);
-            path.is_file()
-        });
 
-    if !found {
+    // The error carries the name as written, not the last candidate tried: the
+    // latter is an extension the caller never asked for.
+    let Some(path) = resolve_config_file(&path) else {
         return Err(Error::Schematic(schematic::ConfigError::MissingFile(path)));
-    }
+    };
 
     info!(path = %path.display(), "Found configuration file.");
 

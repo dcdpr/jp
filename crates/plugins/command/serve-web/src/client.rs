@@ -243,7 +243,10 @@ fn reader_loop(reader: impl BufRead, inner: &Inner, shutdown_tx: &watch::Sender<
 
             // This plugin only reads, so neither of these answers a request it
             // sent: they belong to something that isn't ours.
-            HostToPlugin::Composed(_) | HostToPlugin::Done(_) | HostToPlugin::Draft(_) => {
+            HostToPlugin::Composed(_)
+            | HostToPlugin::Done(_)
+            | HostToPlugin::Draft(_)
+            | HostToPlugin::Configs(_) => {
                 warn!(?msg, "Received a response to a request we never sent");
             }
 

@@ -4,6 +4,8 @@ mod cmd;
 mod config_pipeline;
 mod ctx;
 mod editor;
+#[cfg(test)]
+mod env_testing;
 mod error;
 mod format;
 mod output;
