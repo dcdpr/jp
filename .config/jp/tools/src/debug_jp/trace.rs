@@ -26,11 +26,15 @@ use crate::{
         build::{self, BuildSpec},
         launch::{LaunchResult, LaunchSpec, Launcher, RealLauncher, Timeouts},
         sandbox::{Sandbox, SandboxOpts},
-        trace_parse::{self, Level, TRACE_PATH_PREFIX, TraceEvent},
+        shorten_paths,
         trace_render::{self, CommandRun, OutputPaths},
         with_termination_note,
     },
-    util::{ToolResult, error, runner::DuctProcessRunner},
+    util::{
+        ToolResult, error,
+        runner::DuctProcessRunner,
+        trace::{self, Level, TRACE_PATH_PREFIX, TraceEvent},
+    },
 };
 
 /// Tool entrypoint.
@@ -259,21 +263,19 @@ fn execute(
         "",
     )?;
 
-    let trace_display = crate::debug_jp::util::relative_to(workspace_root, &art.trace_dst);
-    let stdout_display = crate::debug_jp::util::relative_to(workspace_root, &art.stdout_dst);
-    let stderr_display = crate::debug_jp::util::relative_to(workspace_root, &art.stderr_dst);
     let report = trace_render::render(
         &art.events,
         art.total,
         &art.launch,
         &spec.args,
         OutputPaths {
-            trace: &trace_display,
-            stdout: &stdout_display,
-            stderr: &stderr_display,
+            trace: art.trace_dst.as_str(),
+            stdout: art.stdout_dst.as_str(),
+            stderr: art.stderr_dst.as_str(),
         },
     );
     let report = with_termination_note(report, &art.launch);
+    let report = shorten_paths(&report, workspace_root);
     fs::write(out_dir.join(format!("report-trace-{ts}.md")), &report)?;
     Ok(Outcome::Success { content: report })
 }
@@ -326,9 +328,9 @@ fn execute_sequence(
         .iter()
         .map(|a| {
             (
-                crate::debug_jp::util::relative_to(workspace_root, &a.trace_dst),
-                crate::debug_jp::util::relative_to(workspace_root, &a.stdout_dst),
-                crate::debug_jp::util::relative_to(workspace_root, &a.stderr_dst),
+                a.trace_dst.to_string(),
+                a.stdout_dst.to_string(),
+                a.stderr_dst.to_string(),
             )
         })
         .collect();
@@ -350,7 +352,7 @@ fn execute_sequence(
         })
         .collect();
 
-    let report = trace_render::render_multi(&runs);
+    let report = shorten_paths(&trace_render::render_multi(&runs), workspace_root);
     fs::write(out_dir.join(format!("report-trace-{ts}.md")), &report)?;
     Ok(Outcome::Success { content: report })
 }
@@ -412,7 +414,7 @@ fn run_one(
     // marker line or a `trace_log` JSON field, depending on `--format` — and
     // copy it out of the system temp dir into the real workspace.
     if !trace_dst.exists() {
-        let Some(trace_path) = trace_parse::extract_trace_path(&launch_result.stderr) else {
+        let Some(trace_path) = trace::extract_trace_path(&launch_result.stderr) else {
             let note = launch_result
                 .note()
                 .map(|n| format!("{n}\n\n"))
@@ -438,7 +440,7 @@ fn run_one(
 
     let raw = fs::read_to_string(&trace_dst)
         .map_err(|e| format!("Failed to read trace log at {trace_dst}: {e}"))?;
-    let all_events = trace_parse::parse_lines(&raw);
+    let all_events = trace::parse_lines(&raw);
     let total = all_events.len();
     let events = filter_events(all_events, level, target_filter, grep);
 

@@ -1,0 +1,272 @@
+[conversation.tools.debug_app_profile]
+enable = false
+format = "unattended"
+run = "ask"
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "Open and close an Instruments recording around an operation in the running macOS app, and read back what a session recorded. Start it, drive the operation, stop it for a symbolicated time profile; report to ask what the app cost per driven step. macOS only."
+
+description = """
+Three modes over one subject: `start` and `stop` record, `report` reads back.
+
+## Recording is a bracket
+
+Not something a session carries from launch to quit. Drive the app into the \
+state you want, open a bracket, drive the one operation in question, close it, \
+read the summary. A session can hold several in sequence, so the same operation \
+can be measured warm and cold without relaunching.
+
+Keep the bracket tight. A bracket held open across a mostly-idle app produces a \
+report dominated by system idle frames, which is the failure this shape exists \
+to avoid.
+
+**When you open it decides what it can see, and how long closing it takes.**
+
+With `debug_app_launch` already run, the recorder attaches to that one process. \
+The trace holds it alone and closing the bracket takes a second or two. This is \
+what you want almost always.
+
+With no app running, there is nothing to attach to, so the recorder takes every \
+process on the machine. That is the only way to cover the app's own startup — \
+open the bracket, then `debug_app_launch` into it — but closing it takes \
+**minutes**, because every process's samples are exported before the app's can \
+be sifted out of them. Only do this when the question is specifically about \
+launch, and note that allocations cannot be recorded this way.
+
+Scope also decides what survives. An attach bundle holds this app's environment \
+alone, so it is kept and `mode: "report"` can ask it further questions. A \
+system-wide bundle holds every process's, so it is destroyed as soon as it is \
+read and only the summary survives. Whatever is kept is bounded by an age window \
+and a byte budget, oldest evicted first.
+
+Symbols come from the app's own dSYM and the slide it reports for itself, so \
+frames in the app's code are named and located. Frames in the dyld shared cache \
+are not, and the summary counts them rather than listing addresses.
+
+## Reporting reads back
+
+`mode: "report"` changes nothing and can be called repeatedly at different \
+scopes. It needs no running app and no session: reading a run after \
+`debug_app_quit` works from what the slot kept.
+
+**Counts lead, times support.** View-body evaluations and FFI call counts are \
+deterministic for the same steps, so two runs can be compared on them and a fix \
+can be asserted against them. Wall clock cannot — it is noisy within a run and \
+not comparable between two — so a report leads on the count and carries the \
+duration beside it. Diff two profiles on milliseconds and you are chasing \
+ghosts.
+
+Three views come from the app's own intervals, which every run writes and which \
+are readable while the app is still going:
+
+- `timeline` (the default) — per-driven-step counts. Needs a `debug_app_drive` \
+  run, which is the only thing that records when a step ran.
+- `spans` — every interval the app timed, by how often it ran.
+- `views` — the view bodies alone.
+
+Three come from a finalized `.trace`, so they answer for closed recordings only:
+
+- `hotspots` — the busiest program counters, named and located.
+- `callgraph` — top functions, or the callees of one named with `function`.
+- `allocations` — the footprint the app measured for itself over the recording. \
+  Not per call site: the Allocations instrument writes to the trace event store \
+  rather than to a table and `xctrace export` surfaces none of it, so the stacks \
+  are reachable only by opening the bundle in Instruments. The footprint needs no \
+  instrument at all and every run has it.
+
+Every report names the calls that answer the next question, so start with the \
+default view and follow what it suggests.
+"""
+
+examples = """
+What the selections you just drove cost the app, per step:
+```json
+{"mode": "report"}
+```
+
+Which view bodies ran under one of those steps, and how often:
+```json
+{"mode": "report", "view": "views", "step": 5}
+```
+
+Profile one operation against a running app:
+```json
+{"mode": "start"}
+```
+then drive the operation, then:
+```json
+{"mode": "stop"}
+```
+
+Name the code responsible, once that bracket is closed:
+```json
+{"mode": "report", "view": "hotspots", "function": "deserialize"}
+```
+
+Check whether a fix moved the counts, against an earlier recording:
+```json
+{"mode": "report", "recording": "profile-1785748475000", "against": "profile-1785740000000"}
+```
+
+Cover the app's own startup, accepting a slow close. Open this before
+`debug_app_launch`:
+```json
+{"mode": "start"}
+```
+
+Add allocation attribution. Needs an app launched with
+`allocation_stacks: true`, and cannot be combined with the no-app scope:
+```json
+{"mode": "start", "capture": ["allocations"]}
+```
+
+Throw a botched bracket away without paying to read it:
+```json
+{"mode": "stop", "discard": true}
+```
+"""
+
+[conversation.tools.debug_app_profile.style]
+parameters = "just serve-tools {{context}} {{tool}}"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.debug_app_profile.parameters.mode]
+type = "string"
+enum = ["start", "stop", "report"]
+required = true
+summary = "`start` opens a recording, `stop` closes it and returns the summary, `report` reads back what this session recorded."
+description = """
+`report` is read-only and idempotent: it captures nothing, destroys nothing, and \
+leaves the offsets `debug_app_snapshot` uses to report deltas alone. Call it as \
+often as you like at different scopes. It also works with no app running and \
+after `debug_app_quit`.
+
+Every other parameter belongs to exactly one mode, and asking for one in the \
+wrong mode is refused rather than ignored.
+"""
+
+[conversation.tools.debug_app_profile.parameters.capture]
+type = "array"
+items.type = "string"
+summary = "Extra instruments to record, on top of the time profile every recording holds. The only value is `allocations`. Applies to `mode: \"start\"`."
+description = """
+Sampling is not expressible here, because it is not optional: every recording \
+holds a time profile, so there is nothing to switch on.
+
+`allocations` adds the Allocations instrument, and it works in exactly one \
+situation: an app launched with `allocation_stacks: true`, with the bracket \
+attached to it. Two constraints leave no other option. The instrument refuses \
+a target of all processes, so it cannot be used in the no-app scope; and it \
+reads what libmalloc recorded, which only happens if the app was started with \
+`MallocStackLogging`. Both other combinations are refused rather than \
+recording an instrument that would find nothing.
+
+**What it produces is a bundle for a human to open, not data a report can \
+read.** `xctrace export` surfaces none of the Allocations instrument's output \
+— Apple's position is that Leaks and Allocations are built on a different \
+recording technology — so `mode: "report"` can point you at the retained \
+bundle and no further.
+
+It also costs 2x to 10x and not evenly: allocation-heavy paths slow \
+disproportionately, so every timing in the bracket becomes comparable only \
+with another allocations recording.
+
+So ask for it only when you intend to open Instruments yourself. For a memory \
+number an agent can act on, skip this entirely and use `mode: "report"` with \
+`view: "allocations"`, which reports the footprint the app samples on every \
+run.
+"""
+
+[conversation.tools.debug_app_profile.parameters.discard]
+type = "boolean"
+summary = "Throw the recording away unread instead of summarizing it. Defaults to false. Applies to `mode: \"stop\"`."
+description = """
+For a bracket that went wrong — the wrong operation, or one that never ran. \
+Reading a system-wide recording costs minutes, and there is no reason to pay \
+that for a trace nobody wants.
+"""
+
+[conversation.tools.debug_app_profile.parameters.view]
+type = "string"
+enum = ["timeline", "spans", "views", "hotspots", "callgraph", "allocations"]
+summary = "Which question the report answers. Defaults to `timeline`. Applies to `mode: \"report\"`."
+description = """
+`timeline`, `spans` and `views` read the app's own intervals, which every run \
+writes and which are readable while a bracket is still recording. `hotspots`, \
+`callgraph` and `allocations` read a finalized `.trace`, so they answer for \
+closed recordings only; asked of an open bracket they say so rather than showing \
+an empty table.
+
+Start with `timeline`. It attributes counts to the driven step that caused them, \
+which is the only view that says *which action* is expensive rather than which \
+code.
+"""
+
+[conversation.tools.debug_app_profile.parameters.recording]
+type = "string"
+summary = "Scope the report to one recording, named by its id or a unique suffix of one. Applies to `mode: \"report\"`."
+description = """
+For a stream-backed view this narrows the window to the bracket. For a \
+bundle-backed view it picks which bundle to read, and can be omitted when the \
+slot holds exactly one readable recording.
+
+A suffix is enough, because a report abbreviates ids and the abbreviation is \
+what gets pasted back. An ambiguous one is refused with the candidates.
+"""
+
+[conversation.tools.debug_app_profile.parameters.against]
+type = "string"
+summary = "Render the view as deltas against an earlier recording, named the same way as `recording`. Applies to `mode: \"report\"`."
+description = """
+This is the reason counts lead. Comparing two runs on view-body and FFI counts is \
+meaningful — the same steps produce the same counts, so a change is a change in \
+the code. Comparing them on milliseconds is not, so wall clock is left out of the \
+comparison entirely and the bundle-backed views refuse it: their numbers are \
+sample counts, which are time.
+
+The earlier run's intervals survive because a launch archives the previous \
+stream rather than truncating it.
+"""
+
+[conversation.tools.debug_app_profile.parameters.step]
+type = "integer"
+summary = "Scope to one driven step, by its position in the run counting from one. Applies to `mode: \"report\"` with a stream-backed view."
+description = """
+Step numbers come from `debug_app_drive`, which is the only thing that records \
+when a step ran. Without a driven run there is nothing to scope to, and a report \
+says so.
+
+A number that names nothing lists the steps there are.
+"""
+
+[conversation.tools.debug_app_profile.parameters.since]
+type = "string"
+summary = "Start of the window: a duration back from now (`30s`, `5m`, `2h`) or an RFC 3339 timestamp. Applies to `mode: \"report\"` with a stream-backed view."
+
+[conversation.tools.debug_app_profile.parameters.until]
+type = "string"
+summary = "End of the window, in the same two forms as `since`. Applies to `mode: \"report\"` with a stream-backed view."
+
+[conversation.tools.debug_app_profile.parameters.span]
+type = "string"
+summary = "Keep only intervals whose name holds this. Applies to `mode: \"report\"` with a stream-backed view."
+description = """
+Matched as a substring of the name the app gave the work — `transcript.render`, \
+`ConversationHistoryView.body`, `deserialize`. Use `function` instead to narrow a \
+bundle-backed view to a symbol.
+"""
+
+[conversation.tools.debug_app_profile.parameters.function]
+type = "string"
+summary = "Narrow to one symbol in the app's binary. Applies to `mode: \"report\"` with `view: \"hotspots\"` or `view: \"callgraph\"`."
+description = """
+In `hotspots` this keeps only frames whose resolved name holds it. In `callgraph` \
+it switches the view from top functions to what that function was calling at the \
+moment each sample was taken.
+"""
+
+[conversation.tools.debug_app_profile.parameters.top]
+type = "integer"
+summary = "How many rows a bundle-backed table shows. Defaults to 25. Applies to `mode: \"report\"` with `view: \"hotspots\"` or `view: \"callgraph\"`."
+

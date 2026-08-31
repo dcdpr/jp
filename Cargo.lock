@@ -4873,6 +4873,7 @@ dependencies = [
  "url",
  "which",
  "windows-sys 0.61.0",
+ "xct2cli",
 ]
 
 [[package]]

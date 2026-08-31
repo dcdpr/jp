@@ -3,9 +3,9 @@ use std::time::Duration;
 use serde_json::{Map, Value, json};
 
 use super::*;
-use crate::debug_jp::util::{
-    launch::Termination,
-    trace_parse::{Level, TraceEvent},
+use crate::{
+    debug_jp::util::launch::Termination,
+    util::trace::{Level, TraceEvent},
 };
 
 fn fixture_launch() -> LaunchResult {

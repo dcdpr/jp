@@ -1,0 +1,92 @@
+[conversation.tools.debug_app_pixels]
+enable = false
+format = "unattended"
+run = "ask"
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "Read the colours along one row or column of the running macOS app's window, as runs of identical pixels. Reads only. macOS only."
+
+description = """
+The escalation from the accessibility tree for anything *drawn*. A tree read \
+gives the frame of every element, which settles where a text field or a row \
+sits; a divider, a selection fill, a row separator and a rounded border are not \
+elements, so they have no frame to ask for and no colour to report. A scanline \
+across the window has all four in it.
+
+Offsets and colours are in **pixels**, not points. That is the unit these \
+questions arrive in, and it keeps the retina factor visible rather than hiding \
+it: a one-point line reads as a run of two. The window's size is reported in \
+both units, so the conversion is at hand.
+
+Colours are the image's own, unconverted, and the colour space is named in the \
+report. A screenshot read as Display P3 and as sRGB gives two different sets of \
+values for the same pixels.
+
+Each call captures a fresh PNG and keeps it, so a second question about the same \
+picture can pass `image` instead of capturing again.
+
+Needs the Screen Recording grant, which is a different grant from the \
+Accessibility one the rest of these tools need.
+"""
+
+examples = """
+Is the line between the sidebar and the transcript one uniform colour, and how
+wide is it? The sidebar is 280 points wide, so scan across the boundary:
+```json
+{"scan": "row", "at": 200, "from": 540, "to": 580}
+```
+
+Is the selected row filled with the colour the palette names, or is the system
+accent showing through? Scan down through it:
+```json
+{"scan": "column", "at": 100, "from": 60, "to": 200}
+```
+
+The same capture, read again at another line, without disturbing the app:
+```json
+{"scan": "row", "at": 400, "image": "tmp/debug-app/default/shot-1785762174129.png"}
+```
+"""
+
+[conversation.tools.debug_app_pixels.style]
+parameters = "just serve-tools {{context}} {{tool}}"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.debug_app_pixels.parameters.scan]
+type = "string"
+required = true
+summary = "Which way to read: `row` for left to right, `column` for top to bottom."
+
+[conversation.tools.debug_app_pixels.parameters.at]
+type = "integer"
+required = true
+summary = "The row or column to read, in pixels from the top or the left."
+
+[conversation.tools.debug_app_pixels.parameters.from]
+type = "integer"
+summary = "Where along the scan to start, in pixels. The near edge when unset."
+description = """
+A window is a couple of thousand pixels across and the interesting part is \
+usually tens of them. Bounding the scan keeps the report short without moving \
+the offsets, which stay absolute so they can be compared against a frame from \
+`debug_app_snapshot`.
+"""
+
+[conversation.tools.debug_app_pixels.parameters.to]
+type = "integer"
+summary = "Where along the scan to stop, inclusive, in pixels. The far edge when unset."
+
+[conversation.tools.debug_app_pixels.parameters.image]
+type = "string"
+summary = "A PNG to scan instead of capturing a fresh one."
+description = """
+For asking a second question about a capture an earlier call left behind, at \
+another line or another range. Nothing about the app is touched, so this also \
+works after `debug_app_quit`, and it is the way to read a screenshot without \
+letting the app change underneath the two scans.
+
+Relative paths resolve against the repository root. No retina factor is reported \
+for an image passed this way: it may be a crop, a scaled copy, or from another \
+machine.
+"""
