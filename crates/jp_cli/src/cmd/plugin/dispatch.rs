@@ -443,7 +443,10 @@ fn spawn_plugin(
 ///
 /// Sends `Shutdown` over the protocol, gives the plugin `grace` to act on it,
 /// and kills it if it doesn't.
-/// `sent` marks the request so the two callers don't both make it.
+/// `sent` records the request having been made, so the two callers don't both
+/// make it.
+/// It does not record the request arriving: a write to a plugin that has
+/// already exited fails, and the flag is raised either way.
 ///
 /// Killing rather than closing stdin: the handle is shared, so no single holder
 /// can produce the EOF that would let a reading plugin notice on its own.
@@ -523,8 +526,12 @@ fn message_loop(
         }
     }
 
-    // Plugin's stdout closed without an `exit` message. If we sent a
-    // shutdown, this is expected (the child exited after receiving it).
+    // Plugin's stdout closed without an `exit` message. A shutdown request makes
+    // that expected: the child exited rather than answering.
+    //
+    // The flag records the request being made rather than delivered, so a plugin
+    // that had already exited when the request was written reaches here too, and
+    // its exit is reported as clean rather than unexpected.
     if shutdown_sent.load(Ordering::Acquire) {
         debug!("Plugin exited after shutdown.");
         return Ok(());

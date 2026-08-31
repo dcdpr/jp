@@ -58,7 +58,8 @@ fn a_failing_exit_carries_its_code_and_reason() {
     )
     .expect_err("a non-zero exit is an error");
 
-    assert!(error.to_string().contains("no such ticket"), "{error}");
+    assert_eq!(error.code.get(), 3);
+    assert_eq!(error.message.as_deref(), Some("no such ticket"));
 }
 
 /// A plugin that ignores `Shutdown` is killed rather than waited on forever.
