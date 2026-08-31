@@ -22,7 +22,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 ArgumentChunk(
-                    "{}",
+                    "{\"bar\":[\"foo\",\"bar\"],\"foo\":\"hello world\"}",
                 ),
             ),
             metadata: {},
@@ -75,21 +75,14 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "!",
+                " and",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " It",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " output",
+                " returned",
             ),
             metadata: {},
         },
@@ -131,7 +124,7 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " \n\nIs",
+                " Is",
             ),
             metadata: {},
         },
@@ -145,35 +138,14 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " a",
+                " anything",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " specific",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " task",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " or",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " calculation",
+                " else",
             ),
             metadata: {},
         },
@@ -187,7 +159,7 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "'d",
+                " would",
             ),
             metadata: {},
         },
@@ -195,13 +167,6 @@ expression: v
             index: 1,
             part: Message(
                 " like",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " me",
             ),
             metadata: {},
         },
@@ -216,13 +181,6 @@ expression: v
             index: 1,
             part: Message(
                 " try",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " next",
             ),
             metadata: {},
         },

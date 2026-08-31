@@ -6,7 +6,6 @@ use jp_attachment::Attachment;
 use jp_config::{
     PartialAppConfig, ToPartial as _,
     assistant::tool_choice::ToolChoice,
-    conversation::tool::ToolParameterConfig,
     model::{
         id::{ModelIdConfig, Name, PartialModelIdConfig, PartialModelIdOrAliasConfig, ProviderId},
         parameters::{PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningEffort},
@@ -16,7 +15,7 @@ use jp_config::{
 };
 use jp_conversation::{
     ConversationEvent, ConversationStream,
-    event::{ChatRequest, ToolCallResponse},
+    event::{ChatRequest, EventKind, ToolCallResponse},
     stream::ConversationEventWithConfig,
     thread::{Thread, ThreadBuilder},
 };
@@ -30,6 +29,115 @@ use crate::{
     query::ChatQuery,
     tool::{ToolDefinition, ToolDocs},
 };
+
+/// Fail when a model calls a tool with arguments its schema does not declare.
+///
+/// A provider that drops or mangles the parameter schema on the way out still
+/// produces a plausible-looking tool call: with nothing to go on, the model
+/// invents argument names from the tool's name, and the snapshot records them
+/// as though they were a real choice.
+/// Checking each recorded call against the schema is what separates "the model
+/// picked these arguments" from "the model never saw the schema".
+///
+/// Only checked while recording.
+/// On playback the response is fixed and may predate the schema it is being
+/// judged against, so the check would report on the past rather than on current
+/// behavior.
+/// What playback verifies instead is the request: a cassette matches on its
+/// recorded body, so a change to what JP sends fails the test on its own.
+fn assert_tool_calls_match_schema(tools: &[ToolDefinition], events: &[TestEvent]) {
+    for event in events {
+        let TestEvent::Flushed(event) = event else {
+            continue;
+        };
+        let EventKind::ToolCallRequest(call) = &event.kind else {
+            continue;
+        };
+
+        let Some(tool) = tools.iter().find(|tool| tool.name == call.name) else {
+            panic!(
+                "model called `{}`, which was never declared; declared tools: {:?}",
+                call.name,
+                tools.iter().map(|tool| &tool.name).collect::<Vec<_>>()
+            );
+        };
+
+        let declared = tool
+            .parameters
+            .get("properties")
+            .and_then(serde_json::Value::as_object);
+
+        for name in call.arguments.keys() {
+            assert!(
+                declared.is_some_and(|declared| declared.contains_key(name)),
+                "model called `{}` with undeclared argument `{name}`, so the schema it was sent \
+                 does not describe this tool; sent: {}",
+                call.name,
+                tool.parameters
+            );
+        }
+    }
+}
+
+// This module is the test harness itself, so its own tests live here rather
+// than in the sibling `_tests.rs` file the crate uses for production modules.
+#[cfg(test)]
+mod harness_tests {
+    use jp_conversation::event::ToolCallRequest;
+    use serde_json::{Map, json};
+
+    use super::*;
+
+    fn tool_call(arguments: Map<String, serde_json::Value>) -> TestEvent {
+        TestEvent::Flushed(ConversationEvent::new(
+            EventKind::ToolCallRequest(ToolCallRequest::new(
+                "call_1".to_owned(),
+                "run_me".to_owned(),
+                arguments,
+            )),
+            Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+        ))
+    }
+
+    fn run_me() -> Vec<ToolDefinition> {
+        vec![ToolDefinition {
+            name: "run_me".to_owned(),
+            docs: ToolDocs::default(),
+            parameters: json!({
+                "type": "object",
+                "properties": { "foo": { "type": "string" } },
+                "required": []
+            }),
+        }]
+    }
+
+    #[test]
+    fn a_declared_argument_passes() {
+        let arguments = json!({
+          "foo": "x"
+        })
+        .as_object()
+        .cloned()
+        .unwrap();
+
+        assert_tool_calls_match_schema(&run_me(), &[tool_call(arguments)]);
+    }
+
+    /// The shape a provider produces when the schema never reached the model: a
+    /// well-formed call naming an argument the tool does not have.
+    #[test]
+    #[should_panic(expected = "undeclared argument")]
+    fn an_invented_argument_fails() {
+        let arguments = json!({
+          "command": "ls"
+        })
+        .as_object()
+        .cloned()
+        .unwrap();
+
+        assert_tool_calls_match_schema(&run_me(), &[tool_call(arguments)]);
+    }
+}
 
 /// An entry in the per-request event log used for snapshot testing.
 ///
@@ -226,23 +334,28 @@ impl TestRequest {
         self.tool_choice(ToolChoice::Function(name.into()))
     }
 
-    pub fn tool<S: Into<String>, I: IntoIterator<Item = (&'static str, ToolParameterConfig)>>(
-        mut self,
-        name: S,
-        definitions: I,
-    ) -> Self {
+    /// Declare a tool with the given JSON Schema for its arguments.
+    pub fn tool<S: Into<String>>(mut self, name: S, parameters: serde_json::Value) -> Self {
         if let Self::Chat { query, .. } = &mut self {
             query.tools.push(ToolDefinition {
                 name: name.into(),
                 docs: ToolDocs::default(),
-                parameters: definitions
-                    .into_iter()
-                    .map(|(k, v)| (k.to_owned(), v))
-                    .collect(),
+                parameters,
             });
         }
 
         self
+    }
+
+    /// Declare a tool that takes no arguments.
+    pub fn tool_without_parameters<S: Into<String>>(self, name: S) -> Self {
+        self.tool(
+            name,
+            serde_json::json!({
+              "type": "object",
+              "properties": {}
+            }),
+        )
     }
 
     #[expect(dead_code)]
@@ -513,6 +626,7 @@ pub async fn run_chat_completion(
                         assert,
                         assert_history,
                     } => {
+                        let tools = query.tools.clone();
                         let events: Vec<Event> = provider
                             .chat_completion_stream(&model, query)
                             .await
@@ -581,6 +695,9 @@ pub async fn run_chat_completion(
                             }
                         }
 
+                        if recording {
+                            assert_tool_calls_match_schema(&tools, &all_events[index]);
+                        }
                         assert(&all_events);
                         assert_history(&history);
                     }
@@ -691,7 +808,7 @@ pub(crate) fn test_model_details(id: ProviderId) -> ModelDetails {
             features: vec![],
         },
         ProviderId::Llamacpp => ModelDetails {
-            id: "llamacpp/qwen3.5:9b".parse().unwrap(),
+            id: "llamacpp/unsloth/Qwen3.5-9B-GGUF:Q4_K_M".parse().unwrap(),
             display_name: None,
             context_window: None,
             max_output_tokens: None,

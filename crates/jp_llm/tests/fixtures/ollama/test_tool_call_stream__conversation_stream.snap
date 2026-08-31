@@ -223,7 +223,13 @@ expression: v
       "type": "tool_call_request",
       "id": "run_me_2",
       "name": "run_me",
-      "arguments": {}
+      "arguments": {
+        "bar": [
+          "Zm9v",
+          "YmFy"
+        ],
+        "foo": "aGVsbG8gd29ybGQ="
+      }
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
@@ -235,7 +241,7 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "The tool ran successfully! It output: `working!`. \n\nIs there a specific task or calculation you'd like me to try next? 😊"
+      "message": "The tool ran successfully and returned: `working!`. Is there anything else you would like to try? 😊"
     }
   ]
 }

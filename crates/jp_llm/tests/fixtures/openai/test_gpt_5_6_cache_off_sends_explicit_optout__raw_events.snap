@@ -14,21 +14,28 @@ expression: v
         Part {
             index: 0,
             part: Message(
-                "133",
+                "1",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                "7",
+                ",",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Message(
+                "337",
             ),
             metadata: {},
         },
         Flush {
             index: 0,
             metadata: {
-                "openai_item_id": String("msg_0f159240d69d819e016a53caa3c078819499fde8e6f15c461c"),
+                "openai_item_id": String("msg_0a32bb521f691117016a886d77c6d887d2b4455bf62285a5e7"),
                 "openai_phase": String("final_answer"),
             },
         },

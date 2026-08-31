@@ -11,7 +11,11 @@ expression: v
                     ToolCallRequest {
                         id: "run_me_2",
                         name: "run_me",
-                        arguments: {},
+                        arguments: {
+                            "bar": Array [
+                                String("foo"),
+                            ],
+                        },
                     },
                 ),
                 metadata: {},
@@ -27,7 +31,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "It looks like the tool executed successfully and returned `working!`. Since I wasn't able to see the specific output of the tool, could you provide more details or let me know what kind of task you'd like it to perform? For example, if you want to run a mathematical calculation, analyze data, or interact with an API, please specify the arguments or context you need.",
+                        message: "The tool ran successfully with the argument `[\"foo\"]`. Everything is working as expected. Let me know if you'd like to try different arguments or perform another task!",
                     },
                 ),
                 metadata: {},

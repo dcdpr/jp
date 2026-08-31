@@ -224,7 +224,7 @@ expression: v
           "model": {
             "id": {
               "provider": "openrouter",
-              "name": "x-ai/grok-code-fast-1"
+              "name": "x-ai/grok-4.3"
             }
           }
         }
@@ -238,12 +238,12 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "reasoning": ""
+      "reasoning": "The user said: \"Test message\"\n"
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "Test acknowledged. Ready for the real questions? Fire away! 🚀"
+      "message": "Test received! What's up?"
     }
   ]
 }

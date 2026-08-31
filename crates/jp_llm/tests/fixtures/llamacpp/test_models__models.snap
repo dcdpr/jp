@@ -7,12 +7,69 @@ expression: v
         id: ModelIdConfig {
             provider: Llamacpp,
             name: Name(
-                "Qwen3.5-9B-GGUF",
+                "Qwen_Qwen3.5-9B-GGUF:Q4_K_M",
             ),
         },
         display_name: None,
         context_window: Some(
-            8192,
+            0,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Llamacpp,
+            name: Name(
+                "Qwen3.6-35B-A3B-GGUF:Q8_0",
+            ),
+        },
+        display_name: None,
+        context_window: Some(
+            0,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Llamacpp,
+            name: Name(
+                "Qwen3.5-35B-A3B-GGUF:Q4_K_XL",
+            ),
+        },
+        display_name: None,
+        context_window: Some(
+            0,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Llamacpp,
+            name: Name(
+                "Qwen3.5-9B-GGUF:Q4_K_M",
+            ),
+        },
+        display_name: None,
+        context_window: Some(
+            0,
         ),
         max_output_tokens: None,
         reasoning: None,

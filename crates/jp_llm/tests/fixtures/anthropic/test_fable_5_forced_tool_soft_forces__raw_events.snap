@@ -8,7 +8,7 @@ expression: v
             index: 0,
             part: ToolCall(
                 Start {
-                    id: "toolu_012shPkgnEf5sUQ9oWo4q6AY",
+                    id: "toolu_01DYRwPNeF44tkkTHK9GZLXv",
                     name: "run_me",
                 },
             ),
@@ -28,7 +28,7 @@ expression: v
             index: 0,
             part: ToolCall(
                 ArgumentChunk(
-                    "{\"foo\": \"",
+                    "{\"foo\": \"h",
                 ),
             ),
             metadata: {},
@@ -37,7 +37,7 @@ expression: v
             index: 0,
             part: ToolCall(
                 ArgumentChunk(
-                    "hello\"}",
+                    "ello\"}",
                 ),
             ),
             metadata: {},

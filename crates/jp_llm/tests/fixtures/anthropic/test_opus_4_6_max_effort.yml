@@ -3,6 +3,7 @@ when:
   method: POST
   json_body_str: >-
     {
+      "model": "claude-opus-4-6",
       "messages": [
         {
           "role": "user",
@@ -14,7 +15,6 @@ when:
           ]
         }
       ],
-      "model": "claude-opus-4-6",
       "max_tokens": 64000,
       "thinking": {
         "type": "adaptive",
@@ -36,44 +36,38 @@ then:
       value: text/event-stream; charset=utf-8
   body: |+
     event: message_start
-    data: {"type":"message_start","message":{"model":"claude-opus-4-6","id":"msg_01UHGEGfMPwMzkJJJZb1ShpF","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":33,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":13,"service_tier":"standard","inference_geo":"global"}}              }
+    data: {"type":"message_start","message":{"model":"claude-opus-4-6","id":"msg_011CeG89FYrWbyH3sdD8X71f","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":16,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":9,"service_tier":"standard","inference_geo":"global"}}  }
     
     event: content_block_start
-    data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}            }
+    data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}     }
     
     event: ping
     data: {"type": "ping"}
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"The user is asking a"}  }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"The"} }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" simple math question."}      }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" user is asking a simple arithmetic question.\n\n2 + 2 = 4"}               }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":""}          }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"EtIBCkYICxgCKkBN5NJqJIeLCiAqkfpaWfsOkN1BR8OlbxUPrnJrvLg2wpB10LFEOdpBuDkqar3RoqRqnYDw3tWf0d8v3vqOZ741EgwcFNxoO4XttUTOs30aDJBSCDDS7MM12o/tKCIwBEsXqD98nDRhYwdqykW1nRvRO0gtiT6Yg+id8XgwgBQs8DazQhyqToQh4DH0UmbNKjo922mzjOT81xiWsuXze5CXHpy08TzdpvwPHvlL9yryWwGrvKWOr2fG6I8AgmWs9UQaVX0wUhy5jtpCGAE="}              }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"Eq8CCpABCBEYAipAjyhq0cDykkIL3l6bQ5E4zr3nqaHaxXcyt/imAOSX1jqIl2mWy0C2b8rIyqSuENqZOhMo8LdK9ggshh5EhHaTrDIPY2xhdWRlLW9wdXMtNC02OABCCHRoaW5raW5nWiRiMTRkMTM3ZC1mNTEyLTQzMDktOTc0ZC0zZmYxMzJhZjE1NjKoAfbaodQGEgzoZJ9Cz7CjcQ9p9q8aDLiGxeMBGMQ4PaE4KiIw20Tik2WHQIXvL9VXsbcCecJdD4DUYlYMpDrXxGUl1ugFNtplHKw3s6oDSl2WA1ZIKkwCwzJ4mpAu2KLIFWAvKyIPaEmhDaUP71PrwAbkFwWwkK0ebOKIkRhStdex87VbYrijQfrs8TGZKYhLugSEWcpHH2DXvMge9oB3258tGAE="}   }
     
     event: content_block_stop
-    data: {"type":"content_block_stop","index":0   }
+    data: {"type":"content_block_stop","index":0         }
     
     event: content_block_start
     data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}   }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"2 + 2 = **"}   }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"4**."}               }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"2 + 2 = **4**."}    }
     
     event: content_block_stop
-    data: {"type":"content_block_stop","index":1               }
+    data: {"type":"content_block_stop","index":1 }
     
     event: message_delta
-    data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"input_tokens":33,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":38}        }
+    data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null,"stop_details":null},"usage":{"input_tokens":16,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":48,"output_tokens_details":{"thinking_tokens":32}}  }
     
     event: message_stop
-    data: {"type":"message_stop"  }
+    data: {"type":"message_stop"         }
     

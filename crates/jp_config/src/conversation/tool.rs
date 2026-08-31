@@ -5,8 +5,7 @@ use std::{fmt, str::FromStr};
 use indexmap::IndexMap;
 use schematic::{Config, ConfigEnum, ConfigError, HandlerError, PartialConfig as _};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
-use tracing::warn;
+use serde_json::Value;
 
 pub use crate::types::command::{
     CommandConfig, CommandConfigOrString, PartialCommandConfig, PartialCommandConfigOrString,
@@ -634,34 +633,41 @@ impl ToPartial for ToolConfig {
     }
 }
 
-/// Tool parameter configuration.
+/// Overrides for one tool parameter.
 ///
-/// This type doubles as a recursive JSON Schema node: `items` points to the
-/// schema for array elements, `properties` describes the fields of object
-/// elements.
+/// MCP parameters inherit unset fields from the server's schema.
+/// Local and built-in parameters must set `type` and define complete array and
+/// object shapes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Config)]
 #[config(rename_all = "snake_case")]
 pub struct ToolParameterConfig {
     /// The type of the parameter.
+    ///
+    /// MCP tools inherit this from the server.
+    /// Local and built-in tools must set it explicitly.
     #[setting(nested)]
-    #[serde(rename = "type")]
-    pub kind: OneOrManyTypes,
+    #[serde(default, rename = "type", skip_serializing_if = "Option::is_none")]
+    pub kind: Option<OneOrManyTypes>,
 
-    /// The default value of the parameter.
+    /// The value used when the argument is omitted.
+    ///
+    /// MCP tools inherit the server's default when unset.
+    /// Local and built-in tools have no default when unset.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default: Option<Value>,
 
     /// Whether the parameter is required.
-    #[setting(default)]
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub required: bool,
+    ///
+    /// MCP parameters inherit the server's requirement when unset.
+    /// Local and built-in parameters default to optional.
+    /// A requirement declared by an MCP server cannot be removed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub required: Option<bool>,
 
     /// A short summary of the parameter.
     ///
-    /// This is included in the JSON schema sent to the LLM.
-    /// If not set, falls back to [`description`].
-    ///
-    /// [`description`]: Self::description
+    /// This is included in the schema sent to the LLM.
+    /// When unset, `description` is used.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
 
@@ -677,17 +683,32 @@ pub struct ToolParameterConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub examples: Option<String>,
 
-    /// A list of possible values for the parameter.
-    #[serde(default, rename = "enum", skip_serializing_if = "Vec::is_empty")]
-    pub enumeration: Vec<Value>,
+    /// Values accepted by the parameter.
+    ///
+    /// MCP tools inherit the server's enum when unset.
+    /// Local and built-in tools accept any value matching `type` when unset.
+    /// Set this to an empty array to remove an inherited enum.
+    ///
+    /// For array elements, set `items.enum`.
+    /// An enum on the array itself must contain complete arrays, for example
+    /// `enum = [["one"], ["two", "three"]]`.
+    #[serde(default, rename = "enum", skip_serializing_if = "Option::is_none")]
+    pub enumeration: Option<Vec<Value>>,
 
-    /// Schema for array items (recursive).
+    /// Constraints applied to every array element.
+    ///
+    /// MCP tools inherit `items` when unset.
+    /// Local and built-in array parameters must define it.
     #[setting(nested)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[expect(clippy::use_self, reason = "macro can't resolve `Self`")]
     pub items: Option<Box<ToolParameterConfig>>,
 
-    /// Sub-properties for object-typed parameters (recursive).
+    /// Constraints for fields of an object parameter.
+    ///
+    /// MCP properties are merged by name.
+    /// Entries here may narrow nested fields or add fields to local and
+    /// built-in object parameters.
     #[setting(nested, merge = merge_nested_indexmap)]
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     #[expect(clippy::use_self, reason = "macro can't resolve `Self`")]
@@ -697,7 +718,7 @@ pub struct ToolParameterConfig {
 impl PartialConfigDelta for PartialToolParameterConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
-            kind: self.kind.delta(next.kind),
+            kind: delta_opt_partial(self.kind.as_ref(), next.kind),
             default: delta_opt(self.default.as_ref(), next.default),
             required: delta_opt(self.required.as_ref(), next.required),
             summary: delta_opt(self.summary.as_ref(), next.summary),
@@ -729,17 +750,13 @@ impl ToPartial for ToolParameterConfig {
         let defaults = Self::Partial::default();
 
         Self::Partial {
-            kind: self.kind.to_partial(),
+            kind: self.kind.as_ref().map(ToPartial::to_partial),
             default: partial_opts(self.default.as_ref(), defaults.default),
-            required: partial_opt(&self.required, defaults.required),
+            required: partial_opts(self.required.as_ref(), defaults.required),
             summary: partial_opts(self.summary.as_ref(), defaults.summary),
             description: partial_opts(self.description.as_ref(), defaults.description),
             examples: partial_opts(self.examples.as_ref(), defaults.examples),
-            enumeration: if self.enumeration.is_empty() {
-                None
-            } else {
-                Some(self.enumeration.clone())
-            },
+            enumeration: self.enumeration.clone(),
             items: self.items.as_ref().map(|v| Box::new(v.to_partial())),
             properties: self
                 .properties
@@ -800,72 +817,6 @@ impl OneOrManyTypes {
             Self::One(v) => v.as_str() == type_,
             Self::Many(v) => v.iter().any(|v| v == type_),
         }
-    }
-
-    /// Return whether the type is exactly the given type.
-    #[must_use]
-    pub fn is_type(&self, type_: &str) -> bool {
-        match self {
-            Self::One(v) => v.as_str() == type_,
-            Self::Many(v) => v.len() == 1 && v[0] == type_,
-        }
-    }
-}
-
-impl ToolParameterConfig {
-    /// Return whether the parameter is required.
-    #[must_use]
-    pub const fn is_required(&self) -> bool {
-        self.required
-    }
-
-    /// Convert the parameter to a JSON schema.
-    pub fn to_json_schema(&self) -> Value {
-        let mut map = Map::new();
-        map.insert("type".to_owned(), match &self.kind {
-            OneOrManyTypes::One(v) => v.clone().into(),
-            OneOrManyTypes::Many(v) => v.clone().into(),
-        });
-
-        if let Some(desc) = self.summary.as_deref().or(self.description.as_deref()) {
-            map.insert("description".to_owned(), desc.into());
-        }
-
-        if let Some(default) = self.default.clone() {
-            map.insert("default".to_owned(), default);
-        }
-
-        if !self.enumeration.is_empty() {
-            map.insert("enum".to_owned(), self.enumeration.as_slice().into());
-        }
-
-        if let Some(items) = self.items.as_ref() {
-            if !self.kind.is_type("array") {
-                warn!("Unexpected `items` property for non-array type");
-            }
-            map.insert("items".to_owned(), items.to_json_schema());
-        }
-
-        if !self.properties.is_empty() {
-            let props: Map<_, _> = self
-                .properties
-                .iter()
-                .map(|(k, v)| (k.clone(), v.to_json_schema()))
-                .collect();
-            map.insert("properties".to_owned(), Value::Object(props));
-
-            let required: Vec<_> = self
-                .properties
-                .iter()
-                .filter(|(_, v)| v.required)
-                .map(|(k, _)| Value::String(k.clone()))
-                .collect();
-            if !required.is_empty() {
-                map.insert("required".to_owned(), Value::Array(required));
-            }
-        }
-
-        Value::Object(map)
     }
 }
 

@@ -7,21 +7,21 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "User",
+                "The",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " is just testing. We should",
+                " user says \"Test message\". Likely they just want a response acknowledging. Could be they are checking connectivity. In such cases respond politely \"",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " respond politely acknowledging.",
+                "Message received\" etc.",
             ),
             metadata: {},
         },
@@ -32,21 +32,14 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "Got it! Your message came through loud and",
+                "Message received—everything looks good! Let me know if",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " clear. If you need anything—questions,",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " help, or just a friendly chat—just let me know!",
+                " there's anything I can help you with.",
             ),
             metadata: {},
         },
@@ -69,14 +62,14 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " wants repeat previous message: \"Test",
+                " wants to repeat previous message: \"Test",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " message\".",
+                " message\". Provide that.",
             ),
             metadata: {},
         },
@@ -103,49 +96,147 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "We",
+                "The",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " need to call the tool run_me",
+                " user asks: \"Please run",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " with arguments (can choose any).",
+                " the tool, providing whatever",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " Provide some arguments. Use default",
+                " arguments you want.\"\n\nWe",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " foo? not needed. Provide",
+                " have a tool defined:",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " bar something. So call run_me with bar: maybe",
+                " functions.run_me with arguments",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " \"example\".",
+                ": foo optional (default \"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "foo\") and bar required, type",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " string or array.\n\nWe can choose",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " arbitrary arguments. We need to call the",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " function via the tool channel",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                ". Since user wants us",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " to run the tool with whatever arguments we want, we",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " can choose something. Let's provide",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " bar: \"example\" and",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " maybe foo omitted so default.\n\n",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "We need to call functions.run_me with",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " proper JSON, and",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " no other output besides the",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " tool result.\n\nThus we",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " will invoke the function.",
             ),
             metadata: {},
         },
@@ -157,7 +248,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 Start {
-                    id: "ba9565d53",
+                    id: "0bb7d840a",
                     name: "run_me",
                 },
             ),
@@ -176,16 +267,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 ArgumentChunk(
-                    "{\"bar\":\"",
-                ),
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 2,
-            part: ToolCall(
-                ArgumentChunk(
-                    "example\"}",
+                    "{\"bar\":\"example\"}",
                 ),
             ),
             metadata: {},
@@ -213,77 +295,133 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " need to respond. The user asked: \"Please run the",
+                " need to respond as ChatGPT. The user asks: \"",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " tool, providing whatever arguments you want.\" The assistant already invoked",
+                "Please run the tool, providing whatever arguments you",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " the tool with {\"bar\":\"",
+                " want.\" The tool is defined with input schema containing bar string",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "example\"} and got response \"The secret code",
+                ". The user says",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " is: 42\". Now we should output the",
+                " \"",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " result to user. Probably they want the tool",
+                "run",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " run result. So we should say something",
+                " the",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " like: \"I ran the",
+                " tool",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " tool with arguments ... and got",
+                ",",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " the following output: The secret code is:",
+                " providing",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " 42\".",
+                " whatever",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " arguments you want.\" They presumably want us to call the tool. The tool returns a comment: \"The secret code",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " is: 42\". The system says to be mindful of tool usage. We have just run the tool. Now we need to produce",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " a response to the user. Perhaps we should explain the result. Since the tool returned \"The secret code is: ",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "42\". We'll respond with that.\n\nWe should not",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " claim we have no info",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                ". Provide the output.\n\nThus",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " answer: \"The tool returned: The secret code",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " is: 42.\"\n\nLet's do that.",
             ),
             metadata: {},
         },
@@ -294,21 +432,28 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "I ran the tool with a sample argument (`",
+                "I ran the tool with a sample",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "{\"bar\":\"example\"}`) and got this response:\n\n",
+                " argument (`{\"bar\":\"example\"",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "**The secret code is: 42**",
+                "}`) and it returned:\n\n**“The secret code is",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                ": 42.”**",
             ),
             metadata: {},
         },
@@ -331,14 +476,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " tool returned \"The secret code is: 42\". So answer",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " that.",
+                " tool returned \"The secret code is: 42.\"",
             ),
             metadata: {},
         },
@@ -349,14 +487,14 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "The previous tool",
+                "The tool call returned:\n\n**“The secret code is: 42.”",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " call returned:\n\n**The secret code is:\u{202f}42**",
+                "**",
             ),
             metadata: {},
         },

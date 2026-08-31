@@ -9,7 +9,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "We need to call run_me with some args.",
+                        reasoning: "User wants tool run with any arguments. We'll call run_me with some arguments.",
                     },
                 ),
                 metadata: {},
@@ -20,14 +20,14 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "f976d15b5",
+                        id: "f8afbdfcc",
                         name: "run_me",
                         arguments: {
                             "foo": String("test"),
                             "bar": Array [
-                                Number(1),
-                                Number(2),
-                                Number(3),
+                                String("a"),
+                                String("b"),
+                                String("c"),
                             ],
                         },
                     },
@@ -45,7 +45,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "The user says: \"Please run the tool, providing whatever arguments you want.\" They want me to run the tool. The tool seems to be \"commentary\" function. The tool just replies \"working!\". The user expects me to run the tool with some arguments, perhaps any. I already called the tool with {\"foo\":\"test\",\"bar\":[1,2,3]}. The tool responded \"working!\" So I should respond to the user acknowledging the tool was run. Maybe ask if they need something else, or summarise output. Provide the output from the tool. Since the tool's response is just \"working!\", I can respond accordingly.\n\nThus, answer: I ran the tool with sample arguments; it returned \"working!\". Let me know if you need specific arguments.\n\nProceed.",
+                        reasoning: "User asks \"Please run the tool, providing whatever arguments you want.\" The assistant already called the tool with arguments {\"foo\":\"test\",\"bar\":[\"a\",\"b\",\"c\"]} and got response \"working!\". Now need to produce final answer. The user likely expects that we ran a tool and got response. So we can respond with the result and maybe ask if they need something else.",
                     },
                 ),
                 metadata: {},
@@ -56,7 +56,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "I ran the tool with a sample payload (`{\"foo\":\"test\",\"bar\":[1,2,3]}`) and it responded:\n\n**working!**\n\nLet me know if you’d like me to try specific arguments or use the tool for a particular purpose.",
+                        message: "I ran the tool with a sample payload (`{\"foo\":\"test\",\"bar\":[\"a\",\"b\",\"c\"]}`) and the tool responded:\n\n**“working!”**\n\nLet me know if you’d like the tool to be invoked with different arguments or if there’s anything else I can help with!",
                     },
                 ),
                 metadata: {},

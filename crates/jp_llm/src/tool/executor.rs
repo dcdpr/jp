@@ -314,7 +314,7 @@ impl TestExecutorSource {
             .map(|name| ToolDefinition {
                 name: name.clone(),
                 docs: super::ToolDocs::default(),
-                parameters: indexmap::IndexMap::new(),
+                parameters: serde_json::json!({ "type": "object", "properties": {} }),
             })
             .collect()
     }

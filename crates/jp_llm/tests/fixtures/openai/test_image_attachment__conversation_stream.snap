@@ -223,7 +223,7 @@ expression: v
       "type": "chat_response",
       "message": "apple",
       "metadata": {
-        "openai_item_id": "bXNnXzA2YWI1YjBjMDQ3NDM3OGUwMTY5YWFlYTBlMjMzNDgxYTI4MDJjMmU0MWRkMjBhZWRj"
+        "openai_item_id": "bXNnXzBkN2E0NTEyZGJkODc4MzUwMTZhODg2ZGEwY2I0ODg3ZDI4ZTM0OWY2ZjcwM2I3Zjhk"
       }
     }
   ]

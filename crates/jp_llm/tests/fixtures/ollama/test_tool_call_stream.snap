@@ -11,7 +11,13 @@ expression: v
                     ToolCallRequest {
                         id: "run_me_2",
                         name: "run_me",
-                        arguments: {},
+                        arguments: {
+                            "bar": Array [
+                                String("foo"),
+                                String("bar"),
+                            ],
+                            "foo": String("hello world"),
+                        },
                     },
                 ),
                 metadata: {},
@@ -27,7 +33,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "The tool ran successfully! It output: `working!`. \n\nIs there a specific task or calculation you'd like me to try next? 😊",
+                        message: "The tool ran successfully and returned: `working!`. Is there anything else you would like to try? 😊",
                     },
                 ),
                 metadata: {},

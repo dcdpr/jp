@@ -223,7 +223,13 @@ expression: v
       "type": "tool_call_request",
       "id": "run_me_2",
       "name": "run_me",
-      "arguments": {}
+      "arguments": {
+        "foo": "YmFy",
+        "bar": [
+          "Zm9v",
+          "YmFy"
+        ]
+      }
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
@@ -235,7 +241,7 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "It looks like you're asking me to \"run a tool,\" but there isn't a specific tool defined in your message. To help better, could you clarify:\n\n1. **What tool** are you referring to? (e.g., a code interpreter, calculator, or custom function)\n2. **What arguments** should I provide? (e.g., numbers for math, text to analyze, data to process)\n3. **What outcome** do you expect? (e.g., generate a report, solve an equation, visualize data)\n\nLet me know so I can assist! 😊"
+      "message": "The tool executed successfully with the provided arguments. Is there anything specific you would like to do or discuss next?"
     }
   ]
 }

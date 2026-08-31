@@ -241,11 +241,11 @@ expression: v
       "type": "chat_response",
       "data": {
         "titles": [
-          "Help with Herrington Hall classroom assignment and images"
+          "Generate a title for this conversation"
         ]
       },
       "metadata": {
-        "openai_item_id": "bXNnXzBmODhkNjVjY2JiYTIxZGYwMTY5OTViNmI3NWMxYzgxOTQ5NmFhNGVhMGQ2Yzk5YTUw"
+        "openai_item_id": "bXNnXzA4OGM0MTA1NmY5NzFmZTEwMTZhODg2ZGE2ZjU2ODg3ZDI5ODA5OTVmMzNkYTEwYTYx"
       }
     }
   ]

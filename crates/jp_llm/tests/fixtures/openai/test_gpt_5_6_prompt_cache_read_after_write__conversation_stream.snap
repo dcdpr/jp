@@ -235,9 +235,9 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "The fox.",
+      "message": "The quick brown fox.",
       "metadata": {
-        "openai_item_id": "bXNnXzA0MWEyM2Q1NWRhNmIyYjYwMTZhNTQ5YTIyNDY3ODgxOTQ4MWI1OWIxNzhiYmI0MzZh",
+        "openai_item_id": "bXNnXzA2ZjM3YTdjNTBmZGFkZDkwMTZhODg2ZDc3M2Y3ODg3ZDJhOTk4MzRkN2I1NTc5Yzgz",
         "openai_phase": "ZmluYWxfYW5zd2Vy"
       }
     },
@@ -263,9 +263,9 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "The dog.",
+      "message": "The lazy dog.",
       "metadata": {
-        "openai_item_id": "bXNnXzA0MWEyM2Q1NWRhNmIyYjYwMTZhNTQ5YTIzZmZlNDgxOTRiOTM3ZjIwZDA5YmU3ZmZk",
+        "openai_item_id": "bXNnXzA2ZjM3YTdjNTBmZGFkZDkwMTZhODg2ZDc4NGViNDg3ZDJhMzNmNjdmMzZjMjM1MjRi",
         "openai_phase": "ZmluYWxfYW5zd2Vy"
       }
     }

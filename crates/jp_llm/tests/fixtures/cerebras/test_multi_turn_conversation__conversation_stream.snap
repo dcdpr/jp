@@ -237,12 +237,12 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "reasoning": "User is just testing. We should respond politely acknowledging."
+      "reasoning": "The user says \"Test message\". Likely they just want a response acknowledging. Could be they are checking connectivity. In such cases respond politely \"Message received\" etc."
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "Got it! Your message came through loud and clear. If you need anything—questions, help, or just a friendly chat—just let me know!"
+      "message": "Message received—everything looks good! Let me know if there's anything I can help you with."
     },
     {
       "type": "config_delta",
@@ -268,7 +268,7 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "reasoning": "User wants repeat previous message: \"Test message\"."
+      "reasoning": "User wants to repeat previous message: \"Test message\". Provide that."
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
@@ -296,12 +296,12 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "reasoning": "We need to call the tool run_me with arguments (can choose any). Provide some arguments. Use default foo? not needed. Provide bar something. So call run_me with bar: maybe \"example\"."
+      "reasoning": "The user asks: \"Please run the tool, providing whatever arguments you want.\"\n\nWe have a tool defined: functions.run_me with arguments: foo optional (default \"foo\") and bar required, type string or array.\n\nWe can choose arbitrary arguments. We need to call the function via the tool channel. Since user wants us to run the tool with whatever arguments we want, we can choose something. Let's provide bar: \"example\" and maybe foo omitted so default.\n\nWe need to call functions.run_me with proper JSON, and no other output besides the tool result.\n\nThus we will invoke the function."
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
-      "id": "ba9565d53",
+      "id": "0bb7d840a",
       "name": "run_me",
       "arguments": {
         "bar": "ZXhhbXBsZQ=="
@@ -310,19 +310,19 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
-      "id": "ba9565d53",
+      "id": "0bb7d840a",
       "content": "VGhlIHNlY3JldCBjb2RlIGlzOiA0Mg==",
       "is_error": false
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "reasoning": "We need to respond. The user asked: \"Please run the tool, providing whatever arguments you want.\" The assistant already invoked the tool with {\"bar\":\"example\"} and got response \"The secret code is: 42\". Now we should output the result to user. Probably they want the tool run result. So we should say something like: \"I ran the tool with arguments ... and got the following output: The secret code is: 42\"."
+      "reasoning": "We need to respond as ChatGPT. The user asks: \"Please run the tool, providing whatever arguments you want.\" The tool is defined with input schema containing bar string. The user says \"run the tool, providing whatever arguments you want.\" They presumably want us to call the tool. The tool returns a comment: \"The secret code is: 42\". The system says to be mindful of tool usage. We have just run the tool. Now we need to produce a response to the user. Perhaps we should explain the result. Since the tool returned \"The secret code is: 42\". We'll respond with that.\n\nWe should not claim we have no info. Provide the output.\n\nThus answer: \"The tool returned: The secret code is: 42.\"\n\nLet's do that."
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "I ran the tool with a sample argument (`{\"bar\":\"example\"}`) and got this response:\n\n**The secret code is: 42**"
+      "message": "I ran the tool with a sample argument (`{\"bar\":\"example\"}`) and it returned:\n\n**“The secret code is: 42.”**"
     },
     {
       "type": "config_delta",
@@ -348,12 +348,12 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "reasoning": "The tool returned \"The secret code is: 42\". So answer that."
+      "reasoning": "The tool returned \"The secret code is: 42.\""
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "The previous tool call returned:\n\n**The secret code is: 42**"
+      "message": "The tool call returned:\n\n**“The secret code is: 42.”**"
     }
   ]
 }

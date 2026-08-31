@@ -14,7 +14,14 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " need to call run_me with some args.",
+                " need to call function run_me with some arguments.",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " Provide any.",
             ),
             metadata: {},
         },
@@ -26,7 +33,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 Start {
-                    id: "ae3b6602f",
+                    id: "885f4bbdf",
                     name: "run_me",
                 },
             ),
@@ -45,7 +52,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 ArgumentChunk(
-                    "{\"foo\":\"test",
+                    "{\"foo\":\"example",
                 ),
             ),
             metadata: {},
@@ -54,7 +61,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 ArgumentChunk(
-                    "\",\"bar\":[1,2,3]}",
+                    "\",\"bar\":123}",
                 ),
             ),
             metadata: {},
@@ -75,231 +82,231 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "We",
+                "The",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " need to respond to user request: \"Please run the tool, providing whatever arguments you",
+                " user says: \"Please run the tool, providing whatever arguments you",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " want.\" The user asked ChatGPT to run the tool",
+                " want.\"\n\nWe have a tool called run_me",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " with whatever arguments I want. The tool",
+                ". The user is asking",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " is called \"commentary\" with",
+                " to run the tool, providing whatever arguments",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " a function signature requiring a",
+                " we want. So we",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " JSON object with key \"",
+                " need to invoke the tool",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "commentary\". The tool is a language",
+                " with",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " model tool, not a function;",
+                " some arguments. The tool",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " earlier description: The tool",
+                " returns \"working!\" as we saw. The earlier conversation",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " is like \"We will also provide",
+                ": The user requested to",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " you with a tool that can help you",
+                " run the tool. We already",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " answer user queries: commentary.",
+                " invoked it with {\"",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " It returns an answer",
+                "foo\":\"example\",\"bar\":",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " that is a direct, succinct answer",
+                "123}. The tool responded \"",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " to the question. This tool",
+                "working!\".\n\nNow we",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " should only be used when the user",
+                " should respond appropriately. Based",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " asks that their answer should be",
+                " on the tool's purpose? The tool",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " succinct\". However the user asks to",
+                " is \"run_me\"",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " run the tool with whatever arguments I want. The tool",
+                " which when called returns \"",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " expects a \"commentary\" key with",
+                "working!\". We might want",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " some content. It returns a",
+                " to",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " short answer. So I can provide something",
+                " ask the user if they need something else. Or maybe we",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                ". Provide a JSON with",
+                " should show the output of the",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " commentary field. Should we ask",
+                " tool.\n\nOur prior call gave us",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " clarification? The user explicitly asks",
+                " \"working!\" output. So",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " to run the tool providing whatever arguments we want",
+                " we can respond with that",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                ". So we should invoke the tool",
+                " output as part of answer",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                ". The tool is \"commentary\". So we need to call the",
+                ": \"The tool responded",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " function with some commentary.",
+                ": working!\". Or ask",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " For example \"commentary\": \"Hello,",
+                " if they have specific arguments",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " this is a test run of the",
+                ".\n\nThus final answer:",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " tool\". Let's do that.",
+                " Provide the tool output.",
             ),
             metadata: {},
         },
@@ -310,21 +317,70 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "{\"commentary\":\"This is a test run of the commentary tool",
+                "I ran the tool with",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                ", providing a succinct placeholder response",
+                " a sample set of arguments",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                ".\"}",
+                " (`{\"foo\":\"example",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "\",\"bar\":123}`",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                ") and it returned:\n\n",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "**working!**\n\nLet",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " me know if you’d like",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " to try different arguments",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " or need",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " anything else!",
             ),
             metadata: {},
         },

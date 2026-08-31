@@ -1,4 +1,3 @@
-use indexmap::IndexMap;
 use jp_config::{PartialAppConfig, assistant::request::CachePolicy};
 use jp_conversation::{Compaction, ConversationStream, SummaryPolicy, event::ChatResponse};
 
@@ -12,7 +11,7 @@ fn tool(name: &str, summary: Option<&str>) -> ToolDefinition {
             summary: summary.map(str::to_owned),
             ..Default::default()
         },
-        parameters: IndexMap::new(),
+        parameters: serde_json::json!({ "type": "object", "properties": {} }),
     }
 }
 

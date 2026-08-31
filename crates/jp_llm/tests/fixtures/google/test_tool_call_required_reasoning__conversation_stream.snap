@@ -237,7 +237,7 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "reasoning": "**Analyzing Tool Arguments**\n\nOkay, I'm currently assessing the best way to approach the arguments for this \"run_me\" tool. I'm focusing on \"bar\" and \"foo,\" which are the options. The \"bar\" argument seems interesting, with its dual nature of either a literal string, like \"foo\", or a list of strings, so I need to make the right choice between them. I'm prioritizing flexibility and effectiveness in my approach.\n\n\n**Refining Argument Selection**\n\nI've decided to provide a list of strings to the 'bar' argument, specifically `[\"apple\", \"banana\"]`, while omitting a value for 'foo', which defaults to \"foo\". This approach prioritizes demonstrating flexibility. I believe `default_api.run_me(bar=[\"apple\", \"banana\"])` is the most effective call for the \"run_me\" tool.\n\n\n"
+      "reasoning": "**Considering Tool Arguments**\n\nI'm currently focused on determining the optimal arguments for the `run_me` tool. I'm exploring the options for `foo`, realizing it's optional and defaults to \"foo\".  The more pressing concern is the `bar` argument, which is mandatory and can accept either a string literal ('foo') or a list of strings. I need to make a solid selection to proceed.\n\n\n**Defining Tool Call**\n\nI've decided on the `run_me` tool call structure. Given that `foo` is optional, and `bar` can accept a list, I'm going with `default_api.run_me(bar=[\"foo\", \"bar\"])`. This covers the list case for `bar` and leverages the default for `foo`. I now need to think about potential error handling and what to do if the returned response isn't what is expected.\n\n\n"
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
@@ -246,12 +246,12 @@ expression: v
       "name": "run_me",
       "arguments": {
         "bar": [
-          "YXBwbGU=",
-          "YmFuYW5h"
+          "Zm9v",
+          "YmFy"
         ]
       },
       "metadata": {
-        "google_thought_signature": "Q2lRQnZqNzIrLzM0SFNoU1N3eFpIZEZZRy9Vejc5a1FmYUV0Q0pZNGtVY3VSd1ZtQjhvS1dnRytQdmI3VEF4cFpSTE9TNnh2V1M0QkJmbzRUSndMcmpTQzQ3bW5qWmRwa3YzSW5zaHQ3WVQxUDY1OXkzTVdJV1psR1lEdUJiYmNHZkhoVm9WTVNkYzBjTTFscjlKV1AxTDh6TUxYSmwrbm1IRFN2OTJCSVFZTGpnclZBUUcrUHZiN2Z6ZnhKT3NqM3JWV1VZOHcxLy9SRVFrVTRoZGpOeTRmcEloYWhYaUUraHRMZGplTjNLTzRTdWV4azdTSzVMVDh6c1pac1ppQlhXdVF6OTJETmxQaHRia3BBdm9qd25ya1NoMisrMnhKSmdZeW02RWhxZS91OWdnVmcxMktBRjN3ZjhyaUZYeDVhSXkzeUZQd3JubEhSbHFiaDNTek84Mnh4dVhwZ21ocnFWdTc0eVhhQVhqM2ZQTHhaY1JQYmlzOXF0MVRubFVrM1U3bk9SenRwSEEvYkYxOFk0VE1KRFkrMmJDOU81dmNIbXZ1bk5jYXpkS08wYnVOVTVkbW5mZVZSWGpZenRvYnByVXA0ZFNqZHIwWjRncmRBUUcrUHZiN1hsWFlOZG1DTDdIM2s1cDJQQzh6YmdGaTZIZUpkQnZpU3dKL3FSejdyTXcxaGltSkRPYjdhM2lDblVJbERra25acnRUNVBSbG5MZXkvdXZ0YzhRRzlWMTcwYzZ6aVZCY3lBaTg5ZG50ZEIwWkl5RWFTMEZNanM2RVBWY3U0N3cwSGZ6bWVLWHBtcTAxbEU5bDNLOEpRTUZ5Vm93eStyajhiV1pBSHMvMXJWY0x3dEg2UFpUdGgyZW52K0RmcFRGMGRXY2MvajhYazdQSzhjLzhWS0xxdlJsWnJoN1BDTktCUUNuY2tSRVgwSCtRNGlOZXI4cTRHcUgvdEJtMWs3L09EaVZsdHpqdXNHTXFIcmRvbW9Gb0xyUzluRTJWN2xRcUN0VUJBYjQrOXZ2ZDNNRE1LVW5FbGd5NkJrcEp1aTQzODBFd2gxcmp6L3JJaStielVKVEpKdit6S2dmeVF6SkFGZlphcVpIelZNTWJ3a3haamZGMHp3N2tPL1kxYUMwekQrdlFnYVRCVHpubnFTYVo5Q2luWWl6YXFnMHF3T2ZWNVQ2U05pRnN6SFpjaDVCUWlQRlBnTnN4UXdQdkcyUHRWM2szRzdiYW9weUMrZk9HL1BDT3ozWkcrQzhjVExWUnJkZnVJTDl1MklpZzNFUzkyVTlIcWo5SDgzNTdpUmVKb1g3VW9xT3ZJV0RGd1lDSWJDVWpGNkFzeXlhdWFHQmVaalMzS0pvWWFYMDJxRzMzZ3U1Sko1ZFpVRDZDRlA3QUNzNEJBYjQrOXZzRmNJVE5JWW11NGM5NzdwSG1XWTlFVUNDWlVnaUdveE9lSVVrSmlDUVczcFlCb0VPOXBoVW9nQTBKb29Ga09rWEFqMzFZUUJQRnZZNHhyODdobDV3VTVVZ0dZazc5MzRZOUJyamxnTGtqYXhlZU5TckIzTTZzZE5paGFnTHUrUkVYdExIYmhwVFlHTEFmN2YvY011UWU2SERjbUtYR3dNeVhCMUZrcHdacWE1ajExZTZDZytLTU1VSjQ1cloza3NIenRwM3FMTnVpdWZPZmVpdGlrVEFrN0U0SGFKODlOeis0MThWMU9tQzczS2g2WWhLQnJWQldGUk9tT0Rud0U2NE5idDA1QzZha0YvNEtUd0crUHZiN1g3YVFwT2ZiTmJPcWlSRWRlZXRoRFNLU05veUpvOGVoOFZnalg5ZzY2YnFIVk5FRnpGRlZSZXFZTjdoWXQrNTdyWjArKzZqalJ0QVVKZXVoZzVNUnROV2YrQW5wZnFlNFBNQT0="
+        "google_thought_signature": "Q2lRQkVVMHlEelBLTklBbVhKRHJ5L3VWSi85dnltTkl5VUpPNnNuVDExQmdwSExWT1lRS1dnRVJUVElQZ0hoYzNPR1FOY0pYVUZaS3Q2SjBnU1pZczNqYkxaSFNRMEVzcVJlM0xpUU5iVjgyZFRaNVVYL0p6R1V2V1pqclNDbTVPMG54d1JwNXdIb1J2MnJydlU0R1JsWUwyYndpdjVRVjZQWUNIanJIQUEycDZBcmFBUUVSVFRJUFk3T2pZYmtsVUdkSW1UT3V2RHUwdWxDRUpKeEZMa2YzYWk5TnpYNVJTT05SWVFlTkpQak1iREJDZk1TVHBETVJ2Y1ZXbkJzbUx3ZHljQUNaOHZRV1FBTmY1R2VHakpDcmdZb1NWRXJialdEZlpuMkpoeUtFTktUQ3pxYklLWEgvRE5icFAyWmxTY3dsY3ViOEo0dGRFYk0vVnUyR21jMjNneU5ZSGpKUHA0MDVvdmtEbEJYa3FUOWJjUE1ISkIxaGs0RjlsUVpkZHl5ZGtsVFlhS2JjUEZSV2Z3bXBNczM3allqbEh3bndGbFo0S3d5V2lzUGV6NDdZRjZhdlB4QmFSTnFiUElBK2cxY3YyQlh2R1dUdktsUEYxNjJRQ3I4QkFSRk5NZytZcTNrNzB2K1o3TllUT0pOV01wYjBFY2pPL0hnRGZyNXE4TUtOUU90eGlqYUU3RS9aZUNHdUNJZ1VwWWVMb2lSS3dteGtRcFJ2MEgzNzJQbmpWbkZVeTZvczgyckhvVVNtR2FvRWx5eFAwMUJob2p4WHVOaGhuZnBmYUYyMExHbXI1elRCeWZXQldlcGRWL2FIOEFJSUY3N1Rreml2U3o4c2N3RUZzSzZzbXRZUks5NFp1ak1XUExnenVVc3BLbXh4OGxWS1VYOTBpQ0hRcEp4RzhHSVVtWldhV2duTlFsaE03c0g3UmFqOWd3ZnJMaUFRamp1OTd4MEs2UUVCRVUweUQ5YnJGUnZkRGhFS0VFL01TUHhTMnI3bDV0OS8xbjdhRFQ2KzRjRDNYN0FKU2w3b3Z2R1JkVVRaZUhGWHpJN2xSVWE4WlpjL1JpTFh3MnhDaS9uRE05UVhFOUlVSWxQMDBpS0xQNGxSWGlxTmM4WksrZ0cwanBLNFZORGNGWkdsSG5aOGtMNUo0NzR0QUd3NFMvVEV4RGhvUkd4a1o0R1Y5aUt0N2lLMGVMZmhYaWtadWNIR1kyNFBuOWhxNHhSR1FHMnhoTjVDZVhWL3lqQU0wdmJybnp1aHp0Tzk3emM2L0pWaktmVFVvSEdFRVFibnR6LzhlRFBnRitlaVdSY3FqWTFYRTI2cVFqSU9BNkc0QlVjeFNpYXQrMEk2TUtLbVJFd1BZYkdiWjFJUityZittd3BPQVJGTk1nOXo4Vk55MzJrVm1wM3J0TWZmcHBzS1NJR0k1aXgyN2RTMFlOMm9qQkZFVW9PNEJ2VjJmYitKV3JUcTkwdS9tc1V0MjBLamhOcVdYekxDTkY5TFViSVAvbVVzV1FhNDUrNTI="
       }
     },
     {
@@ -277,7 +277,7 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "The tool ran successfully and returned the following response: `{\"run_me_response\": {\"content\": \"working!\"}}`"
+      "message": "The tool ran successfully and returned the following output:\n```json\n{\"run_me_response\": {\"content\": \"working!\"}}\n```"
     }
   ]
 }

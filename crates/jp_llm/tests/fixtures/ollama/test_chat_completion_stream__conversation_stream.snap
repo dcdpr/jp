@@ -224,12 +224,12 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "reasoning": "Okay, the user sent \"Test message\". This seems like a straightforward test to see if I'm responding properly.\n\nLet me check if there are any errors in my setup. Since I'm an AI model, maybe they want to confirm functionality.\n\nI should respond clearly that I received their message and offer assistance. Keep it friendly and helpful.\n\nMake sure not to include any technical details or overcomplicate the reply. Just a simple acknowledgment and offer help."
+      "reasoning": "Okay, the user sent \"Test message\". They're probably checking if I'm responding properly. Let me make sure my response is clear and friendly. Maybe they want to know how fast or well I can handle queries. Since it's just a test, I should keep it concise but acknowledge their input warmly. No need for long explanations here. Just confirm receipt with some emojis to be approachable."
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "Hello! 👋 Your test message has been received successfully.  \n\nHow can I assist you today? Feel free to ask questions, request information, or need help with anything specific! 😊"
+      "message": "Hello! 🌟 Your test message received successfully — is there anything specific you'd like help with today? 😊"
     }
   ]
 }

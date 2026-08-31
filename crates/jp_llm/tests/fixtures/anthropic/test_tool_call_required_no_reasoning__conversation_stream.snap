@@ -221,7 +221,7 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
-      "id": "toolu_01Tx82UdMEsycf3ZEowDhZcf",
+      "id": "toolu_019hRf3U5xzJoV7ufpEPgXT2",
       "name": "run_me",
       "arguments": {
         "bar": "Zm9v"
@@ -230,14 +230,14 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
-      "id": "toolu_01Tx82UdMEsycf3ZEowDhZcf",
+      "id": "toolu_019hRf3U5xzJoV7ufpEPgXT2",
       "content": "d29ya2luZyE=",
       "is_error": false
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "Great! The tool ran successfully with the argument `bar: \"foo\"` and returned the output `\"working!\"`. \n\nThe tool appears to be simple and functional - it accepted the parameter and executed without any errors."
+      "message": "Great! The tool ran successfully with the argument `bar=\"foo\"` and returned the result \"working!\""
     }
   ]
 }

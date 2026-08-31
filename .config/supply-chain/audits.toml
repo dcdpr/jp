@@ -76,6 +76,11 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 version = "0.1.5"
 
+[[audits.hashlink]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.11.0 -> 0.12.1"
+
 [[audits.htmd]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"

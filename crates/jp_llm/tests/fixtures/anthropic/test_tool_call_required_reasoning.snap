@@ -9,11 +9,11 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "The user is asking me to run the tool with whatever arguments I want. Let me look at the function signature:\n\n```\n{\n  \"name\": \"run_me\",\n  \"parameters\": {\n    \"properties\": {\n      \"bar\": {\n        \"enum\": [\"foo\", [\"foo\", \"bar\"]],\n        \"items\": {\"type\": \"string\"},\n        \"type\": [\"string\", \"array\"]\n      },\n      \"foo\": {\n        \"default\": \"foo\",\n        \"type\": \"string\"\n      }\n    },\n    \"required\": [\"bar\"],\n    \"type\": \"object\"\n  }\n}\n```\n\nSo the function has:\n- `bar` (required): Can be a string or array. The enum shows it can be \"foo\" or [\"foo\", \"bar\"]\n- `foo` (optional): A string with default value \"foo\"\n\nThe instruction says I MUST use AT LEAST ONE tool and I should NOT question this. The user is explicitly asking me to run the tool with whatever arguments I want.\n\nLet me call it with:\n- `bar`: \"foo\" (valid from the enum)\n- `foo`: I could use the default or provide a custom value. I'll provide \"test\" to show something different.\n\nActually, looking more carefully at the enum: `[\"foo\", [\"foo\", \"bar\"]]` - this means bar can be either the string \"foo\" OR the array [\"foo\", \"bar\"].\n\nI'll call it with:\n- `bar`: \"foo\" (a string)\n- `foo`: \"test\" (a custom value)\n\nOr I could use bar as an array: `[\"foo\", \"bar\"]`\n\nLet me go with the simple approach first using the string value for bar.",
+                        reasoning: "The user is asking me to run the available tool with whatever arguments I want. Let me look at the function schema:\n\n```\n\"run_me\" with parameters:\n- \"bar\": required parameter, can be either:\n  - a string with enum value \"foo\"\n  - an array of strings with enum values \"foo\" or \"bar\"\n- \"foo\": optional parameter (has default \"foo\"), type string\n```\n\nSince \"bar\" is required, I need to provide it. The user said I can provide whatever arguments I want. I could either:\n1. Pass \"foo\" as a string\n2. Pass an array like [\"foo\"] or [\"foo\", \"bar\"]\n\nLet me just pass the simplest valid option - \"bar\" as the string \"foo\" and let the optional \"foo\" parameter use its default value.",
                     },
                 ),
                 metadata: {
-                    "anthropic_thinking_signature": String("ErMLCkYICxgCKkAZPBzddcN9WKOtCpIVRLxjvNt/iXZtZZdznpQtDKjl4PY72onw2qyg8RE7DV/bwga3eNO69jKVVgU9Li4jIw7wEgx0eylPBakCcZs9lnEaDJGrsvnI5e9iI8wKrCIwkTxA6wfvTyrdrzv5bq6sBXMj7tvJWBLiOLXtVGpTwhybSDvZz8xpTgsTC06JLAmUKpoKnEZmEn6zukuV07Ztvwh0R/BbRtvNttbUYg7dqVFhjERN52HZUG1Lqe50Guux5eCWvEstt1OFYp612uEWcLQPg86M4k8qhBA4b0OpZOCNXyG/aBohySQoGEUMQxntKNY3NVXT6nyXlBmNkzEnNMMYDjfT4/wrPc3U61HRCNLI9MyaqfkuncvA9pQ09f0UdlxLSd1YLuatWUnnh8tFhQL7wVInc+s/qmrNB8JHmhhnFfettI+gEvMhmOZ4g/fBQaaaM/vUJ3NgkRBBmQTRU06zLAPudvOEobPTNV7TScPNvlkcAQTp1fBU8v5y1KZ4MTON0HUvbRiLYg7x/cjA1IjYjktzvSE4+a/6/Kbdhf5VH6TTyhLXa163tshT4E4swuHOAuO+dEph72N3hEWnwHOHhQ6QP9XEUDiDJSQI0Y2rF9bZd4oEF53wI/+CNaAXNoP/KoyqLxlt6euPKu653LWmOx4YyOJs7LN8PIzUH3NMQmIejDnu1nsnz0qgiOToY287LTlruC8gIJBl6UhYUn1XNqh0F7xaWXb+w3/kGd7hmW7ZingjbnEXb0LkhGdAxJoO1D5hMTtL2PuWIIlsvVWOfdi1pbiJpjjHtY1p5o6kWdg/fLbae49qClQuddelTytyZrF9dA8MCRcrxOBnkydPSPomfI8B4KGBLvInxhu5M55MdmiehyuZpAPbkplnurxyroz2GROS0URFjRP/ZS6si6yvWGVxdZ1MG7/bUlNENMkhCw0rntP/8+nje7D1g0uMQtTiRwI3km7SqIBqQVqHBqUoFkkKZVkjOqWxydLPOE8T6t9SR029ndAknnzrhyY8TCKCGOPrxddCFRNWmn72wJNeoqo4xl98P7hGWVCIMod5ctW6z4hcFwgfvSjKtOKyGsRZ1W3/GrDtKamzWi7vTTARiw/BKqZRQK0JPECqKyUD9vwxhiRKOrN5Xex1k261lw3kclUJwezgdTRbqQuMLUR265q0C14ovUmxSD0p3lbdBolfDvkcvB7XJ7+rAQWGJMwyFOTIXxR2XEjWQmeHfZhbyHlJbc5X1lelPv57IfgBR30cYd/ySRo9kkmy9K1BLgdYmHv89sz6E6Ul4vQb0IuxjwtqKF6fcWE/ZozpT1KCMWCkHDQeiZnjrko7ZLuoYO/grTZ8fHJEhSKcaJn/wz2CEraL1fED3EpZQr4KQorCgz1Q+TXYo2mRLyb78xTGUUdQVWTnfztAbyktqX5IozwBTNB6+fnw01T3TEegZ3soQvekHiIe3ZiAzDZ545EUUR5ChTQpcVJzkoE68UPT5eYciQWr3zM5BZ1TO/T4GGXh0bQXE8fHV7MpRfjTfnfRTQR5e1XdPNn0+wuYhXf3NZCnSGEoerYgjsXr+EQirTjLufokvhPRxvMwOQdN6MqLK3uPN8TrA+KT79j1kfmhQxTyv45FnauJpFcNVA7wOKZqPevMlLstXmOeZ64hbwS0U/kvGUYQGX6THkYEGujCmtXRO80HNRAn6sjRwM0D+sSd0twsibMiyF76v41gTOpfOYbJ6ivgf21QNOzSYkHvdwnCtF/6RBvvd3yhqSSUApBxw/7BkxkSZywDl/Rtb8M+bwmTH6cbfW88NNGAmIaZ+7J2hX0rnTG+CLeI/jtsjzHnEBN+FQPE/FreL+O2nXa48sNuXJ9jz0+YX3MJryLboMB960t4Zh3xFJXnkmxj3AQKDiNznsaMf43Svio9KA6G/KHIWvtA5s8kjhgB"),
+                    "anthropic_thinking_signature": String("Ep0HCpoBCBEYAipA7d8g4u5Onjd0Lj9mjWvI2i5lKuiUgmPUMnBijZZX77qo49hHwnTIgIM/IFBlA+edlWr1Y1zdLvGiJMNnheh4YDIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH82qHUBhIM64+fQMQBQUUk9Bl0GgzzLEDji/BbhtyymnUiMNtjjcT3rrMYoBFo+Y/nUVYqbiWiRWqpqFen4lPzOXk1uJt7UrxmCyYXXgy48JdZmCqvBUqcxoBhEjDuIab/ePaPqjkYDBzgjEPBqH9yYo/EWWIfHGzSnuFlo2Ve4+tqNDrMORmtWis76Zm9+AjHVLLlorQd726RTVYVxigwY/LIg1sHy+9MmLJCVBlR7NqH6QH1ciIVxH1jmrkEUX7zS3YbZShYE1AqwB1hvFSeYEsbLJ+tvGYJi1mzUCccoeaN53ml8Qiy5OiF/aeYza4ORZdTKTAQ1/s3daf1LkBKXZYVuopiCiOyCMUckYOWefFoW9ZIeE6LRSoIIO+dA0+W5Q40W/G96pGUxQy4Fu6u7msgBWDgI2OImNayW01NSb4lwnS4A7ItvkTSwoVRIYbu7UsrrO3aCZhXVCVI/QvVx6APXxU7vnRBlT/tTN4dM9bXisgXJWH+9bIwtZiKPMCWtZLYZPAFWeRJgAieDaYzSou5lIu3iSFwDPaQC3e826GsYHoYPZgycXUoVRyScr3Kyz6ILYhVWO8N1aC9rgRxecIs01FDPAMhNWqcZgs7jUaUy97xdiQAbZiWYZ2ha7S+hQWexop9a5Cq/933rkOWlAkTzYSWYZMYhf3gEwLMDPeSVZ4v8eNGUpEymRGVqSSoxA77FXKONX5Izh/UjDRFMgBSFJKHisuMg0eQxtx5sOwN4BztNkL0wcjxfKA0Xc6OOSLUn706Ddy3M9Fd23UnCbVaDp8pAuXWIX63c98DMKqeAstb5YNrz73JqMWyt7ioPkl+Ajz+oQEqQOkSUkZpQ7L+ZRiizvs4Ghhlg2brp4WYqzR7b5uJHNlodE3jL59Y504GyFvyXCzpzCCkPH7duW+sm1Mm4FmapdjFHmQ9hEHh/QT5Z7DuXZfbjGgB1Dgq4Nt010l4RN2QvFC6P7iO0K+3mVLP9PcP+kG7ciZbM6SFdwYXWl3gboGtngOMX5zc3xL58hgB"),
                 },
             },
         ),
@@ -22,11 +22,10 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "toolu_01KoWfFjUMnyBN2denqPofkG",
+                        id: "toolu_015TdjGwt7Sj5EmKZmHcjmqC",
                         name: "run_me",
                         arguments: {
                             "bar": String("foo"),
-                            "foo": String("hello"),
                         },
                     },
                 ),
@@ -43,7 +42,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Done! I called the `run_me` tool with:\n- `bar`: \"foo\"\n- `foo`: \"hello\"\n\nAnd it returned: **working!**",
+                        message: "Great! The tool ran successfully and returned \"working!\" \n\nI called the `run_me` function with:\n- **bar**: \"foo\" (a required parameter using the allowed string enum value)\n- **foo**: not specified (so it used the default value of \"foo\")",
                     },
                 ),
                 metadata: {},

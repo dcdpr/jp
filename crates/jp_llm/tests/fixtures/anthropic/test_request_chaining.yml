@@ -3,6 +3,7 @@ when:
   method: POST
   json_body_str: >-
     {
+      "model": "claude-haiku-4-5",
       "messages": [
         {
           "role": "user",
@@ -14,7 +15,6 @@ when:
           ]
         }
       ],
-      "model": "claude-haiku-4-5",
       "max_tokens": 1152,
       "thinking": {
         "type": "enabled",
@@ -34,196 +34,369 @@ then:
       value: text/event-stream; charset=utf-8
   body: |+
     event: message_start
-    data: {"type":"message_start","message":{"model":"claude-haiku-4-5-20251001","id":"msg_01XbKytd53sr2thA2NXe5xwS","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":56,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":5,"service_tier":"standard","inference_geo":"not_available"}}            }
+    data: {"type":"message_start","message":{"model":"claude-haiku-4-5-20251001","id":"msg_011CeG89FQRMfwLpCLYApZ9H","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":56,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":4,"service_tier":"standard","inference_geo":"not_available"}}             }
     
     event: content_block_start
-    data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}      }
+    data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}             }
     
     event: ping
     data: {"type": "ping"}
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"This is an interesting topic"}               }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"This is a request"}  }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" that combines the traditional Japanese art of kirigami (cutting and folding paper) with modern parachute design. I'll need to cover"}   }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" for a"}          }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":":\n\n1. What kirigami is\n2. What parachutes are and how they work\n3. The history of kirigami-inspired parachute"}        }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" 2000-word explainer about"}     }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" research\n4. The specific advantages of kirigami-inspired designs\n5. The science behind why they work\n6. Real-world applications"}}
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" Kirigami-inspired parach"}        }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n7. Future possibilities\n\nLet me aim for approximately 2000 words and make this comprehensive and engaging."}         }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"utes. Let"}   }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"Er0FCmMIDBgCKkCNUOEgl8HdGRJ+KR0/c/ezW66npLSeETiFG78UhTG/fMLOOujTqXK0+sMqig5FuVGTu7r10d2CJL9rOQhhQ00xMhljbGF1ZGUtaGFpa3UtNC01LTIwMjUxMDAxOAASDDPu1695RjBM0o0dIhoMVCotSeLI9hN2reKKIjA1V76eETHTeuA6Gc4my+lB7aTtL5jOlHZIRZnQl4zJyGB1LjEK0ddBExAExybex0gqhwQ1xD1YCVTznY91CFEuIFl9aR3FHhxVtoIIYfjTSw5L9rOLPMtTVbCQ9Vt7rj0mlcbsqQJh8an1I9Xejl7wFuIKCwpwMETmHv6eLtH/tDpMZC42DlZa5riRGCkG0Br4pKKDUjoJuXd3JRfT6D1E0q706YVn67W0SJnyU+0p7RXcL0ws2AozGcWVWCKVKOZi1F9Bj8eQtYNfVUDH9guhG5UNEGzphCrSesTe6JrkL8Yj1pIYPDwLQW0ksT57IgmRIXhLiL0Xb4TthLPwthWfipqU/3g7l2U4DqizLWKDmuxG9XG9Db2oHAV4e4/QevPr3Wkx4uI3yGd1riLnhHbeEnKxYpVHz4Rbhxf7YAR2jNdVF5DIizSvPIX3zViIxDgXVWxQ8FALMSaektkWFSMUJ83g1N3/68MhAzcLtHC+IA1gUgijYC75n1S+aUKzOS5zpT+S+nGAarQ0CUFM4YrHND8x0l15T/0uJYC1HPHiLipyDSk2BlSF6kvWVMMpoapM41tJvXZKfc+DK5JXAN1sQZtr5eLZVVftVvQOn2D4KdLVbIO8vXY3ulnqXap6VNMI24cWkw8BTJ4u24TqgGOW7c+LRE4yPga5/bsKRPq3+5MCIRIdB8ZOpw84Sg7KqWj9NcCaGETlxu3b2YbOjuAXatrTl5NYwNXM40UtSskG+NzGwdN2c5BrXHgYAQ=="}   }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" me break this down:\n\n1."}      }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" Kirigami -"}               }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" the"}  }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" Japanese"}              }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" art of cutting"}    }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" and folding paper\n2. How this inspires parachute design\n3. The engineering principles\n4. Applications\n5. Advantages and challenges\n\nLet me write"}             }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" a comprehensive explainer covering these topics."}}
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"EtIECpoBCBEYAipAA71lV96P7rUMBkRC6dr7S7jLj5V/V+uqmJCx6o53QlkwweCComo4UY0KHecxN+E1YzeeGIPK3jRyGDaE19c+djIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH12qHUBhIMETDzAo1IKKnaECDaGgy5S/K2LO4dgpuoLy8iMKLQCGC6otFJG8lMtZ81aqjDg3ZzeFJMEg+BZbvJskjYUGszoNoKACZh9RT4OLWaGCrkAhf1Y5bF64pVI5NmDqyxj7FgW8VzGALY6OcvYjp29UCenxsx7a9SOi91QuLnNyKDJ+0Ua7/xkBUm9zfvWIK7L+u/JJygi7OHBooWmIkM1KJATRZkeDhWgF/KV1g8nJSHZ70s1ulEdUTIrtQHbxzmAnmYN7z72NTOzXLICfoH96MDsli++5mGzqk3Z9b8JBUPj1Wt0b4a2S3PgbtczCvsW7+wNRbphPazvVwoJuaUHhYQ4WylJ9H4X0k+L5k8RFsUYCFmG/KJU7ghGdYnHWy46g7CjWdZAkbKlRCa+BvTxspuuygn1wwSW/JeCjITMAObhH5GkVrtDaIrNmc9h8H929FpNbFXIqCpJEG6a2HT1gxdpJJpqlQ3FjiIUJ8OhRZVxzdYGjSVBLiVAAwBrgezrqY8Uoutl1FJe2dDnJyQE9nXM8e/RBO+/KJRMgT7AB2Lo1ahLRrPevnlwbstDkw6G7S3hxi8GAE="}       }
     
     event: content_block_stop
-    data: {"type":"content_block_stop","index":0}
+    data: {"type":"content_block_stop","index":0  }
     
     event: content_block_start
-    data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}            }
+    data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}        }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"# Kirigami-"}          }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"# Kirigami-Inspired Parachutes: Where Ancient Art Meets Modern Engineering\n\n## Introduction\n\nImagine taking an ancient"}         }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Inspired Parachutes: Where Ancient Art Meets Modern Engineering\n\n## Introduction\n\nIn a fascinating"}       }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Japanese paper-folding art form and using it to revolutionize how we design parachutes. This seemingly unlikely intersection of traditional craftsmanship and cutting"}}
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" convergence of traditional Japanese art and cutting-edge aerospace engineering, scientists and engineers have begun developing parachutes inspired by ki"}         }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"-edge aerospace engineering represents one of the most innovative developments in recent materials science and mechanical design. Kirigami-inspired parachutes demonstrate how insights from nature and"}           }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"rigami—the ancient practice of cutting and folding paper to create intricate three-dimensional designs. This innovative approach has the"} }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" traditional arts can solve complex engineering challenges, offering improved safety, performance, and adaptability for everything from drone deployment to Mars rover landing"}              }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" potential to revolutionize how we think about parachute design, emergency descent systems, and even robotic exploration of other"}            }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" systems.\n\n## Understanding Kirigami: The Foundation\n\nBefore we can appreciate how kirigami inspires parachute design, we must first understand what kirigami actually is. Often confused"}              }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" planets. By drawing inspiration from a centuries-old craft, researchers are creating"}        }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" with its more famous cousin origami—the art of folding paper without cutting—kirigami incorporates both folding and cutting to create complex three"}    }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" parachutes that are lighter, more reliable, and capable of handling extreme conditions that traditional designs struggle"}   }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"-dimensional structures from flat sheets.\n\nThe word \"kirigami\" comes from two Japanese terms: \"kiri\" (cutting) and \"kami\" (paper). Unlike origami, which relies"}       }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" with.\n\n## Understanding Kirigami\n\nBefore exploring kirigami-inspired parachutes, it's essential to understand ki"}            }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" solely on folds to create shape and structure, kirigami allows artists to cut strategic lines and sections"}          }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"rigami itself. Kirigami, which comes from the Japanese words \"kiru\" (to cut) and \""}}
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" from paper, then fold the remaining material to achieve designs of remarkable complexity and functionality. Traditional"}   }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"kami\" (paper), is a variation of the more well-known origami art form. While origami relies"} }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" kirigami creates pop-up cards, decorative lanterns, and intricate architectural models.\n\nThe genius of kirigami lies in its fundamental principle: by removing"}             }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" purely on folding paper without cutting, kirigami incorporates cuts and slits into the folding process, creating more"}  }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" material strategically and creating specific fold patterns, you can control how a flat object transforms in three-"}        }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" complex three-dimensional structures. These carefully placed cuts allow paper to transform into"}              }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"dimensional space. This principle—controlling transformation and behavior through intelligent design of cuts and folds—translates remark"}           }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" intricate geometric patterns and functional shapes that would be impossible to achieve through fol"} }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ably well to engineering challenges.\n\n## The Problem with Traditional Parachutes\n\nTo understand why researchers became interested in kirigami-inspired parachute design, we need to examine the limitations"}    }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ding alone.\n\nThe beauty of kirigami lies in its mathematical precision and structural elegance. By strategically cutting and folding flat"}  }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" of conventional parachutes. Traditional round parachutes, the standard since their widespread adoption in World War II, operate on straightforward principles: deploy, catch"}         }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" materials, artists and engineers can create structures with remarkable strength"}         }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" air, slow descent.\n\nHowever, traditional parachutes face several constraints:\n\n**Limited Packing Efficiency"} }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"-to-weight ratios, excellent stability properties, and the ability to absorb and distribute forces efficiently. These properties have"}        }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"**: Conventional parachutes require significant volume when packed, limiting how many can be stored or carried. The fabric"}           }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" caught the attention of researchers looking for new solutions to fundamental engineering challenges.\n\n## Traditional Parachute Design and Its"}         }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" must be carefully folded and packed to prevent damage and ensure proper deployment.\n\n**Deployment Issues**: Traditional parachutes can experience opening shock"}  }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Limitations\n\nTo understand why kirigami-inspired parachutes represent an advancement, it"}      }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"—a sudden jolt when the canopy fully inflates. This shock can damage cargo, injure jum"}               }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"'s important to grasp how conventional parachutes work. A traditional parachute operates"}         }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"pers, and stress the deployment mechanism.\n\n**Limited Adaptability**: Once deployed, a traditional parachute's aerodynamic properties are relatively fixed. It cannot adjust its behavior"}              }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" through a simple but elegant principle: when deployed, its large fabric can"}    }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" based on changing conditions.\n\n**Descent Rate Control**: Traditional parachutes offer limited control over descent rates without complex additional systems like v"}               }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"opy catches air, creating drag that slows an object's descent. The canopy is"}  }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ents or steerable designs.\n\n**Pack-to-Performance Ratio**: The ratio between packed volume and deployed"}         }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" typically hemispherical or conical in shape, designed to provide maximum surface area while maintaining aer"} }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" size is constrained by the laws of physics and fabric properties.\n\n## The Kirigami Solution: Principles and Advantages\n\nIn the early 2020"}           }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"odynamic stability.\n\nHowever, traditional parachutes have several limitations:\n\n**Deployment Challenges**: Large parachutes require significant space"} }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"s, researchers at institutions including MIT and other universities began exploring how kirigami design principles could address these parachute limitations. The breakthrough insight"}           }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" for packing and can be difficult to deploy reliably, especially in emergency situations where reliability"}             }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" was elegantly simple: if you cut and fold a sheet of material in specific patterns, you can create a structure that"}            }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" is critical. The canopy must unfold perfectly, and any tangles or ma"}  }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":":\n\n1. **Packs more compactly** because strategic cuts allow the material to fold more efficiently without bun"}      }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"lfunctions can be catastrophic.\n\n**Material Constraints**: Traditional parachutes require specialized materials that are strong, lightweight, and durable. These materials can"}              }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ching\n2. **Deploys more gradually** because the cuts create sequential unfolding patterns that reduce opening shock\n3. **Adjusts aerodynamic"}               }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" be expensive and have limited availability, which can increase costs and restrict"}              }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" properties** by controlling which sections deploy when\n4. **Maximizes surface area** relative to packed volume through intelligent three-dimensional geometry"}             }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" their use in certain applications.\n\n**Structural Vulnerability**: The fabric canopy is susceptible to tears and damage from sharp objects or extreme"}              }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"\n5. **Distributes stress** more evenly across the structure through strategic load paths\n\n### The Cutting Strategy\n\nThe fundamental innovation involves determining"}}
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" environmental conditions. Once damaged, the parachute's effectiveness is compromised.\n\n**Weight and Packaging**: To be effective"}  }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" where and how to cut the parachute fabric before folding it. These cuts aren't random—they're mathematically optimized based"}               }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":", parachutes must be quite large, making them heavy and requiring substantial packing space. This is"}   }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" on several factors:\n\n- **Deployment sequence**: Cuts are positioned so that different sections inflate in a"}         }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" particularly problematic for applications with strict weight and volume constraints, such as space missions"}    }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" controlled sequence rather than all at once\n- **Load distribution**: Cuts create patterns that direct stress along specific paths, similar to how bone"} }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" or high-altitude research platforms.\n\n**Limited Operational Envelope**: Traditional parachutes are designed for relatively narrow operational parameters. Deplo"}        }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" structure directs stress in biological systems\n- **Geometric efficiency**: The cuts enable the parachute to achieve greater surface area in a more compact packed"}            }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ying them in extremely high winds, at unusual angles, or in other non-ideal conditions can lead"}            }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" state\n\nResearchers use computational modeling and origami mathematics to design these cut patterns. The mathematics of kirigami involves complex calculations about"}               }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" to failures.\n\n## The Kirigami Innovation\n\nResearchers, particularly those at"}         }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" how materials can fold in three-dimensional space and how cuts affect this behavior.\n\n## How Kirigami Parachutes Work\n\nWhen a kirigami-"} }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" institutions like MIT and the University of Illinois, began investigating whether kirigami's design"}       }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"inspired parachute is deployed, the sequence of events differs markedly from traditional parachutes:\n\n**Initial Deployment**: The parachute begins opening, but because of the cut patterns"}          }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" principles could overcome these limitations. The fundamental insight was that the strategically placed cuts in kirigami designs create materials"}          }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" with unique mechanical properties—they can stretch, conform"}       }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":", and distribute forces in ways that uncut sheets cannot.\n\nThe key breakthrough came when researchers realized that a"}              }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" flat sheet of material with kirigami cuts could be folded and compacted much more efficiently than a"}   }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" large parachute canopy, yet still deploy into a complex"}           }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" three-dimensional structure that provides exceptional aerodynamic properties. The cuts"}          }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" allow the material to expand and unfold naturally during deployment without tangling,"}    }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" while maintaining structural integrity.\n\nIn kirigami-inspired parachute designs, strateg"}              }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ically placed cuts are made in a lightweight material (such as thin plastic, composite material"}         }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":", or specially treated fabric). These cuts are arranged in geometric patterns—often involving"}          }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" parallel slits, radial patterns, or combinations thereof. When"}     }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" the parachute deploys, these cuts allow the material to expand uniformly in all directions while preventing over"} }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"-extension and tearing. The material naturally forms a three-dimensional structure without"}     }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" requiring elaborate deployment mechanisms.\n\n## The Science Behind Kirigami-Inspired Parachutes\n\nThe effectiveness of kirigami-inspired parachutes stems from several interconn"}   }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ected mechanical principles:\n\n**Stress Distribution**: The cuts in a kirigami sheet act as stress risers and redistribution channels"}  }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":". When forces are applied to"}      }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":", only certain sections inflate immediately. The cuts act as flex points, allowing controlled unfolding rather than violent inflation.\n\n**Progressive Inflation**: As air"}    }
     
     event: content_block_stop
-    data: {"type":"content_block_stop","index":1               }
+    data: {"type":"content_block_stop","index":1}
     
     event: message_delta
-    data: {"type":"message_delta","delta":{"stop_reason":"max_tokens","stop_sequence":null,"stop_details":null},"usage":{"input_tokens":56,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1152}   }
+    data: {"type":"message_delta","delta":{"stop_reason":"max_tokens","stop_sequence":null,"stop_details":null},"usage":{"input_tokens":56,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1152,"output_tokens_details":{"thinking_tokens":92}}  }
+    
+    event: message_stop
+    data: {"type":"message_stop"           }
+    
+---
+when:
+  path: /v1/messages
+  method: POST
+  json_body_str: >-
+    {
+      "model": "claude-haiku-4-5",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Give me a 2000 word explainer about Kirigami-inspired parachutes"
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "This is a request for a 2000-word explainer about Kirigami-inspired parachutes. Let me break this down:\n\n1. Kirigami - the Japanese art of cutting and folding paper\n2. How this inspires parachute design\n3. The engineering principles\n4. Applications\n5. Advantages and challenges\n\nLet me write a comprehensive explainer covering these topics.",
+              "signature": "EtIECpoBCBEYAipAA71lV96P7rUMBkRC6dr7S7jLj5V/V+uqmJCx6o53QlkwweCComo4UY0KHecxN+E1YzeeGIPK3jRyGDaE19c+djIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH12qHUBhIMETDzAo1IKKnaECDaGgy5S/K2LO4dgpuoLy8iMKLQCGC6otFJG8lMtZ81aqjDg3ZzeFJMEg+BZbvJskjYUGszoNoKACZh9RT4OLWaGCrkAhf1Y5bF64pVI5NmDqyxj7FgW8VzGALY6OcvYjp29UCenxsx7a9SOi91QuLnNyKDJ+0Ua7/xkBUm9zfvWIK7L+u/JJygi7OHBooWmIkM1KJATRZkeDhWgF/KV1g8nJSHZ70s1ulEdUTIrtQHbxzmAnmYN7z72NTOzXLICfoH96MDsli++5mGzqk3Z9b8JBUPj1Wt0b4a2S3PgbtczCvsW7+wNRbphPazvVwoJuaUHhYQ4WylJ9H4X0k+L5k8RFsUYCFmG/KJU7ghGdYnHWy46g7CjWdZAkbKlRCa+BvTxspuuygn1wwSW/JeCjITMAObhH5GkVrtDaIrNmc9h8H929FpNbFXIqCpJEG6a2HT1gxdpJJpqlQ3FjiIUJ8OhRZVxzdYGjSVBLiVAAwBrgezrqY8Uoutl1FJe2dDnJyQE9nXM8e/RBO+/KJRMgT7AB2Lo1ahLRrPevnlwbstDkw6G7S3hxi8GAE="
+            },
+            {
+              "type": "text",
+              "text": "# Kirigami-Inspired Parachutes: Where Ancient Art Meets Modern Engineering\n\n## Introduction\n\nImagine taking an ancient Japanese paper-folding art form and using it to revolutionize how we design parachutes. This seemingly unlikely intersection of traditional craftsmanship and cutting-edge aerospace engineering represents one of the most innovative developments in recent materials science and mechanical design. Kirigami-inspired parachutes demonstrate how insights from nature and traditional arts can solve complex engineering challenges, offering improved safety, performance, and adaptability for everything from drone deployment to Mars rover landing systems.\n\n## Understanding Kirigami: The Foundation\n\nBefore we can appreciate how kirigami inspires parachute design, we must first understand what kirigami actually is. Often confused with its more famous cousin origami—the art of folding paper without cutting—kirigami incorporates both folding and cutting to create complex three-dimensional structures from flat sheets.\n\nThe word \"kirigami\" comes from two Japanese terms: \"kiri\" (cutting) and \"kami\" (paper). Unlike origami, which relies solely on folds to create shape and structure, kirigami allows artists to cut strategic lines and sections from paper, then fold the remaining material to achieve designs of remarkable complexity and functionality. Traditional kirigami creates pop-up cards, decorative lanterns, and intricate architectural models.\n\nThe genius of kirigami lies in its fundamental principle: by removing material strategically and creating specific fold patterns, you can control how a flat object transforms in three-dimensional space. This principle—controlling transformation and behavior through intelligent design of cuts and folds—translates remarkably well to engineering challenges.\n\n## The Problem with Traditional Parachutes\n\nTo understand why researchers became interested in kirigami-inspired parachute design, we need to examine the limitations of conventional parachutes. Traditional round parachutes, the standard since their widespread adoption in World War II, operate on straightforward principles: deploy, catch air, slow descent.\n\nHowever, traditional parachutes face several constraints:\n\n**Limited Packing Efficiency**: Conventional parachutes require significant volume when packed, limiting how many can be stored or carried. The fabric must be carefully folded and packed to prevent damage and ensure proper deployment.\n\n**Deployment Issues**: Traditional parachutes can experience opening shock—a sudden jolt when the canopy fully inflates. This shock can damage cargo, injure jumpers, and stress the deployment mechanism.\n\n**Limited Adaptability**: Once deployed, a traditional parachute's aerodynamic properties are relatively fixed. It cannot adjust its behavior based on changing conditions.\n\n**Descent Rate Control**: Traditional parachutes offer limited control over descent rates without complex additional systems like vents or steerable designs.\n\n**Pack-to-Performance Ratio**: The ratio between packed volume and deployed size is constrained by the laws of physics and fabric properties.\n\n## The Kirigami Solution: Principles and Advantages\n\nIn the early 2020s, researchers at institutions including MIT and other universities began exploring how kirigami design principles could address these parachute limitations. The breakthrough insight was elegantly simple: if you cut and fold a sheet of material in specific patterns, you can create a structure that:\n\n1. **Packs more compactly** because strategic cuts allow the material to fold more efficiently without bunching\n2. **Deploys more gradually** because the cuts create sequential unfolding patterns that reduce opening shock\n3. **Adjusts aerodynamic properties** by controlling which sections deploy when\n4. **Maximizes surface area** relative to packed volume through intelligent three-dimensional geometry\n5. **Distributes stress** more evenly across the structure through strategic load paths\n\n### The Cutting Strategy\n\nThe fundamental innovation involves determining where and how to cut the parachute fabric before folding it. These cuts aren't random—they're mathematically optimized based on several factors:\n\n- **Deployment sequence**: Cuts are positioned so that different sections inflate in a controlled sequence rather than all at once\n- **Load distribution**: Cuts create patterns that direct stress along specific paths, similar to how bone structure directs stress in biological systems\n- **Geometric efficiency**: The cuts enable the parachute to achieve greater surface area in a more compact packed state\n\nResearchers use computational modeling and origami mathematics to design these cut patterns. The mathematics of kirigami involves complex calculations about how materials can fold in three-dimensional space and how cuts affect this behavior.\n\n## How Kirigami Parachutes Work\n\nWhen a kirigami-inspired parachute is deployed, the sequence of events differs markedly from traditional parachutes:\n\n**Initial Deployment**: The parachute begins opening, but because of the cut patterns, only certain sections inflate immediately. The cuts act as flex points, allowing controlled unfolding rather than violent inflation.\n\n**Progressive Inflation**: As air"
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Please continue from where you left off. DO NOT reason or mention being asked to continue the conversation, just do it. YOU MUST repeat between 10 and 100 characters from the end of the previous message, so that our system can find the correct merge point between the two messages."
+            }
+          ]
+        }
+      ],
+      "max_tokens": 1152,
+      "thinking": {
+        "type": "enabled",
+        "budget_tokens": 1024,
+        "display": "summarized"
+      },
+      "stream": true,
+      "cache_control": {
+        "type": "ephemeral",
+        "ttl": "5m"
+      }
+    }
+then:
+  status: 200
+  header:
+    - name: content-type
+      value: text/event-stream; charset=utf-8
+  body: |+
+    event: message_start
+    data: {"type":"message_start","message":{"model":"claude-haiku-4-5-20251001","id":"msg_011CeG8AH8P89yuzRSPk2oe1","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":1179,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":7,"service_tier":"standard","inference_geo":"not_available"}}      }
+    
+    event: content_block_start
+    data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}    }
+    
+    event: ping
+    data: {"type": "ping"}
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"The user wants me to continue the"}     }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" text from where I left off. They're asking me to NOT mention being asked to continue, just do it naturally. They also want me to repeat between 10 and 100 characters from the end of the previous message so their"}}
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" system can find the merge point.\n\nThe previous message ended with:\n\"**Progressive Inflation**: As air\"\n\nLet me count the characters from the end. I should go"}            }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" back about 10-100 characters. Let me take a good chunk from the end:\n\n\"**Initial Deployment**: The parachute begins opening, but because of the cut patterns, only certain sections inflate immediately. The"} }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" cuts act as flex points, allowing controlled unfolding rather than violent inflation.\n\n**Progressive Inflation**: As air\"\n\nI'll start my continuation with this and continue naturally"} }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":". Let me count: \"**Initial Deployment**: The parachute begins opening, but because of the cut patterns, only certain sections inflate immediately. The cuts act as flex points, allowing controlled unfolding rather than violent inflation.\n\n**Progressive Inflation**: As air\" \n\nActually"}    }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":", let me be more precise. The user said between 10-100 characters from the END of the previous message. The end is \"**Progressive Inflation**: As air\"\n\nThat's approximately 35 characters already,"}          }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" so I could use that much. Let me include a bit more context from before it.\n\nI'll repeat: \"**Initial Deployment**: The parachute begins opening, but because of"}       }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" the cut patterns, only certain sections inflate immediately. The cuts act as flex points, allowing controlled unfolding rather than violent inflation.\n\n**Progressive Inflation**: As air\"\n\nThis gives them the merge point while I continue naturally"}           }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" with the content."}               }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"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"}   }
+    
+    event: content_block_stop
+    data: {"type":"content_block_stop","index":0   }
+    
+    event: content_block_start
+    data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}          }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"**Initial Deployment**: The parachute begins opening, but because of the cut patterns, only certain sections inflate immediately. The cuts act as flex points, allowing controlled unfolding rather than violent inflation.\n\n**Progressive Inflation**: As air continues to fill the canopy, the cuts"}               }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" unfold sequentially. This staged inflation dramatically reduces the opening shock experienced by cargo and personnel. Instead"}         }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" of a sudden jolt, there's a more gradual deceleration that distributes forces over a longer time period.\n\n**Optimized Geometry**: The three"}            }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"-dimensional shape that emerges from the cuts and folds creates improved aerodynamic properties. The multiple surfaces and angles can generate"}               }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" more efficient drag coefficients than traditional hemispherical canopies, potentially allowing for better control and stability during descent"}              }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":".\n\n**Adaptive Performance**: Because different sections can inflate at different rates, operators can potentially influence descent characteristics by controlling deployment sequences. This adapt"}        }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ability opens possibilities for precision landing that traditional parachutes cannot match.\n\n## Real-World Applications\n\nThe theoretical advantages of kirigami parachutes have caught the attention of multiple"}         }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" industries and research sectors:\n\n### Aerial Logistics and Drone Delivery\n\nCommercial drone companies are exploring kirigami-inspired designs for delivering packages."}             }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" The improved packing efficiency means smaller, lighter delivery drones can carry larger parachutes for emergency deployment. The"}  }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" gentler opening characteristics reduce stress on packages, making it possible to safely deploy items that might"}           }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" be damaged by traditional parachute opening shock.\n\n### Space Exploration\n\nNASA and other space agencies have shown particular interest in kirigami parachutes for Mars missions and"}      }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" lunar lander systems. The Mars Perseverance rover, for instance, used traditional parachute technology, but ki"}         }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"rigami designs could enable landing heavier payloads in the thin Martian atmosphere. The controlled deployment sequence could be"}      }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" calibrated for Martian conditions, and the compact packing would save crucial space and weight in spacecraft design"}           }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":".\n\n### Military and Defense Applications\n\nDefense departments recognize the potential of kirigami parachutes for precision payload delivery, rapid insertion operations, and emergency"}    }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" evacuation systems. The ability to control descent rates and reduce opening shock has applications in airborne operations where precision and personnel safety are paramount.\n\n### Personal"}      }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Parachute Systems\n\nHigh-altitude jumpers and BASE jumpers represent another potential market. The more"} }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" compact packing of kirigami parachutes means lighter systems, while the gentler opening characteristics could reduce injuries associated with parachute deployment at extreme"}        }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" altitudes.\n\n### Disaster Relief and Humanitarian Aid\n\nIn emergency situations, the ability to pack more parachutes into a given aircraft volume"}      }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" could dramatically increase the amount of supplies that can be delivered to disaster zones. The reduced opening shock also means more frag"}       }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ile items—medical equipment, electronics, food—can be safely delivered via parachute.\n\n## Technical Challenges and Ongoing Research\n\nDespite the promising potential"} }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":", kirigami parachute development faces several significant challenges:\n\n**Material Durability**: While paper works well for demonstrating kirigami principles, parachutes require"}          }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" materials that can withstand extreme forces, repeated use, and harsh environmental conditions. Researchers are testing advanced"}}
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" fabrics, composites, and even smart materials that can perform like traditional parachute materials while maintaining the structural benefits of kirigami design"}     }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":".\n\n**Scale and Manufacturing**: Creating kirigami patterns in large parachutes presents manufacturing challenges. Laboratory prototypes are one"}           }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" thing; producing parachutes at the scale needed for actual deployment is another. Researchers are developing industrial cutting and folding techniques that can precisely create these patterns at scale.\n\n**"}  }
+    
+    event: content_block_delta
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Fold Consistency**: Every fold must be precise."}   }
+    
+    event: content_block_stop
+    data: {"type":"content_block_stop","index":1      }
+    
+    event: message_delta
+    data: {"type":"message_delta","delta":{"stop_reason":"max_tokens","stop_sequence":null,"stop_details":null},"usage":{"input_tokens":1179,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1152,"output_tokens_details":{"thinking_tokens":377}}        }
     
     event: message_stop
     data: {"type":"message_stop"             }
@@ -234,6 +407,7 @@ when:
   method: POST
   json_body_str: >-
     {
+      "model": "claude-haiku-4-5",
       "messages": [
         {
           "role": "user",
@@ -249,12 +423,35 @@ when:
           "content": [
             {
               "type": "thinking",
-              "thinking": "This is an interesting topic that combines the traditional Japanese art of kirigami (cutting and folding paper) with modern parachute design. I'll need to cover:\n\n1. What kirigami is\n2. What parachutes are and how they work\n3. The history of kirigami-inspired parachute research\n4. The specific advantages of kirigami-inspired designs\n5. The science behind why they work\n6. Real-world applications\n7. Future possibilities\n\nLet me aim for approximately 2000 words and make this comprehensive and engaging.",
-              "signature": "Er0FCmMIDBgCKkCNUOEgl8HdGRJ+KR0/c/ezW66npLSeETiFG78UhTG/fMLOOujTqXK0+sMqig5FuVGTu7r10d2CJL9rOQhhQ00xMhljbGF1ZGUtaGFpa3UtNC01LTIwMjUxMDAxOAASDDPu1695RjBM0o0dIhoMVCotSeLI9hN2reKKIjA1V76eETHTeuA6Gc4my+lB7aTtL5jOlHZIRZnQl4zJyGB1LjEK0ddBExAExybex0gqhwQ1xD1YCVTznY91CFEuIFl9aR3FHhxVtoIIYfjTSw5L9rOLPMtTVbCQ9Vt7rj0mlcbsqQJh8an1I9Xejl7wFuIKCwpwMETmHv6eLtH/tDpMZC42DlZa5riRGCkG0Br4pKKDUjoJuXd3JRfT6D1E0q706YVn67W0SJnyU+0p7RXcL0ws2AozGcWVWCKVKOZi1F9Bj8eQtYNfVUDH9guhG5UNEGzphCrSesTe6JrkL8Yj1pIYPDwLQW0ksT57IgmRIXhLiL0Xb4TthLPwthWfipqU/3g7l2U4DqizLWKDmuxG9XG9Db2oHAV4e4/QevPr3Wkx4uI3yGd1riLnhHbeEnKxYpVHz4Rbhxf7YAR2jNdVF5DIizSvPIX3zViIxDgXVWxQ8FALMSaektkWFSMUJ83g1N3/68MhAzcLtHC+IA1gUgijYC75n1S+aUKzOS5zpT+S+nGAarQ0CUFM4YrHND8x0l15T/0uJYC1HPHiLipyDSk2BlSF6kvWVMMpoapM41tJvXZKfc+DK5JXAN1sQZtr5eLZVVftVvQOn2D4KdLVbIO8vXY3ulnqXap6VNMI24cWkw8BTJ4u24TqgGOW7c+LRE4yPga5/bsKRPq3+5MCIRIdB8ZOpw84Sg7KqWj9NcCaGETlxu3b2YbOjuAXatrTl5NYwNXM40UtSskG+NzGwdN2c5BrXHgYAQ=="
+              "thinking": "This is a request for a 2000-word explainer about Kirigami-inspired parachutes. Let me break this down:\n\n1. Kirigami - the Japanese art of cutting and folding paper\n2. How this inspires parachute design\n3. The engineering principles\n4. Applications\n5. Advantages and challenges\n\nLet me write a comprehensive explainer covering these topics.",
+              "signature": "EtIECpoBCBEYAipAA71lV96P7rUMBkRC6dr7S7jLj5V/V+uqmJCx6o53QlkwweCComo4UY0KHecxN+E1YzeeGIPK3jRyGDaE19c+djIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAH12qHUBhIMETDzAo1IKKnaECDaGgy5S/K2LO4dgpuoLy8iMKLQCGC6otFJG8lMtZ81aqjDg3ZzeFJMEg+BZbvJskjYUGszoNoKACZh9RT4OLWaGCrkAhf1Y5bF64pVI5NmDqyxj7FgW8VzGALY6OcvYjp29UCenxsx7a9SOi91QuLnNyKDJ+0Ua7/xkBUm9zfvWIK7L+u/JJygi7OHBooWmIkM1KJATRZkeDhWgF/KV1g8nJSHZ70s1ulEdUTIrtQHbxzmAnmYN7z72NTOzXLICfoH96MDsli++5mGzqk3Z9b8JBUPj1Wt0b4a2S3PgbtczCvsW7+wNRbphPazvVwoJuaUHhYQ4WylJ9H4X0k+L5k8RFsUYCFmG/KJU7ghGdYnHWy46g7CjWdZAkbKlRCa+BvTxspuuygn1wwSW/JeCjITMAObhH5GkVrtDaIrNmc9h8H929FpNbFXIqCpJEG6a2HT1gxdpJJpqlQ3FjiIUJ8OhRZVxzdYGjSVBLiVAAwBrgezrqY8Uoutl1FJe2dDnJyQE9nXM8e/RBO+/KJRMgT7AB2Lo1ahLRrPevnlwbstDkw6G7S3hxi8GAE="
             },
             {
               "type": "text",
-              "text": "# Kirigami-Inspired Parachutes: Where Ancient Art Meets Modern Engineering\n\n## Introduction\n\nIn a fascinating convergence of traditional Japanese art and cutting-edge aerospace engineering, scientists and engineers have begun developing parachutes inspired by kirigami—the ancient practice of cutting and folding paper to create intricate three-dimensional designs. This innovative approach has the potential to revolutionize how we think about parachute design, emergency descent systems, and even robotic exploration of other planets. By drawing inspiration from a centuries-old craft, researchers are creating parachutes that are lighter, more reliable, and capable of handling extreme conditions that traditional designs struggle with.\n\n## Understanding Kirigami\n\nBefore exploring kirigami-inspired parachutes, it's essential to understand kirigami itself. Kirigami, which comes from the Japanese words \"kiru\" (to cut) and \"kami\" (paper), is a variation of the more well-known origami art form. While origami relies purely on folding paper without cutting, kirigami incorporates cuts and slits into the folding process, creating more complex three-dimensional structures. These carefully placed cuts allow paper to transform into intricate geometric patterns and functional shapes that would be impossible to achieve through folding alone.\n\nThe beauty of kirigami lies in its mathematical precision and structural elegance. By strategically cutting and folding flat materials, artists and engineers can create structures with remarkable strength-to-weight ratios, excellent stability properties, and the ability to absorb and distribute forces efficiently. These properties have caught the attention of researchers looking for new solutions to fundamental engineering challenges.\n\n## Traditional Parachute Design and Its Limitations\n\nTo understand why kirigami-inspired parachutes represent an advancement, it's important to grasp how conventional parachutes work. A traditional parachute operates through a simple but elegant principle: when deployed, its large fabric canopy catches air, creating drag that slows an object's descent. The canopy is typically hemispherical or conical in shape, designed to provide maximum surface area while maintaining aerodynamic stability.\n\nHowever, traditional parachutes have several limitations:\n\n**Deployment Challenges**: Large parachutes require significant space for packing and can be difficult to deploy reliably, especially in emergency situations where reliability is critical. The canopy must unfold perfectly, and any tangles or malfunctions can be catastrophic.\n\n**Material Constraints**: Traditional parachutes require specialized materials that are strong, lightweight, and durable. These materials can be expensive and have limited availability, which can increase costs and restrict their use in certain applications.\n\n**Structural Vulnerability**: The fabric canopy is susceptible to tears and damage from sharp objects or extreme environmental conditions. Once damaged, the parachute's effectiveness is compromised.\n\n**Weight and Packaging**: To be effective, parachutes must be quite large, making them heavy and requiring substantial packing space. This is particularly problematic for applications with strict weight and volume constraints, such as space missions or high-altitude research platforms.\n\n**Limited Operational Envelope**: Traditional parachutes are designed for relatively narrow operational parameters. Deploying them in extremely high winds, at unusual angles, or in other non-ideal conditions can lead to failures.\n\n## The Kirigami Innovation\n\nResearchers, particularly those at institutions like MIT and the University of Illinois, began investigating whether kirigami's design principles could overcome these limitations. The fundamental insight was that the strategically placed cuts in kirigami designs create materials with unique mechanical properties—they can stretch, conform, and distribute forces in ways that uncut sheets cannot.\n\nThe key breakthrough came when researchers realized that a flat sheet of material with kirigami cuts could be folded and compacted much more efficiently than a large parachute canopy, yet still deploy into a complex three-dimensional structure that provides exceptional aerodynamic properties. The cuts allow the material to expand and unfold naturally during deployment without tangling, while maintaining structural integrity.\n\nIn kirigami-inspired parachute designs, strategically placed cuts are made in a lightweight material (such as thin plastic, composite material, or specially treated fabric). These cuts are arranged in geometric patterns—often involving parallel slits, radial patterns, or combinations thereof. When the parachute deploys, these cuts allow the material to expand uniformly in all directions while preventing over-extension and tearing. The material naturally forms a three-dimensional structure without requiring elaborate deployment mechanisms.\n\n## The Science Behind Kirigami-Inspired Parachutes\n\nThe effectiveness of kirigami-inspired parachutes stems from several interconnected mechanical principles:\n\n**Stress Distribution**: The cuts in a kirigami sheet act as stress risers and redistribution channels. When forces are applied to"
+              "text": "# Kirigami-Inspired Parachutes: Where Ancient Art Meets Modern Engineering\n\n## Introduction\n\nImagine taking an ancient Japanese paper-folding art form and using it to revolutionize how we design parachutes. This seemingly unlikely intersection of traditional craftsmanship and cutting-edge aerospace engineering represents one of the most innovative developments in recent materials science and mechanical design. Kirigami-inspired parachutes demonstrate how insights from nature and traditional arts can solve complex engineering challenges, offering improved safety, performance, and adaptability for everything from drone deployment to Mars rover landing systems.\n\n## Understanding Kirigami: The Foundation\n\nBefore we can appreciate how kirigami inspires parachute design, we must first understand what kirigami actually is. Often confused with its more famous cousin origami—the art of folding paper without cutting—kirigami incorporates both folding and cutting to create complex three-dimensional structures from flat sheets.\n\nThe word \"kirigami\" comes from two Japanese terms: \"kiri\" (cutting) and \"kami\" (paper). Unlike origami, which relies solely on folds to create shape and structure, kirigami allows artists to cut strategic lines and sections from paper, then fold the remaining material to achieve designs of remarkable complexity and functionality. Traditional kirigami creates pop-up cards, decorative lanterns, and intricate architectural models.\n\nThe genius of kirigami lies in its fundamental principle: by removing material strategically and creating specific fold patterns, you can control how a flat object transforms in three-dimensional space. This principle—controlling transformation and behavior through intelligent design of cuts and folds—translates remarkably well to engineering challenges.\n\n## The Problem with Traditional Parachutes\n\nTo understand why researchers became interested in kirigami-inspired parachute design, we need to examine the limitations of conventional parachutes. Traditional round parachutes, the standard since their widespread adoption in World War II, operate on straightforward principles: deploy, catch air, slow descent.\n\nHowever, traditional parachutes face several constraints:\n\n**Limited Packing Efficiency**: Conventional parachutes require significant volume when packed, limiting how many can be stored or carried. The fabric must be carefully folded and packed to prevent damage and ensure proper deployment.\n\n**Deployment Issues**: Traditional parachutes can experience opening shock—a sudden jolt when the canopy fully inflates. This shock can damage cargo, injure jumpers, and stress the deployment mechanism.\n\n**Limited Adaptability**: Once deployed, a traditional parachute's aerodynamic properties are relatively fixed. It cannot adjust its behavior based on changing conditions.\n\n**Descent Rate Control**: Traditional parachutes offer limited control over descent rates without complex additional systems like vents or steerable designs.\n\n**Pack-to-Performance Ratio**: The ratio between packed volume and deployed size is constrained by the laws of physics and fabric properties.\n\n## The Kirigami Solution: Principles and Advantages\n\nIn the early 2020s, researchers at institutions including MIT and other universities began exploring how kirigami design principles could address these parachute limitations. The breakthrough insight was elegantly simple: if you cut and fold a sheet of material in specific patterns, you can create a structure that:\n\n1. **Packs more compactly** because strategic cuts allow the material to fold more efficiently without bunching\n2. **Deploys more gradually** because the cuts create sequential unfolding patterns that reduce opening shock\n3. **Adjusts aerodynamic properties** by controlling which sections deploy when\n4. **Maximizes surface area** relative to packed volume through intelligent three-dimensional geometry\n5. **Distributes stress** more evenly across the structure through strategic load paths\n\n### The Cutting Strategy\n\nThe fundamental innovation involves determining where and how to cut the parachute fabric before folding it. These cuts aren't random—they're mathematically optimized based on several factors:\n\n- **Deployment sequence**: Cuts are positioned so that different sections inflate in a controlled sequence rather than all at once\n- **Load distribution**: Cuts create patterns that direct stress along specific paths, similar to how bone structure directs stress in biological systems\n- **Geometric efficiency**: The cuts enable the parachute to achieve greater surface area in a more compact packed state\n\nResearchers use computational modeling and origami mathematics to design these cut patterns. The mathematics of kirigami involves complex calculations about how materials can fold in three-dimensional space and how cuts affect this behavior.\n\n## How Kirigami Parachutes Work\n\nWhen a kirigami-inspired parachute is deployed, the sequence of events differs markedly from traditional parachutes:\n\n**Initial Deployment**: The parachute begins opening, but because of the cut patterns, only certain sections inflate immediately. The cuts act as flex points, allowing controlled unfolding rather than violent inflation.\n\n**Progressive Inflation**: As air"
+            }
+          ]
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Please continue from where you left off. DO NOT reason or mention being asked to continue the conversation, just do it. YOU MUST repeat between 10 and 100 characters from the end of the previous message, so that our system can find the correct merge point between the two messages."
+            }
+          ]
+        },
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "thinking",
+              "thinking": "The user wants me to continue the text from where I left off. They're asking me to NOT mention being asked to continue, just do it naturally. They also want me to repeat between 10 and 100 characters from the end of the previous message so their system can find the merge point.\n\nThe previous message ended with:\n\"**Progressive Inflation**: As air\"\n\nLet me count the characters from the end. I should go back about 10-100 characters. Let me take a good chunk from the end:\n\n\"**Initial Deployment**: The parachute begins opening, but because of the cut patterns, only certain sections inflate immediately. The cuts act as flex points, allowing controlled unfolding rather than violent inflation.\n\n**Progressive Inflation**: As air\"\n\nI'll start my continuation with this and continue naturally. Let me count: \"**Initial Deployment**: The parachute begins opening, but because of the cut patterns, only certain sections inflate immediately. The cuts act as flex points, allowing controlled unfolding rather than violent inflation.\n\n**Progressive Inflation**: As air\" \n\nActually, let me be more precise. The user said between 10-100 characters from the END of the previous message. The end is \"**Progressive Inflation**: As air\"\n\nThat's approximately 35 characters already, so I could use that much. Let me include a bit more context from before it.\n\nI'll repeat: \"**Initial Deployment**: The parachute begins opening, but because of the cut patterns, only certain sections inflate immediately. The cuts act as flex points, allowing controlled unfolding rather than violent inflation.\n\n**Progressive Inflation**: As air\"\n\nThis gives them the merge point while I continue naturally with the content.",
+              "signature": "EpwPCpoBCBEYAipAz0iJwEYn+BEoTXeKBm7XcbNM8Ky748GOjf1GgAiL7NNQwYxJOYOmjju9B35OE19jXvbwcMP3sTEZz0ZgH8nfdjIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAGF26HUBhIMi5XcUnrkQHKzDpRpGgwSAk7r19CxLhJ03DIiMCPcdC0SXHmh277Sh9GU8a+IVIbq1clrJ+JwiygprDkHGT0IG2jCetngqti0UNICrCquDbNJuxYvHDrTO4tnRmXI+nMWqvbfPXaehdDDpolbtLfvHZhLXEfUkfHeb2fpedX2EnWfTNgP2HZ5D0xsX6Exzr2cZ8JdnPNX+tPWPYBi9e0QJrSFR7qCya+LeBnbZYWRAGyJjbLmfvSo3swbIOexhyZzNvZfQYRqGNsnVOtcnCQY3LjjZULSMNEYKgsrTBXS5PzQQXLIeKw7OLFkBYzTY+w1BCsFNurN6ZgrUvOraI76HNnaYLPsxqxmaTqHOvMQyeBborMyqD3ogJ2U7X9b8wHPVcShr646y9uLaq8sZSOxCh3FhIcCSK7qyO8bK1iRIxWtBHVfkcQLM8cL1+fO9g3bMblNa7ZfuBIHTuxfc6f1zgznsqDoY0NEht7nYdCRsIQXrxX3cAl/5Q5no2PZXWF/4oIr6Gm7MycVZD99RaJvmNmK/yqE8a4RFIaQcT273kxSonDtQwtEHT+6TWhSIXkVLIICPx7SlrqGAE/h0ynO068J3lXLxb1Lgss7ZZLClSZOMR/ZX7naeaJnpTbpRiUbrXILU/fdxyUI/yaw6Z8fS6KImrqqab1igKT0HIcZFszKsgKwKPBNV9lyRO5DxMOFAybnsaj/ynZz8yHcJVrNY5CMhqoyC2f7Twk8V5vgbP5RhV3JkLCmCH4ryqI2c6UiRWj6uAp2ZWiqOtg456OPIY4ZNrVCLaThW44nf0RPSzckzvC4gd3eLVGpjN+urnUqIeT11SLuqzSPhhHekrzoBoiM+tYIOdnvHRtKHV0IeSwu2JVErp3C48BvornGNx2cXBHXovXjvTJokmzsPI/0C9H7TujbPlQHAVBtsSeMjbgmu8LcEhlKqrdOjPhhfirLJdT/JlAcYlDF2KDUK8JqVENROsJM6mAQEI0jjlLWmTHb1iWpl9X5PAXcGXQi1ED6MffXN6Zh+XFVRl7kxo3cyUcmNPzjLBa/hoBzzTqwSNrCTj7dqznQwJf8rmRBA+KXp1FnwV8h6po97m7ebdBoQaz6i851L+Ge57IulzGcZDb4zROI2/aFfwLY6g0+NWaNxd603Gl8bFyI97UJGOjUzhlme+vnBM2iw28QfKTFfZNXPooM4sH8cPFcn21NGQ4XHQx4zrU/AdMenMA1BsgQogVWI+I5midnShch+78Mi07JYpXmRtdFSxC7sbev7OGzoeB50SHYzwfBr/R6XVpyicWFe8zUJHPlkPdruOcAjVJ3qwZ6aJofX5xlv60viw0bgjeKaATiRXZBQ8J8HcbUlFgmTmugrpCCb04zePOHm76UWnLjOarJUCP05y4YN05G15h+XBuMzYhXTzg58WZWliVbiZPv3KDRyPoFdwjPjrDPSIdn2QwQbAT+0cGfO3buPmBrYyP4pXS63JyEwG86bUqeK9qI7d4JnX69IgNIxRKySRC4Uocf35wafW2+9uAWfBKbpPxco6bPvZISpOhdTBnbq3uPPs7Cgecw7O+yP6SPyoamvmE4c7CZvTD8Yg3+vJ5ixQID8SQUNd6NPuKzVR/JBPhL9vrwN7iJn0eZHCkFxIqogaSpxQ2+u76FxydrhBCnwsO/t4fXQJD8L2Rmu5CNm96qqWYxGZ2F9Lulrd+ZXBqxeuG9pRK1MSB3KTER5HGhPTp80A1V02iVY+VgzwOHlX+uvHOtMjELYT5w8Ut+pyPwLcShlx6vCTk8SEnw4fyqauN4y/trKiV7Rm+WlWmJAJM7RxVn7VzzRuqMjHf5G9vZXFP2EL29c5sO/bWB9W+GeLllNIrcK3feGRK6TWxkq6dv5xd51DL4+jBKEoLM1wYyaS+u0+er8SVRaJX5/1PWLT/JsBvXARkVehvsNETeZ9f8Na5Q+Ni0wC9QnCuTJjQ1Fz677zviRhXvFWNxzSWjOm1jAbY3R6q0UrmoF/5tFLBp2N0kQL9zjRi1iaZUVZAA62K2/GtzKE1nLdhOy0i3Y9rvzOTl0u0UKYqi8dM515laNTUK6SA38PYiSvG4hXQMx5HFu7j4MpMS+lR7+pA5YYD0h6awn84nbXRoF8e+WG4W90AE1+F9iHakLcDdEdqSI3cD392Qa18LzPxt1P2e/nwjwuu1iQJ0MD6TpKtvAWEC3t06fRqmtkgnBQgqVz7vpK1lNb9Y0DpQdLY9SVJq+90xxhIiooQ9JNrTiGYvg++j5iBETA2008WDtjrC1WOYCHxBIyQseR061vZEZOArm8KPCLiiu5cai8Lg7GWoBNTEPrz53xPmLYjQrUDaTfthMsoyigutw8FNxHLrL7io+v1B+kY50O7rYRgB"
+            },
+            {
+              "type": "text",
+              "text": "**Initial Deployment**: The parachute begins opening, but because of the cut patterns, only certain sections inflate immediately. The cuts act as flex points, allowing controlled unfolding rather than violent inflation.\n\n**Progressive Inflation**: As air continues to fill the canopy, the cuts unfold sequentially. This staged inflation dramatically reduces the opening shock experienced by cargo and personnel. Instead of a sudden jolt, there's a more gradual deceleration that distributes forces over a longer time period.\n\n**Optimized Geometry**: The three-dimensional shape that emerges from the cuts and folds creates improved aerodynamic properties. The multiple surfaces and angles can generate more efficient drag coefficients than traditional hemispherical canopies, potentially allowing for better control and stability during descent.\n\n**Adaptive Performance**: Because different sections can inflate at different rates, operators can potentially influence descent characteristics by controlling deployment sequences. This adaptability opens possibilities for precision landing that traditional parachutes cannot match.\n\n## Real-World Applications\n\nThe theoretical advantages of kirigami parachutes have caught the attention of multiple industries and research sectors:\n\n### Aerial Logistics and Drone Delivery\n\nCommercial drone companies are exploring kirigami-inspired designs for delivering packages. The improved packing efficiency means smaller, lighter delivery drones can carry larger parachutes for emergency deployment. The gentler opening characteristics reduce stress on packages, making it possible to safely deploy items that might be damaged by traditional parachute opening shock.\n\n### Space Exploration\n\nNASA and other space agencies have shown particular interest in kirigami parachutes for Mars missions and lunar lander systems. The Mars Perseverance rover, for instance, used traditional parachute technology, but kirigami designs could enable landing heavier payloads in the thin Martian atmosphere. The controlled deployment sequence could be calibrated for Martian conditions, and the compact packing would save crucial space and weight in spacecraft design.\n\n### Military and Defense Applications\n\nDefense departments recognize the potential of kirigami parachutes for precision payload delivery, rapid insertion operations, and emergency evacuation systems. The ability to control descent rates and reduce opening shock has applications in airborne operations where precision and personnel safety are paramount.\n\n### Personal Parachute Systems\n\nHigh-altitude jumpers and BASE jumpers represent another potential market. The more compact packing of kirigami parachutes means lighter systems, while the gentler opening characteristics could reduce injuries associated with parachute deployment at extreme altitudes.\n\n### Disaster Relief and Humanitarian Aid\n\nIn emergency situations, the ability to pack more parachutes into a given aircraft volume could dramatically increase the amount of supplies that can be delivered to disaster zones. The reduced opening shock also means more fragile items—medical equipment, electronics, food—can be safely delivered via parachute.\n\n## Technical Challenges and Ongoing Research\n\nDespite the promising potential, kirigami parachute development faces several significant challenges:\n\n**Material Durability**: While paper works well for demonstrating kirigami principles, parachutes require materials that can withstand extreme forces, repeated use, and harsh environmental conditions. Researchers are testing advanced fabrics, composites, and even smart materials that can perform like traditional parachute materials while maintaining the structural benefits of kirigami design.\n\n**Scale and Manufacturing**: Creating kirigami patterns in large parachutes presents manufacturing challenges. Laboratory prototypes are one thing; producing parachutes at the scale needed for actual deployment is another. Researchers are developing industrial cutting and folding techniques that can precisely create these patterns at scale.\n\n**Fold Consistency**: Every fold must be precise."
             }
           ]
         },
@@ -268,7 +465,6 @@ when:
           ]
         }
       ],
-      "model": "claude-haiku-4-5",
       "max_tokens": 1152,
       "thinking": {
         "type": "enabled",
@@ -288,687 +484,164 @@ then:
       value: text/event-stream; charset=utf-8
   body: |+
     event: message_start
-    data: {"type":"message_start","message":{"model":"claude-haiku-4-5-20251001","id":"msg_01VUbehXJnVzVV6avGJJEseG","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":1144,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":3,"service_tier":"standard","inference_geo":"not_available"}}       }
+    data: {"type":"message_start","message":{"model":"claude-haiku-4-5-20251001","id":"msg_011CeG8B8WF6cC1Dy8GEPAtA","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":2017,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":4,"service_tier":"standard","inference_geo":"not_available"}}         }
     
     event: content_block_start
-    data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}               }
+    data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""} }
     
     event: ping
     data: {"type": "ping"}
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"The user wants"}         }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"The user is asking"}        }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" me to continue the article about kirigami-inspired parachutes from where I left off. They want me to repeat between 10 and 100 characters from the end of the previous message so"} }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" me to continue from where I left off. I need to:\n1. Repeat between 10 and 100 characters from the end of the previous message\n2. NOT"}    }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" the system can find the merge point.\n\nThe end of my previous message was:\n\"**Stress Distribution**: The cuts in a kirig"}              }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" reason or mention being asked to continue\n3. Just continue the text naturally\n\nThe end of the previous message was: \"**Fold Consistency**: Every fold must be precise"}    }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"ami sheet act as stress risers and redistribution channels. When forces are applied to\"\n\nI should repeat some of this text ("}}
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":".\"\n\nI'll repeat the last part and continue from there."}         }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"between 10-100 characters) and then continue. Let me pick a good chunk that's within that"}        }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" range.\n\n\"When forces are applied to\" is about 27 characters, which is perfect.\n\nLet me continue from there"}        }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" naturally."}               }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"EskGCmMIDBgCKkAaomiXkx9Ni0I2DuX65TEylCjJRt5GSfiCJVFkhLLX/Eg5x7kRn2N3fXrzLSe+vrlv69fulMVUOTbVKA2lKS0GMhljbGF1ZGUtaGFpa3UtNC01LTIwMjUxMDAxOAASDMy0GcAH0rXLZSxo3BoMx7+b9/92IZn0OGTKIjBA9rWKIAdEUTAICiGCby1kw0bmvhGLedGfyjvpLr/MC3lPe53WutR+gU0M4f+g8JcqkwUOZxLGRPw+smQr3oyzUVlAEBU5tyLuP+By4h+QFvL3ynN1E3KajJp619e0iBg3U3pWMyor1lngfdKRDVAbx/a2/oiWxPM4yX3jY9yeuVm1nnyw35ErYUTxrSyU9nv5nHX2pG4CbW+qxeBv1VlYolTptotRcrm3srBu/aYz7EN24IL0ZggBJfC1eji0d+r4CsV4RS+xKGAFz/W54evD2rzfyqzQSz5GaTD+cLhil9jKi9TLDSJA0A4gwQ/v8vDuHs2FjIVW7TRrPWI9MAGa3J+r6r+g6c6K3yJ3RVyn2DeqEqVsZx+zJVyJpymYC263PxOJd6blwUIJ0gpmLxDse3Rb8Ww4QinXuPjhAtorePgiKqgdi+XI58Q8PJQpXuMPnBgn3cNcLGgCJL5it6QVZrZhssi9AvDURUcLFgtGBUouPyZcksuZ8/C78HqY10W2GXAI+2znXBUQ3J541UmHDXgC3eEimAGhUbJTuJPnkxco4KKKVgNL5s5Yo7jgy1pZARew2T7lcemeoqeuSsNvTim3aaCtWc6yqE0XUX0fKvXYGGhlsSuTVqCuM7PGbMqC9+TzuNKd6KHgt3balCruEo3Jm5nlwW1cWJzNeZnL8RrtMUKuSBT1wxdUNs5En/OEfeD5f4PbAogjXkKGDl9XluIwv+JsANT0LZOFnKu08WPukhi2UH92jTaTkwMC8ZKnLTQc1I3EX+cfrvlVt0VlrRkjrxse9Z10w3u/dFRTMMo1CFTo6Y8XXKdFHp7UuRAcnCCJJSdc+BH3R0j4bkY6xaRn5pvd5I2lFa7qJOzeaFY2/UFf0Vn9UIalJ+cKb9xX8HWA09zANRvgOsTTXrGwUY9y3ZukBKKoQxxpL63qaVBk2zXOExgB"}        }
+    data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"EvEECpoBCBEYAipALs5crxbpKogKGm4LSYKose2CTpSNYZLA7yc5jd074M1QwPM071tdD2IERJoIT4mQgUj7cZyAKZdEWsrAZbhrqTIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okYjE0ZDEzN2QtZjUxMi00MzA5LTk3NGQtM2ZmMTMyYWYxNTYyqAGO26HUBhIMsLSRqvFhv6iJR2PfGgzDV3eUGtOIwQHlG3MiML92MzKQ0/CU7/VK18Qrt6zoMTfYyPQGM0NLKzQWnhWRAIhDTtl/Obzb6kdoHrhUayqDAx7/ZG1t8spbQXdWxIgG1DEa//Og4k/LLdG0Ch++XV/W0I2vPsVLzr1o51Pdrl9qwQcdkF8ZLunfx16LoCUg9TMsr5TfrxBjk2sqox7/PQdvkYptWaFDVOBpxGLTTmUSrhH6samhexNyAOMO4WGRGiu/ETeb3tgkGi7tCqMDYY12RWETMnUNPiu6WN3t7++CIEbktKsJBpvk2Z3I9zBwcpHTaDrrvFHHRiOY1O1ivrV+pwmtQbDTQsElPKTpq8vVkQzJyWcEwhxLvYVOMw1XjLEIORnTSsaUrLJwKvIRff0bV+xlR+Prt7YPcCft2PORS+DAuuUJxmIq33cDKHqk/RNFO7B6VkXS4vs/hmViO+SWq2mTyd0QBuiG5teUmXUvcg4Be1GfoCmqXASwp+Ofx8v236qd1YFNlzV2ulbO2hSsGYktHsQYeQnOQQKSwJf4jkbdPoi8ZpouEPtv3mmwwIvmPAM9D5Z+/Llt0P4qK2ToeD/uZiqiqWRL/LzpZS+LUwHHHBgB"}  }
     
     event: content_block_stop
-    data: {"type":"content_block_stop","index":0     }
+    data: {"type":"content_block_stop","index":0              }
     
     event: content_block_start
-    data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}           }
+    data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}  }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"When forces are applied to the material, they are distributed across multiple"}               }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"**Fold Consistency**: Every fold must be precise. In"}      }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" pathways rather than concentrating at single points. This prevents catastroph"}              }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" traditional manufacturing, small variations are tolerable, but in kirigami design, inconsistent folds can compromise the entire deployment"}  }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ic failure and allows the parachute to withstand higher stresses without tearing.\n\n**Programmable Deployment"}          }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" sequence. Automation and quality control systems are being developed to ensure each parachute meets exacting fold and cut specifications.\n\n**"}}
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"**: The geometry of the cuts can be precisely designed to control how the parachute expands during"}     }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Testing and Certification**: Before kirigami parachutes can be used operationally, they must pass rigorous testing protocols. This includes wind"}               }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" deployment. By adjusting cut spacing, angle, and pattern, engineers can create parachutes that deploy at specific"}          }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" tunnel testing, drop tests from various altitudes, and performance validation under different atmospheric conditions. Regulatory bodies must be convinced of"}}
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" rates and in particular configurations, making the process"}       }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" safety and reliability.\n\n**Cost Analysis**: Currently, the precision manufacturing required for kirigami parachutes makes them more"} }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" more predictable and reliable than traditional designs.\n\n**Material Efficiency**: Because the cuts allow for"}  }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" expensive than traditional designs. Researchers and manufacturers are working to reduce costs through process optimization and economies of scale.\n\n**Material Properties Under"}      }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" more compact packing and more efficient force distribution, kirigami-inspired parachutes can achieve the same drag"}          }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Load**: Understanding how cut and folded materials behave under the extreme stresses of deployment requires extensive"}  }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" coefficient with less material. This translates directly to weight savings—a critical"}  }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" research. Computer simulations help, but real-world testing remains essential.\n\n## The Mathematics"}}
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" advantage in aerospace applications.\n\n**Flexibility and Resilience**: The flexibility"}              }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Behind the Design\n\nThe mathematical framework underpinning kirigami parachute design draws from several fields:\n\n**Origami Mathematics**:"}           }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" inherent in kirigami designs allows parachutes to adapt to varying deployment conditions. Whether the chute is deployed at an"}      }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Researchers use theorems from origami mathematics, particularly work by mathematicians studying crease patterns and fold sequences"}            }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" angle, in strong winds, or in unexpected orientations, the cuts allow the"} }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":", to predict how materials will behave when folded in specific ways.\n\n**Graph Theory and Topology**: The cut"}        }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" material to adjust and stabilize more gracefully than rigid structures would.\n\n**Damage"}          }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" patterns can be analyzed as graphs, where the topology must be preserved to maintain structural integrity while achieving the desired deployment characteristics.\n\n**Computational Geometry**: Software"}             }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Tolerance**: While any tear in a parachute is"}    }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" simulates how specific cut and fold patterns will behave in three dimensions, predicting stress distribution,"}         }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" concerning, kirigami designs have built-in advantages for damage mitigation. The existing cuts"}               }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" inflation sequences, and aerodynamic performance.\n\n**Fluid Dynamics**: Modeling how air flows around and through the kirigami parachute can"} }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" act as natural crack arrestors, preventing small tears from propagating catastrophically across"}         }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"opy requires sophisticated computational fluid dynamics (CFD) analysis to optimize performance.\n\n## Biomimicry Connections"}               }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" the entire canopy. The distributed stress pathways mean that localized damage doesn't compromise"}            }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"\n\nInterestingly, kirigami parachute design connects to another field of innovation: biomimicry. Nature has already solved many problems that"}          }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" the entire structure's function.\n\n## Research and Development Milestones\n\nThe development of kirigami-inspired parach"}         }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" engineers face, and several organisms use principles similar to kirigami:\n\n**Plant Seeds**: Many seeds have"}        }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"utes has progressed through several important phases. Early research involved"}  }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" evolved intricate folded and cut-like structures that unfold during descent, creating complex aerodynamic shapes. Maple"}         }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" computational modeling and small-scale laboratory experiments. Scientists used computer simulations to design"} }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" seeds, for instance, spin and fall in controlled ways due to their wing structure—a principle"}             }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" optimal cut patterns and predict how they would behave under deployment. These sim"}          }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" kirigami designers study.\n\n**Insect Wings**: When insects fold their wings to store them compactly, they use"}              }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ulations tested thousands of iterations, refining the designs based on aerodynamic performance, strength, and reliability metrics."}}
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" patterns of folds and segments remarkably similar to kirigami designs. These same principles enable rapid"} }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"\n\nSubsequent research moved into experimental validation. Teams constructed small-scale prototypes and tested them in wind tunn"}          }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":", controlled deployment during flight.\n\n**Cellular Structures**: At the microscopic level, many biological structures use cuts and folds to maximize"}               }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"els, where they could measure drag coefficients, observe deployment behavior, and identify any unexpected"}         }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" surface area while maintaining structural integrity—exactly what kirigami parachutes aim to achieve.\n\n## Future Innovations and Possibilities\n\nThe potential evolution"}      }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" instabilities. These tests confirmed that kirigami-inspired designs could indeed achieve performance matching"}      }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" of kirigami parachute technology extends beyond current applications:\n\n**Smart Materials Integration**: Researchers are exploring parachutes incorporating smart materials that can change"}               }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" or exceeding traditional parachutes while being significantly lighter.\n\nA landmark moment came when researchers successfully"}   }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" stiffness or shape in response to environmental conditions. Imagine a kirigami parachute that adjusts its deployment sequence based on atmospheric pressure, temperature, or descent"}}
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" designed and tested full-scale kirigami-inspired parachutes in actual drop tests"} }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" rate.\n\n**Modular Systems**: Future designs might incorporate modular kirigami elements that can be combined in different configurations for different missions. A single manufacturing system"}           }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":". These real-world trials demonstrated that the designs worked as predicted and could reli"}        }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" could produce parachutes optimized for various applications.\n\n**Self-Healing Fabrics**: Integration of self-healing materials could make parachutes more durable and maint"}}
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ably slow an object's descent in practical conditions. The results showed deployment was smo"}            }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ainable. Damage from tears or punctures might repair themselves automatically.\n\n**Artificial Intelligence Optimization**: Machine learning algorithms could"}              }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"other and more predictable than many traditional designs.\n\n## Practical Applications\n\nThe potential applications for"}               }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" optimize cut and fold patterns for specific missions, atmospheric conditions, and payload characteristics.\n\n**Nano-Scale Applications"}     }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" kirigami-inspired parachutes extend across multiple fields:\n\n**Space Exploration**: NASA and other space agencies have expressed significant"}        }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"**: While currently focused on full-size parachutes, kirigami principles could eventually enable micro-pa"}               }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" interest in these designs for Mars landers and other planetary entry vehicles. The Mars 2020 "}    }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"rachutes for tiny payloads, sensors, or even medical applications.\n\n## Conclusion\n\nKirigami-inspired parachutes represent a fascinating convergence of traditional art"}              }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Perseverance rover successfully used advanced parachute designs that incorporate some kirigami principles."}        }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":", mathematics, and modern engineering. By applying principles developed over centuries in Japanese paper-"}     }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" The weight savings and increased reliability are particularly valuable for space missions where every kilogram matters"}       }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"craft, researchers have identified innovative solutions to challenges that have persisted in parachute design for decades."}      }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" and failure is not an option.\n\n**Emergency Systems**: Traditional aircraft parachutes could"}         }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"\n\nThe journey from theoretical concept to practical deployment continues, with researchers worldwide working to overcome manufacturing, testing, and scaling challenges. As materials"}       }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" potentially be replaced with lighter, more reliable kirigami-inspired designs. Similarly, personal"}          }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" science advances and manufacturing techniques become more sophisticated, kirigami parachutes are likely to transition from laboratory curiosities to operational systems.\n\nWhether deployed"}            }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" parachutes for skydivers and BASE jumpers could benefit from improved deployment reliability and performance in"} }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" from military aircraft, commercial delivery drones, or Mars landers, kirigami-inspired parachutes exemplify how"}}
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" unpredictable conditions.\n\n**Robotic Descent Systems**: For deploying robots and scientific"}           }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" innovation often comes not from working harder within existing paradigms, but from looking to unexpected"}              }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" instruments into hostile environments—such as other planets, deep oceans, or volcanic"}             }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" sources—in this case, the elegant geometry of an ancient art form—for fresh solutions to persistent problems."}         }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" regions—kirigami-inspired parachutes offer advantages in reliability and payload capacity.\n\n**High"}           }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" This approach reminds us that breakthrough technologies often emerge when we're willing to learn from traditions, nature, and uncon"}   }
     
     event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"-Altitude Research**: Weather balloons, atmospheric monitoring platforms, and other high-altitude instruments could use"}         }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" lighter, more efficient parachutes, allowing them to carry more scientific instruments or descend from"}       }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" greater heights safely.\n\n**Disaster Response**: In emergency situations where personnel or equipment must be lowered into difficult"}          }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" terrain, more reliable and easier-to-deploy parachutes could save lives.\n\n## Material"}             }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Considerations\n\nWhile the original research involved cutting paper and plastics, practical"}  }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" applications have expanded to include various advanced materials. Researchers have tested kirigami-inspired designs in"}  }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":":\n\n**High-Strength Fabrics**: Modern parachute materials like"}         }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" nylon and polyester can be cut according to kirigami principles, creating designs that are both traditional in"}         }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" material but innovative in construction.\n\n**Composite Materials**: Carbon fiber and other composite materials can be precisely cut and layered to create even stronger"}        }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" and lighter structures, offering potential for specialized applications requiring extreme performance"}          }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":".\n\n**Metamaterials**: Cutting and structuring materials in kirigami patterns actually creates metamaterials—"}     }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"engineered materials with properties not found in nature. These can be tuned to have specific mechanical behaviors ideal"} }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" for particular applications.\n\n**"}   }
+    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ventional sources of inspiration."}            }
     
     event: content_block_stop
-    data: {"type":"content_block_stop","index":1     }
+    data: {"type":"content_block_stop","index":1          }
     
     event: message_delta
-    data: {"type":"message_delta","delta":{"stop_reason":"max_tokens","stop_sequence":null,"stop_details":null},"usage":{"input_tokens":1144,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1152}   }
+    data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null,"stop_details":null},"usage":{"input_tokens":2017,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1138,"output_tokens_details":{"thinking_tokens":96}}     }
     
     event: message_stop
-    data: {"type":"message_stop"  }
-    
----
-when:
-  path: /v1/messages
-  method: POST
-  json_body_str: >-
-    {
-      "messages": [
-        {
-          "role": "user",
-          "content": [
-            {
-              "type": "text",
-              "text": "Give me a 2000 word explainer about Kirigami-inspired parachutes"
-            }
-          ]
-        },
-        {
-          "role": "assistant",
-          "content": [
-            {
-              "type": "thinking",
-              "thinking": "This is an interesting topic that combines the traditional Japanese art of kirigami (cutting and folding paper) with modern parachute design. I'll need to cover:\n\n1. What kirigami is\n2. What parachutes are and how they work\n3. The history of kirigami-inspired parachute research\n4. The specific advantages of kirigami-inspired designs\n5. The science behind why they work\n6. Real-world applications\n7. Future possibilities\n\nLet me aim for approximately 2000 words and make this comprehensive and engaging.",
-              "signature": "Er0FCmMIDBgCKkCNUOEgl8HdGRJ+KR0/c/ezW66npLSeETiFG78UhTG/fMLOOujTqXK0+sMqig5FuVGTu7r10d2CJL9rOQhhQ00xMhljbGF1ZGUtaGFpa3UtNC01LTIwMjUxMDAxOAASDDPu1695RjBM0o0dIhoMVCotSeLI9hN2reKKIjA1V76eETHTeuA6Gc4my+lB7aTtL5jOlHZIRZnQl4zJyGB1LjEK0ddBExAExybex0gqhwQ1xD1YCVTznY91CFEuIFl9aR3FHhxVtoIIYfjTSw5L9rOLPMtTVbCQ9Vt7rj0mlcbsqQJh8an1I9Xejl7wFuIKCwpwMETmHv6eLtH/tDpMZC42DlZa5riRGCkG0Br4pKKDUjoJuXd3JRfT6D1E0q706YVn67W0SJnyU+0p7RXcL0ws2AozGcWVWCKVKOZi1F9Bj8eQtYNfVUDH9guhG5UNEGzphCrSesTe6JrkL8Yj1pIYPDwLQW0ksT57IgmRIXhLiL0Xb4TthLPwthWfipqU/3g7l2U4DqizLWKDmuxG9XG9Db2oHAV4e4/QevPr3Wkx4uI3yGd1riLnhHbeEnKxYpVHz4Rbhxf7YAR2jNdVF5DIizSvPIX3zViIxDgXVWxQ8FALMSaektkWFSMUJ83g1N3/68MhAzcLtHC+IA1gUgijYC75n1S+aUKzOS5zpT+S+nGAarQ0CUFM4YrHND8x0l15T/0uJYC1HPHiLipyDSk2BlSF6kvWVMMpoapM41tJvXZKfc+DK5JXAN1sQZtr5eLZVVftVvQOn2D4KdLVbIO8vXY3ulnqXap6VNMI24cWkw8BTJ4u24TqgGOW7c+LRE4yPga5/bsKRPq3+5MCIRIdB8ZOpw84Sg7KqWj9NcCaGETlxu3b2YbOjuAXatrTl5NYwNXM40UtSskG+NzGwdN2c5BrXHgYAQ=="
-            },
-            {
-              "type": "text",
-              "text": "# Kirigami-Inspired Parachutes: Where Ancient Art Meets Modern Engineering\n\n## Introduction\n\nIn a fascinating convergence of traditional Japanese art and cutting-edge aerospace engineering, scientists and engineers have begun developing parachutes inspired by kirigami—the ancient practice of cutting and folding paper to create intricate three-dimensional designs. This innovative approach has the potential to revolutionize how we think about parachute design, emergency descent systems, and even robotic exploration of other planets. By drawing inspiration from a centuries-old craft, researchers are creating parachutes that are lighter, more reliable, and capable of handling extreme conditions that traditional designs struggle with.\n\n## Understanding Kirigami\n\nBefore exploring kirigami-inspired parachutes, it's essential to understand kirigami itself. Kirigami, which comes from the Japanese words \"kiru\" (to cut) and \"kami\" (paper), is a variation of the more well-known origami art form. While origami relies purely on folding paper without cutting, kirigami incorporates cuts and slits into the folding process, creating more complex three-dimensional structures. These carefully placed cuts allow paper to transform into intricate geometric patterns and functional shapes that would be impossible to achieve through folding alone.\n\nThe beauty of kirigami lies in its mathematical precision and structural elegance. By strategically cutting and folding flat materials, artists and engineers can create structures with remarkable strength-to-weight ratios, excellent stability properties, and the ability to absorb and distribute forces efficiently. These properties have caught the attention of researchers looking for new solutions to fundamental engineering challenges.\n\n## Traditional Parachute Design and Its Limitations\n\nTo understand why kirigami-inspired parachutes represent an advancement, it's important to grasp how conventional parachutes work. A traditional parachute operates through a simple but elegant principle: when deployed, its large fabric canopy catches air, creating drag that slows an object's descent. The canopy is typically hemispherical or conical in shape, designed to provide maximum surface area while maintaining aerodynamic stability.\n\nHowever, traditional parachutes have several limitations:\n\n**Deployment Challenges**: Large parachutes require significant space for packing and can be difficult to deploy reliably, especially in emergency situations where reliability is critical. The canopy must unfold perfectly, and any tangles or malfunctions can be catastrophic.\n\n**Material Constraints**: Traditional parachutes require specialized materials that are strong, lightweight, and durable. These materials can be expensive and have limited availability, which can increase costs and restrict their use in certain applications.\n\n**Structural Vulnerability**: The fabric canopy is susceptible to tears and damage from sharp objects or extreme environmental conditions. Once damaged, the parachute's effectiveness is compromised.\n\n**Weight and Packaging**: To be effective, parachutes must be quite large, making them heavy and requiring substantial packing space. This is particularly problematic for applications with strict weight and volume constraints, such as space missions or high-altitude research platforms.\n\n**Limited Operational Envelope**: Traditional parachutes are designed for relatively narrow operational parameters. Deploying them in extremely high winds, at unusual angles, or in other non-ideal conditions can lead to failures.\n\n## The Kirigami Innovation\n\nResearchers, particularly those at institutions like MIT and the University of Illinois, began investigating whether kirigami's design principles could overcome these limitations. The fundamental insight was that the strategically placed cuts in kirigami designs create materials with unique mechanical properties—they can stretch, conform, and distribute forces in ways that uncut sheets cannot.\n\nThe key breakthrough came when researchers realized that a flat sheet of material with kirigami cuts could be folded and compacted much more efficiently than a large parachute canopy, yet still deploy into a complex three-dimensional structure that provides exceptional aerodynamic properties. The cuts allow the material to expand and unfold naturally during deployment without tangling, while maintaining structural integrity.\n\nIn kirigami-inspired parachute designs, strategically placed cuts are made in a lightweight material (such as thin plastic, composite material, or specially treated fabric). These cuts are arranged in geometric patterns—often involving parallel slits, radial patterns, or combinations thereof. When the parachute deploys, these cuts allow the material to expand uniformly in all directions while preventing over-extension and tearing. The material naturally forms a three-dimensional structure without requiring elaborate deployment mechanisms.\n\n## The Science Behind Kirigami-Inspired Parachutes\n\nThe effectiveness of kirigami-inspired parachutes stems from several interconnected mechanical principles:\n\n**Stress Distribution**: The cuts in a kirigami sheet act as stress risers and redistribution channels. When forces are applied to"
-            }
-          ]
-        },
-        {
-          "role": "user",
-          "content": [
-            {
-              "type": "text",
-              "text": "Please continue from where you left off. DO NOT reason or mention being asked to continue the conversation, just do it. YOU MUST repeat between 10 and 100 characters from the end of the previous message, so that our system can find the correct merge point between the two messages."
-            }
-          ]
-        },
-        {
-          "role": "assistant",
-          "content": [
-            {
-              "type": "thinking",
-              "thinking": "The user wants me to continue the article about kirigami-inspired parachutes from where I left off. They want me to repeat between 10 and 100 characters from the end of the previous message so the system can find the merge point.\n\nThe end of my previous message was:\n\"**Stress Distribution**: The cuts in a kirigami sheet act as stress risers and redistribution channels. When forces are applied to\"\n\nI should repeat some of this text (between 10-100 characters) and then continue. Let me pick a good chunk that's within that range.\n\n\"When forces are applied to\" is about 27 characters, which is perfect.\n\nLet me continue from there naturally.",
-              "signature": "EskGCmMIDBgCKkAaomiXkx9Ni0I2DuX65TEylCjJRt5GSfiCJVFkhLLX/Eg5x7kRn2N3fXrzLSe+vrlv69fulMVUOTbVKA2lKS0GMhljbGF1ZGUtaGFpa3UtNC01LTIwMjUxMDAxOAASDMy0GcAH0rXLZSxo3BoMx7+b9/92IZn0OGTKIjBA9rWKIAdEUTAICiGCby1kw0bmvhGLedGfyjvpLr/MC3lPe53WutR+gU0M4f+g8JcqkwUOZxLGRPw+smQr3oyzUVlAEBU5tyLuP+By4h+QFvL3ynN1E3KajJp619e0iBg3U3pWMyor1lngfdKRDVAbx/a2/oiWxPM4yX3jY9yeuVm1nnyw35ErYUTxrSyU9nv5nHX2pG4CbW+qxeBv1VlYolTptotRcrm3srBu/aYz7EN24IL0ZggBJfC1eji0d+r4CsV4RS+xKGAFz/W54evD2rzfyqzQSz5GaTD+cLhil9jKi9TLDSJA0A4gwQ/v8vDuHs2FjIVW7TRrPWI9MAGa3J+r6r+g6c6K3yJ3RVyn2DeqEqVsZx+zJVyJpymYC263PxOJd6blwUIJ0gpmLxDse3Rb8Ww4QinXuPjhAtorePgiKqgdi+XI58Q8PJQpXuMPnBgn3cNcLGgCJL5it6QVZrZhssi9AvDURUcLFgtGBUouPyZcksuZ8/C78HqY10W2GXAI+2znXBUQ3J541UmHDXgC3eEimAGhUbJTuJPnkxco4KKKVgNL5s5Yo7jgy1pZARew2T7lcemeoqeuSsNvTim3aaCtWc6yqE0XUX0fKvXYGGhlsSuTVqCuM7PGbMqC9+TzuNKd6KHgt3balCruEo3Jm5nlwW1cWJzNeZnL8RrtMUKuSBT1wxdUNs5En/OEfeD5f4PbAogjXkKGDl9XluIwv+JsANT0LZOFnKu08WPukhi2UH92jTaTkwMC8ZKnLTQc1I3EX+cfrvlVt0VlrRkjrxse9Z10w3u/dFRTMMo1CFTo6Y8XXKdFHp7UuRAcnCCJJSdc+BH3R0j4bkY6xaRn5pvd5I2lFa7qJOzeaFY2/UFf0Vn9UIalJ+cKb9xX8HWA09zANRvgOsTTXrGwUY9y3ZukBKKoQxxpL63qaVBk2zXOExgB"
-            },
-            {
-              "type": "text",
-              "text": "When forces are applied to the material, they are distributed across multiple pathways rather than concentrating at single points. This prevents catastrophic failure and allows the parachute to withstand higher stresses without tearing.\n\n**Programmable Deployment**: The geometry of the cuts can be precisely designed to control how the parachute expands during deployment. By adjusting cut spacing, angle, and pattern, engineers can create parachutes that deploy at specific rates and in particular configurations, making the process more predictable and reliable than traditional designs.\n\n**Material Efficiency**: Because the cuts allow for more compact packing and more efficient force distribution, kirigami-inspired parachutes can achieve the same drag coefficient with less material. This translates directly to weight savings—a critical advantage in aerospace applications.\n\n**Flexibility and Resilience**: The flexibility inherent in kirigami designs allows parachutes to adapt to varying deployment conditions. Whether the chute is deployed at an angle, in strong winds, or in unexpected orientations, the cuts allow the material to adjust and stabilize more gracefully than rigid structures would.\n\n**Damage Tolerance**: While any tear in a parachute is concerning, kirigami designs have built-in advantages for damage mitigation. The existing cuts act as natural crack arrestors, preventing small tears from propagating catastrophically across the entire canopy. The distributed stress pathways mean that localized damage doesn't compromise the entire structure's function.\n\n## Research and Development Milestones\n\nThe development of kirigami-inspired parachutes has progressed through several important phases. Early research involved computational modeling and small-scale laboratory experiments. Scientists used computer simulations to design optimal cut patterns and predict how they would behave under deployment. These simulations tested thousands of iterations, refining the designs based on aerodynamic performance, strength, and reliability metrics.\n\nSubsequent research moved into experimental validation. Teams constructed small-scale prototypes and tested them in wind tunnels, where they could measure drag coefficients, observe deployment behavior, and identify any unexpected instabilities. These tests confirmed that kirigami-inspired designs could indeed achieve performance matching or exceeding traditional parachutes while being significantly lighter.\n\nA landmark moment came when researchers successfully designed and tested full-scale kirigami-inspired parachutes in actual drop tests. These real-world trials demonstrated that the designs worked as predicted and could reliably slow an object's descent in practical conditions. The results showed deployment was smoother and more predictable than many traditional designs.\n\n## Practical Applications\n\nThe potential applications for kirigami-inspired parachutes extend across multiple fields:\n\n**Space Exploration**: NASA and other space agencies have expressed significant interest in these designs for Mars landers and other planetary entry vehicles. The Mars 2020 Perseverance rover successfully used advanced parachute designs that incorporate some kirigami principles. The weight savings and increased reliability are particularly valuable for space missions where every kilogram matters and failure is not an option.\n\n**Emergency Systems**: Traditional aircraft parachutes could potentially be replaced with lighter, more reliable kirigami-inspired designs. Similarly, personal parachutes for skydivers and BASE jumpers could benefit from improved deployment reliability and performance in unpredictable conditions.\n\n**Robotic Descent Systems**: For deploying robots and scientific instruments into hostile environments—such as other planets, deep oceans, or volcanic regions—kirigami-inspired parachutes offer advantages in reliability and payload capacity.\n\n**High-Altitude Research**: Weather balloons, atmospheric monitoring platforms, and other high-altitude instruments could use lighter, more efficient parachutes, allowing them to carry more scientific instruments or descend from greater heights safely.\n\n**Disaster Response**: In emergency situations where personnel or equipment must be lowered into difficult terrain, more reliable and easier-to-deploy parachutes could save lives.\n\n## Material Considerations\n\nWhile the original research involved cutting paper and plastics, practical applications have expanded to include various advanced materials. Researchers have tested kirigami-inspired designs in:\n\n**High-Strength Fabrics**: Modern parachute materials like nylon and polyester can be cut according to kirigami principles, creating designs that are both traditional in material but innovative in construction.\n\n**Composite Materials**: Carbon fiber and other composite materials can be precisely cut and layered to create even stronger and lighter structures, offering potential for specialized applications requiring extreme performance.\n\n**Metamaterials**: Cutting and structuring materials in kirigami patterns actually creates metamaterials—engineered materials with properties not found in nature. These can be tuned to have specific mechanical behaviors ideal for particular applications.\n\n**"
-            }
-          ]
-        },
-        {
-          "role": "user",
-          "content": [
-            {
-              "type": "text",
-              "text": "Please continue from where you left off. DO NOT reason or mention being asked to continue the conversation, just do it. YOU MUST repeat between 10 and 100 characters from the end of the previous message, so that our system can find the correct merge point between the two messages."
-            }
-          ]
-        }
-      ],
-      "model": "claude-haiku-4-5",
-      "max_tokens": 1152,
-      "thinking": {
-        "type": "enabled",
-        "budget_tokens": 1024,
-        "display": "summarized"
-      },
-      "stream": true,
-      "cache_control": {
-        "type": "ephemeral",
-        "ttl": "5m"
-      }
-    }
-then:
-  status: 200
-  header:
-    - name: content-type
-      value: text/event-stream; charset=utf-8
-  body: |+
-    event: message_start
-    data: {"type":"message_start","message":{"model":"claude-haiku-4-5-20251001","id":"msg_01XPu82Bcyesy6Gsy2F1tEQt","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":2200,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":8,"service_tier":"standard","inference_geo":"not_available"}}   }
-    
-    event: content_block_start
-    data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}   }
-    
-    event: ping
-    data: {"type": "ping"}
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"The user wants me to continue from where"}             }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" I left off. I need to repeat between 10 and 100 characters from the end of the previous message to help with mer"}          }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"ging.\n\nThe previous message ended with:\n\"**Metamaterials**: Cutting and structuring materials in kirigami patterns actually creates metamaterials—engineered materials with properties not found in nature. These can"}       }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" be tuned to have specific mechanical behaviors ideal for particular applications.\n\n**\"\n\nSo the end is \"**\" which is only"}  }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" 2 characters. I need to go back further. Let me count back to find "}     }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"10-100 characters:\n\n\"These can be tuned to have specific mechanical behaviors ideal for particular applications.\n\n**\"\n\nThat's about 96"}         }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" characters including spaces and newlines. Let me use that section for the merge point.\n\nActually, looking"} }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" more carefully, the text ends with:\n\"**Metamaterials**: Cutting and structuring materials in kirigami patterns actually creates metamaterials—engineered materials with properties not found in nature. These can be tuned to have specific mechanical"}          }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" behaviors ideal for particular applications.\n\n**\"\n\nI should repeat from a point that gives "}           }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"10-100 characters. Let me count from \"These can be tuned to have specific mechanical behaviors ideal for particular applications.\\n\\n**\"\n\nThat's:"}   }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" \"These can be tuned to have specific mechanical behaviors ideal for particular applications.\\n\\n**\"\n\nLet me count: T-h-e-s-e- -"}     }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"c-a-n- -b-e- -t-u-n-e-d- -t-o- -h-a-v-e- -s-"}          }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"p-e-c-i-f-i-c- -m-e-c-h-a-n-i-c-a-l- -b-e-h-a-v-i-o-r-s- -i-d-e-a"}         }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"-l- -f-o-r- -p-a-r-t-i-c-u-l-a-r- -a-p-p-l-i-c-a-t-i-o-n-"}           }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"s = about 91 characters, that works!\n"}    }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"\n\nThese"}           }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" can be tuned to have specific mechanical behaviors ideal for particular applications.\n\n**"}         }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"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"}}
-    
-    event: content_block_stop
-    data: {"type":"content_block_stop","index":0       }
-    
-    event: content_block_start
-    data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}         }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"These can be tuned to have specific mechanical behaviors ideal for particular applications.\n\n**"}  }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Smart Materials**: Research continues into integrating sensors and responsive"}              }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" materials into kirigami-inspired parachute designs, potentially creating parachutes that can actively monitor their"}              }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" condition and adjust their properties during deployment.\n\n## Engineering Challenges and Ongoing"}         }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" Research\n\nDespite the promising potential, researchers continue to address several engineering"}}
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" challenges:\n\n**Scaling and Manufacturing**: While small-scale prototypes work excellently, manufacturing"}            }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" large-scale kirigami parachutes with precise cuts and consistent quality presents"}    }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" manufacturing challenges. Laser cutting and other precision technologies are helping solve"}             }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" this problem, but costs remain a consideration for widespread adoption.\n\n**Material Fatigue**: Understanding"} }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" how repeated folding and deployment cycles affect the longevity of cut materials"} }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" requires extensive testing. Researchers are studying whether the stress concent"}           }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"rations at cut edges create fatigue vulnerabilities over the parachute's lifespan.\n\n**Unpredictable Conditions**: While"}         }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" kirigami designs perform well in controlled tests, the real world presents infinite variations. Research continues"}         }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" to test these parachutes in diverse environmental conditions—extreme winds, temperature"}               }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" variations, precipitation, and deployment angles—to ensure reliability across all scenarios.\n\n**Optimization Trade"}             }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"-offs**: Engineers must balance multiple competing objectives: weight, strength, deployment speed, stability, and cost. Finding"}        }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" the optimal configuration for specific applications requires careful analysis and testing.\n\n**Material Compatibility**: Different"}               }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" applications require different materials, and not all materials that work well with traditional"}      }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" parachute designs are equally suitable for kirigami patterns. Research into material selection and treatment continues."}}
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"\n\n## Future Directions\n\nThe field of kirigami-inspired parachutes continues to evolve rapidly. Several promising research directions are emerging"}  }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":":\n\n**Biomimetic Integration**: Some researchers are combining kirigami principles with biomimetic design, studying how organisms"}   }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" achieve flight and descent to further optimize parachute designs"}}
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":".\n\n**Adaptive Parachutes**: Future designs may incorporate mechanisms that allow parachutes to change their configuration in response to environmental conditions, automatically"}               }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" optimizing their performance throughout descent.\n\n**Hybrid Systems**: Combining kirigami-inspired parachutes with other"}       }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" descent technologies—such as controlled inflation systems or active guidance—could create hybrid systems offering"}       }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" unprecedented capabilities.\n\n**Additive Manufacturing**: 3D printing technologies may eventually enable"}              }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" the creation of parachutes with complex internal structures and tailored properties, going beyond what traditional cutting and folding can achieve.\n\n**"}          }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"Nanostructured Materials**: As nanotechnology advances, kirigami designs could be implemented at microsc"}    }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"opic scales, creating materials with entirely new properties and capabilities.\n\n## Conclusion\n\nKirigami-inspired parachutes represent a fascinating example of how ancient artistic"}          }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" traditions can inform modern engineering solutions. By applying the principles of strategic cutting and folding, researchers have developed parachute"}           }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" designs that are lighter, more reliable, and more resilient than traditional approaches. These innovations have already found their way into cutting"}            }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"-"}}
-    
-    event: content_block_stop
-    data: {"type":"content_block_stop","index":1            }
-    
-    event: message_delta
-    data: {"type":"message_delta","delta":{"stop_reason":"max_tokens","stop_sequence":null,"stop_details":null},"usage":{"input_tokens":2200,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":1152}      }
-    
-    event: message_stop
-    data: {"type":"message_stop" }
-    
----
-when:
-  path: /v1/messages
-  method: POST
-  json_body_str: >-
-    {
-      "messages": [
-        {
-          "role": "user",
-          "content": [
-            {
-              "type": "text",
-              "text": "Give me a 2000 word explainer about Kirigami-inspired parachutes"
-            }
-          ]
-        },
-        {
-          "role": "assistant",
-          "content": [
-            {
-              "type": "thinking",
-              "thinking": "This is an interesting topic that combines the traditional Japanese art of kirigami (cutting and folding paper) with modern parachute design. I'll need to cover:\n\n1. What kirigami is\n2. What parachutes are and how they work\n3. The history of kirigami-inspired parachute research\n4. The specific advantages of kirigami-inspired designs\n5. The science behind why they work\n6. Real-world applications\n7. Future possibilities\n\nLet me aim for approximately 2000 words and make this comprehensive and engaging.",
-              "signature": "Er0FCmMIDBgCKkCNUOEgl8HdGRJ+KR0/c/ezW66npLSeETiFG78UhTG/fMLOOujTqXK0+sMqig5FuVGTu7r10d2CJL9rOQhhQ00xMhljbGF1ZGUtaGFpa3UtNC01LTIwMjUxMDAxOAASDDPu1695RjBM0o0dIhoMVCotSeLI9hN2reKKIjA1V76eETHTeuA6Gc4my+lB7aTtL5jOlHZIRZnQl4zJyGB1LjEK0ddBExAExybex0gqhwQ1xD1YCVTznY91CFEuIFl9aR3FHhxVtoIIYfjTSw5L9rOLPMtTVbCQ9Vt7rj0mlcbsqQJh8an1I9Xejl7wFuIKCwpwMETmHv6eLtH/tDpMZC42DlZa5riRGCkG0Br4pKKDUjoJuXd3JRfT6D1E0q706YVn67W0SJnyU+0p7RXcL0ws2AozGcWVWCKVKOZi1F9Bj8eQtYNfVUDH9guhG5UNEGzphCrSesTe6JrkL8Yj1pIYPDwLQW0ksT57IgmRIXhLiL0Xb4TthLPwthWfipqU/3g7l2U4DqizLWKDmuxG9XG9Db2oHAV4e4/QevPr3Wkx4uI3yGd1riLnhHbeEnKxYpVHz4Rbhxf7YAR2jNdVF5DIizSvPIX3zViIxDgXVWxQ8FALMSaektkWFSMUJ83g1N3/68MhAzcLtHC+IA1gUgijYC75n1S+aUKzOS5zpT+S+nGAarQ0CUFM4YrHND8x0l15T/0uJYC1HPHiLipyDSk2BlSF6kvWVMMpoapM41tJvXZKfc+DK5JXAN1sQZtr5eLZVVftVvQOn2D4KdLVbIO8vXY3ulnqXap6VNMI24cWkw8BTJ4u24TqgGOW7c+LRE4yPga5/bsKRPq3+5MCIRIdB8ZOpw84Sg7KqWj9NcCaGETlxu3b2YbOjuAXatrTl5NYwNXM40UtSskG+NzGwdN2c5BrXHgYAQ=="
-            },
-            {
-              "type": "text",
-              "text": "# Kirigami-Inspired Parachutes: Where Ancient Art Meets Modern Engineering\n\n## Introduction\n\nIn a fascinating convergence of traditional Japanese art and cutting-edge aerospace engineering, scientists and engineers have begun developing parachutes inspired by kirigami—the ancient practice of cutting and folding paper to create intricate three-dimensional designs. This innovative approach has the potential to revolutionize how we think about parachute design, emergency descent systems, and even robotic exploration of other planets. By drawing inspiration from a centuries-old craft, researchers are creating parachutes that are lighter, more reliable, and capable of handling extreme conditions that traditional designs struggle with.\n\n## Understanding Kirigami\n\nBefore exploring kirigami-inspired parachutes, it's essential to understand kirigami itself. Kirigami, which comes from the Japanese words \"kiru\" (to cut) and \"kami\" (paper), is a variation of the more well-known origami art form. While origami relies purely on folding paper without cutting, kirigami incorporates cuts and slits into the folding process, creating more complex three-dimensional structures. These carefully placed cuts allow paper to transform into intricate geometric patterns and functional shapes that would be impossible to achieve through folding alone.\n\nThe beauty of kirigami lies in its mathematical precision and structural elegance. By strategically cutting and folding flat materials, artists and engineers can create structures with remarkable strength-to-weight ratios, excellent stability properties, and the ability to absorb and distribute forces efficiently. These properties have caught the attention of researchers looking for new solutions to fundamental engineering challenges.\n\n## Traditional Parachute Design and Its Limitations\n\nTo understand why kirigami-inspired parachutes represent an advancement, it's important to grasp how conventional parachutes work. A traditional parachute operates through a simple but elegant principle: when deployed, its large fabric canopy catches air, creating drag that slows an object's descent. The canopy is typically hemispherical or conical in shape, designed to provide maximum surface area while maintaining aerodynamic stability.\n\nHowever, traditional parachutes have several limitations:\n\n**Deployment Challenges**: Large parachutes require significant space for packing and can be difficult to deploy reliably, especially in emergency situations where reliability is critical. The canopy must unfold perfectly, and any tangles or malfunctions can be catastrophic.\n\n**Material Constraints**: Traditional parachutes require specialized materials that are strong, lightweight, and durable. These materials can be expensive and have limited availability, which can increase costs and restrict their use in certain applications.\n\n**Structural Vulnerability**: The fabric canopy is susceptible to tears and damage from sharp objects or extreme environmental conditions. Once damaged, the parachute's effectiveness is compromised.\n\n**Weight and Packaging**: To be effective, parachutes must be quite large, making them heavy and requiring substantial packing space. This is particularly problematic for applications with strict weight and volume constraints, such as space missions or high-altitude research platforms.\n\n**Limited Operational Envelope**: Traditional parachutes are designed for relatively narrow operational parameters. Deploying them in extremely high winds, at unusual angles, or in other non-ideal conditions can lead to failures.\n\n## The Kirigami Innovation\n\nResearchers, particularly those at institutions like MIT and the University of Illinois, began investigating whether kirigami's design principles could overcome these limitations. The fundamental insight was that the strategically placed cuts in kirigami designs create materials with unique mechanical properties—they can stretch, conform, and distribute forces in ways that uncut sheets cannot.\n\nThe key breakthrough came when researchers realized that a flat sheet of material with kirigami cuts could be folded and compacted much more efficiently than a large parachute canopy, yet still deploy into a complex three-dimensional structure that provides exceptional aerodynamic properties. The cuts allow the material to expand and unfold naturally during deployment without tangling, while maintaining structural integrity.\n\nIn kirigami-inspired parachute designs, strategically placed cuts are made in a lightweight material (such as thin plastic, composite material, or specially treated fabric). These cuts are arranged in geometric patterns—often involving parallel slits, radial patterns, or combinations thereof. When the parachute deploys, these cuts allow the material to expand uniformly in all directions while preventing over-extension and tearing. The material naturally forms a three-dimensional structure without requiring elaborate deployment mechanisms.\n\n## The Science Behind Kirigami-Inspired Parachutes\n\nThe effectiveness of kirigami-inspired parachutes stems from several interconnected mechanical principles:\n\n**Stress Distribution**: The cuts in a kirigami sheet act as stress risers and redistribution channels. When forces are applied to"
-            }
-          ]
-        },
-        {
-          "role": "user",
-          "content": [
-            {
-              "type": "text",
-              "text": "Please continue from where you left off. DO NOT reason or mention being asked to continue the conversation, just do it. YOU MUST repeat between 10 and 100 characters from the end of the previous message, so that our system can find the correct merge point between the two messages."
-            }
-          ]
-        },
-        {
-          "role": "assistant",
-          "content": [
-            {
-              "type": "thinking",
-              "thinking": "The user wants me to continue the article about kirigami-inspired parachutes from where I left off. They want me to repeat between 10 and 100 characters from the end of the previous message so the system can find the merge point.\n\nThe end of my previous message was:\n\"**Stress Distribution**: The cuts in a kirigami sheet act as stress risers and redistribution channels. When forces are applied to\"\n\nI should repeat some of this text (between 10-100 characters) and then continue. Let me pick a good chunk that's within that range.\n\n\"When forces are applied to\" is about 27 characters, which is perfect.\n\nLet me continue from there naturally.",
-              "signature": "EskGCmMIDBgCKkAaomiXkx9Ni0I2DuX65TEylCjJRt5GSfiCJVFkhLLX/Eg5x7kRn2N3fXrzLSe+vrlv69fulMVUOTbVKA2lKS0GMhljbGF1ZGUtaGFpa3UtNC01LTIwMjUxMDAxOAASDMy0GcAH0rXLZSxo3BoMx7+b9/92IZn0OGTKIjBA9rWKIAdEUTAICiGCby1kw0bmvhGLedGfyjvpLr/MC3lPe53WutR+gU0M4f+g8JcqkwUOZxLGRPw+smQr3oyzUVlAEBU5tyLuP+By4h+QFvL3ynN1E3KajJp619e0iBg3U3pWMyor1lngfdKRDVAbx/a2/oiWxPM4yX3jY9yeuVm1nnyw35ErYUTxrSyU9nv5nHX2pG4CbW+qxeBv1VlYolTptotRcrm3srBu/aYz7EN24IL0ZggBJfC1eji0d+r4CsV4RS+xKGAFz/W54evD2rzfyqzQSz5GaTD+cLhil9jKi9TLDSJA0A4gwQ/v8vDuHs2FjIVW7TRrPWI9MAGa3J+r6r+g6c6K3yJ3RVyn2DeqEqVsZx+zJVyJpymYC263PxOJd6blwUIJ0gpmLxDse3Rb8Ww4QinXuPjhAtorePgiKqgdi+XI58Q8PJQpXuMPnBgn3cNcLGgCJL5it6QVZrZhssi9AvDURUcLFgtGBUouPyZcksuZ8/C78HqY10W2GXAI+2znXBUQ3J541UmHDXgC3eEimAGhUbJTuJPnkxco4KKKVgNL5s5Yo7jgy1pZARew2T7lcemeoqeuSsNvTim3aaCtWc6yqE0XUX0fKvXYGGhlsSuTVqCuM7PGbMqC9+TzuNKd6KHgt3balCruEo3Jm5nlwW1cWJzNeZnL8RrtMUKuSBT1wxdUNs5En/OEfeD5f4PbAogjXkKGDl9XluIwv+JsANT0LZOFnKu08WPukhi2UH92jTaTkwMC8ZKnLTQc1I3EX+cfrvlVt0VlrRkjrxse9Z10w3u/dFRTMMo1CFTo6Y8XXKdFHp7UuRAcnCCJJSdc+BH3R0j4bkY6xaRn5pvd5I2lFa7qJOzeaFY2/UFf0Vn9UIalJ+cKb9xX8HWA09zANRvgOsTTXrGwUY9y3ZukBKKoQxxpL63qaVBk2zXOExgB"
-            },
-            {
-              "type": "text",
-              "text": "When forces are applied to the material, they are distributed across multiple pathways rather than concentrating at single points. This prevents catastrophic failure and allows the parachute to withstand higher stresses without tearing.\n\n**Programmable Deployment**: The geometry of the cuts can be precisely designed to control how the parachute expands during deployment. By adjusting cut spacing, angle, and pattern, engineers can create parachutes that deploy at specific rates and in particular configurations, making the process more predictable and reliable than traditional designs.\n\n**Material Efficiency**: Because the cuts allow for more compact packing and more efficient force distribution, kirigami-inspired parachutes can achieve the same drag coefficient with less material. This translates directly to weight savings—a critical advantage in aerospace applications.\n\n**Flexibility and Resilience**: The flexibility inherent in kirigami designs allows parachutes to adapt to varying deployment conditions. Whether the chute is deployed at an angle, in strong winds, or in unexpected orientations, the cuts allow the material to adjust and stabilize more gracefully than rigid structures would.\n\n**Damage Tolerance**: While any tear in a parachute is concerning, kirigami designs have built-in advantages for damage mitigation. The existing cuts act as natural crack arrestors, preventing small tears from propagating catastrophically across the entire canopy. The distributed stress pathways mean that localized damage doesn't compromise the entire structure's function.\n\n## Research and Development Milestones\n\nThe development of kirigami-inspired parachutes has progressed through several important phases. Early research involved computational modeling and small-scale laboratory experiments. Scientists used computer simulations to design optimal cut patterns and predict how they would behave under deployment. These simulations tested thousands of iterations, refining the designs based on aerodynamic performance, strength, and reliability metrics.\n\nSubsequent research moved into experimental validation. Teams constructed small-scale prototypes and tested them in wind tunnels, where they could measure drag coefficients, observe deployment behavior, and identify any unexpected instabilities. These tests confirmed that kirigami-inspired designs could indeed achieve performance matching or exceeding traditional parachutes while being significantly lighter.\n\nA landmark moment came when researchers successfully designed and tested full-scale kirigami-inspired parachutes in actual drop tests. These real-world trials demonstrated that the designs worked as predicted and could reliably slow an object's descent in practical conditions. The results showed deployment was smoother and more predictable than many traditional designs.\n\n## Practical Applications\n\nThe potential applications for kirigami-inspired parachutes extend across multiple fields:\n\n**Space Exploration**: NASA and other space agencies have expressed significant interest in these designs for Mars landers and other planetary entry vehicles. The Mars 2020 Perseverance rover successfully used advanced parachute designs that incorporate some kirigami principles. The weight savings and increased reliability are particularly valuable for space missions where every kilogram matters and failure is not an option.\n\n**Emergency Systems**: Traditional aircraft parachutes could potentially be replaced with lighter, more reliable kirigami-inspired designs. Similarly, personal parachutes for skydivers and BASE jumpers could benefit from improved deployment reliability and performance in unpredictable conditions.\n\n**Robotic Descent Systems**: For deploying robots and scientific instruments into hostile environments—such as other planets, deep oceans, or volcanic regions—kirigami-inspired parachutes offer advantages in reliability and payload capacity.\n\n**High-Altitude Research**: Weather balloons, atmospheric monitoring platforms, and other high-altitude instruments could use lighter, more efficient parachutes, allowing them to carry more scientific instruments or descend from greater heights safely.\n\n**Disaster Response**: In emergency situations where personnel or equipment must be lowered into difficult terrain, more reliable and easier-to-deploy parachutes could save lives.\n\n## Material Considerations\n\nWhile the original research involved cutting paper and plastics, practical applications have expanded to include various advanced materials. Researchers have tested kirigami-inspired designs in:\n\n**High-Strength Fabrics**: Modern parachute materials like nylon and polyester can be cut according to kirigami principles, creating designs that are both traditional in material but innovative in construction.\n\n**Composite Materials**: Carbon fiber and other composite materials can be precisely cut and layered to create even stronger and lighter structures, offering potential for specialized applications requiring extreme performance.\n\n**Metamaterials**: Cutting and structuring materials in kirigami patterns actually creates metamaterials—engineered materials with properties not found in nature. These can be tuned to have specific mechanical behaviors ideal for particular applications.\n\n**"
-            }
-          ]
-        },
-        {
-          "role": "user",
-          "content": [
-            {
-              "type": "text",
-              "text": "Please continue from where you left off. DO NOT reason or mention being asked to continue the conversation, just do it. YOU MUST repeat between 10 and 100 characters from the end of the previous message, so that our system can find the correct merge point between the two messages."
-            }
-          ]
-        },
-        {
-          "role": "assistant",
-          "content": [
-            {
-              "type": "thinking",
-              "thinking": "The user wants me to continue from where I left off. I need to repeat between 10 and 100 characters from the end of the previous message to help with merging.\n\nThe previous message ended with:\n\"**Metamaterials**: Cutting and structuring materials in kirigami patterns actually creates metamaterials—engineered materials with properties not found in nature. These can be tuned to have specific mechanical behaviors ideal for particular applications.\n\n**\"\n\nSo the end is \"**\" which is only 2 characters. I need to go back further. Let me count back to find 10-100 characters:\n\n\"These can be tuned to have specific mechanical behaviors ideal for particular applications.\n\n**\"\n\nThat's about 96 characters including spaces and newlines. Let me use that section for the merge point.\n\nActually, looking more carefully, the text ends with:\n\"**Metamaterials**: Cutting and structuring materials in kirigami patterns actually creates metamaterials—engineered materials with properties not found in nature. These can be tuned to have specific mechanical behaviors ideal for particular applications.\n\n**\"\n\nI should repeat from a point that gives 10-100 characters. Let me count from \"These can be tuned to have specific mechanical behaviors ideal for particular applications.\\n\\n**\"\n\nThat's: \"These can be tuned to have specific mechanical behaviors ideal for particular applications.\\n\\n**\"\n\nLet me count: T-h-e-s-e- -c-a-n- -b-e- -t-u-n-e-d- -t-o- -h-a-v-e- -s-p-e-c-i-f-i-c- -m-e-c-h-a-n-i-c-a-l- -b-e-h-a-v-i-o-r-s- -i-d-e-a-l- -f-o-r- -p-a-r-t-i-c-u-l-a-r- -a-p-p-l-i-c-a-t-i-o-n-s = about 91 characters, that works!\n\n\nThese can be tuned to have specific mechanical behaviors ideal for particular applications.\n\n**",
-              "signature": "EoUPCmMIDBgCKkClCaLXK3PHxxyNaMgHK7mebiDPXrHDnWGbhjt1jqiGjFfyW42q8JwuLDvZbTwXq1m1M+PM1jdc/6MwiXEAXY76MhljbGF1ZGUtaGFpa3UtNC01LTIwMjUxMDAxOAASDJK2iKkx9ucu4sVC4hoMYaxmbHbuvAhJueykIjDOiODY5q2iQb71Bz1/UkXXDDxTE3xz1pp1DH6fDsns1o+/FGTxDzf+GdV3UIhrC/Aqzw0CW9lKxJrUMeuufJPm/7Utb8FqoOOFWSkv2YHwkbpbc4ozq4CSVa6RYO2v5JndFG+OPkzKfuIk4Ljj5gDJheOSt9h8tvZurWBYImTgV3IvJ7TvdW6pzmre3iyozolfOsC3nJux/OzhHgGANUbCX7YT7Ai1uzspYWSedlxVYInSODMML5CSPVUJzOhdRrkcjC48JmJ0T3BQSuIBwQRSMHBSYqkCK5WLP3dClRTVm0i8MYu/bmDw2p5hf/x75VumeuSWa0MPXqeAbpc88sls2jOtjlTR0n24TNbusNfxuLp+NDNHIRn+OC7U3Bo8rpwIdr/kJ0peYz1oifzXO3asOgCF/Txq3poDnXhjaVXilBJgw7V+gZOBrjmVDu5VD62PQpImuH4vYD6s7eTVLoxCHSUFPRsY8WA1SE1bFIDs7YjJsDigiVTWGYf9TntAqbathuOovFbrTfqFJkz6xT4OA+an5dKTidXpddQMmE2SgSU46QcPnXaz/g1d71GkgaHVKykwcEoDsgr4Pc2P6/J9qWTlHetqC8GaIsDkyY5ZCMwmhulVSecUtM5Naqg+j6Cx+iyLxyXceUngO9SPxzaSNqyrhcnIUcX2Qifq9eIT0fHhvXT5gdC6ZR3as+Eu5PfWnWsTF/a/ntxXykEx4I3J7uhTzlTQxAxn417JGhuuvfPjpd2VQOvg8zYbBjMUP7kXcurcWFEA+i3xA9659DVj3qDmePNYy29MX6mDOMPOxIowJWMxpt+G6ng63p+yIlmmOMK+cpvmY/hCLlsZjJaj1fcBvCAZ6R3vEc/QdyqRr3dg4/6zSSe+Psg/nbhJO4+pm3P8iZ4Fp3Y/KYbTppO2G4jT11NFBg5tW3UKpX26nbRmCdnv9RZygbd7jRtz4VyfwOEA4vf2dXUh7pvaDKEVeLOkH95olr14vL/Gkp815qtZ0VzxWp3tlSb7zh1pPBg8xtHsha3mlxETwPwEkCBbWH+pRAmXNs3LE8Y4FWuBtHyfzy+D/wsP1HBT96dCHHf0TnpT2gEzaOFTlwc0X2GCrQxdSsIqOr8FGlowToqYvPimzpgLfgcmRybY7SJSQg2AboRf4LmkKvA7u4fLhV71JbBAMPRRI5WmdWDGIFJ05FOKVJQFV8t/0xwRSQ+Xpbo23sAGa7ygV+roizb79OwKPLikOJMULoSEV2VzHvDgspvTO3tFE9DYUlJwBBqnqIkcq0gJ7cdxPqq4dNY+pIEuDwgmI6zuZh7KF6UyfqshxK+5X/A89rFI3RPbXei4ok5JolVGGd7QqC3dRWEL10qdLF7IV62fzmIPEAYa0kwBq0C+LUMe1//iptr/1vM3SFKYQNyC5VRW97IyviFEt1M1PpxzwlaJl0A7kFUaa7p4S4W1i4ylQZsWpnK4ldoMZt0OK9k/OBOAjoLwzoNl7ITqn+jYfWfbYF65JHS9QzaNe/F6IN4GmFEd5yaZkhM/MPwRJ3V7QjchG27qJ40dH0w93BZF7WNOVPySeCIBG/GXoPHepKovicr9rc6Tu0LigDecMd4HgFgT4nov32jKNeerYMK+4D7EcdkPN2cXdRiqssGGlfa6FDsx+ozdlvPK/DWLFYBZ9W3aaK/MweTgeMkxz8q/sYVGzwJql3bdty5xxWbm6bY9CyM++QXmPh7F8whmULZmq0qwCHb1NWtioLaV1dEuHbBJBcP9JTlNaJdpbxI61dgXp4CRcR2XnY5duX33c+IZM/T2VMZi6naLkc2tlyxPspQuCYe8f3lB0JoCSK4Dgtq+VLqcJ4UFDxoLUWG2f2XX+7bZQ370pU/wV1njHWSTrrQWzZX7baCBNcxykiyWFZOnVLQxUsPANGYDNZ7iFViS7l2tqbxdiOCMb1bNtJ4lL0P3At0pi7GZgrfjWNXMtm4yiqCups+3pNBfy9yXcaobmy7vdU8rzdf9W2WKyfvOh/U851ZvFT+JX8yCYKADm147rJV74bWqARMlauxbwjbf+5bRpa9G9RRjePjG2cwpd6l9QUHskBxwVlLn/zulQLfvYm79AxnMiGviaLM5VtUguUq0R7jHLFrSbxgIvaKYz1VJHLuAqg7yU/N7+CRhjAb7LQG/cwB/Ng8MnFHlqkGU/mMBvmmJVkSHurgQuL4uyzkaIL4K6nQ3QVVX8EXTz9o+fdhp/owNwkFk5H4Lj9su2iA8q1Qu+sRLwsl1pSM6h7wznECCLDeQZjQ2IECG3SUD2QJ8Ocl7gwlT3WucEGD9XXhVnRQ7OsMiiFpT3aR5UAj7/r8Jtxf/2iyL37CnIx5Ah5SzuhumZT7pAkKn1DhjaihXXXLye+KcCicJ9gIYAQ=="
-            },
-            {
-              "type": "text",
-              "text": "These can be tuned to have specific mechanical behaviors ideal for particular applications.\n\n**Smart Materials**: Research continues into integrating sensors and responsive materials into kirigami-inspired parachute designs, potentially creating parachutes that can actively monitor their condition and adjust their properties during deployment.\n\n## Engineering Challenges and Ongoing Research\n\nDespite the promising potential, researchers continue to address several engineering challenges:\n\n**Scaling and Manufacturing**: While small-scale prototypes work excellently, manufacturing large-scale kirigami parachutes with precise cuts and consistent quality presents manufacturing challenges. Laser cutting and other precision technologies are helping solve this problem, but costs remain a consideration for widespread adoption.\n\n**Material Fatigue**: Understanding how repeated folding and deployment cycles affect the longevity of cut materials requires extensive testing. Researchers are studying whether the stress concentrations at cut edges create fatigue vulnerabilities over the parachute's lifespan.\n\n**Unpredictable Conditions**: While kirigami designs perform well in controlled tests, the real world presents infinite variations. Research continues to test these parachutes in diverse environmental conditions—extreme winds, temperature variations, precipitation, and deployment angles—to ensure reliability across all scenarios.\n\n**Optimization Trade-offs**: Engineers must balance multiple competing objectives: weight, strength, deployment speed, stability, and cost. Finding the optimal configuration for specific applications requires careful analysis and testing.\n\n**Material Compatibility**: Different applications require different materials, and not all materials that work well with traditional parachute designs are equally suitable for kirigami patterns. Research into material selection and treatment continues.\n\n## Future Directions\n\nThe field of kirigami-inspired parachutes continues to evolve rapidly. Several promising research directions are emerging:\n\n**Biomimetic Integration**: Some researchers are combining kirigami principles with biomimetic design, studying how organisms achieve flight and descent to further optimize parachute designs.\n\n**Adaptive Parachutes**: Future designs may incorporate mechanisms that allow parachutes to change their configuration in response to environmental conditions, automatically optimizing their performance throughout descent.\n\n**Hybrid Systems**: Combining kirigami-inspired parachutes with other descent technologies—such as controlled inflation systems or active guidance—could create hybrid systems offering unprecedented capabilities.\n\n**Additive Manufacturing**: 3D printing technologies may eventually enable the creation of parachutes with complex internal structures and tailored properties, going beyond what traditional cutting and folding can achieve.\n\n**Nanostructured Materials**: As nanotechnology advances, kirigami designs could be implemented at microscopic scales, creating materials with entirely new properties and capabilities.\n\n## Conclusion\n\nKirigami-inspired parachutes represent a fascinating example of how ancient artistic traditions can inform modern engineering solutions. By applying the principles of strategic cutting and folding, researchers have developed parachute designs that are lighter, more reliable, and more resilient than traditional approaches. These innovations have already found their way into cutting-"
-            }
-          ]
-        },
-        {
-          "role": "user",
-          "content": [
-            {
-              "type": "text",
-              "text": "Please continue from where you left off. DO NOT reason or mention being asked to continue the conversation, just do it. YOU MUST repeat between 10 and 100 characters from the end of the previous message, so that our system can find the correct merge point between the two messages."
-            }
-          ]
-        }
-      ],
-      "model": "claude-haiku-4-5",
-      "max_tokens": 1152,
-      "thinking": {
-        "type": "enabled",
-        "budget_tokens": 1024,
-        "display": "summarized"
-      },
-      "stream": true,
-      "cache_control": {
-        "type": "ephemeral",
-        "ttl": "5m"
-      }
-    }
-then:
-  status: 200
-  header:
-    - name: content-type
-      value: text/event-stream; charset=utf-8
-  body: |+
-    event: message_start
-    data: {"type":"message_start","message":{"model":"claude-haiku-4-5-20251001","id":"msg_01YWwkdNL8MZTnpBreygqsVb","type":"message","role":"assistant","content":[],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":2893,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":0},"output_tokens":8,"service_tier":"standard","inference_geo":"not_available"}}            }
-    
-    event: content_block_start
-    data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":"","signature":""}    }
-    
-    event: ping
-    data: {"type": "ping"}
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"The user wants me to continue from where"}     }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" I left off. They want me to repeat between 10 and 100 characters from the end of the previous message. Let me look at the end of the previous message:\n\n\"These"}          }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" innovations have already found their way into cutting-\"\n\nI need to repeat between 10 and 100 characters from the end. Let me count backwards:\n\n\"cutting"}        }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"-\" = 8 characters\n\"into cutting-\" = 13 characters\n\"way into cutting-\" = 17 characters\n\"their way into cutting-\" = 23 characters\n\"found"}            }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" their way into cutting-\" = 29 characters\n\"have already found their way into cutting-\" = 43 characters\n\"innovations have already found their way into cutting-\" = 54 characters\n\"These"}             }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" innovations have already found their way into cutting-\" = 61 characters\n\nI'll use \"have"}      }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" already found their way into cutting-\" which is 43 characters - that's within the 10-100 character range.\n\nNow I need to continue"}              }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":" the sentence that was cut off at \"cutting"}  }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"-\""}  }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"EucICmMIDBgCKkBGPKRuPzYjOt2POhQyc3q17RDATUVRSGDLLqOWSykTyZLZyT+K2FDciiebCOLyPM3qaQNY1iWYym66IIBGJRpdMhljbGF1ZGUtaGFpa3UtNC01LTIwMjUxMDAxOAASDFx47Zv1o09I33epFBoM6dQwZBKJcUa0Ne+XIjDHN3XIWgG1UeHNggSnxJrq/lH3UWUaOACLjM1nhMC/GWjaRs3gFc/wLu2smSUx4akqsQc9RPSmubE59GhCPuIetfzjJe29bG8YzJu3d6V2yLICvEoPa7MNRdK99mBDWoB7dcVbD7xWA8A8aavQse2SQtgSuc9nFGQKaDhAFWz5Rg7+u2E0Q6DnCSxYLqdJaOVvgyz6ETJaKXqU0hAUAr1TJekjBnbUjYMY1clpDU4gFYFwtFZEOKNDSOo3X6CGUEHWfswurn8QiGzLnGq+wjNqOTOYvLBVHTXCuqRF7YE3D7qnzcnScQm4I2D+6BIsYWp8WiSeEI6SRBIxO6FZx0A+Uo2z9HFrgK1gyRNf14N8sjHWNCvieWzZvdqW0W9WqR4x+UeoOBXccr6MaEjco+SWruyQ79BBpe4nkP+cLL8AV3848oANUbd9D2zKBBjXzaciAVnd0KCmOw5qLKxKCPa5izN/wV8WVmdIw9ntCgBAiKKzuhLgwAdB4ZRMH4JCr+WuvwlijS2zvUUM6uKfbg+KSw32MAnvyImhhruoNwAKFdBWObsYVnZVChwwV3BqBh1uNgODRw6DnfBnonrKpiaouBDCdGI25RkfxpHMlR1kmhn3irSki04haeCQZSvVExAf4+Uq0xwbmPSktkW9DDsI4AroBVGYuph52Vv50Nuy276XIMxwhFWGbZL9RK57Ph4r80OnZwN9iQSgWbC/3sw0fGIpLlrGRDt5nAyMK7p1uU3B/0PQfFiRYMOUzz89Eq5xhBL/lTD7nzKTrTAI5gVyXah3g25QnNU5bJYyLb+dx+1xU0OmZtH0DX4dyIS1d7fujbyxJ2A90AfdFHLnLTXQ8VFjtEuPIZTtusywXJNp20nFm6qtkfUsrDUZv39BYi4g3gNvwLgtBM7rOS+gWHaALiR8RT2iWesaQzg29EmbtHVv4MpPHljmT2gl0OIQcGJNI9774Sb6/31dtW7QRVKFAD9a9adIjhlFqON5NneNiwpToaCL0CdN+4tJ8c/1J4yB1SRrI40a1IyIq1vp/eqZRZeNRgqzUx3YG07mxD9N1ORu3aZXcRENfGKOXC+haCcboEqTxZZyRqmLD/ylRXapPm6vZsk0N+YWa9yKsvPGGRTH5X82CzxKywgMw4soRRh0k4V1rwE+5V5NHy9yIBrDcRZq8syVtkgKqHpylttmwOfOmoZXBeQZLeDAU496uKGvTTOpuyAllZNVv/P5JcMJ5XYC3RjcNDaE5eafYde6xUkgHnA18UfgbQl/hRmnhOtjEQzu9sqw2AaVHLd/NbFXeYkHdeMR+N1f4G6ZhrelkUvhubIYAQ=="} }
-    
-    event: content_block_stop
-    data: {"type":"content_block_stop","index":0           }
-    
-    event: content_block_start
-    data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}          }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"have already found their way into cutting-edge aerospace applications, particularly"}      }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" in space exploration. As research continues and manufacturing technologies improve"}             }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":", we can expect to see even broader adoption of these designs across multiple industries.\n\nThe convergence of kirigami with"}          }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" modern engineering exemplifies how innovation often comes not from pursuing"}           }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" entirely new directions, but from thoughtfully revisiting and reinterpreting wisdom from the"}         }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" past. A centuries-old Japanese art form, developed purely for aesthetic purposes, has revealed"}       }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" mechanical principles that address fundamental challenges in contemporary engineering. This cross-discipl"}}
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"inary insight demonstrates the value of looking beyond conventional engineering literature and drawing inspiration from diverse fields."} }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"\n\nAs climate change and space exploration become increasingly important, the efficiency gains offered by kirigami-inspired parachutes take"}   }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" on greater significance. Every kilogram of weight saved on a spacecraft is fuel that can be redirected toward scientific"}     }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" instruments or extended mission capabilities. Every improvement in reliability reduces"}          }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" the risk of mission failure and loss of life.\n\nThe story of kirigami-inspired parachutes also illustrates an important principle for"}   }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" engineers and innovators: constraints often lead to creativity. The limitations of traditional pa"}   }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"rachute designs motivated researchers to seek fundamentally different approaches. By embracing the mathematical and"}   }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" mechanical principles embedded in kirigami, they discovered solutions that are simultaneously more elegant and more practical than incremental improvements to"}     }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" existing designs would have provided.\n\nLooking forward, as these technologies mature and become more widely adopted, they may inspire"}              }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" similar kirigami-based innovations in other fields—from structural engineering to medical devices to robot"}              }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"ics. The principles of strategic cutting and folding, stress distribution, and programmable deployment have broad applicability beyond"}}
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" parachutes.\n\nIn essence, kirigami-inspired parachutes represent more than just an engineering innovation"} }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"; they represent a philosophical shift toward biomimicry and cross-disciplinary thinking in solving complex problems. They remind us that sometimes the most advanced"}    }
-    
-    event: content_block_delta
-    data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":" solutions draw their inspiration from the most unexpected sources, and that the marriage of art and science often produces results neither discipline could achieve alone."}            }
-    
-    event: content_block_stop
-    data: {"type":"content_block_stop","index":1     }
-    
-    event: message_delta
-    data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null,"stop_details":null},"usage":{"input_tokens":2893,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":671}}
-    
-    event: message_stop
-    data: {"type":"message_stop"}
+    data: {"type":"message_stop"     }
     

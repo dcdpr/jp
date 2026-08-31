@@ -224,9 +224,9 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "1337",
+      "message": "1,337",
       "metadata": {
-        "openai_item_id": "bXNnXzBmMTU5MjQwZDY5ZDgxOWUwMTZhNTNjYWEzYzA3ODgxOTQ5OWZkZThlNmYxNWM0NjFj",
+        "openai_item_id": "bXNnXzBhMzJiYjUyMWY2OTExMTcwMTZhODg2ZDc3YzZkODg3ZDJiNDQ1NWJmNjIyODVhNWU3",
         "openai_phase": "ZmluYWxfYW5zd2Vy"
       }
     }

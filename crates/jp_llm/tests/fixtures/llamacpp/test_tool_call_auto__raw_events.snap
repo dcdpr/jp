@@ -12,7 +12,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 Start {
-                    id: "ugYzpYrAdrXYCq64CUePmIvTG8oJwCZZ",
+                    id: "XKlv3S6qUhMOu2TFBjOi50mehedlfHVg",
                     name: "run_me",
                 },
             ),
@@ -40,7 +40,16 @@ expression: v
             index: 2,
             part: ToolCall(
                 ArgumentChunk(
-                    "hello",
+                    "Hello",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 2,
+            part: ToolCall(
+                ArgumentChunk(
+                    " World",
                 ),
             ),
             metadata: {},
@@ -103,7 +112,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 ArgumentChunk(
-                    "bar",
+                    "foo",
                 ),
             ),
             metadata: {},
@@ -151,133 +160,210 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "Gre",
+                "T",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "at! T",
+                "he tool e",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "he t",
+                "xecuted succe",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "ool ran succe",
+                "ssful",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "s",
+                "ly w",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "sfu",
+                "ith the ar",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "lly. I",
+                "gu",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "s there a",
+                "men",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "nything s",
+                "ts",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "peci",
+                " `foo",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "fi",
+                "=\"Hell",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "c you",
+                "o ",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "'d ",
+                "Worl",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "like ",
+                "d\"",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "to ",
+                "` a",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "test or ",
+                "nd ",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "explore ",
+                "`ba",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "f",
+                "r=",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                "urther?",
+                "[\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "foo",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "\",",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " \"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "foo\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "]`. The",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                " output in",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "d",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "ica",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "tes: **",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "wor",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Message(
+                "king!**",
             ),
             metadata: {},
         },

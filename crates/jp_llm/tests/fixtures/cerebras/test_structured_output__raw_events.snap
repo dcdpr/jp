@@ -7,77 +7,35 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "User asks: \"Generate a title for this conversation.\" We need to output in structured",
+                "We",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "_output format: JSON with",
+                " need to output structured_output: JSON with",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " property \"",
+                " required \"titles\" array, exactly one string",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "titles\": array with exactly",
+                ". Provide a concise descriptive title. So answer",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " one string. So produce {\"titles\": [\"...\"]",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "}. Title should be",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " concise",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " descriptive. For this conversation: user asks for title",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " generation. Maybe \"Conversation Title Generation Request",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "\". Provide one title",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                ". Ensure correct JSON.",
+                " with JSON.",
             ),
             metadata: {},
         },
@@ -88,14 +46,14 @@ expression: v
         Part {
             index: 1,
             part: Structured(
-                "{\"titles\": [\"",
+                "{\"titles\":[\"Conversation Title Generation Request\"]",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                "Conversation Title Generation Request\"]}",
+                "}",
             ),
             metadata: {},
         },

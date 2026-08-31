@@ -9,7 +9,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "The user is asking me to run a tool, but they haven't specified which tool or what arguments I should use. Looking at the available tools, there's only one called \"run_me\" with no parameters defined (both type and properties are empty strings/null).\n\nSince there's only one tool available (\"run_me\") and it has no required parameters, I can call it without any arguments. The user said \"providing whatever arguments you want\" which suggests I have flexibility, but since this tool doesn't take any parameters anyway, I'll just call it with no arguments.",
+                        reasoning: "The user wants me to run a tool/function called \"run_me\" with some arguments they choose. Looking at the schema:\n\n- Function name: run_me\n- Parameters required: [\"bar\"] - so \"bar\" is required\n  - Type can be string or array of strings\n  - Items must have enum value either \"foo\" or \"bar\", and type string\n  \nWait, looking more carefully at this. The parameter description says the items should only accept \"foo\" or \"bar\". Let me call run_me with some arguments. Since bar is required but I can choose whatever, let me provide a simple valid argument like [\"foo\"] which would be an array containing one item that's in the enum list.\n\nActually, looking at this more carefully:\n- The function requires parameter \"bar\" \n- The type of bar is described as having properties with items from enum [\"foo\", \"bar\"], but wait... it says items must have enum values and also says bar can be string or array. This seems like some schema confusion in the description.\n\nLet me interpret this more simply: I'll call run_me with a simple argument. Since the example shows foo as an option, let me just pass [\"foo\"] as the value for bar parameter.",
                     },
                 ),
                 metadata: {},
@@ -22,7 +22,11 @@ expression: v
                     ToolCallRequest {
                         id: "run_me_2",
                         name: "run_me",
-                        arguments: {},
+                        arguments: {
+                            "bar": Array [
+                                String("foo"),
+                            ],
+                        },
                     },
                 ),
                 metadata: {},
@@ -38,7 +42,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "The tool executed successfully! It returned a \"working!\" status. Let me know if you'd like to try a specific function, pass certain arguments, or explore what's available. 😊",
+                        message: "The tool ran successfully with the arguments you provided. It output: `working!`. Is there anything specific you'd like to explore further or a different function you want me to execute? 😊",
                     },
                 ),
                 metadata: {},

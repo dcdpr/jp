@@ -20,7 +20,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Got it! Your test message came through loud and clear. How can I help you today?",
+                        message: "Your test message came through successfully! Let me know if there's anything I can help you with.",
                     },
                 ),
                 metadata: {},

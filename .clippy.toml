@@ -16,6 +16,11 @@ doc-valid-idents = [
 allow-unwrap-in-tests = true
 allow-print-in-tests = true
 allowed-duplicate-crates = [
+    # `thiserror-impl` 2.0.20 parses with `syn` 3 while the rest of the
+    # proc-macro ecosystem is still on 2, so the graph carries both. Nothing in
+    # the workspace can collapse it: we pin `syn` 2, and moving to 3 would only
+    # trade which half of the ecosystem disagrees. Drop this once they converge.
+    "syn",
     "windows-core",
     "windows-implement",
     "windows-interface",

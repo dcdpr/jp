@@ -8,7 +8,7 @@ expression: v
             index: 0,
             part: ToolCall(
                 Start {
-                    id: "toolu_01RGHgVXd9wN3iqGdMM4KSA4",
+                    id: "toolu_01JAHJz5uuvrjHRutexsopKE",
                     name: "run_me",
                 },
             ),
@@ -28,7 +28,7 @@ expression: v
             index: 0,
             part: ToolCall(
                 ArgumentChunk(
-                    "{\"bar\"",
+                    "{\"bar\":",
                 ),
             ),
             metadata: {},
@@ -37,7 +37,7 @@ expression: v
             index: 0,
             part: ToolCall(
                 ArgumentChunk(
-                    ": \"",
+                    " \"foo\"",
                 ),
             ),
             metadata: {},
@@ -46,7 +46,7 @@ expression: v
             index: 0,
             part: ToolCall(
                 ArgumentChunk(
-                    "foo\"",
+                    ", \"",
                 ),
             ),
             metadata: {},
@@ -55,7 +55,7 @@ expression: v
             index: 0,
             part: ToolCall(
                 ArgumentChunk(
-                    ", \"foo\":",
+                    "foo\": ",
                 ),
             ),
             metadata: {},
@@ -64,7 +64,7 @@ expression: v
             index: 0,
             part: ToolCall(
                 ArgumentChunk(
-                    " \"foo\"}",
+                    "\"foo\"}",
                 ),
             ),
             metadata: {},
@@ -82,77 +82,21 @@ expression: v
         Part {
             index: 0,
             part: Message(
-                "Perfect",
+                "Great",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                "! The tool ran successfully with the arguments",
+                "! The tool ran successfully. I called the function with:\n- **bar**: \"foo\"\n- **foo**: \"foo\"\n\nAnd it returned \"working!\" as the",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Message(
-                " `",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                "bar",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                "=\"foo\"` and `foo=\"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                "foo\"`,",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " returning",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " the",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " result",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                " \"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Message(
-                "working!\"",
+                " result. Pretty straightforward!",
             ),
             metadata: {},
         },

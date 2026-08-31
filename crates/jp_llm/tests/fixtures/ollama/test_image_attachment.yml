@@ -31,5 +31,5 @@ then:
     - name: content-type
       value: application/x-ndjson
   body: |
-    {"model":"qwen3.5:9b","created_at":"2026-03-06T14:52:04.247078Z","message":{"role":"assistant","content":"apple"},"done":false}
-    {"model":"qwen3.5:9b","created_at":"2026-03-06T14:52:04.292065Z","message":{"role":"assistant","content":""},"done":true,"done_reason":"stop","total_duration":19843279875,"load_duration":6578935000,"prompt_eval_count":100,"prompt_eval_duration":486485583,"eval_count":2,"eval_duration":43401250}
+    {"model":"qwen3.5:9b","created_at":"2026-08-21T15:24:19.917303Z","message":{"role":"assistant","content":"apple"},"done":false}
+    {"model":"qwen3.5:9b","created_at":"2026-08-21T15:24:19.958234Z","message":{"role":"assistant","content":""},"done":true,"done_reason":"stop","total_duration":31880467959,"load_duration":18375352084,"prompt_eval_count":61,"prompt_eval_duration":677948000,"eval_count":2,"eval_duration":40862000}

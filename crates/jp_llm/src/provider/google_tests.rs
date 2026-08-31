@@ -23,7 +23,7 @@ async fn test_gemini_3_reasoning() -> std::result::Result<(), Box<dyn std::error
                 exclude: Some(false),
             },
         )))
-        .model("google/gemini-3-pro-preview".parse().unwrap())
+        .model("google/gemini-3.1-pro-preview".parse().unwrap())
         .event(ChatRequest::from("Test message"));
 
     run_test(PROVIDER, function_name!(), Some(request)).await
@@ -175,7 +175,7 @@ fn test_off_on_unknown_model_attempts_disable() {
 /// Its lowest supported level is requested with the thoughts withheld instead.
 #[test]
 fn test_off_on_always_on_leveled_model_uses_lowest_level() {
-    let mut model = ModelDetails::empty((PROVIDER, "gemini-3-pro-preview").try_into().unwrap());
+    let mut model = ModelDetails::empty((PROVIDER, "gemini-3.1-pro-preview").try_into().unwrap());
     model.max_output_tokens = Some(65_536);
     // Mirrors the table entry: low and high only, reasoning always on.
     model.reasoning =
@@ -492,8 +492,8 @@ mod transform_schema {
     #[test]
     fn const_rewritten_to_enum() {
         let input = schema(json!({
-            "type": "string",
-            "const": "tool_call.my_tool.call_123"
+          "type": "string",
+          "const": "tool_call.my_tool.call_123"
         }));
 
         let out = transform_schema(input);
@@ -506,8 +506,8 @@ mod transform_schema {
     #[test]
     fn const_rewritten_for_non_string_values() {
         let input = schema(json!({
-            "type": "integer",
-            "const": 42
+          "type": "integer",
+          "const": 42
         }));
 
         let out = transform_schema(input);
@@ -519,17 +519,20 @@ mod transform_schema {
     #[test]
     fn nested_const_in_properties_rewritten() {
         let input = schema(json!({
-            "type": "object",
-            "properties": {
-                "inquiry_id": {
-                    "type": "string",
-                    "const": "tool_call.fs_modify_file.call_abc"
-                },
-                "answer": {
-                    "type": "boolean"
-                }
+          "type": "object",
+          "properties": {
+            "inquiry_id": {
+              "type": "string",
+              "const": "tool_call.fs_modify_file.call_abc"
             },
-            "required": ["inquiry_id", "answer"]
+            "answer": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "inquiry_id",
+            "answer"
+          ]
         }));
 
         let out = transform_schema(input);
@@ -547,18 +550,18 @@ mod transform_schema {
     #[test]
     fn deeply_nested_const_rewritten() {
         let input = schema(json!({
-            "type": "object",
-            "properties": {
-                "outer": {
-                    "type": "object",
-                    "properties": {
-                        "inner": {
-                            "type": "string",
-                            "const": "fixed"
-                        }
-                    }
+          "type": "object",
+          "properties": {
+            "outer": {
+              "type": "object",
+              "properties": {
+                "inner": {
+                  "type": "string",
+                  "const": "fixed"
                 }
+              }
             }
+          }
         }));
 
         let out = transform_schema(input);
@@ -571,11 +574,11 @@ mod transform_schema {
     #[test]
     fn const_in_array_items_rewritten() {
         let input = schema(json!({
-            "type": "array",
-            "items": {
-                "type": "string",
-                "const": "only_value"
-            }
+          "type": "array",
+          "items": {
+            "type": "string",
+            "const": "only_value"
+          }
         }));
 
         let out = transform_schema(input);
@@ -588,18 +591,27 @@ mod transform_schema {
     #[test]
     fn ref_inlined_from_defs() {
         let input = schema(json!({
-            "type": "array",
-            "items": { "$ref": "#/$defs/CountryInfo" },
-            "$defs": {
-                "CountryInfo": {
-                    "type": "object",
-                    "properties": {
-                        "continent": { "type": "string" },
-                        "gdp": { "type": "integer" }
-                    },
-                    "required": ["continent", "gdp"]
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CountryInfo"
+          },
+          "$defs": {
+            "CountryInfo": {
+              "type": "object",
+              "properties": {
+                "continent": {
+                  "type": "string"
+                },
+                "gdp": {
+                  "type": "integer"
                 }
+              },
+              "required": [
+                "continent",
+                "gdp"
+              ]
             }
+          }
         }));
 
         let out = transform_schema(input);
@@ -618,21 +630,23 @@ mod transform_schema {
     #[test]
     fn ref_with_sibling_fields_preserved() {
         let input = schema(json!({
-            "type": "object",
-            "properties": {
-                "person": {
-                    "$ref": "#/$defs/Person",
-                    "description": "The main person"
-                }
-            },
-            "$defs": {
-                "Person": {
-                    "type": "object",
-                    "properties": {
-                        "name": { "type": "string" }
-                    }
-                }
+          "type": "object",
+          "properties": {
+            "person": {
+              "$ref": "#/$defs/Person",
+              "description": "The main person"
             }
+          },
+          "$defs": {
+            "Person": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                }
+              }
+            }
+          }
         }));
 
         let out = transform_schema(input);
@@ -647,19 +661,25 @@ mod transform_schema {
     #[test]
     fn ref_in_nested_property() {
         let input = schema(json!({
-            "type": "object",
-            "properties": {
-                "addr": { "$ref": "#/$defs/Address" }
-            },
-            "$defs": {
-                "Address": {
-                    "type": "object",
-                    "properties": {
-                        "city": { "type": "string" },
-                        "zip": { "type": "string" }
-                    }
-                }
+          "type": "object",
+          "properties": {
+            "addr": {
+              "$ref": "#/$defs/Address"
             }
+          },
+          "$defs": {
+            "Address": {
+              "type": "object",
+              "properties": {
+                "city": {
+                  "type": "string"
+                },
+                "zip": {
+                  "type": "string"
+                }
+              }
+            }
+          }
         }));
 
         let out = transform_schema(input);
@@ -675,13 +695,17 @@ mod transform_schema {
     #[test]
     fn definitions_also_removed() {
         let input = schema(json!({
-            "type": "object",
-            "properties": {
-                "x": { "$ref": "#/$defs/X" }
-            },
-            "definitions": {
-                "X": { "type": "string" }
+          "type": "object",
+          "properties": {
+            "x": {
+              "$ref": "#/$defs/X"
             }
+          },
+          "definitions": {
+            "X": {
+              "type": "string"
+            }
+          }
         }));
 
         let out = transform_schema(input);
@@ -693,12 +717,18 @@ mod transform_schema {
     #[test]
     fn property_ordering_added_for_multiple_properties() {
         let input = schema(json!({
-            "type": "object",
-            "properties": {
-                "first": { "type": "string" },
-                "second": { "type": "integer" },
-                "third": { "type": "boolean" }
+          "type": "object",
+          "properties": {
+            "first": {
+              "type": "string"
+            },
+            "second": {
+              "type": "integer"
+            },
+            "third": {
+              "type": "boolean"
             }
+          }
         }));
 
         let out = transform_schema(input);
@@ -709,10 +739,12 @@ mod transform_schema {
     #[test]
     fn property_ordering_not_added_for_single_property() {
         let input = schema(json!({
-            "type": "object",
-            "properties": {
-                "only": { "type": "string" }
+          "type": "object",
+          "properties": {
+            "only": {
+              "type": "string"
             }
+          }
         }));
 
         let out = transform_schema(input);
@@ -723,12 +755,19 @@ mod transform_schema {
     #[test]
     fn property_ordering_preserved_if_already_set() {
         let input = schema(json!({
-            "type": "object",
-            "properties": {
-                "a": { "type": "string" },
-                "b": { "type": "string" }
+          "type": "object",
+          "properties": {
+            "a": {
+              "type": "string"
             },
-            "propertyOrdering": ["b", "a"]
+            "b": {
+              "type": "string"
+            }
+          },
+          "propertyOrdering": [
+            "b",
+            "a"
+          ]
         }));
 
         let out = transform_schema(input);
@@ -740,10 +779,15 @@ mod transform_schema {
     #[test]
     fn anyof_variants_processed() {
         let input = schema(json!({
-            "anyOf": [
-                { "type": "string", "const": "fixed" },
-                { "type": "integer" }
-            ]
+          "anyOf": [
+            {
+              "type": "string",
+              "const": "fixed"
+            },
+            {
+              "type": "integer"
+            }
+          ]
         }));
 
         let out = transform_schema(input);
@@ -759,13 +803,19 @@ mod transform_schema {
     #[test]
     fn anyof_with_ref_resolved() {
         let input = schema(json!({
-            "anyOf": [
-                { "$ref": "#/$defs/Str" },
-                { "type": "integer" }
-            ],
-            "$defs": {
-                "Str": { "type": "string" }
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Str"
+            },
+            {
+              "type": "integer"
             }
+          ],
+          "$defs": {
+            "Str": {
+              "type": "string"
+            }
+          }
         }));
 
         let out = transform_schema(input);
@@ -778,11 +828,13 @@ mod transform_schema {
     #[test]
     fn additional_properties_bool_preserved() {
         let input = schema(json!({
-            "type": "object",
-            "properties": {
-                "name": { "type": "string" }
-            },
-            "additionalProperties": false
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
         }));
 
         let out = transform_schema(input);
@@ -793,14 +845,16 @@ mod transform_schema {
     #[test]
     fn additional_properties_schema_processed() {
         let input = schema(json!({
-            "type": "object",
-            "properties": {
-                "name": { "type": "string" }
-            },
-            "additionalProperties": {
-                "type": "string",
-                "const": "extra"
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
             }
+          },
+          "additionalProperties": {
+            "type": "string",
+            "const": "extra"
+          }
         }));
 
         let out = transform_schema(input);
@@ -813,11 +867,16 @@ mod transform_schema {
     #[test]
     fn prefix_items_processed() {
         let input = schema(json!({
-            "type": "array",
-            "prefixItems": [
-                { "type": "string", "const": "header" },
-                { "type": "integer" }
-            ]
+          "type": "array",
+          "prefixItems": [
+            {
+              "type": "string",
+              "const": "header"
+            },
+            {
+              "type": "integer"
+            }
+          ]
         }));
 
         let out = transform_schema(input);
@@ -831,8 +890,12 @@ mod transform_schema {
     #[test]
     fn enum_preserved_unchanged() {
         let input = schema(json!({
-            "type": "string",
-            "enum": ["A", "B", "C"]
+          "type": "string",
+          "enum": [
+            "A",
+            "B",
+            "C"
+          ]
         }));
 
         let out = transform_schema(input);
@@ -843,10 +906,10 @@ mod transform_schema {
     #[test]
     fn supported_properties_preserved() {
         let input = schema(json!({
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 10,
-            "description": "A number"
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "description": "A number"
         }));
 
         let out = transform_schema(input);
@@ -861,18 +924,21 @@ mod transform_schema {
     #[test]
     fn inquiry_schema_transforms_correctly() {
         let input = schema(json!({
-            "type": "object",
-            "properties": {
-                "inquiry_id": {
-                    "type": "string",
-                    "const": "tool_call.fs_modify_file.call_a3b7c9d1"
-                },
-                "answer": {
-                    "type": "boolean"
-                }
+          "type": "object",
+          "properties": {
+            "inquiry_id": {
+              "type": "string",
+              "const": "tool_call.fs_modify_file.call_a3b7c9d1"
             },
-            "required": ["inquiry_id", "answer"],
-            "additionalProperties": false
+            "answer": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "inquiry_id",
+            "answer"
+          ],
+          "additionalProperties": false
         }));
 
         let out = transform_schema(input);
@@ -911,20 +977,31 @@ mod transform_schema {
     #[test]
     fn sdk_docstring_example() {
         let input = schema(json!({
-            "items": { "$ref": "#/$defs/CountryInfo" },
-            "title": "Placeholder",
-            "type": "array",
-            "$defs": {
-                "CountryInfo": {
-                    "properties": {
-                        "continent": { "title": "Continent", "type": "string" },
-                        "gdp": { "title": "Gdp", "type": "integer" }
-                    },
-                    "required": ["continent", "gdp"],
-                    "title": "CountryInfo",
-                    "type": "object"
+          "items": {
+            "$ref": "#/$defs/CountryInfo"
+          },
+          "title": "Placeholder",
+          "type": "array",
+          "$defs": {
+            "CountryInfo": {
+              "properties": {
+                "continent": {
+                  "title": "Continent",
+                  "type": "string"
+                },
+                "gdp": {
+                  "title": "Gdp",
+                  "type": "integer"
                 }
+              },
+              "required": [
+                "continent",
+                "gdp"
+              ],
+              "title": "CountryInfo",
+              "type": "object"
             }
+          }
         }));
 
         let out = transform_schema(input);

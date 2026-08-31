@@ -1,9 +1,7 @@
-use std::iter;
-
-use indexmap::IndexMap;
-use jp_config::{conversation::tool::ToolParameterConfig, providers::llm::LlmProviderConfig};
+use jp_config::providers::llm::LlmProviderConfig;
 use jp_conversation::event::{ToolCallRequest, ToolCallResponse};
 use jp_test::{Result, function_name};
+use serde_json::json;
 
 use super::*;
 use crate::{model::ReasoningDetails, test::TestRequest};
@@ -12,7 +10,7 @@ macro_rules! test_all_models {
         ($($fn:ident),* $(,)?) => {
             mod anthropic { use super::*; $(test_all_models!(func; $fn, "openrouter/anthropic/claude-haiku-4.5");)* }
             mod google    { use super::*; $(test_all_models!(func; $fn, "openrouter/google/gemini-2.5-flash");)* }
-            mod xai       { use super::*; $(test_all_models!(func; $fn, "openrouter/x-ai/grok-code-fast-1");)* }
+            mod xai       { use super::*; $(test_all_models!(func; $fn, "openrouter/x-ai/grok-4.3");)* }
             mod minimax   { use super::*; $(test_all_models!(func; $fn, "openrouter/minimax/minimax-m2");)* }
         };
         (func; $fn:ident, $model:literal) => {
@@ -64,14 +62,8 @@ async fn test_anthropic_opus_5_parallel_tool_round_trip() -> Result {
             .model(model_id)
             .model_details(model)
             .enable_reasoning()
-            .tool(
-                "list_items",
-                iter::empty::<(&'static str, ToolParameterConfig)>(),
-            )
-            .tool(
-                "search_items",
-                iter::empty::<(&'static str, ToolParameterConfig)>(),
-            )
+            .tool_without_parameters("list_items")
+            .tool_without_parameters("search_items")
             .chat_request(
                 "Call both list_items and search_items in parallel. Do not answer with text \
                  before calling both tools.",
@@ -106,17 +98,18 @@ async fn test_anthropic_opus_5_parallel_tool_round_trip() -> Result {
 #[test]
 fn request_preserves_integer_tool_parameter_type() -> Result {
     let request = TestRequest::chat(ProviderId::Openrouter)
-        .tool("fs_read_file", [("start_line", ToolParameterConfig {
-            kind: "integer".to_owned().into(),
-            required: false,
-            default: None,
-            summary: None,
-            description: None,
-            examples: None,
-            enumeration: vec![],
-            items: None,
-            properties: IndexMap::new(),
-        })])
+        .tool(
+            "fs_read_file",
+            json!({
+              "type": "object",
+              "properties": {
+                "start_line": {
+                  "type": "integer"
+                }
+              },
+              "required": []
+            }),
+        )
         .chat_request("Read README.md");
     let TestRequest::Chat { model, query, .. } = request else {
         unreachable!();
@@ -147,33 +140,35 @@ fn request_preserves_integer_tool_parameter_type() -> Result {
 #[test]
 fn tool_call_finish_is_a_clean_completion() -> Result {
     let tool_call: response::Choice = serde_json::from_value(serde_json::json!({
-        "finish_reason": null,
-        "native_finish_reason": null,
-        "delta": {
-            "role": "assistant",
-            "content": null,
-            "reasoning": null,
-            "tool_calls": [{
-                "index": 0,
-                "id": "call_1",
-                "function": {
-                    "name": "fs_read_file",
-                    "arguments": "{\"path\":\"README.md\",\"start_line\":\"1\"}"
-                }
-            }]
-        },
-        "error": null
+      "finish_reason": null,
+      "native_finish_reason": null,
+      "delta": {
+        "role": "assistant",
+        "content": null,
+        "reasoning": null,
+        "tool_calls": [
+          {
+            "index": 0,
+            "id": "call_1",
+            "function": {
+              "name": "fs_read_file",
+              "arguments": "{\"path\":\"README.md\",\"start_line\":\"1\"}"
+            }
+          }
+        ]
+      },
+      "error": null
     }))?;
     let finish: response::Choice = serde_json::from_value(serde_json::json!({
-        "finish_reason": "tool_calls",
-        "native_finish_reason": "tool_calls",
-        "delta": {
-            "role": null,
-            "content": null,
-            "reasoning": null,
-            "tool_calls": []
-        },
-        "error": null
+      "finish_reason": "tool_calls",
+      "native_finish_reason": "tool_calls",
+      "delta": {
+        "role": null,
+        "content": null,
+        "reasoning": null,
+        "tool_calls": []
+      },
+      "error": null
     }))?;
     let mut state = AggregationState {
         tool_call_indices: vec![],
@@ -304,10 +299,7 @@ fn forced_tool_request(
 ) -> (request::ChatCompletion, Option<ForcedToolFallback>) {
     let request = TestRequest::chat(ProviderId::Openrouter)
         .tool_choice_fn("edit_file")
-        .tool(
-            "edit_file",
-            iter::empty::<(&'static str, ToolParameterConfig)>(),
-        )
+        .tool_without_parameters("edit_file")
         .chat_request("Edit the file");
     let request = if enable_reasoning {
         request.enable_reasoning()

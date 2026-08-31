@@ -47,10 +47,10 @@ audit-as-crates-io = false
 audit-as-crates-io = false
 
 [policy.saphyr]
-audit-as-crates-io = true
+audit-as-crates-io = false
 
 [policy.saphyr-parser]
-audit-as-crates-io = true
+audit-as-crates-io = false
 
 [policy.schematic]
 audit-as-crates-io = false

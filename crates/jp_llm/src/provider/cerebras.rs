@@ -727,7 +727,7 @@ fn convert_tools(tools: Vec<ToolDefinition>) -> Vec<Value> {
                 "function": {
                     "name": tool.name,
                     "description": tool.docs.schema_description().unwrap_or_default(),
-                    "parameters": parameters_with_strict_mode(tool.parameters, false),
+                    "parameters": parameters_with_strict_mode(&tool.parameters, false),
                 },
             })
         })

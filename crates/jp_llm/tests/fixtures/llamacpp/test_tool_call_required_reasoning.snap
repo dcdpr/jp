@@ -9,7 +9,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "The user is asking me to run a tool with arguments I choose. Looking at the available function, I have `run_me` which requires two parameters:\n- `foo`: a string or null (default is \"foo\")\n- `bar`: a string or array, with enum values [\"foo\", \"bar\"]\n\nSince the user said I can provide whatever arguments I want, I can choose any valid values. Let me pick some reasonable values:\n- foo: I'll use \"test\" (a string value)\n- bar: I'll use [\"foo\", \"bar\"] (an array with both enum values)\n\nBoth are valid according to the schema.",
+                        reasoning: "The user is asking me to run a tool, but they haven't specified which tool or what arguments they want. Looking at the available function, I have \"run_me\" which takes two required parameters:\n- foo: string or null (default: \"foo\")\n- bar: string or array, must be \"foo\" or \"bar\" (enum)\n\nSince the user said \"whatever arguments you want\", I can choose any valid combination. Let me pick some reasonable values:\n- foo: I'll use \"test\" as a string value\n- bar: I'll use [\"foo\", \"bar\"] as an array with valid enum values\n\nThis should satisfy the requirements while demonstrating the function works.\n",
                     },
                 ),
                 metadata: {},
@@ -20,7 +20,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "bJSJqbnctkwroZWyYjEQrObRWJdWOWSV",
+                        id: "n19Zg7uRIClo8uT6BobGdBU6pPoBmbMu",
                         name: "run_me",
                         arguments: {
                             "foo": String("test"),
@@ -41,7 +41,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "The tool ran successfully with the arguments `foo: \"test\"` and `bar: [\"foo\", \"bar\"]`. The output was:\n\n```\nworking!\n```",
+                        message: "The tool ran successfully with the provided arguments. The result indicates the operation completed without errors.\n\nIf you'd like to try different arguments or a specific tool, feel free to ask!",
                     },
                 ),
                 metadata: {},

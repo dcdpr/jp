@@ -9,7 +9,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Structured {
-                        data: String("Conversation: Requesting a Title Generation"),
+                        data: String("Here Are the Top 50 SEO Strategies to Boost Your Rankings! 🚀\n\nThe world of search engines is constantly evolving, but with the right tactics... [Continue reading]  \n\n📊 **Pro Tip:** Don't forget local keywords if you're targeting specific cities or regions! 🔍"),
                     },
                 ),
                 metadata: {},

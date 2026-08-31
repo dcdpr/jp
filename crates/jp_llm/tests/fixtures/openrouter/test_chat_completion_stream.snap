@@ -9,15 +9,15 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "**Acknowledging user message**\n\nThe user sent a \"Test message,\" so I think they might want me to acknowledge it. I'm considering a concise response, maybe asking if they need any help. It's important to keep it straightforward while offering to run tests or provide examples if needed. I’ll make sure to acknowledge their message clearly and simply.",
+                        reasoning: "**Acknowledging a test message**\n\nThe user sent a \"Test message,\" so I want to acknowledge it. It's important to keep my reply concise and maybe ask how I can help further. I should confirm that I'm active and ready to assist. Offering examples of the kinds of things I can do might be useful too. I’ll keep it short and to the point, as the user likely didn’t want anything lengthy.",
                     },
                 ),
                 metadata: {
-                    "openai_encrypted_content": String("gAAAAABplbbEbShfX62VJsFwLrU5ceacaVLeXjFMdtka0JJNfyQ0h9HjXz3fQQ-Pkpey71EKKmNGS30Q-u7gpxgxwaHhaKSvUEKEuMNAQnKAhiNGdmP5Hql0tul3FSufj6_g3HHU-LpyELSHqeKPFB93jjkV1Mj-C7aRAQ9DGuFTe_DkGGYiSqCTGMICZ0rckAoTGz2ddokhUE1Hf2Fb-nT8hz62g1kqh6UgQOqD4GRNMyjjid5wc-jnIy7wxc0gm4rAWiYL4kHL6XSLE7uTp_FSDnEBirnQ18XVAlMR0umKZqx2HYjyw2QQiyz5MBAWEVEzWBNE3H698FLJITGXaKC1RlgZyMNR89usAQv-0fiGIq9qBb7Uh7_E8vxwg0wi44ZLPVSxYuAYLOS-1A6IgamgeM398jcPDcpEQsyBpbQUs6Zyyr2JUbXllv1HxfEbZ74yH524qAb5GxasbP98i6LDyD6cJpgVXPTSIl4KClTKCl4H8g5PHrUpdu7JKj24ch2hVjYLr0YTAeJfrmORL5KfnbxFTnP9im-Sf1-kzHDQ7xf9J51KcUrBrTGrWuXMgcfa0TCtvLh2BXhMsJG1WBq5qiT1cEQrAUWMvVKhj2_bv3z4tR1dda0GrIkko1_9u6A-j8-boMQUML1KW9X1pdq5d_iaE-giAonACoIn9nlM89v7iIyHscVhLXAE9nEjWm22UCIjs-fLAdi1rcO0PEHOYTfJ0EIt9mqujNgFIN6n1KvyXojmHHdnl7MrvQBO4bH0MkY-KcmOFEuqBB-xjgdXXjzvxoZPEkfabGw2Mk-d1kmHQcsxn6JMFQqNfbP9IPVnmDS2ihTe9p82JittHdHB82yqwd-wyFusNHQ3JmCVHdYPsU9v3A412iAmy_mvcy3Mu6_xoxoPhA9MJSdOlRTcA9eV0pGgX3klG0jL6awBZExk1OGJcO1FblKRQU0JVn8tPwN8JElJ5QsSj6goFVLj89rfNOtdh-ajwTRq1xnmFyr5BlN8nQIy5IP-Ft2SK0dUmEI81L1lAokLJstNyAjnADia05mcxaZs6CtARHBm4gmufjOmb7UL1ovj29w63hFoKGH5tQFF"),
+                    "openai_encrypted_content": String("gAAAAABqiG2xWqNU2-V3-X-cjkJKoqe58oFVNL9Kl_2kLbxi0Ml4xKKzqM6hKK58s-DBR8AeLns6wMzZiWgj8_OeXZenjW5dnnVpFHUu2ypdHb_W15FnCHImhK4DoAJIQiL96UjRGaKaQnCklHcsE7vrDvVpVFJwUcB4gtnhyHP2LMRno1PKqHhmyElmgwv6StZXqvr1hd4_WDebuyOAgcRDUmhXLAXWDxXjpfrBEs-OoNKeMZ3xQO1CC3IAcpo_fmUBBygDRB0ztsz9kczTsm12vgEjxi9dP4cKnE765q0_RPfEAb0xceuPl751Dueyxoh7wi7Vl1YtOzEFsdmz9OzI0Aj7Xma5z0y9MVQ7I81o9D9f6YYBD-AyBi2FdyYUyD57LBG1ic-eqCQnzxXDi0CpvHBIF8Ga6VQ5sryULJyoyQRRWvta6FNLua5jQSnpiHWGv7isVijb1Kmqhlak1c2rmWY922TejxseEemkAhcAf4MdqACmXahKOpclmu8qYCctgXgV_B1oyO_MVb_d1h0AiRGgOZm7jLXPQ8gHJvDu5GIrk3sLzTl4-koZ-syyDCR3_mvonAYcLR4bxoeAXpCYB3wJkL2oC3tu1zQQilSH_nUrDTKRoGFPRAVjgol4QUFixpAM3jVw3PMEoI5OxVpEk9s-rO3x-Fspkx-DUBNHR0ZUis_p2Yl8lIbvaLi2xmVqoF9M4LtCpuycwdDo7e6dLJSeGhpzzW4kpKHPfNDqrGMaWmIR4Nesydpfebw1X7CTD-jcyX9eIQ2jyIKETII3P-YTPiRiiN4iMnIykloImyzi22BtZ8aYYzE4vQlAeAD6CX5T7PAek0_sFiPQ75NQb3uoa45lISMO70aVDky8h2iI9bTRzM-RzHT_O_Qmdc-fgONTPNuUg2WjjFeRLL-NocsQjiiv24Nas6kJrCPrzz83axP7BdT1O6UulhnOMMEvmbrado_y59YswjIYimkgqEqVARwMb4EI-f6y-sI76UiBWqifYDTo6RuxFWxaYCsJ-m5hMg7SYkFNUwyh0oNEKJkFU2Fb4tV0IpXB7UyGhe8SWlLajNzJ8ywi5Ss5SlnYJUQ243UKT5Sqz3MhMXhjxWLPy3bOus-rPklMpw_JJQBSgD5l028_c0uSdHKpq55WqCk4RKgPmUjOfoty8tTLTImD3ZZeSfjHvV5JPjKsFbEFQRRb8-FzqcsgdtfV0Vg872dXhYtkrXd22aOB1kLwriva5IgTF0syUQwG8X0tXHjeeTMRkh52HXW8zasSV3fyfCpsQ4ei4RCvFfISb8QJRX_Zi_LdN_OEuh2ky_q2_cxA2KL7eL2UbGJOPKmg95xFnOsyKfm5MSHypQ3B4RKLQL2EIMqzil-HhvPkiPpO4Xh9MZGYbwu081P8n9NoXchmBr0YMsaVtrLWoeBX0F4k38urF1wu9hkf6nxfyZ8p5hd8tTn0bf7ql4decORacMOFOurSdbV7SiMwrAbhSq5_w5qz2kIatMRHgh781lrou3AY818LSKK2LfUnnOYO5FvNVgRnYP7YzFB0CPDll7Tz_lTTlakLU4dNwEhLWxr6tqDvCJjVv6Z6v6en411BuiPDAZXwUmVp.eyJlbmRwb2ludF9zbHVnIjoib3BlbmFpL2dwdC01LW1pbmktMjAyNS0wOC0wN3xvcGVuYWkifQ"),
                     "openrouter_metadata": Array [
                         Object {
-                            "id": String("rs_06e0d5b1d38ec685016995b6c1afac8195aaceefddc683f9fb"),
-                            "index": Number(0),
+                            "id": String("rs_09b619bc260da7af016a886dafcc2c87d1a95439de5110510e"),
+                            "index": Number(1),
                             "field": String("openai_encrypted_content"),
                         },
                     ],
@@ -29,7 +29,7 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Received your test message — everything's working. How can I help you next?",
+                        message: "Received your test message — I'm here and working. How can I help you today?",
                     },
                 ),
                 metadata: {},

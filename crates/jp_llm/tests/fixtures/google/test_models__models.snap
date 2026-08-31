@@ -91,106 +91,6 @@ expression: v
         id: ModelIdConfig {
             provider: Google,
             name: Name(
-                "gemini-2.0-flash",
-            ),
-        },
-        display_name: Some(
-            "Gemini 2.0 Flash",
-        ),
-        context_window: Some(
-            1048576,
-        ),
-        max_output_tokens: Some(
-            8192,
-        ),
-        reasoning: Some(
-            Unsupported,
-        ),
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: None,
-        prefill: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Google,
-            name: Name(
-                "gemini-2.0-flash-001",
-            ),
-        },
-        display_name: Some(
-            "Gemini 2.0 Flash 001",
-        ),
-        context_window: Some(
-            1048576,
-        ),
-        max_output_tokens: Some(
-            8192,
-        ),
-        reasoning: Some(
-            Unsupported,
-        ),
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: None,
-        prefill: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Google,
-            name: Name(
-                "gemini-2.0-flash-lite-001",
-            ),
-        },
-        display_name: Some(
-            "Gemini 2.0 Flash-Lite 001",
-        ),
-        context_window: Some(
-            1048576,
-        ),
-        max_output_tokens: Some(
-            8192,
-        ),
-        reasoning: Some(
-            Unsupported,
-        ),
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: None,
-        prefill: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Google,
-            name: Name(
-                "gemini-2.0-flash-lite",
-            ),
-        },
-        display_name: Some(
-            "Gemini 2.0 Flash-Lite",
-        ),
-        context_window: Some(
-            1048576,
-        ),
-        max_output_tokens: Some(
-            8192,
-        ),
-        reasoning: Some(
-            Unsupported,
-        ),
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: None,
-        prefill: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Google,
-            name: Name(
                 "gemini-2.5-flash-preview-tts",
             ),
         },
@@ -466,50 +366,6 @@ expression: v
         ),
         knowledge_cutoff: None,
         deprecated: None,
-        structured_output: None,
-        prefill: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Google,
-            name: Name(
-                "gemini-3-pro-preview",
-            ),
-        },
-        display_name: Some(
-            "Gemini 3 Pro Preview",
-        ),
-        context_window: Some(
-            1048576,
-        ),
-        max_output_tokens: Some(
-            65536,
-        ),
-        reasoning: Some(
-            Supported {
-                mode: Leveled {
-                    xlow: false,
-                    low: true,
-                    medium: false,
-                    high: true,
-                    xhigh: false,
-                    max: false,
-                },
-                can_disable: false,
-            },
-        ),
-        knowledge_cutoff: Some(
-            2025-01-01,
-        ),
-        deprecated: Some(
-            Deprecated {
-                note: "recommended replacement: gemini-3.1-pro-preview",
-                retire_at: Some(
-                    2026-03-09,
-                ),
-            },
-        ),
         structured_output: None,
         prefill: None,
         features: [],
@@ -911,6 +767,29 @@ expression: v
         id: ModelIdConfig {
             provider: Google,
             name: Name(
+                "gemini-3.7-flash",
+            ),
+        },
+        display_name: Some(
+            "Gemini 3.7 Flash",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: Some(
+            65536,
+        ),
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Google,
+            name: Name(
                 "lyria-3-clip-preview",
             ),
         },
@@ -984,14 +863,14 @@ expression: v
         id: ModelIdConfig {
             provider: Google,
             name: Name(
-                "gemini-robotics-er-1.5-preview",
+                "gemini-robotics-er-1.6-preview",
             ),
         },
         display_name: Some(
-            "Gemini Robotics-ER 1.5 Preview",
+            "Gemini Robotics-ER 1.6 Preview",
         ),
         context_window: Some(
-            1048576,
+            131072,
         ),
         max_output_tokens: Some(
             65536,
@@ -1007,11 +886,11 @@ expression: v
         id: ModelIdConfig {
             provider: Google,
             name: Name(
-                "gemini-robotics-er-1.6-preview",
+                "gemini-robotics-er-2-preview",
             ),
         },
         display_name: Some(
-            "Gemini Robotics-ER 1.6 Preview",
+            "Gemini Robotics-ER 2 Preview",
         ),
         context_window: Some(
             131072,
@@ -1247,81 +1126,6 @@ expression: v
         id: ModelIdConfig {
             provider: Google,
             name: Name(
-                "imagen-4.0-generate-001",
-            ),
-        },
-        display_name: Some(
-            "Imagen 4",
-        ),
-        context_window: Some(
-            480,
-        ),
-        max_output_tokens: Some(
-            8192,
-        ),
-        reasoning: Some(
-            Unsupported,
-        ),
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: None,
-        prefill: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Google,
-            name: Name(
-                "imagen-4.0-ultra-generate-001",
-            ),
-        },
-        display_name: Some(
-            "Imagen 4 Ultra",
-        ),
-        context_window: Some(
-            480,
-        ),
-        max_output_tokens: Some(
-            8192,
-        ),
-        reasoning: Some(
-            Unsupported,
-        ),
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: None,
-        prefill: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Google,
-            name: Name(
-                "imagen-4.0-fast-generate-001",
-            ),
-        },
-        display_name: Some(
-            "Imagen 4 Fast",
-        ),
-        context_window: Some(
-            480,
-        ),
-        max_output_tokens: Some(
-            8192,
-        ),
-        reasoning: Some(
-            Unsupported,
-        ),
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: None,
-        prefill: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Google,
-            name: Name(
                 "veo-3.1-generate-preview",
             ),
         },
@@ -1471,6 +1275,31 @@ expression: v
         },
         display_name: Some(
             "Gemini 3.1 Flash Live Preview",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: Some(
+            65536,
+        ),
+        reasoning: Some(
+            Unsupported,
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Google,
+            name: Name(
+                "gemini-robotics-er-2-streaming-preview",
+            ),
+        },
+        display_name: Some(
+            "Gemini Robotics-ER 2 Streaming Preview",
         ),
         context_window: Some(
             131072,

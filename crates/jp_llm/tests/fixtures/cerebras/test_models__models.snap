@@ -69,43 +69,4 @@ expression: v
         prefill: None,
         features: [],
     },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Cerebras,
-            name: Name(
-                "zai-glm-4.7",
-            ),
-        },
-        display_name: Some(
-            "Z.ai GLM 4.7",
-        ),
-        context_window: Some(
-            131072,
-        ),
-        max_output_tokens: Some(
-            40960,
-        ),
-        reasoning: Some(
-            Supported {
-                mode: Leveled {
-                    xlow: false,
-                    low: false,
-                    medium: false,
-                    high: false,
-                    xhigh: false,
-                    max: false,
-                },
-                can_disable: true,
-            },
-        ),
-        knowledge_cutoff: None,
-        deprecated: Some(
-            Active,
-        ),
-        structured_output: Some(
-            true,
-        ),
-        prefill: None,
-        features: [],
-    },
 ]

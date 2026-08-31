@@ -2853,6 +2853,15 @@ test *FLAGS="--workspace": (_install "cargo-nextest@" + nextest_version + " carg
     #!/usr/bin/env sh
     set -eu
 
+    # A bare `insta` assertion finds its snapshots relative to the
+    # `CARGO_MANIFEST_DIR` baked in when the test binary was compiled, which
+    # names whichever checkout built it. Share one target directory across git
+    # worktrees and that is often a different worktree than the one running the
+    # test, so every snapshot reads as new and the run fails on a difference
+    # that does not exist. Naming the root here is what `cargo insta test` does
+    # for itself, and why it passes where a plain `nextest` run does not.
+    export INSTA_WORKSPACE_ROOT="{{justfile_directory()}}"
+
     cargo nextest run --all-targets --cargo-profile=nextest --status-level=slow --failure-output=final "$@"
 
 # Continuously run tests, using Bacon.

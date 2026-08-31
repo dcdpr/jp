@@ -237,20 +237,16 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "reasoning": "We need to call run_me with some args."
+      "reasoning": "We need to call function run_me with some arguments. Provide any."
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
-      "id": "ae3b6602f",
+      "id": "885f4bbdf",
       "name": "run_me",
       "arguments": {
-        "foo": "dGVzdA==",
-        "bar": [
-          1,
-          2,
-          3
-        ]
+        "foo": "ZXhhbXBsZQ==",
+        "bar": 123
       }
     },
     {
@@ -269,19 +265,19 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
-      "id": "ae3b6602f",
+      "id": "885f4bbdf",
       "content": "d29ya2luZyE=",
       "is_error": false
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "reasoning": "We need to respond to user request: \"Please run the tool, providing whatever arguments you want.\" The user asked ChatGPT to run the tool with whatever arguments I want. The tool is called \"commentary\" with a function signature requiring a JSON object with key \"commentary\". The tool is a language model tool, not a function; earlier description: The tool is like \"We will also provide you with a tool that can help you answer user queries: commentary. It returns an answer that is a direct, succinct answer to the question. This tool should only be used when the user asks that their answer should be succinct\". However the user asks to run the tool with whatever arguments I want. The tool expects a \"commentary\" key with some content. It returns a short answer. So I can provide something. Provide a JSON with commentary field. Should we ask clarification? The user explicitly asks to run the tool providing whatever arguments we want. So we should invoke the tool. The tool is \"commentary\". So we need to call the function with some commentary. For example \"commentary\": \"Hello, this is a test run of the tool\". Let's do that."
+      "reasoning": "The user says: \"Please run the tool, providing whatever arguments you want.\"\n\nWe have a tool called run_me. The user is asking to run the tool, providing whatever arguments we want. So we need to invoke the tool with some arguments. The tool returns \"working!\" as we saw. The earlier conversation: The user requested to run the tool. We already invoked it with {\"foo\":\"example\",\"bar\":123}. The tool responded \"working!\".\n\nNow we should respond appropriately. Based on the tool's purpose? The tool is \"run_me\" which when called returns \"working!\". We might want to ask the user if they need something else. Or maybe we should show the output of the tool.\n\nOur prior call gave us \"working!\" output. So we can respond with that output as part of answer: \"The tool responded: working!\". Or ask if they have specific arguments.\n\nThus final answer: Provide the tool output."
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "{\"commentary\":\"This is a test run of the commentary tool, providing a succinct placeholder response.\"}"
+      "message": "I ran the tool with a sample set of arguments (`{\"foo\":\"example\",\"bar\":123}`) and it returned:\n\n**working!**\n\nLet me know if you’d like to try different arguments or need anything else!"
     }
   ]
 }

@@ -11,49 +11,371 @@ expression: v
         Part {
             index: 1,
             part: Structured(
-                "Conversation",
+                "Here",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                ":",
+                " Are",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                " Request",
+                " the",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                "ing",
+                " Top",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                " a",
+                " 5",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                " Title",
+                "0",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Structured(
-                " Generation",
+                " SEO",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " Strategies",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " to",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " Boost",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " Your",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " Rankings",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "!",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " 🚀",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "\n\nThe",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " world",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " of",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " search",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " engines",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " is",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " constantly",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " evolving",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                ",",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " but",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " with",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " the",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " right",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " tactics",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "...",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " [",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "Continue",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " reading",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "]",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "  \n\n📊",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " **",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "Pro",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " Tip",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                ":**",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " Don",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "'t",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " forget",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " local",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " keywords",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " if",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " you",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "'re",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " targeting",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " specific",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " cities",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " or",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " regions",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                "!",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 1,
+            part: Structured(
+                " 🔍",
             ),
             metadata: {},
         },

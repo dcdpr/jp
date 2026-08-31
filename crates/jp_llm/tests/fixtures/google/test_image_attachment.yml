@@ -51,5 +51,5 @@ then:
     - name: content-type
       value: text/event-stream
   body: |+
-    data: {"candidates": [{"content": {"parts": [{"text": "apple"}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 285,"candidatesTokenCount": 1,"totalTokenCount": 350,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 27},{"modality": "IMAGE","tokenCount": 258}],"thoughtsTokenCount": 64},"modelVersion": "gemini-2.5-flash-lite","responseId": "UOuqadfEHdnikdUP48LuqQg"}
+    data: {"candidates": [{"content": {"parts": [{"text": "Apple"}],"role": "model"},"finishReason": "STOP","index": 0}],"usageMetadata": {"promptTokenCount": 285,"candidatesTokenCount": 1,"totalTokenCount": 336,"promptTokensDetails": [{"modality": "TEXT","tokenCount": 27},{"modality": "IMAGE","tokenCount": 258}],"thoughtsTokenCount": 50,"serviceTier": "standard"},"modelVersion": "gemini-2.5-flash-lite","responseId": "fG2Iat_gO9XsxN8Pqdmf0QY"}
     

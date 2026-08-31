@@ -8,8 +8,19 @@ expression: v
             ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "**Acknowledging Test Message**\n\nI've received your test message. I'm ready for your next prompt and eager to assist further.\n\n",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
                     Message {
-                        message: "Understood! I received your test message.\n\nHow can I help you?",
+                        message: "Understood! How can I help you today?",
                     },
                 ),
                 metadata: {},

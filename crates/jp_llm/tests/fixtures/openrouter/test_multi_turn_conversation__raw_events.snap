@@ -10,10 +10,10 @@ expression: v
                 "",
             ),
             metadata: {
-                "openai_encrypted_content": String("gAAAAABpquoUHUij_tbJYHytRBieXJcIDxtoMQkNBVqYQ0FzhxW20tG1LZqfuV0oe7z1DJBdGEMA8CJc9W_-k7MYM9mn9sDoh_m1hZMgtzZZi_OBbV4X2VV9uN2uqXPSUu8XhOLrnpnke-VfL496uLOgifTQvY0w1R4atlM1ar1wV8SfzAvhoGqi4958uDjGeMf-6YI-3cmTiED3CPDUN-0yLEvS-5hnMwtlvN1PlcrI7j8NRW6jKrqcs_kX7rWT55l750xhhnCgYuAizV7utaFY66E3MJJiwp-ziNvcGcxLajPS4_hQJAvFn1xP-o4zpA_bxEFYuYXu2fd9ydpoZ-4C36MEHPnWe7swY8S_SgmrIhRlQA0pksMnQEdsmuyLneHYNuAouJ9LzonS0C6sFivr-T3Jhw46dHPWoKPQwsPki8XhWl7FFP9I51Ft6qo8VnOtRu9x-KDIwJJQRpYTBOCNMyvGvWrfmxnxDOHFcSYQM35PThYsJDQZlNZVIqIX7fAg02aNZaeEcUHF3qcMgq-CXv6X1HqQR7pi4RjzsVAkiIk0O_u46zI5ERwMmAD5p_jIZm_9MCQw4hlh4Hxtwoipc8sUrb_aZtwm93s09Pwtc6dRiqp0JahOfN6opXuqegfZr-jL-rSe08E-zIvMshvOpVlgDUebJN1uNeuF8QD4ZqXinYaduIkObuqM7ZZA9PN2omjTQy2vylE_Ua5GzwhoS3SoZ_2pEBz7_T4ttnkn-vQC-FzW4osoDOVx-fF_Hdh7jHLI1nntxDTRPKnASf27NfJMUFsTuGwove-TsACktz_ajPpxefUC1BOfQb370KFPhuRS-3YGlxPYI-u6DRuoomvzYiOkpP0nnDQ9-0R2jrEbKXLh-GtLXK2-Sno-ZEef6u-46-Jp"),
+                "openai_encrypted_content": String("gAAAAABqiG2zmVZP8FBtKiXx0Qphj09BKyVd2Tmb06TZxJdYfK7P9sfJZtzI0ZE3iVV-2rfk-6B8tCrlslPlB2Ocx8hqHV5h5Gj0KLZRG1SqRx0oLq5JUyXWCM2fDI9iE6PI5ei049Gb3Sl9xAuZxOCM2xd9FChBG-MDVQfXaftUGVOcWLJAQBxnKRWSlhlwPbxlbeoVPUN-W3r8No-Q4lTuuxkPCEC_Z_T7YQ0Bnoa97J2AJoYsV0WvBDJAmQthg2v3193sCrn6SwyP__GAm7kWgfPr6d7amXv5YuDNjMzufwaPW8S-ClPAzSP9r6eYu-Rch9QgnNEwp5UcsU6XHvCfYH34SRHvLhUfsQKdtZ6vKlAuxw_6Yozwjj3_1YAF7xJNzIZ6yKhuqbF6grmCNrdxywqHazktuIavl-yDxx7R1MsbzBxaLg7lp-bMjuUQsYWeAF0c4Kg5FDYidKqMkLWaj9tXGjVeCegGtUH6ch2Jq9cD16BGY7drSgwBWfVeP-szwYL5Jt74OfNBxsDFwklL3Y0y-iPvzH-chkkCgQFKc2p0drnwJdTacGdRh_M5pxOucABWwRvRMV-izDIbshmzKKQTjJsdhWglqFVEXEW0xLL9zS8z4ogDbyHQAGPFD-CWzyeRdzQMR2O23XL9SD2poPUMZnRQLdBzbvbqlWiof0cObVU737npCHUkQr7jn7CXXpFn521F4ClRhV7iesZNfCrFq13exPn3zl72FfwXUPcOsj9tyZ8A88TzKwiEoXff5Xk7Tf6e6Zw1f6svbTnB5bej_X9lpiEqqnxVJ8jWqRRGSo9Nf1PURbh7V9sFGPCTKtgkInqPVdJXUrHL2DPXg99xHoiw2-O7DZUzERx4cNWa9v0NbFrUePOAZzHWBv5UeThTi1KtQaXWQ9co-Gn8IzPPBEWOfJWoE4EihGA27C3nAkNam_GnXCs09vDFQUAQar0uGwImr1gvdRUgpBqu6XbmFDC8A505NQu0mek33714KujYFZARAQ4iu20zqhkUH_XioN-h0tm7Xo65koIVJGUz33apEjleEk8gfxOBwiAM7a7Vj_dxdUGD3TWbIdGWn7KUAC9QUTkiXdpq7ZPTVrlUcM7P2d2xo4LXJ5NBSKKZtlZEc-Kj2LUcYxUEla0dtELbQzdXDTRljGr6NtPEk0mP7kxPso5uLoQMRJKGG0KSNYKrpih-T9FdsSTDZ0_Nqb0mMCy8X5Ng8T6f7mq3QrbpA-oQZhbTaoFAu9S9-2uU9LF-1Sn2Px3Izk0plD2Q6kiiTjxSF63lBmLUzl0b6mSaSgsGtVDt2eGorQIBwmTT9jFI--bzoA02Z5H8jjPodkv6Dl-WaqoLcIgTNGGgNnvWCNbcmaMpKfL64WzFXDEE9VHEEwFrGlwb6nDDSYx0YPaauDKk.eyJlbmRwb2ludF9zbHVnIjoib3BlbmFpL2dwdC01LW1pbmktMjAyNS0wOC0wN3xvcGVuYWkifQ"),
                 "openrouter_metadata": Array [
                     Object {
-                        "id": String("rs_00ca5059fead702c0169aaea14b1f4819490f4d487741769e7"),
+                        "id": String("rs_0d34786b2ea43e4f016a886db354bc87d1908d08fb90e00dea"),
                         "index": Number(0),
                         "field": String("openai_encrypted_content"),
                     },
@@ -72,14 +72,14 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " you'd",
+                " you",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " like",
+                " want",
             ),
             metadata: {},
         },
@@ -107,7 +107,7 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " confirm",
+                " check",
             ),
             metadata: {},
         },
@@ -134,461 +134,13 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "**Repe",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "ating",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " user",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " message",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "**\n\nThe",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " user",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " is",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " asking",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " me",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " to",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " repeat",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " their",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " previous",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " message",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                ",",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " which",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " was",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " \"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "Test",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " message",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                ".\"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " I",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " think",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " it's",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " pretty",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " clear",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " they",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " want",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " that",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " repeated",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " back",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " to",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " them",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                ".",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " So",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                ",",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " I'll",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " keep",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " it",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " concise",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " and",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " just",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " reply",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " with",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " \"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "Test",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " message",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                ".\"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " It's",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " nice",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " and",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " straightforward",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                ",",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " and",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " it",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " shows",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " I'm",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " paying",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " attention",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " to",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " what",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " they've",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " said",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "!",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
                 "",
             ),
             metadata: {
-                "openai_encrypted_content": String("gAAAAABpquoXMJnk0kggkGeYA4RwI6FIgCGxIJ5yDNZqXgNFtTl6Q3GoOYbIqgPBpehAdNxmwnjfDael2x8lFDWeEfvB0FPOHcVhBh-QdOaE4d3Fo_RYAyWyzxkfHb9QvHHzinIOrOH9YlecQ-FKv5mk7vWMlBMDFJ61LFfFV6aBOdV24NtYe6lSohSHQzWapzkfQbtxKWRY__jMyDUs_lQylg0HF8E9BBm0XQnBBtuQsF0GRsNcrPc_08_kZ6AQ3nRpqTVFTCtzr1_U7_7UznEvpE5IZ6O5nCrcHOt-eiOj7g4mTwRtoTff4dNP59dhhmanFrRQuP0Yj0Y_9WI8hETYlHWsE0J0Kwj-Ze-ZYDyECGcanXZ91Arh2T6kOhpvBboCMx_mKYmVBOhVT0qRC2V0Bj3PLF-8mB-g4zTcY5TBSlfBCDSAbJtnAn29KtDOPs5CS7Fzzp7DGxwULTC2NX-Ai89DwzPAPtV44BDjuuBA4WppaFU9cI2piSldh2uPfn9vhXzzvO8t-dml4G1bRtWPuaQG7tOspiJtbqi6u8qjqRn1LlqgvXbFE_SwtxylvfFdRkvBUdCO353y-wHJ1susUE7--82VoheOjYxQz-p9z_kuXilFZ-oUWJTfCim3eRliKcH-eOzO7tSOtQArzV-LXwiHKXObKmAfohO1K3ik69Tb020Kc-1RHMIVy-Gjw7kgrUg89MpzRZpbRa8vpcQHZ7sbmM_UmvVTxPZ6Dxmrt7qceXO1sHcJJPe3HmsVYygcRRf2VfSlwUbuXGW5JOZG7gBJnPgkxCGa_ajUWrwBHdfy65Jv_R6HbdwW_FK_LaLee-6pYDj1RnlzTmdLAacWIQxepPXSk4uFS1OAKnJR5ZQhnKvigp-JKsnrfK7rA_Z3hlkvjE_ivk_qyu6p9Dq0QiawpFmLA_cgxfCQ92bcnmOsED2NBirZTvil2U2_EcnAnH3ctUAT3yiO5gxfQuYYX_HIGnA3jb9WY1_ZuwvkIaFTU2bKQDxAOus-huulwVTHDnjT3_w1usaeynFboFopMxa8Rso_tYstQhFDWQhG_yTmr6x6dvzV6OtwvywF1TKJvGZmBcxcN4Cm-K2kohEHL0DHvZWpCy2TkpMoqE6T2pzrQojE5Ts="),
+                "openai_encrypted_content": String("gAAAAABqiG20JdJzhCVKIz5BNxGZpnOIG-ByNHkXIoRaPA6_75ZCkZfHnkDNnR2liuuKRtvAgAC1AnAW3eRji4TTaoV_h5dpBPFccob1B27xRE4mcSPj3N-fvs7qkMDY7Ka3CyjjklvnTVC_4ULbNOGWNtWO1qnnvr9T1qQogFTiyRD0hnxqMtXu5pm4IV6dnRxqM-plQAwxQM7xXHgNN_z8EBrnRtyT3dhwzJuqe4LWH7LOk774-ny3HtUw_WjNK128MYCsGiRS2QQoL2jZKiwryHz6ILhHrM_PZyHqI-6W6HDR8Orv70jx2TFPtwz_ixDRIiLcTylVtznD3q5Hk7caiWimVjHq-WvVgkfQBvZ8asaplEDHgGMN-B-qctIdQdOh6g7mwm6h6LndC7pNQPeHCpF9B3Csze6dK8f_26nVV6M-RrHEIFfF6yqnEtsjhFxCzOJaP5OvDpxTmbYAQzRYhMj5l168dJWtItVyei935LkkcOx_UPtrjt1VXFDZ849DKnhKBiJDNPajRiAlHJex4EKgx8a2gUz4cXx8FiYQFipa_nTJZYGszjP4FSIM9XADdmT_Kyxbk4g8SQag2ubt8RPReOpaxNQ3cGxHwfPoT9yLHMcHGyY_n_Ti-FNon5aXBjT_rHwWwkYJU7lftQtNKtYaIBdXZ1HrXQ7LqAeAGy1Hdc2qmFV3V2UaqdcjgY-6zDxOrjVY7nHsVe19czZwkDn76inntZPG9XyqAxCxrmdrDqGrA8YzjTCXUkS3MYvRWtbt8gMK5gvkWlhOesIewya6UhN692bMVRmXVK0gefWqfHbCMvwWuMK_DRbaH1e4r2U-KClkyzC3lOOfiNWZfs10cxHOtbyq8T65v-Bgy1vsYHbL8EASFCTV1JhuJ9_5t7t5YFOaA-utYc3u2zipTw1keK7LmyVD1bm0Txh9ZIJwnxWlh47QPZctnzLIP4LnaBiESfzTECKRuMZ-DlsYADS2Xh7lq3Dpme-dEXTIHdp7rTjlQ0XAMxEB59wpzEPOCr9RsuETfgDoRBUeZi-9oKswHU8iK8iYEYaEOSqZX8o8uDjmSAccx8TLmwPvA0etLAZFzzjDMG0opRC4tY4bmhmBI_wZNIU8BDxOS6VicN1HdsKbhLkvvKU17Lp_Z6zdAUCQiDEe74rkEFJSwlQYnpYPGw3yBMzpFc7EjVcP1DAok-F17QVFB9GxzrJWU5_QWSKYlgrIiiRRz7a0zvSZBk89ffIsFZvyM_mUZChIKmqqv4CxnyWeWXciu_wMEwI3YeYTB6OAaJzwlgaE_C51AMnfqzAS9ikL01L1ZiML9vsBA_9dc5vBH7ImSI5UCqoS4UlKvFbLAd3GcTCbvOeJQYsgOMfrOZlDzxfeOw2NsylxSBwhE3M9Mzi-sxiLjNiELJcy9A2GkYcAXpL3TJXsa6_lLc8_1WxOFHlmbrrU_TWH4uboTbTVRTZBxjXdZNZyJ510LxRzIpz4nERirVzBvUE1nsr7ZLRVehrNeEhEBtHB_7sdQnR10L1-CsK0HV0rRx2r2KpjC2PpJqFauTxcKfoOlgysXV0zO6C5syN_0L0hESrgzhQ=.eyJlbmRwb2ludF9zbHVnIjoib3BlbmFpL2dwdC01LW1pbmktMjAyNS0wOC0wN3xvcGVuYWkifQ"),
                 "openrouter_metadata": Array [
                     Object {
-                        "id": String("rs_0484b0da679aef370169aaea15b2f08190ad9233c33b900922"),
+                        "id": String("rs_01b257e7c8e7a3f3016a886db4229c87d1a0565466b119d8b1"),
                         "index": Number(0),
                         "field": String("openai_encrypted_content"),
                     },
@@ -628,10 +180,10 @@ expression: v
                 "",
             ),
             metadata: {
-                "openai_encrypted_content": String("gAAAAABpquoYB1e-OYaMpow5Ib4tMTBwLuhr-AHiI0FHHIS4bjjkAVRCeXSvRIC97BP8NiMa46M728pt6vKAOZ1zXASSE3tugjWG1S9ezGodvRFdxDvqYFUtLitnkT5nNcj_qmcLCvMtc_A3Ow-VJiPCIDvAttH8OfP3g141-ac0HfO3nngV8IJ5FiI0dEpCpcX4oeF3P5T4eAIGMIhGohQKRBUP2Y5wmBpx0e2oaC0Zv9nLlMlrQflgRXp0ddWjdMdv-6e83qnmOJPnWsNNL3gu7EeiTaGlrW4do-gU1UKJGu0QK-rZwz-oTzhXyULY0wMapRnlq1Jiw_OQbKMgZ-tHwzjdkwBP7qbsiAp68L07F9E-h8FTOZJRkkkBqSftHgOlR0lNqUQj-NNb_C5tuEjP_Tppdnr2ZZGizma33FFAXwehJnD9E3bpbr1IRpUcfHW_WvhGMgnNl-xZhUAtOzjYHffZDjL4R-CEMkGX_I4wXa-QOrEtXTZ5nqSGX0YlBvi3S3eYrclkAXR_-jNBcuBHUQQ5FuZfr-OC89oK-G-zY9oK47FANGkk4Mctd0LlfLB5iEW-PisE6yE_am7cSH8llKPh3mrN6bGi92nYCZik1zEKt3dZp6OGkVwMy3veGnJxXnUoWmRK7XODo8w8aMFcnj9N0QwKtuUjSsLYAy0iijpzJcBquy-_isFgQzD98HKFxqHPhXllgngUDxiEhtZXZbinI0oqiUaxP7jUEORYoI8MGIZzwiy-XCHBZMIXGzMALAThP3QfeBC-hco9qTa91gOFoj5OT7si-UUwP5Y3GAGRxU953lrg0o1qHcvZy8wWu4zPFgl9ofszPNdGEFAnXS9N3gD-R7hEO9KiSA0GP0XVBzEo_n3a8mLyEFYZoYBKeJ-YcTTUeCsg5HkJTPu063n4scUk0g=="),
+                "openai_encrypted_content": String("gAAAAABqiG21n1aHY7NU1yFVn6zFAfIkMqxSB35m01g0ykq5RMBFXwajuY_u5ArYLQ6SVFvnyekk_wMoPkr2QAB0MvHBE_XYkp26f3ftenE5cgCu_tG-OqHsD02CPwR0hBI52Muo6qcljm1YyCMTE9UQcwSpUhbyDsMhgAegzPt0nyTXOMa_SKqFz6Qq20_v5cj3qkDdD0DWKy-n9-LDnfs9bSCKiFJjHM93Y0fVwFhZFsvBAVIV2ItSL7vwYB8PdV_WvQhnz0DD3wNe_goJKaDDJXzxz-R1hZIEbyEr2qGJ2AkKkYHAyAZxV-TLmAqqCLZ8RgZ7s1ft-33c4HSfoJvV8SIhAOdmifRNHv6p8Azr-sYlG0Snjoc9BbNQ6_Ec5JsYd6yOdiglkXwu6p54GKj9RNMtNbJ5gUYhssG6JaT7KSdIXv89aWoalZiqr4HjaOIS6_vF0P9Xsm1cfDea_-RDdb1ghvdWE4f6POyeg7uvJe3rOTeanW8tjhPqfv5acoNTzz1QpXMphDSJx76JiaYoT6EO7igvjhrpNF7eSzMQ_WVWqk_5zLXSF6dIsYY3dCp3x1UmrqctvBCAidJDhGtNLvKjG8B3qSi1QMSyyWiD3mdMwRz401wYv51PoCiy6oP3_XF2cYTgmMmAL0plZFayuhuhImdxnTox2tRm9SIDnaemuugfRPut7X1x8U1K4NCi4v-lbMs4VpTylShzThHZ6lbvGug9cgkwhmpf42iKjGihzoW6nFv5sXzAw_Muw_9ZY4aQIE27EgjG788UCozOraPH5KAB1EbHrNkmDXmQIUSpXfYjsxHHJYRy5jGMPZeyILA9340kc92M4cU11OottKFEwieLqZy2U0fWaF-Nv8zLlFrGwffJ3Uiex98zLaoIntjwptRXpKvRW8GpnvFeL3svJGnbiba1xzLlRfue_VlCLR83698gBro-lb3Y__mMO0YyitmtAinp8Bo7tXt0vw0NU5V5A3JbhVtvvUu9n92XuOR4R-j3bPROlfrdel-TMyYmKRvDV_Jp0fCQIlqn8UZkVZfJxFnlHgbB074d7mx6dyLWcyWTL-pIN21qxIW8acxKEi6OnmhvWboGmra-zmDXa19qQF7_7jwDpZLpBh2FLPpgMPoMBdPcFH36LEjU9DTvx44RBTwt2qjxqSoCdl77-DNZC5WOHyDF63BgBSNUpD8Q9Uv-qMG1JW5Srynf8yiOcRslJlxwfHTlnaZHDm4y6bvDYxTyfW9ZNK1JAdVfgoObW0w_ZqgoUFuQjMpnVDXxCRvENDO9ICOizpKmbkCtMJq3ocm-w7l1woXCt5noNB-2uJ9xuXhPRihem9ICrcE0rW6QGuauu5Z5JM1_xNsbvPSHoJpaQKIoUp0j0kvWEhkSeGRavTVrYwqFSkFD61-NG8Aa.eyJlbmRwb2ludF9zbHVnIjoib3BlbmFpL2dwdC01LW1pbmktMjAyNS0wOC0wN3xvcGVuYWkifQ"),
                 "openrouter_metadata": Array [
                     Object {
-                        "id": String("rs_0330d78074a4a4a10169aaea185e748190800a2ea101896492"),
+                        "id": String("rs_0ba5d332f57725c0016a886db56fd487d19055c1778cd2596c"),
                         "index": Number(0),
                         "field": String("openai_encrypted_content"),
                     },
@@ -642,7 +194,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 Start {
-                    id: "call_9NiOxr9CbNNm4FD5cLEyiAkN",
+                    id: "call_ASyCmpktnp9V9J73QldUIcMS",
                     name: "run_me",
                 },
             ),
@@ -697,7 +249,7 @@ expression: v
             index: 2,
             part: ToolCall(
                 ArgumentChunk(
-                    "bar",
+                    "foo",
                 ),
             ),
             metadata: {},
@@ -766,10 +318,10 @@ expression: v
                 "",
             ),
             metadata: {
-                "openai_encrypted_content": String("gAAAAABpquoZPeHted_8DKo-Yt1A74QlJbMvnOuy7etD1zbeXdM2MdKC_ny8umUckQP4LBXDfKk_CwsTfcx7y55ePMftlpK5o0t1TZ6PXQab5K6zhvBPwIkrN7mLIvJ0V_L2pswY_dVv2LASIJAQ_x0gbAfY0loyrMYd2Hdk1aHIy9XaPzfqTt8xbeRi60ioyBVYD9KBoB8-ST_wW8KSjl21jnbvYH7m2xilDedKum_wDXlVOq9Ag7tkKZX1OxIhcU6-twmWNUTsLXToe7svr9Oe41Yyf8KwyQ3AbI_saTVEsYmyr60qdzKk4emlZk0AMaeOSdmYSFAng25LaX6xm8dhph7-n5tQTFIejl_eH5gHBn0jeTQjrAOQaImrScm9mguQD35dw58bBpcCJM2PIJVGk5I7g48ilhWfhFzJr3Z7nMZ6-uUE_7Xm8Oxwl74osxOhU9Uh4RmAZ-WXzBfWCOlOvEMfi5D75qlNCZ19MTzJith4sofn9dKDOqvtJ5Jx91q0kmH4d5YqrtMXuSR8OdvYWELRX5tgfzAWMA2IOL8asR5tis55KBf3l8Pow1aBDK2XYqD9KaPmUMMMmRYG9K9gksOBxACQzM376CRTnT3pGMHwUVEW_zZqEdyvpjhyQuBCEaXCw7xSAQxH3kRC6pSZITtsGTKT2GS0liHQa26JIgUQQ47gX0TIKMhVFYzlYMDrsk9MosKFdVWNABtxjZa0TmjQwfcthT6aNxJIJd29P4Wut6m58vcdMteiAnL9_-KwK5VeTJSaCvKeVki4dngH7a704ZNq4cOZE3e2XzVywqJJnr3oroFq5jI-5AF3gz0gAYZQ78khqPW-G6Cs72EWpdg8woDoACNHiEL0DKcFnXHB6yzyRh7O9MD8KKgM6TuduEUTVy2X"),
+                "openai_encrypted_content": String("gAAAAABqiG229A1tQne7tDEAy9w7w8oKJt4jagLtHmVafmDkQ1Sua5IGOmmr8DkMin4n0yT5KHpInbkysm80BEuzbHPEC-3HsiihT_EZvCK316CNMO0v2BRkhPljPq6uB4xOdYree4cDarQnvJ-hifgxg1F_HaCUt08dO2Pcn4gVYbAYQ3D_ESQTgJYU3BZCoCyN6KFDAq-pjQqG7amK22sh_bx1gWJ662Sudvvv9QAFLy_MxBmpajvjYY9zBu7gtPGAsYUCtQ5iBFCQOaapWYCllN-5bugFyqd54u95xacsxasCop3qBQlonduK9mXj4TosoUDnobRffpfOO9mIzvYAravF5JhAKqlIBQY3wH2ySD9U3_FSxcCu6QmDn948WB6AGwbTTp4Qo6kDISor3p9vVkqCWyLF8tkTmSBz8Z-Px9pw_4NDbM8JaPSRcvggcCZj9uQfnc5LEcF9aAsvH2YQU6Ug3PZ1UVkI586zaPcOtRHSWBlFjWxxWUltSHXFp85nlCnH8j68MHoBj3pTt1GUtgEgmrfXWrfPNqzsOy64YkR6ZwK_DUJCZQiGH35-CnmpPCTacLMEYrLrQkEzprLRJXtMNrx4N8ClTAxuiwBcm14Utfy-rLk1mdEehuti1taR9ztoZfKXrqsP8gGYAnUE7AdLZU15d3EYRYlslit3WFqeX5X6hjIVWlA9Rw8F30a52U-oJ2W2wdQsBOdrzqguC685dQrVrskcNi_G1B5B4eTxJslfHN0btyMoQaB2qd9m9GzkCoi32RRLIveGvLUpo2_-cqqEAo2jpBQbNm0Bbk7Cw0Ujwtn-WYM75_1PaniQHRhv3wm7eptT6IfbCK5hEm6WmgAvBGmkNRbzAbGjl16xhMytgzrme4OZkT72S3OxzJxdKyTiIuQBbotFOX4MIm0jIKcnXKF2_TMQQyJpVSAp0owtT6MCj9NMlsfmD4_UW4dmV3abihqkFHWkjRrzsC36D3Ll13rdpaTCBtqLwwuJvx2VAYKxTFWr8V-81maQx6w5wxaIODYDW9uWdErrei-GfDNLpyGJBdDJ45zyw_KoIi4aT_zscwj6gZjK8C0c2oeyGRho-VaEiLyOpBUE3CbZyDFk00kphFVkxyi4xR-9b6Gzewz8N12SQ5RcIlXvFdQGIYDEd3uN9z3RZ8Q02YBzt-nmlT9gWjqKaVKHh5u4WeFlq1YPIZpZBFadWRMhCKcOLd90ZJ0PTvfQYVsFXYdyB_T5G-Sles5ixdMqkijbAxsgvdrkLHWLL1hBncZcqnQh4IxQtaSo9ZW9tmoMywnO54LibPh-gUI-I5-jrYLNQ-iEe47N-CPehNvj4dgaJDGFZOCpi3LxyZ2KZQVAF_0EJOje-wnY3YLMetiMkM4FGWEfdb5xOK9SkBKVQ7tIZEznRJx1.eyJlbmRwb2ludF9zbHVnIjoib3BlbmFpL2dwdC01LW1pbmktMjAyNS0wOC0wN3xvcGVuYWkifQ"),
                 "openrouter_metadata": Array [
                     Object {
-                        "id": String("rs_099f65e74fbf90cc0169aaea1953b0819386ab78bbf1ec7b6f"),
+                        "id": String("rs_04f321adba32141d016a886db6992487d18344fe2f8152cceb"),
                         "index": Number(0),
                         "field": String("openai_encrypted_content"),
                     },
@@ -842,7 +394,7 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "bar",
+                "foo",
             ),
             metadata: {},
         },
@@ -975,7 +527,7 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " Would",
+                " Do",
             ),
             metadata: {},
         },
@@ -989,7 +541,7 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " like",
+                " want",
             ),
             metadata: {},
         },
@@ -1059,35 +611,35 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                " do",
+                " save",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " something",
+                "/report",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " with",
+                " the",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " that",
+                " result",
             ),
             metadata: {},
         },
         Part {
             index: 1,
             part: Message(
-                " code",
+                " somewhere",
             ),
             metadata: {},
         },
@@ -1114,42 +666,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "**Respond",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "ing",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " with",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " tool",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " result",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "**\n\nThe",
+                "**Responding to tool result**\n\nThe",
             ),
             metadata: {},
         },
@@ -1163,21 +680,21 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " wants",
+                " is",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " to",
+                " asking",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " know",
+                " about",
             ),
             metadata: {},
         },
@@ -1233,14 +750,42 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                ",",
+                ".",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " which",
+                " I",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " can",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " see",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " that",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " it",
             ),
             metadata: {},
         },
@@ -1324,301 +869,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " should",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " conc",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "is",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "ely",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " state",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " that",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " result",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " and",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " maybe",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " include",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " the",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " arguments",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " for",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " clarity",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                ",",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " since",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " they",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " specifically",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " asked",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " for",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " the",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " result",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                ".",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " I",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "’ll",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " also",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " suggest",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " next",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " actions",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " they",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " could",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " take",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                ".",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " Keeping",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " the",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " response",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " short",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " and",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " to",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " the",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " point",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " will",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " ensure",
+                " think",
             ),
             metadata: {},
         },
@@ -1639,7 +890,63 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " effective",
+                " best",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " to",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " quote",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " that",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " exactly",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " to",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " keep",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " things",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " clear",
             ),
             metadata: {},
         },
@@ -1653,7 +960,231 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " informative",
+                " concise",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                ".",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " I",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " should",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " also",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " consider",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " giving",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " the",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " user",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " an",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " option",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " to",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " act",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " on",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " that",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " information",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                ",",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " depending",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " on",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " what",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " they",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " want",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " to",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " do",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " next",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                ".",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " Keeping",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " my",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " response",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " straightforward",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " will",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " be",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " helpful",
             ),
             metadata: {},
         },
@@ -1670,11 +1201,11 @@ expression: v
                 "",
             ),
             metadata: {
-                "openai_encrypted_content": String("gAAAAABpquocKd_CuH29oDbUgkwxO2IZ46wMqq2H-WIeMZIIlbYZHCRek3BWsAE8d_jmlf70sFPbd9UbTLf00glrOCRboskRfk-ECgpA0n7gUjflQYywsguj_AFzfntsw8_GCluPOWFev48I6PKjsV1JjCKDRIOHn3vxRGEUXksgHPNYTIEkYjRyPGMa16Ja6ZRbkS8ezPXa40q6pRLEONJ8kmaE7tk_U3cWYL8E72QmNUkv086Uo8WNMN9RHMKFwcSqVyg2WYhuCqwQubfWLmI1BYiPToYUnYlaWtnUY50cdAVBv6240iIQT1SRmfHOj-Fys40-TpG4FS8dwTVflFCyMTy6fMr2wCieutTsaeE0ReyC4lnqVnUSm9S6LxbyPXOzjzNzFZMyo2j4uRAyiX5GLvq701ftBdV1Oz3ATgEOcgz4_EQTru3AN9Ls1K7mdrWFyoWd8Jjk8N2kbvZoqAug8SM2JciK2bU2whf_yu7gkkOJhtDrBLXBgfe_TLT46tRebBXtRH4nTs58gxacQylm4psUI4sRNhyYvVGhnC_CEsPQuGfux5jOjyu3BVVDlZbTEBszXyVptk50ckFemlHPbDw4wLM0ENEbhd8IZZpWbZ2o3fXlum4B4i7X-rmdcAOUO_0vBAnWAgOTzX1qe774wxBmavEI-faVprwTRnK-JbU1SgRmItuO22nXfe_IMRVUDM6wLrd99tw8iZ9EJn4M_Ek08Y6NuG175Oeki_iAL3FdYm6Mmj5x8TrPZbc5uXcpDAK8AoAPIXogFG55nBAXOoN-e4HlfozjcrXs54-RtZ9W3vgwZ5dXVSgJSNCIisZ92PbCHvfWpV-z8-mFt2_AU0NRgCdLm8AJV701abKZPTWpPC5tAahqwxQjUuxj_CWIdqa5-1zp7UJEL1gB7gNH_kXhkH00IXjHJOLHl4whpYUfncUPnW4Jwe9r2BF9nWFUelMRZavNRJ58xNs8ekvX4RreLKM_GYypsSecCrmyLkpTAuSlc_A4TTD9XD1nGUKInCvoovsmDjEVWF9o6rKvJH3wA6FJk3jXknQhwtTA7Nh78YkGLdZLOlbjsrcojo0d9y0GMGnBO8LyhlyzBlOPd2Mzolwzp9xLxbnmT4rgDeEkSGXfVU7dIDzSwoedsHZu3tf4C_6YfA1IZCeLlVrnFz1Jn3SQja1aKO3e5GRGSV5-jFtpwnc="),
+                "openai_encrypted_content": String("gAAAAABqiG26-QKe9bLx35H5lZVNndJP71VDcVQoB90Izm8DYtZz3S1VMA8EtX5RTZ6QJsa70_DNGDE7b8ZgUzGv0AKEf4zoSw9kDCiKSD_-zSFG2u2ugKuZFL9KJ5F1xHja91DAkIgb7mS_YPznp8EwWlgx39d1hNDNCyYEJv5bOo4B1Aw-mhfVZnxbUOAdYJSklWmW08hkoDNrbt7m8WiYJRPMvH5KadJSGuF-DSOjlngZ588il2nVe7xx8ZNGshyRDogoxLmKq9Yj_Lq3pUjOnQppcVF7K0FjiTaCds3j2w3USzxCxh6MXuSm71XCbIOP5YdbjlCoIXiy8mD2yDY7ATQ4OtktXcNEeKq_LFndmFW3BS1tg6_pCu0Qz_FQUBHJpF_pv7s1LWd5SM166BvniDqxk_XPmcR3kTtgdk5BW_izqzN7_HKqLPhJyGINey4Qim_f87vqBhqlzqdCGyZ-flKUcJhtjRfuzq0foRy-unKG7PmWvTNn9PGhtdR0RifJkKKKa_eJzpdqILYvSZX2NMWkL1v3rJ9AHzNehdTn_05Wru6YZB4uoc1GvBnobpw7j65NXv723RCjgOrXCxByeX1pTOOTifnhwtUlg4vVdNt00K1tikCTpZHEBeG_p4tPlmFp89oe_cvNVNjR5dp9wnCcQmhlWCU3lAb5dmpBXpuE-mM82fnV1D_RdQTMjqaDeTlr8dJkj1yOU3Q5HWx8fdGyoU2n23NeLNxdnm3tX-I6uvUz98YnfmBmEqNkrItWEe2pCrZ_Erza8ULawtHYDVkvazehIY8-pgB6PqurR8ZgiqffgK7PMQUwEOBixvnWfC1_pbDMLoWoyWvTZlAZIC33ooMa-sqbUK6_AiFSFp4d_XeWSrN3Z7mtorbXTtmwzq7pVE1MnbUxlVnlYMuGf-w0DMTkvoK-6-nJsy2esd_5C7gWAZ0fpkvR0uvNUQwreyFvpP9gNY8hLlFVMryNtCJGiRSV8wdmeViHO3zCGW80Y2wrY8n8rhtdJ6IY7Q8jyTidAY8HTNFGGw_OJpeEt3tj0bEqQDdMu0-tOnyyDtoDmMsuN9v3HfYT3woY1VUy2BAMsqzUDcttOXOqvFx_LK8bS8PKa2FDN2_YgcgYOHMhYoRtaZ_wbGLtKzwsHx3R13tkx2pSOvQTOJfqKS7WosJ7C36d0GR82Hv67IUQ0OFbS8nEiYqbbZZtnvtT8baAUBaeFa4-7PcQNZJ0QDd_x9cO1Rr2YJVurOtkSn-HV71Gc2m7PosgbYC02Li40HoWzMllkj5oo4ppqHO3u92-nfbG0J6PKcIC0qIncIT7qq3vWtINV6-xj8Cp4po-4USthHkvo_gW4S2DPHHc0QarbGO0gfP_0MnOStscMVdHK9uZwL1a5d6B3LSJig02Eq4CPRsew-4B9-DIJcTSSXXz3_pHLyNsMK6lPe_6vtiwRLpiauFEBzyk5ORxpvu3i9ltU28TZou6GPigi5nT1msNdU5Sy7cXf5Sw8rFandmwNImLjUXS1rbHtLfaDsA_hJbqYShUMeZ9zypKfORsRFZseCgPMCulKtZ4-9LRUMPXnReoKUPTpMdWmIm_449DT2eGmuLG21YLP-TXdCFt6ZWkAg7w-8tDn63AIO2orOU8lkTCKWq25ug=.eyJlbmRwb2ludF9zbHVnIjoib3BlbmFpL2dwdC01LW1pbmktMjAyNS0wOC0wN3xvcGVuYWkifQ"),
                 "openrouter_metadata": Array [
                     Object {
-                        "id": String("rs_09de8ebe67008a5f0169aaea1aa5bc819088f643e4c55924a1"),
-                        "index": Number(0),
+                        "id": String("rs_00277724cc2b706a016a886db8344887d19bdeaf14e3e76fef"),
+                        "index": Number(1),
                         "field": String("openai_encrypted_content"),
                     },
                 ],
@@ -1768,118 +1299,6 @@ expression: v
             index: 1,
             part: Message(
                 "\".",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " Would",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " you",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " like",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " to",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " run",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " it",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " again",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " with",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " different",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " arguments",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " or",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " use",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " that",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " code",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " somehow",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "?",
             ),
             metadata: {},
         },

@@ -224,15 +224,15 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "reasoning": "The user has sent \"Test message\" which appears to be a simple test to see if I'm working and responding. I should acknowledge this in a friendly and helpful way.",
+      "reasoning": "The user has sent a simple test message. This is likely to check if I'm working and responding. I should respond in a friendly, helpful way that confirms I'm here and ready to assist.",
       "metadata": {
-        "anthropic_thinking_signature": "RXNvQ0NrWUlDeGdDS2tESnlLYkxnMDdFQVlZeVFKTk9OS3JMVE91TkM5ZFUwZTQ5YnNwWUlQdmNKSkc1ZmhmQlA4Q3Q0YWlpR0xRdWNJMk5ocG80Q0R6TjBHSEJGcUFiV3ovZ0VneDEzbFFUYnp2U2dpZ3FOQzBhREFRbTJyazhkanBoN2txK1lTSXcvNU1HY25aMkRUSDNVb1RmSHQ3enEyMDgzUEhEZHpWS0s0VXJ5MW96YmdBUWV1TjRXeWMxNE1tR2hWc0ZLTjRsS3JFQkR1U0VhaDROaWVkck1XODdTRlFKV056QVExUEFuQ0FHZ3REYlU5Zi9jNWdmb0NVdEs1RFRMWDJaOXpoS1lBbitZVVBrekRBeHZXOUlEZWtva1BhOXRVREhJSndySTlHRWNIODR4eW9hTVN6QndqMEJTcmIxSEJwczhPeENraWxPczF0VmgxSFh5QkxvdEkyazN3b1hQby9ubFEzNVlzMFhDVHVaajU1NjBaNTZkbjZSbmp2RDFKWThKRXZvY1QxL0p1Zy85N0ZEWXNMbnBmaHRlYnMyaWJZSitDRXl3bUVxc1ZzeVNHd1dTWlUvR0FFPQ=="
+        "anthropic_thinking_signature": "RXJVRENwb0JDQkVZQWlwQXlteUtmRkFWTFdtcWFhYkVSbFVXVU5zelI0Y1FIbUpRY0ZCcVY1MFJLbjdDQmM4bnBsT3RUMFU4d01WTmNwQVNoMnVxYlo2NXVQUXlOb3BGalpDSUx6SVpZMnhoZFdSbExXaGhhV3QxTFRRdE5TMHlNREkxTVRBd01UZ0FRZ2gwYUdsdWEybHVaMW9rWWpFMFpERXpOMlF0WmpVeE1pMDBNekE1TFRrM05HUXRNMlptTVRNeVlXWXhOVFl5cUFINTJxSFVCaElNcFRSVktUYXVSSW1WUmNIQkdneit1YnlJQXNhbVJwSGVCMWNpTVBPVGNlMW50M24zbjUzR2J5Q0RQVVdZeHpteWd0bzFZNFdveHVUQTFJTWtCdUxMTTQ1aEkrRjhqZ09VcDhwQ1lDckhBUmFJbGlSaU1ZQVdidm9maGtqZ1lZZ0grVE5uOUx3ekEyV0c4ZjNZWXNON05yWk5ETnpWKzBGMmllbWdmcVg5dGRMQjcwTmtoZVkraG9nNUpHL0xnU29RSWduSmxvaFR4L2pJR1BYSkVqZklnTWMxMkl3T3lteHkyU0JsMUxubEZscE5IWHdZUEI3a242VVpoNnRRU0d3WU1kNGFvdEFzVHBDeUdiNTh0bnlWR0xCUjZBZnhod1lrSVAyaDYrTm5oL1NUK25mMDB0YmhlR0lSR005aGlUd0JEM0dFK0M3eVU3VmcvWTFFSmJ5ZWJwSXU3YVdKZWRvTDBIc25HVDF6MDlZRmE3MlZQQ2NZQVE9PQ=="
       }
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "Hello! I'm working and ready to help. What can I assist you with today?"
+      "message": "Hello! I'm here and ready to help. How can I assist you today?"
     }
   ]
 }

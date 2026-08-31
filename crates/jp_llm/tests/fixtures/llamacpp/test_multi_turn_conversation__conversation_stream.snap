@@ -237,7 +237,7 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "Test message received! How can I help you today?"
+      "message": "Hello! How can I assist you today?"
     },
     {
       "type": "config_delta",
@@ -263,7 +263,7 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "reasoning": "Thinking Process:\n\n1.  **Analyze the Request:**\n    *   User says: \"Repeat my previous message\"\n    *   Context: The conversation history shows:\n        *   User: \"Test message\"\n        *   Assistant: \"Test message received! How can I help you today?\"\n        *   User: \"Repeat my previous message\"\n    *   Goal: Identify the user's *immediately preceding* message and repeat it verbatim.\n\n2.  **Identify the Previous Message:**\n    *   Looking at the chat history, the user's last message before \"Repeat my previous message\" was \"Test message\".\n\n3.  **Formulate the Output:**\n    *   The user wants me to repeat *their* previous message.\n    *   That message was \"Test message\".\n    *   I should output exactly that.\n\n4.  **Final Check:**\n    *   Does this violate any safety policies? No.\n    *   Is it accurate? Yes.\n    *   Is it concise? Yes.\n\n5.  **Draft Response:** \"Test message\"\n\n6.  **Refinement:** Just output the text as requested. \"Test message\" is the content.\n\n    *Wait, one nuance:* In some contexts, \"previous message\" could be interpreted as the assistant's last message or the user's last message. Usually, when a user says \"Repeat my previous message\", they mean the message *they* just sent before this one.\n    *   User Message 1: \"Test message\"\n    *   User Message 2: \"Repeat my previous message\"\n    *   So, repeating \"Test message\" is the correct interpretation.\n\n7.  **Final Output Generation:** \"Test message\""
+      "reasoning": "Thinking Process:\n\n1.  **Analyze the Request:** The user is asking me to \"Repeat my previous message\".\n2.  **Identify the Previous Message:** Looking at the conversation history, the user's first message was \"Test message\", and the second message (which is the current request) is \"Repeat my previous message\".\n3.  **Determine the \"Previous Message\":** The message immediately preceding the current one is \"Test message\".\n4.  **Formulate the Response:** I need to output the text \"Test message\".\n5.  **Check Constraints:** There are no special constraints (like \"don't repeat it\" or \"only repeat if...\"). Just a direct command.\n6.  **Final Output:** \"Test message\".\n\n*Self-Correction/Refinement:* Wait, let me double-check the conversation flow.\n- User Turn 1: \"Test message\"\n- Model Turn 1: \"Hello! How can I assist you today?\"\n- User Turn 2: \"Repeat my previous message\"\n\nThe \"previous message\" from the user's perspective is Turn 1 (\"Test message\").\nSo I should repeat \"Test message\".\n\n*Action:* Output \"Test message\".\n"
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
@@ -291,24 +291,24 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
-      "id": "qkCJzYjHEtfBrrkQDqGOZvqKmXEouoxP",
+      "id": "3025kzfSjn1Q76fmpkjrrvhmMOFjumOt",
       "name": "run_me",
       "arguments": {
         "foo": "dGVzdA==",
-        "bar": "WyJmb28iXQ=="
+        "bar": "WyJmb28iLCAiYmFyIl0="
       }
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
-      "id": "qkCJzYjHEtfBrrkQDqGOZvqKmXEouoxP",
+      "id": "3025kzfSjn1Q76fmpkjrrvhmMOFjumOt",
       "content": "VGhlIHNlY3JldCBjb2RlIGlzOiA0Mg==",
       "is_error": false
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "The tool has run successfully! Here is the output:\n\n```\nThe secret code is: 42\n```\n\nThe tool was called with the arguments `foo=\"test\"` and `bar=[\"foo\"]`."
+      "message": "The secret code is: 42"
     },
     {
       "type": "config_delta",
@@ -334,12 +334,12 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "reasoning": "The user is asking about the result of the previous tool call I made. Looking back at the conversation, I called a tool called `run_me` with arguments `foo=\"test\"` and `bar=[\"foo\"]`, and the result was \"The secret code is: 42\".\n\nI should report this back to the user accurately."
+      "reasoning": "The user is asking about the result of the previous tool call. Looking at the conversation history, I can see that I previously ran a tool using the `<function=run_me>` block, and the result was:\n\n\"The secret code is: 42\"\n\nI should provide this information clearly to the user.\n"
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "The result of the previous tool call was:\n\n```\nThe secret code is: 42\n```\n\nThe tool `run_me` was executed with the arguments `foo=\"test\"` and `bar=[\"foo\"]`, and it returned this output."
+      "message": "The result of the previous tool call was:\n\n**The secret code is: 42**"
     }
   ]
 }

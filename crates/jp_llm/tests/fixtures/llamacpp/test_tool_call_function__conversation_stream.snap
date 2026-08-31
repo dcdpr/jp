@@ -221,7 +221,7 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
-      "id": "8DFIx92obUFlZuPR29lLFa1zIFmOZeGh",
+      "id": "10C5kzdXGxswu3Mf4kc59YGXJwe2Wh6Q",
       "name": "run_me",
       "arguments": {
         "foo": "aGVsbG8=",
@@ -231,14 +231,14 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
-      "id": "8DFIx92obUFlZuPR29lLFa1zIFmOZeGh",
+      "id": "10C5kzdXGxswu3Mf4kc59YGXJwe2Wh6Q",
       "content": "d29ya2luZyE=",
       "is_error": false
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "The tool ran successfully with the arguments `foo=\"hello\"` and `bar=[\"foo\", \"bar\"]`. The output confirms the execution: `working!`. Let me know if you'd like to try it with different arguments or need help with anything else!"
+      "message": "The tool has run successfully with the provided arguments. The output indicates that everything is working as expected. Let me know if you'd like to try different arguments or explore other tools!"
     }
   ]
 }

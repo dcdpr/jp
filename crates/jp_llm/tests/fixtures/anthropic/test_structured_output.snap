@@ -11,7 +11,7 @@ expression: v
                     Structured {
                         data: Object {
                             "titles": Array [
-                                String("Generating a Conversation Title"),
+                                String("Generate a title for this conversation"),
                             ],
                         },
                     },

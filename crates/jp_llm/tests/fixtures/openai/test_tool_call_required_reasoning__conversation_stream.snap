@@ -237,19 +237,19 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "reasoning": "**Using the tool**\n\nI need to call a tool before I respond to the user. I can use functions.run_me with certain parameters: foo can be any string, while bar must be set to \"foo.\" It's simpler if I just call functions.run_me. The user asked me to provide whatever arguments I want, so I’ll use foo set to \"executed\" and bar as \"foo.\" Once I get the output from the tool, I'll reply to the user!",
+      "reasoning": "**Analyzing tool call options**\n\nI need to call a tool, specifically functions.run_me, which requires setting the \"bar\" parameter as \"foo,\" but \"foo\" can be null or a string. I’m considering whether to use multi_tool_use.parallel for multiple calls, but it only works for functions tools. Since it seems simpler, I'll just call functions.run_me directly and use the commentary channel for this. My plan is to call it with \"foo\" set to null.",
       "metadata": {
-        "openai_item_id": "cnNfMDQ4N2VhNjc4ZTBmOTFhNzAxNjlhYWVhMTJlOTI4ODFhMjhiODM2ZjcwMjY5MjljMTE=",
-        "openai_encrypted_content": "Z0FBQUFBQnBxdW9WTEdQM3FGNi1kWW1NMU9BcVNSaGh0bHQxRmxxUjdXR0ZwNDRCdFdrNU42QllGQndtMkNObng3U1FLNGIxbHJ3SzlBNVlIaWlnQy1EaFJlM1NtcTFvbXJqNDhadldQOHJMbllpQU5vQWlFM3VSc1RPbWQyaVlJWElFSDdZcG1JMVUyMjdGdVNGTFd2TnpVWmRrekh3Y0d3NGh4ZGhiaThPdXpqbTlQWWw1ckVXZjYyNFp0SWI2QXIzeUI0YXFmanhINk5KZjc4R2pSaUNBeVJjdURNMWhPTlZNLVkzbDNmbTJ0TjRFYkFxbUZJVjNCWWJ6d3VSMDVtWTZIbkJfMl9fRmdORUVlZzJqNVA0VHVwNzN0TEZnN2FRanh1czcya1JKdlc1TUdaY3hmN1ZwQXB5d09PY2k3c294VXRDUmNfWEpvUVp1YkwweUtoNVJvcjRvWXp0UjRiY1k1QWlpVlRoTmFoMDMxZnVZNHZKQ1FqTDdWQWVydmthWGVhdU0zUmVJOUs5R0l4ejZGc1cyd3VBczZlYm9wVkw1UWt3VnlKMVRHbURjaGdkcTFYeHR5YVVMQUZyWGhxank1MGVOSVdTLVFLTkt0VnZ2VWNqWXhiZDdhRHJWNEROZWQyd0ZHcW5lLTlUcU9pXzloU1lMRE9nTmg4a2t1M0dwakVEb2NxMmNva29LT1RNU2VjNlhxTWJRSlpsbUQ5Vm00aF9sclZsLU1FbWZzRHZTbFhCSTlGNXJ4dkJUaVFneTdHU3VkNUozd1VSalVlaW53QUZtYVNxQmhZWDlEcmNXc3RvOTg1azgxWVloS1YwRlBnSWduUzFtMU9aNHFaQkNCTzhOODh4bW9VSjRpeXFrSDUtT3FWM0NTVk9qVl9TR0ZaRU5SdFExeFVRY2VkVS02Z3lDZ1d3SmxYRHlwcjJpYmZFLTR2eGVIQXhWeS1xS2hIeWdVS0hKMGN1WU9RQ2xxbFd5LUVYYTRDZVNDQjNOazlHUWYtYXh1a1g4RU1weXhvUlQ1MHRRdDdqRFBFRUFpaFRzbTdPMkVTQ2t6c2p0OTh0ZlRwZll4RzE5bVlHNTFIbWVkcDBKUjd1bm5SR1dlUWpYUTJ3VGxzS3E4bmJnMElBTlQ2dmdIa1Q3OGtRWE55WGpfdkpObURPbkh3UWVtRDh4bDYxS195UUhheWlNUEFTS19fVE1GUXpnWVpWTFBRY3VvbC1kemRKcDRZd2ppUGFVaHpLN25CNk5xOVE5WGY1ejVQb1RVc3k1bFB3RWQ4b09ZSWJuN0oxVk5NRDE5MjRnU0lSZWZjV1VlbVVrMWNKUFhaOWh0LUVhUEVhRVFWWWFZVk1ZNkdYaTJJVDhPMTdPMklrZm1XRHMxejluRjk1REY1VjhkakNYSkljTnBJd09pYkdUaENMSGpSbVZoNjUydFZ5dFBTMjJpSk1QdDRCb3U5cklqSW1DU0lSQWtQUGRLLU1NaTJBUmtHWmVpTmV0MWxlNmJCc0pGTkN5dFVZVllESGdjLTZLNjBqN1VFb3FVZ000QWxaUFUtWFd0cURCRm16U1dRaXNYdnFQNDBqU3dxQ3dPTGxtY1oyX2FZMWhOeWlIOVFmZXZDcUpUZUs2NkxWMldzLWdPSlFOYmExSDNMMUd1ajN1NjlQSGlSbUtHY25EOHBfejJ3TU1Qa3RENGVjOFZhQ1VIa0hWTUFQTU5CRi1wcXpZcDVrdkdyLWpHc1pjYUhxUHcyNFlSZDhmalVycmd6SUFfQzZKZFNDNWwtV1JkWHpfeUI5SzlqUDd4NWxBWXFGclRmRzV5YklMN0dlSEdRSzFneUMtYmd6NGw1aXQ2dnd2a0FhaGNaV19GUTFIYjZxNDFaLUxLbmljUjl6ZldZV0ZpTHVHZ1Y2MHMwTkllYThuWjJnT056UDZpcElpSWVpd29jNi1QbTdmOXJ2ZmtadDhGR0U5QTlFSVlvdHFoVzhTR1lsNVpfYmRWR1RoXzdDZlBveE56M3lOcFhoNWEyblE4WGlCbmVzZTFHQTZ6STJoZGRvLW1yNVUtWlY1NkE5dGRjLUExUmdLN1J1WG16WU95TGxmelExUURLUXZLUTREdnJ0V1lUcG4xV2ZEWERwd3BuSm1DMnc2SGJCSFZpME9rOGZ5czNWc2lzdThwTDhBZHc9PQ=="
+        "openai_item_id": "cnNfMDI3MDJhZGM4ZmJiN2EzYTAxNmE4ODZkYWRmODMwODdkMmI2NmYxOWFjNzQyZDRmMjc=",
+        "openai_encrypted_content": "Z0FBQUFBQnFpRzJ4bmFXVEF3Vng3eDA0Y3I1eTZRRFFWT3ZkMGVsWlFUR2kyN0JjRVVyM0JJRzBPYVVyOVZURnFmdWtuem11VU9hdkNlV21jVlRSRU1YLVJRZzVZOFRySXV0UFBHblQ3eUJsYXY0d05ibnQwWUV3X3hmLVRENXBIbGE5Wk1OYU1reEVEa2ZxZkJWcGNfeTIydFNYSzRia3UtTHpBcWRrandYNmRWZWhZWFcwUllTY1lYbjBpeVBOb09iYWQ2a0Q3NGlqemhBVHVUakd0ekgtbDRhWE4yTC03Y1Z5NUhtTm8xNWxtX1hTd3l5eWExTk43X0FvLWk5eWw4QzdyS2k5R3Zad1NzdVQzNGg4Ukw1alJ4aUJ4Ni1wVGlyNjg3ZmFienhZNHloNFh3bm1VRkZuX1ZXYWh3a2xzSF93N0s1YXNfZlQ0TGtEZmZRc1k4eGw5dE1feUFMRDNpUmNvYmVFX0VYR1p2YkJteUM3WDJzMTlRNUxDU1lLTXNXUzE1YzZzWVFOVVNNUUU1ZkN5T0l4cnVKYkR6VEJ3UmRGS005WkFNNVVhWThRWllGWEtwUXBLUS1LbnpTQ3lqN0pGaW9oSE5WbnJHblEwa1JtdE83NTlnUmFoNDl3MXNhaXRfdFkyVUtoUzZEUDE4WERPdzFQbHpuSlROdG9fdUROTFN4TlpnNno4N3didTFqYnVUMkVCZWlQWFFfaFhyUmswSGJGbzZjeDNXOFlkQW9JQkphRlpTLTNvNk5odEhtTGRzdjJ4MnBINTRBWjlWSXoybExTMko1RTVPM2J3S1NSUEFGdThQUEF5S05acnMzb1plNkx4WGJ1cnFiTkR0bl8tOVAyU0VQTHlfTEpMRFRCdG91bXNJM09XaHhJLTItejhZSXpkWGpNMWhxWV9rbGtpX25RRHhSWlRlUkEyUEhUN2lfMG1HRUIybTE2ZklkNEF1TnJSUmV0T19HQlc1NVRxMXBOZGRaVE5yUFZFWDlpVDJDTTVPQjVmSTZtVjlreEFueElzekJNQzhmZnNobzNGVWdUcGR5QmpEbjBSdzZQcERDQmc1NDNDVjJRUl8xckd1anhNVXFnTGR5ZHhUNVZNMFFsbm9pV1M5S2NNWnNzdkNDd2tHdmpYSmpsbHluYk5XdXVLNjJLOUlXWFYzc2tGWFhENXd1YzJMYnpiY3dVY3pEemtlTzBCYnU2ZXQtUDRmUkRkNVp4TUZ6X3V6RTFaSzFNSElwUTBrWF9ERHNGaTFmckR6aVE5eWk0cFhnN2o0UzFJb3lDU1h3cUVRRGY3S1RuVlcxS1U3MEoxU0xORF81ZHhOa19VWkRSVnZISXRCSHd5a0UxdWREaC00eEJfWVVYOWlmV00wTkk2UWtDb0cxSGd3ZFRRWV9sM3J4TERHNElTRTVhcnJfVHc1Q2pmaHBYMTl3QndQaHF0QjNFU2VRSDZ1dGtQa0tnMVoyQTdvdWYyVmJYa1Y2cHJIUjlzTm1PckFlMlJ2WnpxUm9yNGNmdDNUZkhWcC1ldVJLREwzaVBWanJ3TEMtT1ZzSFBHbmlJaVM2VTN3c2RpNjdKREVRckxvcGFyVlRTSU1pM0E4Tk1lZDM3MVVyakxXbEdHZklDR0pQeTZUVjlZSnpReDR6aEZoVE52dWVLQlpyTWx0czhERjlHVktxdjhVRHNmeEVXX3h4SUdrU3dTbDJVam1SemtGRVdMR292LXE1RF9nN18wY0VGQ04yYm8zdWk1QVpJNWx2MTJFb003UDlwYk9SeGg3MWhUMGNuN0dUbTdBdmwxX2xKZGxCaGxTdTEtcFRfaldncEpBdGVtXzZUMHNVckI5a2NndTNqRkpiV2h1RDZLTTFaR18weEIzNUYtdTdVektPMUg0eVZsV1FETVRqZTNPWFp3cEZFN2ZoVndUV0hmYTgwRXJpeUI5WkhLTWRBa05JMGJhZUI1OWxacngxRlB1OVlMeHZ0cDA3OTNLTE00SjdfcUlLSmhwMFpWUjREeHk5VUUxbEluSlVYZXFUTjBtbTV0M2ZCTjZIYXlRanhaLVA1UC1nYlhtOHhVeGdyUDY5UHZkQmIzMkhnZ3M0aHp3MEt3R1JzUkVELW5SX1BWWTVNVEdJTHM3bVZfTWU5RVBMcmlzSmRBcUUwZDNLbTd6cmM2NDNIWTlfcnB1TGlBenF4cjM1WmJQOHB6a0NRbFhveFBCLVphbV9weHE4RUoxUm9YM0JHdWt2b28xRDgzVnVscXNDRlNfeVFwVWF0LW1xNDBuTmZlU3F1SHMwPQ=="
       }
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
-      "id": "call_QQuf1B1LkLboUYsCcYcBhyiz",
+      "id": "call_i95it8x7WlrY7fZeliTs6shY",
       "name": "run_me",
       "arguments": {
-        "foo": "ZXhlY3V0ZWQ=",
+        "foo": null,
         "bar": "Zm9v"
       }
     },
@@ -269,16 +269,16 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
-      "id": "call_QQuf1B1LkLboUYsCcYcBhyiz",
+      "id": "call_i95it8x7WlrY7fZeliTs6shY",
       "content": "d29ya2luZyE=",
       "is_error": false
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "Tool ran successfully. Output: \"working!\"",
+      "message": "Done — the tool returned: \"working!\"",
       "metadata": {
-        "openai_item_id": "bXNnXzA0ODdlYTY3OGUwZjkxYTcwMTY5YWFlYTE2Njc3MDgxYTJhNTRiY2FhZmM3MDYzODc3"
+        "openai_item_id": "bXNnXzAyNzAyYWRjOGZiYjdhM2EwMTZhODg2ZGIyY2MzNDg3ZDI5Mzc0MzQ0MGM3ODM3ZTA0"
       }
     }
   ]

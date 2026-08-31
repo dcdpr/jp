@@ -9,10 +9,10 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "call_AujnMFG9aQStXpHVXQ5Gwfgi",
+                        id: "call_QVPVzLo15uyHKtD1NPj8MGFL",
                         name: "run_me",
                         arguments: {
-                            "foo": String("hello"),
+                            "foo": String("foo"),
                             "bar": String("foo"),
                         },
                     },
@@ -30,11 +30,11 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "I ran the tool with the arguments {\"foo\":\"hello\", \"bar\":\"foo\"}. The tool responded: \"working!\"\n\nIf you want me to run it again with different arguments, tell me which values to use (or say \"choose for me\") and I'll run it.",
+                        message: "Done — I ran the tool with the arguments {\"foo\":\"foo\",\"bar\":\"foo\"} and it returned: \"working!\" Anything else you want me to try with different arguments or do next?",
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("msg_02c385c765ef70e5016995b6c3653881a28b92a7993e5ad793"),
+                    "openai_item_id": String("msg_0af451943fc5782a016a886dafede087d2ad72f5a2559b7abe"),
                 },
             },
         ),

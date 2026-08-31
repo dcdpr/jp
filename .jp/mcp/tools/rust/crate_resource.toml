@@ -41,6 +41,4 @@ inline_results = "off"
 parameters = "function_call"
 
 [conversation.tools.rust_crate_resource.parameters.uri]
-type = "string"
-required = true
 summary = "Crate resource URI."

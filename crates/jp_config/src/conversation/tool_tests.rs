@@ -513,6 +513,30 @@ fn test_tools_config() {
 }
 
 #[test]
+fn mcp_parameter_override_preserves_unset_shape_fields() {
+    let partial: PartialToolConfig = toml::from_str(
+        r#"
+source = "mcp.grizzly"
+
+[parameters.tags.items]
+enum = ["projects/jp", "task", "idea"]
+"#,
+    )
+    .unwrap();
+
+    let config = ToolConfig::from_partial(partial, vec![]).unwrap();
+    let tags = config.parameters.get("tags").unwrap();
+    let items = tags.items.as_deref().unwrap();
+
+    assert_eq!(tags.kind, None);
+    assert_eq!(items.kind, None);
+    assert_eq!(
+        items.enumeration,
+        Some(vec![json!("projects/jp"), json!("task"), json!("idea")])
+    );
+}
+
+#[test]
 fn test_tool_config_command() {
     let mut p = PartialToolConfig::default_values(&()).unwrap().unwrap();
     assert!(p.command.is_none());

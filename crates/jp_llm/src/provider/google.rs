@@ -509,23 +509,6 @@ fn map_model(model: types::Model) -> ModelDetails {
                 features: vec![],
             }
         }
-        "gemini-3-pro-preview" => ModelDetails {
-            id,
-            display_name,
-            context_window,
-            max_output_tokens,
-            reasoning: Some(
-                ReasoningDetails::leveled(false, true, false, true, false, false).always_on(),
-            ),
-            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 1, 1).unwrap()),
-            deprecated: Some(ModelDeprecation::deprecated(
-                &"recommended replacement: gemini-3.1-pro-preview",
-                Some(NaiveDate::from_ymd_opt(2026, 3, 9).unwrap()),
-            )),
-            structured_output: None,
-            prefill: None,
-            features: vec![],
-        },
         "gemini-flash-latest" | "gemini-3-flash-preview" => ModelDetails {
             id,
             display_name,
@@ -1011,6 +994,25 @@ fn convert_tool_choice(choice: ToolChoice) -> types::ToolConfig {
     }
 }
 
+/// Close the root object of a tool's parameters schema.
+///
+/// Gemini accepts JSON Schema as declared, references included, so the document
+/// passes through.
+/// Only `additionalProperties` is added, to state that the argument object
+/// takes no keys beyond the ones it declares.
+fn closed_object_schema(parameters: Value) -> Value {
+    let mut document = match parameters {
+        Value::Object(document) => document,
+        other => return other,
+    };
+
+    document
+        .entry("additionalProperties")
+        .or_insert(Value::Bool(false));
+
+    Value::Object(document)
+}
+
 fn convert_tools(tools: Vec<ToolDefinition>) -> Vec<types::Tool> {
     tools
         .into_iter()
@@ -1018,7 +1020,7 @@ fn convert_tools(tools: Vec<ToolDefinition>) -> Vec<types::Tool> {
             types::Tool::FunctionDeclaration(types::ToolConfigFunctionDeclaration {
                 function_declarations: vec![types::FunctionDeclaration {
                     parameters: None,
-                    parameters_json_schema: Some(tool.to_parameters_schema()),
+                    parameters_json_schema: Some(closed_object_schema(tool.parameters)),
                     name: tool.name,
                     description: tool
                         .docs

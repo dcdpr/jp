@@ -3,7 +3,7 @@ source: crates/jp_llm/src/provider/compaction_request_tests.rs
 expression: request
 ---
 {
-  "model": "qwen3.5:9b",
+  "model": "unsloth/Qwen3.5-9B-GGUF:Q4_K_M",
   "messages": [
     {
       "role": "user",
@@ -19,7 +19,7 @@ expression: request
     }
   ],
   "stream": true,
-  "reasoning_format": "none",
+  "reasoning_format": "deepseek",
   "chat_template_kwargs": {
     "enable_thinking": false
   }

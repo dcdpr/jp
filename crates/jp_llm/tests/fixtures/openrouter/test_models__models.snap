@@ -7,35 +7,6 @@ expression: v
         id: ModelIdConfig {
             provider: Openrouter,
             name: Name(
-                "ai21/jamba-large-1.7",
-            ),
-        },
-        display_name: Some(
-            "AI21: Jamba Large 1.7",
-        ),
-        context_window: Some(
-            256000,
-        ),
-        max_output_tokens: Some(
-            4096,
-        ),
-        reasoning: Some(
-            Unsupported,
-        ),
-        knowledge_cutoff: Some(
-            2024-08-31,
-        ),
-        deprecated: None,
-        structured_output: Some(
-            false,
-        ),
-        prefill: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Openrouter,
-            name: Name(
                 "aion-labs/aion-2.0",
             ),
         },
@@ -311,10 +282,10 @@ expression: v
             "Magnum v4 72B",
         ),
         context_window: Some(
-            16384,
+            32768,
         ),
         max_output_tokens: Some(
-            2048,
+            4096,
         ),
         reasoning: Some(
             Unsupported,
@@ -399,11 +370,73 @@ expression: v
         id: ModelIdConfig {
             provider: Openrouter,
             name: Name(
+                "anthropic/claude-fable-5:batch",
+            ),
+        },
+        display_name: Some(
+            "Anthropic: Claude Fable 5 (batch)",
+        ),
+        context_window: Some(
+            1000000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: true,
+                },
+                can_disable: false,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
                 "anthropic/claude-haiku-4.5",
             ),
         },
         display_name: Some(
             "Anthropic: Claude Haiku 4.5",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: Some(
+            64000,
+        ),
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "anthropic/claude-haiku-4.5:batch",
+            ),
+        },
+        display_name: Some(
+            "Anthropic: Claude Haiku 4.5 (batch)",
         ),
         context_window: Some(
             200000,
@@ -469,6 +502,33 @@ expression: v
         ),
         deprecated: None,
         structured_output: Some(
+            false,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "anthropic/claude-opus-4.1:batch",
+            ),
+        },
+        display_name: Some(
+            "Anthropic: Claude Opus 4.1 (batch)",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: Some(
+            32000,
+        ),
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-01-31,
+        ),
+        deprecated: None,
+        structured_output: Some(
             true,
         ),
         prefill: None,
@@ -503,11 +563,73 @@ expression: v
         id: ModelIdConfig {
             provider: Openrouter,
             name: Name(
+                "anthropic/claude-opus-4.5:batch",
+            ),
+        },
+        display_name: Some(
+            "Anthropic: Claude Opus 4.5 (batch)",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: Some(
+            64000,
+        ),
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
                 "anthropic/claude-opus-4.6",
             ),
         },
         display_name: Some(
             "Anthropic: Claude Opus 4.6",
+        ),
+        context_window: Some(
+            1000000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: true,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "anthropic/claude-opus-4.6:batch",
+            ),
+        },
+        display_name: Some(
+            "Anthropic: Claude Opus 4.6 (batch)",
         ),
         context_window: Some(
             1000000,
@@ -614,6 +736,43 @@ expression: v
         id: ModelIdConfig {
             provider: Openrouter,
             name: Name(
+                "anthropic/claude-opus-4.7:batch",
+            ),
+        },
+        display_name: Some(
+            "Anthropic: Claude Opus 4.7 (batch)",
+        ),
+        context_window: Some(
+            1000000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: true,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
                 "anthropic/claude-opus-4.8",
             ),
         },
@@ -656,6 +815,43 @@ expression: v
         },
         display_name: Some(
             "Anthropic: Claude Opus 4.8 (Fast)",
+        ),
+        context_window: Some(
+            1000000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: true,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "anthropic/claude-opus-4.8:batch",
+            ),
+        },
+        display_name: Some(
+            "Anthropic: Claude Opus 4.8 (batch)",
         ),
         context_window: Some(
             1000000,
@@ -762,6 +958,43 @@ expression: v
         id: ModelIdConfig {
             provider: Openrouter,
             name: Name(
+                "anthropic/claude-opus-5:batch",
+            ),
+        },
+        display_name: Some(
+            "Claude Opus 5 (batch)",
+        ),
+        context_window: Some(
+            1000000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: true,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
                 "anthropic/claude-sonnet-4",
             ),
         },
@@ -794,6 +1027,33 @@ expression: v
         },
         display_name: Some(
             "Anthropic: Claude Sonnet 4.5",
+        ),
+        context_window: Some(
+            1000000,
+        ),
+        max_output_tokens: Some(
+            64000,
+        ),
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-01-31,
+        ),
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "anthropic/claude-sonnet-4.5:batch",
+            ),
+        },
+        display_name: Some(
+            "Anthropic: Claude Sonnet 4.5 (batch)",
         ),
         context_window: Some(
             1000000,
@@ -853,11 +1113,85 @@ expression: v
         id: ModelIdConfig {
             provider: Openrouter,
             name: Name(
+                "anthropic/claude-sonnet-4.6:batch",
+            ),
+        },
+        display_name: Some(
+            "Anthropic: Claude Sonnet 4.6 (batch)",
+        ),
+        context_window: Some(
+            1000000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: true,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
                 "anthropic/claude-sonnet-5",
             ),
         },
         display_name: Some(
             "Anthropic: Claude Sonnet 5",
+        ),
+        context_window: Some(
+            1000000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: true,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "anthropic/claude-sonnet-5:batch",
+            ),
+        },
+        display_name: Some(
+            "Anthropic: Claude Sonnet 5 (batch)",
         ),
         context_window: Some(
             1000000,
@@ -1009,6 +1343,68 @@ expression: v
             32768,
         ),
         reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "bytedance-seed/seed-2-1-turbo",
+            ),
+        },
+        display_name: Some(
+            "ByteDance Seed: Seed 2.1 Turbo",
+        ),
+        context_window: Some(
+            262144,
+        ),
+        max_output_tokens: Some(
+            262144,
+        ),
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "bytedance-seed/seed-2.0-code",
+            ),
+        },
+        display_name: Some(
+            "ByteDance Seed: Seed-2.0-Code",
+        ),
+        context_window: Some(
+            262144,
+        ),
+        max_output_tokens: Some(
+            131072,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: true,
+            },
+        ),
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: Some(
@@ -1356,7 +1752,7 @@ expression: v
             163840,
         ),
         max_output_tokens: Some(
-            65536,
+            163840,
         ),
         reasoning: Some(
             Unsupported,
@@ -1566,7 +1962,118 @@ expression: v
             ),
         },
         display_name: Some(
-            "DeepSeek: DeepSeek V4 Flash",
+            "DeepSeek: DeepSeek V4 Flash 0423",
+        ),
+        context_window: Some(
+            1024000,
+        ),
+        max_output_tokens: Some(
+            384000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: false,
+                    medium: false,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "deepseek/deepseek-v4-flash-0731",
+            ),
+        },
+        display_name: Some(
+            "DeepSeek: DeepSeek V4 Flash 0731",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: Some(
+            384000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: false,
+                    high: true,
+                    xhigh: false,
+                    max: true,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "deepseek/deepseek-v4-flash-vision-exp",
+            ),
+        },
+        display_name: Some(
+            "DeepSeek: DeepSeek V4 Flash Vision Exp",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: Some(
+            384000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: false,
+                    high: true,
+                    xhigh: false,
+                    max: true,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            false,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "deepseek/deepseek-v4-pro",
+            ),
+        },
+        display_name: Some(
+            "DeepSeek: DeepSeek V4 Pro 0423",
         ),
         context_window: Some(
             1048576,
@@ -1599,31 +2106,54 @@ expression: v
         id: ModelIdConfig {
             provider: Openrouter,
             name: Name(
-                "deepseek/deepseek-v4-pro",
+                "deepseek/deepseek-v4-pro-0813",
             ),
         },
         display_name: Some(
-            "DeepSeek: DeepSeek V4 Pro",
+            "DeepSeek: DeepSeek V4 Pro 0813",
         ),
         context_window: Some(
-            1048576,
+            1048575,
         ),
-        max_output_tokens: Some(
-            384000,
-        ),
+        max_output_tokens: None,
         reasoning: Some(
             Supported {
                 mode: Leveled {
                     xlow: false,
-                    low: false,
+                    low: true,
                     medium: false,
                     high: true,
-                    xhigh: true,
-                    max: false,
+                    xhigh: false,
+                    max: true,
                 },
                 can_disable: true,
             },
         ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "dots-studio/dots-3-note-preview:free",
+            ),
+        },
+        display_name: Some(
+            "Dots Studio: Dots3-Note Preview (free)",
+        ),
+        context_window: Some(
+            512000,
+        ),
+        max_output_tokens: Some(
+            512000,
+        ),
+        reasoning: None,
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: Some(
@@ -1697,6 +2227,60 @@ expression: v
         },
         display_name: Some(
             "Google: Gemini 2.5 Flash Lite",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: Some(
+            65535,
+        ),
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-01-31,
+        ),
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "google/gemini-2.5-flash-lite:batch",
+            ),
+        },
+        display_name: Some(
+            "Google: Gemini 2.5 Flash Lite (batch)",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: Some(
+            65535,
+        ),
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-01-31,
+        ),
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "google/gemini-2.5-flash:batch",
+            ),
+        },
+        display_name: Some(
+            "Google: Gemini 2.5 Flash (batch)",
         ),
         context_window: Some(
             1048576,
@@ -1800,6 +2384,33 @@ expression: v
         id: ModelIdConfig {
             provider: Openrouter,
             name: Name(
+                "google/gemini-2.5-pro:batch",
+            ),
+        },
+        display_name: Some(
+            "Google: Gemini 2.5 Pro (batch)",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: Some(
+            65536,
+        ),
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2025-01-31,
+        ),
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
                 "google/gemini-3-flash-preview",
             ),
         },
@@ -1810,7 +2421,44 @@ expression: v
             1048576,
         ),
         max_output_tokens: Some(
-            65535,
+            65536,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: true,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "google/gemini-3-flash-preview:batch",
+            ),
+        },
+        display_name: Some(
+            "Google: Gemini 3 Flash Preview (batch)",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: Some(
+            65536,
         ),
         reasoning: Some(
             Supported {
@@ -2008,7 +2656,7 @@ expression: v
             65536,
         ),
         max_output_tokens: Some(
-            66000,
+            65536,
         ),
         reasoning: Some(
             Supported {
@@ -2042,6 +2690,43 @@ expression: v
         },
         display_name: Some(
             "Google: Gemini 3.1 Flash Lite Preview",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: Some(
+            65536,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: true,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "google/gemini-3.1-flash-lite:batch",
+            ),
+        },
+        display_name: Some(
+            "Google: Gemini 3.1 Flash Lite (batch)",
         ),
         context_window: Some(
             1048576,
@@ -2116,6 +2801,43 @@ expression: v
         },
         display_name: Some(
             "Google: Gemini 3.1 Pro Preview Custom Tools",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: Some(
+            65536,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: false,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "google/gemini-3.1-pro-preview:batch",
+            ),
+        },
+        display_name: Some(
+            "Google: Gemini 3.1 Pro Preview (batch)",
         ),
         context_window: Some(
             1048576,
@@ -2224,6 +2946,82 @@ expression: v
         id: ModelIdConfig {
             provider: Openrouter,
             name: Name(
+                "google/gemini-3.5-flash-lite:batch",
+            ),
+        },
+        display_name: Some(
+            "Google: Gemini 3.5 Flash Lite (batch)",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: Some(
+            65536,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: true,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: false,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "google/gemini-3.5-flash:batch",
+            ),
+        },
+        display_name: Some(
+            "Google: Gemini 3.5 Flash (batch)",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: Some(
+            65536,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: true,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: false,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2025-01-01,
+        ),
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
                 "google/gemini-3.6-flash",
             ),
         },
@@ -2240,6 +3038,117 @@ expression: v
             Supported {
                 mode: Leveled {
                     xlow: true,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: false,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "google/gemini-3.6-flash:batch",
+            ),
+        },
+        display_name: Some(
+            "Google: Gemini 3.6 Flash (batch)",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: Some(
+            65536,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: true,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: false,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "google/gemini-3.7-flash",
+            ),
+        },
+        display_name: Some(
+            "Google: Gemini 3.7 Flash",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: Some(
+            65536,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: false,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "google/gemini-3.7-flash:batch",
+            ),
+        },
+        display_name: Some(
+            "Google: Gemini 3.7 Flash (batch)",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: Some(
+            65536,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
                     low: true,
                     medium: true,
                     high: true,
@@ -2414,7 +3323,7 @@ expression: v
             262144,
         ),
         max_output_tokens: Some(
-            262144,
+            16384,
         ),
         reasoning: None,
         knowledge_cutoff: None,
@@ -2436,7 +3345,7 @@ expression: v
             "Google: Gemma 4 26B A4B  (free)",
         ),
         context_window: Some(
-            131072,
+            262144,
         ),
         max_output_tokens: Some(
             32768,
@@ -2445,7 +3354,7 @@ expression: v
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: Some(
-            true,
+            false,
         ),
         prefill: None,
         features: [],
@@ -2732,11 +3641,11 @@ expression: v
         id: ModelIdConfig {
             provider: Openrouter,
             name: Name(
-                "inclusionai/ling-3.0-flash:free",
+                "inclusionai/ling-3.0-flash",
             ),
         },
         display_name: Some(
-            "Ling-3.0-flash (free)",
+            "Ling-3.0-flash",
         ),
         context_window: Some(
             262144,
@@ -2783,64 +3692,6 @@ expression: v
             },
         ),
         knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: Some(
-            false,
-        ),
-        prefill: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Openrouter,
-            name: Name(
-                "inflection/inflection-3-pi",
-            ),
-        },
-        display_name: Some(
-            "Inflection: Inflection 3 Pi",
-        ),
-        context_window: Some(
-            8000,
-        ),
-        max_output_tokens: Some(
-            1024,
-        ),
-        reasoning: Some(
-            Unsupported,
-        ),
-        knowledge_cutoff: Some(
-            2024-10-31,
-        ),
-        deprecated: None,
-        structured_output: Some(
-            false,
-        ),
-        prefill: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Openrouter,
-            name: Name(
-                "inflection/inflection-3-productivity",
-            ),
-        },
-        display_name: Some(
-            "Inflection: Inflection 3 Productivity",
-        ),
-        context_window: Some(
-            8000,
-        ),
-        max_output_tokens: Some(
-            1024,
-        ),
-        reasoning: Some(
-            Unsupported,
-        ),
-        knowledge_cutoff: Some(
-            2024-10-31,
-        ),
         deprecated: None,
         structured_output: Some(
             false,
@@ -2933,6 +3784,31 @@ expression: v
         id: ModelIdConfig {
             provider: Openrouter,
             name: Name(
+                "liquid/lfm-2.5-2.6b:free",
+            ),
+        },
+        display_name: Some(
+            "LiquidAI: LFM2.5-2.6B (free)",
+        ),
+        context_window: Some(
+            65536,
+        ),
+        max_output_tokens: Some(
+            8192,
+        ),
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
                 "mancer/weaver",
             ),
         },
@@ -2943,7 +3819,7 @@ expression: v
             8000,
         ),
         max_output_tokens: Some(
-            2000,
+            6000,
         ),
         reasoning: Some(
             Unsupported,
@@ -2953,7 +3829,7 @@ expression: v
         ),
         deprecated: None,
         structured_output: Some(
-            true,
+            false,
         ),
         prefill: None,
         features: [],
@@ -3113,7 +3989,7 @@ expression: v
             131072,
         ),
         max_output_tokens: Some(
-            128000,
+            16384,
         ),
         reasoning: Some(
             Unsupported,
@@ -3219,11 +4095,83 @@ expression: v
         id: ModelIdConfig {
             provider: Openrouter,
             name: Name(
+                "meta/muse-glimmer-30b",
+            ),
+        },
+        display_name: Some(
+            "Meta: Muse Glimmer 30B",
+        ),
+        context_window: Some(
+            131072,
+        ),
+        max_output_tokens: Some(
+            131072,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: false,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
                 "meta/muse-spark-1.1",
             ),
         },
         display_name: Some(
             "Meta: Muse Spark 1.1",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: None,
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: true,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: false,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "meta/muse-spark-1.2",
+            ),
+        },
+        display_name: Some(
+            "Meta: Muse Spark 1.2",
         ),
         context_window: Some(
             1048576,
@@ -3452,10 +4400,10 @@ expression: v
             "MiniMax: MiniMax M2.5",
         ),
         context_window: Some(
-            196608,
+            198000,
         ),
         max_output_tokens: Some(
-            196608,
+            32768,
         ),
         reasoning: None,
         knowledge_cutoff: None,
@@ -3477,7 +4425,7 @@ expression: v
             "MiniMax: MiniMax M2.7",
         ),
         context_window: Some(
-            196608,
+            204800,
         ),
         max_output_tokens: Some(
             131072,
@@ -3520,6 +4468,29 @@ expression: v
         id: ModelIdConfig {
             provider: Openrouter,
             name: Name(
+                "minimax/minimax-m3:batch",
+            ),
+        },
+        display_name: Some(
+            "MiniMax: MiniMax M3 (batch)",
+        ),
+        context_window: Some(
+            524288,
+        ),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
                 "mistralai/codestral-2508",
             ),
         },
@@ -3536,31 +4507,6 @@ expression: v
         knowledge_cutoff: Some(
             2025-03-31,
         ),
-        deprecated: None,
-        structured_output: Some(
-            true,
-        ),
-        prefill: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Openrouter,
-            name: Name(
-                "mistralai/devstral-2512",
-            ),
-        },
-        display_name: Some(
-            "Mistral: Devstral 2 2512",
-        ),
-        context_window: Some(
-            262144,
-        ),
-        max_output_tokens: None,
-        reasoning: Some(
-            Unsupported,
-        ),
-        knowledge_cutoff: None,
         deprecated: None,
         structured_output: Some(
             true,
@@ -3611,6 +4557,33 @@ expression: v
             Unsupported,
         ),
         knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "mistralai/ministral-8b",
+            ),
+        },
+        display_name: Some(
+            "Mistral: Ministral 8B",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: None,
+        reasoning: Some(
+            Unsupported,
+        ),
+        knowledge_cutoff: Some(
+            2024-09-30,
+        ),
         deprecated: None,
         structured_output: Some(
             true,
@@ -3971,9 +4944,11 @@ expression: v
             "Mistral: Mistral Small 3.2 24B",
         ),
         context_window: Some(
-            131072,
+            256000,
         ),
-        max_output_tokens: None,
+        max_output_tokens: Some(
+            16384,
+        ),
         reasoning: Some(
             Unsupported,
         ),
@@ -4188,6 +5163,29 @@ expression: v
         max_output_tokens: Some(
             262144,
         ),
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "moonshotai/kimi-k2.7-code:batch",
+            ),
+        },
+        display_name: Some(
+            "MoonshotAI: Kimi K2.7 Code (batch)",
+        ),
+        context_window: Some(
+            262144,
+        ),
+        max_output_tokens: None,
         reasoning: None,
         knowledge_cutoff: None,
         deprecated: None,
@@ -4458,7 +5456,7 @@ expression: v
             262144,
         ),
         max_output_tokens: Some(
-            228000,
+            262144,
         ),
         reasoning: None,
         knowledge_cutoff: None,
@@ -4630,6 +5628,41 @@ expression: v
         id: ModelIdConfig {
             provider: Openrouter,
             name: Name(
+                "nvidia/nemotron-3-ultra-550b-a55b:batch",
+            ),
+        },
+        display_name: Some(
+            "NVIDIA: Nemotron 3 Ultra (batch)",
+        ),
+        context_window: Some(
+            512288,
+        ),
+        max_output_tokens: None,
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: false,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
                 "nvidia/nemotron-3-ultra-550b-a55b:free",
             ),
         },
@@ -4678,6 +5711,56 @@ expression: v
         ),
         max_output_tokens: Some(
             8192,
+        ),
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            false,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "nvidia/nemotron-3.5-lightning",
+            ),
+        },
+        display_name: Some(
+            "NVIDIA: Nemotron 3.5 Lightning",
+        ),
+        context_window: Some(
+            262144,
+        ),
+        max_output_tokens: Some(
+            131072,
+        ),
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "nvidia/nemotron-3.5-lightning:free",
+            ),
+        },
+        display_name: Some(
+            "NVIDIA: Nemotron 3.5 Lightning (free)",
+        ),
+        context_window: Some(
+            1000000,
+        ),
+        max_output_tokens: Some(
+            65536,
         ),
         reasoning: None,
         knowledge_cutoff: None,
@@ -4858,6 +5941,35 @@ expression: v
         id: ModelIdConfig {
             provider: Openrouter,
             name: Name(
+                "openai/gpt-3.5-turbo:batch",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-3.5 Turbo (batch)",
+        ),
+        context_window: Some(
+            16385,
+        ),
+        max_output_tokens: Some(
+            4096,
+        ),
+        reasoning: Some(
+            Unsupported,
+        ),
+        knowledge_cutoff: Some(
+            2021-09-30,
+        ),
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
                 "openai/gpt-4",
             ),
         },
@@ -4945,6 +6057,35 @@ expression: v
         id: ModelIdConfig {
             provider: Openrouter,
             name: Name(
+                "openai/gpt-4-turbo:batch",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-4 Turbo (batch)",
+        ),
+        context_window: Some(
+            128000,
+        ),
+        max_output_tokens: Some(
+            4096,
+        ),
+        reasoning: Some(
+            Unsupported,
+        ),
+        knowledge_cutoff: Some(
+            2023-12-31,
+        ),
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
                 "openai/gpt-4.1",
             ),
         },
@@ -5003,11 +6144,98 @@ expression: v
         id: ModelIdConfig {
             provider: Openrouter,
             name: Name(
+                "openai/gpt-4.1-mini:batch",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-4.1 Mini (batch)",
+        ),
+        context_window: Some(
+            1047576,
+        ),
+        max_output_tokens: Some(
+            32768,
+        ),
+        reasoning: Some(
+            Unsupported,
+        ),
+        knowledge_cutoff: Some(
+            2024-06-30,
+        ),
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
                 "openai/gpt-4.1-nano",
             ),
         },
         display_name: Some(
             "OpenAI: GPT-4.1 Nano",
+        ),
+        context_window: Some(
+            1047576,
+        ),
+        max_output_tokens: Some(
+            32768,
+        ),
+        reasoning: Some(
+            Unsupported,
+        ),
+        knowledge_cutoff: Some(
+            2024-06-30,
+        ),
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-4.1-nano:batch",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-4.1 Nano (batch)",
+        ),
+        context_window: Some(
+            1047576,
+        ),
+        max_output_tokens: Some(
+            32768,
+        ),
+        reasoning: Some(
+            Unsupported,
+        ),
+        knowledge_cutoff: Some(
+            2024-06-30,
+        ),
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-4.1:batch",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-4.1 (batch)",
         ),
         context_window: Some(
             1047576,
@@ -5206,11 +6434,11 @@ expression: v
         id: ModelIdConfig {
             provider: Openrouter,
             name: Name(
-                "openai/gpt-4o-mini-search-preview",
+                "openai/gpt-4o-mini:batch",
             ),
         },
         display_name: Some(
-            "OpenAI: GPT-4o-mini Search Preview",
+            "OpenAI: GPT-4o-mini (batch)",
         ),
         context_window: Some(
             128000,
@@ -5235,11 +6463,11 @@ expression: v
         id: ModelIdConfig {
             provider: Openrouter,
             name: Name(
-                "openai/gpt-4o-search-preview",
+                "openai/gpt-4o:batch",
             ),
         },
         display_name: Some(
-            "OpenAI: GPT-4o Search Preview",
+            "OpenAI: GPT-4o (batch)",
         ),
         context_window: Some(
             128000,
@@ -5303,40 +6531,11 @@ expression: v
         id: ModelIdConfig {
             provider: Openrouter,
             name: Name(
-                "openai/gpt-5-chat",
+                "openai/gpt-5-codex:batch",
             ),
         },
         display_name: Some(
-            "OpenAI: GPT-5 Chat",
-        ),
-        context_window: Some(
-            128000,
-        ),
-        max_output_tokens: Some(
-            16384,
-        ),
-        reasoning: Some(
-            Unsupported,
-        ),
-        knowledge_cutoff: Some(
-            2024-09-30,
-        ),
-        deprecated: None,
-        structured_output: Some(
-            true,
-        ),
-        prefill: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Openrouter,
-            name: Name(
-                "openai/gpt-5-codex",
-            ),
-        },
-        display_name: Some(
-            "OpenAI: GPT-5 Codex",
+            "OpenAI: GPT-5 Codex (batch)",
         ),
         context_window: Some(
             400000,
@@ -5448,11 +6647,89 @@ expression: v
         id: ModelIdConfig {
             provider: Openrouter,
             name: Name(
+                "openai/gpt-5-mini:batch",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-5 Mini (batch)",
+        ),
+        context_window: Some(
+            400000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: true,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: false,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2024-05-31,
+        ),
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
                 "openai/gpt-5-nano",
             ),
         },
         display_name: Some(
             "OpenAI: GPT-5 Nano",
+        ),
+        context_window: Some(
+            400000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: true,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: false,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2024-05-31,
+        ),
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-5-nano:batch",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-5 Nano (batch)",
         ),
         context_window: Some(
             400000,
@@ -5526,6 +6803,45 @@ expression: v
         id: ModelIdConfig {
             provider: Openrouter,
             name: Name(
+                "openai/gpt-5-pro:batch",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-5 Pro (batch)",
+        ),
+        context_window: Some(
+            400000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: false,
+                    medium: false,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: false,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2024-09-30,
+        ),
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
                 "openai/gpt-5.1",
             ),
         },
@@ -5550,33 +6866,6 @@ expression: v
                 },
                 can_disable: true,
             },
-        ),
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: Some(
-            true,
-        ),
-        prefill: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Openrouter,
-            name: Name(
-                "openai/gpt-5.1-chat",
-            ),
-        },
-        display_name: Some(
-            "OpenAI: GPT-5.1 Chat",
-        ),
-        context_window: Some(
-            128000,
-        ),
-        max_output_tokens: Some(
-            16384,
-        ),
-        reasoning: Some(
-            Unsupported,
         ),
         knowledge_cutoff: None,
         deprecated: None,
@@ -5674,7 +6963,44 @@ expression: v
             400000,
         ),
         max_output_tokens: Some(
-            100000,
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-5.1:batch",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-5.1 (batch)",
+        ),
+        context_window: Some(
+            400000,
+        ),
+        max_output_tokens: Some(
+            128000,
         ),
         reasoning: Some(
             Supported {
@@ -5748,7 +7074,7 @@ expression: v
             128000,
         ),
         max_output_tokens: Some(
-            16384,
+            32000,
         ),
         reasoning: Some(
             Unsupported,
@@ -5839,20 +7165,67 @@ expression: v
         id: ModelIdConfig {
             provider: Openrouter,
             name: Name(
-                "openai/gpt-5.3-chat",
+                "openai/gpt-5.2-pro:batch",
             ),
         },
         display_name: Some(
-            "OpenAI: GPT-5.3 Chat",
+            "OpenAI: GPT-5.2 Pro (batch)",
         ),
         context_window: Some(
-            128000,
+            400000,
         ),
         max_output_tokens: Some(
-            16384,
+            128000,
         ),
         reasoning: Some(
-            Unsupported,
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: false,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: false,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-5.2:batch",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-5.2 (batch)",
+        ),
+        context_window: Some(
+            400000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: true,
+            },
         ),
         knowledge_cutoff: None,
         deprecated: None,
@@ -6016,11 +7389,89 @@ expression: v
         id: ModelIdConfig {
             provider: Openrouter,
             name: Name(
+                "openai/gpt-5.4-mini:batch",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-5.4 Mini (batch)",
+        ),
+        context_window: Some(
+            400000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2025-08-31,
+        ),
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
                 "openai/gpt-5.4-nano",
             ),
         },
         display_name: Some(
             "OpenAI: GPT-5.4 Nano",
+        ),
+        context_window: Some(
+            400000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2025-08-31,
+        ),
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-5.4-nano:batch",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-5.4 Nano (batch)",
         ),
         context_window: Some(
             400000,
@@ -6078,6 +7529,80 @@ expression: v
                     max: false,
                 },
                 can_disable: false,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-5.4-pro:batch",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-5.4 Pro (batch)",
+        ),
+        context_window: Some(
+            1050000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: false,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: false,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-5.4:batch",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-5.4 (batch)",
+        ),
+        context_window: Some(
+            1050000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: true,
             },
         ),
         knowledge_cutoff: None,
@@ -6170,6 +7695,84 @@ expression: v
         id: ModelIdConfig {
             provider: Openrouter,
             name: Name(
+                "openai/gpt-5.5-pro:batch",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-5.5 Pro (batch)",
+        ),
+        context_window: Some(
+            1050000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: false,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: false,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2025-12-01,
+        ),
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-5.5:batch",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-5.5 (batch)",
+        ),
+        context_window: Some(
+            1050000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2025-12-01,
+        ),
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
                 "openai/gpt-5.6-luna",
             ),
         },
@@ -6214,6 +7817,84 @@ expression: v
         },
         display_name: Some(
             "OpenAI: GPT-5.6 Luna Pro",
+        ),
+        context_window: Some(
+            1050000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: true,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2026-02-16,
+        ),
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-5.6-luna-pro:batch",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-5.6 Luna Pro (batch)",
+        ),
+        context_window: Some(
+            1050000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: true,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2026-02-16,
+        ),
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-5.6-luna:batch",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-5.6 Luna (batch)",
         ),
         context_window: Some(
             1050000,
@@ -6326,6 +8007,84 @@ expression: v
         id: ModelIdConfig {
             provider: Openrouter,
             name: Name(
+                "openai/gpt-5.6-sol-pro:batch",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-5.6 Sol Pro (batch)",
+        ),
+        context_window: Some(
+            1050000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: true,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2026-02-16,
+        ),
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-5.6-sol:batch",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-5.6 Sol (batch)",
+        ),
+        context_window: Some(
+            1050000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: true,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2026-02-16,
+        ),
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
                 "openai/gpt-5.6-terra",
             ),
         },
@@ -6392,6 +8151,123 @@ expression: v
         ),
         knowledge_cutoff: Some(
             2026-02-16,
+        ),
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-5.6-terra-pro:batch",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-5.6 Terra Pro (batch)",
+        ),
+        context_window: Some(
+            1050000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: true,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2026-02-16,
+        ),
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-5.6-terra:batch",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-5.6 Terra (batch)",
+        ),
+        context_window: Some(
+            1050000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: true,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2026-02-16,
+        ),
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/gpt-5:batch",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: GPT-5 (batch)",
+        ),
+        context_window: Some(
+            400000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: true,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: false,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2024-09-30,
         ),
         deprecated: None,
         structured_output: Some(
@@ -6681,6 +8557,60 @@ expression: v
         id: ModelIdConfig {
             provider: Openrouter,
             name: Name(
+                "openai/o1-pro:batch",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: o1-pro (batch)",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: Some(
+            100000,
+        ),
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2023-10-31,
+        ),
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/o1:batch",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: o1 (batch)",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: Some(
+            100000,
+        ),
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2023-10-31,
+        ),
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
                 "openai/o3",
             ),
         },
@@ -6697,31 +8627,6 @@ expression: v
         knowledge_cutoff: Some(
             2024-06-30,
         ),
-        deprecated: None,
-        structured_output: Some(
-            true,
-        ),
-        prefill: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Openrouter,
-            name: Name(
-                "openai/o3-deep-research",
-            ),
-        },
-        display_name: Some(
-            "OpenAI: o3 Deep Research",
-        ),
-        context_window: Some(
-            200000,
-        ),
-        max_output_tokens: Some(
-            100000,
-        ),
-        reasoning: None,
-        knowledge_cutoff: None,
         deprecated: None,
         structured_output: Some(
             true,
@@ -6799,11 +8704,131 @@ expression: v
         id: ModelIdConfig {
             provider: Openrouter,
             name: Name(
+                "openai/o3-mini-high:batch",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: o3 Mini High (batch)",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: Some(
+            100000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: false,
+                    medium: false,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: false,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2023-10-31,
+        ),
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/o3-mini:batch",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: o3 Mini (batch)",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: Some(
+            100000,
+        ),
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2023-10-31,
+        ),
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
                 "openai/o3-pro",
             ),
         },
         display_name: Some(
             "OpenAI: o3 Pro",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: Some(
+            100000,
+        ),
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-06-30,
+        ),
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/o3-pro:batch",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: o3 Pro (batch)",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: Some(
+            100000,
+        ),
+        reasoning: None,
+        knowledge_cutoff: Some(
+            2024-06-30,
+        ),
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/o3:batch",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: o3 (batch)",
         ),
         context_window: Some(
             200000,
@@ -6853,31 +8878,6 @@ expression: v
         id: ModelIdConfig {
             provider: Openrouter,
             name: Name(
-                "openai/o4-mini-deep-research",
-            ),
-        },
-        display_name: Some(
-            "OpenAI: o4 Mini Deep Research",
-        ),
-        context_window: Some(
-            200000,
-        ),
-        max_output_tokens: Some(
-            100000,
-        ),
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: Some(
-            true,
-        ),
-        prefill: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Openrouter,
-            name: Name(
                 "openai/o4-mini-high",
             ),
         },
@@ -6903,6 +8903,72 @@ expression: v
                 can_disable: false,
             },
         ),
+        knowledge_cutoff: Some(
+            2024-06-30,
+        ),
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/o4-mini-high:batch",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: o4 Mini High (batch)",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: Some(
+            100000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: false,
+                    medium: false,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: false,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2024-06-30,
+        ),
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "openai/o4-mini:batch",
+            ),
+        },
+        display_name: Some(
+            "OpenAI: o4 Mini (batch)",
+        ),
+        context_window: Some(
+            200000,
+        ),
+        max_output_tokens: Some(
+            100000,
+        ),
+        reasoning: None,
         knowledge_cutoff: Some(
             2024-06-30,
         ),
@@ -7184,56 +9250,6 @@ expression: v
             128000,
         ),
         max_output_tokens: None,
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: Some(
-            false,
-        ),
-        prefill: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Openrouter,
-            name: Name(
-                "poolside/laguna-m.1",
-            ),
-        },
-        display_name: Some(
-            "Poolside: Laguna M.1",
-        ),
-        context_window: Some(
-            262144,
-        ),
-        max_output_tokens: Some(
-            32768,
-        ),
-        reasoning: None,
-        knowledge_cutoff: None,
-        deprecated: None,
-        structured_output: Some(
-            false,
-        ),
-        prefill: None,
-        features: [],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Openrouter,
-            name: Name(
-                "poolside/laguna-m.1:free",
-            ),
-        },
-        display_name: Some(
-            "Poolside: Laguna M.1 (free)",
-        ),
-        context_window: Some(
-            262144,
-        ),
-        max_output_tokens: Some(
-            32768,
-        ),
         reasoning: None,
         knowledge_cutoff: None,
         deprecated: None,
@@ -7553,10 +9569,10 @@ expression: v
             "Qwen: Qwen3 14B",
         ),
         context_window: Some(
-            131072,
+            40960,
         ),
         max_output_tokens: Some(
-            8192,
+            16384,
         ),
         reasoning: None,
         knowledge_cutoff: Some(
@@ -7638,9 +9654,7 @@ expression: v
         context_window: Some(
             131072,
         ),
-        max_output_tokens: Some(
-            32768,
-        ),
+        max_output_tokens: None,
         reasoning: None,
         knowledge_cutoff: Some(
             2025-06-30,
@@ -7663,10 +9677,10 @@ expression: v
             "Qwen: Qwen3 30B A3B",
         ),
         context_window: Some(
-            40960,
+            131072,
         ),
         max_output_tokens: Some(
-            16384,
+            8192,
         ),
         reasoning: None,
         knowledge_cutoff: Some(
@@ -7674,7 +9688,7 @@ expression: v
         ),
         deprecated: None,
         structured_output: Some(
-            true,
+            false,
         ),
         prefill: None,
         features: [],
@@ -7829,10 +9843,10 @@ expression: v
             "Qwen: Qwen3 Coder 30B A3B Instruct",
         ),
         context_window: Some(
-            160000,
+            262144,
         ),
         max_output_tokens: Some(
-            32768,
+            262144,
         ),
         reasoning: Some(
             Unsupported,
@@ -7944,7 +9958,7 @@ expression: v
             262144,
         ),
         max_output_tokens: Some(
-            32768,
+            65536,
         ),
         reasoning: None,
         knowledge_cutoff: Some(
@@ -7971,7 +9985,7 @@ expression: v
             262144,
         ),
         max_output_tokens: Some(
-            32768,
+            65536,
         ),
         reasoning: None,
         knowledge_cutoff: None,
@@ -7996,7 +10010,7 @@ expression: v
             262144,
         ),
         max_output_tokens: Some(
-            262144,
+            16384,
         ),
         reasoning: Some(
             Unsupported,
@@ -8105,10 +10119,10 @@ expression: v
             "Qwen: Qwen3 VL 30B A3B Instruct",
         ),
         context_window: Some(
-            262144,
+            131072,
         ),
         max_output_tokens: Some(
-            16384,
+            32768,
         ),
         reasoning: Some(
             Unsupported,
@@ -8443,7 +10457,7 @@ expression: v
             262144,
         ),
         max_output_tokens: Some(
-            65536,
+            262144,
         ),
         reasoning: None,
         knowledge_cutoff: None,
@@ -8558,6 +10572,31 @@ expression: v
         id: ModelIdConfig {
             provider: Openrouter,
             name: Name(
+                "qwen/qwen3.7-flash",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen3.7 Flash",
+        ),
+        context_window: Some(
+            1000000,
+        ),
+        max_output_tokens: Some(
+            65536,
+        ),
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            false,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
                 "qwen/qwen3.7-max",
             ),
         },
@@ -8568,7 +10607,7 @@ expression: v
             1000000,
         ),
         max_output_tokens: Some(
-            65536,
+            131072,
         ),
         reasoning: None,
         knowledge_cutoff: None,
@@ -8593,9 +10632,120 @@ expression: v
             1000000,
         ),
         max_output_tokens: Some(
-            65536,
+            131072,
         ),
         reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen3.8-2.4t-a95b",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen3.8 2.4T A95B",
+        ),
+        context_window: Some(
+            1000000,
+        ),
+        max_output_tokens: Some(
+            262144,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: false,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: false,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen3.8-27b",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen3.8 27B",
+        ),
+        context_window: Some(
+            262144,
+        ),
+        max_output_tokens: Some(
+            131072,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: false,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "qwen/qwen3.8-max",
+            ),
+        },
+        display_name: Some(
+            "Qwen: Qwen3.8 Max",
+        ),
+        context_window: Some(
+            1000000,
+        ),
+        max_output_tokens: Some(
+            131072,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: true,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: false,
+            },
+        ),
         knowledge_cutoff: None,
         deprecated: None,
         structured_output: Some(
@@ -8751,6 +10901,43 @@ expression: v
         id: ModelIdConfig {
             provider: Openrouter,
             name: Name(
+                "sakana/sakana-namazu",
+            ),
+        },
+        display_name: Some(
+            "Sakana: Sakana Namazu",
+        ),
+        context_window: Some(
+            262144,
+        ),
+        max_output_tokens: Some(
+            65536,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: false,
+                    medium: false,
+                    high: true,
+                    xhigh: false,
+                    max: false,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
                 "sao10k/l3-lunaris-8b",
             ),
         },
@@ -8838,6 +11025,43 @@ expression: v
         id: ModelIdConfig {
             provider: Openrouter,
             name: Name(
+                "stealth/ox-alpha",
+            ),
+        },
+        display_name: Some(
+            "Ox Alpha",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: Some(
+            131072,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: false,
+                    high: true,
+                    xhigh: false,
+                    max: true,
+                },
+                can_disable: false,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            false,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
                 "stepfun/step-3.5-flash",
             ),
         },
@@ -8916,6 +11140,60 @@ expression: v
         knowledge_cutoff: Some(
             2025-03-31,
         ),
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "tencent/hy-mt2-1.8b",
+            ),
+        },
+        display_name: Some(
+            "Tencent: Hy-MT2-1.8B",
+        ),
+        context_window: Some(
+            8192,
+        ),
+        max_output_tokens: Some(
+            4096,
+        ),
+        reasoning: Some(
+            Unsupported,
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            false,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "tencent/hy-mt2-30b-a3b",
+            ),
+        },
+        display_name: Some(
+            "Tencent: Hy-MT2-30B-A3B",
+        ),
+        context_window: Some(
+            8192,
+        ),
+        max_output_tokens: Some(
+            4096,
+        ),
+        reasoning: Some(
+            Unsupported,
+        ),
+        knowledge_cutoff: None,
         deprecated: None,
         structured_output: Some(
             true,
@@ -9093,10 +11371,10 @@ expression: v
             "TheDrummer: UnslopNemo 12B",
         ),
         context_window: Some(
-            32768,
+            1024000,
         ),
         max_output_tokens: Some(
-            32768,
+            1024000,
         ),
         reasoning: Some(
             Unsupported,
@@ -9120,6 +11398,80 @@ expression: v
         },
         display_name: Some(
             "Thinking Machines: Inkling",
+        ),
+        context_window: Some(
+            524288,
+        ),
+        max_output_tokens: Some(
+            262144,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: true,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: true,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            false,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "thinkingmachines/inkling-small",
+            ),
+        },
+        display_name: Some(
+            "Thinking Machines: Inkling Small",
+        ),
+        context_window: Some(
+            524288,
+        ),
+        max_output_tokens: Some(
+            262144,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: true,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: false,
+                    max: true,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "thinkingmachines/inkling:batch",
+            ),
+        },
+        display_name: Some(
+            "Thinking Machines: Inkling (batch)",
         ),
         context_window: Some(
             524288,
@@ -9160,7 +11512,7 @@ expression: v
             6144,
         ),
         max_output_tokens: Some(
-            2048,
+            6144,
         ),
         reasoning: Some(
             Unsupported,
@@ -9186,9 +11538,36 @@ expression: v
             "Upstage: Solar Pro 3",
         ),
         context_window: Some(
-            128000,
+            131072,
         ),
-        max_output_tokens: None,
+        max_output_tokens: Some(
+            131072,
+        ),
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "upstage/solar-pro4",
+            ),
+        },
+        display_name: Some(
+            "Upstage: Solar Pro 4",
+        ),
+        context_window: Some(
+            524288,
+        ),
+        max_output_tokens: Some(
+            131072,
+        ),
         reasoning: None,
         knowledge_cutoff: None,
         deprecated: None,
@@ -9233,7 +11612,7 @@ expression: v
             ),
         },
         display_name: Some(
-            "xAI: Grok 4.20",
+            "SpaceXAI: Grok 4.20",
         ),
         context_window: Some(
             2000000,
@@ -9258,7 +11637,7 @@ expression: v
             ),
         },
         display_name: Some(
-            "xAI: Grok 4.20 Multi-Agent",
+            "SpaceXAI: Grok 4.20 Multi-Agent",
         ),
         context_window: Some(
             2000000,
@@ -9295,7 +11674,7 @@ expression: v
             ),
         },
         display_name: Some(
-            "xAI: Grok 4.3",
+            "SpaceXAI: Grok 4.3",
         ),
         context_window: Some(
             1000000,
@@ -9330,7 +11709,7 @@ expression: v
             ),
         },
         display_name: Some(
-            "xAI: Grok 4.5",
+            "SpaceXAI: Grok 4.5",
         ),
         context_window: Some(
             500000,
@@ -9361,11 +11740,46 @@ expression: v
         id: ModelIdConfig {
             provider: Openrouter,
             name: Name(
+                "x-ai/grok-4.6",
+            ),
+        },
+        display_name: Some(
+            "SpaceXAI: Grok 4.6",
+        ),
+        context_window: Some(
+            500000,
+        ),
+        max_output_tokens: None,
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: false,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
                 "x-ai/grok-build-0.1",
             ),
         },
         display_name: Some(
-            "xAI: Grok Build 0.1",
+            "SpaceXAI: Grok Build 0.1",
         ),
         context_window: Some(
             256000,
@@ -9624,10 +12038,10 @@ expression: v
             "Z.ai: GLM 5",
         ),
         context_window: Some(
-            204800,
+            198000,
         ),
         max_output_tokens: Some(
-            131072,
+            128000,
         ),
         reasoning: None,
         knowledge_cutoff: None,
@@ -9721,6 +12135,115 @@ expression: v
         deprecated: None,
         structured_output: Some(
             true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "z-ai/glm-5.2:batch",
+            ),
+        },
+        display_name: Some(
+            "Z.ai: GLM 5.2 (batch)",
+        ),
+        context_window: Some(
+            1048575,
+        ),
+        max_output_tokens: None,
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: false,
+                    medium: false,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "z-ai/glm-5.2:free",
+            ),
+        },
+        display_name: Some(
+            "Z.ai: GLM 5.2 (free)",
+        ),
+        context_window: Some(
+            256000,
+        ),
+        max_output_tokens: Some(
+            256000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: false,
+                    medium: false,
+                    high: true,
+                    xhigh: true,
+                    max: false,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "z-ai/glm-5.3",
+            ),
+        },
+        display_name: Some(
+            "Z.ai: GLM 5.3",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: Some(
+            131072,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: false,
+                    high: true,
+                    xhigh: false,
+                    max: true,
+                },
+                can_disable: false,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            false,
         ),
         prefill: None,
         features: [],
@@ -9890,6 +12413,43 @@ expression: v
         id: ModelIdConfig {
             provider: Openrouter,
             name: Name(
+                "~deepseek/deepseek-v4-flash-latest",
+            ),
+        },
+        display_name: Some(
+            "DeepSeek V4 Flash Latest",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: Some(
+            1048576,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: false,
+                    high: true,
+                    xhigh: false,
+                    max: true,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
                 "~google/gemini-flash-latest",
             ),
         },
@@ -9905,7 +12465,7 @@ expression: v
         reasoning: Some(
             Supported {
                 mode: Leveled {
-                    xlow: true,
+                    xlow: false,
                     low: true,
                     medium: true,
                     high: true,
@@ -9971,9 +12531,11 @@ expression: v
             "MoonshotAI Kimi Latest",
         ),
         context_window: Some(
-            1048576,
+            974842,
         ),
-        max_output_tokens: None,
+        max_output_tokens: Some(
+            974842,
+        ),
         reasoning: Some(
             Supported {
                 mode: Leveled {
@@ -10094,7 +12656,7 @@ expression: v
                     low: true,
                     medium: true,
                     high: true,
-                    xhigh: false,
+                    xhigh: true,
                     max: false,
                 },
                 can_disable: false,
@@ -10104,6 +12666,43 @@ expression: v
         deprecated: None,
         structured_output: Some(
             true,
+        ),
+        prefill: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openrouter,
+            name: Name(
+                "~z-ai/glm-latest",
+            ),
+        },
+        display_name: Some(
+            "Z.ai: GLM Latest",
+        ),
+        context_window: Some(
+            1048576,
+        ),
+        max_output_tokens: Some(
+            131072,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: false,
+                    high: true,
+                    xhigh: false,
+                    max: true,
+                },
+                can_disable: false,
+            },
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(
+            false,
         ),
         prefill: None,
         features: [],

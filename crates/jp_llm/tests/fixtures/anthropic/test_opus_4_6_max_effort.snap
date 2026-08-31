@@ -9,11 +9,11 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "The user is asking a simple math question.",
+                        reasoning: "The user is asking a simple arithmetic question.\n\n2 + 2 = 4",
                     },
                 ),
                 metadata: {
-                    "anthropic_thinking_signature": String("EtIBCkYICxgCKkBN5NJqJIeLCiAqkfpaWfsOkN1BR8OlbxUPrnJrvLg2wpB10LFEOdpBuDkqar3RoqRqnYDw3tWf0d8v3vqOZ741EgwcFNxoO4XttUTOs30aDJBSCDDS7MM12o/tKCIwBEsXqD98nDRhYwdqykW1nRvRO0gtiT6Yg+id8XgwgBQs8DazQhyqToQh4DH0UmbNKjo922mzjOT81xiWsuXze5CXHpy08TzdpvwPHvlL9yryWwGrvKWOr2fG6I8AgmWs9UQaVX0wUhy5jtpCGAE="),
+                    "anthropic_thinking_signature": String("Eq8CCpABCBEYAipAjyhq0cDykkIL3l6bQ5E4zr3nqaHaxXcyt/imAOSX1jqIl2mWy0C2b8rIyqSuENqZOhMo8LdK9ggshh5EhHaTrDIPY2xhdWRlLW9wdXMtNC02OABCCHRoaW5raW5nWiRiMTRkMTM3ZC1mNTEyLTQzMDktOTc0ZC0zZmYxMzJhZjE1NjKoAfbaodQGEgzoZJ9Cz7CjcQ9p9q8aDLiGxeMBGMQ4PaE4KiIw20Tik2WHQIXvL9VXsbcCecJdD4DUYlYMpDrXxGUl1ugFNtplHKw3s6oDSl2WA1ZIKkwCwzJ4mpAu2KLIFWAvKyIPaEmhDaUP71PrwAbkFwWwkK0ebOKIkRhStdex87VbYrijQfrs8TGZKYhLugSEWcpHH2DXvMge9oB3258tGAE="),
                 },
             },
         ),
