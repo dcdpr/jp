@@ -59,6 +59,13 @@ pub enum HostToPlugin {
     /// Response to `compose`.
     Composed(ComposeResponse),
 
+    /// Successful completion of a request with no response payload.
+    ///
+    /// The answer to `archive_conversation` and `set_title`.
+    /// A failure comes back as [`HostToPlugin::Error`] instead, naming which
+    /// request it was.
+    Done(DoneResponse),
+
     /// An error response to any plugin request.
     Error(ErrorResponse),
 
@@ -91,6 +98,12 @@ pub enum PluginToHost {
 
     /// Ask the host to collect text from the user.
     Compose(ComposeRequest),
+
+    /// Move a conversation to the archive.
+    ArchiveConversation(ConversationRequest),
+
+    /// Rename a conversation, or clear its name.
+    SetTitle(SetTitleRequest),
 
     /// Print user-facing output through JP's printer.
     Print(PrintMessage),
@@ -220,6 +233,14 @@ pub struct ConfigResponse {
     pub data: Value,
 }
 
+/// Successful completion of a request with no response payload.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DoneResponse {
+    /// Optional request correlation ID.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+}
+
 /// An error response.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ErrorResponse {
@@ -279,6 +300,35 @@ pub struct ReadEventsRequest {
 
     /// The conversation ID.
     pub conversation: String,
+}
+
+/// A request naming one conversation and nothing else.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ConversationRequest {
+    /// Optional request correlation ID.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+
+    /// The conversation to act on.
+    pub conversation: String,
+}
+
+/// Rename a conversation, or clear its name.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SetTitleRequest {
+    /// Optional request correlation ID.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+
+    /// The conversation to rename.
+    pub conversation: String,
+
+    /// The new title.
+    ///
+    /// Absent, or blank, clears it: the conversation is then eligible for a
+    /// generated title again rather than being named the empty string.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
 }
 
 /// Request to read config.

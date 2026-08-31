@@ -871,22 +871,24 @@ impl Workspace {
     /// Moves the conversation to the archive partition.
     /// The conversation is removed from the in-memory index and excluded from
     /// normal operations.
-    pub fn archive_conversation(&mut self, mut conv: ConversationMut) {
+    ///
+    /// The index entry is dropped only once the move succeeded, so a failure
+    /// leaves the conversation where a caller can still find it rather than
+    /// hiding a conversation that is still live.
+    /// A failed metadata write is returned for the same reason, even though the
+    /// directory rather than `archived_at` is what marks a conversation
+    /// archived.
+    pub fn archive_conversation(&mut self, mut conv: ConversationMut) -> Result<()> {
         let id = conv.id();
 
-        // Stamp archived_at and flush to disk before the rename.
-        // If the rename fails, the conversation stays live with a stale
-        // archived_at — a cosmetic issue, not data loss. Directory location
-        // is the source of truth for archived state.
+        // Stamp archived_at and flush before the rename. The directory is the
+        // source of truth for archived state, so this is the cosmetic half —
+        // but a store that cannot take it will not take the rename either.
         conv.update_metadata(|m| m.archived_at = Some(chrono::Utc::now()));
-        if let Err(e) = conv.flush() {
-            warn!(%id, %e, "Failed to flush archived_at before archiving.");
-        }
+        conv.flush()?;
         conv.clear_dirty();
 
-        if let Err(e) = self.persist.archive(&id) {
-            warn!(%id, %e, "Failed to archive conversation.");
-        }
+        self.persist.archive(&id)?;
 
         drop(conv);
 
@@ -894,6 +896,8 @@ impl Workspace {
         self.state.events.remove(&id);
         self.state.presence.remove(&id);
         self.state.written.remove(&id);
+
+        Ok(())
     }
 
     /// Restore a conversation from the archive.
