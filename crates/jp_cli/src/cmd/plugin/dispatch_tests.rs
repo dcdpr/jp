@@ -101,6 +101,66 @@ fn archiving_takes_a_conversation_out_of_the_index() {
     );
 }
 
+/// A store that will not take the write answers `error`, not `done`.
+///
+/// The write happens under a lock, and a persist failure has no other way to
+/// reach the plugin: nothing about the conversation on disk says the title
+/// changed, so `done` would be the only thing it ever learned.
+#[test]
+fn a_failed_write_is_reported_rather_than_confirmed() {
+    let (ws, id, _tmp) = workspace_with_conversation();
+    let ws = ws.with_persist(Arc::new(RefusingBackend));
+
+    let response = handle_set_title(&ws, None, SetTitleRequest {
+        id: Some("r4".to_owned()),
+        conversation: wire_id(id),
+        title: Some("Never stored".to_owned()),
+    });
+
+    match response {
+        HostToPlugin::Error(error) => {
+            assert_eq!(error.id.as_deref(), Some("r4"));
+            assert_eq!(error.request.as_deref(), Some("set_title"));
+            assert!(
+                error.message.contains("failed to save the title"),
+                "{error:?}"
+            );
+        }
+        other => panic!("expected an error, got {other:?}"),
+    }
+}
+
+/// A persist backend that refuses every write.
+#[derive(Debug)]
+struct RefusingBackend;
+
+impl jp_storage::backend::PersistBackend for RefusingBackend {
+    fn write(
+        &self,
+        _id: &ConversationId,
+        _metadata: &Conversation,
+        _events: &jp_conversation::ConversationStream,
+        _projection: jp_storage::backend::Projection,
+    ) -> Result<(), jp_storage::Error> {
+        Err(jp_storage::Error::write_failed(
+            "/read-only/events.json",
+            std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+        ))
+    }
+
+    fn remove(&self, _id: &ConversationId) -> Result<(), jp_storage::Error> {
+        Ok(())
+    }
+
+    fn archive(&self, _id: &ConversationId) -> Result<(), jp_storage::Error> {
+        Ok(())
+    }
+
+    fn unarchive(&self, _id: &ConversationId) -> Result<(), jp_storage::Error> {
+        Ok(())
+    }
+}
+
 /// A failure names the request it belongs to, so a plugin with several in
 /// flight can tell which one it answers.
 #[test]

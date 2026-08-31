@@ -1009,7 +1009,7 @@ fn test_archive_removes_from_index() {
     // Archive it.
     let h = ws.acquire_conversation(&id).unwrap();
     let lock = ws.test_lock(h);
-    ws.archive_conversation(lock.into_mut());
+    ws.archive_conversation(lock.into_mut()).unwrap();
 
     // No longer in the live index.
     assert!(ws.acquire_conversation(&id).is_err());
@@ -1038,7 +1038,7 @@ fn test_archive_sets_archived_at() {
     let before = Utc::now();
     let h = ws.acquire_conversation(&id).unwrap();
     let lock = ws.test_lock(h);
-    ws.archive_conversation(lock.into_mut());
+    ws.archive_conversation(lock.into_mut()).unwrap();
 
     // Metadata loaded from the archive should have archived_at set.
     let archived: Vec<_> = ws.archived_conversations().collect();
@@ -1073,7 +1073,7 @@ fn test_unarchive_restores_to_index() {
     // Archive then unarchive.
     let h = ws.acquire_conversation(&id).unwrap();
     let lock = ws.test_lock(h);
-    ws.archive_conversation(lock.into_mut());
+    ws.archive_conversation(lock.into_mut()).unwrap();
     assert!(ws.acquire_conversation(&id).is_err());
 
     let handle = ws.unarchive_conversation(&id).unwrap();
@@ -1117,7 +1117,7 @@ fn test_unarchive_local_only_stays_out_of_workspace() {
     drop(conv);
 
     let h = ws.acquire_conversation(&id).unwrap();
-    ws.archive_conversation(ws.test_lock(h).into_mut());
+    ws.archive_conversation(ws.test_lock(h).into_mut()).unwrap();
 
     ws.unarchive_conversation(&id).unwrap();
 
@@ -1155,7 +1155,7 @@ fn test_unarchive_clears_archived_at() {
     // Archive.
     let h = ws.acquire_conversation(&id).unwrap();
     let lock = ws.test_lock(h);
-    ws.archive_conversation(lock.into_mut());
+    ws.archive_conversation(lock.into_mut()).unwrap();
 
     // Verify archived_at is set.
     let archived: Vec<_> = ws.archived_conversations().collect();
@@ -1203,10 +1203,10 @@ fn test_archived_keyword_resolves_most_recently_archived() {
 
     // Archive id1 first, then id2. id2 gets the later archived_at.
     let h = ws.acquire_conversation(&id1).unwrap();
-    ws.archive_conversation(ws.test_lock(h).into_mut());
+    ws.archive_conversation(ws.test_lock(h).into_mut()).unwrap();
     std::thread::sleep(Duration::from_millis(10));
     let h = ws.acquire_conversation(&id2).unwrap();
-    ws.archive_conversation(ws.test_lock(h).into_mut());
+    ws.archive_conversation(ws.test_lock(h).into_mut()).unwrap();
 
     // The `archived` keyword should resolve to id2 (most recently archived).
     let archived: Vec<_> = ws.archived_conversations().collect();

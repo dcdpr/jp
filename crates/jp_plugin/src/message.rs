@@ -59,7 +59,7 @@ pub enum HostToPlugin {
     /// Response to `compose`.
     Composed(ComposeResponse),
 
-    /// A request that only reports whether it worked, worked.
+    /// Successful completion of a request with no response payload.
     ///
     /// The answer to `archive_conversation` and `set_title`.
     /// A failure comes back as [`HostToPlugin::Error`] instead, naming which
@@ -233,7 +233,7 @@ pub struct ConfigResponse {
     pub data: Value,
 }
 
-/// A request that only reports whether it worked, worked.
+/// Successful completion of a request with no response payload.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DoneResponse {
     /// Optional request correlation ID.

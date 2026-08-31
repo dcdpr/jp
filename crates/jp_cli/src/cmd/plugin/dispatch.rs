@@ -663,7 +663,7 @@ fn handle_request(
     Ok(Flow::Continue)
 }
 
-/// An error against a request that only reports whether it worked.
+/// An error against a request that has no response payload of its own.
 fn action_failed(id: Option<String>, request: &str, message: String) -> HostToPlugin {
     HostToPlugin::Error(ErrorResponse {
         id,
@@ -710,7 +710,13 @@ fn handle_archive(
         Err(message) => return action_failed(req_id, "archive_conversation", message),
     };
 
-    workspace.archive_conversation(lock.into_mut());
+    if let Err(error) = workspace.archive_conversation(lock.into_mut()) {
+        return action_failed(
+            req_id,
+            "archive_conversation",
+            format!("failed to archive the conversation: {error}"),
+        );
+    }
 
     HostToPlugin::Done(DoneResponse { id: req_id })
 }
@@ -734,9 +740,20 @@ fn handle_set_title(
         .map(|title| title.trim().to_owned())
         .filter(|title| !title.is_empty());
 
-    lock.as_mut().update_metadata(|meta| meta.title = title);
+    let mut conv = lock.into_mut();
+    conv.update_metadata(|meta| meta.title = title);
 
-    // Written out when the lock drops, at the end of this function.
+    // Flushed here rather than left to the drop, which reports a failed write to
+    // stderr and has no way to hand it back. `done` has to mean the title
+    // reached the store.
+    if let Err(error) = conv.flush() {
+        return action_failed(
+            req.id,
+            "set_title",
+            format!("failed to save the title: {error}"),
+        );
+    }
+
     HostToPlugin::Done(DoneResponse { id: req.id })
 }
 

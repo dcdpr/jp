@@ -100,7 +100,7 @@ impl Archive {
                 LockOutcome::Acquired(lock) => lock,
                 LockOutcome::NewConversation | LockOutcome::ForkConversation(_) => unreachable!(),
             };
-            ctx.workspace.archive_conversation(lock.into_mut());
+            ctx.workspace.archive_conversation(lock.into_mut())?;
             ctx.printer.println(format!(
                 "Conversation {} archived.",
                 id.to_string().bold().yellow()
