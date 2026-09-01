@@ -58,7 +58,7 @@ use std::{
     env, fs,
     io::{self, IsTerminal},
     sync::Arc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
@@ -75,6 +75,7 @@ use jp_config::{
     },
     conversation::{
         ConversationConfig,
+        attachment::AttachmentConfig,
         tool::{
             Enable, PartialEnableConfig, PartialToolConfig, ToggleScope, ToolSource,
             access::{AccessConfig, PartialAccessConfig, PartialFsRuleConfig},
@@ -101,10 +102,10 @@ use jp_llm::{
 };
 use jp_mcp::{StartupSet, id::McpServerId};
 use jp_printer::Printer;
-use jp_storage::backend::Projection;
+use jp_storage::backend::{FsStorageBackend, Projection};
 use jp_task::task::TitleGeneratorTask;
 use jp_term::width::{display_width, truncate_to_width};
-use jp_workspace::{ConversationHandle, ConversationLock, Workspace};
+use jp_workspace::{ConversationHandle, ConversationLock, Id as WorkspaceId, Workspace};
 use minijinja::{Environment, UndefinedBehavior};
 use tool::{TerminalExecutorSource, ToolCoordinator};
 use tracing::{debug, trace, warn};
@@ -1191,37 +1192,85 @@ impl Query {
     }
 }
 
+/// The turn's attachments, some of which cannot resolve yet.
+///
+/// Resolving one can read a conversation out of the workspace, fetch over HTTP,
+/// or read a resource from an MCP server.
+/// The first needs a context the turn no longer holds and the last needs a
+/// server that is still starting, so they are resolved at different points and
+/// meet here.
+struct PendingAttachments {
+    /// Resolved while the context was still in hand.
+    resolved: Vec<Attachment>,
+
+    /// Read from an MCP server, so they wait for one to be running.
+    deferred: Vec<Url>,
+}
+
+impl PendingAttachments {
+    /// Resolve what is left and return the whole set.
+    async fn resolve(
+        self,
+        root: &Utf8Path,
+        mcp_client: &jp_mcp::Client,
+    ) -> Result<Vec<Attachment>> {
+        let mut attachments = self.resolved;
+        attachments.extend(resolve_attachments(root, mcp_client, self.deferred).await?);
+
+        Ok(attachments)
+    }
+}
+
 /// Everything a turn needs, gathered in one place.
 ///
-/// Collecting reads the context; running no longer touches it.
-/// That split is what lets the slow half of a turn be driven by a caller that
-/// is not the `query` command, without handing it the whole CLI context.
-pub(crate) struct TurnInputs<'a> {
+/// Collecting reads the context; running does not.
+/// That split is what lets a turn be driven by a caller that is not the `query`
+/// command, without handing it the whole CLI context.
+pub(crate) struct TurnInputs {
+    /// The effective configuration for this turn, already alias-resolved.
     config: Arc<AppConfig>,
 
-    /// Borrowed, because the router owns the process-wide signal task and so
-    /// cannot be cloned.
-    signals: &'a SignalRouter,
+    /// Where an interrupt reaches the turn, and where the turn registers its
+    /// own handler for the duration.
+    signals: SignalRouter,
+
+    /// Resolves MCP tools and reads MCP resources.
     mcp_client: jp_mcp::Client,
-    root: Utf8PathBuf,
+
+    /// The workspace root, which tool commands and attachments resolve against.
+    workspace_root: Utf8PathBuf,
+
+    /// Whether output is going to a terminal, which decides whether progress
+    /// and timer lines are worth drawing.
     is_tty: bool,
-    width: Option<u16>,
-    attachments: Vec<Attachment>,
 
-    /// Attachments that read from an MCP server, held until it is running.
-    mcp_attachments: Vec<Url>,
+    /// Columns to lay output out against, or `None` when output is piped.
+    terminal_width: Option<u16>,
 
+    /// What the assistant is given alongside the conversation.
+    attachments: PendingAttachments,
+
+    /// Where the turn's output goes.
     printer: Arc<Printer>,
+
+    /// Standing decisions about which tool calls may run unattended.
     approvals: Arc<ApprovalStore>,
+
+    /// The request that starts the turn.
     chat_request: ChatRequest,
-    workspace_id: String,
+
+    /// Named in the tool invocation context, so a tool can scope state it
+    /// persists to the workspace the call came from.
+    workspace_id: WorkspaceId,
+
+    /// A `--replay` trim to apply at the turn-start commit point.
     pending_trim: PendingStreamTrim,
 
     /// MCP servers starting in the background, awaited by [`TurnInputs::run`].
     mcp_servers: StartupSet,
 }
 
-impl<'a> TurnInputs<'a> {
+impl TurnInputs {
     /// Collect what a turn needs from the context.
     ///
     /// This is the half that reads [`Ctx`]; [`Self::run`] reads none of it, so
@@ -1233,12 +1282,11 @@ impl<'a> TurnInputs<'a> {
     /// An attachment that reads from an MCP server is the exception, held back
     /// for [`Self::run`] to resolve once the servers it needs are up.
     ///
-    /// `printer` is where the turn's output goes.
-    /// A turn typed at a terminal renders to it; a turn asked for from
-    /// elsewhere has no reader there, and a sink is how it stops writing into a
-    /// session it does not belong to.
+    /// `printer` is where the turn's output goes: the terminal's printer for a
+    /// turn typed there, or a sink printer, which writes nothing, for a turn
+    /// started from somewhere with no terminal attached.
     pub(crate) async fn collect(
-        ctx: &'a Ctx,
+        ctx: &Ctx,
         config: Arc<AppConfig>,
         chat_request: ChatRequest,
         pending_trim: PendingStreamTrim,
@@ -1249,31 +1297,31 @@ impl<'a> TurnInputs<'a> {
             .conversation
             .attachments
             .iter()
-            .map(jp_config::conversation::attachment::AttachmentConfig::to_url)
+            .map(AttachmentConfig::to_url)
             .collect::<std::result::Result<Vec<_>, _>>()?;
 
-        let (mcp_attachments, attachment_urls): (Vec<_>, Vec<_>) =
+        let (deferred, attachment_urls): (Vec<_>, Vec<_>) =
             attachment_urls.into_iter().partition(needs_mcp_server);
 
-        let attachments = load_conversation_attachments(ctx, attachment_urls).await?;
+        let resolved = load_conversation_attachments(ctx, attachment_urls).await?;
 
         debug!(
-            count = attachments.len(),
-            deferred = mcp_attachments.len(),
+            count = resolved.len(),
+            deferred = deferred.len(),
+            deferred_uris = ?deferred.iter().map(Url::as_str).collect::<Vec<_>>(),
             "Attachments loaded."
         );
 
         Ok(Self {
-            root: ctx.workspace.root().to_path_buf(),
+            workspace_root: ctx.workspace.root().to_path_buf(),
             approvals: Arc::new(load_approval_store(ctx.fs_backend.as_deref())),
-            workspace_id: ctx.workspace.id().to_string(),
-            signals: &ctx.signals,
+            workspace_id: ctx.workspace.id().clone(),
+            signals: ctx.signals.clone(),
             mcp_client: ctx.mcp_client.clone(),
             printer,
             is_tty: ctx.term.is_tty,
-            width: ctx.term.width,
-            attachments,
-            mcp_attachments,
+            terminal_width: ctx.term.width,
+            attachments: PendingAttachments { resolved, deferred },
             mcp_servers,
             chat_request,
             pending_trim,
@@ -1296,26 +1344,44 @@ impl<'a> TurnInputs<'a> {
         // Wait for all MCP servers to finish loading, showing a timer line when the
         // wait takes long enough to be noticeable. Starting a server can mean
         // compiling one, so this is not a wait to hold anything else up for.
+        let waited = Instant::now();
         await_mcp_servers(
             self.mcp_servers,
             cfg.style.mcp_startup.clone(),
             self.printer.clone(),
             self.is_tty,
-            self.width,
+            self.terminal_width,
         )
         .await?;
+        debug!(
+            elapsed_ms = waited.elapsed().as_millis(),
+            "MCP servers ready."
+        );
 
-        // Only now can these resolve: the handler reads a resource from a
-        // running server, and until the wait above returns there is none.
-        let mut attachments = self.attachments;
-        attachments
-            .extend(resolve_attachments(&self.root, &self.mcp_client, self.mcp_attachments).await?);
+        // Only now can the deferred ones resolve: the handler reads a resource
+        // from a running server, and until the wait above returns there is none.
+        let resolving = Instant::now();
+        let attachments = self
+            .attachments
+            .resolve(&self.workspace_root, &self.mcp_client)
+            .await?;
+        debug!(
+            count = attachments.len(),
+            elapsed_ms = resolving.elapsed().as_millis(),
+            "Attachments resolved."
+        );
 
         let forced_tool = cfg.assistant.tool_choice.function_name();
         let tools =
             tool_definitions(cfg.conversation.tools.iter(), &self.mcp_client, forced_tool).await?;
+        debug!(count = tools.len(), forced_tool, "Tools resolved.");
 
         let thread = build_thread(stream, attachments, &cfg.assistant, !tools.is_empty())?;
+        debug!(
+            events = thread.events.len(),
+            attachments = thread.attachments.len(),
+            "Thread assembled."
+        );
 
         // Sanitize any structural issues (orphaned tool calls, missing user
         // messages, etc.) before sending the stream to the provider.
@@ -1323,9 +1389,9 @@ impl<'a> TurnInputs<'a> {
 
         Query::run_turn(
             cfg,
-            self.signals,
+            &self.signals,
             &self.mcp_client,
-            self.root,
+            self.workspace_root,
             self.is_tty,
             &thread.attachments,
             lock,
@@ -1337,7 +1403,7 @@ impl<'a> TurnInputs<'a> {
             // Built from the lock the turn actually runs against, so it cannot
             // name one conversation while the events land in another.
             InvocationContext {
-                workspace_id: self.workspace_id,
+                workspace_id: self.workspace_id.into_string(),
                 conversation_id: lock.id().to_string(),
             },
             self.pending_trim,
@@ -2493,7 +2559,7 @@ fn apply_mounts(
 fn create_mount_effects(
     mounts: &[String],
     workspace: &Workspace,
-    fs_backend: Option<&jp_storage::backend::FsStorageBackend>,
+    fs_backend: Option<&FsStorageBackend>,
     now: chrono::DateTime<chrono::Utc>,
 ) -> Result<()> {
     if mounts.is_empty() {
@@ -2613,17 +2679,13 @@ fn create_workspace_symlink(link: &Utf8Path, target: &Utf8Path) -> Result<()> {
 }
 
 /// Resolve the path to the user-local approval store, if user storage exists.
-fn approval_store_path(
-    fs_backend: Option<&jp_storage::backend::FsStorageBackend>,
-) -> Option<Utf8PathBuf> {
+fn approval_store_path(fs_backend: Option<&FsStorageBackend>) -> Option<Utf8PathBuf> {
     fs_backend
         .and_then(|fs| fs.user_storage_with_path(relative_path::RelativePath::new(APPROVALS_FILE)))
 }
 
 /// Load the approval store, treating missing/in-memory storage as empty.
-fn load_approval_store(
-    fs_backend: Option<&jp_storage::backend::FsStorageBackend>,
-) -> ApprovalStore {
+fn load_approval_store(fs_backend: Option<&FsStorageBackend>) -> ApprovalStore {
     approval_store_path(fs_backend)
         .as_deref()
         .map(ApprovalStore::load)
@@ -2728,10 +2790,7 @@ enum DraftRemoval<'a> {
 ///
 /// A draft that cannot be read has no fingerprint, which leaves it in place
 /// rather than removing bytes nothing has seen.
-fn draft_fingerprint(
-    fs_backend: Option<&jp_storage::backend::FsStorageBackend>,
-    id: &ConversationId,
-) -> Option<String> {
+fn draft_fingerprint(fs_backend: Option<&FsStorageBackend>, id: &ConversationId) -> Option<String> {
     let dir = fs_backend.and_then(|fs| fs.find_user_local_conversation_dir(id))?;
 
     fs::read_to_string(dir.join(editor::QUERY_FILENAME))
@@ -2754,7 +2813,7 @@ fn draft_fingerprint(
 /// composed belongs to whoever wrote it, and removing it would discard text
 /// this invocation never saw.
 fn cleanup_query_message_file(
-    fs_backend: Option<&jp_storage::backend::FsStorageBackend>,
+    fs_backend: Option<&FsStorageBackend>,
     id: &ConversationId,
     removal: DraftRemoval<'_>,
 ) {
@@ -2793,10 +2852,7 @@ fn current_dir_utf8() -> BoxedResult<Utf8PathBuf> {
 }
 
 /// Whether a tool's `access.fs` is empty across all merged layers.
-fn tool_access_empty(
-    tools: &IndexMap<String, jp_config::conversation::tool::PartialToolConfig>,
-    name: &str,
-) -> bool {
+fn tool_access_empty(tools: &IndexMap<String, PartialToolConfig>, name: &str) -> bool {
     tools
         .get(name)
         .and_then(|cfg| cfg.access.as_ref())

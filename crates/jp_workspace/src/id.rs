@@ -62,6 +62,15 @@ impl Id {
 
         fs::write(path, contents)
     }
+
+    /// Consume the ID, returning the string it wraps.
+    ///
+    /// For a boundary that stores the ID as a string: takes the allocation
+    /// rather than formatting a second one.
+    #[must_use]
+    pub fn into_string(self) -> String {
+        self.0
+    }
 }
 
 impl Default for Id {
