@@ -935,7 +935,7 @@ fn test_tool_use_of_unknown_tool_errors() {
 fn test_tool_use_does_not_persist_into_partial_config() {
     // `-u` binds one turn. Mirrors `no_title_does_not_persist_into_partial_config`:
     // anything this flag writes into the partial would reach the conversation
-    // through `get_config_delta_from_cli` and force the tool on every later
+    // through `turn_config_delta` and force the tool on every later
     // query.
     let base = make_partial_with_tools();
 
@@ -1326,7 +1326,7 @@ fn tier_flag_is_persisted_as_config_delta() {
         .unwrap();
     let runtime_config = build(partial).unwrap();
 
-    let delta = get_config_delta_from_cli(&runtime_config, &lock)
+    let delta = turn_config_delta(&runtime_config, &lock)
         .unwrap()
         .expect("expected --tier to produce a config delta");
 
@@ -1395,7 +1395,7 @@ fn no_tier_flag_replaces_a_persisted_tier_with_off() {
         "--no-tier must resolve this query to `off`"
     );
 
-    let delta = get_config_delta_from_cli(&runtime_config, &lock)
+    let delta = turn_config_delta(&runtime_config, &lock)
         .unwrap()
         .expect("turning the tier off must produce a config delta");
 
@@ -1927,7 +1927,7 @@ fn no_title_does_not_persist_into_partial_config() {
     // `--no-title` through `apply_cli_config` previously wrote
     // `conversation.title.generate.auto = Some(false)` into the
     // partial, which would then flow into the conversation's
-    // `config_delta` via `get_config_delta_from_cli` and persist
+    // `config_delta` via `turn_config_delta` and persist
     // for every future query on that conversation. The flag is
     // now strictly invocation-scoped, so the partial must be
     // untouched relative to a run without the flag.
