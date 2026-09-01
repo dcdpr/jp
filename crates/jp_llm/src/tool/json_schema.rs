@@ -141,7 +141,14 @@ fn validate_node_inner(
     visiting: &mut Vec<String>,
 ) -> Result<(), ToolError> {
     let types = node.types();
-    validate_types(path, &types)?;
+    // A schema with no `type` keyword accepts any value, and constrains
+    // nothing that could contradict its `items`, `properties`, `enum` or
+    // `default`. A `type` that is present but empty or unrecognised, and a
+    // `$ref` that could not be followed, remain malformed.
+    let unconstrained = node.is_unconstrained();
+    if !unconstrained {
+        validate_types(path, &types)?;
+    }
 
     let items = node.items();
     if types.iter().any(|type_| type_ == "array") && items.is_none() {
@@ -152,7 +159,7 @@ fn validate_node_inner(
     }
 
     if let Some(items) = &items {
-        if !types.iter().any(|type_| type_ == "array") {
+        if !unconstrained && !types.iter().any(|type_| type_ == "array") {
             return Err(ToolError::InvalidSchema {
                 path: format!("{path}.items"),
                 message: format!(
@@ -165,7 +172,7 @@ fn validate_node_inner(
     }
 
     let properties = node.properties();
-    if !properties.is_empty() && !types.iter().any(|type_| type_ == "object") {
+    if !unconstrained && !properties.is_empty() && !types.iter().any(|type_| type_ == "object") {
         return Err(ToolError::InvalidSchema {
             path: format!("{path}.properties"),
             message: format!(
@@ -404,9 +411,26 @@ impl<'a> Node<'a> {
         }
     }
 
+    /// Whether this node leaves the JSON type of its value open.
+    ///
+    /// A schema with no `type` keyword accepts any value, which is how a server
+    /// declares a free-form parameter.
+    /// A node still holding a `$ref` that could not be followed is not open:
+    /// what it declares is unknown.
+    #[must_use]
+    pub fn is_unconstrained(&self) -> bool {
+        self.node.get("type").is_none() && self.node.get("$ref").is_none()
+    }
+
     /// Whether a value satisfies this node's declared types.
+    ///
+    /// A node that declares no type accepts every value.
     #[must_use]
     pub fn accepts(&self, value: &Value) -> bool {
+        if self.is_unconstrained() {
+            return true;
+        }
+
         let types = self.types();
         let has = |type_: &str| types.iter().any(|candidate| candidate == type_);
 

@@ -317,6 +317,24 @@ fn coerces_json_strings_to_declared_parameter_types() {
     );
 }
 
+/// Coercion repairs a string the schema cannot accept.
+/// A parameter that declares no type accepts the string as written, so a
+/// JSON-looking string reaches the tool as the text the model sent.
+#[test]
+fn leaves_strings_alone_for_a_parameter_with_no_declared_type() {
+    let parameters = schema([("value", json!({ "description": "Any JSON value." }), false)]);
+    let mut arguments = json!({ "value": "3" }).as_object().cloned().unwrap();
+
+    ToolDefinition {
+        name: "test".to_owned(),
+        docs: ToolDocs::default(),
+        parameters,
+    }
+    .coerce_arguments(&mut arguments);
+
+    assert_eq!(Value::Object(arguments), json!({ "value": "3" }));
+}
+
 #[tokio::test]
 async fn execute_coerces_json_strings_before_calling_tool() {
     let partial: PartialToolConfig = serde_json::from_value(json!({

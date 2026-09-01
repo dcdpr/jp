@@ -644,6 +644,8 @@ pub struct ToolParameterConfig {
     /// The type of the parameter.
     ///
     /// MCP tools inherit this from the server.
+    /// A parameter the server declares without a type accepts any JSON value;
+    /// set a type here to narrow it.
     /// Local and built-in tools must set it explicitly.
     #[setting(nested)]
     #[serde(default, rename = "type", skip_serializing_if = "Option::is_none")]

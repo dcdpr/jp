@@ -253,6 +253,45 @@ mod with_overrides {
         assert_eq!(schema["required"], json!(["b", "a"]));
     }
 
+    /// A property with no `type` is the server saying "any value".
+    /// The document keeps it as written and the tool stays usable.
+    #[test]
+    fn a_free_form_property_survives_and_validates() {
+        let source = json!({
+            "type": "object",
+            "properties": {
+                "key": { "type": "string" },
+                "value": { "description": "Any JSON value." }
+            }
+        });
+
+        let schema = with_overrides("tools.store.parameters", &source, &IndexMap::new()).unwrap();
+
+        assert_eq!(
+            schema["properties"]["value"],
+            json!({ "description": "Any JSON value." })
+        );
+        assert!(validate("tools.store.parameters", &schema).is_ok());
+    }
+
+    /// Nothing was declared, so nothing is contradicted: configuration may
+    /// narrow a free-form property to the shape the user actually wants.
+    #[test]
+    fn a_free_form_property_can_be_narrowed_by_configuration() {
+        let source = json!({
+            "type": "object",
+            "properties": { "value": { "description": "Any JSON value." } }
+        });
+        let overrides = configs(&[("value", json!({ "type": "object" }))]);
+
+        let schema = with_overrides("tools.store.parameters", &source, &overrides).unwrap();
+
+        assert_eq!(
+            schema["properties"]["value"],
+            json!({ "type": "object", "description": "Any JSON value." })
+        );
+    }
+
     #[test]
     fn a_property_the_server_omits_is_added() {
         let source = json!({ "type": "object", "properties": {} });
@@ -420,6 +459,9 @@ mod validate {
         );
     }
 
+    /// An unresolvable reference is not the same as an absent `type`: what the
+    /// node declares is unknown, not open, and forwarding a dangling pointer
+    /// gets the whole request rejected by the provider.
     #[test]
     fn a_node_without_a_usable_type_is_rejected() {
         assert_eq!(
@@ -428,6 +470,69 @@ mod validate {
                 "properties": { "thing": { "$ref": "https://example.com/schema.json#/Thing" } }
             })),
             "Invalid schema at `tools.demo.parameters.thing.type`: schema does not declare a \
+             supported type"
+        );
+    }
+
+    /// A property with no `type` keyword is valid JSON Schema meaning "any
+    /// value", which is how a server declares a free-form parameter.
+    #[test]
+    fn a_property_with_no_type_is_unconstrained() {
+        assert!(
+            validated(&json!({
+                "type": "object",
+                "properties": {
+                    "key": { "type": "string" },
+                    "value": { "description": "Any JSON value." }
+                }
+            }))
+            .is_ok()
+        );
+    }
+
+    /// No declared type means no type for an enum value or a default to
+    /// contradict.
+    /// An `enum` still bounds the `default` it appears beside, which is why the
+    /// two are declared on separate properties here.
+    #[test]
+    fn an_unconstrained_property_accepts_any_enum_and_default() {
+        assert!(
+            validated(&json!({
+                "type": "object",
+                "properties": {
+                    "choice": { "enum": [1, "two", null, ["three"]] },
+                    "value": { "default": { "a": 1 } }
+                }
+            }))
+            .is_ok()
+        );
+    }
+
+    /// `items` and `properties` apply only when the instance is an array or an
+    /// object; neither needs a `type` to say so.
+    #[test]
+    fn an_unconstrained_property_may_carry_items_and_properties() {
+        assert!(
+            validated(&json!({
+                "type": "object",
+                "properties": {
+                    "list": { "items": { "type": "string" } },
+                    "target": { "properties": { "path": { "type": "string" } } }
+                }
+            }))
+            .is_ok()
+        );
+    }
+
+    /// A `type` that is present but says nothing is malformed, not open.
+    #[test]
+    fn an_empty_type_list_is_rejected() {
+        assert_eq!(
+            message_of(&json!({
+                "type": "object",
+                "properties": { "value": { "type": [] } }
+            })),
+            "Invalid schema at `tools.demo.parameters.value.type`: schema does not declare a \
              supported type"
         );
     }
@@ -611,6 +716,24 @@ mod node {
 
         assert_eq!(kind.origin(), Some("#/$defs/Kind"));
         assert_eq!(kind.types(), vec!["string".to_owned()]);
+    }
+
+    #[test]
+    fn a_node_without_a_type_accepts_every_value() {
+        let schema = json!({
+            "type": "object",
+            "properties": { "value": { "description": "Any JSON value." } }
+        });
+
+        let root = Node::root(&schema);
+        let (_, value) = root.properties().into_iter().next().expect("property");
+
+        assert!(value.is_unconstrained());
+        assert!(value.types().is_empty());
+        assert!(value.accepts(&json!("a")));
+        assert!(value.accepts(&json!(1)));
+        assert!(value.accepts(&json!(null)));
+        assert!(value.accepts(&json!({ "a": 1 })));
     }
 
     #[test]

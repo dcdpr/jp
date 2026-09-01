@@ -1076,7 +1076,11 @@ fn coerce_object(arguments: &mut Map<String, Value>, node: &Node<'_>) {
 }
 
 fn coerce_value(value: &mut Value, node: &Node<'_>) {
+    // Coercion repairs a string the schema cannot accept. A parameter that
+    // declares no type accepts it as written, so parsing it would hand the
+    // tool a number or an object where the model sent text.
     if let Value::String(raw) = value
+        && !node.is_unconstrained()
         && !node.types().iter().any(|type_| type_ == "string")
         && let Ok(parsed) = serde_json::from_str::<Value>(raw)
         && node.accepts(&parsed)
