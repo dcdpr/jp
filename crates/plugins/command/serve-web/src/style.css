@@ -327,37 +327,6 @@ a:hover {
     border-radius: 8px;
 }
 
-/* One column of directories inside the form's own column, so they are spaced
-   against each other rather than against the fields around them. */
-.new-conversation .config-named {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-}
-
-/* One block per load-path directory: the directory is the namespace, and its
-   files are the choices within it. */
-.new-conversation fieldset {
-    margin: 0;
-    padding: 12px 14px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-}
-
-.new-conversation legend {
-    padding: 0 6px;
-    font-size: 0.8rem;
-    font-weight: 600;
-    color: var(--fg-muted);
-}
-
-.new-conversation .config-option {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 4px 0;
-}
-
 .new-conversation button {
     padding: 10px 20px;
     font: inherit;
@@ -660,14 +629,16 @@ html.ready .loading-veil {
     background: rgb(0 0 0 / 0.4);
 }
 
-.config-form {
+.config-form,
+.config-picker-body {
     display: flex;
     flex-direction: column;
     gap: 16px;
     padding: 20px;
 }
 
-.config-form h2 {
+.config-form h2,
+.config-picker-body h2 {
     margin: 0;
     font-size: 1rem;
 }
@@ -682,38 +653,6 @@ html.ready .loading-veil {
     display: flex;
     flex-direction: column;
     gap: 12px;
-}
-
-/* Only the named configurations scroll. The assignment rows above them are two
-   fields and a button, and scrolling them out of reach to make room for a list
-   of personas is not a trade worth making. */
-.config-groups .config-named {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
-    max-height: 40vh;
-    overflow-y: auto;
-}
-
-.config-groups fieldset {
-    margin: 0;
-    padding: 10px 12px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-}
-
-.config-groups legend {
-    padding: 0 6px;
-    font-size: 0.75rem;
-    font-weight: 600;
-    color: var(--fg-muted);
-}
-
-.config-option {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 3px 0;
 }
 
 .config-actions {
@@ -739,25 +678,38 @@ html.ready .loading-veil {
     border-color: var(--accent);
 }
 
-/* A value assigned directly, as `--cfg key=value` does.
+/* The arguments a message runs under, in the order they are applied. */
+.config-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
 
-   Two fields rather than one that expects an `=`: the key is a config path with
-   its own completions and the value is free text, and joining them is the
-   server's job either way. */
-.config-pairs {
+/* The rows scroll, the note and the buttons below them do not: a list long
+   enough to need the room is also one the next row is added to. */
+.config-items {
     display: flex;
     flex-direction: column;
     gap: 6px;
+    max-height: 40vh;
+    margin: 0;
+    padding: 0;
+    overflow-y: auto;
+    list-style: none;
 }
 
-.config-pair {
+.config-item {
     display: flex;
     gap: 6px;
 }
 
-.config-pairs input[type="text"] {
-    /* Without this a long placeholder sets the minimum width and the row
-       overflows the dialog rather than sharing what it has. */
+/* Three classes deep on purpose. The new-conversation form styles every text
+   field it contains as its Title field, which would leave the picker and the
+   argument beside it padded differently. */
+.config-list .config-item .config-pick,
+.config-list .config-item .config-raw {
+    /* Without this a long option or placeholder sets the minimum width and the
+       row overflows the dialog rather than sharing what it has. */
     min-width: 0;
     flex: 1;
     padding: 8px 10px;
@@ -770,22 +722,19 @@ html.ready .loading-veil {
     border-radius: var(--radius);
 }
 
-/* The key is a dotted path and the value is usually a word, so the key gets the
-   room. */
-.config-pairs input[name="cfg_key"] {
-    flex: 1.5;
+.config-new {
+    display: flex;
+    gap: 6px;
 }
 
 /* Two classes deep on purpose. The new-conversation form styles every button it
-   contains as its Start button, and this one is not that. */
-.config-pair .config-add {
+   contains as its Start button, and these are not that. */
+.config-item .config-grip,
+.config-item .config-remove,
+.config-new .config-add {
     flex: none;
-    width: 32px;
-    padding: 0;
     font: inherit;
-    font-size: 1.1rem;
     font-weight: 400;
-    line-height: 1;
     color: var(--fg-muted);
     background: transparent;
     border: 1px solid var(--border);
@@ -793,9 +742,124 @@ html.ready .loading-veil {
     cursor: pointer;
 }
 
-.config-pair .config-add:hover {
+/* Square and as tall as the field between them, so a row reads as one control
+   rather than three. */
+.config-item .config-grip,
+.config-item .config-remove {
+    width: 36px;
+    padding: 0;
+    font-size: 1rem;
+    line-height: 1;
+}
+
+/* The grip is the only part of a row that starts a drag, so it is also the only
+   part that gives up the browser's own touch gestures: without this, dragging
+   it on a phone scrolls the page instead. */
+.config-item .config-grip {
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+}
+
+/* Lifted off the list while it is dragged, and above the rows it passes over. */
+.config-item.is-dragging {
+    position: relative;
+    z-index: 1;
+    background: var(--bg-alt);
+    border-radius: var(--radius);
+    box-shadow: 0 6px 16px rgb(0 0 0 / 0.3);
+}
+
+.config-item.is-dragging .config-grip {
+    cursor: grabbing;
+}
+
+.config-new .config-add {
+    padding: 8px 14px;
+}
+
+.config-item .config-grip:hover,
+.config-item .config-remove:hover,
+.config-new .config-add:hover {
     color: var(--fg);
     background: var(--bg-alt);
+}
+
+.config-new .config-add:disabled {
+    cursor: default;
+    opacity: 0.5;
+}
+
+.config-new .config-add:disabled:hover {
+    color: var(--fg-muted);
+    background: transparent;
+}
+
+/* Ticking a set of configurations to add, rather than picking them one row at a
+   time. Opened from `+ Configuration`, and on the conversation page that means
+   a dialog over a dialog. */
+
+/* One class and one element deep on purpose: the new-conversation form styles
+   every text field it contains as its Title field, and this one is not that. */
+.config-picker input.config-filter {
+    box-sizing: border-box;
+    width: 100%;
+    padding: 8px 10px;
+    /* Inherits the body's 16px, which is also the size below which iOS zooms
+       the page on focus. Denser would suit a dialog, and costs a zoom. */
+    font: inherit;
+    color: var(--fg);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+.config-picker-groups {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    max-height: 50vh;
+    overflow-y: auto;
+}
+
+/* One block per load-path directory: the directory is the namespace, and its
+   files are the choices within it. */
+.config-picker fieldset {
+    margin: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+}
+
+.config-picker legend {
+    padding: 0 6px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--fg-muted);
+}
+
+.config-picker .config-option {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 0;
+}
+
+/* What the filter has hidden. Spelled out because the rules above set a
+   `display`, which is what the `hidden` attribute would otherwise have
+   removed. */
+.config-picker .config-option[hidden],
+.config-picker fieldset[hidden] {
+    display: none;
+}
+
+/* The place a ticked configuration will take in the list, which is the order it
+   was ticked in. */
+.config-picker .config-order {
+    margin-left: auto;
+    font-size: 0.75rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--fg-muted);
 }
 
 /* Nothing here skips rendering.
@@ -1031,11 +1095,14 @@ html.ready .loading-veil {
     content: none;
   }
 
-  .config-pairs input[type="text"] {
+  .config-list .config-item .config-pick,
+  .config-list .config-item .config-raw,
+  .config-new .config-add {
     min-height: 44px;
   }
 
-  .config-pair .config-add {
+  .config-item .config-grip,
+  .config-item .config-remove {
     width: 44px;
     min-height: 44px;
   }

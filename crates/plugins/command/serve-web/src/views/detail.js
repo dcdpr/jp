@@ -395,15 +395,14 @@ input.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') input.blur();
 });
 
-// What the next message runs under: configurations chosen by name, and values
-// assigned directly.
+// What the next message runs under: the `--cfg` arguments the chooser holds, in
+// the order they apply.
 //
 // Kept here rather than on the server: nothing is applied until a message is
 // sent, so this is a choice in progress, not state the conversation has.
 const configModal = document.getElementById('config-modal');
 const configGroups = document.getElementById('config-groups');
-let chosenConfigs = new Set();
-let chosenPairs = [];
+let chosenCfg = [];
 let configsLoaded = false;
 
 document.getElementById('open-config').addEventListener('click', async () => {
@@ -411,12 +410,10 @@ document.getElementById('open-config').addEventListener('click', async () => {
   configModal.showModal();
   await loadConfigs();
 
-  // The boxes outlive the choice: the list is built once, and what is chosen is
-  // spent when a message is sent. Re-reading it on every open keeps the ticks
+  // The rows outlive the choice: the list is fetched once, and what is chosen
+  // is spent when a message is sent. Rewriting it on every open keeps the rows
   // saying what the next message will actually run under.
-  for (const box of configGroups.querySelectorAll('input[type=checkbox]')) {
-    box.checked = chosenConfigs.has(box.value);
-  }
+  window.jpConfigList.write(configGroups, chosenCfg);
 });
 
 // The chooser is rendered by the server, which is what keeps it identical to the
@@ -439,55 +436,18 @@ async function loadConfigs() {
   }
 }
 
-// The assignments that have been filled in, in the order they were written.
-function readPairs() {
-  return Array.from(configGroups.querySelectorAll('.config-pair'))
-    .map(row => Array.from(row.querySelectorAll('input')).map(field => field.value))
-    .filter(([key]) => key.trim() !== '')
-    .map(([key, value]) => [key.trim(), value]);
-}
-
-// Put the applied choice back into the form.
+// Cancel puts the previous choice back; apply takes what is in the form.
 //
 // A cancelled dialog must not leave its edits on screen: reopening it would show
-// ticks and rows that no message is going to run under.
-function writeChoice() {
-  configGroups.querySelectorAll('input[type=checkbox]').forEach((tick) => {
-    tick.checked = chosenConfigs.has(tick.value);
-  });
-
-  const rows = configGroups.querySelector('.config-pairs');
-  const first = rows && rows.querySelector('.config-pair');
-  if (!first) return;
-
-  rows.querySelectorAll('.config-pair').forEach((row, i) => { if (i > 0) row.remove(); });
-
-  // One row per applied assignment, and the spare to write the next one in.
-  chosenPairs.concat([['', '']]).forEach(([key, value], i) => {
-    const row = i === 0 ? first : first.cloneNode(true);
-    const fields = row.querySelectorAll('input');
-    fields[0].value = key;
-    fields[1].value = value;
-    if (i > 0) rows.append(row);
-  });
-}
-
-// Cancel puts the previous choice back; apply takes what is in the form.
+// rows no message is going to run under.
 configModal.addEventListener('close', () => {
   if (configModal.returnValue === 'apply') {
-    chosenConfigs = new Set(
-      Array.from(configGroups.querySelectorAll('input[type=checkbox]:checked'))
-        .map(tick => tick.value),
-    );
-    chosenPairs = readPairs();
+    chosenCfg = window.jpConfigList.read(configGroups);
   } else {
-    writeChoice();
+    window.jpConfigList.write(configGroups, chosenCfg);
   }
 
-  document.getElementById('open-config').classList.toggle(
-    'active',
-    chosenConfigs.size > 0 || chosenPairs.length > 0,
-  );
+  document.getElementById('open-config').classList.toggle('active', chosenCfg.length > 0);
 });
 
 // A larger field for a longer reply.
@@ -1198,14 +1158,9 @@ composer.addEventListener('submit', async (event) => {
           client: clientId,
           count: String(landedAbove),
         });
-        // One entry per choice: the same shape `--cfg` takes, repeated.
-        for (const segment of chosenConfigs) params.append('cfg', segment);
-        // Sent as the two fields a row posts rather than joined here, so the
-        // server reads an assignment the same way whichever form it came from.
-        for (const [key, value] of chosenPairs) {
-          params.append('cfg_key', key);
-          params.append('cfg_value', value);
-        }
+        // One entry per row, in the order the rows sit in: the same shape
+        // `--cfg` takes, repeated.
+        for (const argument of chosenCfg) params.append('cfg', argument);
         return params;
       })(),
     });
@@ -1246,7 +1201,7 @@ composer.addEventListener('submit', async (event) => {
   // for an appending field, such as a system prompt a configuration adds to,
   // that appends a second copy and the conversation keeps it for every turn
   // after.
-  chosenConfigs.clear();
+  chosenCfg = [];
   document.getElementById('open-config').classList.remove('active');
 
   poll();
