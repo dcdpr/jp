@@ -3,6 +3,7 @@ use crate::{
     util::{ToolResult, unknown_tool},
 };
 
+mod changed_files;
 mod commit;
 mod create_issue_bug;
 mod create_issue_enhancement;

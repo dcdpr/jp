@@ -5,7 +5,7 @@ use serde_json::{Map, Value};
 
 use super::env_from_options;
 use crate::{
-    Result,
+    Result, to_list_with_root,
     util::{
         ToolResult, error,
         runner::{DuctProcessRunner, ProcessRunner},
@@ -42,7 +42,7 @@ struct FileStat {
 impl fmt::Display for FileStat {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.insertions == "-" && self.deletions == "-" {
-            return write!(f, "- {} (binary)", self.path);
+            return write!(f, "{} (binary)", self.path);
         }
 
         let mut stat = String::new();
@@ -56,9 +56,9 @@ impl fmt::Display for FileStat {
             write!(stat, "-{}", self.deletions)?;
         }
         if stat.is_empty() {
-            write!(f, "- {}", self.path)
+            write!(f, "{}", self.path)
         } else {
-            write!(f, "- {} ({stat})", self.path)
+            write!(f, "{} ({stat})", self.path)
         }
     }
 }
@@ -119,12 +119,12 @@ fn format_show_output(show: &ShowOutput) -> Result<String> {
     }
     out.push_str("  </message>\n");
 
+    // Nested one level inside `<git_show>`, so every line of the block carries
+    // the surrounding indentation.
     if !show.files.is_empty() {
-        out.push_str("  <files>\n");
-        for f in &show.files {
-            writeln!(out, "    {f}")?;
+        for line in to_list_with_root(&show.files, "files").lines() {
+            writeln!(out, "  {line}")?;
         }
-        out.push_str("  </files>\n");
     }
 
     out.push_str("</git_show>");

@@ -1,10 +1,10 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, fmt};
 
 use base64::{Engine as _, prelude::BASE64_STANDARD};
 use serde_json::{Value, json};
 
 use super::{auth, auth_optional, parse_repo};
-use crate::{Result, to_xml};
+use crate::{Result, to_list_with_root, to_xml};
 
 pub(crate) async fn github_code_search(
     repository: Option<String>,
@@ -204,28 +204,45 @@ fn apply_range(
     Ok(out)
 }
 
+/// One blob in a repository listing, rendered as a single list entry.
+struct RepoFile {
+    path: String,
+    /// Size in bytes, for the blobs the API reported one for.
+    size: Option<u64>,
+}
+
+impl fmt::Display for RepoFile {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.size {
+            Some(size) => write!(f, "{} ({size} bytes)", self.path),
+            None => write!(f, "{}", self.path),
+        }
+    }
+}
+
+/// Render a repository listing as a bulleted block.
+///
+/// A path that names an empty directory, or one holding only binaries, lists
+/// nothing and gets the same sentence as a path that matched nothing.
+fn format_listing(files: &[RepoFile]) -> String {
+    if files.is_empty() {
+        return "No files found.".to_owned();
+    }
+
+    to_list_with_root(files, "results")
+}
+
 pub(crate) async fn github_list_files(
     repository: Option<String>,
     ref_: Option<String>,
     path: Option<String>,
 ) -> Result<String> {
-    #[derive(serde::Serialize)]
-    struct Files {
-        files: Vec<File>,
-    }
-
-    #[derive(serde::Serialize)]
-    struct File {
-        path: String,
-        size: Option<u64>,
-    }
-
     async fn fetch(
         org: &str,
         repo: &str,
         ref_: &str,
         prefix: &str,
-        files: &mut Vec<File>,
+        files: &mut Vec<RepoFile>,
     ) -> Result<()> {
         let query = indoc::indoc! {"
             repository(owner: $owner, name: $name) {
@@ -296,7 +313,7 @@ pub(crate) async fn github_list_files(
 
             match kind {
                 "tree" => Box::pin(fetch(org, repo, ref_, &path, files)).await?,
-                "blob" => files.push(File { path, size }),
+                "blob" => files.push(RepoFile { path, size }),
                 _ => {}
             }
         }
@@ -314,5 +331,9 @@ pub(crate) async fn github_list_files(
     let mut files = vec![];
     fetch(&owner, &repo, &ref_, &prefix, &mut files).await?;
 
-    to_xml(Files { files })
+    Ok(format_listing(&files))
 }
+
+#[cfg(test)]
+#[path = "repo_tests.rs"]
+mod tests;

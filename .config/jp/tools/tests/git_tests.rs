@@ -259,7 +259,7 @@ async fn a_configured_root_stats_the_nested_working_tree() {
 
     assert_eq!(
         content,
-        "<git_status>\n  - scratch.txt (untracked)\n</git_status>"
+        "<git_status>\n- scratch.txt (untracked)\n</git_status>"
     );
 }
 
@@ -1290,7 +1290,7 @@ async fn show_displays_commit_details() {
     assert!(content.contains(&hash));
     assert!(content.contains("feat: update s.rs"));
     assert!(content.contains("Detailed description."));
-    assert!(content.contains("    - s.rs ("));
+    assert!(content.contains("  - s.rs ("));
     assert!(content.contains("  <files>"));
 }
 

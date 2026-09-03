@@ -1,10 +1,11 @@
+use std::fmt::Write as _;
+
 use camino::{Utf8Path, Utf8PathBuf};
 use ignore::{IncrementalIgnore, WalkBuilder, WalkState, gitignore::Gitignore};
 use jp_tool::{AccessPolicy, Capability};
-use serde::ser::SerializeMap as _;
 
 use super::utils::{is_suppressed, resolve_workspace_path, suppressed_note};
-use crate::{Error, util::OneOrMany};
+use crate::{Error, to_list_with_root, util::OneOrMany};
 
 /// Outcome of a listing: the files found, plus any requested path that
 /// contributed nothing and why.
@@ -47,29 +48,26 @@ impl Files {
     pub(crate) fn notes(&self) -> Vec<String> {
         self.skipped.iter().map(Skipped::note).collect()
     }
-}
 
-impl serde::Serialize for Files {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        // A listing that reached everything it was asked about serializes as a
-        // bare list (or a single sentence when nothing matched). The keyed shape
-        // appears only when something was skipped, so the notes cannot be
-        // mistaken for part of the file set.
-        if self.skipped.is_empty() {
-            return if self.files.is_empty() {
-                serializer.serialize_str("No files found.")
-            } else {
-                self.files.serialize(serializer)
-            };
+    /// Render the listing as the tool's response.
+    ///
+    /// The files are one bulleted block inside `<results>`; a listing that
+    /// matched nothing is a single sentence instead.
+    /// Skip notes follow the block, outside it, so they cannot be read as part
+    /// of the file set.
+    pub(crate) fn render(&self) -> String {
+        let mut out = if self.files.is_empty() {
+            "No files found.".to_owned()
+        } else {
+            to_list_with_root(&self.files, "results")
+        };
+
+        for (index, note) in self.notes().iter().enumerate() {
+            let separator = if index == 0 { "\n\n" } else { "\n" };
+            let _ = write!(out, "{separator}Note: {note}");
         }
 
-        let mut map = serializer.serialize_map(Some(2))?;
-        map.serialize_entry("files", &self.files)?;
-        map.serialize_entry("notes", &self.notes())?;
-        map.end()
+        out
     }
 }
 

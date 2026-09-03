@@ -1,8 +1,12 @@
 use chrono::{DateTime, Utc};
 use jp_github::models::{commits, repos::DiffEntryStatus};
 
-use super::{auth_optional, parse_repo};
-use crate::{Result, github::handle_404, to_xml, to_xml_with_root, util::OneOrMany};
+use super::{
+    auth_optional,
+    changed_files::{ChangedFile, format_changed_files, format_not_found},
+    parse_repo,
+};
+use crate::{Result, github::handle_404, to_xml, util::OneOrMany};
 
 /// Changed files per page for a single commit.
 /// Fixed at 100; the GitHub commit endpoint caps the files array at 300 and
@@ -65,17 +69,10 @@ fn header(commit: &commits::Commit) -> Header {
 }
 
 /// List the commit's changed files without patches, plus metadata and stats.
+///
+/// The commit header stays structured because its message spans lines; the
+/// changed files follow it as a bulleted block.
 fn enumerate(page: u64, commit: commits::Commit) -> Result<String> {
-    #[derive(serde::Serialize)]
-    struct ChangedFile {
-        filename: String,
-        status: DiffEntryStatus,
-        additions: u64,
-        deletions: u64,
-        changes: u64,
-        previous_filename: Option<String>,
-    }
-
     #[derive(serde::Serialize)]
     struct Commit {
         sha: String,
@@ -87,7 +84,6 @@ fn enumerate(page: u64, commit: commits::Commit) -> Result<String> {
         total: u64,
         page: u64,
         per_page: u8,
-        file: Vec<ChangedFile>,
     }
 
     let h = header(&commit);
@@ -97,7 +93,7 @@ fn enumerate(page: u64, commit: commits::Commit) -> Result<String> {
         total: 0,
     });
 
-    let file = commit
+    let files: Vec<ChangedFile> = commit
         .files
         .unwrap_or_default()
         .into_iter()
@@ -106,12 +102,11 @@ fn enumerate(page: u64, commit: commits::Commit) -> Result<String> {
             status: f.status,
             additions: f.additions,
             deletions: f.deletions,
-            changes: f.changes,
             previous_filename: f.previous_filename,
         })
         .collect();
 
-    to_xml(Commit {
+    let header = to_xml(Commit {
         sha: h.sha,
         message: h.message,
         author: h.author,
@@ -121,17 +116,20 @@ fn enumerate(page: u64, commit: commits::Commit) -> Result<String> {
         total: stats.total,
         page,
         per_page: FILES_PER_PAGE,
-        file,
-    })
+    })?;
+
+    Ok(format!("{header}\n\n{}", format_changed_files(&files)))
 }
 
 /// Fetch patches for a specific set of files in the commit.
 ///
-/// Files not present on the requested `page` get an explicit `not_found` entry
-/// so the caller can bump `page` or re-enumerate to locate them.
+/// Files the page does not contain are listed in a `not_found` block below the
+/// patches, with one hint covering all of them.
 fn fetch(page: u64, commit: commits::Commit, files: &[String]) -> Result<String> {
+    // A patch is a diff body rather than a one-line fact, so matched files keep
+    // their structured shape instead of collapsing into a list entry.
     #[derive(serde::Serialize)]
-    struct ChangedFile {
+    struct MatchedFile {
         filename: String,
         status: DiffEntryStatus,
         additions: u64,
@@ -142,20 +140,12 @@ fn fetch(page: u64, commit: commits::Commit, files: &[String]) -> Result<String>
     }
 
     #[derive(serde::Serialize)]
-    struct NotFound {
-        filename: String,
-        hint: &'static str,
-    }
-
-    #[derive(serde::Serialize)]
     struct Response {
         sha: String,
         message: String,
         page: u64,
         per_page: u8,
-        file: Vec<ChangedFile>,
-        #[serde(skip_serializing_if = "Vec::is_empty")]
-        not_found: Vec<NotFound>,
+        file: Vec<MatchedFile>,
     }
 
     let h = header(&commit);
@@ -167,7 +157,7 @@ fn fetch(page: u64, commit: commits::Commit, files: &[String]) -> Result<String>
     for entry in entries {
         seen.push(entry.filename.clone());
         if files.contains(&entry.filename) {
-            matched.push(ChangedFile {
+            matched.push(MatchedFile {
                 filename: entry.filename,
                 status: entry.status,
                 additions: entry.additions,
@@ -179,26 +169,27 @@ fn fetch(page: u64, commit: commits::Commit, files: &[String]) -> Result<String>
         }
     }
 
-    let not_found: Vec<NotFound> = files
+    let not_found: Vec<String> = files
         .iter()
         .filter(|requested| !seen.iter().any(|seen| seen == *requested))
-        .map(|filename| NotFound {
-            filename: filename.clone(),
-            hint: "not present on this page; bump `page` or call without `files` to enumerate the \
-                   commit's changed files and locate the right page",
-        })
+        .cloned()
         .collect();
 
     if matched.is_empty() && !not_found.is_empty() {
-        return to_xml_with_root(&not_found, "not_found");
+        return Ok(format_not_found(&not_found));
     }
 
-    to_xml(Response {
+    let response = to_xml(Response {
         sha: h.sha,
         message: h.message,
         page,
         per_page: FILES_PER_PAGE,
         file: matched,
-        not_found,
-    })
+    })?;
+
+    if not_found.is_empty() {
+        return Ok(response);
+    }
+
+    Ok(format!("{response}\n\n{}", format_not_found(&not_found)))
 }
