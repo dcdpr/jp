@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use camino::Utf8PathBuf;
+use camino_tempfile::Utf8TempDir;
 use jp_config::conversation::tool::{ToolConfig, ToolSource, style::PartialDisplayStyleConfig};
 use jp_inquire::{ReplyOutcome, prompt::MockPromptBackend};
 use jp_llm::tool::executor::MockExecutor;
@@ -293,10 +293,11 @@ async fn test_pre_render_for_prompt_function_call_fires_before_approval() {
     let (printer, _stdout, stderr) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
     let style_config = jp_config::AppConfig::new_test().style;
+    let root = Utf8TempDir::new().expect("temp dir");
     let tool_renderer = ToolRenderer::new(
         ErrChannel::new(printer.clone()),
         style_config,
-        Utf8PathBuf::from("/tmp"),
+        root.path().to_owned(),
         false,
         jp_llm::tool::InvocationContext::default(),
     );
@@ -358,10 +359,11 @@ async fn test_pre_render_for_prompt_custom_ask_defers_rendering() {
     let (printer, _stdout, stderr) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
     let style_config = jp_config::AppConfig::new_test().style;
+    let root = Utf8TempDir::new().expect("temp dir");
     let tool_renderer = ToolRenderer::new(
         ErrChannel::new(printer.clone()),
         style_config,
-        Utf8PathBuf::from("/tmp"),
+        root.path().to_owned(),
         false,
         jp_llm::tool::InvocationContext::default(),
     );
@@ -456,10 +458,11 @@ async fn test_resolve_tool_call_decision_invalidates_prerender_on_edit() {
     let (printer, _stdout, stderr) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
     let style_config = jp_config::AppConfig::new_test().style;
+    let root = Utf8TempDir::new().expect("temp dir");
     let tool_renderer = ToolRenderer::new(
         ErrChannel::new(printer.clone()),
         style_config,
-        Utf8PathBuf::from("/tmp"),
+        root.path().to_owned(),
         false,
         jp_llm::tool::InvocationContext::default(),
     );
@@ -807,10 +810,13 @@ async fn custom_formatter_receives_the_invoked_tool_name() {
 
     let (printer, _stdout, stderr) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
+    // The formatter is spawned with this path as its working directory, so it
+    // has to exist on every platform the tests run on.
+    let root = Utf8TempDir::new().expect("temp dir");
     let tool_renderer = ToolRenderer::new(
         ErrChannel::new(printer.clone()),
         jp_config::AppConfig::new_test().style,
-        Utf8PathBuf::from("/tmp"),
+        root.path().to_owned(),
         false,
         jp_llm::tool::InvocationContext::default(),
     );
