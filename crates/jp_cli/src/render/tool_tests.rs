@@ -193,7 +193,9 @@ async fn test_render_custom_arguments_after_approval() {
     args.insert("host".into(), Value::String("myhost".into()));
     let style = ParametersStyle::Custom(CommandConfigOrString::String("echo custom-output".into()));
 
-    let outcome = renderer.render_approved("ssh_run", &args, &style).await;
+    let outcome = renderer
+        .render_approved("ssh_run", "ssh_run", &args, &style)
+        .await;
 
     assert!(matches!(outcome, RenderOutcome::Rendered {
         content: Some(_)

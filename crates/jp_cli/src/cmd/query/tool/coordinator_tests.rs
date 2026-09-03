@@ -774,3 +774,61 @@ fn test_pending_prompt_mixed_types_interleaved() {
     assert!(matches!(queue[1], PendingPrompt::ResultMode { .. }));
     assert!(matches!(queue[2], PendingPrompt::Question { .. }));
 }
+
+#[tokio::test]
+async fn custom_formatter_receives_the_invoked_tool_name() {
+    // A `source` that names an implementation (`local.fs_list_files` under the
+    // key `ls`) is the name the tool is executed with, so the custom parameter
+    // formatter has to be handed that name too. Handing it the key asks the
+    // formatter about a tool that does not exist.
+    use jp_config::conversation::tool::CommandConfigOrString;
+
+    let tool_config = ToolConfig::from_partial(
+        jp_config::conversation::tool::PartialToolConfig {
+            source: Some(ToolSource::Local {
+                tool: Some("fs_list_files".to_owned()),
+            }),
+            style: Some(PartialDisplayStyleConfig {
+                parameters: Some(ParametersStyle::Custom(CommandConfigOrString::String(
+                    "echo {{tool.name}}".to_owned(),
+                ))),
+                ..Default::default()
+            }),
+            ..Default::default()
+        },
+        vec![],
+    )
+    .expect("valid tool config");
+
+    let mut tools_config = jp_config::AppConfig::new_test().conversation.tools;
+    tools_config.insert("ls".to_owned(), tool_config);
+
+    let coordinator = ToolCoordinator::new(tools_config, empty_executor_source());
+
+    let (printer, _stdout, stderr) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let tool_renderer = ToolRenderer::new(
+        ErrChannel::new(printer.clone()),
+        jp_config::AppConfig::new_test().style,
+        Utf8PathBuf::from("/tmp"),
+        false,
+        jp_llm::tool::InvocationContext::default(),
+    );
+
+    let outcome = coordinator
+        .render_approved_tool("ls", &Map::new(), &tool_renderer)
+        .await;
+
+    match outcome {
+        RenderOutcome::Rendered { content } => {
+            assert_eq!(content.as_deref(), Some("fs_list_files"));
+        }
+        RenderOutcome::Suppressed { error } => panic!("custom formatter failed: {error}"),
+    }
+
+    // The header the user reads stays the name the assistant called.
+    printer.flush();
+    let output = String::from_utf8(strip_ansi_escapes::strip(stderr.lock().as_str()))
+        .expect("valid utf-8 after stripping ANSI");
+    assert_eq!(output, "Calling tool ls\n\nfs_list_files\n");
+}
