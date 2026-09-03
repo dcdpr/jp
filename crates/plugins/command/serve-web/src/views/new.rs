@@ -7,15 +7,14 @@ use super::{configs, layout};
 
 /// Render the new-conversation form.
 ///
-/// `selected` and `pairs` are the configuration choices to restore, and `error`
-/// is shown above the form when a previous attempt was refused; the fields keep
-/// what was typed so nothing has to be entered twice.
+/// `chosen` are the configuration arguments to restore, in the order they
+/// apply, and `error` is shown above the form when a previous attempt was
+/// refused; the fields keep what was typed so nothing has to be entered twice.
 pub(crate) fn render(
     entries: &[ConfigEntry],
     content: &str,
     title: &str,
-    selected: &[String],
-    pairs: &[(String, String)],
+    chosen: &[String],
     error: Option<&str>,
 ) -> Markup {
     layout::page("New conversation", html! {
@@ -44,7 +43,7 @@ pub(crate) fn render(
                         placeholder="Optional; named from the first turn if left blank";
                 }
 
-                (configs::chooser(entries, selected, pairs))
+                (configs::chooser(entries, chosen))
 
                 label {
                     span class="field-label" { "Message" }
@@ -64,6 +63,7 @@ pub(crate) fn render(
         }
 
         script { (PreEscaped(configs::SCRIPT)) }
+        script { (PreEscaped(SCRIPT)) }
     })
 }
 
@@ -93,3 +93,8 @@ try {
   // reads as shared and errs toward asking.
 }
 ";
+
+/// The keyboard shortcut for starting the conversation.
+///
+/// The form works without it; this only saves the trip to the button.
+const SCRIPT: &str = include_str!("new.js");

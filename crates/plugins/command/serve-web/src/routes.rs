@@ -299,69 +299,47 @@ async fn status(State(state): State<AppState>) -> Json<StatusBody> {
 
 /// The configuration choices a form carries.
 ///
-/// `names` are configurations to load by name; `keys` and `values` are the rows
-/// of a free assignment, paired by position when they are read back.
-/// A row always posts both fields, so the two lists stay in step.
+/// One `cfg` field per row of the chooser, each holding a whole `--cfg`
+/// argument: a configuration to load by name, or a value to assign.
+/// Both are what `--cfg` takes, and posting them under one name is what
+/// preserves the order they were arranged in.
 #[derive(Debug, Default)]
 struct CfgFields {
-    names: Vec<String>,
-    keys: Vec<String>,
-    values: Vec<String>,
+    args: Vec<String>,
 }
 
 impl CfgFields {
     /// Take one decoded form pair, reporting whether it belonged here.
+    ///
+    /// An empty argument is a row nothing was chosen in, and is dropped.
+    ///
+    /// What is kept is trimmed: a soft keyboard puts a space after a word it
+    /// thinks is finished, and an argument carrying one reaches the config
+    /// parser as a different key or value than the one that was typed.
     fn accept(&mut self, key: &str, value: &str) -> bool {
-        match key {
-            "cfg" => self.names.push(value.to_owned()),
-            "cfg_key" => self.keys.push(value.to_owned()),
-            "cfg_value" => self.values.push(value.to_owned()),
-            _ => return false,
+        if key != "cfg" {
+            return false;
+        }
+
+        let argument = value.trim();
+        if !argument.is_empty() {
+            self.args.push(argument.to_owned());
         }
 
         true
     }
 
-    /// The assignments that were filled in, in the order they were written.
-    ///
-    /// A row with no key is one the reader left blank; there is always at least
-    /// one of those, since the form keeps a spare.
-    ///
-    /// Both halves are trimmed.
-    /// A soft keyboard puts a space after a word it thinks is finished, and a
-    /// key or value carrying one reaches the config parser as a different key
-    /// or value than the one that was typed.
-    fn pairs(&self) -> Vec<(String, String)> {
-        self.keys
-            .iter()
-            .zip(&self.values)
-            .filter(|(key, _)| !key.trim().is_empty())
-            .map(|(key, value)| (key.trim().to_owned(), value.trim().to_owned()))
-            .collect()
-    }
-
-    /// The `--cfg` arguments this form asks for, names first.
-    ///
-    /// An assignment is ordered after the names so a value typed into the form
-    /// wins over the same key set by a configuration named beside it.
-    fn args(&self) -> Vec<String> {
-        self.names
-            .iter()
-            .cloned()
-            .chain(
-                self.pairs()
-                    .into_iter()
-                    .map(|(key, value)| format!("{key}={value}")),
-            )
-            .collect()
+    /// The `--cfg` arguments this form asks for, in the order they apply.
+    fn args(&self) -> &[String] {
+        &self.args
     }
 }
 
 /// A new turn, as posted by the composer form.
 ///
 /// Read from decoded pairs rather than through `Form`, for the same reason the
-/// new-conversation form is: a set of checkboxes sharing a name posts that name
-/// once per ticked box, and the urlencoded deserialiser cannot collect repeats.
+/// new-conversation form is: the chooser posts `cfg` once per row, and the
+/// urlencoded deserialiser cannot collect repeats.
 #[derive(Debug, Default)]
 struct TurnForm {
     content: String,
@@ -482,7 +460,7 @@ async fn start_turn(
 
     let client = state.client.clone();
     let turns = Arc::clone(&state.turns);
-    let cfg = form.cfg.args();
+    let cfg = form.cfg.args().to_vec();
     tokio::spawn(async move {
         let failure = match client.query(&id, &content, cfg).await {
             Ok(()) => {
@@ -537,11 +515,10 @@ async fn interrupt(
 
 /// What the new-conversation form submits.
 ///
-/// Read from decoded pairs rather than through `Form`, because a set of
-/// checkboxes sharing a name posts the name once per ticked box, and the
-/// urlencoded deserialiser behind `Form` has no way to express "collect the
-/// repeats" — it sees the second `cfg` and reports a string where a sequence
-/// was expected.
+/// Read from decoded pairs rather than through `Form`, because the chooser
+/// posts `cfg` once per row, and the urlencoded deserialiser behind `Form` has
+/// no way to express "collect the repeats" — it sees the second `cfg` and
+/// reports a string where a sequence was expected.
 #[derive(Debug, Default)]
 struct NewConversationForm {
     content: String,
@@ -586,7 +563,7 @@ async fn new_conversation_form(State(state): State<AppState>) -> Result<Markup, 
         .await
         .map_err(|e| AppError::Internal(e.to_string()))?;
 
-    Ok(views::new::render(&configs, "", "", &[], &[], None))
+    Ok(views::new::render(&configs, "", "", &[], None))
 }
 
 /// Start a conversation, then send the browser to it.
@@ -610,7 +587,7 @@ async fn start_conversation(
     } else {
         match state
             .client
-            .start_conversation(&content, title, form.cfg.args())
+            .start_conversation(&content, title, form.cfg.args().to_vec())
             .await
         {
             Ok((id, outcome)) => {
@@ -672,8 +649,7 @@ async fn start_conversation(
         &configs,
         &content,
         &form.title,
-        &form.cfg.names,
-        &form.cfg.pairs(),
+        form.cfg.args(),
         error.as_deref(),
     )
     .into_response())
@@ -787,7 +763,7 @@ async fn list_configs(State(state): State<AppState>) -> Result<Markup, AppError>
         .client
         .list_configs()
         .await
-        .map(|entries| views::configs::chooser(&entries, &[], &[]))
+        .map(|entries| views::configs::chooser(&entries, &[]))
         .map_err(|e| AppError::Internal(e.to_string()))
 }
 

@@ -17,10 +17,11 @@ use oxc_span::SourceType;
 /// scripts share a single global lexical scope.
 /// A `const` in one collides with the same name in the next, and neither file
 /// is wrong on its own.
-const PAGES: &[&[&str]] = &[&["src/views/detail.js"], &[
-    "src/views/list.js",
-    "src/views/filter.js",
-]];
+const PAGES: &[&[&str]] = &[
+    &["src/views/configs.js", "src/views/new.js"],
+    &["src/views/configs.js", "src/views/detail.js"],
+    &["src/views/list.js", "src/views/filter.js"],
+];
 
 fn main() {
     let mut failed = false;

@@ -250,51 +250,47 @@ fn a_tool_result_reaches_a_caller_that_already_counted_the_call() {
     );
 }
 
-/// Both shapes of choice reach the host as `--cfg` arguments, assignments last.
+/// Both shapes of choice reach the host in the order the chooser held them.
 ///
-/// A value typed into the form is the more specific of the two, so it is
-/// applied over the same key set by a configuration named beside it.
+/// The host applies them in that order, so an assignment written above a
+/// configuration is overridden by it, and one written below wins.
 #[test]
-fn a_turn_form_orders_assignments_after_named_configurations() {
+fn a_turn_form_keeps_the_order_the_rows_were_arranged_in() {
     let form = TurnForm::parse(
-        "content=go&cfg=personas%2Fdev&cfg_key=assistant.model.id&cfg_value=opus&cfg=skill%2Frfd",
+        "content=go&cfg=assistant.model.id%3Dopus&cfg=personas%2Fdev&cfg=skill%2Frfd",
     );
 
     assert_eq!(form.content, "go");
     assert_eq!(form.cfg.args(), [
+        "assistant.model.id=opus",
         "personas/dev",
-        "skill/rfd",
-        "assistant.model.id=opus"
+        "skill/rfd"
     ]);
 }
 
-/// The form always carries a spare row, which is not an assignment.
+/// A picker left on its empty option is not an argument.
 #[test]
-fn a_turn_form_drops_a_row_with_no_key() {
-    let form = TurnForm::parse("content=go&cfg_key=&cfg_value=&cfg_key=+&cfg_value=stray");
+fn a_turn_form_drops_a_row_that_chose_nothing() {
+    let form = TurnForm::parse("content=go&cfg=&cfg=+&cfg=personas%2Fdev");
 
-    assert!(form.cfg.args().is_empty());
+    assert_eq!(form.cfg.args(), ["personas/dev"]);
 }
 
-/// Space around an assignment is the keyboard's, not the reader's.
+/// Space around an argument is the keyboard's, not the reader's.
 #[test]
-fn a_turn_form_trims_an_assignment() {
-    let form = TurnForm::parse("content=go&cfg_key=+assistant.name+&cfg_value=+JP+");
+fn a_turn_form_trims_an_argument() {
+    let form = TurnForm::parse("content=go&cfg=+assistant.name%3DJP+");
 
     assert_eq!(form.cfg.args(), ["assistant.name=JP"]);
 }
 
-/// The new-conversation form reads the same fields as the composer.
+/// The new-conversation form reads the same field as the composer.
 #[test]
-fn the_new_conversation_form_reads_the_same_configuration_fields() {
+fn the_new_conversation_form_reads_the_same_configuration_field() {
     let form = NewConversationForm::parse(
-        "title=Spike&content=go&cfg=personas%2Fdev&cfg_key=assistant.name&cfg_value=JP",
+        "title=Spike&content=go&cfg=personas%2Fdev&cfg=assistant.name%3DJP",
     );
 
     assert_eq!(form.title, "Spike");
-    assert_eq!(form.cfg.names, ["personas/dev"]);
-    assert_eq!(form.cfg.pairs(), [(
-        "assistant.name".to_owned(),
-        "JP".to_owned()
-    )]);
+    assert_eq!(form.cfg.args(), ["personas/dev", "assistant.name=JP"]);
 }
