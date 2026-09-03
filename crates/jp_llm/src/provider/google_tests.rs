@@ -55,7 +55,7 @@ fn test_unknown_model_requests_thoughts() {
         tool_choice: ToolChoice::Auto,
     };
 
-    let (request, _) = create_request(&model, query).unwrap();
+    let (request, _) = create_request(&model, query, None).unwrap();
 
     let thinking = request
         .generation_config
@@ -190,7 +190,7 @@ fn test_off_on_unknown_model_attempts_disable() {
         tool_choice: ToolChoice::Auto,
     };
 
-    let (request, _) = create_request(&model, query).unwrap();
+    let (request, _) = create_request(&model, query, None).unwrap();
 
     let thinking = request
         .generation_config
@@ -229,7 +229,7 @@ fn test_off_on_always_on_leveled_model_uses_lowest_level() {
         tool_choice: ToolChoice::Auto,
     };
 
-    let (request, _) = create_request(&model, query).unwrap();
+    let (request, _) = create_request(&model, query, None).unwrap();
 
     let thinking = request
         .generation_config
@@ -375,6 +375,7 @@ mod thought_signature_recovery {
             tools: vec![],
             tool_config: None,
             generation_config: None,
+            service_tier: None,
         }
     }
 
@@ -1254,5 +1255,153 @@ mod stream_error_classification {
 
         assert_eq!(error.kind, StreamErrorKind::InsufficientQuota);
         assert!(!error.is_retryable());
+    }
+}
+
+mod service_tier_configuration {
+    use jp_config::{
+        PartialAppConfig,
+        providers::llm::google::{GoogleConfig, ServiceTier},
+        types::json_value::JsonValue,
+    };
+    use jp_conversation::{ConversationStream, thread::Thread};
+    use serde_json::json;
+
+    use crate::{
+        model::ModelDetails,
+        provider::{Google, ProviderId},
+        query::ChatQuery,
+    };
+
+    static PROVIDER: ProviderId = ProviderId::Google;
+
+    /// Name of an environment variable that is always set, usable as a dummy
+    /// API key.
+    /// Windows has no `USER`.
+    fn api_key_env() -> String {
+        if cfg!(windows) { "USERNAME" } else { "USER" }.to_owned()
+    }
+
+    fn test_query_with_parameters(other_params: Vec<(&str, &str)>) -> ChatQuery {
+        let mut events = ConversationStream::new_test().with_turn("test");
+        let mut delta = PartialAppConfig::empty();
+        let other = delta
+            .assistant
+            .model
+            .parameters
+            .other
+            .get_or_insert_default();
+        for (k, v) in other_params {
+            other.insert(k.to_owned(), JsonValue(json!(v)));
+        }
+        events.add_config_delta(delta);
+
+        ChatQuery {
+            thread: Thread {
+                system_prompt: None,
+                sections: vec![],
+                attachments: vec![],
+                events,
+            },
+            tools: vec![],
+            tool_choice: jp_config::assistant::tool_choice::ToolChoice::Auto,
+        }
+    }
+
+    #[test]
+    fn request_omits_service_tier_when_unset() {
+        let google = Google::try_from(&GoogleConfig {
+            api_key_env: api_key_env(),
+            base_url: "https://generativelanguage.googleapis.com/v1beta".into(),
+            service_tier: None,
+        })
+        .unwrap();
+
+        let model = ModelDetails::empty((PROVIDER, "gemini-2.5-flash").try_into().unwrap());
+        let query = test_query_with_parameters(vec![]);
+        let val = google.request_value(&model, query).unwrap();
+
+        assert!(val.get("serviceTier").is_none());
+        assert!(val.get("service_tier").is_none());
+    }
+
+    #[test]
+    fn request_serializes_flex_tier_from_provider_config() {
+        let google = Google::try_from(&GoogleConfig {
+            api_key_env: api_key_env(),
+            base_url: "https://generativelanguage.googleapis.com/v1beta".into(),
+            service_tier: Some(ServiceTier::Flex),
+        })
+        .unwrap();
+
+        let model = ModelDetails::empty((PROVIDER, "gemini-2.5-flash").try_into().unwrap());
+        let query = test_query_with_parameters(vec![]);
+        let val = google.request_value(&model, query).unwrap();
+
+        assert_eq!(val["serviceTier"], "flex");
+    }
+
+    #[test]
+    fn request_serializes_priority_tier_from_provider_config() {
+        let google = Google::try_from(&GoogleConfig {
+            api_key_env: api_key_env(),
+            base_url: "https://generativelanguage.googleapis.com/v1beta".into(),
+            service_tier: Some(ServiceTier::Priority),
+        })
+        .unwrap();
+
+        let model = ModelDetails::empty((PROVIDER, "gemini-2.5-flash").try_into().unwrap());
+        let query = test_query_with_parameters(vec![]);
+        let val = google.request_value(&model, query).unwrap();
+
+        assert_eq!(val["serviceTier"], "priority");
+    }
+
+    #[test]
+    fn request_serializes_standard_tier_from_provider_config() {
+        let google = Google::try_from(&GoogleConfig {
+            api_key_env: api_key_env(),
+            base_url: "https://generativelanguage.googleapis.com/v1beta".into(),
+            service_tier: Some(ServiceTier::Standard),
+        })
+        .unwrap();
+
+        let model = ModelDetails::empty((PROVIDER, "gemini-2.5-flash").try_into().unwrap());
+        let query = test_query_with_parameters(vec![]);
+        let val = google.request_value(&model, query).unwrap();
+
+        assert_eq!(val["serviceTier"], "standard");
+    }
+
+    #[test]
+    fn parameter_override_takes_precedence_over_provider_config() {
+        let google = Google::try_from(&GoogleConfig {
+            api_key_env: api_key_env(),
+            base_url: "https://generativelanguage.googleapis.com/v1beta".into(),
+            service_tier: Some(ServiceTier::Standard),
+        })
+        .unwrap();
+
+        let model = ModelDetails::empty((PROVIDER, "gemini-2.5-flash").try_into().unwrap());
+        let query = test_query_with_parameters(vec![("service_tier", "flex")]);
+        let val = google.request_value(&model, query).unwrap();
+
+        assert_eq!(val["serviceTier"], "flex");
+    }
+
+    #[test]
+    fn parameter_override_camel_case_takes_precedence() {
+        let google = Google::try_from(&GoogleConfig {
+            api_key_env: api_key_env(),
+            base_url: "https://generativelanguage.googleapis.com/v1beta".into(),
+            service_tier: None,
+        })
+        .unwrap();
+
+        let model = ModelDetails::empty((PROVIDER, "gemini-2.5-flash").try_into().unwrap());
+        let query = test_query_with_parameters(vec![("serviceTier", "priority")]);
+        let val = google.request_value(&model, query).unwrap();
+
+        assert_eq!(val["serviceTier"], "priority");
     }
 }

@@ -466,6 +466,7 @@ Ok(
                         base_url: Some(
                             "https://generativelanguage.googleapis.com/v1beta",
                         ),
+                        service_tier: None,
                     },
                     llamacpp: PartialLlamacppConfig {
                         base_url: Some(

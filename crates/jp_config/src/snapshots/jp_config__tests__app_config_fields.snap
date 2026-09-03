@@ -62,6 +62,7 @@ expression: "AppConfig::fields()"
     "providers.llm.llamacpp.base_url",
     "providers.llm.google.api_key_env",
     "providers.llm.google.base_url",
+    "providers.llm.google.service_tier",
     "providers.llm.deepseek.api_key_env",
     "providers.llm.deepseek.base_url",
     "providers.llm.cerebras.api_key_env",
