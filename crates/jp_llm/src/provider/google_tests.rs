@@ -1243,6 +1243,13 @@ mod service_tier_configuration {
 
     static PROVIDER: ProviderId = ProviderId::Google;
 
+    /// Name of an environment variable that is always set, usable as a dummy
+    /// API key.
+    /// Windows has no `USER`.
+    fn api_key_env() -> String {
+        if cfg!(windows) { "USERNAME" } else { "USER" }.to_owned()
+    }
+
     fn test_query_with_parameters(other_params: Vec<(&str, &str)>) -> ChatQuery {
         let mut events = ConversationStream::new_test().with_turn("test");
         let mut delta = PartialAppConfig::empty();
@@ -1272,7 +1279,7 @@ mod service_tier_configuration {
     #[test]
     fn request_omits_service_tier_when_unset() {
         let google = Google::try_from(&GoogleConfig {
-            api_key_env: "USER".into(),
+            api_key_env: api_key_env(),
             base_url: "https://generativelanguage.googleapis.com/v1beta".into(),
             service_tier: None,
         })
@@ -1289,7 +1296,7 @@ mod service_tier_configuration {
     #[test]
     fn request_serializes_flex_tier_from_provider_config() {
         let google = Google::try_from(&GoogleConfig {
-            api_key_env: "USER".into(),
+            api_key_env: api_key_env(),
             base_url: "https://generativelanguage.googleapis.com/v1beta".into(),
             service_tier: Some(ServiceTier::Flex),
         })
@@ -1305,7 +1312,7 @@ mod service_tier_configuration {
     #[test]
     fn request_serializes_priority_tier_from_provider_config() {
         let google = Google::try_from(&GoogleConfig {
-            api_key_env: "USER".into(),
+            api_key_env: api_key_env(),
             base_url: "https://generativelanguage.googleapis.com/v1beta".into(),
             service_tier: Some(ServiceTier::Priority),
         })
@@ -1321,7 +1328,7 @@ mod service_tier_configuration {
     #[test]
     fn request_serializes_standard_tier_from_provider_config() {
         let google = Google::try_from(&GoogleConfig {
-            api_key_env: "USER".into(),
+            api_key_env: api_key_env(),
             base_url: "https://generativelanguage.googleapis.com/v1beta".into(),
             service_tier: Some(ServiceTier::Standard),
         })
@@ -1337,7 +1344,7 @@ mod service_tier_configuration {
     #[test]
     fn parameter_override_takes_precedence_over_provider_config() {
         let google = Google::try_from(&GoogleConfig {
-            api_key_env: "USER".into(),
+            api_key_env: api_key_env(),
             base_url: "https://generativelanguage.googleapis.com/v1beta".into(),
             service_tier: Some(ServiceTier::Standard),
         })
@@ -1353,7 +1360,7 @@ mod service_tier_configuration {
     #[test]
     fn parameter_override_camel_case_takes_precedence() {
         let google = Google::try_from(&GoogleConfig {
-            api_key_env: "USER".into(),
+            api_key_env: api_key_env(),
             base_url: "https://generativelanguage.googleapis.com/v1beta".into(),
             service_tier: None,
         })
