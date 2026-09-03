@@ -3,15 +3,18 @@
 use std::{convert::Infallible, ops::Deref, str::FromStr};
 
 use schematic::{Config, ConfigEnum, PartialConfig as _};
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{
+    Deserialize, Deserializer, Serialize,
+    de::{Error as DeError, Visitor},
+};
 use serde_untagged::UntaggedEnumVisitor;
 
 use crate::{
+    BoxedError,
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::{PartialConfigDelta, delta_opt},
     fill::FillDefaults,
     partial::ToPartial,
-    types::{Dedup, deserialize_dedup},
 };
 
 /// String value, either defaulting to a merge strategy of `replace`, or
@@ -177,10 +180,14 @@ pub struct MergedString {
 
     /// The separator to use between the previous value and the new value.
     ///
-    /// - `none`: No separator (default).
-    /// - `space`: Single space separator.
-    /// - `line`: New line separator.
-    /// - `paragraph`: Paragraph separator (two new lines).
+    /// - `paragraph`: Blank line between the two values (default).
+    /// - `line`: Single newline.
+    /// - `space`: Single space.
+    /// - `none`: Values are joined with nothing in between.
+    ///
+    /// A value merged with `space` or `none` leaves no line break around it,
+    /// which is what `dedup` matches on, so such a value is only recognized as
+    /// already present when it equals the whole accumulated string.
     #[setting(default)]
     pub separator: MergedStringSeparator,
 
@@ -192,29 +199,36 @@ pub struct MergedString {
     #[setting(default)]
     pub discard_when_merged: bool,
 
-    /// Whether to skip an `append` or `prepend` whose value is already present.
+    /// How an `append` or `prepend` recognizes a value it has already merged,
+    /// and skips it.
     ///
-    /// Defaults to `true`.
-    /// Set to `false` to append the value unconditionally.
-    /// Accepts `true`, `false`, or `"inherit"`.
+    /// - `block`: Skip a value that appears as a whole block of the existing
+    ///   string, bounded on each side by a line break or by the string's start
+    ///   or end (default).
+    /// - `contains`: Skip a value that appears anywhere in the existing string,
+    ///   including inside a line.
+    /// - `exact`: Skip a value only when it equals the whole existing string.
+    /// - `off`: Merge the value however often it is supplied.
     ///
-    /// A value counts as present when it appears in the existing string as a
-    /// whole `separator`-delimited block.
-    /// Partial matches inside a block do not count.
-    /// With `separator = "none"` there are no block boundaries to match
-    /// against, so only an exact match of the whole string counts.
+    /// `true` and `false` are accepted as shorthand for `block` and `off`.
     ///
-    /// This flag is "sticky": once a config in the merge chain sets it
-    /// explicitly, subsequent merges for this field use that value — unless a
-    /// later config states a different one.
+    /// `block` and `exact` need a line break around the value to recognize it,
+    /// which a value merged with `separator = "space"` or `"none"` does not
+    /// have; `contains` is the mode that still recognizes those.
+    /// Its trade-off is short values: a value that occurs as part of a longer
+    /// sentence somewhere in the string counts as present, and is dropped.
+    ///
+    /// This setting is "sticky": once a config in the merge chain states one,
+    /// subsequent merges for this field use it — unless a later config states
+    /// a different one.
     ///
     /// `"inherit"` (or omitting the field) means "no opinion" — inherit from
-    /// the previous merge, falling back to `true`.
+    /// the previous merge, falling back to `block`.
     #[setting(
         skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_dedup"
+        deserialize_with = "deserialize_string_dedup"
     )]
-    pub dedup: Option<bool>,
+    pub dedup: Option<StringDedup>,
 }
 
 impl AssignKeyValue for PartialMergedString {
@@ -225,14 +239,14 @@ impl AssignKeyValue for PartialMergedString {
             "strategy" => self.strategy = kv.try_some_from_str()?,
             "separator" => self.separator = kv.try_some_from_str()?,
             "discard_when_merged" => self.discard_when_merged = kv.try_some_bool()?,
-            // Tri-state. `inherit` states no opinion, which in a config file
-            // leaves an earlier layer's choice standing — so it is a no-op here
-            // too. Assignments mutate the accumulated partial in place, so
-            // writing `None` would instead erase what a lower layer set.
-            // Returning to the default takes an explicit `dedup=true`.
-            "dedup" => match kv.try_some_bool_or_from_str::<Dedup, _>()? {
-                Some(Dedup::Inherit) => {}
-                Some(opinion) => self.dedup = opinion.opinion(),
+            // `inherit` states no opinion, which in a config file leaves an
+            // earlier layer's choice standing — so it is a no-op here too.
+            // Assignments mutate the accumulated partial in place, so writing
+            // `None` would instead erase what a lower layer set. Returning to
+            // the default takes an explicit `dedup=block`.
+            "dedup" => match kv.try_some_bool_or_from_str::<StringDedupSetting, _>()? {
+                Some(StringDedupSetting::Inherit) => {}
+                Some(setting) => self.dedup = setting.opinion(),
                 None => self.dedup = None,
             },
             _ => return missing_key(&kv),
@@ -298,12 +312,125 @@ pub enum MergedStringStrategy {
     Replace,
 }
 
-/// Merge strategy for `VecWithStrategy`.
+/// How a merged string recognizes a value it has already merged.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, ConfigEnum)]
+#[serde(rename_all = "snake_case")]
+pub enum StringDedup {
+    /// Merge the value however often it is supplied.
+    Off,
+
+    /// Skip a value equal to the whole accumulated string.
+    Exact,
+
+    /// Skip a value that appears as a whole block of the accumulated string,
+    /// bounded on each side by a line break or by the string's start or end.
+    #[default]
+    Block,
+
+    /// Skip a value that appears anywhere in the accumulated string, including
+    /// inside a line.
+    Contains,
+}
+
+/// The forms a `dedup` setting can be written in.
+///
+/// [`StringDedupSetting::Inherit`] carries no opinion, leaving the merge to
+/// take one from the previous layer.
+/// Used to parse `dedup` from config files and from key-value assignments
+/// (`--cfg …dedup=contains`), which accept the same set of values.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum StringDedupSetting {
+    /// A stated mode, written by name or as one of the `true` / `false`
+    /// shorthands.
+    Mode(StringDedup),
+
+    /// `"inherit"`.
+    Inherit,
+}
+
+impl StringDedupSetting {
+    /// The opinion this form carries, if any.
+    pub(crate) const fn opinion(self) -> Option<StringDedup> {
+        match self {
+            Self::Mode(mode) => Some(mode),
+            Self::Inherit => None,
+        }
+    }
+}
+
+impl From<bool> for StringDedupSetting {
+    fn from(v: bool) -> Self {
+        Self::Mode(if v {
+            StringDedup::Block
+        } else {
+            StringDedup::Off
+        })
+    }
+}
+
+impl FromStr for StringDedupSetting {
+    type Err = BoxedError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "true" => Ok(Self::from(true)),
+            "false" => Ok(Self::from(false)),
+            "inherit" => Ok(Self::Inherit),
+            _ => s.parse().map(Self::Mode).map_err(|_| {
+                format!(
+                    "expected `off`, `exact`, `block`, `contains`, `true`, `false` or `inherit`, \
+                     got `{s}`"
+                )
+                .into()
+            }),
+        }
+    }
+}
+
+/// Deserialize a `dedup` field from a mode name, a boolean, or `"inherit"`.
+///
+/// `"inherit"` and an absent field both produce `None`, which the merge
+/// strategies read as "no opinion" and inherit from the previous layer.
+fn deserialize_string_dedup<'de, D>(deserializer: D) -> Result<Option<StringDedup>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct DedupVisitor;
+
+    impl Visitor<'_> for DedupVisitor {
+        type Value = Option<StringDedup>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("a dedup mode, a boolean, or \"inherit\"")
+        }
+
+        fn visit_bool<E: DeError>(self, v: bool) -> Result<Self::Value, E> {
+            Ok(StringDedupSetting::from(v).opinion())
+        }
+
+        fn visit_str<E: DeError>(self, v: &str) -> Result<Self::Value, E> {
+            v.parse::<StringDedupSetting>()
+                .map(StringDedupSetting::opinion)
+                .map_err(DeError::custom)
+        }
+
+        fn visit_none<E: DeError>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+
+        fn visit_unit<E: DeError>(self) -> Result<Self::Value, E> {
+            Ok(None)
+        }
+    }
+
+    deserializer.deserialize_any(DedupVisitor)
+}
+
+/// Separator placed between two merged string values.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize, ConfigEnum)]
 #[serde(rename_all = "snake_case")]
 pub enum MergedStringSeparator {
     /// No separator.
-    #[default]
     None,
 
     /// Single space separator.
@@ -313,13 +440,14 @@ pub enum MergedStringSeparator {
     Line,
 
     /// Paragraph separator.
+    #[default]
     Paragraph,
 }
 
 impl MergedStringSeparator {
     /// Returns the separator as a string.
     #[must_use]
-    pub const fn as_str(&self) -> &str {
+    pub const fn as_str(&self) -> &'static str {
         match self {
             Self::None => "",
             Self::Space => " ",

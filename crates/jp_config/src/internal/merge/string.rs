@@ -3,8 +3,11 @@
 #![expect(clippy::unnecessary_wraps, clippy::trivially_copy_pass_by_ref)]
 
 use schematic::MergeResult;
+use tracing::debug;
 
-use crate::types::string::{MergedStringStrategy, PartialMergeableString, PartialMergedString};
+use crate::types::string::{
+    MergedStringStrategy, PartialMergeableString, PartialMergedString, StringDedup,
+};
 
 /// Merge two ` PartialMergeableString  ` values.
 pub fn string_with_strategy(
@@ -39,21 +42,35 @@ pub fn string_with_strategy(
         }
     };
 
-    // Skip an append or prepend whose value is already present, unless a config
-    // explicitly opts out. Applying the same config source twice — through an
-    // `extends` diamond, or by re-supplying `--cfg` on a conversation that
-    // already merged it — must not duplicate its contribution.
-    let dedup_active = dedup.unwrap_or(true);
+    // Skip an append or prepend whose value is already present. Applying the
+    // same config source twice — through an `extends` diamond, or by
+    // re-supplying `--cfg` on a conversation that already merged it — must not
+    // duplicate its contribution.
+    let dedup_mode = dedup.unwrap_or_default();
 
-    // An unstated strategy means `append`, matching `MergedStringStrategy`'s
-    // default. Only the computation resolves it; the stored `strategy` keeps
-    // the unstated form so later merges can still express their own.
+    // An unstated strategy means `append` and an unstated separator means
+    // `paragraph`, matching the two types' defaults. Only the computation
+    // resolves them; the stored fields keep the unstated form so later merges
+    // can still express their own.
     let resolved_strategy = strategy.unwrap_or_default();
-
-    let sep = separator.as_ref().map_or("", |sep| sep.as_str());
+    let sep = separator.unwrap_or_default().as_str();
     let value = match (prev_value, next_value) {
         (_, n) if resolved_strategy == MergedStringStrategy::Replace => n,
-        (Some(p), Some(n)) if dedup_active && contains_block(&p, &n, sep) => Some(p),
+        // Nothing on one side means nothing to separate from.
+        (Some(p), Some(n)) if p.is_empty() => Some(n),
+        (Some(p), Some(n)) if n.is_empty() => Some(p),
+        (Some(p), Some(n)) if is_present(&p, &n, dedup_mode) => {
+            // The only path that drops a value the author wrote. Nothing
+            // downstream can tell it apart from a value never supplied, so a
+            // reader hunting a missing prompt section has this line and
+            // nothing else.
+            debug!(
+                mode = %dedup_mode,
+                value = %excerpt(&n),
+                "Skipping a value already present in the merged string."
+            );
+            Some(p)
+        }
         (Some(p), Some(n)) if resolved_strategy == MergedStringStrategy::Append => {
             Some(format!("{p}{sep}{n}"))
         }
@@ -82,7 +99,7 @@ pub fn string_with_strategy(
 }
 
 /// The explicit `dedup` opinion carried by a value, if any.
-const fn dedup_flag(v: &PartialMergeableString) -> Option<bool> {
+const fn dedup_flag(v: &PartialMergeableString) -> Option<StringDedup> {
     match v {
         PartialMergeableString::String(_) => None,
         PartialMergeableString::Merged(m) => m.dedup,
@@ -93,7 +110,10 @@ const fn dedup_flag(v: &PartialMergeableString) -> Option<bool> {
 /// a `replace` strategy so the flag survives the next merge.
 ///
 /// A `None` opinion is left implicit and the value's shape is unchanged.
-fn with_dedup_flag(v: PartialMergeableString, dedup: Option<bool>) -> PartialMergeableString {
+fn with_dedup_flag(
+    v: PartialMergeableString,
+    dedup: Option<StringDedup>,
+) -> PartialMergeableString {
     if dedup.is_none() {
         return v;
     }
@@ -115,29 +135,62 @@ fn with_dedup_flag(v: PartialMergeableString, dedup: Option<bool>) -> PartialMer
     }
 }
 
-/// Whether `needle` already appears in `haystack` as a whole
-/// `separator`-delimited block.
+/// A short single-line excerpt of `value`, for a log field.
 ///
-/// A match must start at the beginning of `haystack` or right after a
-/// separator, and end at the end of `haystack` or right before one.
+/// Merged strings run to whole prompt sections; the excerpt identifies which
+/// one was skipped rather than reproducing it.
+fn excerpt(value: &str) -> String {
+    /// Characters kept before the excerpt is cut short.
+    const MAX_CHARS: usize = 60;
+
+    let line = value.lines().next().unwrap_or_default();
+
+    match line.char_indices().nth(MAX_CHARS) {
+        Some((index, _)) => format!("{}\u{2026}", &line[..index]),
+        // The whole first line fits, but the value carries more after it.
+        None if line.len() < value.len() => format!("{line}\u{2026}"),
+        None => line.to_owned(),
+    }
+}
+
+/// Whether `value` is already merged into `accumulated`, under `mode`.
+fn is_present(accumulated: &str, value: &str, mode: StringDedup) -> bool {
+    match mode {
+        StringDedup::Off => false,
+        StringDedup::Exact => accumulated == value,
+        StringDedup::Block => contains_block(accumulated, value),
+        StringDedup::Contains => accumulated.contains(value),
+    }
+}
+
+/// Line-break characters, either of which bounds a block.
+///
+/// Both are listed so a value carrying CRLF endings is bounded on the side that
+/// ends with `\r` as well as the side that starts with `\n`.
+const BLOCK_BOUNDARY: [char; 2] = ['\n', '\r'];
+
+/// Whether `needle` already appears in `haystack` as a whole block.
+///
+/// A match must start at the beginning of `haystack` or right after a line
+/// break, and end at the end of `haystack` or right before one.
 /// Anchoring on both sides keeps a value that merely occurs inside a larger
 /// block from counting as present.
 ///
-/// An empty separator leaves no boundaries to anchor on, so only an exact match
-/// of the whole string counts.
-fn contains_block(haystack: &str, needle: &str, separator: &str) -> bool {
-    if needle.is_empty() || haystack == needle {
+/// The anchor is the line break rather than the separator the incoming value
+/// carries, because `haystack` is assembled from contributions that each chose
+/// their own separator: a block appended with `paragraph` can be followed by
+/// one appended with `line`, and both boundaries have to read as boundaries.
+/// A value merged with `space` or `none` leaves no line break to anchor on, so
+/// only a match of the whole string counts.
+fn contains_block(haystack: &str, needle: &str) -> bool {
+    if haystack == needle {
         return true;
-    }
-
-    if separator.is_empty() {
-        return false;
     }
 
     haystack.match_indices(needle).any(|(index, matched)| {
         let end = index + matched.len();
-        let starts_block = index == 0 || haystack[..index].ends_with(separator);
-        let ends_block = end == haystack.len() || haystack[end..].starts_with(separator);
+        let starts_block = index == 0 || haystack[..index].ends_with(BLOCK_BOUNDARY);
+        let ends_block = end == haystack.len() || haystack[end..].starts_with(BLOCK_BOUNDARY);
 
         starts_block && ends_block
     })

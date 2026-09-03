@@ -202,10 +202,23 @@ fn merge_string_replace() {
 
 #[test]
 fn merge_string_append() {
+    // An unstated separator is a paragraph one.
     let mut base = JsonValue(json!("hello"));
     base.merge(
         &(),
-        JsonValue(json!({"value": " world", "strategy": "append"})),
+        JsonValue(json!({"value": "world", "strategy": "append"})),
+    )
+    .unwrap();
+    assert_eq!(base.0, json!("hello\n\nworld"));
+}
+
+#[test]
+fn merge_string_append_without_a_separator() {
+    // Joining two fragments of one value takes an explicit `none`.
+    let mut base = JsonValue(json!("hello"));
+    base.merge(
+        &(),
+        JsonValue(json!({"value": " world", "strategy": "append", "separator": "none"})),
     )
     .unwrap();
     assert_eq!(base.0, json!("hello world"));
@@ -216,10 +229,10 @@ fn merge_string_prepend() {
     let mut base = JsonValue(json!("world"));
     base.merge(
         &(),
-        JsonValue(json!({"value": "hello ", "strategy": "prepend"})),
+        JsonValue(json!({"value": "hello", "strategy": "prepend"})),
     )
     .unwrap();
-    assert_eq!(base.0, json!("hello world"));
+    assert_eq!(base.0, json!("hello\n\nworld"));
 }
 
 #[test]
