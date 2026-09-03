@@ -526,6 +526,20 @@ fn map_model(model: types::Model) -> ModelDetails {
             prefill: None,
             features: vec![],
         },
+        "gemini-3.8-flash" => ModelDetails {
+            id,
+            display_name,
+            context_window,
+            max_output_tokens,
+            reasoning: Some(
+                ReasoningDetails::leveled(false, true, true, true, false, false).always_on(),
+            ),
+            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2026, 3, 1).unwrap()),
+            deprecated: Some(ModelDeprecation::Active),
+            structured_output: Some(true),
+            prefill: None,
+            features: vec![],
+        },
         // Closed to new users rather than retired: `generateContent` answers 404
         // "no longer available to new users" for a key that never had access,
         // while existing users are served until the announced shutdown. Note that
