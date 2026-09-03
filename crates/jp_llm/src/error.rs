@@ -596,7 +596,7 @@ pub(crate) fn looks_like_transient_network_error(text: &str) -> bool {
 /// - `"retry-after: 30"`
 /// - `"wait 30 seconds"`
 /// - `"try again in 5s"` / `"try again in 5.5s"`
-/// - `"retryDelay": "30s"` (Google Gemini JSON body)
+/// - `"retryDelay": "34.4s"` (Google Gemini JSON body)
 pub(crate) fn extract_retry_from_text(text: &str) -> Option<Duration> {
     let lower = text.to_ascii_lowercase();
 
@@ -638,16 +638,14 @@ pub(crate) fn extract_retry_from_text(text: &str) -> Option<Duration> {
         }
     }
 
-    // "retryDelay": "30s" (Gemini JSON body)
-    if let Some(pos) = lower.find("retrydelay") {
-        let after = &lower[pos..];
-        if let Some(d) = after
+    // "retryDelay": "34.4s" (Gemini JSON body)
+    if let Some(pos) = lower.find("retrydelay")
+        && let Some(duration) = lower[pos..]
             .split('"')
-            .find(|s| s.ends_with('s') && s[..s.len() - 1].chars().all(|c| c.is_ascii_digit()))
-            .and_then(parse_human_duration)
-        {
-            return Some(Duration::from_secs(d));
-        }
+            .filter(|token| token.ends_with('s'))
+            .find_map(parse_retry_delay)
+    {
+        return Some(duration);
     }
 
     None
@@ -788,6 +786,15 @@ fn parse_human_duration(s: &str) -> Option<u64> {
     }
 
     if total > 0 { Some(total) } else { None }
+}
+
+/// Parse a `google.protobuf.Duration` JSON value into a delay, rounding up to
+/// whole seconds.
+///
+/// The wire format is decimal seconds with a trailing `s` and up to nine
+/// fractional digits: `"7s"`, `"34.4s"`, `"45.837906927s"`.
+pub(crate) fn parse_retry_delay(value: &str) -> Option<Duration> {
+    parse_secs_token(value).map(Duration::from_secs)
 }
 
 /// Parse a token like `"30"`, `"30s"`, `"5.5s"`, `"2.398s."` into whole
