@@ -96,7 +96,7 @@ use std::sync::{
 use jp_conversation::{Conversation, ConversationId, ConversationStream};
 use jp_storage::backend::{ConversationLockGuard, PersistBackend, Projection};
 use parking_lot::{Mutex, RwLock, RwLockReadGuard};
-use tracing::{info, warn};
+use tracing::{debug, warn};
 
 use crate::{error::Error, handle::ConversationHandle};
 
@@ -488,7 +488,7 @@ impl ConversationMut {
         // index reload treat its absence as somebody else's deletion.
         self.written.store(true, Ordering::Relaxed);
 
-        info!(id = %self.id, "Flushed conversation to disk.");
+        debug!(id = %self.id, "Flushed conversation to disk.");
         Ok(())
     }
 
