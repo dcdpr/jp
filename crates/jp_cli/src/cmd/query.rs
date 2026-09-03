@@ -135,7 +135,7 @@ use crate::{
     editor,
     error::{Error, Result},
     output::print_json,
-    parser::AttachmentUrlOrPath,
+    parser::{AttachmentUrlOrPath, split_list},
     render::TurnView,
     signals::SignalRouter,
     timer::spawn_line_timer,
@@ -1630,23 +1630,29 @@ impl clap::FromArgMatches for ToolDirectives {
 
         let mut indexed = vec![];
         for (val, idx) in tool_values.into_iter().zip(tool_indices) {
-            let directive = if val.is_empty() {
-                ToolDirective::EnableAll
-            } else {
-                ToolDirective::Enable(val)
-            };
-            indexed.push((idx, directive));
+            if val.is_empty() {
+                indexed.push((idx, ToolDirective::EnableAll));
+                continue;
+            }
+
+            for name in split_list(&val, "tool name")? {
+                indexed.push((idx, ToolDirective::Enable(name)));
+            }
         }
 
         for (val, idx) in no_tool_values.into_iter().zip(no_tool_indices) {
-            let directive = if val.is_empty() {
-                ToolDirective::DisableAll
-            } else {
-                ToolDirective::Disable(val)
-            };
-            indexed.push((idx, directive));
+            if val.is_empty() {
+                indexed.push((idx, ToolDirective::DisableAll));
+                continue;
+            }
+
+            for name in split_list(&val, "tool name")? {
+                indexed.push((idx, ToolDirective::Disable(name)));
+            }
         }
 
+        // A stable sort, so the names of a single flag keep the order they were
+        // written in: they all carry that flag's index.
         indexed.sort_by_key(|(idx, _)| *idx);
         Ok(Self(indexed.into_iter().map(|(_, d)| d).collect()))
     }
@@ -1673,13 +1679,17 @@ impl clap::Args for ToolDirectives {
                      name, it is enabled for this query and every later one on the conversation; \
                      use `--no-tool` to turn it back off.\n\nTo run a disabled tool just once, \
                      use `--tool-use NAME` instead.\n\nIf no arguments are provided, all \
-                     configured tools will be enabled.\n\nYou can provide this flag multiple \
-                     times to enable multiple tools. Flags are evaluated left-to-right, so \
-                     `--no-tools --tool=write` first disables everything, then re-enables only \
-                     'write'.",
+                     configured tools will be enabled.\n\nName several tools at once by \
+                     separating them with commas (`--tool=read,write`), or by providing this flag \
+                     multiple times. Flags are evaluated left-to-right, so `--no-tools \
+                     --tool=write` first disables everything, then re-enables only 'write'.",
                 )
                 .action(ArgAction::Append)
                 .num_args(0..=1)
+                // The values are split on commas by hand rather than with
+                // `value_delimiter(',')`, which splits before this empty string
+                // is read: an empty segment in `--tool=read,` would then be
+                // indistinguishable from a bare `--tool` and enable every tool.
                 .default_missing_value(""),
         )
         .arg(
@@ -1690,11 +1700,11 @@ impl clap::Args for ToolDirectives {
                 .help("Disable tool(s)")
                 .long_help(
                     "Disable tool(s).\n\nIf provided without a value, all enabled tools will be \
-                     disabled, otherwise pass the argument multiple times to disable one or more \
-                     tools.\n\nThe change applies to this query and every later one on the \
-                     conversation; use `--tool` to turn tools back on. To suppress tools for a \
-                     single query, use `--no-tool-use`.\n\nFlags are evaluated left-to-right \
-                     together with `--tool`.",
+                     disabled, otherwise name the tools to disable, separated by commas \
+                     (`--no-tool=read,write`) or across repeated flags.\n\nThe change applies to \
+                     this query and every later one on the conversation; use `--tool` to turn \
+                     tools back on. To suppress tools for a single query, use \
+                     `--no-tool-use`.\n\nFlags are evaluated left-to-right together with `--tool`.",
                 )
                 .action(ArgAction::Append)
                 .num_args(0..=1)

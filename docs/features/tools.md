@@ -308,7 +308,7 @@ dropped.
 The reason is logged at warning level, which the terminal does not show by
 default, so run with `-v` when a tool you expect is missing.
 
-Naming that tool with `--tool` is the exception.
+Naming that tool with `--tool-use` is the exception.
 Asking for a tool explicitly and receiving a request without it is worse than an
 error, so JP fails the query instead.
 

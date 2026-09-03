@@ -139,7 +139,7 @@ user in the query.
 
 However, most model providers have API capabilities to explicitly guide the use
 of tools by the model.
-You can leverage this feature by using the `--tool` flag.
+You can reach this through the `--tool-use` flag.
 
 :::info Best Effort
 If a model provider does not support explicit tool usage instructions via their
@@ -148,15 +148,38 @@ explicit instructions into the prompt.
 
 :::
 
-### Disable Tool Use
+### Choose Which Tools Are Available
 
-You can disable the use of tools by using the `--tool=false` flag.
-Alternatively, use the `--no-tool` flag, or the short-hand `-T` flag.
+`--tool` (short-hand `-t`) enables tools, `--no-tool` (short-hand `-T`) disables
+them.
+Name several at once by separating them with commas, or repeat the flag.
+Tool names therefore cannot contain a comma, and JP rejects a configuration that
+gives one to a tool.
 
 ```sh
-jp query --tool=false "How many hours are there in a day?"
-jp query --no-tool "How many days are there in a week?"
-jp query -T "How many weeks are there in a year?"
+jp query -t cargo_check,cargo_test "Does this compile?"
+jp query --no-tool=fs_modify_file "Review this function."
+```
+
+Both flags apply to the whole conversation: the change carries into every later
+query until you change it back.
+Without a value they cover every configured tool, and they are evaluated left to
+right, so this leaves `fs_read_file` as the only tool for the rest of the
+conversation:
+
+```sh
+jp query -T -t fs_read_file "What does this module do?"
+```
+
+### Disable Tool Use
+
+You can disable the use of tools for a single query with the `--no-tool-use`
+flag, or the short-hand `-U` flag.
+The next query has its tools back; use `--no-tool` to turn them off for good.
+
+```sh
+jp query --no-tool-use "How many hours are there in a day?"
+jp query -U "How many days are there in a week?"
 ```
 
 :::info Guaranteed Support
@@ -168,22 +191,26 @@ API, this flag will still work.
 
 ### Require Any Tool
 
-You can require the use of any tool by using the `--tool=true` flag (or just
-`--tool`).
+You can require the use of any tool by using the `--tool-use=true` flag.
 This means that the model will be forced to use a tool, but its still free to
 choose which one, if more than one is available.
 
 ```sh
-jp query --tool=true "At what time does the sun rise tomorrow?"
-jp query --tool "When can I see the northern lights?"
+jp query --tool-use=true "At what time does the sun rise tomorrow?"
 ```
+
+Write the value with `=`, or put a bare `--tool-use` after your query.
+A bare flag before the query reads the first word that follows it as a tool
+name.
 
 ### Force Specific Tool Use
 
-You can force the use of a specific tool by using the `--tool=<name>` flag.
+You can force the use of a specific tool by using the `--tool-use=<name>` flag.
+The named tool runs even if it is disabled, and the choice applies to this query
+only.
 
 ```sh
-jp query --tool=cargo_test "Any idea what causes this test to fail?"
+jp query --tool-use=cargo_test "Any idea what causes this test to fail?"
 ```
 
 ## Structured Output

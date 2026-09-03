@@ -471,6 +471,39 @@ fn assign_a_bare_label() {
     }
 }
 
+/// An empty item between two commas is a typo, not a value.
+///
+/// The whole value being empty names nothing, which is how a list is cleared;
+/// `a,,b` asks for a value that isn't there, so it is refused rather than
+/// quietly producing two.
+#[test]
+fn assign_rejects_an_empty_item_in_a_list() {
+    use crate::assignment::KvAssignment;
+
+    let mut partial = PartialConversationConfig::default();
+
+    for value in ["jp_config,,jp_llm", "jp_config,", ",jp_llm"] {
+        let kv = KvAssignment::try_from_cli("labels.crate", value).unwrap();
+        let error = partial.assign(kv).unwrap_err();
+
+        // The CLI prints the whole cause chain, and the reason lives in the
+        // innermost cause.
+        let chain: Vec<_> =
+            std::iter::successors(Some(&*error as &dyn std::error::Error), |error| {
+                error.source()
+            })
+            .map(ToString::to_string)
+            .collect();
+
+        assert!(
+            chain
+                .iter()
+                .any(|cause| cause == &format!("empty value in '{value}'")),
+            "unexpected causes for {value:?}: {chain:?}"
+        );
+    }
+}
+
 /// A rule declared in a config file is the base an assignment lands on, so a
 /// merge adds to the value it already names rather than dropping it.
 #[test]
