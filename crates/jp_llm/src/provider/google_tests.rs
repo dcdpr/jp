@@ -1028,16 +1028,30 @@ mod transform_schema {
 }
 
 mod stream_error_classification {
+    use std::time::Duration;
+
     use gemini_client_rs::GeminiError;
-    use serde_json::json;
+    use serde_json::{Value, json};
 
     use crate::error::{StreamError, StreamErrorKind};
 
-    /// A Gemini API error carrying `status` and an error message.
+    /// A Gemini API error in the shape the client builds from a failed
+    /// response: the HTTP status alongside the response body, which carries its
+    /// own copy of the status as a `google.rpc.Status`.
     fn api_error(status: u64, message: &str) -> GeminiError {
         GeminiError::Api(json!({
             "status": status,
             "message": {"error": {"code": status, "message": message}},
+        }))
+    }
+
+    /// A Gemini API error whose `google.rpc.Status` carries `details`.
+    fn api_error_with_details(status: u64, message: &str, details: &Value) -> GeminiError {
+        GeminiError::Api(json!({
+            "status": status,
+            "message": {
+                "error": {"code": status, "message": message, "details": details},
+            },
         }))
     }
 
@@ -1069,5 +1083,144 @@ mod stream_error_classification {
 
         assert_eq!(error.kind, StreamErrorKind::RateLimit);
         assert!(error.is_retryable());
+    }
+
+    #[test]
+    fn a_503_service_unavailable_is_retryable() {
+        let error = StreamError::from(api_error(
+            503,
+            "The model is overloaded. Please try again later.",
+        ));
+
+        assert_eq!(error.kind, StreamErrorKind::Transient);
+        assert!(error.is_retryable());
+    }
+
+    #[test]
+    fn a_503_with_a_retry_delay_preserves_the_duration() {
+        let error = StreamError::from(api_error_with_details(
+            503,
+            "The service is currently unavailable.",
+            &json!([{
+                "@type": "type.googleapis.com/google.rpc.RetryInfo",
+                "retryDelay": "25s"
+            }]),
+        ));
+
+        assert_eq!(error.kind, StreamErrorKind::Transient);
+        assert!(error.is_retryable());
+        assert_eq!(error.retry_after, Some(Duration::from_secs(25)));
+    }
+
+    #[test]
+    fn a_429_with_resource_exhausted_stays_rate_limit_and_retryable() {
+        let error = StreamError::from(api_error(
+            429,
+            "Resource has been exhausted (e.g. check quota).",
+        ));
+
+        assert_eq!(error.kind, StreamErrorKind::RateLimit);
+        assert!(error.is_retryable());
+    }
+
+    /// Gemini reports `retryDelay` as a `google.protobuf.Duration`, which in
+    /// practice carries nine fractional digits.
+    /// Whole seconds are the exception, so a parser that only accepts them
+    /// reads no delay at all.
+    #[test]
+    fn a_429_with_a_fractional_retry_delay_rounds_up() {
+        let error = StreamError::from(api_error_with_details(
+            429,
+            "Resource has been exhausted. Please retry in 45.837906927s.",
+            &json!([{
+                "@type": "type.googleapis.com/google.rpc.RetryInfo",
+                "retryDelay": "45.837906927s"
+            }]),
+        ));
+
+        assert_eq!(error.kind, StreamErrorKind::RateLimit);
+        assert!(error.is_retryable());
+        assert_eq!(error.retry_after, Some(Duration::from_secs(46)));
+    }
+
+    #[test]
+    fn a_429_with_a_whole_second_retry_delay_extracts_duration() {
+        let error = StreamError::from(api_error_with_details(
+            429,
+            "Resource has been exhausted.",
+            &json!([{
+                "@type": "type.googleapis.com/google.rpc.RetryInfo",
+                "retryDelay": "30s"
+            }]),
+        ));
+
+        assert_eq!(error.kind, StreamErrorKind::RateLimit);
+        assert!(error.is_retryable());
+        assert_eq!(error.retry_after, Some(Duration::from_secs(30)));
+    }
+
+    /// A per-minute limit clears on its own, so the reported delay is worth
+    /// waiting out.
+    #[test]
+    fn a_429_violating_a_per_minute_quota_is_a_rate_limit() {
+        let error = StreamError::from(api_error_with_details(
+            429,
+            "You exceeded your current quota, please check your plan and billing details.",
+            &json!([
+                {
+                    "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+                    "violations": [{
+                        "quotaId": "GenerateRequestsPerMinutePerProjectPerModel-FreeTier"
+                    }]
+                },
+                {
+                    "@type": "type.googleapis.com/google.rpc.RetryInfo",
+                    "retryDelay": "34.4s"
+                }
+            ]),
+        ));
+
+        assert_eq!(error.kind, StreamErrorKind::RateLimit);
+        assert!(error.is_retryable());
+        assert_eq!(error.retry_after, Some(Duration::from_secs(35)));
+    }
+
+    /// A daily allowance arrives on the same status code as a per-minute limit,
+    /// but retrying cannot clear it, and the delay Gemini reports alongside it
+    /// is not the time until the allowance resets.
+    #[test]
+    fn a_429_violating_a_daily_quota_is_fatal() {
+        let error = StreamError::from(api_error_with_details(
+            429,
+            "You exceeded your current quota, please check your plan and billing details.",
+            &json!([
+                {
+                    "@type": "type.googleapis.com/google.rpc.QuotaFailure",
+                    "violations": [{
+                        "quotaId": "GenerateRequestsPerDayPerProjectPerModel-FreeTier",
+                        "quotaValue": "50"
+                    }]
+                },
+                {
+                    "@type": "type.googleapis.com/google.rpc.RetryInfo",
+                    "retryDelay": "51.9s"
+                }
+            ]),
+        ));
+
+        assert_eq!(error.kind, StreamErrorKind::InsufficientQuota);
+        assert!(!error.is_retryable());
+        assert_eq!(error.retry_after, None);
+    }
+
+    #[test]
+    fn non_429_quota_exhaustion_is_fatal() {
+        let error = StreamError::from(api_error(
+            403,
+            "Quota exceeded for quota metric 'queries' and limit 'QUOTA_FOR_INSTANCE'.",
+        ));
+
+        assert_eq!(error.kind, StreamErrorKind::InsufficientQuota);
+        assert!(!error.is_retryable());
     }
 }

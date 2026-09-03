@@ -1,4 +1,4 @@
-use std::{collections::HashMap, env};
+use std::{collections::HashMap, env, time::Duration};
 
 use async_stream::stream;
 use async_trait::async_trait;
@@ -27,7 +27,10 @@ use tracing::{debug, trace, warn};
 use super::{EventStream, Provider, trace_to_tmpfile};
 use crate::{
     StreamErrorKind,
-    error::{Error, Result, StreamError, looks_like_context_window_error, looks_like_quota_error},
+    error::{
+        Error, Result, StreamError, extract_retry_from_text, looks_like_context_window_error,
+        looks_like_quota_error, parse_retry_delay,
+    },
     event::{Event, EventMatcher, EventPatch, FinishReason, PatchAction},
     model::{ModelDeprecation, ModelDetails, ReasoningDetails, ReasoningMode},
     query::ChatQuery,
@@ -98,7 +101,7 @@ fn call(
         let stream = client
             .stream_content(&model, &request)
             .await
-            .map_err(|e| StreamError::other(e.to_string()))?
+            .map_err(StreamError::from)?
             .map_err(StreamError::from);
 
         tokio::pin!(stream);
@@ -1131,51 +1134,114 @@ fn convert_events(events: ConversationStream) -> Vec<types::Content> {
         })
 }
 
+/// The `google.rpc.Status` details of a failed API call, empty if the response
+/// carried none.
+///
+/// `GeminiError::Api` wraps every failed response as `{"status": <http status>,
+/// "message": <body>, "context": …}`, so Google's error payload sits under
+/// `/message/error`.
+fn error_details(value: &Value) -> &[Value] {
+    value
+        .pointer("/message/error/details")
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+}
+
+/// The delay Gemini asks the caller to wait, read from the
+/// `google.rpc.RetryInfo` entry of an error's details.
+///
+/// Gemini answers 429 without a `Retry-After` header, so the details array is
+/// the only place the delay is reported.
+fn retry_info_delay(details: &[Value]) -> Option<Duration> {
+    details
+        .iter()
+        .filter_map(|detail| detail.get("retryDelay").and_then(Value::as_str))
+        .find_map(parse_retry_delay)
+}
+
+/// Whether the violated quota in a `google.rpc.QuotaFailure` entry is a daily
+/// allowance.
+///
+/// Gemini reports both a per-minute rate limit and an exhausted daily allowance
+/// as a 429 `RESOURCE_EXHAUSTED`.
+/// The violated `quotaId` is what separates them:
+/// `GenerateRequestsPerDayPerProjectPerModel-FreeTier` against
+/// `GenerateRequestsPerMinutePerProjectPerModel-FreeTier`.
+fn violates_daily_quota(details: &[Value]) -> bool {
+    details
+        .iter()
+        .filter_map(|detail| detail.get("violations").and_then(Value::as_array))
+        .flatten()
+        .filter_map(|violation| violation.get("quotaId").and_then(Value::as_str))
+        .any(|quota_id| quota_id.to_ascii_lowercase().contains("perday"))
+}
+
+/// Build the fatal error for an API quota that no retry can clear.
+fn insufficient_quota(msg: &str, source: GeminiError) -> StreamError {
+    StreamError::new(
+        StreamErrorKind::InsufficientQuota,
+        format!(
+            "Insufficient API quota. Check your plan and billing details at \
+             https://console.cloud.google.com/billing. ({msg})"
+        ),
+    )
+    .with_source(source)
+}
+
 impl From<GeminiError> for StreamError {
     fn from(err: GeminiError) -> Self {
         match err {
             GeminiError::Http(error) => Self::from(error),
-            // EventSource errors that reach here (rather than the stream
-            // `.then()` path) don't carry an unread response body, so we
-            // fall back to the status-code-only classification.
+            GeminiError::EventSource(reqwest_eventsource::Error::Transport(error)) => {
+                Self::from(error)
+            }
+            GeminiError::EventSource(reqwest_eventsource::Error::StreamEnded) => {
+                StreamError::transient("stream ended unexpectedly")
+            }
             GeminiError::EventSource(error) => {
                 StreamError::other(error.to_string()).with_source(error)
             }
             GeminiError::Api(ref value) => {
                 let msg = err.to_string();
+                let status = value.get("status").and_then(Value::as_u64);
+                let details = error_details(value);
+                let retry_after =
+                    retry_info_delay(details).or_else(|| extract_retry_from_text(&msg));
 
-                // Check for quota/billing exhaustion first.
-                if looks_like_quota_error(&msg) {
-                    return StreamError::new(
-                        StreamErrorKind::InsufficientQuota,
-                        format!(
-                            "Insufficient API quota. Check your plan and billing details \
-                             at https://console.cloud.google.com/billing. ({msg})"
-                        ),
-                    )
-                    .with_source(err);
+                if status == Some(429) {
+                    // An exhausted daily allowance arrives as a rate limit, but no
+                    // amount of backoff clears it, and the accompanying retry delay
+                    // is not the time until the allowance resets.
+                    if violates_daily_quota(details) {
+                        return insufficient_quota(&msg, err);
+                    }
+
+                    return StreamError::rate_limit(retry_after).with_source(err);
                 }
 
-                // Classify by HTTP status code if present in the API error.
-                let status = value
-                    .get("status")
-                    .or_else(|| value.pointer("/error/code"))
-                    .and_then(Value::as_u64);
+                // A 5xx is the server failing to serve a request it accepted, so
+                // the same request can succeed on the next attempt. Flex-tier
+                // traffic is shed this way when capacity is constrained.
+                if matches!(status, Some(500 | 502 | 503 | 504)) {
+                    let error = StreamError::transient(msg).with_source(err);
+                    return match retry_after {
+                        Some(duration) => error.with_retry_after(duration),
+                        None => error,
+                    };
+                }
 
-                // An oversized prompt is the same size on the next attempt, so
-                // it is classified before the status codes below. A 429 is
-                // exempt: it is an authoritative rate-limit signal, and
-                // token-per-minute limits are phrased close enough to a window
-                // overflow that the text check would misread them as fatal.
-                if status != Some(429) && looks_like_context_window_error(&msg) {
+                if looks_like_quota_error(&msg) {
+                    return insufficient_quota(&msg, err);
+                }
+
+                // An oversized prompt is the same size on the next attempt, so it
+                // is fatal rather than retryable.
+                if looks_like_context_window_error(&msg) {
                     return StreamError::context_window_exceeded(msg).with_source(err);
                 }
 
-                match status {
-                    Some(429) => StreamError::rate_limit(None).with_source(err),
-                    Some(500 | 502 | 503 | 504) => StreamError::transient(msg).with_source(err),
-                    _ => StreamError::other(msg).with_source(err),
-                }
+                StreamError::other(msg).with_source(err)
             }
             GeminiError::Json { data, error } => StreamError::other(data).with_source(error),
             GeminiError::FunctionExecution(msg) => StreamError::other(msg),
@@ -1186,7 +1252,7 @@ impl From<GeminiError> for StreamError {
 impl From<GeminiError> for Error {
     fn from(error: GeminiError) -> Self {
         match &error {
-            GeminiError::Api(api) if api.get("status").is_some_and(|v| v.as_u64() == Some(404)) => {
+            GeminiError::Api(api) if api.get("status").and_then(Value::as_u64) == Some(404) => {
                 if let Some(model) = api.pointer("/message/error/message").and_then(|v| {
                     v.as_str().and_then(|s| {
                         s.contains("Call ListModels").then(|| {

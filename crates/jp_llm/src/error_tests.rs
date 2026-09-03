@@ -320,6 +320,30 @@ fn text_gemini_retry_delay() {
 }
 
 #[test]
+fn text_gemini_fractional_retry_delay() {
+    let text = r#"{"error":{"details":[{"retryDelay":"45.837906927s"}]}}"#;
+    assert_eq!(extract_retry_from_text(text), Some(Duration::from_secs(46)));
+}
+
+#[test]
+fn retry_delay_accepts_the_protobuf_duration_format() {
+    assert_eq!(parse_retry_delay("7s"), Some(Duration::from_secs(7)));
+    assert_eq!(parse_retry_delay("34.4s"), Some(Duration::from_secs(35)));
+    assert_eq!(parse_retry_delay("3.500000s"), Some(Duration::from_secs(4)));
+    assert_eq!(
+        parse_retry_delay("45.837906927s"),
+        Some(Duration::from_secs(46))
+    );
+
+    // Sub-second delays round up rather than to a no-op wait.
+    assert_eq!(parse_retry_delay("0.25s"), Some(Duration::from_secs(1)));
+
+    assert_eq!(parse_retry_delay("0s"), None);
+    assert_eq!(parse_retry_delay("soon"), None);
+    assert_eq!(parse_retry_delay(""), None);
+}
+
+#[test]
 fn text_no_pattern_returns_none() {
     assert_eq!(extract_retry_from_text("Something went wrong"), None);
     assert_eq!(extract_retry_from_text(""), None);
