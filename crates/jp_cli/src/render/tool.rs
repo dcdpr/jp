@@ -265,15 +265,22 @@ impl ToolRenderer {
     /// On success, returns `Rendered { content }` where `content` is the
     /// custom-formatted output (if any) so the caller can persist it for
     /// replay.
+    ///
+    /// `name` is what the assistant called and what the header shows.
+    /// `invoked_name` is what the tool's implementation is called, which a
+    /// `source` override can make different, and is what a custom formatter
+    /// receives.
     pub async fn render_approved(
         &self,
         name: &str,
+        invoked_name: &str,
         arguments: &Map<String, Value>,
         style: &ParametersStyle,
     ) -> RenderOutcome {
         if let ParametersStyle::Custom(cmd_config) = style {
             let cmd = cmd_config.clone().command();
-            self.render_custom_tool_call(name, arguments, cmd).await
+            self.render_custom_tool_call(name, invoked_name, arguments, cmd)
+                .await
         } else {
             self.render_tool_call(name, arguments, style);
             RenderOutcome::Rendered { content: None }
@@ -290,10 +297,11 @@ impl ToolRenderer {
     async fn render_custom_tool_call(
         &self,
         name: &str,
+        invoked_name: &str,
         arguments: &Map<String, Value>,
         cmd: CommandConfig,
     ) -> RenderOutcome {
-        match format_args_custom(name, arguments, cmd, &self.root, &self.invocation).await {
+        match format_args_custom(invoked_name, arguments, cmd, &self.root, &self.invocation).await {
             Ok(content) if !content.is_empty() => {
                 let styled_name = name.yellow().bold();
                 self.write_chrome(self.current_region.as_ref(), |w| {
@@ -802,6 +810,9 @@ fn format_args_json(arguments: Map<String, Value>) -> String {
 }
 
 /// Runs a custom arguments formatter command and returns the content.
+///
+/// `tool_name` is the name the tool is invoked under, which is the name its own
+/// implementation answers to rather than the key the assistant called.
 async fn format_args_custom(
     tool_name: &str,
     arguments: &Map<String, Value>,

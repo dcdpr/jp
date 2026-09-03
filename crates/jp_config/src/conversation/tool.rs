@@ -838,11 +838,9 @@ pub enum ToolSource {
         ///
         /// If not specified, it is inferred from the key in the
         /// [`super::ConversationConfig::tools`] map.
-        // TODO: What's the reason for specifying this for local tools? It seems
-        // to me that there is only one way to define the tool name, in
-        // `ToolsConfig`, so it should be inferred from the key? For `mcp` tools
-        // it makes sense, if you want to rename the tool from the server's
-        // original name.
+        /// Setting it renames the tool for the assistant while the command
+        /// still receives the name its own dispatch expects, so a binary
+        /// serving several tools can be reached under shorter names.
         tool: Option<String>,
     },
 

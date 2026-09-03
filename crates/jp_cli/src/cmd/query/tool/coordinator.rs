@@ -88,7 +88,8 @@ use indexmap::IndexMap;
 use inquire::error::InquireError;
 use jp_config::{
     conversation::tool::{
-        FormatMode, QuestionTarget, ResultMode, RunMode, ToolsConfig, style::ParametersStyle,
+        FormatMode, QuestionTarget, ResultMode, RunMode, ToolSource, ToolsConfig,
+        style::ParametersStyle,
     },
     interrupt::ToolInterruptConfig,
 };
@@ -406,6 +407,24 @@ impl ToolCoordinator {
             .unwrap_or_default()
     }
 
+    /// Return the name the tool is invoked under.
+    ///
+    /// A tool's key in `conversation.tools` is the name the assistant calls.
+    /// Its `source` may name a differently named implementation
+    /// (`local.fs_list_files`, `mcp.<server>.<tool>`), and that is the name the
+    /// tool is actually invoked with.
+    /// Falls back to `tool_name` when the source names nothing.
+    pub fn invoked_name(&self, tool_name: &str) -> String {
+        self.tools_config
+            .get(tool_name)
+            .and_then(|config| match config.source() {
+                ToolSource::Builtin { tool }
+                | ToolSource::Local { tool }
+                | ToolSource::Mcp { tool, .. } => tool.clone(),
+            })
+            .unwrap_or_else(|| tool_name.to_owned())
+    }
+
     /// Return the format mode for a tool, falling back to `Ask` if the tool is
     /// unknown (untrusted-by-default).
     pub fn format_mode(&self, tool_name: &str) -> FormatMode {
@@ -713,7 +732,7 @@ impl ToolCoordinator {
 
         let style = self.parameter_style(tool_name);
         tool_renderer
-            .render_approved(tool_name, arguments, &style)
+            .render_approved(tool_name, &self.invoked_name(tool_name), arguments, &style)
             .await
     }
 
