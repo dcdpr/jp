@@ -28,6 +28,25 @@ fn test_provider_config_openai() {
 }
 
 #[test]
+fn test_provider_config_google_service_tier() {
+    use crate::providers::llm::google::ServiceTier;
+
+    let mut p = PartialLlmProviderConfig::default();
+
+    let kv = KvAssignment::try_from_cli("google.service_tier", "flex").unwrap();
+    p.assign(kv).unwrap();
+    assert_eq!(p.google.service_tier, Some(ServiceTier::Flex));
+
+    let kv = KvAssignment::try_from_cli("google.service_tier", "priority").unwrap();
+    p.assign(kv).unwrap();
+    assert_eq!(p.google.service_tier, Some(ServiceTier::Priority));
+
+    let kv = KvAssignment::try_from_cli("google.service_tier", "standard").unwrap();
+    p.assign(kv).unwrap();
+    assert_eq!(p.google.service_tier, Some(ServiceTier::Standard));
+}
+
+#[test]
 fn assign_alias_full_id_string() {
     let mut p = PartialLlmProviderConfig::default();
 

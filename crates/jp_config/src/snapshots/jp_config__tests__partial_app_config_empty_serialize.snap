@@ -226,6 +226,7 @@ PartialAppConfig {
             google: PartialGoogleConfig {
                 api_key_env: None,
                 base_url: None,
+                service_tier: None,
             },
             llamacpp: PartialLlamacppConfig {
                 base_url: None,
