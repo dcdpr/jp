@@ -441,10 +441,15 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Value, bool
         system_parts.push(xml);
     }
 
-    let mut messages: Vec<Value> = system_parts
-        .into_iter()
-        .map(|content| json!({ "role": "system", "content": content }))
-        .collect();
+    // Cerebras applies each model's own chat template, and several of those
+    // templates reject a system message that isn't the first message:
+    // "System message must be at the beginning." Joining the parts keeps every
+    // model reachable regardless of its template.
+    let mut messages: Vec<Value> = if system_parts.is_empty() {
+        vec![]
+    } else {
+        vec![json!({ "role": "system", "content": system_parts.join("\n\n") })]
+    };
 
     messages.extend(convert_events(parts.events));
 

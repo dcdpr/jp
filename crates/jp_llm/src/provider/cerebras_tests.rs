@@ -1,5 +1,6 @@
 use eventsource_stream::Event as MessageEvent;
 use futures::StreamExt as _;
+use jp_config::assistant::sections::SectionConfig;
 use jp_conversation::{ConversationEvent, event::ToolCallRequest};
 use reqwest_eventsource::Error as SseError;
 
@@ -32,6 +33,40 @@ fn test_unknown_model_requests_parsed_reasoning() {
     assert_eq!(
         body["reasoning_format"], "parsed",
         "unknown models must request parsed reasoning"
+    );
+}
+
+/// Regression: several Cerebras chat templates reject a system message that is
+/// not the first message, failing the request with "System message must be at
+/// the beginning."
+/// The prompt, its sections, and the attachment XML must therefore arrive as a
+/// single system message.
+#[test]
+fn create_request_joins_system_parts_into_one_message() {
+    let model = ModelDetails::empty((PROVIDER, "future-model-99").try_into().unwrap());
+
+    let query = ChatQuery {
+        thread: jp_conversation::thread::Thread {
+            system_prompt: Some("You are JP.".to_owned()),
+            sections: vec![
+                SectionConfig::default().with_content("Rule 1."),
+                SectionConfig::default().with_content("Rule 2."),
+            ],
+            attachments: vec![],
+            events: jp_conversation::ConversationStream::new_test().with_turn("test"),
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+    };
+
+    let (body, _) = create_request(&model, query).unwrap();
+
+    assert_eq!(
+        body["messages"],
+        json!([
+            { "role": "system", "content": "You are JP.\n\nRule 1.\n\nRule 2." },
+            { "role": "user", "content": "test" },
+        ])
     );
 }
 
