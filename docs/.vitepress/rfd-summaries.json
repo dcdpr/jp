@@ -1,6 +1,6 @@
 {
   "001-jp-rfd-process.md": {
-    "hash": "3bd100f45d12cfa53efedb35462865ada7de4bd5f5d40d3781a652e3d3d5093b",
+    "hash": "530085202f0a497981e72bffbc56f6cbf4164bb29f1fd45b50335dd4fecfba34",
     "summary": "Establishes lightweight Request for Discussion process for proposing and tracking design decisions with clear lifecycle states."
   },
   "002-using-llms.md": {
