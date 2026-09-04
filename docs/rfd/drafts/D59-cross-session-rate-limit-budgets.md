@@ -30,14 +30,32 @@ provider names.
 With `max_retries` at its default of 5 and Cerebras answering `retry-after: 60`,
 an unlucky session can spend five minutes waiting and still fail.
 
-### Why the budget cannot be computed
+### Why a client-side ledger cannot work
 
 The obvious design is a shared ledger: estimate what a request will cost,
 decrement a counter, refill it at the limit rate.
-That requires knowing the charging rule, and three rounds of controlled
-measurement against Cerebras failed to produce one.
+Two things rule it out, and they have different reach.
 
-The reservation is taken at admission, before the response exists.
+#### Every provider: the meter counts consumers JP cannot see
+
+A rate limit is enforced against an account, not against a process.
+Another key on the same account, a colleague's machine, a `curl` in someone's
+terminal, a script nobody remembers writing.
+Even a perfect record of what JP itself spent would be missing an unbounded
+amount of the total, so a ledger built from JP's own arithmetic is wrong by an
+amount it cannot measure.
+
+This holds however well a provider documents its charging, and it alone is
+enough to reject the ledger.
+
+#### Cerebras specifically: the charging rule is not derivable
+
+The second argument is narrower, and is offered as corroboration rather than as
+the basis for the design.
+It is what the measurements below actually establish, and it establishes it for
+one provider.
+
+Cerebras takes its reservation at admission, before the response exists.
 Six readings with a short prompt gave exactly `min(max_completion_tokens,
 16384)` with no contribution from the prompt at all:
 
@@ -57,22 +75,26 @@ A prompt-caching explanation fit until the same large prompt was sent twice and
 the second request was charged *more* than the first, not less.
 
 The rule may be coarse-grained input estimation, or something else.
-It is not derivable from the documented behaviour, and it is not stable enough
-to encode.
+It is not derivable from Cerebras's documented behaviour, and it is not stable
+enough to encode.
+Whether any other provider is this opaque is unknown; several document their
+accounting clearly, and for those the first argument is the only one that
+applies.
 
-There is a second, independent reason a computed ledger cannot work.
-The meter counts what the *organization* consumed: another key, a colleague's
-machine, a `curl` in someone's terminal.
-Even a perfect record of JP's own usage would be missing an unbounded amount of
-the total.
+#### What both point at
 
-Both problems disappear if JP stops computing and starts reading.
+Stop computing, start reading.
+A provider that meters an account has to tell its clients where they stand, and
 Cerebras returns the answer on every successful response:
 
 ```
 x-ratelimit-limit-tokens-minute: 500000
 x-ratelimit-remaining-tokens-minute: 419616
 ```
+
+Reading it is correct whether or not the charging rule is knowable, and correct
+whether or not JP is the only client.
+That is the property worth designing around.
 
 ## Design
 
@@ -141,10 +163,14 @@ trait Provider {
 
 The default returns nothing, so a provider that reports nothing simply gets no
 throttling.
-Cerebras yields six snapshots (tokens and requests, across minute, hour and
-day).
-OpenAI and Anthropic report comparable headers under different names and can be
-added later without touching anything else.
+
+Cerebras is the only provider whose headers have been examined; it yields six
+snapshots (tokens and requests, across minute, hour and day).
+OpenAI is the one other provider with in-tree evidence: `extract_retry_after`
+already parses its `x-ratelimit-reset-requests` and `x-ratelimit-reset-tokens`
+for retry timing, so the raw material is there.
+Nothing is known about the rest, and Phase 6 is where a second adapter
+establishes whether the shape generalizes rather than assuming it does.
 
 This keeps providers and buckets orthogonal: a new provider is one adapter, a
 new bucket kind touches no provider.
@@ -164,11 +190,22 @@ window)`:
 $JP_USER_DATA_DIR/rate-limits/cerebras-a3f19c2e.json
 ```
 
-The suffix is a truncated SHA-256 of the API key.
-It identifies the credential without storing anything reversible, and key
-rotation starts a fresh budget for free.
-The digest is never logged.
+The store is keyed by an opaque **credential id** that the shell supplies.
+It never learns how that id was derived, and deliberately so.
+Today a provider authenticates with a single API key, so the id is a truncated
+SHA-256 of it: enough to tell two keys apart without storing anything
+reversible, and key rotation starts a fresh budget for free.
+[RFD 090] replaces that with a chain of named credential profiles, some of them
+OAuth tokens with no API key to hash, at which point the id becomes the provider
+and profile name that RFD already established as a credential's identity.
+The store does not change when that happens; only what fills the id does.
 
+A credential chain means a session can move between credentials mid-turn when
+one is exhausted, and each has its own meter.
+Switching credential switches bucket, which falls out of keying on the id rather
+than on the provider.
+
+The id is never logged.
 Writes go through the advisory locking in `jp_storage::lock` and land
 atomically.
 **Any failure to read, parse, or lock the store degrades to "no budget known",
@@ -177,9 +214,16 @@ which sends.** A throttle that can stall the CLI is worse than no throttle.
 ### The decision
 
 Before a provider request, a session loads the snapshots, projects each forward
-to now at `limit / window` per second (the token-bucket refill Cerebras
-documents, capped at `limit`), and waits while any projected remaining sits
-below a floor.
+to now, and waits while any projected remaining sits below a floor.
+
+**Projection belongs to the adapter, not to the shared logic.** How a bucket
+recovers is a property of the provider: Cerebras documents continuous
+token-bucket replenishment, so its snapshots project at `limit / window` per
+second, capped at `limit`.
+A provider that resets on a fixed window instead recovers nothing until the
+boundary and then everything at once, and projecting it linearly would invent
+headroom that does not exist.
+The adapter that reads a provider's headers is the thing that knows which it is.
 
 The floor cannot be a prediction of what this request will cost, for the reasons
 in the Motivation.
@@ -193,8 +237,17 @@ than today.
 
 ### Where the pieces live
 
-`jp_llm` owns the snapshot type, the per-provider extraction, and the store.
-`jp_cli` owns the wait and the prompt, because prompting is a terminal concern.
+`jp_llm` owns the snapshot type and the per-provider extraction.
+Neither needs to know whose credential produced the response: an adapter reads
+headers and returns numbers.
+
+The shell owns the credential id, the store, the decision and the wait.
+That split is not a preference.
+[RFD 090] rules that credential identity never crosses the provider boundary,
+and a credential-keyed store inside `jp_llm` would break that rule the moment
+that RFD lands.
+Prompting is a terminal concern besides.
+
 The collect-path callers (`collect_with_retry`, used by title generation,
 summarization and inquiries) consume quota too and take the same wait, but
 silently and bounded, since there is nobody watching to answer a prompt.
@@ -263,9 +316,10 @@ the full budget.
 The failure mode is graceful: they learn from the 429, which is today's
 behaviour.
 
-**Multiple keys on one account.** Cerebras meters per organization, so two keys
-share a meter while this design gives each its own budget.
-The key is the best identity JP has, not the true one.
+**Multiple credentials on one account.** Cerebras meters per organization, so
+two keys on one org share a meter while this design gives each its own budget.
+The credential is the best identity JP has, not the true one, and nothing a
+client can observe distinguishes the two cases.
 
 **Replacing the retry layer.** This is additive.
 The 429 path stays exactly as it is and remains the backstop.
@@ -303,6 +357,19 @@ The fallback is to record "remaining was zero at this instant" from the status
 code alone, which is a different shape from a snapshot and may not be worth the
 special case.
 
+**Two records about the same credential.** [RFD 090] gives each credential
+profile an `exhausted_until` timestamp, persisted in the user data directory, so
+a fresh invocation skips a credential whose quota has not reset.
+That is a coarse form of what this design stores: both say when a credential is
+usable again, keyed the same way, in the same place.
+They answer different questions — one is a hard cooldown after a billing quota
+error, the other a soft headroom estimate from a refilling bucket — and
+collapsing them would conflate the fatal case with the transient one, which
+`InsufficientQuota` and `RateLimit` are deliberately kept apart elsewhere.
+But two stores about one credential is a smell, and whoever builds the second of
+the two should decide whether they share a file.
+Neither exists yet, so this is not blocking.
+
 ## Implementation Plan
 
 **Phase 1 — Spike: response-head access.** Determine whether a streaming
@@ -313,10 +380,12 @@ Everything else depends on it.
 **Phase 2 — Snapshot type and Cerebras extraction.** `RateLimitSnapshot`,
 `LimitUnit`, the defaulted trait method, and the Cerebras adapter with unit
 tests against captured header sets.
+The adapter carries its own projection rule, so the token-bucket arithmetic
+lands here rather than in the shared decision.
 Mergeable alone; nothing consumes it yet.
 
-**Phase 3 — The store.** Load, atomic write, advisory locking, credential
-digest, and the degrade-to-send rule on every failure path.
+**Phase 3 — The store.** Load, atomic write, advisory locking, the credential
+id, and the degrade-to-send rule on every failure path.
 Mergeable alone, still unconsumed.
 Tests cover a corrupt file, a missing directory, and a lock held by another
 process.
@@ -339,6 +408,7 @@ shape generalizes before it is treated as settled.
 - [Issue 1069] — the report this addresses
 - [RFD 020] — parallel conversations, the source of the contention
 - [RFD 045] — the interrupt handler stack the wait plugs into
+- [RFD 090] — credential profiles and the boundary this design keys against
 - [`acquire_lock`] — the wait-then-prompt pattern this mirrors
 - [Cerebras rate limits] — dual-bucket model and token-bucket replenishment
 
@@ -346,5 +416,6 @@ shape generalizes before it is treated as settled.
 [Issue 1069]: https://github.com/dcdpr/jp/issues/1069
 [RFD 020]: ../020-parallel-conversations.md
 [RFD 045]: ../045-layered-interrupt-handler-stack.md
+[RFD 090]: ../090-anthropic-subscription-auth-with-credential-fallback.md
 [`acquire_lock`]: https://github.com/dcdpr/jp/blob/main/crates/jp_cli/src/cmd/lock.rs
 [`jp_workspace::user_data_dir`]: https://github.com/dcdpr/jp/blob/main/crates/jp_workspace/src/lib.rs
