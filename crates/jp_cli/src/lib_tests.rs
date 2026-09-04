@@ -439,6 +439,38 @@ fn test_load_cli_cfg_args_no_roots_errors() {
     }
 }
 
+// A terminal is evidence of a user, but only until the user says otherwise.
+#[test]
+fn interactive_requires_a_terminal_and_no_opt_out() {
+    assert!(interactive(false, true));
+    assert!(!interactive(false, false));
+    assert!(!interactive(true, true));
+    assert!(!interactive(true, false));
+}
+
+#[test]
+#[serial(env_vars)]
+fn non_interactive_env_var_accepts_1_and_true_only() {
+    {
+        let _guard = EnvVarGuard::set("JP_NONINTERACTIVE", "1");
+        assert!(env_opt_out("JP_NONINTERACTIVE"));
+    }
+    {
+        let _guard = EnvVarGuard::set("JP_NONINTERACTIVE", "true");
+        assert!(env_opt_out("JP_NONINTERACTIVE"));
+    }
+    // `JP_NONINTERACTIVE=0` must not read as "set, therefore on" — a user who
+    // exports it to turn the behaviour off would otherwise turn it on.
+    {
+        let _guard = EnvVarGuard::set("JP_NONINTERACTIVE", "0");
+        assert!(!env_opt_out("JP_NONINTERACTIVE"));
+    }
+    {
+        let _guard = EnvVarGuard::remove("JP_NONINTERACTIVE");
+        assert!(!env_opt_out("JP_NONINTERACTIVE"));
+    }
+}
+
 #[test]
 fn test_load_cli_cfg_args_key_value_still_works() {
     let partial = PartialAppConfig::empty();

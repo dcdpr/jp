@@ -145,6 +145,20 @@ struct Globals {
     #[arg(short = 'q', long, global = true)]
     quiet: bool,
 
+    /// Assume no user is available to answer prompts.
+    ///
+    /// Anything JP would normally ask about resolves without asking: the
+    /// workspace-selection prompts, tool permission requests, plugin approval,
+    /// and lock-timeout handling all behave as they do when JP is run without a
+    /// terminal.
+    ///
+    /// Set `JP_NONINTERACTIVE=1` to apply this to every invocation in an
+    /// environment, such as a script or a CI job.
+    ///
+    /// This does not change output formatting; use `--format` for that.
+    #[arg(long, global = true)]
+    non_interactive: bool,
+
     /// The output format.
     #[arg(
         short = 'F',
@@ -330,6 +344,29 @@ pub(crate) enum CliFormat {
     JsonPretty,
 }
 
+/// Whether a user is present to answer prompts.
+///
+/// A terminal is the evidence that someone is watching; `non_interactive` is
+/// the user overriding that evidence.
+/// Deliberately independent of whether output can carry ANSI escapes ([RFD
+/// 048]) — a piped `jp c ls` still has a user behind it.
+///
+/// [RFD 048]: https://jp.computer/rfd/048
+const fn interactive(non_interactive: bool, terminal: bool) -> bool {
+    !non_interactive && terminal
+}
+
+/// Whether `name` names an environment variable set to an opt-in value.
+///
+/// Only `1` and `true` count.
+/// Every other value, including `0` and the empty string, reads as unset, so
+/// exporting `NAME=0` turns the behaviour off rather than on.
+fn env_opt_out(name: &str) -> bool {
+    env::var(name)
+        .as_deref()
+        .is_ok_and(|v| v == "1" || v == "true")
+}
+
 impl CliFormat {
     /// Resolve `Auto` based on TTY detection, returning the concrete
     /// [`OutputFormat`].
@@ -360,7 +397,7 @@ pub fn run() -> ExitCode {
     #[cfg(feature = "dhat")]
     let _profiler = run_dhat();
 
-    let cli = match Cli::try_parse() {
+    let mut cli = match Cli::try_parse() {
         Ok(cli) => cli,
         Err(e) => {
             if e.kind() == clap::error::ErrorKind::DisplayHelp && is_root_help_request() {
@@ -373,6 +410,10 @@ pub fn run() -> ExitCode {
         }
     };
     let is_tty = stdout().is_terminal();
+
+    // Folded into the flag once here, so every consumer downstream reads one
+    // field instead of re-reading the environment.
+    cli.globals.non_interactive |= env_opt_out("JP_NONINTERACTIVE");
 
     let format = cli.globals.format.resolve(is_tty);
 
@@ -412,9 +453,7 @@ pub fn run() -> ExitCode {
 
     // Read here rather than inside the policy, which stays a pure function of
     // its inputs.
-    let debug_enabled = env::var("JP_DEBUG")
-        .as_deref()
-        .is_ok_and(|v| v == "1" || v == "true");
+    let debug_enabled = env_opt_out("JP_DEBUG");
 
     if should_report_trace_log(outcome, is_tty, debug_enabled)
         && let Some(path) = guard.and_then(TracingGuard::persist)
@@ -498,6 +537,7 @@ fn detect_output_width(declared: Option<u16>) -> OutputWidth {
         })
 }
 
+#[expect(clippy::too_many_lines)]
 fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     let printer =
         Printer::terminal(format).with_output_width(detect_output_width(cli.globals.width));
@@ -521,6 +561,7 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
                 session.as_ref(),
                 cli.globals.persist,
                 cli.globals.workspace.as_ref(),
+                cli.globals.non_interactive,
             )
             .map_err(Into::into);
 
@@ -550,7 +591,11 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     trace!("Resolving session identity.");
     let session = session::resolve();
 
-    let exec = bootstrap::resolve(cli.globals.workspace.as_ref(), session.as_ref())?;
+    let exec = bootstrap::resolve(
+        cli.globals.workspace.as_ref(),
+        session.as_ref(),
+        cli.globals.non_interactive,
+    )?;
     trace!(
         root = %exec.root,
         source = ?exec.source,

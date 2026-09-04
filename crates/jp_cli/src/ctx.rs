@@ -136,9 +136,7 @@ impl Ctx {
         let is_tty = io::stdout().is_terminal();
         let width = printer.output_width().columns();
 
-        // Same derivation as `is_tty` for now; the two diverge when the
-        // promptability signal moves to `/dev/tty` availability.
-        let interactive = is_tty;
+        let interactive = crate::interactive(args.non_interactive, is_tty);
 
         Self {
             exec,
