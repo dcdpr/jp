@@ -42,6 +42,93 @@ fn env_at<'a>(
     }
 }
 
+/// An execution context resolved from `source`, standing in `cwd_root`'s
+/// workspace while operating on `root`.
+fn exec_at(root: &str, cwd_root: Option<&str>, source: RootSource) -> ExecutionContext {
+    ExecutionContext {
+        launch_cwd: Utf8PathBuf::from(cwd_root.unwrap_or("/elsewhere")),
+        root: Utf8PathBuf::from(root),
+        cwd_root: cwd_root.map(Utf8PathBuf::from),
+        child_cwd: None,
+        source,
+    }
+}
+
+/// A notice as the user reads it, with the styling stripped.
+fn plain_notice(exec: &ExecutionContext) -> Option<String> {
+    exec.foreign_root_notice()
+        .map(strip_ansi_escapes::strip_str)
+}
+
+// The case the notice exists for: the user is standing in one workspace and
+// the run went to another, on the strength of state they set days ago.
+#[test]
+fn session_resolution_away_from_the_cwd_workspace_is_announced() {
+    let exec = exec_at("/ws/a", Some("/ws/b"), RootSource::SessionActive);
+
+    assert_eq!(
+        plain_notice(&exec).as_deref(),
+        Some("using session workspace /ws/a (cwd: /ws/b)")
+    );
+}
+
+// The selected root is what the user needs to spot first, so it carries the
+// same bold yellow `jp w use` gives the workspace it switches to.
+#[test]
+fn the_selected_root_is_highlighted() {
+    let exec = exec_at("/ws/a", Some("/ws/b"), RootSource::SessionActive);
+    let notice = exec.foreign_root_notice().unwrap();
+
+    assert!(
+        notice.contains(&"/ws/a".to_owned().bold().yellow().to_string()),
+        "unstyled notice: {notice:?}"
+    );
+}
+
+// Standing inside the workspace that was selected is not a surprise, whatever
+// route selected it.
+#[test]
+fn session_resolution_to_the_cwd_workspace_is_silent() {
+    let exec = exec_at("/ws/a", Some("/ws/a"), RootSource::SessionActive);
+
+    assert_eq!(exec.foreign_root_notice(), None);
+}
+
+// The picker only runs at ladder step 6, which requires no cwd workspace, so a
+// picker-sourced root never has a competing directory to announce.
+#[test]
+fn picker_resolution_is_silent() {
+    let exec = exec_at("/ws/a", Some("/ws/b"), RootSource::Picker);
+
+    assert_eq!(exec.foreign_root_notice(), None);
+}
+
+// Outside any workspace there is no competing answer to surprise anyone with,
+// and this is the steady state for someone who works via `jp w use`.
+#[test]
+fn session_resolution_outside_any_workspace_is_silent() {
+    let exec = exec_at("/ws/a", None, RootSource::SessionActive);
+
+    assert_eq!(exec.foreign_root_notice(), None);
+}
+
+// An explicit `-w` was typed this invocation: the user already knows.
+#[test]
+fn explicit_target_away_from_the_cwd_workspace_is_silent() {
+    for source in [
+        RootSource::CliPath,
+        RootSource::CliId,
+        RootSource::CliSelector,
+    ] {
+        let exec = exec_at("/ws/a", Some("/ws/b"), source);
+        assert_eq!(
+            exec.foreign_root_notice(),
+            None,
+            "{source:?} must stay quiet"
+        );
+    }
+}
+
 /// An `Env`-sourced session identity.
 fn env_session() -> Session {
     Session {
