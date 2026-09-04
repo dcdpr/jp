@@ -5,7 +5,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-17
 - **Tracking Issue**: [\#518]
-- **Extended by**: [RFD 086], [RFD 088], [RFD 091], [RFD 095]
+- **Extended by**: [RFD 086], [RFD 088], [RFD 091], [RFD 095], [RFD 104]
 
 ## Summary
 
@@ -89,6 +89,15 @@ The two checks serve different purposes:
 
 - `stdout.is_terminal()` → can the consumer handle ANSI escape codes?
 - `/dev/tty` available → can a user answer prompts?
+
+> [!TIP]
+> [RFD 104] splits `--format auto` per channel: stdout still resolves from
+> `stdout.is_terminal()`, stderr resolves from `stderr.is_terminal()`, and an
+> explicit `--format` continues to force both as described here.
+> Resolving one format from stdout means `jp query | less` treats the user's
+> terminal as unable to render escapes, so chrome that repaints in place is
+> stripped on the way out. 104 also implements the `/dev/tty` promptability
+> signal this section specifies, which the code has never used.
 
 ### Integration with `Printer`
 
@@ -251,3 +260,4 @@ Independent of Phases 1-2.
 [RFD 088]: 088-unified-editor-service-and-inline-reply-widget.md
 [RFD 091]: 091-printer-owned-status-line.md
 [RFD 095]: 095-reasoning-region-shading-across-tool-calls.md
+[RFD 104]: 104-terminal-capability-and-promptability-signals.md

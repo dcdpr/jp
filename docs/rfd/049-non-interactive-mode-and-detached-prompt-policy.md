@@ -5,7 +5,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-17
 - **Required by**: [RFD 027], [RFD 051]
-- **Requires**: [RFD 018]
+- **Requires**: [RFD 018], [RFD 104]
 
 ## Summary
 
@@ -340,3 +340,4 @@ as `has_client`), and Phase 1.
 [RFD 027]: 027-client-server-query-architecture.md
 [RFD 048]: 048-four-channel-output-model.md
 [RFD 051]: 051-sub-agent-workflows.md
+[RFD 104]: 104-terminal-capability-and-promptability-signals.md
