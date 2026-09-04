@@ -245,12 +245,17 @@ impl Printer {
 
     /// Print a fragment of chrome, with no trailing newline.
     ///
-    /// Never JSON-wrapped, even in JSON mode: a fragment is half a line, and an
-    /// NDJSON record has to be a whole one.
-    /// Use [`Self::eprintln`] for anything a consumer should be able to read
-    /// back as a record.
+    /// In JSON mode the fragment becomes a whole NDJSON record, as it does on
+    /// stdout: `2>&1 | jq` has to parse every line, so a fragment a consumer
+    /// does not care about is one they filter out, not one that breaks the
+    /// stream.
     pub fn eprint<P: Printable>(&self, p: P) {
         let mut task = p.into_task();
+        if self.format.is_json() {
+            task = self.wrap_json(task);
+            task.content.push('\n');
+        }
+
         task.target = PrintTarget::Err;
         self.send(Command::Print(task));
     }

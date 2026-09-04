@@ -195,18 +195,18 @@ fn json_eprintln_wraps_in_ndjson() {
     assert_eq!(*err.lock(), "{\"message\":\"note: using workspace `A`\"}\n");
 }
 
-// Partial writes have no complete record to wrap: the reasoning-progress
-// indicator emits a bare `.` per chunk, which would otherwise become one JSON
-// object per character.
+// The reasoning-progress indicator emits a bare `.` per chunk. Each becomes
+// its own record rather than a fragment: noise a consumer can filter beats a
+// line that makes `jq` give up on the whole stream.
 #[test]
-fn json_eprint_does_not_wrap() {
+fn json_eprint_wraps_each_fragment_as_a_record() {
     let (printer, _, err) = Printer::memory(OutputFormat::Json);
 
     printer.eprint(".");
     printer.eprint(".");
     printer.flush();
 
-    assert_eq!(*err.lock(), "..");
+    assert_eq!(*err.lock(), "{\"message\":\".\"}\n{\"message\":\".\"}\n");
 }
 
 #[test]
