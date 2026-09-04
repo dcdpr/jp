@@ -16,8 +16,8 @@ jp --non-interactive ...
 # Same for every invocation in a script or CI job
 JP_NONINTERACTIVE=1 jp query "..."
 
-# Redirecting stdout switches off pretty-printing, and nothing else: a piped
-# command still has a user behind it, so it can still ask
+# Redirecting stdout switches off pretty-printing; pass --non-interactive to
+# also declare that nobody is there to answer a prompt
 jp query "..." > out.txt
 
 # Pipe data into and out of jp

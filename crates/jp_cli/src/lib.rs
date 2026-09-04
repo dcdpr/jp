@@ -147,13 +147,13 @@ struct Globals {
 
     /// Assume no user is available to answer prompts.
     ///
-    /// Anything JP would normally ask about resolves without asking: the
-    /// workspace and conversation pickers, tool permission requests, plugin
-    /// approval, and lock-timeout handling all behave as they do when JP is run
-    /// without a terminal.
+    /// Everything JP would ask about resolves the way it does when JP runs
+    /// without a terminal: the workspace and conversation pickers, the
+    /// lock-timeout prompt, and a third-party plugin's approval all fail, and a
+    /// tool set to ask before running runs unconfirmed.
     ///
-    /// A command with no answer to fall back on fails instead: `jp init`, and
-    /// any removal or archive it would have to confirm.
+    /// A command with no answer to fall back on fails too: `jp init`, and any
+    /// removal or archive it would have to confirm.
     ///
     /// Set `JP_NONINTERACTIVE=1` to apply this to every invocation in an
     /// environment, such as a script or a CI job.
