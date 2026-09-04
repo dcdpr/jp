@@ -22,11 +22,22 @@
 
 use serde::Deserialize;
 use serde_json::{Value, json};
+use tracing::{debug, warn};
 
 #[derive(Debug, Deserialize)]
 pub(crate) struct StreamChunk {
     #[serde(default)]
     pub choices: Vec<StreamChoice>,
+
+    /// An error the provider reported inside the stream, once the response had
+    /// already returned 200.
+    ///
+    /// Held as raw JSON because nothing reads it.
+    /// Every failure these providers are known to produce arrives as an HTTP
+    /// status before the stream opens, so this field exists for [`parse_chunk`]
+    /// to say something out loud if that ever stops being true.
+    #[serde(default)]
+    pub error: Option<Value>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -64,6 +75,41 @@ pub(crate) struct FunctionDelta {
     pub name: Option<String>,
     #[serde(default)]
     pub arguments: Option<String>,
+}
+
+/// Parse one SSE `data:` payload from `provider` into a chunk.
+///
+/// Returns `None` when the payload yields nothing to emit, having logged the
+/// reason.
+pub(crate) fn parse_chunk(data: &str, provider: &str) -> Option<StreamChunk> {
+    let chunk: StreamChunk = match serde_json::from_str(data) {
+        Ok(chunk) => chunk,
+        Err(error) => {
+            warn!(provider, %error, data, "Failed to parse chunk.");
+            return None;
+        }
+    };
+
+    // Nothing downstream can act on this, so at least record it. A stream that
+    // reports a failure this way and then stops has sent no terminal event,
+    // which reads to the retry layer as a dropped connection: it resends the
+    // request blind, several times, and the user is told the connection failed.
+    if let Some(error) = &chunk.error {
+        warn!(
+            provider,
+            error = %error,
+            "Provider reported an error inside the stream. It will surface as a \
+             truncated response instead of this message."
+        );
+        return None;
+    }
+
+    if chunk.choices.is_empty() {
+        debug!(provider, data, "Chunk carried no choices.");
+        return None;
+    }
+
+    Some(chunk)
 }
 
 /// Merge consecutive assistant messages in an OpenAI-compatible
@@ -107,3 +153,7 @@ pub(crate) fn merge_consecutive_assistant_messages(messages: Vec<Value>) -> Vec<
             acc
         })
 }
+
+#[cfg(test)]
+#[path = "openai_compat_tests.rs"]
+mod tests;

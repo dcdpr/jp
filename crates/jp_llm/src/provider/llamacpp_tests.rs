@@ -4,6 +4,7 @@ use jp_conversation::ConversationEvent;
 use reqwest_eventsource::Error as SseError;
 
 use super::*;
+use crate::provider::openai_compat::StreamChunk;
 
 fn qwen_model() -> LlamacppModel {
     serde_json::from_value(serde_json::json!({

@@ -25,7 +25,7 @@ use tracing::{debug, trace, warn};
 use super::{
     EventStream, ModelDetails,
     openai::parameters_with_strict_mode,
-    openai_compat::{StreamChunk, merge_consecutive_assistant_messages},
+    openai_compat::{merge_consecutive_assistant_messages, parse_chunk},
 };
 use crate::{
     error::{Error, StreamError},
@@ -238,17 +238,8 @@ fn handle_sse_event_sync(
                 return Ok(events);
             }
 
-            let chunk: StreamChunk = match serde_json::from_str(&msg.data) {
-                Ok(c) => c,
-                Err(error) => {
-                    warn!(
-                        error = error.to_string(),
-                        data = &msg.data,
-                        "Failed to parse Llamacpp chunk."
-                    );
-
-                    return Ok(vec![]);
-                }
+            let Some(chunk) = parse_chunk(&msg.data, "llamacpp") else {
+                return Ok(vec![]);
             };
 
             let mut events = Vec::new();
