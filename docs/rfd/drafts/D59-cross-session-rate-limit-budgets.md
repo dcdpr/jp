@@ -364,11 +364,12 @@ different times, and share a theme rather than a seam.
 **Serialize provider requests across sessions with a lock.** Correct and simple,
 and it throws away the parallelism [RFD 020] exists to provide.
 
-**Do nothing beyond the retry layer.** The 429 handling with jittered backoff is
-already correct and already merged, and it is what this design falls back to.
-The case against leaving it there is that reacting costs a full round trip and a
-provider-dictated wait each time, and on a small plan the bucket is exhausted
-for most of every minute.
+**Do nothing beyond the retry layer.** Reacting to the 429 is what this design
+falls back to, and that fallback is sound on its own terms: the wait honours the
+provider's `Retry-After`, and [PR 1080] spreads concurrent sessions so they do
+not all resume on the same instant.
+The case against leaving it there is that reacting costs a full round trip each
+time, and on a small plan the bucket is exhausted for most of every minute.
 
 ## Non-Goals
 
@@ -508,6 +509,7 @@ If the shape survives that it is worth treating as settled.
 [Anthropic rate limits]: https://platform.claude.com/docs/en/api/rate-limits
 [Cerebras rate limits]: https://inference-docs.cerebras.ai/support/rate-limits
 [Issue 1069]: https://github.com/dcdpr/jp/issues/1069
+[PR 1080]: https://github.com/dcdpr/jp/pull/1080
 [RFD 020]: ../020-parallel-conversations.md
 [RFD 045]: ../045-layered-interrupt-handler-stack.md
 [RFD 090]: ../090-anthropic-subscription-auth-with-credential-fallback.md
