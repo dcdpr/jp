@@ -1092,8 +1092,8 @@ fn test_shared_extends_file_across_config_layers_applies_once() {
 
     // `web.toml`'s block is followed by `coding.toml`'s, joined with the `line`
     // separator that file appends with rather than the `paragraph` one
-    // `web.toml` carries — so the block-boundary check misses it and the block
-    // is appended a second time.
+    // `web.toml` carries. Anchoring the match on the line break rather than on
+    // either separator is what recognizes the repeat and skips it.
     assert_eq!(
         merged.assistant.system_prompt.as_deref(),
         Some("You can browse the web.\nYou can write code.")

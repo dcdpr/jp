@@ -186,8 +186,10 @@ pub struct MergedString {
     /// - `none`: Values are joined with nothing in between.
     ///
     /// A value merged with `space` or `none` leaves no line break around it,
-    /// which is what `dedup` matches on, so such a value is only recognized as
-    /// already present when it equals the whole accumulated string.
+    /// which the default `dedup` mode matches on, so such a value is only
+    /// recognized as already present when it equals the whole accumulated
+    /// string.
+    /// Set `dedup = "contains"` to recognize it anywhere.
     #[setting(default)]
     pub separator: MergedStringSeparator,
 
@@ -212,9 +214,11 @@ pub struct MergedString {
     ///
     /// `true` and `false` are accepted as shorthand for `block` and `off`.
     ///
-    /// `block` and `exact` need a line break around the value to recognize it,
-    /// which a value merged with `separator = "space"` or `"none"` does not
-    /// have; `contains` is the mode that still recognizes those.
+    /// `block` recognizes a value inside a longer string by the line breaks
+    /// around it, which a value merged with `separator = "space"` or `"none"`
+    /// does not have; such a value is only recognized when it equals the whole
+    /// string.
+    /// `contains` is the mode that recognizes a value merged inside a line.
     /// Its trade-off is short values: a value that occurs as part of a longer
     /// sentence somewhere in the string counts as present, and is dropped.
     ///
