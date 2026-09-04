@@ -7,7 +7,7 @@ pub mod llamacpp;
 pub mod mock;
 pub mod ollama;
 pub mod openai;
-pub mod openai_compat;
+pub(crate) mod openai_compat;
 pub mod openrouter;
 
 use std::sync::atomic::{AtomicU64, Ordering};

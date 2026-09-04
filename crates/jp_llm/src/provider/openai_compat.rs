@@ -14,9 +14,11 @@
 //! (default) and `deepseek-legacy` modes; Cerebras spells the same field
 //! `reasoning`, and a serde alias accepts both.
 //!
-//! Deserialization is deliberately lenient: every field defaults, and unknown
-//! ones are ignored, so a provider adding a field to a chunk does not break the
-//! stream.
+//! Deserialization is deliberately lenient: unknown fields are ignored and the
+//! optional fields default, so a provider adding a field to a chunk does not
+//! break the stream.
+//! `StreamChoice::delta` is the one required field; a chunk whose choice omits
+//! it fails to parse, and both providers log a warning and skip that chunk.
 
 use serde::Deserialize;
 use serde_json::{Value, json};
