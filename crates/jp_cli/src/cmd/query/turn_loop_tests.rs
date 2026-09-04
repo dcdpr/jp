@@ -3702,7 +3702,7 @@ async fn test_waiting_indicator_not_shown_for_non_tty() {
             .await
             .unwrap();
 
-        let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+        let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
@@ -3731,12 +3731,19 @@ async fn test_waiting_indicator_not_shown_for_non_tty() {
         .unwrap();
 
         printer.flush();
-        let output = out.lock();
 
-        // Should NOT contain waiting indicator for non-TTY
+        // The indicator is chrome, so stderr is where it would land.
+        // The clear sequence is checked too: a timer that spawns and is
+        // cancelled before its first tick writes only that.
+        let chrome = err.lock();
         assert!(
-            !output.contains("Waiting…"),
-            "Output should NOT contain waiting indicator for non-TTY.\nOutput:\n{output}"
+            !chrome.contains("Waiting…"),
+            "Chrome (stderr) should NOT contain the waiting indicator without a \
+             TTY.\nChrome:\n{chrome}"
+        );
+        assert!(
+            !chrome.contains("\r\x1b[K"),
+            "Chrome (stderr) should NOT contain cursor control without a TTY.\nChrome:\n{chrome}"
         );
     }))
     .await;
