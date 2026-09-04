@@ -85,6 +85,95 @@ async fn a_429_outranks_a_context_window_phrasing_in_the_body() {
     assert!(err.is_retryable());
 }
 
+/// As [`invalid_status`], with a `Retry-After` header attached.
+fn invalid_status_retry_after(
+    status: u16,
+    body: &str,
+    retry_after_secs: u32,
+) -> reqwest_eventsource::Error {
+    let response = http::Response::builder()
+        .status(status)
+        .header("retry-after", retry_after_secs.to_string())
+        .body(body.to_owned())
+        .expect("valid response");
+
+    reqwest_eventsource::Error::InvalidStatusCode(
+        reqwest::StatusCode::from_u16(status).expect("valid status"),
+        reqwest::Response::from(response),
+    )
+}
+
+/// `quota exceeded` and `resource_exhausted` are also how providers word an
+/// ordinary rate limit, so on a 429 they must not outrank the status code.
+///
+/// Misreading one costs more than a wrong label: `InsufficientQuota` is fatal,
+/// so the turn ends instead of waiting, and the `Retry-After` the provider sent
+/// is discarded with it.
+#[tokio::test]
+async fn a_429_outranks_vague_quota_phrasing_in_the_body() {
+    for body in [
+        r#"{"message":"Token quota exceeded for this organization."}"#,
+        r#"{"error":{"status":"RESOURCE_EXHAUSTED","message":"too many requests"}}"#,
+    ] {
+        let err = StreamError::from_eventsource(invalid_status_retry_after(429, body, 60)).await;
+
+        assert_eq!(err.kind, StreamErrorKind::RateLimit, "body: {body}");
+        assert!(err.is_retryable(), "body: {body}");
+        assert_eq!(
+            err.retry_after,
+            Some(Duration::from_mins(1)),
+            "body: {body}"
+        );
+    }
+}
+
+/// A marker that names billing outright still outranks a 429: OpenAI reports a
+/// drained account as `insufficient_quota` with that status, and no amount of
+/// waiting clears it.
+#[tokio::test]
+async fn a_429_yields_to_an_explicit_billing_marker() {
+    for body in [
+        r#"{"error":{"code":"insufficient_quota","message":"exceeded your current quota"}}"#,
+        r#"{"error":{"type":"billing_error","message":"Your credit balance is too low"}}"#,
+    ] {
+        let err = StreamError::from_eventsource(invalid_status_retry_after(429, body, 60)).await;
+
+        assert_eq!(err.kind, StreamErrorKind::InsufficientQuota, "body: {body}");
+        assert!(!err.is_retryable(), "body: {body}");
+    }
+}
+
+/// Away from a 429 there is no authoritative status to defer to, so the vague
+/// markers still classify.
+#[tokio::test]
+async fn vague_quota_phrasing_still_classifies_without_a_429() {
+    let err = StreamError::from_eventsource(invalid_status(
+        403,
+        r#"{"message":"Quota exceeded for this project."}"#,
+    ))
+    .await;
+
+    assert_eq!(err.kind, StreamErrorKind::InsufficientQuota);
+}
+
+/// The exact body Cerebras returns when the per-minute token bucket is
+/// exhausted, alongside the `retry-after: 60` it ships with.
+///
+/// `token_quota_exceeded` sits one character away from the `quota exceeded`
+/// marker; a rephrasing on their side must not turn a wait into a dead end.
+#[tokio::test]
+async fn the_cerebras_token_bucket_429_stays_a_rate_limit() {
+    let err = StreamError::from_eventsource(invalid_status_retry_after(
+        429,
+        r#"{"message":"Tokens per minute limit exceeded - too many tokens processed.","type":"too_many_tokens_error","param":"quota","code":"token_quota_exceeded"}"#,
+        60,
+    ))
+    .await;
+
+    assert_eq!(err.kind, StreamErrorKind::RateLimit);
+    assert_eq!(err.retry_after, Some(Duration::from_mins(1)));
+}
+
 #[test]
 fn extract_retry_after_from_retry_after_ms() {
     let mut headers = reqwest::header::HeaderMap::new();
