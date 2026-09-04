@@ -255,6 +255,70 @@ mod parameters_with_strict_mode {
     }
 }
 
+mod convert_tools {
+    use serde_json::json;
+
+    use super::super::convert_tools;
+    use crate::tool::{ToolDefinition, ToolDocs};
+
+    /// One converted tool, as it goes on the wire.
+    fn converted(parameters: serde_json::Value) -> serde_json::Value {
+        let tools = convert_tools(vec![ToolDefinition {
+            name: "store".to_owned(),
+            docs: ToolDocs::default(),
+            parameters,
+        }]);
+
+        serde_json::to_value(tools.first().expect("one tool")).expect("serializable tool")
+    }
+
+    /// OpenAI's strict subset requires a type on every property, and a
+    /// free-form parameter has none.
+    /// The tool goes unstrict so the parameter reaches the API as the server
+    /// declared it; sending it strict gets the whole request rejected, taking
+    /// every other tool in the query with it.
+    #[test]
+    fn a_free_form_parameter_drops_strict_mode() {
+        let tool = converted(json!({
+            "type": "object",
+            "properties": {
+                "key": { "type": "string" },
+                "value": { "description": "Any JSON value." }
+            }
+        }));
+
+        assert_eq!(tool["strict"], json!(false));
+        assert_eq!(
+            tool["parameters"]["properties"]["value"],
+            json!({ "description": "Any JSON value." })
+        );
+    }
+
+    /// The subset applies at every depth, so the walk has to reach an item
+    /// schema too.
+    #[test]
+    fn a_free_form_array_item_drops_strict_mode() {
+        let tool = converted(json!({
+            "type": "object",
+            "properties": {
+                "values": { "type": "array", "items": { "description": "Any JSON value." } }
+            }
+        }));
+
+        assert_eq!(tool["strict"], json!(false));
+    }
+
+    #[test]
+    fn a_fully_typed_schema_stays_strict() {
+        let tool = converted(json!({
+            "type": "object",
+            "properties": { "key": { "type": "string" } }
+        }));
+
+        assert_eq!(tool["strict"], json!(true));
+    }
+}
+
 mod ensure_strict_schema {
     use serde_json::{Value, json};
 

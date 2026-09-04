@@ -38,7 +38,7 @@ use crate::{
     provider::trace_to_tmpfile,
     query::ChatQuery,
     stream::with_tool_call_keepalive,
-    tool::ToolDefinition,
+    tool::{ToolDefinition, json_schema},
 };
 
 static PROVIDER: ProviderId = ProviderId::Openai;
@@ -1928,11 +1928,20 @@ fn make_schema_nullable(schema: &mut Value) {
 fn convert_tools(tools: Vec<ToolDefinition>) -> Vec<types::Tool> {
     tools
         .into_iter()
-        .map(|tool| types::Tool::Function {
-            name: tool.name,
-            strict: true,
-            description: tool.docs.schema_description().map(str::to_owned),
-            parameters: parameters_with_strict_mode(&tool.parameters, true).into(),
+        .map(|tool| {
+            // The strict subset requires a type on every property, which a
+            // parameter the server left free-form does not have. Dropping
+            // strict mode for that one tool costs its adherence guarantee;
+            // sending it strict costs the whole request, and every other tool
+            // in it.
+            let strict = !json_schema::has_unconstrained_node(&tool.parameters);
+
+            types::Tool::Function {
+                name: tool.name,
+                strict,
+                description: tool.docs.schema_description().map(str::to_owned),
+                parameters: parameters_with_strict_mode(&tool.parameters, strict).into(),
+            }
         })
         .collect()
 }

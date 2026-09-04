@@ -614,6 +614,45 @@ mod validate {
     }
 }
 
+mod has_unconstrained_node {
+    use super::*;
+
+    #[test]
+    fn finds_a_free_form_property_behind_a_reference() {
+        assert!(has_unconstrained_node(&json!({
+            "type": "object",
+            "properties": { "payload": { "$ref": "#/$defs/Payload" } },
+            "$defs": { "Payload": { "description": "Any JSON value." } }
+        })));
+    }
+
+    #[test]
+    fn reports_a_fully_typed_document() {
+        assert!(!has_unconstrained_node(&json!({
+            "type": "object",
+            "properties": {
+                "tags": { "type": "array", "items": { "type": "string" } }
+            }
+        })));
+    }
+
+    /// The walk closes the same loop validation does, rather than expanding a
+    /// self-referential type forever.
+    #[test]
+    fn a_recursive_schema_terminates() {
+        assert!(!has_unconstrained_node(&json!({
+            "type": "object",
+            "properties": { "node": { "$ref": "#/$defs/Node" } },
+            "$defs": {
+                "Node": {
+                    "type": "object",
+                    "properties": { "child": { "$ref": "#/$defs/Node" } }
+                }
+            }
+        })));
+    }
+}
+
 mod inline {
     use super::*;
 

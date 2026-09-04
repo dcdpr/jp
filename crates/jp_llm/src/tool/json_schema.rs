@@ -302,6 +302,41 @@ fn validate_types(path: &str, types: &[String]) -> Result<(), ToolError> {
     Ok(())
 }
 
+/// Whether any node in the document leaves the JSON type of its value open.
+///
+/// Walks properties and array items, reading through `$ref` the way [`Node`]
+/// does, and stops at a definition already on the path so a recursive schema
+/// terminates.
+#[must_use]
+pub fn has_unconstrained_node(schema: &Value) -> bool {
+    Node::root(schema)
+        .properties()
+        .iter()
+        .any(|(_, property)| is_open(property, &mut vec![]))
+}
+
+fn is_open(node: &Node<'_>, visiting: &mut Vec<String>) -> bool {
+    if let Some(origin) = node.origin() {
+        if visiting.iter().any(|seen| seen == origin) {
+            return false;
+        }
+        visiting.push(origin.to_owned());
+    }
+
+    let open = node.is_unconstrained()
+        || node.items().is_some_and(|items| is_open(&items, visiting))
+        || node
+            .properties()
+            .iter()
+            .any(|(_, property)| is_open(property, visiting));
+
+    if node.origin().is_some() {
+        visiting.pop();
+    }
+
+    open
+}
+
 /// Expand every same-document `$ref` and drop the definitions block.
 ///
 /// For providers that cannot follow references.
