@@ -282,6 +282,21 @@ impl Printer {
         self.send(Command::Print(task));
     }
 
+    /// Erase the current line on the chrome channel.
+    ///
+    /// For chrome that repaints in place — status lines, progress counters,
+    /// the retry notice.
+    /// A no-op in JSON modes: `\r\x1b[K` is neither a record nor part of one,
+    /// so emitting it would break `2>&1 | jq` to redraw something a JSON
+    /// consumer cannot see.
+    pub fn erase_line(&self) {
+        if self.format.is_json() {
+            return;
+        }
+
+        let _ = write!(self.err_writer(), "\r\x1b[K");
+    }
+
     /// Wrap a print task's content in an NDJSON envelope.
     ///
     /// ANSI escapes are stripped before serialization.

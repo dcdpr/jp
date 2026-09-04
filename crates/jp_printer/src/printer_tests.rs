@@ -210,6 +210,29 @@ fn json_eprint_wraps_each_fragment_as_a_record() {
 }
 
 #[test]
+fn erase_line_writes_the_escape_on_a_text_format() {
+    let (printer, _, err) = Printer::memory(OutputFormat::TextPretty);
+
+    printer.erase_line();
+    printer.flush();
+
+    assert_eq!(*err.lock(), "\r\x1b[K");
+}
+
+// A cursor escape is neither a record nor part of one, so emitting it into an
+// NDJSON stream leaves the stream unparseable for the sake of a repaint no
+// JSON consumer can see.
+#[test]
+fn erase_line_is_silent_in_json() {
+    let (printer, _, err) = Printer::memory(OutputFormat::Json);
+
+    printer.erase_line();
+    printer.flush();
+
+    assert_eq!(*err.lock(), "");
+}
+
+#[test]
 fn json_print_wraps_in_ndjson() {
     let (printer, out, _) = Printer::memory(OutputFormat::Json);
 

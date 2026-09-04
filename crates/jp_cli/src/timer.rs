@@ -154,7 +154,7 @@ pub fn spawn_line_timer(
             tokio::select! {
                 biased;
                 () = child.cancelled() => {
-                    let _ = write!(printer.err_writer(), "\r\x1b[K");
+                    printer.erase_line();
                     return;
                 }
                 _ = ticker.tick() => {}
