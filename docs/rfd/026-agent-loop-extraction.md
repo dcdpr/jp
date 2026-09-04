@@ -301,6 +301,16 @@ The dependency graph gets one more node.
 Adding a trait for persistence doesn't reduce this.
 A builder or context struct could help, but that's a separate refactor.
 
+> [!TIP]
+> That separate refactor has landed: `TurnInputs` in `jp_cli::cmd::query`
+> gathers a turn's inputs and splits the work in two, where collecting reads the
+> CLI context and running does not.
+> Its fields are the "context that varies by caller" set this RFD names above,
+> and `TurnInputs::run` is the call site Phase 4 replaces with
+> `jp_agent::run_turn_loop`.
+> It already takes a `&ConversationLock` rather than a `&mut Workspace`, so the
+> `ConversationStore` trait has less to cover than assumed here.
+
 **Incremental move.** Moving modules between crates requires updating every
 import path.
 Tests that reference internal types need adjustment.

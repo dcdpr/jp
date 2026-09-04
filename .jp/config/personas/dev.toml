@@ -16,6 +16,7 @@ extends = [
     "../skill/github-reader.toml",
     "../skill/unix.toml",
     "../skill/coding.toml",
+    "../skill/ticket.toml",
 ]
 
 [style]
