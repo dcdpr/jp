@@ -26,6 +26,18 @@ pub(crate) struct Use {
     /// Also settable with the global `--workspace` flag, but not both at once.
     /// Defaults to the picker (`?`).
     pub(super) target: Option<WorkspaceTarget>,
+
+    /// Keep using this workspace even from inside another one.
+    ///
+    /// Without it, standing in a different workspace makes JP ask which of the
+    /// two you meant.
+    /// With it, the selection wins and JP stops asking; every run from
+    /// elsewhere reports the workspace it used.
+    ///
+    /// A later `jp workspace use` without `--always` releases the pin, and `jp
+    /// workspace use cwd` clears the selection outright.
+    #[arg(long)]
+    pub(super) always: bool,
 }
 
 impl Use {
@@ -57,6 +69,17 @@ impl Use {
                     .into(),
             );
         };
+
+        // `cwd` drops the record the pin would live on, so the two together
+        // ask for a selection that is both absent and permanent.
+        if self.always && matches!(target, WorkspaceTarget::Cwd) {
+            return Err(format!(
+                "`{}` clears the session-active workspace, so there is nothing for `{}` to pin to.",
+                "jp workspace use cwd".bold().yellow(),
+                "--always".bold().yellow(),
+            )
+            .into());
+        }
 
         let previous = env.store.active(session);
 
@@ -106,9 +129,15 @@ impl Use {
                 if previous.as_ref().is_some_and(|entry| {
                     entry.id().is_some_and(|prev| prev == id) && entry.root == selected.root
                 }) {
+                    // Re-selecting the same workspace still restates the pin:
+                    // `--always` on an already-active workspace is how a user
+                    // pins one they are standing in.
+                    env.store.set_sticky(session, self.always)?;
+
                     printer.println(format!(
-                        "Already the session-active workspace: {}",
+                        "Already the session-active workspace: {}{}",
                         selected.root.to_string().bold().yellow(),
+                        pin_suffix(self.always),
                     ));
                     return Ok(());
                 }
@@ -116,18 +145,35 @@ impl Use {
                 env.store
                     .record_selection(session, &id, &selected.root, Utc::now())?;
 
+                // The invocation states the whole intent for the session: a
+                // selection made without `--always` is one made without a pin,
+                // including when an earlier selection left one behind.
+                env.store.set_sticky(session, self.always)?;
+
                 let to = selected.root.to_string().bold().yellow();
+                let pinned = pin_suffix(self.always);
                 match previous {
                     Some(entry) => printer.println(format!(
-                        "Switched the session-active workspace from {} to {to}",
+                        "Switched the session-active workspace from {} to {to}{pinned}",
                         entry.root.to_string().bold().grey(),
                     )),
-                    None => printer.println(format!("Session-active workspace set to {to}")),
+                    None => {
+                        printer.println(format!("Session-active workspace set to {to}{pinned}"));
+                    }
                 }
             }
         }
 
         Ok(())
+    }
+}
+
+/// The trailing clause naming the pin, for a selection that has one.
+fn pin_suffix(always: bool) -> &'static str {
+    if always {
+        " (always, ignoring the current directory)"
+    } else {
+        ""
     }
 }
 
