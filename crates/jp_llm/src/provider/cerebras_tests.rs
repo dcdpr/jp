@@ -4,7 +4,7 @@ use jp_conversation::{ConversationEvent, event::ToolCallRequest};
 use reqwest_eventsource::Error as SseError;
 
 use super::*;
-use crate::provider::llamacpp::StreamChunk;
+use crate::provider::openai_compat::StreamChunk;
 
 /// Regression: a model absent from the table must still request the parsed
 /// reasoning format.

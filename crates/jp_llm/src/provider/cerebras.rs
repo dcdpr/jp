@@ -23,8 +23,8 @@ use tracing::{debug, trace, warn};
 
 use super::{
     EventStream, ModelDetails, Provider,
-    llamacpp::{StreamChunk, merge_consecutive_assistant_messages},
     openai::parameters_with_strict_mode,
+    openai_compat::{StreamChunk, merge_consecutive_assistant_messages},
 };
 use crate::{
     error::{Error, Result, StreamError},
