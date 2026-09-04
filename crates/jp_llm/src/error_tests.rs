@@ -85,6 +85,70 @@ async fn a_429_outranks_a_context_window_phrasing_in_the_body() {
     assert!(err.is_retryable());
 }
 
+/// Cerebras returns a flat error envelope with no `error` wrapper.
+///
+/// Every status it produces uses this shape, so failing to read it renders
+/// every Cerebras failure as a bare `HTTP <code>` with the useful sentence
+/// discarded.
+#[tokio::test]
+async fn a_flat_error_envelope_reaches_the_message() {
+    let err = StreamError::from_eventsource(invalid_status(
+        404,
+        r#"{"message":"Model zai-glm-4.7 is archived and unavailable for the organization.","type":"model_archived_error","param":"model","code":"model_archived"}"#,
+    ))
+    .await;
+
+    assert_eq!(
+        err.message(),
+        "Model zai-glm-4.7 is archived and unavailable for the organization. (HTTP 404 Not Found)"
+    );
+}
+
+/// The nested envelope keeps working.
+#[tokio::test]
+async fn a_nested_error_envelope_reaches_the_message() {
+    let err = StreamError::from_eventsource(invalid_status(
+        400,
+        r#"{"error":{"message":"you asked for the impossible"}}"#,
+    ))
+    .await;
+
+    assert_eq!(
+        err.message(),
+        "you asked for the impossible (HTTP 400 Bad Request)"
+    );
+}
+
+#[test]
+fn extract_api_error_body_reads_both_envelopes() {
+    assert_eq!(
+        extract_api_error_body(r#"{"error":{"message":"nested"}}"#),
+        Some("nested".to_owned())
+    );
+    assert_eq!(
+        extract_api_error_body(r#"{"message":"flat","type":"invalid_request_error"}"#),
+        Some("flat".to_owned())
+    );
+}
+
+/// The nested envelope wins when a body carries both, because a provider that
+/// nests is describing the error there and using the outer key for something
+/// else.
+#[test]
+fn extract_api_error_body_prefers_the_nested_envelope() {
+    assert_eq!(
+        extract_api_error_body(r#"{"error":{"message":"nested"},"message":"flat"}"#),
+        Some("nested".to_owned())
+    );
+}
+
+#[test]
+fn extract_api_error_body_ignores_bodies_without_a_message() {
+    assert_eq!(extract_api_error_body("not json at all"), None);
+    assert_eq!(extract_api_error_body(r#"{"detail":"nope"}"#), None);
+    assert_eq!(extract_api_error_body(r#"{"message":42}"#), None);
+}
+
 #[test]
 fn extract_retry_after_from_retry_after_ms() {
     let mut headers = reqwest::header::HeaderMap::new();
