@@ -4,7 +4,7 @@ use camino_tempfile::tempdir;
 use chrono::{TimeZone as _, Utc};
 use jp_config::AppConfig;
 use jp_conversation::{
-    Conversation, ConversationEvent, ConversationId, EventKind,
+    Conversation, ConversationEvent, ConversationId, EventKind, Labels,
     event::{
         ChatRequest, ChatResponse, InquiryQuestion, InquiryRequest, InquirySource, ToolCallRequest,
         ToolCallResponse,
@@ -232,6 +232,56 @@ fn filter_ids_matches_title() {
     let ctx = setup_ctx_with_conversations(vec![(id, conv, vec![])]);
 
     assert_eq!(matching(&ctx, &[id], "storage"), vec![id]);
+}
+
+#[test]
+fn filter_ids_matches_a_label_key() {
+    let id_match = make_id(20_410);
+    let id_miss = make_id(20_411);
+    let labelled = |key: &str| Conversation {
+        labels: Labels::from_iter([(key, ["jp_config"])]),
+        ..Default::default()
+    };
+    let ctx = setup_ctx_with_conversations(vec![
+        (id_match, labelled("crate"), vec![]),
+        (id_miss, labelled("module"), vec![]),
+    ]);
+
+    assert_eq!(matching(&ctx, &[id_match, id_miss], "crate"), vec![
+        id_match
+    ]);
+}
+
+#[test]
+fn filter_ids_matches_a_label_value() {
+    let id_match = make_id(20_420);
+    let id_miss = make_id(20_421);
+    let labelled = |value: &str| Conversation {
+        labels: Labels::from_iter([("crate", [value])]),
+        ..Default::default()
+    };
+    let ctx = setup_ctx_with_conversations(vec![
+        (id_match, labelled("jp_config"), vec![]),
+        (id_miss, labelled("jp_llm"), vec![]),
+    ]);
+
+    assert_eq!(matching(&ctx, &[id_match, id_miss], "jp_config"), vec![
+        id_match
+    ]);
+}
+
+#[test]
+fn filter_ids_matches_a_whole_label_pair() {
+    // The pair is searched as one line, so the `key=value` text a user types
+    // into `--label` also works as a `--grep` pattern.
+    let id = make_id(20_430);
+    let conv = Conversation {
+        labels: Labels::from_iter([("crate", ["jp_config"])]),
+        ..Default::default()
+    };
+    let ctx = setup_ctx_with_conversations(vec![(id, conv, vec![])]);
+
+    assert_eq!(matching(&ctx, &[id], "crate=jp_config"), vec![id]);
 }
 
 #[test]

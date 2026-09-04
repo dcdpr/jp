@@ -31,8 +31,10 @@ pub(crate) struct Use {
 
     /// Restrict picker candidates to conversations containing the pattern.
     ///
-    /// Substring match against the title, chat text, reasoning, structured
-    /// output, tool calls, tool results, and inquiry questions.
+    /// Substring match against the title, labels, chat text, reasoning,
+    /// structured output, tool calls, tool results, and inquiry questions.
+    /// A label is matched as `key=value`, or as a bare key when it holds no
+    /// value.
     /// Case-insensitive unless the pattern contains an uppercase character
     /// (smart-case).
     /// Composable with target keywords (`?`, `?p`, `?s`, `?a`) and with
