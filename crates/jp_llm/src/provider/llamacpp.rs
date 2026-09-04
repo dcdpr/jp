@@ -22,7 +22,11 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tracing::{debug, trace, warn};
 
-use super::{EventStream, ModelDetails, openai::parameters_with_strict_mode};
+use super::{
+    EventStream, ModelDetails,
+    openai::parameters_with_strict_mode,
+    openai_compat::{StreamChunk, merge_consecutive_assistant_messages},
+};
 use crate::{
     error::{Error, StreamError},
     event::{Event, FinishReason},
@@ -608,48 +612,6 @@ fn convert_events(events: ConversationStream) -> Vec<Value> {
     merge_consecutive_assistant_messages(messages)
 }
 
-/// Merge consecutive assistant messages in an OpenAI-compatible
-/// chat-completions message list into single messages.
-///
-/// A single model turn can surface reasoning, content, and several parallel
-/// tool calls as separate events.
-/// The chat-completions contract expects them as one assistant message:
-/// reasoning and content folded in, every parallel `tool_calls` entry in one
-/// array, immediately followed by the tool results.
-///
-/// Both the `reasoning` (Cerebras) and `reasoning_content` (llama.cpp) field
-/// names are handled, so this is shared by both OpenAI-compatible providers.
-pub(crate) fn merge_consecutive_assistant_messages(messages: Vec<Value>) -> Vec<Value> {
-    messages
-        .into_iter()
-        .fold(vec![], |mut acc: Vec<Value>, message| {
-            if let Some(last) = acc.last_mut()
-                && last.get("role").and_then(Value::as_str) == Some("assistant")
-                && message.get("role").and_then(Value::as_str) == Some("assistant")
-            {
-                if let Some(new) = message.get("tool_calls").and_then(Value::as_array) {
-                    last["tool_calls"]
-                        .as_array_mut()
-                        .map(|existing| existing.extend(new.iter().cloned()))
-                        .unwrap_or_else(|| last["tool_calls"] = json!(new));
-                }
-
-                for key in ["reasoning", "reasoning_content", "content"] {
-                    if let Some(value) = message.get(key)
-                        && value.is_string()
-                    {
-                        last[key] = value.clone();
-                    }
-                }
-
-                return acc;
-            }
-
-            acc.push(message);
-            acc
-        })
-}
-
 /// Convert tool definitions to the OpenAI-compatible JSON format.
 ///
 /// If [`ToolChoice::Function`] is set, only include the named tool. llama.cpp
@@ -810,57 +772,6 @@ impl TryFrom<&LlamacppConfig> for Llamacpp {
             base_url,
         })
     }
-}
-
-// These mirror the llama.cpp server's `common_chat_msg_diff_to_json_oaicompat`
-// output. The critical addition over the `openai` crate is the
-// `reasoning_content` field, which carries extracted reasoning for the
-// `--reasoning-format deepseek` (default) and `deepseek-legacy` modes.
-//
-// These types are also used by the `cerebras` provider, which streams an
-// identical OpenAI-compatible SSE format.
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct StreamChunk {
-    #[serde(default)]
-    pub choices: Vec<StreamChoice>,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct StreamChoice {
-    pub delta: StreamDelta,
-    #[serde(default)]
-    pub finish_reason: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Default)]
-pub(crate) struct StreamDelta {
-    #[serde(default)]
-    pub content: Option<String>,
-    /// Reasoning content extracted by the server (deepseek / deepseek-legacy).
-    /// This is a non-standard `DeepSeek` extension that llama.cpp also uses.
-    #[serde(default, alias = "reasoning")]
-    pub reasoning_content: Option<String>,
-    #[serde(default)]
-    pub tool_calls: Option<Vec<ToolCallDelta>>,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct ToolCallDelta {
-    #[serde(default)]
-    pub index: u32,
-    #[serde(default)]
-    pub id: Option<String>,
-    #[serde(default)]
-    pub function: Option<FunctionDelta>,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct FunctionDelta {
-    #[serde(default)]
-    pub name: Option<String>,
-    #[serde(default)]
-    pub arguments: Option<String>,
 }
 
 #[cfg(test)]
