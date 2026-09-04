@@ -439,6 +439,49 @@ fn test_load_cli_cfg_args_no_roots_errors() {
     }
 }
 
+// A terminal is evidence of a user, but only until the user says otherwise.
+#[test]
+fn interactive_requires_a_terminal_and_no_opt_out() {
+    assert!(interactive(false, true));
+    assert!(!interactive(false, false));
+    assert!(!interactive(true, true));
+    assert!(!interactive(true, false));
+}
+
+/// `--no-interactive` is the flag; `--non-interactive` is the spelling most
+/// other tools use, and both have to reach the same field.
+#[test]
+fn both_spellings_of_the_interactivity_flag_parse() {
+    let cli = Cli::try_parse_from(["jp", "--no-interactive", "conversation", "ls"]).unwrap();
+    assert!(cli.globals.no_interactive);
+
+    let cli = Cli::try_parse_from(["jp", "--non-interactive", "conversation", "ls"]).unwrap();
+    assert!(cli.globals.no_interactive, "the alias stopped working");
+}
+
+#[test]
+#[serial(env_vars)]
+fn non_interactive_env_var_accepts_1_and_true_only() {
+    {
+        let _guard = EnvVarGuard::set("JP_NONINTERACTIVE", "1");
+        assert!(env_opt_out("JP_NONINTERACTIVE"));
+    }
+    {
+        let _guard = EnvVarGuard::set("JP_NONINTERACTIVE", "true");
+        assert!(env_opt_out("JP_NONINTERACTIVE"));
+    }
+    // `JP_NONINTERACTIVE=0` must not read as "set, therefore on" — a user who
+    // exports it to turn the behaviour off would otherwise turn it on.
+    {
+        let _guard = EnvVarGuard::set("JP_NONINTERACTIVE", "0");
+        assert!(!env_opt_out("JP_NONINTERACTIVE"));
+    }
+    {
+        let _guard = EnvVarGuard::remove("JP_NONINTERACTIVE");
+        assert!(!env_opt_out("JP_NONINTERACTIVE"));
+    }
+}
+
 #[test]
 fn test_load_cli_cfg_args_key_value_still_works() {
     let partial = PartialAppConfig::empty();
@@ -747,6 +790,7 @@ fn resolve_config_consumes_default_id() {
         &mut workspace,
         None,
         None,
+        false,
     )
     .unwrap();
 
@@ -804,6 +848,7 @@ fn resolve_config_applies_the_compact_model_flag() {
         &mut workspace,
         None,
         None,
+        false,
     )
     .unwrap();
 
@@ -888,6 +933,7 @@ fn resolve_config_reset_skips_broken_conversation_config() {
         &mut workspace,
         None,
         None,
+        false,
     );
     assert!(result.is_err(), "broken conversation config must propagate");
 
@@ -904,6 +950,7 @@ fn resolve_config_reset_skips_broken_conversation_config() {
         &mut workspace,
         None,
         None,
+        false,
     )
     .expect("--cfg=NONE must recover a broken conversation config");
 
@@ -944,6 +991,7 @@ fn resolve_config_reset_workspace_layer_contains_resolved_model_ids() {
         &mut workspace,
         None,
         None,
+        false,
     )
     .unwrap();
 
@@ -995,6 +1043,7 @@ fn resolve_config_reset_post_layer_contains_resolved_model_ids() {
         &mut workspace,
         None,
         None,
+        false,
     )
     .unwrap();
 

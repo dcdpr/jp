@@ -24,7 +24,7 @@
 //! prompt is possible; scripts stay deterministic by targeting IDs or paths.
 
 use std::{
-    io::{self, BufRead, IsTerminal as _},
+    io::{self, BufRead},
     str::FromStr,
 };
 
@@ -156,7 +156,11 @@ pub(crate) struct TargetEnv<'a> {
 
 impl<'a> TargetEnv<'a> {
     /// The environment for this invocation.
-    pub(crate) fn new(session: Option<&'a Session>) -> Result<Self> {
+    ///
+    /// `no_interactive` is the caller's `--no-interactive` (or
+    /// `JP_NONINTERACTIVE`) opt-out; without it, a terminal on stdin stands for
+    /// a user who can answer.
+    pub(crate) fn new(session: Option<&'a Session>, no_interactive: bool) -> Result<Self> {
         let data_dir = user_data_dir()?;
 
         Ok(Self {
@@ -164,7 +168,7 @@ impl<'a> TargetEnv<'a> {
             workspaces_dir: data_dir.join(USER_WORKSPACES_DIR),
             store: WorkspaceSessionStore::at_user_data_dir(&data_dir),
             session,
-            interactive: io::stdin().is_terminal(),
+            interactive: crate::stdin_interactive(no_interactive),
         })
     }
 }

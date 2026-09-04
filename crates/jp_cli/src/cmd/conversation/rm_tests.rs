@@ -3,10 +3,16 @@ use std::sync::Arc;
 use chrono::{DateTime, Utc};
 use jp_config::AppConfig;
 use jp_conversation::{Conversation, ConversationId};
-use jp_workspace::Workspace;
+use jp_printer::{OutputFormat, Printer};
+use jp_workspace::{LockResult, Workspace};
+use tokio::runtime::Runtime;
 
 use super::*;
-use crate::cmd::{conversation_id::PositionalIds, time::CreationRange};
+use crate::{
+    Globals,
+    bootstrap::ExecutionContext,
+    cmd::{conversation_id::PositionalIds, time::CreationRange},
+};
 
 fn ts(secs: i64) -> DateTime<Utc> {
     DateTime::<Utc>::UNIX_EPOCH + chrono::Duration::seconds(secs)
@@ -32,6 +38,23 @@ fn workspace_with_conversations(ids: &[ConversationId]) -> Workspace {
         ws.create_conversation_with_id(*id, Conversation::default(), config.clone());
     }
     ws
+}
+
+/// A `Ctx` over an in-memory workspace holding `ids`.
+fn test_ctx(ids: &[ConversationId]) -> Ctx {
+    let workspace = workspace_with_conversations(ids);
+    let (printer, _, _) = Printer::memory(OutputFormat::TextPretty);
+
+    Ctx::new(
+        ExecutionContext::for_workspace(&workspace),
+        workspace,
+        None,
+        Runtime::new().unwrap(),
+        Globals::default(),
+        AppConfig::new_test(),
+        None,
+        printer,
+    )
 }
 
 #[test]
@@ -145,6 +168,35 @@ fn resolve_filtered_until_only_excludes_until_exclusive() {
     ids.sort();
 
     assert_eq!(ids, vec![before]);
+}
+
+/// The removal prompt reads the controlling terminal, not stdin, so a run with
+/// nobody watching would stop there and wait for a keystroke that never comes.
+/// Removal is also the one thing that cannot be undone, so there is no outcome
+/// to assume on the user's behalf either.
+#[test]
+fn removing_without_a_user_fails_unless_confirmation_is_waived() {
+    let id = make_id(1000);
+    let mut ctx = test_ctx(&[id]);
+    ctx.term.interactive = false;
+
+    let handle = ctx.workspace.acquire_conversation(&id).unwrap();
+    let LockResult::Acquired(lock) = ctx.workspace.lock_conversation(handle, None).unwrap() else {
+        panic!("nothing else holds this conversation");
+    };
+
+    let error = confirm_and_remove(&mut ctx, id, &lock, None, false)
+        .expect_err("a removal nobody can confirm must not proceed");
+    assert_eq!(
+        error.message.as_deref(),
+        Some(
+            "removing conversation jp-c10000 needs a confirmation and nobody is available to give \
+             one; pass --no-confirm to remove it without asking"
+        )
+    );
+
+    // `--no-confirm` is the caller having answered in advance.
+    confirm_and_remove(&mut ctx, id, &lock, None, true).expect("nothing left to ask");
 }
 
 #[test]

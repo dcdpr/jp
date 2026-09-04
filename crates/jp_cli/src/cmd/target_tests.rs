@@ -411,6 +411,52 @@ fn a_picker_with_no_candidates_reports_what_was_missing() {
     );
 }
 
+/// Conversation resolution runs before a `Ctx` exists, so the pickers take the
+/// interaction policy as an argument.
+/// Passing `false` has to be what closes them: a guard that reads the ambient
+/// terminal instead would open a real prompt here whenever the test runs from
+/// one.
+#[test]
+fn a_picker_without_a_user_fails_instead_of_prompting() {
+    let (ws, _) = workspace_with_conversation();
+
+    let single = PositionalIds::<true, false>::from_targets(vec![ConversationTarget::Picker(
+        PickerFilter::default(),
+    )]);
+    let Err(error) = resolve_request(
+        &ConversationLoadRequest::explicit_or_session(&single),
+        &ws,
+        None,
+        DefaultConversationId::Ask,
+        false,
+        false,
+    ) else {
+        panic!("nobody is available to answer the picker");
+    };
+    assert!(
+        matches!(error, Error::NoConversationTarget { .. }),
+        "expected keyword help, got: {error}"
+    );
+
+    let multi = PositionalIds::<true, true>::from_targets(vec![ConversationTarget::Picker(
+        PickerFilter::default(),
+    )]);
+    let Err(error) = resolve_request(
+        &ConversationLoadRequest::explicit_or_session(&multi),
+        &ws,
+        None,
+        DefaultConversationId::Ask,
+        false,
+        false,
+    ) else {
+        panic!("nobody is available to answer the multi-select picker");
+    };
+    assert!(
+        matches!(error, Error::NoConversationTarget { .. }),
+        "expected keyword help, got: {error}"
+    );
+}
+
 /// Only Esc, Ctrl-C, and EOF are the user declining.
 /// Anything else is the prompt itself breaking, and must keep its cause so the
 /// run is reported as a failure rather than a choice.

@@ -1,6 +1,6 @@
-use std::{env, fs, io, str::FromStr as _, sync::Arc};
+use std::{env, fs, io, str::FromStr as _};
 
-use camino::{FromPathBufError, Utf8PathBuf};
+use camino::{FromPathBufError, Utf8Path, Utf8PathBuf};
 use clean_path::Clean as _;
 use crossterm::style::Stylize as _;
 use duct::cmd;
@@ -26,7 +26,21 @@ pub(crate) struct Init {
 }
 
 impl Init {
-    pub(crate) fn run(&self, printer: &Printer) -> Output {
+    /// Create the workspace at `path` and configure it through the wizard.
+    ///
+    /// Errors under `--no-interactive`: every value the wizard needs comes from
+    /// a prompt, and no flag supplies them.
+    /// Nothing reaches disk until every answer is in hand, so a run that stops
+    /// early leaves no half-initialized workspace behind.
+    pub(crate) fn run(&self, printer: &Printer, no_interactive: bool) -> Output {
+        if no_interactive {
+            return Err(
+                "`jp init` asks which model to use and whether to confirm tool calls, and nobody \
+                 is available to answer; run it without --no-interactive"
+                    .into(),
+            );
+        }
+
         let cwd: Utf8PathBuf = std::env::current_dir()?
             .try_into()
             .map_err(FromPathBufError::into_io_error)?;
@@ -44,16 +58,6 @@ impl Init {
             root = cwd.join(root);
         }
 
-        fs::create_dir_all(&root)?;
-
-        let storage = root.join(DEFAULT_STORAGE_DIR);
-        let id = jp_workspace::Id::new();
-
-        let fs = Arc::new(FsStorageBackend::new(&storage)?);
-        let _workspace = Workspace::in_memory_with_id(root.clone(), id.clone()).with_backend(fs);
-
-        id.store(&storage)?;
-
         // Interactive configuration
         let run_mode = Self::ask_run_mode(&mut printer.out_writer(), true)?;
         let (provider, name) = Self::ask_model(&mut printer.out_writer())?;
@@ -63,7 +67,40 @@ impl Init {
         // setting is shared across all workspaces.
         Self::maybe_ask_and_persist_user_name(&mut printer.out_writer())?;
 
-        // Write workspace config
+        Self::create_workspace(&root, run_mode, provider, &name)?;
+
+        let loc = if root == cwd {
+            "current directory".to_owned()
+        } else {
+            root.to_string().bold().to_string()
+        };
+
+        printer.println(format!("Initialized workspace at {loc}"));
+        Ok(())
+    }
+
+    /// Write the workspace: its storage directory, its ID, and the config the
+    /// wizard collected.
+    ///
+    /// Takes the wizard's answers as arguments so it cannot run before they
+    /// exist.
+    /// The ID file alone is enough to make a directory look like a workspace to
+    /// every later command, and one carrying no config fails all of them.
+    fn create_workspace(
+        root: &Utf8Path,
+        run_mode: RunMode,
+        provider: ProviderId,
+        name: &Name,
+    ) -> Output {
+        fs::create_dir_all(root)?;
+
+        let storage = root.join(DEFAULT_STORAGE_DIR);
+        let id = jp_workspace::Id::new();
+
+        // Constructing the backend is what creates the storage directory.
+        let _backend = FsStorageBackend::new(&storage)?;
+        id.store(&storage)?;
+
         fs::write(
             storage.join("config.toml"),
             indoc::formatdoc!(
@@ -78,13 +115,6 @@ impl Init {
             ),
         )?;
 
-        let loc = if root == cwd {
-            "current directory".to_owned()
-        } else {
-            root.to_string().bold().to_string()
-        };
-
-        printer.println(format!("Initialized workspace at {loc}"));
         Ok(())
     }
 

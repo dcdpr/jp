@@ -244,12 +244,17 @@ pub(crate) struct ResolveOutcome {
 /// `allow_picker_new` lets the interactive picker offer a "start a new
 /// conversation" item; when chosen, [`ResolveOutcome::start_new`] is set and no
 /// handles are returned.
+///
+/// `interactive` is whether a user is available to answer a picker prompt.
+/// Without one, a target that resolves to nothing fails with keyword help
+/// instead.
 pub(crate) fn resolve_request(
     request: &ConversationLoadRequest,
     workspace: &Workspace,
     session: Option<&Session>,
     default_id: DefaultConversationId,
     allow_picker_new: bool,
+    interactive: bool,
 ) -> Result<ResolveOutcome> {
     let Some(targets) = &request.targets else {
         return Ok(ResolveOutcome::default());
@@ -261,7 +266,14 @@ pub(crate) fn resolve_request(
         allow_new: allow_picker_new,
     };
 
-    let (ids, start_new) = resolve_targets(targets, workspace, session, default_id, grammar)?;
+    let (ids, start_new) = resolve_targets(
+        targets,
+        workspace,
+        session,
+        default_id,
+        grammar,
+        interactive,
+    )?;
 
     let handles = ids
         .iter()
@@ -638,9 +650,16 @@ fn resolve_targets(
     session: Option<&Session>,
     default_id: DefaultConversationId,
     grammar: TargetGrammar,
+    interactive: bool,
 ) -> Result<(Vec<ConversationId>, bool)> {
     if targets.is_empty() {
-        return resolve_from_session_or_picker(workspace, session, default_id, grammar);
+        return resolve_from_session_or_picker(
+            workspace,
+            session,
+            default_id,
+            grammar,
+            interactive,
+        );
     }
 
     let all_ids = targets
@@ -688,20 +707,20 @@ fn resolve_targets(
                 // Archived picker draws from the archive partition.
                 if filter.archived {
                     return if grammar.multi {
-                        resolve_archived_multi_picker(workspace, filter, grammar)
+                        resolve_archived_multi_picker(workspace, filter, grammar, interactive)
                             .map(|ids| (ids, false))
                     } else {
-                        resolve_archived_picker(workspace, filter, grammar)
+                        resolve_archived_picker(workspace, filter, grammar, interactive)
                             .map(|id| (vec![id], false))
                     };
                 }
 
                 if grammar.multi {
-                    return resolve_multi_picker(workspace, session, filter, grammar)
+                    return resolve_multi_picker(workspace, session, filter, grammar, interactive)
                         .map(|ids| (ids, false));
                 }
 
-                return resolve_single_picker(workspace, session, filter, grammar);
+                return resolve_single_picker(workspace, session, filter, grammar, interactive);
             }
             Ok(v) => return Ok((v, false)),
             Err(e) => last_err = Some(e),
@@ -717,6 +736,7 @@ fn resolve_from_session_or_picker(
     session: Option<&Session>,
     default_id: DefaultConversationId,
     grammar: TargetGrammar,
+    interactive: bool,
 ) -> Result<(Vec<ConversationId>, bool)> {
     if let Some(id) = session.and_then(|s| workspace.session_active_conversation(s)) {
         return Ok((vec![id], false));
@@ -727,7 +747,13 @@ fn resolve_from_session_or_picker(
         return Ok((vec![id], false));
     }
 
-    resolve_single_picker(workspace, session, &PickerFilter::default(), grammar)
+    resolve_single_picker(
+        workspace,
+        session,
+        &PickerFilter::default(),
+        grammar,
+        interactive,
+    )
 }
 
 /// Single-select picker dispatch, optionally offering "start a new
@@ -740,12 +766,14 @@ fn resolve_single_picker(
     session: Option<&Session>,
     filter: &PickerFilter,
     grammar: TargetGrammar,
+    interactive: bool,
 ) -> Result<(Vec<ConversationId>, bool)> {
     if !grammar.allow_new {
-        return resolve_picker(workspace, session, filter, grammar).map(|id| (vec![id], false));
+        return resolve_picker(workspace, session, filter, grammar, interactive)
+            .map(|id| (vec![id], false));
     }
 
-    if !io::stdin().is_terminal() {
+    if !interactive {
         return Err(grammar.into());
     }
 
@@ -782,8 +810,9 @@ pub(crate) fn resolve_picker(
     session: Option<&Session>,
     filter: &PickerFilter,
     grammar: TargetGrammar,
+    interactive: bool,
 ) -> Result<ConversationId> {
-    if !io::stdin().is_terminal() {
+    if !interactive {
         return Err(grammar.into());
     }
 
@@ -797,8 +826,9 @@ fn resolve_multi_picker(
     session: Option<&Session>,
     filter: &PickerFilter,
     grammar: TargetGrammar,
+    interactive: bool,
 ) -> Result<Vec<ConversationId>> {
-    if !io::stdin().is_terminal() {
+    if !interactive {
         return Err(grammar.into());
     }
 
@@ -1034,8 +1064,9 @@ pub(crate) fn resolve_archived_picker(
     workspace: &Workspace,
     filter: &PickerFilter,
     grammar: TargetGrammar,
+    interactive: bool,
 ) -> Result<ConversationId> {
-    if !io::stdin().is_terminal() {
+    if !interactive {
         return Err(grammar.into());
     }
 
@@ -1068,8 +1099,9 @@ fn resolve_archived_multi_picker(
     workspace: &Workspace,
     filter: &PickerFilter,
     grammar: TargetGrammar,
+    interactive: bool,
 ) -> Result<Vec<ConversationId>> {
-    if !io::stdin().is_terminal() {
+    if !interactive {
         return Err(grammar.into());
     }
 

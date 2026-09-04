@@ -31,6 +31,8 @@ pub(crate) struct Rm {
     /// Confirmation prompting: `--confirm`, `--no-confirm`, or `--yes`.
     ///
     /// Removal always prompts by default; `--no-confirm` / `--yes` skips it.
+    /// With no user available to answer — no terminal, or `--no-interactive`
+    /// — removal fails unless `--no-confirm` was passed.
     #[command(flatten)]
     confirm: ConfirmFlag,
 }
@@ -110,6 +112,10 @@ async fn remove(
     Ok(())
 }
 
+/// Confirm the removal of `id`, unless `force` says the caller already decided.
+///
+/// Errors when the confirmation is required and no user is available to give
+/// it: a removal cannot be undone, so there is no outcome to assume.
 fn confirm_and_remove(
     ctx: &mut Ctx,
     id: ConversationId,
@@ -117,6 +123,14 @@ fn confirm_and_remove(
     active_id: Option<ConversationId>,
     force: bool,
 ) -> Output {
+    if !force && !ctx.term.interactive {
+        return Err(format!(
+            "removing conversation {id} needs a confirmation and nobody is available to give one; \
+             pass --no-confirm to remove it without asking"
+        )
+        .into());
+    }
+
     let conversation = lock.metadata();
     let events = lock.events();
     let mut details = DetailsFmt::new(id)

@@ -58,12 +58,13 @@ impl Workspace {
         session: Option<&Session>,
         persist: bool,
         global: Option<&WorkspaceTarget>,
+        no_interactive: bool,
     ) -> Output {
         // Reconcile arguments before resolving the environment, so a
         // contradictory invocation fails on its own terms rather than on
         // whatever the user data directory happens to hold.
         let command = self.command.with_global_target(global)?;
-        let env = TargetEnv::new(session)?;
+        let env = TargetEnv::new(session, no_interactive)?;
 
         match command {
             Commands::Use(args) => args.run(printer, &env),

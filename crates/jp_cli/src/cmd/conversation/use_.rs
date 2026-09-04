@@ -241,10 +241,13 @@ impl Use {
             filter.archived = archived_partition;
             filter.candidate_ids = Some(final_ids);
             let grammar = TargetGrammar::from_args(&self.target, false);
+            // The pickers are shared with the pre-`Ctx` resolution path, which
+            // has no `Term` to read, so promptability comes from stdin on both.
+            let interactive = crate::stdin_interactive(ctx.term.args.no_interactive);
             if archived_partition {
-                resolve_archived_picker(&ctx.workspace, &filter, grammar)?
+                resolve_archived_picker(&ctx.workspace, &filter, grammar, interactive)?
             } else {
-                resolve_picker(&ctx.workspace, session, &filter, grammar)?
+                resolve_picker(&ctx.workspace, session, &filter, grammar, interactive)?
             }
         };
 
