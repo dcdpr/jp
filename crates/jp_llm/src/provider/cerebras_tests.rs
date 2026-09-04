@@ -476,6 +476,17 @@ fn map_model_known() {
 }
 
 #[test]
+fn map_model_qwen() {
+    let details = map_model("qwen-3.8-27b").unwrap();
+    assert_eq!(details.display_name.as_deref(), Some("Qwen 3.8 27B"));
+    assert_eq!(details.context_window, Some(65_536));
+    assert_eq!(details.max_output_tokens, Some(32_768));
+    assert_eq!(details.structured_output, Some(true));
+    // Reported as reasoning, but with no effort levels named.
+    assert_eq!(details.reasoning, None);
+}
+
+#[test]
 fn map_model_gpt_oss_has_reasoning() {
     let details = map_model("gpt-oss-120b").unwrap();
     assert!(details.reasoning.unwrap().is_leveled());

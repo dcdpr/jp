@@ -376,15 +376,15 @@ fn map_model(id: &str) -> Result<ModelDetails> {
             prefill: None,
             features: vec![],
         },
-        "zai-glm-4.7" => ModelDetails {
+        "qwen-3.8-27b" => ModelDetails {
             id: (PROVIDER, id).try_into()?,
-            display_name: Some("Zai GLM 4.7".to_owned()),
-            context_window: Some(131_072),
-            max_output_tokens: Some(40_960),
-            // Reasoning is enabled by default; only `none` disables it.
-            reasoning: Some(ReasoningDetails::leveled(
-                false, false, false, false, false, false,
-            )),
+            display_name: Some("Qwen 3.8 27B".to_owned()),
+            context_window: Some(65_536),
+            max_output_tokens: Some(32_768),
+            // Reported as a reasoning model with no effort levels named, so
+            // support stays unknown rather than inheriting a ladder from its
+            // siblings.
+            reasoning: None,
             knowledge_cutoff: None,
             deprecated: None,
             structured_output: Some(true),
@@ -493,7 +493,7 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Value, bool
         body["max_completion_tokens"] = json!(max_tokens);
     }
 
-    // Reasoning effort for gpt-oss-120b and zai-glm-4.7.
+    // Reasoning effort for a model with a known ladder (gpt-oss-120b).
     let reasoning = model.custom_reasoning_config(parameters.reasoning);
     if let Some(r) = &reasoning {
         // `auto` asks for the server's own default rather than a level of our
@@ -510,10 +510,10 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Value, bool
         }
     } else if matches!(parameters.reasoning, Some(ReasoningConfig::Off)) {
         // Honour an explicit "off" when the model is known to accept a `none`
-        // effort (zai-glm-4.7), and also when support is unknown: a model absent
-        // from the table may well accept it, and silently discarding the
-        // caller's setting is worse than a provider error. A model known to lack
-        // `none` (gpt-oss-120b) omits the field and takes the server default.
+        // effort, and also when support is unknown: a model absent from the
+        // table may well accept it, and silently discarding the caller's setting
+        // is worse than a provider error. A model known to lack `none`
+        // (gpt-oss-120b) omits the field and takes the server default.
         let known_none =
             model.reasoning.and_then(|r| r.lowest_effort()) == Some(ReasoningEffort::None);
         let unknown = model.reasoning.is_none();
