@@ -54,8 +54,7 @@ fn backoff_increases() {
 fn backoff_capped() {
     let d_high = exponential_backoff(100, TEST_BASE_BACKOFF_MS, TEST_MAX_BACKOFF_SECS);
 
-    // Should be capped at max_backoff_secs
-    assert!(d_high <= Duration::from_secs(TEST_MAX_BACKOFF_SECS + 1));
+    assert_eq!(d_high, Duration::from_secs(TEST_MAX_BACKOFF_SECS));
 }
 
 #[test]
@@ -69,7 +68,88 @@ fn backoff_respects_config() {
 
     // Should respect max cap
     let d_capped = exponential_backoff(100, 1000, 5);
-    assert!(d_capped <= Duration::from_secs(5));
+    assert_eq!(d_capped, Duration::from_secs(5));
+}
+
+/// The window a jittered delay is allowed to land in: at least the base, and
+/// less than a quarter above it.
+fn assert_within_jitter_window(actual: Duration, base: Duration) {
+    let ceiling = base + base / 4;
+    assert!(
+        actual >= base && actual < ceiling,
+        "{actual:?} outside [{base:?}, {ceiling:?})"
+    );
+}
+
+/// A provider-supplied delay is a minimum: waiting less re-enters the same
+/// limit, so jitter is only ever added.
+#[test]
+fn retry_delay_never_waits_less_than_the_provider_asked() {
+    for _ in 0..200 {
+        let delay = retry_delay(
+            Some(Duration::from_mins(1)),
+            1,
+            TEST_BASE_BACKOFF_MS,
+            TEST_MAX_BACKOFF_SECS,
+        );
+
+        assert_within_jitter_window(delay, Duration::from_mins(1));
+    }
+}
+
+/// Cerebras answers a rate limit with `retry-after: 60`.
+/// Several sessions sharing one API key are limited at the same moment and must
+/// not resume in the same instant, or they trigger the limit again together.
+///
+/// Asserting only the window would pass if jitter never fired at all, so this
+/// also pins that repeated calls actually differ.
+#[test]
+fn retry_delay_spreads_concurrent_sessions_at_the_ceiling() {
+    let delays: Vec<_> = (0..200)
+        .map(|_| {
+            retry_delay(
+                Some(Duration::from_mins(1)),
+                1,
+                TEST_BASE_BACKOFF_MS,
+                TEST_MAX_BACKOFF_SECS,
+            )
+        })
+        .collect();
+
+    let distinct: std::collections::BTreeSet<_> = delays.iter().collect();
+    assert!(
+        distinct.len() > 100,
+        "200 delays produced only {} distinct values; they resume together",
+        distinct.len()
+    );
+}
+
+/// A delay longer than the ceiling is bounded by it before jitter is added.
+#[test]
+fn retry_delay_bounds_a_long_provider_delay() {
+    let delay = retry_delay(Some(Duration::from_mins(10)), 1, TEST_BASE_BACKOFF_MS, 60);
+
+    assert_within_jitter_window(delay, Duration::from_mins(1));
+}
+
+/// Without provider guidance the delay grows exponentially, and each attempt
+/// stays inside its own window.
+#[test]
+fn retry_delay_falls_back_to_exponential_backoff() {
+    for (attempt, base_ms) in [(1, 1000), (2, 2000), (3, 4000)] {
+        let delay = retry_delay(None, attempt, TEST_BASE_BACKOFF_MS, TEST_MAX_BACKOFF_SECS);
+
+        assert_within_jitter_window(delay, Duration::from_millis(base_ms));
+    }
+}
+
+/// A delay too short to carve a jitter window out of is returned unchanged.
+/// The naive implementation asks for a random value in `0..0`, which panics.
+#[test]
+fn retry_delay_leaves_a_sub_millisecond_window_alone() {
+    let delay = retry_delay(Some(Duration::from_millis(3)), 1, 1, 60);
+
+    assert_eq!(delay, Duration::from_millis(3));
 }
 
 #[test]

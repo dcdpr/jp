@@ -111,10 +111,12 @@ pub async fn collect_with_retry(
             return Err(error.into());
         }
 
-        let delay = match error.retry_after {
-            Some(d) => d.min(Duration::from_secs(config.max_backoff_secs)),
-            None => exponential_backoff(attempt, config.base_backoff_ms, config.max_backoff_secs),
-        };
+        let delay = retry_delay(
+            error.retry_after,
+            attempt,
+            config.base_backoff_ms,
+            config.max_backoff_secs,
+        );
 
         debug!(
             attempt,
@@ -128,9 +130,46 @@ pub async fn collect_with_retry(
     }
 }
 
+/// How long to wait before the next attempt, spread so that callers which
+/// failed together do not resume together.
+///
+/// A `retry_after` the provider supplied is used as the delay, bounded by
+/// `max_backoff_secs`.
+/// Without one, the delay grows exponentially with `attempt`.
+/// Either way a random extra of up to a quarter of that delay is added on top.
+///
+/// The extra is added after the bound rather than folded inside it, so it still
+/// has an effect once the bound is reached.
+/// It is only ever added: `retry_after` is the minimum the provider asked for,
+/// and waiting less than it walks straight back into the same limit.
+#[must_use]
+pub fn retry_delay(
+    retry_after: Option<Duration>,
+    attempt: u32,
+    base_backoff_ms: u64,
+    max_backoff_secs: u64,
+) -> Duration {
+    let base = match retry_after {
+        Some(d) => d.min(Duration::from_secs(max_backoff_secs)),
+        None => exponential_backoff(attempt, base_backoff_ms, max_backoff_secs),
+    };
+
+    // A quarter of a delay shorter than 4ms rounds to nothing, and asking for a
+    // random value in an empty range panics.
+    let window_ms = u64::try_from(base.as_millis() / 4).unwrap_or(u64::MAX);
+    if window_ms == 0 {
+        return base;
+    }
+
+    base + Duration::from_millis(rand::random_range(0..window_ms))
+}
+
 /// Calculate exponential backoff delay.
 ///
 /// Formula: `min(base * 2^attempt, max_backoff)`
+///
+/// Callers wanting the delay to actually wait should use [`retry_delay`], which
+/// adds the jitter that keeps concurrent callers apart.
 ///
 /// # Arguments
 ///

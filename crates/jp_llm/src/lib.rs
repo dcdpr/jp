@@ -15,7 +15,7 @@ pub(crate) mod test;
 
 pub use error::{Error, StreamError, StreamErrorKind, ToolError};
 pub use provider::Provider;
-pub use retry::exponential_backoff;
+pub use retry::{exponential_backoff, retry_delay};
 pub use stream::{
     EventStream, chain::EventChain, with_idle_timeout, with_output_limit, with_tool_call_keepalive,
 };

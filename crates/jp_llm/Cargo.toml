@@ -39,6 +39,7 @@ minijinja = { workspace = true, features = [
 ollama-rs = { workspace = true, features = ["rustls", "stream"] }
 openai_responses = { workspace = true, features = ["stream"] }
 quick-xml = { workspace = true, features = ["serialize"] }
+rand = { workspace = true, features = ["thread_rng"] }
 reqwest = { workspace = true }
 reqwest-eventsource = { workspace = true }
 serde = { workspace = true }

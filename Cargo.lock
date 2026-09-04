@@ -2488,6 +2488,7 @@ dependencies = [
  "openai_responses",
  "paste",
  "quick-xml",
+ "rand",
  "reqwest",
  "reqwest-eventsource",
  "serde",

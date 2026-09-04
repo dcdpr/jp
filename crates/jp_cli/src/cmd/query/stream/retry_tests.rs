@@ -107,14 +107,26 @@ fn backoff_uses_retry_after_when_present() {
     };
     let state = StreamRetryState::new(config, false);
     let err = StreamError::rate_limit(Some(Duration::from_secs(42)));
-    assert_eq!(state.backoff_duration(&err), Duration::from_secs(42));
+
+    assert_within_jitter_window(state.backoff_duration(&err), Duration::from_secs(42));
 }
 
 #[test]
 fn backoff_caps_retry_after_at_max_backoff() {
     let state = make_retry_state(3); // max_backoff_secs = 1
     let err = StreamError::rate_limit(Some(Duration::from_mins(5)));
-    assert_eq!(state.backoff_duration(&err), Duration::from_secs(1));
+
+    assert_within_jitter_window(state.backoff_duration(&err), Duration::from_secs(1));
+}
+
+/// The window a jittered delay is allowed to land in: at least the base, and
+/// less than a quarter above it.
+fn assert_within_jitter_window(actual: Duration, base: Duration) {
+    let ceiling = base + base / 4;
+    assert!(
+        actual >= base && actual < ceiling,
+        "{actual:?} outside [{base:?}, {ceiling:?})"
+    );
 }
 
 #[test]
