@@ -2387,6 +2387,137 @@ async fn test_tool_call_with_run_mode_ask_skips() {
     assert!(test_result.is_ok(), "Test timed out");
 }
 
+/// A permission prompt follows `interactive`, not `is_tty`.
+///
+/// The pair here is the one a user gets from `jp query > answer.txt` at a
+/// terminal: output cannot carry ANSI, but someone is still watching.
+/// The mock answers 'n', so the tool runs only if the prompt was skipped — a
+/// permission gate reading `is_tty` would auto-approve the Ask tool and leave
+/// `mock output` in the response.
+#[tokio::test]
+#[allow(clippy::too_many_lines)]
+async fn test_permission_prompt_follows_interactive_not_is_tty() {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let mut config = AppConfig::new_test();
+        config.conversation.tools.defaults.run = RunMode::Ask;
+        config
+            .conversation
+            .tools
+            .insert("mock_tool".to_string(), ToolConfig {
+                source: ToolSource::Local { tool: None },
+                command: None,
+                run: Some(RunMode::Ask),
+                format: None,
+                enable: None,
+                summary: None,
+                description: None,
+                examples: None,
+                parameters: IndexMap::new(),
+                result: None,
+                style: None,
+                questions: IndexMap::new(),
+                options: IndexMap::default(),
+                access: None,
+                cancellation_response: None,
+            });
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+
+        let chat_request = ChatRequest::from("Please use mock_tool");
+
+        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider::with_tool_then_message(
+            "call_piped",
+            "mock_tool",
+            "Tool was skipped by user.",
+        ));
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let mcp_client = jp_mcp::Client::default();
+        let router = detached_router();
+
+        let backend = MockPromptBackend::new().with_inline_responses(['n']);
+
+        let executor_source = TestExecutorSource::new().with_executor("mock_tool", |req| {
+            Box::new(
+                MockExecutor::completed(&req.id, &req.name, "mock output").with_permission_info(
+                    PermissionInfo {
+                        tool_id: req.id.clone(),
+                        tool_name: req.name.clone(),
+                        tool_source: ToolSource::Local { tool: None },
+                        run_mode: RunMode::Ask,
+                        arguments: Value::Object(req.arguments.clone()),
+                    },
+                ),
+            )
+        });
+        let tool_defs = executor_source.tool_definitions();
+
+        let result = run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &router,
+            &mcp_client,
+            root,
+            false, // is_tty: stdout is redirected
+            true,  // interactive: the user is still at the terminal
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &tool_defs,
+            printer.clone(),
+            Arc::new(backend),
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
+            chat_request.clone(),
+            InvocationContext::default(),
+            PendingStreamTrim::default(),
+        )
+        .await;
+
+        assert!(result.is_ok(), "Turn loop should complete: {result:?}");
+
+        let tool_responses: Vec<_> = lock
+            .events()
+            .clone()
+            .into_iter()
+            .filter_map(|e| e.event.into_tool_call_response())
+            .collect();
+
+        assert_eq!(
+            tool_responses.len(),
+            1,
+            "Should have exactly one tool response"
+        );
+
+        let content = tool_responses[0].content();
+        assert!(
+            content.contains("skipped"),
+            "The prompt should have run and been declined: {content}"
+        );
+        assert!(
+            !content.contains("mock output"),
+            "The tool must not run: the prompt was declined, not skipped: {content}"
+        );
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out");
+}
+
 #[tokio::test]
 #[allow(clippy::too_many_lines)]
 async fn test_tool_call_with_run_mode_unattended() {
@@ -3155,6 +3286,10 @@ async fn test_waiting_indicator_shows_during_delay() {
     // Tests that the waiting indicator appears when the LLM takes longer
     // than the configured delay. Uses a multi_thread runtime so the
     // spawned timer task can run concurrently with run_cycle().await.
+    //
+    // `interactive` is false against a TTY: the indicator is a rendering
+    // affordance, so nothing about it may depend on someone being there to
+    // answer a prompt.
 
     let test_result = Box::pin(timeout(Duration::from_secs(10), async {
         let tmp = tempdir().unwrap();
@@ -3198,8 +3333,8 @@ async fn test_waiting_indicator_shows_during_delay() {
             &router,
             &mcp_client,
             root,
-            true, // is_tty = true to enable the indicator
-            true, // interactive
+            true,  // is_tty = true to enable the indicator
+            false, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -3537,6 +3672,8 @@ async fn test_waiting_indicator_not_shown_when_disabled() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+// `interactive` is true without a TTY: a user at the terminal with stdout
+// redirected must not get cursor-control chrome in the redirected output.
 async fn test_waiting_indicator_not_shown_for_non_tty() {
     let test_result = Box::pin(timeout(Duration::from_secs(5), async {
         let tmp = tempdir().unwrap();
@@ -3578,7 +3715,7 @@ async fn test_waiting_indicator_not_shown_for_non_tty() {
             &mcp_client,
             root,
             false, // is_tty = false
-            false, // interactive
+            true,  // interactive
             &[],
             &lock,
             ToolChoice::Auto,

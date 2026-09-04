@@ -844,6 +844,7 @@ pub(super) async fn run_turn_loop(
                         mcp_client,
                         root,
                         &tool_renderer,
+                        is_tty,
                         interactive,
                     )
                     .await;

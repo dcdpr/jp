@@ -49,7 +49,9 @@ pub(crate) enum LockOutcome {
 pub(crate) struct LockRequest<'a> {
     pub workspace: &'a Workspace,
     pub handle: ConversationHandle,
-    pub is_tty: bool,
+
+    /// Whether a user is present to answer the contention prompt.
+    pub interactive: bool,
     pub session: Option<&'a Session>,
     pub printer: &'a Printer,
     pub signals: &'a SignalRouter,
@@ -69,7 +71,7 @@ impl<'a> LockRequest<'a> {
         Self {
             workspace: &ctx.workspace,
             handle,
-            is_tty: ctx.term.interactive,
+            interactive: ctx.term.interactive,
             session: ctx.session.as_ref(),
             printer: &ctx.printer,
             signals: &ctx.signals,
@@ -108,7 +110,7 @@ pub(crate) async fn acquire_lock(mut r: LockRequest<'_>) -> Result<LockOutcome> 
     // First attempt — no timer yet.
     r.handle = match r.workspace.lock_conversation(r.handle, r.session)? {
         LockResult::Acquired(lock) => return Ok(LockOutcome::Acquired(lock)),
-        _ if !r.is_tty => return Err(Error::LockTimeout(id)),
+        _ if !r.interactive => return Err(Error::LockTimeout(id)),
         LockResult::AlreadyLocked(handle) => handle,
     };
 

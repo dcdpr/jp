@@ -51,7 +51,7 @@ pub(crate) enum Trigger {
 pub(crate) struct Resolver<'a> {
     rules: &'a IndexMap<String, LabelConfig>,
     root: &'a Utf8Path,
-    is_tty: bool,
+    interactive: bool,
     printer: &'a Printer,
     prompts: &'a dyn PromptBackend,
 }
@@ -60,14 +60,14 @@ impl<'a> Resolver<'a> {
     pub(crate) const fn new(
         rules: &'a IndexMap<String, LabelConfig>,
         root: &'a Utf8Path,
-        is_tty: bool,
+        interactive: bool,
         printer: &'a Printer,
         prompts: &'a dyn PromptBackend,
     ) -> Self {
         Self {
             rules,
             root,
-            is_tty,
+            interactive,
             printer,
             prompts,
         }
@@ -215,8 +215,8 @@ impl<'a> Resolver<'a> {
             LabelRunMode::Deny => Ok(Approval::Declined),
             // An unanswerable prompt is one of the ways an optional rule can't
             // be produced, which is exactly what it asked to have skipped.
-            LabelRunMode::Ask if !self.is_tty && optional => Ok(Approval::Declined),
-            LabelRunMode::Ask if !self.is_tty => Err(Error::Label(format!(
+            LabelRunMode::Ask if !self.interactive && optional => Ok(Approval::Declined),
+            LabelRunMode::Ask if !self.interactive => Err(Error::Label(format!(
                 "label '{key}' needs confirmation to run `{cmd}`, but there is no terminal to ask \
                  on; set `conversation.labels.{key}.run` to \"unattended\" or \"deny\""
             ))),

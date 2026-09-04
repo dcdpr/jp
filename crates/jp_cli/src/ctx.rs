@@ -93,10 +93,14 @@ pub(crate) struct Term {
 
     /// Whether a user is present to answer prompts.
     ///
-    /// Gates every interactive prompt: tool permissions, label resolution,
-    /// lock-timeout handling, plugin approval, editor confirmations.
+    /// Gates tool permission and result prompts, label resolution, title
+    /// selection, lock-timeout handling, plugin approval, and the editor's
+    /// re-open confirmation.
     /// Distinct from [`Self::is_tty`], which asks whether output can carry ANSI
     /// escapes ([RFD 048]).
+    ///
+    /// Not every prompt consults it: `conversation rm` and `conversation
+    /// archive` gate their confirmations on `--force` and `--confirm` instead.
     ///
     /// [RFD 048]: https://jp.computer/rfd/048
     pub(crate) interactive: bool,
