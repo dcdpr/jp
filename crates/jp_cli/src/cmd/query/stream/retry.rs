@@ -28,7 +28,7 @@
 use std::{fmt, fmt::Write as _, mem, sync::Arc};
 
 use jp_config::assistant::request::RequestConfig;
-use jp_llm::{StreamError, exponential_backoff};
+use jp_llm::{StreamError, retry_delay};
 use jp_printer::Printer;
 use jp_workspace::ConversationMut;
 use tracing::{error, warn};
@@ -237,17 +237,15 @@ impl StreamRetryState {
     ///
     /// Uses the provider-specified `retry_after` if available (capped at
     /// `max_backoff_secs`), otherwise falls back to exponential backoff.
+    /// Both carry jitter, so two sessions failing at the same moment resume at
+    /// different ones.
     fn backoff_duration(&self, error: &StreamError) -> std::time::Duration {
-        let max = std::time::Duration::from_secs(u64::from(self.config.max_backoff_secs));
-
-        match error.retry_after {
-            Some(d) => d.min(max),
-            None => exponential_backoff(
-                self.consecutive_failures,
-                u64::from(self.config.base_backoff_ms),
-                u64::from(self.config.max_backoff_secs),
-            ),
-        }
+        retry_delay(
+            error.retry_after,
+            self.consecutive_failures,
+            u64::from(self.config.base_backoff_ms),
+            u64::from(self.config.max_backoff_secs),
+        )
     }
 
     /// Write the retry notification, overwriting any previous retry line on a

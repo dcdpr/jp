@@ -40,21 +40,30 @@ pub struct RequestConfig {
 
     /// Base delay for exponential backoff (in milliseconds).
     ///
-    /// The actual delay is calculated as:
+    /// Defaults to `1000`.
+    /// The first retry waits this long, and each further retry doubles it:
     ///
     /// ```text
-    /// delay = min(base_backoff * 2^attempt + jitter, max_backoff)
+    /// delay_ms = min(base_backoff_ms * 2^(attempt - 1), max_backoff_secs * 1000) + jitter
     /// ```
     ///
-    /// Where jitter is a random value between 0-500ms to prevent thundering
-    /// herd problems.
+    /// Jitter is a random extra of up to a quarter of the delay.
+    /// It keeps several JP sessions sharing one API key from resuming in the
+    /// same instant after they are rate limited together, which would just
+    /// trigger the limit again.
+    ///
+    /// When the provider says how long to wait, that delay is used instead of
+    /// the doubling one, and still gets the jitter.
     #[setting(default = 1000)]
     pub base_backoff_ms: u32,
 
     /// Maximum backoff delay (in seconds).
     ///
-    /// The backoff delay will never exceed this value, regardless of the number
-    /// of retry attempts.
+    /// Defaults to `60`.
+    /// Caps both the doubling delay and a wait the provider asked for, no
+    /// matter how many attempts have been made.
+    /// Jitter is added on top of the cap, so an individual wait can run up to a
+    /// quarter longer than this.
     #[setting(default = 60)]
     pub max_backoff_secs: u32,
 
