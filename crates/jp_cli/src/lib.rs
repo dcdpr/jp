@@ -159,8 +159,8 @@ struct Globals {
     /// environment, such as a script or a CI job.
     ///
     /// This does not change output formatting; use `--format` for that.
-    #[arg(long, global = true)]
-    non_interactive: bool,
+    #[arg(long, global = true, visible_alias = "non-interactive")]
+    no_interactive: bool,
 
     /// The output format.
     #[arg(
@@ -349,22 +349,22 @@ pub(crate) enum CliFormat {
 
 /// Whether a user is present to answer prompts.
 ///
-/// A terminal is the evidence that someone is watching; `non_interactive` is
-/// the user overriding that evidence.
+/// A terminal is the evidence that someone is watching; `no_interactive` is the
+/// user overriding that evidence.
 /// Deliberately independent of whether output can carry ANSI escapes ([RFD
 /// 048]) — a piped `jp c ls` still has a user behind it.
 ///
 /// [RFD 048]: https://jp.computer/rfd/048
-const fn interactive(non_interactive: bool, terminal: bool) -> bool {
-    !non_interactive && terminal
+const fn interactive(no_interactive: bool, terminal: bool) -> bool {
+    !no_interactive && terminal
 }
 
 /// Whether a user is present to answer a workspace or conversation picker.
 ///
 /// Both resolve before a [`Ctx`] exists, so they cannot read
 /// `Term::interactive` and take the terminal signal from stdin themselves.
-pub(crate) fn stdin_interactive(non_interactive: bool) -> bool {
-    interactive(non_interactive, io::stdin().is_terminal())
+pub(crate) fn stdin_interactive(no_interactive: bool) -> bool {
+    interactive(no_interactive, io::stdin().is_terminal())
 }
 
 /// Whether `name` names an environment variable set to an opt-in value.
@@ -424,7 +424,7 @@ pub fn run() -> ExitCode {
 
     // Folded into the flag once here, so every consumer downstream reads one
     // field instead of re-reading the environment.
-    cli.globals.non_interactive |= env_opt_out("JP_NONINTERACTIVE");
+    cli.globals.no_interactive |= env_opt_out("JP_NONINTERACTIVE");
 
     let format = cli.globals.format.resolve(is_tty);
 
@@ -572,7 +572,7 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
                 session.as_ref(),
                 cli.globals.persist,
                 cli.globals.workspace.as_ref(),
-                cli.globals.non_interactive,
+                cli.globals.no_interactive,
             )
             .map_err(Into::into);
 
@@ -593,7 +593,7 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
         };
 
         return args
-            .run(&printer, cli.globals.non_interactive)
+            .run(&printer, cli.globals.no_interactive)
             .map_err(Into::into);
     }
 
@@ -607,7 +607,7 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     let exec = bootstrap::resolve(
         cli.globals.workspace.as_ref(),
         session.as_ref(),
-        cli.globals.non_interactive,
+        cli.globals.no_interactive,
     )?;
     trace!(
         root = %exec.root,
@@ -655,7 +655,7 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
         &mut workspace,
         session.as_ref(),
         fs_backend.as_deref(),
-        stdin_interactive(cli.globals.non_interactive),
+        stdin_interactive(cli.globals.no_interactive),
     )?;
     let config = Arc::new(config);
     let runtime = build_runtime(cli.root.threads, "jp-worker")?;

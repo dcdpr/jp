@@ -448,6 +448,17 @@ fn interactive_requires_a_terminal_and_no_opt_out() {
     assert!(!interactive(true, false));
 }
 
+/// `--no-interactive` is the flag; `--non-interactive` is the spelling most
+/// other tools use, and both have to reach the same field.
+#[test]
+fn both_spellings_of_the_interactivity_flag_parse() {
+    let cli = Cli::try_parse_from(["jp", "--no-interactive", "conversation", "ls"]).unwrap();
+    assert!(cli.globals.no_interactive);
+
+    let cli = Cli::try_parse_from(["jp", "--non-interactive", "conversation", "ls"]).unwrap();
+    assert!(cli.globals.no_interactive, "the alias stopped working");
+}
+
 #[test]
 #[serial(env_vars)]
 fn non_interactive_env_var_accepts_1_and_true_only() {

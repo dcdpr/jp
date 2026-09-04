@@ -157,10 +157,10 @@ pub(crate) struct TargetEnv<'a> {
 impl<'a> TargetEnv<'a> {
     /// The environment for this invocation.
     ///
-    /// `non_interactive` is the caller's `--non-interactive` (or
+    /// `no_interactive` is the caller's `--no-interactive` (or
     /// `JP_NONINTERACTIVE`) opt-out; without it, a terminal on stdin stands for
     /// a user who can answer.
-    pub(crate) fn new(session: Option<&'a Session>, non_interactive: bool) -> Result<Self> {
+    pub(crate) fn new(session: Option<&'a Session>, no_interactive: bool) -> Result<Self> {
         let data_dir = user_data_dir()?;
 
         Ok(Self {
@@ -168,7 +168,7 @@ impl<'a> TargetEnv<'a> {
             workspaces_dir: data_dir.join(USER_WORKSPACES_DIR),
             store: WorkspaceSessionStore::at_user_data_dir(&data_dir),
             session,
-            interactive: crate::stdin_interactive(non_interactive),
+            interactive: crate::stdin_interactive(no_interactive),
         })
     }
 }

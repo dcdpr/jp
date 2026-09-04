@@ -166,9 +166,9 @@ impl ExecutionContext {
 pub(crate) fn resolve(
     target: Option<&WorkspaceTarget>,
     session: Option<&Session>,
-    non_interactive: bool,
+    no_interactive: bool,
 ) -> Result<ExecutionContext> {
-    let env = TargetEnv::new(session, non_interactive)?;
+    let env = TargetEnv::new(session, no_interactive)?;
     resolve_from(&env, target)
 }
 

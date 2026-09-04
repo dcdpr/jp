@@ -24,7 +24,7 @@ use crate::{
 /// conversations, or when archiving more than one conversation at once.
 /// Pass `--confirm` to prompt for every conversation, or `--no-confirm` /
 /// `--yes` to skip all prompts.
-/// With no user available to answer — no terminal, or `--non-interactive` — a
+/// With no user available to answer — no terminal, or `--no-interactive` — a
 /// required confirmation fails rather than skipping the conversation.
 ///
 /// Use `--created-since`/`--created-before` to archive a range of conversations

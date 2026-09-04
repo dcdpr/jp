@@ -31,7 +31,7 @@ pub(crate) struct Rm {
     /// Confirmation prompting: `--confirm`, `--no-confirm`, or `--yes`.
     ///
     /// Removal always prompts by default; `--no-confirm` / `--yes` skips it.
-    /// With no user available to answer — no terminal, or `--non-interactive`
+    /// With no user available to answer — no terminal, or `--no-interactive`
     /// — removal fails unless `--no-confirm` was passed.
     #[command(flatten)]
     confirm: ConfirmFlag,

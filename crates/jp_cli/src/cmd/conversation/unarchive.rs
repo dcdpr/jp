@@ -65,7 +65,7 @@ impl Unarchive {
                     ..Default::default()
                 },
                 TargetGrammar::from_args(&self.target, false),
-                crate::stdin_interactive(ctx.term.args.non_interactive),
+                crate::stdin_interactive(ctx.term.args.no_interactive),
             )?;
             return Ok(vec![id]);
         }

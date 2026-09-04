@@ -31,7 +31,7 @@ fn init_without_a_user_writes_nothing() {
         error.message.as_deref(),
         Some(
             "`jp init` asks which model to use and whether to confirm tool calls, and nobody is \
-             available to answer; run it without --non-interactive"
+             available to answer; run it without --no-interactive"
         )
     );
     assert!(!root.exists(), "a refused init created the workspace root");

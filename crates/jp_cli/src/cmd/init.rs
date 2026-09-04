@@ -28,15 +28,15 @@ pub(crate) struct Init {
 impl Init {
     /// Create the workspace at `path` and configure it through the wizard.
     ///
-    /// Errors under `--non-interactive`: every value the wizard needs comes
-    /// from a prompt, and no flag supplies them.
+    /// Errors under `--no-interactive`: every value the wizard needs comes from
+    /// a prompt, and no flag supplies them.
     /// Nothing reaches disk until every answer is in hand, so a run that stops
     /// early leaves no half-initialized workspace behind.
-    pub(crate) fn run(&self, printer: &Printer, non_interactive: bool) -> Output {
-        if non_interactive {
+    pub(crate) fn run(&self, printer: &Printer, no_interactive: bool) -> Output {
+        if no_interactive {
             return Err(
                 "`jp init` asks which model to use and whether to confirm tool calls, and nobody \
-                 is available to answer; run it without --non-interactive"
+                 is available to answer; run it without --no-interactive"
                     .into(),
             );
         }

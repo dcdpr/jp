@@ -11,12 +11,12 @@ codes:
 jp query "..."
 
 # Declare that nobody is available to answer prompts
-jp --non-interactive ...
+jp --no-interactive ...
 
 # Same for every invocation in a script or CI job
 JP_NONINTERACTIVE=1 jp query "..."
 
-# Redirecting stdout switches off pretty-printing; pass --non-interactive to
+# Redirecting stdout switches off pretty-printing; pass --no-interactive to
 # also declare that nobody is there to answer a prompt
 jp query "..." > out.txt
 
