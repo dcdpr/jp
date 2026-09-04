@@ -911,6 +911,7 @@ impl ToolCoordinator {
         mcp_client: &Client,
         root: &Utf8Path,
         tool_renderer: &ToolRenderer,
+        interactive: bool,
         is_tty: bool,
         interactive: bool,
     ) -> ExecutionResult {
@@ -990,6 +991,8 @@ impl ToolCoordinator {
             }
         });
 
+        // Progress is a terminal affordance, not a prompt: a `--no-interactive`
+        // run on a terminal still shows how long a tool has been going.
         let progress_config = tool_renderer.progress_config().clone();
         let mut progress_shown = false;
 

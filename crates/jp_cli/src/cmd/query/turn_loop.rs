@@ -846,6 +846,7 @@ pub(super) async fn run_turn_loop(
                         &tool_renderer,
                         is_tty,
                         interactive,
+                        is_tty,
                     )
                     .await;
 
