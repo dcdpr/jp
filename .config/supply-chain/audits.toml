@@ -196,6 +196,11 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 version = "0.167.0"
 
+[[audits.rand]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.9.4 -> 0.9.5"
+
 [[audits.rand_xorshift]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
