@@ -5,7 +5,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-05
 - **Tracking Issue**: [\#788]
-- **Extended by**: [RFD 106](106-collision-free-conversation-id-allocation.md)
+- **Extended by**: [RFD 106]
 
 ## Summary
 
@@ -756,4 +756,5 @@ entry when this RFD is implemented.
 [RFD 069]: 069-guard-scoped-persistence-for-conversations.md
 [RFD 071]: 071-conversation-archiving.md
 [RFD 073]: 073-layered-storage-backend-for-workspaces.md
+[RFD 106]: 106-collision-free-conversation-id-allocation.md
 [\#788]: https://github.com/dcdpr/jp/issues/788
