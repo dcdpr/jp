@@ -41,10 +41,10 @@ pub struct RequestConfig {
     /// Base delay for exponential backoff (in milliseconds).
     ///
     /// Defaults to `1000`.
-    /// The delay doubles with each attempt:
+    /// The first retry waits this long, and each further retry doubles it:
     ///
     /// ```text
-    /// delay = min(base_backoff_ms * 2^attempt, max_backoff_secs) + jitter
+    /// delay_ms = min(base_backoff_ms * 2^(attempt - 1), max_backoff_secs * 1000) + jitter
     /// ```
     ///
     /// Jitter is a random extra of up to a quarter of the delay.

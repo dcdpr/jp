@@ -139,9 +139,12 @@ pub async fn collect_with_retry(
 /// Either way a random extra of up to a quarter of that delay is added on top.
 ///
 /// The extra is added after the bound rather than folded inside it, so it still
-/// has an effect once the bound is reached.
-/// It is only ever added: `retry_after` is the minimum the provider asked for,
-/// and waiting less than it walks straight back into the same limit.
+/// has an effect once the bound is reached, and it is only ever added, never
+/// subtracted.
+///
+/// `max_backoff_secs` is authoritative over `retry_after`: a provider asking
+/// for longer than the bound gets the bound, so the request may walk back into
+/// the same limit.
 #[must_use]
 pub fn retry_delay(
     retry_after: Option<Duration>,
@@ -166,7 +169,7 @@ pub fn retry_delay(
 
 /// Calculate exponential backoff delay.
 ///
-/// Formula: `min(base * 2^attempt, max_backoff)`
+/// Formula: `min(base_backoff_ms * 2^(attempt - 1), max_backoff_secs * 1000)`
 ///
 /// Callers wanting the delay to actually wait should use [`retry_delay`], which
 /// adds the jitter that keeps concurrent callers apart.

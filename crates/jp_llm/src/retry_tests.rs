@@ -81,39 +81,34 @@ fn assert_within_jitter_window(actual: Duration, base: Duration) {
     );
 }
 
-/// A provider-supplied delay is a minimum: waiting less re-enters the same
-/// limit, so jitter is only ever added.
+/// A provider delay below the cap is passed through untouched, and jitter is
+/// only ever added to it, never subtracted.
 #[test]
-fn retry_delay_never_waits_less_than_the_provider_asked() {
+fn retry_delay_only_ever_adds_to_a_provider_delay() {
     for _ in 0..200 {
         let delay = retry_delay(
-            Some(Duration::from_mins(1)),
+            Some(Duration::from_secs(30)),
             1,
             TEST_BASE_BACKOFF_MS,
             TEST_MAX_BACKOFF_SECS,
         );
 
-        assert_within_jitter_window(delay, Duration::from_mins(1));
+        assert_within_jitter_window(delay, Duration::from_secs(30));
     }
 }
 
-/// Cerebras answers a rate limit with `retry-after: 60`.
-/// Several sessions sharing one API key are limited at the same moment and must
-/// not resume in the same instant, or they trigger the limit again together.
+/// Cerebras answers a rate limit with `retry-after: 60`, so several sessions
+/// sharing one API key are handed the identical delay at the same moment.
+/// Here it is above the cap, which pins every one of them to the same ceiling:
+/// the case where jitter folded inside the bound would vanish and they would
+/// all resume in the same instant, triggering the limit again.
 ///
 /// Asserting only the window would pass if jitter never fired at all, so this
 /// also pins that repeated calls actually differ.
 #[test]
 fn retry_delay_spreads_concurrent_sessions_at_the_ceiling() {
     let delays: Vec<_> = (0..200)
-        .map(|_| {
-            retry_delay(
-                Some(Duration::from_mins(1)),
-                1,
-                TEST_BASE_BACKOFF_MS,
-                TEST_MAX_BACKOFF_SECS,
-            )
-        })
+        .map(|_| retry_delay(Some(Duration::from_mins(1)), 1, TEST_BASE_BACKOFF_MS, 30))
         .collect();
 
     let distinct: std::collections::BTreeSet<_> = delays.iter().collect();
@@ -124,7 +119,8 @@ fn retry_delay_spreads_concurrent_sessions_at_the_ceiling() {
     );
 }
 
-/// A delay longer than the ceiling is bounded by it before jitter is added.
+/// `max_backoff_secs` wins over a longer `retry_after`, so a provider asking
+/// for ten minutes against a one-minute cap is waited out in about a minute.
 #[test]
 fn retry_delay_bounds_a_long_provider_delay() {
     let delay = retry_delay(Some(Duration::from_mins(10)), 1, TEST_BASE_BACKOFF_MS, 60);
