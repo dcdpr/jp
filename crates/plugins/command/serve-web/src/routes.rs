@@ -426,26 +426,41 @@ async fn start_turn(
         return response;
     }
 
-    // Sending while a turn runs is refused rather than made to interrupt it.
+    // Sending while a turn runs interrupts it and answers it, inside that turn.
     //
-    // Interrupting and immediately starting a second turn was tried and withdrawn:
-    // it relied on a fixed delay to guess when the first turn had released the
-    // conversation, and the turn that followed came back empty. Stopping and
-    // sending are separate acts until the host can say when a turn has finished
-    // unwinding.
+    // Not a stop followed by a second turn: the conversation is never unlocked in
+    // between, so there is no window for the send to be refused as already-locked
+    // and no need to guess when the first turn has finished unwinding.
+    // This is what Ctrl-C then `[r] Reply` does at a terminal.
     let busy = matches!(
         state.turns.lock().expect("turns lock poisoned").get(&id),
         Some(TurnStatus::Running { .. })
     );
 
     if busy {
-        return (
-            StatusCode::CONFLICT,
-            Json(TurnRefused {
-                error: "A turn is still running. Stop it first, then send.".to_owned(),
-            }),
-        )
-            .into_response();
+        match state.client.reply(&id, &content).await {
+            Ok(()) => {
+                // The same turn, told something new. Whoever started it still
+                // owns it, so only the provisional copy of the message changes.
+                if let Some(TurnStatus::Running { pending, .. }) = state
+                    .turns
+                    .lock()
+                    .expect("turns lock poisoned")
+                    .get_mut(&id)
+                {
+                    *pending = Some(content);
+                }
+
+                return response;
+            }
+
+            // The turn ended between the check above and the reply reaching it.
+            // There is nothing left to interrupt, which makes this an ordinary
+            // message: falling through starts a turn with it.
+            Err(error) => {
+                debug!(%id, %error, "No turn left to reply to; starting one instead.");
+            }
+        }
     }
 
     state
@@ -772,12 +787,6 @@ async fn list_configs(State(state): State<AppState>) -> Result<Markup, AppError>
 struct TurnStarted {
     /// The submitted message, rendered as it will appear in the transcript.
     pending: String,
-}
-
-/// Why a turn was not started, for the page to show and to keep the text.
-#[derive(Debug, Serialize)]
-struct TurnRefused {
-    error: String,
 }
 
 /// A query draft, as the page sees it.

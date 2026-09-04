@@ -68,6 +68,7 @@ use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
 use clap::{ArgAction, builder::TypedValueParser as _};
 use indexmap::IndexMap;
+use interrupt::TurnInterrupts;
 use jp_attachment::Attachment;
 use jp_config::{
     AppConfig, PartialAppConfig, PartialConfig as _, PartialConfigDelta as _,
@@ -789,11 +790,14 @@ impl Query {
             mcp_servers_handle,
             ctx.printer.clone(),
             ctx.term.interactive,
+            // Ctrl-C is how this turn is interrupted, and that arrives through
+            // the signal router.
+            TurnInterrupts::none(),
         )
         .await?;
 
         let mut turn_result = inputs
-            .run(lock, stream, ctx.signals.turn_interrupt(lock.id()))
+            .run(lock, stream, ctx.signals.turn_interrupt())
             .await
             .map_err(|error| cmd::Error::from(error).with_persistence(true));
 
@@ -1131,6 +1135,7 @@ impl Query {
         invocation: InvocationContext,
         pending_trim: PendingStreamTrim,
         mut turn_interrupt: TurnInterrupt,
+        interrupts: TurnInterrupts,
     ) -> Result<()> {
         let model_id = cfg.assistant.model.id.resolved();
 
@@ -1200,6 +1205,7 @@ impl Query {
             chat_request,
             pending_trim,
             turn_interrupt,
+            interrupts,
         )
         .await;
         if let Err(error) = execution_owner.shutdown().await {
@@ -1465,6 +1471,13 @@ pub(crate) struct TurnInputs {
 
     /// MCP servers starting in the background, awaited by [`TurnInputs::run`].
     mcp_servers: StartupSet,
+
+    /// Interrupts aimed at this turn by whoever asked for it.
+    ///
+    /// A turn typed at a terminal is interrupted through the signal router and
+    /// takes [`TurnInterrupts::none`]; a turn asked for from elsewhere is
+    /// reached through here.
+    interrupts: TurnInterrupts,
 }
 
 impl TurnInputs {
@@ -1493,6 +1506,7 @@ impl TurnInputs {
         mcp_servers: StartupSet,
         printer: Arc<Printer>,
         interactive: bool,
+        interrupts: TurnInterrupts,
     ) -> Result<Self> {
         let urls: Vec<Url> = config
             .conversation
@@ -1524,6 +1538,7 @@ impl TurnInputs {
             chat_request,
             pending_trim,
             config,
+            interrupts,
         })
     }
 
@@ -1614,6 +1629,7 @@ impl TurnInputs {
             },
             self.pending_trim,
             turn_interrupt,
+            self.interrupts,
         )
         .await
     }

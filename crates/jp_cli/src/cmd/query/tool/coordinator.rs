@@ -114,17 +114,96 @@ use super::{
 use crate::{
     Error,
     cmd::query::{
-        interrupt::signals::{InterruptUi, ToolInterruptResult, handle_tool_interrupt},
+        interrupt::{
+            InterruptAction, TurnInterrupts,
+            signals::{
+                InterruptUi, ToolInterruptResult, apply_tool_interrupt, as_tool_interrupt,
+                handle_tool_interrupt,
+            },
+        },
         turn::state::{PermissionCacheKey, ToolAnswerCacheKey, TurnState},
     },
     render::tool::RenderOutcome,
     signals::{InterruptNotice, SignalRouter},
 };
 
+/// Fold a resolved tool interrupt into the execution loop's state.
+///
+/// The tools with no result yet are the ones a cancellation answers for, so
+/// they are collected as the interrupt lands rather than after the loop, where
+/// a result that arrived in between would have filled one in.
+fn record_tool_interrupt(
+    result: &ToolInterruptResult,
+    state: &PhaseState,
+    cancellation_token: &CancellationToken,
+    outcome: &mut ExecutionOutcome,
+    tools_cancelled: &mut bool,
+    cancellation_message: &mut Option<String>,
+    cancelled_indices: &mut Vec<usize>,
+) {
+    match result {
+        // Either the user chose to keep waiting, or the menu could not be shown
+        // and nothing happened. A declined press was already handed down the
+        // stack.
+        ToolInterruptResult::Continue
+        | ToolInterruptResult::PromptFailed
+        | ToolInterruptResult::Declined => {}
+
+        ToolInterruptResult::Restart => {
+            // Hold each call's service-side invocation open before cancelling
+            // the Host workers, so the re-preparation that follows continues
+            // the same logical calls instead of submitting new ones.
+            for tool in state.tools.values() {
+                tool.executor.pause_for_restart();
+            }
+
+            cancellation_token.cancel();
+            outcome.upgrade(ExecutionOutcome::Restart);
+        }
+
+        ToolInterruptResult::Cancelled { response, exit } => {
+            let unfinished: Vec<usize> = state
+                .reviews
+                .iter()
+                .enumerate()
+                .filter(|(_, review)| review.is_none())
+                .map(|(index, _)| index)
+                .collect();
+
+            // Hold each unfinished call open before cancelling the Host
+            // workers, so the cancellation response this phase records is what
+            // its MCP caller receives. An agent that owns the call builds its
+            // transcript from that, not from the conversation.
+            for index in &unfinished {
+                if let Some(tool) = state.tools.get(index) {
+                    tool.executor.hold_for_response();
+                }
+            }
+
+            cancellation_token.cancel();
+            *cancelled_indices = unfinished;
+            *tools_cancelled = true;
+            *cancellation_message = response.clone();
+            if *exit {
+                outcome.upgrade(ExecutionOutcome::Stopped);
+            }
+        }
+
+        // The menu itself was cancelled with Ctrl-C: the tools are already
+        // cancelled; surface the escalation so the turn loop begins a graceful
+        // shutdown.
+        ToolInterruptResult::Escalate => outcome.upgrade(ExecutionOutcome::Escalated),
+    }
+}
+
 #[derive(Debug)]
 enum ExecutionEvent {
     /// A Ctrl-C press delivered to this execution phase's interrupt handler.
     Interrupt(InterruptNotice),
+
+    /// An interrupt from a client driving this turn from outside the process,
+    /// which arrives already decided because there was no menu to show.
+    ClientInterrupt(InterruptAction),
 
     ToolResult {
         index: usize,
@@ -1045,7 +1124,7 @@ impl ToolCoordinator {
     /// `interactive` gates every question and result prompt.
     /// The elapsed-time progress row takes no parameter: it is a status region,
     /// so the printer's own terminal capability decides whether it renders.
-    #[expect(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines, clippy::too_many_arguments)]
     pub async fn execute_with_prompting(
         &mut self,
         executors: Vec<(usize, Box<dyn Executor>)>,
@@ -1057,6 +1136,7 @@ impl ToolCoordinator {
         conv: &ConversationMut,
         tool_renderer: &mut ToolRenderer,
         interactive: bool,
+        interrupts: &mut TurnInterrupts,
     ) -> ExecutionResult {
         if executors.is_empty() {
             return ExecutionResult {
@@ -1070,12 +1150,7 @@ impl ToolCoordinator {
         // Register the tool interrupt handler for this execution phase. While
         // registered, the first Ctrl-C press is delivered to this event loop;
         // the guard deregisters the handler when execution completes.
-        //
-        // Scoped to the conversation, so an interrupt that names one reaches the
-        // handler this loop is polling. Tool execution has no timeout of its
-        // own, so an unscoped handler here would leave a targeted interrupt
-        // waiting for the longest tool to finish.
-        let (interrupt_guard, mut interrupt_rx) = signals.push_handler_for(conv.id());
+        let (interrupt_guard, mut interrupt_rx) = signals.push_handler();
 
         // The caller's `index` values come from the execution plan and may
         // be sparse (e.g. when some tools in the same plan are
@@ -1165,7 +1240,18 @@ impl ToolCoordinator {
         let mut cancellation_message: Option<String> = None;
         let mut cancelled_indices: Vec<usize> = Vec::new();
 
-        while let Some(event) = event_rx.recv().await {
+        loop {
+            // A client's interrupt arrives on its own channel rather than
+            // through the router, so it is polled alongside the tools rather
+            // than forwarded by a task: the receiver belongs to the turn, and
+            // the turn outlives this phase.
+            let event = tokio::select! {
+                event = event_rx.recv() => event,
+                Some(action) = interrupts.next() => Some(ExecutionEvent::ClientInterrupt(action)),
+            };
+
+            let Some(event) = event else { break };
+
             match event {
                 ExecutionEvent::ToolResult { index, result } => {
                     if !state.tools.contains_key(&index) {
@@ -1303,59 +1389,38 @@ impl ToolCoordinator {
                             ToolInterruptResult::Escalate | ToolInterruptResult::PromptFailed => {}
                         }
 
-                        match result {
-                            // Either the user chose to keep waiting, or the menu
-                            // could not be shown and nothing happened. A
-                            // declined press was already handed down the stack.
-                            ToolInterruptResult::Continue
-                            | ToolInterruptResult::PromptFailed
-                            | ToolInterruptResult::Declined => {}
-                            ToolInterruptResult::Restart => {
-                                // Hold each call's service-side invocation open
-                                // before cancelling the Host workers, so the
-                                // re-preparation that follows continues the same
-                                // logical calls instead of submitting new ones.
-                                for tool in state.tools.values() {
-                                    tool.executor.pause_for_restart();
-                                }
-                                cancellation_token.cancel();
-                                outcome.upgrade(ExecutionOutcome::Restart);
-                            }
-                            ToolInterruptResult::Cancelled { response, exit } => {
-                                cancelled_indices = state
-                                    .reviews
-                                    .iter()
-                                    .enumerate()
-                                    .filter(|(_, r)| r.is_none())
-                                    .map(|(i, _)| i)
-                                    .collect();
-                                // Hold each unfinished call open before
-                                // cancelling the Host workers, so the
-                                // cancellation response recorded below is what
-                                // its MCP caller receives. An agent that owns
-                                // the call builds its transcript from that, not
-                                // from the conversation.
-                                for index in &cancelled_indices {
-                                    if let Some(tool) = state.tools.get(index) {
-                                        tool.executor.hold_for_response();
-                                    }
-                                }
-                                cancellation_token.cancel();
-                                tools_cancelled = true;
-                                cancellation_message = response;
-                                if exit {
-                                    outcome.upgrade(ExecutionOutcome::Stopped);
-                                }
-                            }
-                            // The menu itself was cancelled with Ctrl-C: the
-                            // tools are already cancelled; surface the
-                            // escalation so the turn loop begins a graceful
-                            // shutdown.
-                            ToolInterruptResult::Escalate => {
-                                outcome.upgrade(ExecutionOutcome::Escalated);
-                            }
-                        }
+                        record_tool_interrupt(
+                            &result,
+                            &state,
+                            &cancellation_token,
+                            &mut outcome,
+                            &mut tools_cancelled,
+                            &mut cancellation_message,
+                            &mut cancelled_indices,
+                        );
                     }
+                }
+
+                ExecutionEvent::ClientInterrupt(action) => {
+                    // Applied even while a tool prompt is active, unlike a
+                    // Ctrl-C: the press competes with the prompt for the
+                    // terminal, and this does not. The prompt is cancelled
+                    // along with the tool that asked.
+                    let result = apply_tool_interrupt(
+                        as_tool_interrupt(action),
+                        &cancellation_token,
+                        interrupt_ui.turn_coordinator,
+                    );
+
+                    record_tool_interrupt(
+                        &result,
+                        &state,
+                        &cancellation_token,
+                        &mut outcome,
+                        &mut tools_cancelled,
+                        &mut cancellation_message,
+                        &mut cancelled_indices,
+                    );
                 }
             }
 

@@ -321,6 +321,304 @@ impl Provider for StallingMockProvider {
     }
 }
 
+/// A provider that stalls on its first request and answers the next.
+///
+/// The stall is the window a mid-turn interrupt has to land in; the answer is
+/// how the test can tell the turn carried on rather than ending there.
+#[derive(Debug)]
+struct StallThenAnswerProvider {
+    /// Streamed before the first request parks.
+    partial: String,
+
+    /// The whole of the second request's response.
+    answer: String,
+
+    calls: AtomicUsize,
+    model: ModelDetails,
+
+    /// Notified on the first poll of the first request's pending tail.
+    stalled: Arc<Notify>,
+}
+
+impl StallThenAnswerProvider {
+    fn new(partial: &str, answer: &str, stalled: &Arc<Notify>) -> Self {
+        Self {
+            partial: partial.to_owned(),
+            answer: answer.to_owned(),
+            calls: AtomicUsize::new(0),
+            model: ModelDetails::empty(id::ModelIdConfig {
+                provider: ProviderId::Test,
+                name: "stall-then-answer".parse().expect("valid name"),
+            }),
+            stalled: Arc::clone(stalled),
+        }
+    }
+
+    /// How many requests the turn has sent.
+    fn calls(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
+    }
+}
+
+#[async_trait]
+impl Provider for StallThenAnswerProvider {
+    async fn model_details(&self, name: &id::Name) -> Result<ModelDetails, LlmError> {
+        let mut model = self.model.clone();
+        model.id.name = name.clone();
+        Ok(model)
+    }
+
+    async fn models(&self) -> Result<Vec<ModelDetails>, LlmError> {
+        Ok(vec![self.model.clone()])
+    }
+
+    async fn chat_completion_stream(
+        &self,
+        _model: &ModelDetails,
+        _query: ChatQuery,
+    ) -> Result<EventStream, LlmError> {
+        if self.calls.fetch_add(1, Ordering::SeqCst) > 0 {
+            let events = vec![
+                Event::message(0, &self.answer),
+                Event::flush(0),
+                Event::Finished(FinishReason::Completed),
+            ];
+
+            return Ok(Box::pin(stream::iter(events.into_iter().map(Ok))));
+        }
+
+        let events: Vec<Result<Event, StreamError>> =
+            vec![Ok(Event::message(0, &self.partial)), Ok(Event::flush(0))];
+
+        let stalled = Arc::clone(&self.stalled);
+        let mut notified = false;
+        let tail = stream::poll_fn(move |_| {
+            if !notified {
+                notified = true;
+                stalled.notify_one();
+            }
+            std::task::Poll::Pending
+        });
+
+        Ok(Box::pin(stream::iter(events).chain(tail)))
+    }
+}
+
+/// A reply from a client lands in the running turn and the turn carries on.
+///
+/// This is the Ctrl-C `[r] Reply` path reached without a keyboard: the partial
+/// answer is kept, the reply follows it, and the assistant answers it in the
+/// same turn rather than a second one.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_client_reply_continues_the_running_turn() {
+    let test_result = Box::pin(timeout(Duration::from_secs(10), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let config = AppConfig::new_test();
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+            .unwrap();
+        let conv_id = lock.id();
+
+        let stalled = Arc::new(Notify::new());
+        let provider = Arc::new(StallThenAnswerProvider::new(
+            "Let me start with Python.",
+            "Rust it is.",
+            &stalled,
+        ));
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let router = detached_router();
+
+        let (interrupt_tx, interrupts) = TurnInterrupts::channel();
+
+        // Sent once the first request has parked, which is the only window in
+        // which this is an interrupt rather than the next turn's question.
+        let reply_handle = tokio::spawn({
+            let stalled = Arc::clone(&stalled);
+            async move {
+                stalled.notified().await;
+                interrupt_tx
+                    .send(InterruptAction::Reply {
+                        content: "No, use Rust.".to_owned(),
+                        echo: true,
+                    })
+                    .await
+                    .expect("the turn is still running");
+            }
+        });
+
+        let result = run_turn_loop(
+            provider.clone() as Arc<dyn Provider>,
+            &model,
+            &config,
+            &router,
+            root,
+            InvocationContext::default(),
+            false, // interactive
+            &[],   // attachments
+            &lock,
+            ToolChoice::Auto,
+            &[], // tools
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
+            ChatRequest::from("Which language?"),
+            PendingStreamTrim::default(),
+            router.turn_interrupt(),
+            interrupts,
+        )
+        .await;
+
+        reply_handle.await.unwrap();
+        assert!(result.is_ok(), "the turn should complete: {result:?}");
+
+        assert_eq!(
+            provider.calls(),
+            2,
+            "the reply belongs to the turn that was interrupted, so it is asked again rather than \
+             left for a second turn"
+        );
+
+        let content = fs
+            .read_test_events_raw(&conv_id)
+            .expect("events should be persisted");
+
+        let question = content.find("Which language?").expect("the first request");
+        let partial = content
+            .find("Let me start with Python.")
+            .expect("the interrupted answer, kept");
+        let reply = content.find("No, use Rust.").expect("the reply");
+        let answer = content
+            .find("Rust it is.")
+            .expect("the answer to the reply");
+
+        assert!(
+            question < partial && partial < reply && reply < answer,
+            "the assistant's interrupted answer must precede the reply, so the model reads its \
+             own partial output as context.\nFile contents:\n{content}"
+        );
+
+        assert_eq!(
+            content.matches("turn_start").count(),
+            1,
+            "the reply belongs to the turn that was interrupted; a second `turn_start` would mean \
+             it started a new one.\nFile contents:\n{content}"
+        );
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out after 10 seconds");
+}
+
+/// A stop from a client ends the turn where it is, mid-stream.
+///
+/// The provider parks after its first response and would never finish on its
+/// own, so a turn that ends at all is one the stop reached while it was
+/// streaming.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_client_stop_ends_the_turn_mid_stream() {
+    let test_result = Box::pin(timeout(Duration::from_secs(10), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let config = AppConfig::new_test();
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+            .unwrap();
+        let conv_id = lock.id();
+
+        let stalled = Arc::new(Notify::new());
+        let provider = Arc::new(StallThenAnswerProvider::new(
+            "Thinking about it.",
+            "never asked",
+            &stalled,
+        ));
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let router = detached_router();
+
+        let (interrupt_tx, interrupts) = TurnInterrupts::channel();
+
+        let stop_handle = tokio::spawn({
+            let stalled = Arc::clone(&stalled);
+            async move {
+                stalled.notified().await;
+                interrupt_tx
+                    .send(InterruptAction::Stop)
+                    .await
+                    .expect("the turn is still running");
+            }
+        });
+
+        let result = run_turn_loop(
+            provider.clone() as Arc<dyn Provider>,
+            &model,
+            &config,
+            &router,
+            root,
+            InvocationContext::default(),
+            false, // interactive
+            &[],   // attachments
+            &lock,
+            ToolChoice::Auto,
+            &[], // tools
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
+            ChatRequest::from("What is 2+2?"),
+            PendingStreamTrim::default(),
+            router.turn_interrupt(),
+            interrupts,
+        )
+        .await;
+
+        stop_handle.await.unwrap();
+        assert!(result.is_ok(), "the turn should complete: {result:?}");
+
+        assert_eq!(
+            provider.calls(),
+            1,
+            "a stop ends the turn, so nothing is asked again"
+        );
+
+        let content = fs
+            .read_test_events_raw(&conv_id)
+            .expect("events should be persisted");
+
+        assert!(
+            content.contains("Thinking about it."),
+            "what the assistant had produced is kept.\nFile contents:\n{content}"
+        );
+        assert!(
+            !content.contains("never asked"),
+            "the turn ended, so the provider was never asked again.\nFile contents:\n{content}"
+        );
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out after 10 seconds");
+}
+
 #[tokio::test]
 async fn test_interrupt_stop_during_streaming_persists_content() {
     // A Ctrl-C press is routed to the streaming loop's registered interrupt
@@ -393,7 +691,8 @@ async fn test_interrupt_stop_during_streaming_persists_content() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await;
 
@@ -491,7 +790,8 @@ async fn a_completed_block_is_persisted_before_the_turn_ends() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             ChatRequest::from("What is 2+2?"),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await;
 
@@ -573,7 +873,8 @@ async fn a_refusal_takes_back_content_it_had_persisted() {
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         ChatRequest::from("something declined"),
         PendingStreamTrim::default(),
-        router.turn_interrupt(lock.id()),
+        router.turn_interrupt(),
+        TurnInterrupts::none(),
     )
     .await
     .unwrap();
@@ -658,7 +959,8 @@ async fn test_streaming_interrupt_menu_cancel_escalates() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await;
 
@@ -740,7 +1042,8 @@ async fn test_normal_completion_persists_content() {
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
         PendingStreamTrim::default(),
-        router.turn_interrupt(lock.id()),
+        router.turn_interrupt(),
+        TurnInterrupts::none(),
     )
     .await
     .unwrap();
@@ -824,7 +1127,8 @@ async fn premature_stream_end_without_finished_returns_error() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             ChatRequest::from("hi"),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         ),
     )
     .await
@@ -886,7 +1190,8 @@ async fn premature_stream_end_exhausts_retry_budget() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             ChatRequest::from("hi"),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         ),
     )
     .await
@@ -964,7 +1269,8 @@ async fn output_ceiling_ends_turn_without_re_requesting() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             ChatRequest::from("hi"),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         ),
     )
     .await
@@ -1067,7 +1373,8 @@ async fn orphan_tool_call_is_sanitized_before_provider_request() {
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         ChatRequest::from("new query"),
         PendingStreamTrim::default(),
-        router.turn_interrupt(lock.id()),
+        router.turn_interrupt(),
+        TurnInterrupts::none(),
     )
     .await
     .unwrap();
@@ -1150,7 +1457,8 @@ async fn test_tool_call_cycle_completes_with_followup() {
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
         PendingStreamTrim::default(),
-        router.turn_interrupt(lock.id()),
+        router.turn_interrupt(),
+        TurnInterrupts::none(),
     )
     .await;
 
@@ -1444,7 +1752,8 @@ async fn test_tool_interrupt_menu_cancel_escalates() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await;
 
@@ -1592,7 +1901,8 @@ async fn test_tool_stop_on_interrupt_commits_responses_without_follow_up() {
                 .with_interrupt(config.interrupt.tool_call.clone()),
             chat_request.clone(),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await;
 
@@ -1734,7 +2044,8 @@ async fn test_interrupt_during_tool_prompt_completes_turn_early() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await;
 
@@ -1844,7 +2155,8 @@ async fn test_multiple_tool_calls_in_sequence() {
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
         PendingStreamTrim::default(),
-        router.turn_interrupt(lock.id()),
+        router.turn_interrupt(),
+        TurnInterrupts::none(),
     )
     .await;
 
@@ -1933,7 +2245,8 @@ async fn test_empty_tool_response_continues_cycle() {
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
         PendingStreamTrim::default(),
-        router.turn_interrupt(lock.id()),
+        router.turn_interrupt(),
+        TurnInterrupts::none(),
     )
     .await;
 
@@ -2077,7 +2390,8 @@ async fn test_tool_restart_on_interrupt() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await;
 
@@ -2197,7 +2511,8 @@ async fn test_merged_stream_exits_after_tool_response() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await;
 
@@ -2323,7 +2638,8 @@ async fn test_tool_call_with_run_mode_ask_approves() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await;
 
@@ -2464,7 +2780,8 @@ async fn test_tool_call_with_run_mode_ask_skips() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await;
 
@@ -2616,7 +2933,8 @@ async fn test_permission_prompt_follows_interactive_not_is_tty() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await;
 
@@ -2738,7 +3056,8 @@ async fn test_tool_call_with_run_mode_unattended() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await;
 
@@ -2884,7 +3203,8 @@ async fn test_tool_call_with_run_mode_skip() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await;
 
@@ -3086,7 +3406,8 @@ async fn test_multiple_tools_with_different_run_modes() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await;
 
@@ -3233,7 +3554,8 @@ async fn test_tool_call_returns_error() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await;
 
@@ -3476,7 +3798,8 @@ async fn test_waiting_indicator_shows_during_delay() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await
         .unwrap();
@@ -3575,7 +3898,8 @@ async fn test_waiting_indicator_survives_keep_alive_and_shows_status() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await
         .unwrap();
@@ -3688,7 +4012,8 @@ async fn test_waiting_indicator_cleared_before_retry_notice() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await
         .unwrap();
@@ -3774,7 +4099,8 @@ async fn test_waiting_indicator_not_shown_when_disabled() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await
         .unwrap();
@@ -3852,7 +4178,8 @@ async fn test_waiting_indicator_not_shown_for_non_tty() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await
         .unwrap();
@@ -3931,7 +4258,8 @@ async fn test_waiting_indicator_follows_stderr_not_stdout() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await
         .unwrap();
@@ -4115,7 +4443,8 @@ async fn test_multi_part_tool_call_shows_preparing_spinner() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await;
 
@@ -4201,7 +4530,8 @@ async fn test_turn_start_event_is_emitted() {
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
         PendingStreamTrim::default(),
-        router.turn_interrupt(lock.id()),
+        router.turn_interrupt(),
+        TurnInterrupts::none(),
     )
     .await
     .unwrap();
@@ -4262,7 +4592,8 @@ async fn test_turn_start_index_increments_across_turns() {
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
         PendingStreamTrim::default(),
-        router.turn_interrupt(lock.id()),
+        router.turn_interrupt(),
+        TurnInterrupts::none(),
     )
     .await
     .unwrap();
@@ -4297,7 +4628,8 @@ async fn test_turn_start_index_increments_across_turns() {
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         chat_request.clone(),
         PendingStreamTrim::default(),
-        router.turn_interrupt(lock.id()),
+        router.turn_interrupt(),
+        TurnInterrupts::none(),
     )
     .await
     .unwrap();
@@ -4391,7 +4723,8 @@ async fn test_markdown_flushed_before_tool_header() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request.clone(),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await
         .unwrap();
@@ -4576,7 +4909,8 @@ async fn test_parallel_tool_calls_rendered_atomically() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await
         .unwrap();
@@ -4734,7 +5068,8 @@ async fn test_single_tool_call_rendered_with_args() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request.clone(),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await
         .unwrap();
@@ -4977,7 +5312,8 @@ async fn a_running_tools_stderr_reaches_the_progress_window() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             ChatRequest::from("Build it"),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await
         .unwrap();
@@ -5073,7 +5409,8 @@ async fn parallel_tools_label_their_window_rows() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             ChatRequest::from("Run both"),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await
         .unwrap();
@@ -5197,7 +5534,8 @@ async fn a_tool_result_survives_a_live_window() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             ChatRequest::from("Run both"),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await
         .unwrap();
@@ -5311,7 +5649,8 @@ async fn a_sink_survives_the_re_spawn_an_answer_triggers() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             ChatRequest::from("Ask then work"),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await
         .unwrap();
@@ -5444,7 +5783,8 @@ async fn a_tool_can_opt_out_of_the_progress_window() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             ChatRequest::from("Run both"),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await
         .unwrap();
@@ -5667,7 +6007,8 @@ async fn a_tool_prompt_hides_the_window_and_restores_it() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             ChatRequest::from("Ask me"),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await
         .unwrap();
@@ -6186,7 +6527,8 @@ async fn test_tool_with_single_inquiry() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await;
 
@@ -6313,7 +6655,8 @@ async fn test_secret_question_without_tty_fails_tool() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await;
 
@@ -6421,7 +6764,8 @@ async fn test_secret_question_with_assistant_target_fails_tool() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await;
 
@@ -6522,7 +6866,8 @@ async fn test_secret_prompter_answer_is_redacted() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await;
 
@@ -6627,7 +6972,8 @@ async fn test_secret_static_answer_is_redacted() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await;
 
@@ -6733,7 +7079,8 @@ async fn test_static_answer_records_answered_inquiry() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await;
 
@@ -6847,7 +7194,8 @@ async fn test_remembered_answer_cache_hit_records_new_inquiry_pair() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await;
 
@@ -6968,7 +7316,8 @@ async fn test_tool_with_multiple_inquiries() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await;
 
@@ -7119,7 +7468,8 @@ async fn test_parallel_tools_one_with_inquiry() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await;
 
@@ -7256,7 +7606,8 @@ async fn test_parallel_tools_both_with_inquiries() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await;
 
@@ -7405,7 +7756,8 @@ async fn test_retry_counter_resets_on_successful_event() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request,
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await;
 
@@ -7543,7 +7895,8 @@ async fn test_unavailable_tool_before_approved_does_not_panic() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await;
 
@@ -7652,7 +8005,8 @@ async fn test_inquiry_failure_marks_tool_as_error() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
             chat_request,
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await;
 
@@ -7845,7 +8199,8 @@ async fn test_live_header_uses_configured_model_id_not_provider_returned() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             chat_request,
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await
         .unwrap();
@@ -7959,7 +8314,8 @@ async fn reasoning_before_a_tool_call_shades_the_tool_chrome() {
         ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
         ChatRequest::from("use the tool"),
         PendingStreamTrim::default(),
-        router.turn_interrupt(lock.id()),
+        router.turn_interrupt(),
+        TurnInterrupts::none(),
     )
     .await
     .unwrap();
@@ -8082,7 +8438,8 @@ async fn a_tool_that_does_not_join_reasoning_renders_unshaded_live() {
         ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
         ChatRequest::from("use the tool"),
         PendingStreamTrim::default(),
-        router.turn_interrupt(lock.id()),
+        router.turn_interrupt(),
+        TurnInterrupts::none(),
     )
     .await
     .unwrap();
@@ -8212,7 +8569,8 @@ async fn test_rebuild_cap_stops_a_provider_that_keeps_requesting_rebuilds() {
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         ChatRequest::from("repair this"),
         PendingStreamTrim::default(),
-        router.turn_interrupt(lock.id()),
+        router.turn_interrupt(),
+        TurnInterrupts::none(),
     )
     .await;
 
@@ -8302,7 +8660,8 @@ async fn test_refused_rebuild_clears_the_retry_line() {
             ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
             ChatRequest::from("answer this"),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await;
 
@@ -8385,7 +8744,8 @@ async fn test_refused_rebuild_persists_streamed_content() {
         ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
         ChatRequest::from("answer this"),
         PendingStreamTrim::default(),
-        router.turn_interrupt(lock.id()),
+        router.turn_interrupt(),
+        TurnInterrupts::none(),
     )
     .await;
 
@@ -8488,7 +8848,8 @@ async fn http_tool_cycle_persists_inquiry_and_response_before_followup() {
             ToolCoordinator::new(config.conversation.tools.clone(), Box::new(source)),
             ChatRequest::from("Run the tool."),
             PendingStreamTrim::default(),
-            router.turn_interrupt(lock.id()),
+            router.turn_interrupt(),
+            TurnInterrupts::none(),
         )
         .await
         .unwrap();

@@ -47,8 +47,9 @@ use tracing::{debug, info, warn};
 use super::{
     PendingStreamTrim, build_sections, build_thread,
     interrupt::{
-        LoopAction, StreamingInterruptResult, handle_llm_event, handle_streaming_interrupt,
-        reply_edit_mode, signals::InterruptUi,
+        InterruptAction, LoopAction, StreamingInterruptResult, TurnInterrupts,
+        apply_streaming_interrupt, handle_llm_event, handle_streaming_interrupt, reply_edit_mode,
+        signals::InterruptUi,
     },
     stream::{
         ResponseBoundary, StreamErrorOutcome, StreamRetryState, can_restart_agent,
@@ -79,6 +80,9 @@ enum StreamingLoopEvent {
     /// A Ctrl-C press delivered by the signal router, carried as the notice the
     /// loop resolves once it has decided what the press did.
     Interrupt(InterruptNotice),
+    /// An interrupt from a client driving this turn from outside the process,
+    /// which arrives already decided because there was no menu to show.
+    ClientInterrupt(InterruptAction),
     /// An event from the LLM provider stream.
     Llm(Box<Result<Event, StreamError>>),
 }
@@ -89,14 +93,16 @@ enum StreamingLoopEvent {
 /// [`StreamingLoopEvent`].
 /// This avoids boxing while allowing `select_all` to poll them as a single
 /// merged stream.
-enum StreamSource<S, L> {
+enum StreamSource<S, C, L> {
     Interrupt(S),
+    Client(C),
     Llm(L),
 }
 
-impl<S, L> Stream for StreamSource<S, L>
+impl<S, C, L> Stream for StreamSource<S, C, L>
 where
     S: Stream<Item = StreamingLoopEvent> + Unpin,
+    C: Stream<Item = StreamingLoopEvent> + Unpin,
     L: Stream<Item = StreamingLoopEvent> + Unpin,
 {
     type Item = StreamingLoopEvent;
@@ -104,6 +110,7 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         match self.get_mut() {
             Self::Interrupt(s) => Pin::new(s).poll_next(cx),
+            Self::Client(s) => Pin::new(s).poll_next(cx),
             Self::Llm(s) => Pin::new(s).poll_next(cx),
         }
     }
@@ -148,7 +155,7 @@ fn event_keeps_waiting_indicator(event: &StreamingLoopEvent) -> bool {
             result.as_ref(),
             Ok(Event::KeepAlive | Event::Patch(_) | Event::Flush { .. })
         ),
-        StreamingLoopEvent::Interrupt(_) => false,
+        StreamingLoopEvent::Interrupt(_) | StreamingLoopEvent::ClientInterrupt(_) => false,
     }
 }
 
@@ -189,6 +196,7 @@ pub(super) async fn run_turn_loop(
     chat_request: ChatRequest,
     pending_trim: PendingStreamTrim,
     mut turn_interrupt: TurnInterrupt,
+    mut interrupts: TurnInterrupts,
 ) -> Result<(), Error> {
     // The turn-level interrupt handler (RFD 045) is the outermost handler scope
     // within the turn: it owns the gaps between phases (persistence, thread
@@ -273,6 +281,30 @@ pub(super) async fn run_turn_loop(
             notice.handled();
         }
 
+        // A client's interrupt that landed between phases is applied the same
+        // way the streaming loop applies one: a stop completes the turn, a
+        // reply becomes the next request.
+        //
+        // One per iteration, because applying one can end the turn, and
+        // whatever followed it was aimed at a turn that no longer exists.
+        //
+        // Not before the turn has started: a client can reach this turn from
+        // the moment it is registered, which is a little before its own request
+        // is appended, and a reply applied in that window would sit above the
+        // message it answers.
+        if turn_coordinator.current_phase() != TurnPhase::Idle
+            && let Some(action) = interrupts.try_next()
+        {
+            info!(?action, "Client interrupt received between turn phases.");
+            let result = lock.as_mut().update_events(|stream| {
+                apply_streaming_interrupt(action, &mut turn_coordinator, stream)
+            });
+
+            if result == StreamingInterruptResult::Abort {
+                return Ok(());
+            }
+        }
+
         match turn_coordinator.current_phase() {
             TurnPhase::Idle => {
                 // The turn-start commit point: any replay trim deferred while
@@ -331,14 +363,17 @@ pub(super) async fn run_turn_loop(
                 // goes out, so a Ctrl-C pressed while the connection is being
                 // set up is delivered as soon as the loop starts polling. The
                 // guard deregisters the handler when the cycle ends.
-                //
-                // Scoped like the turn-level handler above, and for the same
-                // reason: this is the handler being polled while a response
-                // streams, so an interrupt naming this conversation has to be
-                // able to reach it rather than wait for the phase to end.
-                let (interrupt_guard, interrupt_rx) = signals.push_handler_for(lock.id());
+                let (interrupt_guard, interrupt_rx) = signals.push_handler();
                 let interrupt_stream = StreamSource::Interrupt(
                     ReceiverStream::new(interrupt_rx).map(StreamingLoopEvent::Interrupt),
+                );
+
+                // Polled alongside the provider stream so a client's interrupt
+                // lands while the turn is streaming, rather than waiting for
+                // the phase to end on its own.
+                let client_stream = StreamSource::Client(
+                    stream::poll_fn(|cx| interrupts.poll_next(cx))
+                        .map(StreamingLoopEvent::ClientInterrupt),
                 );
 
                 let fresh_request = continuation.is_none();
@@ -404,7 +439,7 @@ pub(super) async fn run_turn_loop(
                 let mut received_provider_event = false;
 
                 let mut streams: SelectAll<_> =
-                    SelectAll::from_iter([interrupt_stream, llm_stream]);
+                    SelectAll::from_iter([interrupt_stream, client_stream, llm_stream]);
 
                 let mut conv = lock.as_mut();
 
@@ -461,6 +496,32 @@ pub(super) async fn run_turn_loop(
                                 // partial content is committed and the turn is
                                 // complete; begin a graceful shutdown and end
                                 // the turn with the interrupt error.
+                                StreamingInterruptResult::Escalate => {
+                                    signals.shutdown_token().cancel();
+                                    return Err(cmd::Error::interrupted().into());
+                                }
+                            }
+                        }
+
+                        StreamingLoopEvent::ClientInterrupt(action) => {
+                            // Nothing is about to prompt, but the partial
+                            // content this commits has to reach the terminal in
+                            // the order it was produced, which is what the menu
+                            // path flushes for too.
+                            turn_coordinator.flush_renderer();
+                            printer.flush_instant();
+
+                            info!(?action, "Client interrupt received during streaming.");
+
+                            let result = conv.update_events(|stream| {
+                                apply_streaming_interrupt(action, &mut turn_coordinator, stream)
+                            });
+
+                            match result {
+                                StreamingInterruptResult::Continue
+                                | StreamingInterruptResult::PromptFailed => {}
+                                StreamingInterruptResult::Break => break,
+                                StreamingInterruptResult::Abort => return Ok(()),
                                 StreamingInterruptResult::Escalate => {
                                     signals.shutdown_token().cancel();
                                     return Err(cmd::Error::interrupted().into());
@@ -922,6 +983,7 @@ pub(super) async fn run_turn_loop(
                         &conv,
                         &mut tool_renderer,
                         interactive,
+                        &mut interrupts,
                     )
                     .await;
 

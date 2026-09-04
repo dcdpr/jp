@@ -31,13 +31,14 @@ use crate::{client::SharedWriter, log_layer::ProtocolLogLayer};
 /// It archives and renames conversations (3), syncs what is being typed through
 /// the draft messages (4), offers the configurations a turn can name (5), posts
 /// turns with `query` and learns their id from `created` (6), stops them with
-/// `interrupt` (7), and reads whether a turn is already running from `lock` on
-/// `events` (8).
+/// `interrupt` (7), reads whether a turn is already running from `lock` on
+/// `events` (8), and answers a running turn with `interrupt`'s `reply` action
+/// (9).
 ///
-/// The last is what makes 8 the floor rather than 7: defaulting `lock` to free
-/// would draw a send button for a conversation that is busy, and the request
-/// behind it would be refused as already-locked.
-const REQUIRED_PROTOCOL: u32 = 8;
+/// The last is what makes 9 the floor rather than 8: an older host reads the
+/// action as the stop it defaults to, so sending a message to a busy
+/// conversation would end its turn and discard what was typed.
+const REQUIRED_PROTOCOL: u32 = 9;
 
 /// What a human running the binary directly is shown instead of a hung read on
 /// a protocol that is never going to speak.

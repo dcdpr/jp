@@ -34,23 +34,23 @@ with the first.
 
 ## Protocol
 
-Needs protocol 8 (`REQUIRED_PROTOCOL`).
+Needs protocol 9 (`REQUIRED_PROTOCOL`).
 The host refuses an older pairing at the handshake rather than failing later, so
 a stale `jp` alongside a fresh plugin is an error message and not a mystery.
 
-| Message                | Direction | Used for                                         |
-| ---------------------- | --------- | ------------------------------------------------ |
-| `list_conversations`   | → host    | The conversation index                           |
-| `read_events`          | → host    | One conversation's transcript, title and lock    |
-| `list_configs`         | → host    | The configurations a message can name            |
-| `query`                | → host    | Start a turn, or start a conversation            |
-| `created`              | ← host    | The id of a conversation just created            |
-| `query_complete`       | ← host    | That turn finished                               |
-| `interrupt`            | → host    | Stop the turn on one named conversation          |
-| `read_draft`           | → host    | The message being composed, as the CLI stores it |
-| `write_draft`          | → host    | Save it back, conditional on a revision          |
-| `archive_conversation` | → host    | Move one conversation to the archive             |
-| `set_title`            | → host    | Rename one conversation                          |
+| Message                | Direction | Used for                                           |
+| ---------------------- | --------- | -------------------------------------------------- |
+| `list_conversations`   | → host    | The conversation index                             |
+| `read_events`          | → host    | One conversation's transcript, title and lock      |
+| `list_configs`         | → host    | The configurations a message can name              |
+| `query`                | → host    | Start a turn, or start a conversation              |
+| `created`              | ← host    | The id of a conversation just created              |
+| `query_complete`       | ← host    | That turn finished                                 |
+| `interrupt`            | → host    | Stop a named turn, or answer one without ending it |
+| `read_draft`           | → host    | The message being composed, as the CLI stores it   |
+| `write_draft`          | → host    | Save it back, conditional on a revision            |
+| `archive_conversation` | → host    | Move one conversation to the archive               |
+| `set_title`            | → host    | Rename one conversation                            |
 
 Starting a conversation is answered twice: `created` as soon as there is
 somewhere to send the reader, and `query_complete` when the first turn ends.
@@ -84,6 +84,12 @@ nothing changes on the page during it.
 The host re-reads the conversation from disk on each request, which means a turn
 you started in a terminal shows up in the browser too, without a restart.
 
+Sending while a turn is running interrupts the assistant and answers it, inside
+the turn that was already going: what it had produced is kept, the message
+follows it, and it carries on from there.
+This is Ctrl-C then `[r] Reply` at a terminal, and the conversation is never
+unlocked in between, so there is no window in which the message could be refused.
+
 Events arrive in batches rather than token by token: the turn loop persists at
 each streaming boundary, so a page sees a complete assistant response or tool
 call at a time.
@@ -99,7 +105,7 @@ server-rendered.
 | ------------------------------- | ------ | -------------------------------- |
 | `/conversations`                | GET    | Index                            |
 | `/conversations/{id}`           | GET    | Transcript and composer          |
-| `/conversations/{id}/turn`      | POST   | Start a turn                     |
+| `/conversations/{id}/turn`      | POST   | Send a message                   |
 | `/conversations/{id}/messages`  | GET    | Transcript as JSON, for the poll |
 | `/conversations/{id}/interrupt` | POST   | Stop the running turn            |
 | `/configs`                      | GET    | The configuration chooser        |
