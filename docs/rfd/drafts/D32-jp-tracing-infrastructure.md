@@ -121,12 +121,13 @@ This keeps `jp --help` clean of developer-only knobs.
 
 CLI flags for verbosity:
 
-| Flag                  | Effect                               |
-| --------------------- | ------------------------------------ |
-| `-v` / `-vv` / `-vvv` | Increases chrome verbosity. Does not |
-|                       | affect tracing.                      |
-| `-q`                  | Suppresses chrome. Does not affect   |
-|                       | tracing.                             |
+| Flag                  | Effect                                |
+| --------------------- | ------------------------------------- |
+| `-v` / `-vv` / `-vvv` | Increases chrome verbosity. Does not  |
+|                       | affect tracing.                       |
+| `-q`                  | Suppresses chrome. Leaves tracing,    |
+|                       | the log file, and `JP_DEBUG`'s report |
+|                       | alone.                                |
 
 The log file always captures full TRACE.
 No flag or variable reduces its verbosity.
