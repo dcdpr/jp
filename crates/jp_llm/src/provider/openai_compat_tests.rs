@@ -29,6 +29,16 @@ fn parse_chunk_drops_a_chunk_without_choices() {
     assert!(parse_chunk(data, "test").is_none());
 }
 
+/// llama.cpp opens every stream with a role-only delta, and repeats it on each
+/// progress update.
+/// It carries a choice, but nothing a handler can emit.
+#[test]
+fn parse_chunk_drops_a_role_only_chunk() {
+    let data = r#"{"choices":[{"finish_reason":null,"index":0,"delta":{"role":"assistant","content":null}}]}"#;
+
+    assert!(parse_chunk(data, "test").is_none());
+}
+
 /// An error reported inside the stream is the shape worth noticing.
 ///
 /// The chunk types ignore unknown fields, so before `error` was captured this

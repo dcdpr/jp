@@ -32,7 +32,8 @@ pub(crate) struct StreamChunk {
     /// An error the provider reported inside the stream, once the response had
     /// already returned 200.
     ///
-    /// Held as raw JSON because nothing reads it.
+    /// Held as raw JSON because nothing interprets the provider's error schema;
+    /// [`parse_chunk`] only checks whether it is present and logs it verbatim.
     /// Every failure these providers are known to produce arrives as an HTTP
     /// status before the stream opens, so this field exists for [`parse_chunk`]
     /// to say something out loud if that ever stops being true.
@@ -45,6 +46,16 @@ pub(crate) struct StreamChoice {
     pub delta: StreamDelta,
     #[serde(default)]
     pub finish_reason: Option<String>,
+}
+
+impl StreamChoice {
+    /// Whether this choice carries any field the providers turn into events.
+    fn is_actionable(&self) -> bool {
+        self.finish_reason.is_some()
+            || self.delta.content.is_some()
+            || self.delta.reasoning_content.is_some()
+            || self.delta.tool_calls.is_some()
+    }
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -98,14 +109,18 @@ pub(crate) fn parse_chunk(data: &str, provider: &str) -> Option<StreamChunk> {
         warn!(
             provider,
             error = %error,
-            "Provider reported an error inside the stream. It will surface as a \
-             truncated response instead of this message."
+            "Provider reported an error inside the stream; dropping this chunk."
         );
         return None;
     }
 
     if chunk.choices.is_empty() {
         debug!(provider, data, "Chunk carried no choices.");
+        return None;
+    }
+
+    if !chunk.choices.iter().any(StreamChoice::is_actionable) {
+        debug!(provider, data, "Chunk carried no actionable choices.");
         return None;
     }
 
