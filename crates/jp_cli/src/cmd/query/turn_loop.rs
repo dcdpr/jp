@@ -126,9 +126,7 @@ fn spawn_waiting_indicator(
     config: &StreamingConfig,
     is_tty: bool,
 ) -> Option<LineTimer> {
-    // The indicator redraws itself with `\r\x1b[K`, which has no record form.
-    // Under JSON it would land among the stderr records as raw text.
-    if !is_tty || printer.format().is_json() {
+    if !is_tty {
         return None;
     }
 

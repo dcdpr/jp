@@ -245,7 +245,7 @@ impl Printer {
         self.send(Command::Print(task));
     }
 
-    /// Print a fragment of chrome, with no trailing newline.
+    /// Print a fragment of chrome, with no trailing newline in text formats.
     ///
     /// In JSON mode the fragment becomes a whole record, as it does on stdout:
     /// `2>&1 | jq` has to parse everything it is given, so a fragment a

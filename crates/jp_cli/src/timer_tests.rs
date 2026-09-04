@@ -94,6 +94,28 @@ async fn test_line_timer_show_false_spawns_nothing() {
     assert!(err.lock().is_empty());
 }
 
+// Every line the timer renders is a `\r\x1b[K` redraw, which has no record
+// form. JSON output gets no timer at all rather than raw text among the
+// records, and the exclusion lives here so no call site has to remember it.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_line_timer_json_format_spawns_nothing() {
+    let (printer, _out, err) = Printer::memory(OutputFormat::Json);
+    let printer = Arc::new(printer);
+
+    let timer = spawn_line_timer(
+        printer.clone(),
+        true,
+        Duration::ZERO,
+        Duration::from_millis(10),
+        |secs, _status| format!("\r\x1b[Ktick {secs:.1}s"),
+    );
+    assert!(timer.is_none());
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    printer.flush();
+    assert!(err.lock().is_empty());
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn test_line_timer_drop_cancels_task() {
     let (printer, err) = test_printer();
