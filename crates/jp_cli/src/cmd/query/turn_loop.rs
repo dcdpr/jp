@@ -119,7 +119,8 @@ where
 /// Spawns a waiting indicator task that prints elapsed time and an optional
 /// status detail to the terminal.
 ///
-/// Returns `None` if the indicator is disabled (not a TTY or config says no).
+/// Returns `None` if the indicator is disabled: not a TTY, JSON output, or
+/// config says no.
 fn spawn_waiting_indicator(
     printer: Arc<Printer>,
     config: &StreamingConfig,

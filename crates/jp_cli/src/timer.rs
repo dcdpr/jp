@@ -114,7 +114,8 @@ impl Drop for LineTimer {
 /// [`LineTimer::set_status`]; a status change redraws the line immediately.
 /// On cancellation the task clears the line with `\r\x1b[K`.
 ///
-/// Returns `None` if `show` is `false`, in which case nothing is spawned.
+/// Returns `None` if `show` is `false` or the printer is in a JSON format, in
+/// which case nothing is spawned.
 pub fn spawn_line_timer(
     printer: Arc<Printer>,
     show: bool,
@@ -122,7 +123,9 @@ pub fn spawn_line_timer(
     interval: Duration,
     format_line: impl Fn(f64, Option<&str>) -> String + Send + 'static,
 ) -> Option<LineTimer> {
-    if !show {
+    // Every line this renders is a `\r\x1b[K` redraw, which has no record form:
+    // under JSON it would land among the stderr records as raw text.
+    if !show || printer.format().is_json() {
         return None;
     }
 

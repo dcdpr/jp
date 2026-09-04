@@ -209,8 +209,9 @@ impl Printer {
     }
     /// Print content.
     ///
-    /// In JSON mode, the content is wrapped in an NDJSON envelope:
-    /// `{"message":"..."}\n`.
+    /// Under [`OutputFormat::Json`] the content becomes one NDJSON record,
+    /// `{"message":"..."}\n`; under [`OutputFormat::JsonPretty`] the same
+    /// record is indented across several lines.
     pub fn print<P: Printable>(&self, p: P) {
         let mut task = p.into_task();
         if self.format.is_json() {
@@ -223,8 +224,9 @@ impl Printer {
 
     /// Print content followed by a newline.
     ///
-    /// In JSON mode, the content is wrapped in an NDJSON envelope:
-    /// `{"message":"..."}\n`.
+    /// Under [`OutputFormat::Json`] the content becomes one NDJSON record,
+    /// `{"message":"..."}\n`; under [`OutputFormat::JsonPretty`] the same
+    /// record is indented across several lines.
     pub fn println<P: Printable>(&self, p: P) {
         let mut task = p.into_task();
         if self.format.is_json() {
@@ -243,16 +245,38 @@ impl Printer {
         self.send(Command::Print(task));
     }
 
-    /// Print error.
+    /// Print a fragment of chrome, with no trailing newline in text formats.
+    ///
+    /// In JSON mode the fragment becomes a whole record, as it does on stdout:
+    /// `2>&1 | jq` has to parse everything it is given, so a fragment a
+    /// consumer does not care about is one they filter out, not one that breaks
+    /// the stream.
+    /// Under [`OutputFormat::Json`] that record is a single NDJSON line; under
+    /// [`OutputFormat::JsonPretty`] it is indented across several lines.
     pub fn eprint<P: Printable>(&self, p: P) {
         let mut task = p.into_task();
+        if self.format.is_json() {
+            task = self.wrap_json(task);
+            task.content.push('\n');
+        }
+
         task.target = PrintTarget::Err;
         self.send(Command::Print(task));
     }
 
-    /// Print error followed by a newline.
+    /// Print a line of chrome.
+    ///
+    /// Under [`OutputFormat::Json`] the content becomes one NDJSON record,
+    /// `{"message":"..."}\n`; under [`OutputFormat::JsonPretty`] the same
+    /// record is indented across several lines.
+    /// Both streams carry the same record shape, so a merged `2>&1` stream
+    /// holds one kind of record.
     pub fn eprintln<P: Printable>(&self, p: P) {
         let mut task = p.into_task();
+        if self.format.is_json() {
+            task = self.wrap_json(task);
+        }
+
         task.content.push('\n');
         task.target = PrintTarget::Err;
         self.send(Command::Print(task));

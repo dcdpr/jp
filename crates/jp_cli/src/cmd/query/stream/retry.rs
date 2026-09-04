@@ -124,6 +124,17 @@ pub struct StreamRetryState {
     is_tty: bool,
 }
 
+/// Whether the retry notification may redraw itself in place.
+///
+/// In-place redrawing needs a terminal to erase the line on, and a stream that
+/// tolerates a partial line.
+/// JSON output is neither: `\r\x1b[K` has no record form, so a redrawn line
+/// lands among the NDJSON records as raw text and a consumer parsing stderr
+/// gives up on the rest of the stream.
+fn can_redraw(is_tty: bool, printer: &Printer) -> bool {
+    is_tty && !printer.format().is_json()
+}
+
 impl StreamRetryState {
     /// Create a new retry state from the given configuration.
     pub fn new(config: RequestConfig, is_tty: bool) -> Self {
@@ -207,7 +218,7 @@ impl StreamRetryState {
             return;
         }
 
-        if self.is_tty {
+        if can_redraw(self.is_tty, printer) {
             let _ = write!(printer.err_writer(), "\r\x1b[K");
         }
 
@@ -242,14 +253,14 @@ impl StreamRetryState {
         }
     }
 
-    /// Write the retry notification, overwriting any previous retry line on TTY
-    /// or printing a new permanent line otherwise.
+    /// Write the retry notification, overwriting any previous retry line on a
+    /// terminal or printing a new permanent line otherwise.
     fn notify(&mut self, kind: &str, printer: &Printer) {
         let attempt = self.consecutive_failures;
         let max = self.config.max_retries;
         let msg = format!("⚠ {kind}, retrying ({attempt}/{max})…");
 
-        if self.is_tty {
+        if can_redraw(self.is_tty, printer) {
             // Overwrite any previous retry line in-place.
             let _ = write!(printer.err_writer(), "\r\x1b[K{msg}");
             self.line_active = true;

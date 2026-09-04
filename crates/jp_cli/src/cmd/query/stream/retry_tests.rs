@@ -95,6 +95,37 @@ fn reset_clears_failure_count() {
     assert!(state.can_retry(&StreamError::transient("test")));
 }
 
+// A terminal on stdout says nothing about what is consuming stderr: `jp -F
+// json query ... 2> >(jq .)` leaves `is_tty` true while a parser reads the
+// chrome. The in-place redraw has no record form, so JSON output takes the
+// permanent-line path and the notification stays parseable.
+#[test]
+fn json_retry_notification_is_a_record_even_on_a_tty() {
+    let (printer, _out, err) = Printer::memory(OutputFormat::Json);
+    let mut state = StreamRetryState::new(
+        RequestConfig {
+            max_retries: 3,
+            base_backoff_ms: 1,
+            max_backoff_secs: 1,
+            stream_idle_timeout_secs: 120,
+            max_response_bytes: MaxResponseBytes::default(),
+            cache: CachePolicy::default(),
+        },
+        true,
+    );
+
+    state.record_attempt();
+    state.notify("rate_limit", &printer);
+    printer.flush();
+
+    assert_eq!(
+        *err.lock(),
+        "{\"message\":\"⚠ rate_limit, retrying (1/3)…\"}\n"
+    );
+    // No line is left on screen to erase, so a later clear writes nothing.
+    assert!(!state.line_active);
+}
+
 #[test]
 fn backoff_uses_retry_after_when_present() {
     let config = RequestConfig {
