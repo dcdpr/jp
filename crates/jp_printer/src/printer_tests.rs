@@ -183,6 +183,32 @@ fn json_println_wraps_in_ndjson() {
     assert_eq!(parsed["message"], "hello world");
 }
 
+// Chrome on stderr is NDJSON too under `--format json` (RFD 048), so a
+// consumer merging the streams gets one record shape rather than two.
+#[test]
+fn json_eprintln_wraps_in_ndjson() {
+    let (printer, _, err) = Printer::memory(OutputFormat::Json);
+
+    printer.eprintln("\x1b[33mnote: using workspace `A`\x1b[0m");
+    printer.flush();
+
+    assert_eq!(*err.lock(), "{\"message\":\"note: using workspace `A`\"}\n");
+}
+
+// Partial writes have no complete record to wrap: the reasoning-progress
+// indicator emits a bare `.` per chunk, which would otherwise become one JSON
+// object per character.
+#[test]
+fn json_eprint_does_not_wrap() {
+    let (printer, _, err) = Printer::memory(OutputFormat::Json);
+
+    printer.eprint(".");
+    printer.eprint(".");
+    printer.flush();
+
+    assert_eq!(*err.lock(), "..");
+}
+
 #[test]
 fn json_print_wraps_in_ndjson() {
     let (printer, out, _) = Printer::memory(OutputFormat::Json);
