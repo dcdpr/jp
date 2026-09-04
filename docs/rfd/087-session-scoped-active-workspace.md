@@ -310,6 +310,15 @@ Examples below use `jp w` for brevity.
   Selecting a checkout also registers it in the roots registry, so a workspace
   selected by path before any command has run inside it is immediately reachable
   by `<id>` from anywhere — which is what a session-scoped selection promises.
+- `jp w use <target> --always`: select the workspace *and* make the session
+  **sticky** to it, so the selection outranks the cwd from then on and the
+  conflict prompt stops firing.
+  This is the up-front form of the prompt's `A` choice, statable before the
+  question is asked.
+  Every `jp w use` states the session's whole intent, so one *without*
+  `--always` releases the flag, including when an earlier invocation set it.
+  `--always` with `cwd` is rejected: that target drops the record the flag lives
+  on.
 - `jp w use cwd` (short `.`): drop the session's active workspace and fall back
   to cwd resolution.
   This replaces a `--clear` flag — clearing is just selecting the cwd-derived
@@ -445,9 +454,10 @@ q - quit without running command
 ```
 
 `A` persists on the session record and makes the session **sticky** to the
-active workspace.
-It is interactive-only state, cleared with `jp w use cwd` (see [Session store
-and cleanup](#session-store-and-cleanup)).
+active workspace, the same state `jp w use <target> --always` sets up front.
+It is interactive-only state, released by any `jp w use` without `--always` and
+dropped along with the record by `jp w use cwd` (see [Session store and
+cleanup](#session-store-and-cleanup)).
 
 **Non-interactive mode ignores the session-active workspace entirely.** Here
 "non-interactive" means JP cannot prompt the user, determined by the same

@@ -75,7 +75,12 @@ fn non_interactive_use_is_rejected() {
     let env = env_at(tmp.path().to_owned(), tmp.path(), Some(&session), false);
     let (printer, _out, _err) = Printer::memory(OutputFormat::Text);
 
-    let error = Use { target: None }.run(&printer, &env).unwrap_err();
+    let error = Use {
+        target: None,
+        always: false,
+    }
+    .run(&printer, &env)
+    .unwrap_err();
     assert!(
         message_of(&error).contains("interactive-only"),
         "unexpected error: {error:?}"
@@ -88,9 +93,149 @@ fn use_without_a_session_identity_is_rejected() {
     let env = env_at(tmp.path().to_owned(), tmp.path(), None, true);
     let (printer, _out, _err) = Printer::memory(OutputFormat::Text);
 
-    let error = Use { target: None }.run(&printer, &env).unwrap_err();
+    let error = Use {
+        target: None,
+        always: false,
+    }
+    .run(&printer, &env)
+    .unwrap_err();
     assert!(
         message_of(&error).contains("No session identity"),
+        "unexpected error: {error:?}"
+    );
+}
+
+// Without `--always` the session follows the cwd again as soon as the user
+// stands in another workspace, which is what makes the conflict prompt fire.
+#[test]
+fn selecting_a_workspace_is_not_sticky_by_default() {
+    let tmp = tempdir().unwrap();
+    let root = make_workspace(tmp.path(), "proj", "ws123");
+    let session = env_session();
+    let env = env_at(tmp.path().to_owned(), tmp.path(), Some(&session), true);
+    let (printer, _out, _err) = Printer::memory(OutputFormat::Text);
+
+    Use {
+        target: Some(WorkspaceTarget::Path(root)),
+        always: false,
+    }
+    .run(&printer, &env)
+    .unwrap();
+
+    assert!(!env.store.load(&session).expect("mapping").sticky);
+}
+
+// `--always` is the up-front form of the conflict prompt's `A`: the selection
+// outranks the cwd from here on, stated once rather than extracted from
+// someone dismissing a prompt.
+#[test]
+fn always_keeps_the_session_on_the_selection() {
+    let tmp = tempdir().unwrap();
+    let root = make_workspace(tmp.path(), "proj", "ws123");
+    let session = env_session();
+    let env = env_at(tmp.path().to_owned(), tmp.path(), Some(&session), true);
+    let (printer, out, _err) = Printer::memory(OutputFormat::Text);
+
+    Use {
+        target: Some(WorkspaceTarget::Path(root.clone())),
+        always: true,
+    }
+    .run(&printer, &env)
+    .unwrap();
+
+    assert!(env.store.load(&session).expect("mapping").sticky);
+
+    let stdout = stdout_of(&printer, &out);
+    assert!(
+        stdout.contains("always"),
+        "the sticky flag must be reported: {stdout}"
+    );
+}
+
+// A later plain `use` states the whole intent for the session, so the sticky
+// flag it does not ask for is one it takes away.
+#[test]
+fn selecting_again_without_always_releases_the_flag() {
+    let tmp = tempdir().unwrap();
+    let first = make_workspace(tmp.path(), "first", "ws123");
+    let second = make_workspace(tmp.path(), "second", "ws456");
+    let session = env_session();
+    let env = env_at(tmp.path().to_owned(), tmp.path(), Some(&session), true);
+    let (printer, _out, _err) = Printer::memory(OutputFormat::Text);
+
+    Use {
+        target: Some(WorkspaceTarget::Path(first)),
+        always: true,
+    }
+    .run(&printer, &env)
+    .unwrap();
+    assert!(env.store.load(&session).expect("mapping").sticky);
+
+    Use {
+        target: Some(WorkspaceTarget::Path(second)),
+        always: false,
+    }
+    .run(&printer, &env)
+    .unwrap();
+    assert!(!env.store.load(&session).expect("mapping").sticky);
+}
+
+// Re-selecting the workspace that is already active takes the early-return
+// path, where the release is the only thing that happened: without the notice
+// the run reports a no-op while the record changed underneath.
+#[test]
+fn reselecting_the_active_workspace_reports_the_release() {
+    let tmp = tempdir().unwrap();
+    let root = make_workspace(tmp.path(), "proj", "ws123");
+    let session = env_session();
+    let env = env_at(tmp.path().to_owned(), tmp.path(), Some(&session), true);
+
+    let (printer, _out, _err) = Printer::memory(OutputFormat::Text);
+    Use {
+        target: Some(WorkspaceTarget::Path(root.clone())),
+        always: true,
+    }
+    .run(&printer, &env)
+    .unwrap();
+
+    let (printer, out, _err) = Printer::memory(OutputFormat::Text);
+    Use {
+        target: Some(WorkspaceTarget::Path(root)),
+        always: false,
+    }
+    .run(&printer, &env)
+    .unwrap();
+
+    assert!(!env.store.load(&session).expect("mapping").sticky);
+
+    let stdout = stdout_of(&printer, &out);
+    assert!(
+        stdout.contains("Already the session-active workspace"),
+        "unexpected output: {stdout}"
+    );
+    assert!(
+        stdout.contains("no longer always"),
+        "the release must be reported: {stdout}"
+    );
+}
+
+// `cwd` drops the record entirely; there would be nothing left to keep active.
+#[test]
+fn always_with_the_cwd_target_is_rejected() {
+    let tmp = tempdir().unwrap();
+    let session = env_session();
+    let env = env_at(tmp.path().to_owned(), tmp.path(), Some(&session), true);
+    let (printer, _out, _err) = Printer::memory(OutputFormat::Text);
+
+    let error = Use {
+        target: Some(WorkspaceTarget::Cwd),
+        always: true,
+    }
+    .run(&printer, &env)
+    .unwrap_err();
+
+    assert!(
+        message_of(&error).contains("--always"),
         "unexpected error: {error:?}"
     );
 }
@@ -105,6 +250,7 @@ fn selecting_a_path_records_the_selection() {
 
     Use {
         target: Some(WorkspaceTarget::Path(root.clone())),
+        always: false,
     }
     .run(&printer, &env)
     .unwrap();
@@ -142,6 +288,7 @@ fn selecting_a_workspace_registers_its_checkout() {
 
     Use {
         target: Some(WorkspaceTarget::Path(root.clone())),
+        always: false,
     }
     .run(&printer, &env)
     .unwrap();
@@ -168,6 +315,7 @@ fn reselecting_the_active_workspace_is_a_noop() {
     let (printer, _out, _err) = Printer::memory(OutputFormat::Text);
     Use {
         target: Some(WorkspaceTarget::Path(root.clone())),
+        always: false,
     }
     .run(&printer, &env)
     .unwrap();
@@ -175,6 +323,7 @@ fn reselecting_the_active_workspace_is_a_noop() {
     let (printer, out, _err) = Printer::memory(OutputFormat::Text);
     Use {
         target: Some(WorkspaceTarget::Path(root.clone())),
+        always: false,
     }
     .run(&printer, &env)
     .unwrap();
@@ -196,6 +345,7 @@ fn use_cwd_clears_the_selection() {
     let (printer, _out, _err) = Printer::memory(OutputFormat::Text);
     Use {
         target: Some(WorkspaceTarget::Path(root)),
+        always: false,
     }
     .run(&printer, &env)
     .unwrap();
@@ -204,6 +354,7 @@ fn use_cwd_clears_the_selection() {
     let (printer, out, _err) = Printer::memory(OutputFormat::Text);
     Use {
         target: Some(WorkspaceTarget::Cwd),
+        always: false,
     }
     .run(&printer, &env)
     .unwrap();
@@ -227,6 +378,7 @@ fn a_path_without_a_workspace_id_is_rejected() {
 
     let error = Use {
         target: Some(WorkspaceTarget::Path(plain)),
+        always: false,
     }
     .run(&printer, &env)
     .unwrap_err();
@@ -242,6 +394,7 @@ fn a_path_without_a_workspace_id_is_rejected() {
 
     let error = Use {
         target: Some(WorkspaceTarget::Path(no_id)),
+        always: false,
     }
     .run(&printer, &env)
     .unwrap_err();
@@ -261,6 +414,7 @@ fn selections_are_scoped_to_the_session() {
     let (printer, _out, _err) = Printer::memory(OutputFormat::Text);
     Use {
         target: Some(WorkspaceTarget::Path(root)),
+        always: false,
     }
     .run(&printer, &env)
     .unwrap();

@@ -79,8 +79,10 @@ pub struct WorkspaceSessionMapping {
     /// Whether the session keeps using its active workspace even when the cwd
     /// resolves to a different one.
     ///
-    /// The persisted `A` choice from the precedence ladder; interactive-only
-    /// state, cleared by `jp w use cwd`.
+    /// Interactive-only state, set by `jp w use --always` or by answering `A`
+    /// at the cwd-vs-active prompt.
+    /// Any later `jp w use` without `--always` releases it, and `jp w use cwd`
+    /// drops it along with the record.
     #[serde(default)]
     pub sticky: bool,
 
@@ -158,6 +160,35 @@ impl WorkspaceSessionStore {
         root: &Utf8Path,
         now: DateTime<Utc>,
     ) -> Result<()> {
+        self.write_selection(session, workspace_id, root, now, None)
+    }
+
+    /// Record a workspace selection and the session's `sticky` flag together.
+    ///
+    /// The selection moves to the front of the history and `sticky` replaces
+    /// whatever the record held, in a single write: an interrupted call leaves
+    /// either both halves of the change or neither.
+    pub fn record_selection_with_sticky(
+        &self,
+        session: &Session,
+        workspace_id: &Id,
+        root: &Utf8Path,
+        now: DateTime<Utc>,
+        sticky: bool,
+    ) -> Result<()> {
+        self.write_selection(session, workspace_id, root, now, Some(sticky))
+    }
+
+    /// Move a selection to the front of the history, replacing the
+    /// session-level `sticky` flag when one is given.
+    fn write_selection(
+        &self,
+        session: &Session,
+        workspace_id: &Id,
+        root: &Utf8Path,
+        now: DateTime<Utc>,
+        sticky: Option<bool>,
+    ) -> Result<()> {
         let mut mapping = self
             .load(session)
             .unwrap_or_else(|| WorkspaceSessionMapping {
@@ -176,6 +207,10 @@ impl WorkspaceSessionStore {
             selected_at: now,
         });
 
+        if let Some(sticky) = sticky {
+            mapping.sticky = sticky;
+        }
+
         write_json(&self.path(session), &mapping)?;
         trace!(
             workspace = %workspace_id,
@@ -189,11 +224,13 @@ impl WorkspaceSessionStore {
     /// choice).
     ///
     /// A sticky session keeps using its active workspace even when the cwd
-    /// resolves to a different one, until `jp w use cwd` clears the record.
-    /// Without a record there is no selection to pin, so the call is a no-op.
+    /// resolves to a different one, until a `jp w use` without `--always`
+    /// releases it or `jp w use cwd` drops the record.
+    /// Without a record there is no selection to keep active, so the call is a
+    /// no-op.
     pub fn set_sticky(&self, session: &Session, sticky: bool) -> Result<()> {
         let Some(mut mapping) = self.load(session) else {
-            debug!("No session-active workspace recorded; nothing to pin.");
+            debug!("No session-active workspace recorded; nothing to keep active.");
             return Ok(());
         };
 

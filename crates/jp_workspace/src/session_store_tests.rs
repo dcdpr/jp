@@ -88,6 +88,36 @@ fn set_sticky_persists_and_reselection_preserves_it() {
 }
 
 #[test]
+fn record_selection_with_sticky_writes_both_halves() {
+    let t = store();
+    let session = env_session("tab-1");
+
+    // No record yet: the selection and the flag arrive together.
+    t.store
+        .record_selection_with_sticky(&session, &id("abc12"), Utf8Path::new("/a"), at(1_000), true)
+        .unwrap();
+
+    let mapping = t.store.load(&session).expect("mapping stored");
+    assert_eq!(mapping.history[0].workspace_id, "abc12");
+    assert!(mapping.sticky);
+
+    // A later selection that asks for no flag clears the one left behind.
+    t.store
+        .record_selection_with_sticky(
+            &session,
+            &id("def34"),
+            Utf8Path::new("/b"),
+            at(2_000),
+            false,
+        )
+        .unwrap();
+
+    let mapping = t.store.load(&session).expect("mapping stored");
+    assert_eq!(mapping.history[0].workspace_id, "def34");
+    assert!(!mapping.sticky);
+}
+
+#[test]
 fn set_sticky_without_a_record_is_a_no_op() {
     let t = store();
     let session = env_session("tab-1");

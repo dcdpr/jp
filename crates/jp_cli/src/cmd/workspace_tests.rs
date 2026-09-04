@@ -57,9 +57,12 @@ fn no_target_at_all_stays_absent() {
 
 #[test]
 fn use_adopts_the_global_flag_as_its_target() {
-    let command = Commands::Use(use_::Use { target: None })
-        .with_global_target(Some(&target("ws123")))
-        .unwrap();
+    let command = Commands::Use(use_::Use {
+        target: None,
+        always: false,
+    })
+    .with_global_target(Some(&target("ws123")))
+    .unwrap();
 
     let Commands::Use(args) = command else {
         panic!("expected the `use` subcommand");
