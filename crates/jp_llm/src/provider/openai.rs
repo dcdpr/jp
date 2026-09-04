@@ -625,6 +625,31 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bo
 /// published model documentation.
 fn map_model(model: ModelResponse) -> Result<ModelDetails> {
     let details = match model.id.as_str() {
+        "gpt-6-astra" => ModelDetails {
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("GPT-6 Astra".to_owned()),
+            context_window: Some(1_050_000),
+            max_output_tokens: Some(128_000),
+            // Reasoning.effort supports: low, medium, high, xhigh, max. There
+            // is no `none`, so reasoning cannot be turned off; the lowest
+            // level stands in for a disable.
+            reasoning: Some(
+                ReasoningDetails::leveled(false, true, true, true, true, true).always_on(),
+            ),
+            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2026, 4, 30).unwrap()),
+            deprecated: Some(ModelDeprecation::Active),
+            structured_output: None,
+            prefill: None,
+            // Reasoning is always active, so TEMP_REQUIRES_NO_REASONING drops
+            // temperature and top_p on every request — which is what this
+            // model wants: it rejects both outright.
+            features: vec![
+                TEMP_REQUIRES_NO_REASONING,
+                REASONING_PRO_MODE,
+                PERSISTED_REASONING,
+                EXPLICIT_PROMPT_CACHING,
+            ],
+        },
         "gpt-5.6" | "gpt-5.6-sol" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
             display_name: Some("GPT-5.6 Sol".to_owned()),
