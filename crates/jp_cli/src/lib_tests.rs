@@ -55,6 +55,24 @@ fn a_failed_run_announces_its_trace_log_even_when_piped() {
     assert!(should_report_trace_log(RunOutcome::Failed, true, false));
 }
 
+// The flag has to reach the printer to mean anything: it names a policy the
+// printer enforces, and no call site consults it. A text format isolates the
+// chrome half of `chrome_repaints`, which is otherwise also false under JSON.
+#[test]
+fn quiet_closes_the_printers_chrome_channel() {
+    let quiet = Globals {
+        quiet: true,
+        ..Globals::default()
+    };
+    let printer = build_printer(&quiet, OutputFormat::TextPretty);
+    assert!(!printer.chrome_repaints());
+    printer.shutdown();
+
+    let printer = build_printer(&Globals::default(), OutputFormat::TextPretty);
+    assert!(printer.chrome_repaints());
+    printer.shutdown();
+}
+
 fn write_config(path: &camino::Utf8Path, content: &str) {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).unwrap();

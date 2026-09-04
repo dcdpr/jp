@@ -50,7 +50,7 @@ use jp_config::{
         load_partials_with_inheritance, log_load_diagnostics,
     },
 };
-use jp_printer::{OutputFormat, OutputWidth, Printer};
+use jp_printer::{Chrome, OutputFormat, OutputWidth, Printer};
 use jp_storage::backend::{
     FsStorageBackend, NullLockBackend, NullPersistBackend, ReadOnlySessionBackend,
 };
@@ -141,7 +141,15 @@ struct Globals {
     #[arg(short = 'v', long, global = true, action = ArgAction::Count)]
     verbose: u8,
 
-    /// Suppress all output, including errors.
+    /// Suppress chrome: progress indicators, status lines, and tool call
+    /// headers.
+    ///
+    /// Command output and the assistant's response still go to stdout, and a
+    /// failing run still reports its error.
+    /// Redirect them (`>/dev/null`, `2>/dev/null`) to drop those as well.
+    ///
+    /// Tracing written to stderr by `-v` or `--log-file=-` is suppressed too.
+    /// The trace log file still records the run in full.
     #[arg(short = 'q', long, global = true)]
     quiet: bool,
 
@@ -548,10 +556,27 @@ fn detect_output_width(declared: Option<u16>) -> OutputWidth {
         })
 }
 
+/// The printer for a run: the terminal streams, the resolved output format, and
+/// the chrome policy.
+///
+/// `--quiet` closes the chrome channel, which is what the flag is for: the
+/// run's commentary on itself goes away and stdout keeps carrying the command's
+/// data.
+fn build_printer(globals: &Globals, format: OutputFormat) -> Printer {
+    let chrome = if globals.quiet {
+        Chrome::Silenced
+    } else {
+        Chrome::Shown
+    };
+
+    Printer::terminal(format)
+        .with_chrome(chrome)
+        .with_output_width(detect_output_width(globals.width))
+}
+
 #[expect(clippy::too_many_lines)]
 fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
-    let printer =
-        Printer::terminal(format).with_output_width(detect_output_width(cli.globals.width));
+    let printer = build_printer(&cli.globals, format);
 
     // `jp workspace` runs on a dedicated pre-workspace path: selecting or
     // inspecting a workspace must work from outside every workspace —

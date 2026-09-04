@@ -526,3 +526,76 @@ fn static_behavior_preserved_when_max_latency_unset() {
         "static-delay behavior must be preserved (no controller speed-up); elapsed {elapsed:?}",
     );
 }
+
+// --- chrome ------------------------------------------------------------------
+
+// A silenced channel drops chrome and nothing else: command output and the
+// assistant's response are data, and keep their stream.
+#[test]
+fn silenced_chrome_drops_stderr_and_keeps_stdout() {
+    let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = printer.with_chrome(Chrome::Silenced);
+
+    printer.println("data");
+    printer.eprintln("a status line");
+    printer.eprint(".");
+    printer.flush();
+
+    assert_eq!(*out.lock(), "data\n");
+    assert_eq!(*err.lock(), "");
+}
+
+// Writer output reaches the worker without passing `Printer::send`, so it
+// needs its own guard. The retry notice and the status timer both write this
+// way.
+#[test]
+fn silenced_chrome_drops_writer_output() {
+    let (printer, _, err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = printer.with_chrome(Chrome::Silenced);
+
+    writeln!(printer.err_writer(), "waiting 3s").unwrap();
+    printer.erase_line();
+    printer.flush();
+
+    assert_eq!(*err.lock(), "");
+}
+
+// Renderers hold clones of the printer, and a clone that printed chrome would
+// reopen the channel the flag closed.
+#[test]
+fn silenced_chrome_survives_a_clone() {
+    let (printer, _, err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = printer.with_chrome(Chrome::Silenced);
+
+    let renderer = printer.clone();
+    renderer.eprintln("a status line");
+    printer.flush();
+
+    assert_eq!(*err.lock(), "");
+}
+
+// Stdout is not chrome, so a silenced channel leaves the writer over it alone.
+#[test]
+fn silenced_chrome_leaves_the_out_writer_alone() {
+    let (printer, out, _) = Printer::memory(OutputFormat::TextPretty);
+    let printer = printer.with_chrome(Chrome::Silenced);
+
+    writeln!(printer.out_writer(), "data").unwrap();
+    printer.flush();
+
+    assert_eq!(*out.lock(), "data\n");
+}
+
+// A repaint needs somewhere to land and someone to see it. Callers asking
+// whether to do the work behind one get both answers from one question.
+#[test]
+fn chrome_repaints_only_when_shown_and_not_json() {
+    let (text, _, _) = Printer::memory(OutputFormat::TextPretty);
+    let (json, _, _) = Printer::memory(OutputFormat::Json);
+    let (silenced, _, _) = Printer::memory(OutputFormat::TextPretty);
+    let silenced = silenced.with_chrome(Chrome::Silenced);
+
+    assert!(text.chrome_repaints());
+    assert!(!json.chrome_repaints());
+    assert!(!silenced.chrome_repaints());
+}
