@@ -10,10 +10,14 @@ codes:
 # Interactive usage, can prompt for input
 jp query "..."
 
-# Force non-interactive mode
-jp --no-prompt ...
+# Declare that nobody is available to answer prompts
+jp --non-interactive ...
 
-# Auto selects non-interactive mode based on stdout redirection
+# Same for every invocation in a script or CI job
+JP_NONINTERACTIVE=1 jp query "..."
+
+# Redirecting stdout switches off pretty-printing, and nothing else: a piped
+# command still has a user behind it, so it can still ask
 jp query "..." > out.txt
 
 # Pipe data into and out of jp

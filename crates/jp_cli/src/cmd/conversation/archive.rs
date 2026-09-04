@@ -5,7 +5,7 @@ use jp_workspace::{ConversationHandle, Workspace};
 
 use crate::{
     cmd::{
-        ConversationLoadRequest, Output,
+        ConversationLoadRequest, Error as CmdError, Output,
         conversation_id::PositionalIds,
         lock::{LockOutcome, LockRequest, acquire_lock},
         time::{CreationRange, TimeThreshold},
@@ -24,6 +24,8 @@ use crate::{
 /// conversations, or when archiving more than one conversation at once.
 /// Pass `--confirm` to prompt for every conversation, or `--no-confirm` /
 /// `--yes` to skip all prompts.
+/// With no user available to answer — no terminal, or `--non-interactive` — a
+/// required confirmation fails rather than skipping the conversation.
 ///
 /// Use `--created-since`/`--created-before` to archive a range of conversations
 /// by creation date, or `--inactive-since` to archive everything unused since a
@@ -141,6 +143,10 @@ impl Archive {
 /// conversation at once (`multi`).
 /// The conversation title, when known, is shown so a bulk selection can be
 /// verified.
+///
+/// Errors when a prompt is required and no user is available to answer it.
+/// Returning `false` there would read as the user declining, and a bulk archive
+/// would report success having archived nothing.
 fn confirm_archive(
     ctx: &mut Ctx,
     id: &ConversationId,
@@ -165,6 +171,14 @@ fn confirm_archive(
     // `--confirm` (`Some(true)`) prompts for everything.
     if preference != Some(true) && !is_active && !is_pinned && !multi {
         return Ok(true);
+    }
+
+    if !ctx.term.interactive {
+        return Err(CmdError::from(format!(
+            "archiving conversation {id} needs a confirmation and nobody is available to give \
+             one; pass --no-confirm to archive it without asking"
+        ))
+        .into());
     }
 
     // Active subsumes pinned in the prompt; with `--confirm` a plain

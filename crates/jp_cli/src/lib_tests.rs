@@ -779,6 +779,7 @@ fn resolve_config_consumes_default_id() {
         &mut workspace,
         None,
         None,
+        false,
     )
     .unwrap();
 
@@ -836,6 +837,7 @@ fn resolve_config_applies_the_compact_model_flag() {
         &mut workspace,
         None,
         None,
+        false,
     )
     .unwrap();
 
@@ -920,6 +922,7 @@ fn resolve_config_reset_skips_broken_conversation_config() {
         &mut workspace,
         None,
         None,
+        false,
     );
     assert!(result.is_err(), "broken conversation config must propagate");
 
@@ -936,6 +939,7 @@ fn resolve_config_reset_skips_broken_conversation_config() {
         &mut workspace,
         None,
         None,
+        false,
     )
     .expect("--cfg=NONE must recover a broken conversation config");
 
@@ -976,6 +980,7 @@ fn resolve_config_reset_workspace_layer_contains_resolved_model_ids() {
         &mut workspace,
         None,
         None,
+        false,
     )
     .unwrap();
 
@@ -1027,6 +1032,7 @@ fn resolve_config_reset_post_layer_contains_resolved_model_ids() {
         &mut workspace,
         None,
         None,
+        false,
     )
     .unwrap();
 

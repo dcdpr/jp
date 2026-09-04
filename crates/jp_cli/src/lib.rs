@@ -148,9 +148,12 @@ struct Globals {
     /// Assume no user is available to answer prompts.
     ///
     /// Anything JP would normally ask about resolves without asking: the
-    /// workspace-selection prompts, tool permission requests, plugin approval,
-    /// and lock-timeout handling all behave as they do when JP is run without a
-    /// terminal.
+    /// workspace and conversation pickers, tool permission requests, plugin
+    /// approval, and lock-timeout handling all behave as they do when JP is run
+    /// without a terminal.
+    ///
+    /// A command with no answer to fall back on fails instead: `jp init`, and
+    /// any removal or archive it would have to confirm.
     ///
     /// Set `JP_NONINTERACTIVE=1` to apply this to every invocation in an
     /// environment, such as a script or a CI job.
@@ -354,6 +357,14 @@ pub(crate) enum CliFormat {
 /// [RFD 048]: https://jp.computer/rfd/048
 const fn interactive(non_interactive: bool, terminal: bool) -> bool {
     !non_interactive && terminal
+}
+
+/// Whether a user is present to answer a workspace or conversation picker.
+///
+/// Both resolve before a [`Ctx`] exists, so they cannot read
+/// `Term::interactive` and take the terminal signal from stdin themselves.
+pub(crate) fn stdin_interactive(non_interactive: bool) -> bool {
+    interactive(non_interactive, io::stdin().is_terminal())
 }
 
 /// Whether `name` names an environment variable set to an opt-in value.
@@ -581,7 +592,9 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
             unreachable!("every workspace-free command has a dedicated run path");
         };
 
-        return args.run(&printer).map_err(Into::into);
+        return args
+            .run(&printer, cli.globals.non_interactive)
+            .map_err(Into::into);
     }
 
     // The pre-workspace bootstrap (RFD 087): session identity and the
@@ -642,6 +655,7 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
         &mut workspace,
         session.as_ref(),
         fs_backend.as_deref(),
+        stdin_interactive(cli.globals.non_interactive),
     )?;
     let config = Arc::new(config);
     let runtime = build_runtime(cli.root.threads, "jp-worker")?;
@@ -948,6 +962,11 @@ fn parse_error(error: cmd::Error, format: OutputFormat) -> (u8, String) {
 /// 6. Consume `default_id` so it doesn't leak into the runtime config.
 /// 7. Build the final [`AppConfig`].
 ///
+/// Step 3 can open the conversation picker, which happens here rather than in
+/// the command because the conversation it selects supplies a config layer.
+/// `interactive` decides whether that prompt is available; without it, a target
+/// that resolves to nothing fails with keyword help.
+///
 /// [RFD 038]: https://jp.computer/rfd/038
 pub(crate) fn resolve_config(
     command: &Commands,
@@ -956,6 +975,7 @@ pub(crate) fn resolve_config(
     workspace: &mut Workspace,
     session: Option<&jp_workspace::session::Session>,
     fs: Option<&FsStorageBackend>,
+    interactive: bool,
 ) -> Result<(
     AppConfig,
     Vec<jp_workspace::ConversationHandle>,
@@ -982,6 +1002,7 @@ pub(crate) fn resolve_config(
         session,
         default_id,
         command.allows_new_from_picker(),
+        interactive,
     )?;
     let handles = outcome.handles;
 

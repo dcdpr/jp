@@ -26,7 +26,21 @@ pub(crate) struct Init {
 }
 
 impl Init {
-    pub(crate) fn run(&self, printer: &Printer) -> Output {
+    /// Create the workspace at `path` and configure it through the wizard.
+    ///
+    /// Errors without a user available to answer: every value the wizard needs
+    /// comes from a prompt, and no flag supplies them.
+    /// The check runs before anything is written, so a run that cannot finish
+    /// leaves no half-initialized workspace behind.
+    pub(crate) fn run(&self, printer: &Printer, non_interactive: bool) -> Output {
+        if non_interactive {
+            return Err(
+                "`jp init` asks which model to use and whether to confirm tool calls, and nobody \
+                 is available to answer; run it without --non-interactive"
+                    .into(),
+            );
+        }
+
         let cwd: Utf8PathBuf = std::env::current_dir()?
             .try_into()
             .map_err(FromPathBufError::into_io_error)?;
