@@ -609,6 +609,13 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
         session.as_ref(),
         cli.globals.no_interactive,
     )?;
+    // A run that went somewhere other than the directory the user is standing
+    // in says so, rather than leaving a days-old `jp w use` to redirect the
+    // command silently.
+    if let Some(notice) = exec.foreign_root_notice() {
+        printer.eprintln(notice);
+    }
+
     trace!(
         root = %exec.root,
         source = ?exec.source,

@@ -99,6 +99,13 @@ pub(crate) struct ExecutionContext {
     /// The selected checkout root.
     pub(crate) root: Utf8PathBuf,
 
+    /// The launch cwd's own workspace root, when it is inside one.
+    ///
+    /// `None` when `jp` was invoked outside every workspace.
+    /// Kept alongside [`Self::root`] so a run can tell that it operates on a
+    /// workspace other than the one the user is standing in.
+    cwd_root: Option<Utf8PathBuf>,
+
     /// The working directory for spawned children, when it differs from the
     /// process cwd.
     ///
@@ -132,6 +139,30 @@ impl ExecutionContext {
         self.child_cwd().unwrap_or(&self.launch_cwd)
     }
 
+    /// The chrome line announcing that this run operates on a workspace other
+    /// than the one the user is standing in.
+    ///
+    /// `None` unless the root came from the session-active workspace while the
+    /// launch cwd sits in a different one: an explicit `--workspace` was typed
+    /// this invocation, a cwd-derived root is the directory the user is in, and
+    /// standing outside every workspace leaves no competing answer to name.
+    pub(crate) fn foreign_root_notice(&self) -> Option<String> {
+        if self.source != RootSource::SessionActive {
+            return None;
+        }
+
+        let cwd_root = self.cwd_root.as_ref()?;
+        if same_dir(cwd_root, &self.root) {
+            return None;
+        }
+
+        Some(format!(
+            "using session workspace {} (cwd: {})",
+            self.root.to_string().bold().yellow(),
+            cwd_root.to_string().bold().grey(),
+        ))
+    }
+
     /// An execution context for a test-constructed workspace: as if `jp` was
     /// launched from the workspace root itself.
     #[cfg(test)]
@@ -139,6 +170,7 @@ impl ExecutionContext {
         Self {
             launch_cwd: workspace.root().to_owned(),
             root: workspace.root().to_owned(),
+            cwd_root: Some(workspace.root().to_owned()),
             child_cwd: None,
             source: RootSource::Cwd,
         }
@@ -195,22 +227,27 @@ fn resolve_from(env: &TargetEnv<'_>, target: Option<&WorkspaceTarget>) -> Result
         },
     };
 
+    // A cwd-derived root is the launch cwd's workspace by construction; every
+    // other source has to look it up to know whether the two agree.
+    let cwd_root = if matches!(source, RootSource::Cwd) {
+        Some(root.clone())
+    } else {
+        Workspace::find_root(env.launch_cwd.clone(), DEFAULT_STORAGE_DIR)
+    };
+
     // The root-as-working-directory invariant: children run as if launched
     // from the selected root whenever that root is not the launch cwd's own
     // workspace. Runs from inside the selected workspace leave the child cwd
     // untouched.
-    let child_cwd = if matches!(source, RootSource::Cwd) {
-        None
-    } else {
-        let launch_root = Workspace::find_root(env.launch_cwd.clone(), DEFAULT_STORAGE_DIR);
-
-        (!launch_root.is_some_and(|launch_root| same_dir(&launch_root, &root)))
-            .then(|| root.clone())
-    };
+    let child_cwd = (!cwd_root
+        .as_ref()
+        .is_some_and(|cwd_root| same_dir(cwd_root, &root)))
+    .then(|| root.clone());
 
     Ok(ExecutionContext {
         launch_cwd: env.launch_cwd.clone(),
         root,
+        cwd_root,
         child_cwd,
         source,
     })
