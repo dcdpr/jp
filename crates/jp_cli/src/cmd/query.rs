@@ -1250,9 +1250,12 @@ async fn await_mcp_servers(
         return Ok(());
     }
 
+    // The line redraws itself with `\r\x1b[K`, which has no record form. Under
+    // JSON it would land among the stderr records as raw text.
+    let show = config.show && is_tty && !printer.format().is_json();
     let timer = spawn_line_timer(
         printer,
-        config.show && is_tty,
+        show,
         Duration::from_secs(config.delay_secs.into()),
         Duration::from_millis(config.interval_ms.into()),
         move |secs, status| mcp_startup_line(secs, status, width),
