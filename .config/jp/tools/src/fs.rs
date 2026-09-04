@@ -1,7 +1,7 @@
 use utils::suppress_matcher;
 
 use crate::{
-    Context, Tool, to_xml,
+    Context, Tool,
     util::{OneOrMany, ToolResult},
 };
 
@@ -47,7 +47,7 @@ pub async fn run(ctx: Context, t: Tool) -> ToolResult {
             &suppress,
         )
         .await
-        .and_then(to_xml)
+        .map(|files| files.render())
         .map(Into::into),
 
         "read_file" => {

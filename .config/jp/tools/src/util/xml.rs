@@ -1,4 +1,4 @@
-use std::fmt::Write as _;
+use std::fmt::{Display, Write as _};
 
 use serde::Serialize;
 use serde_json::Value;
@@ -6,6 +6,31 @@ use serde_json::Value;
 use crate::Result;
 
 const INDENT_WIDTH: usize = 4;
+
+/// Render `items` as a bulleted block wrapped in `<root>` tags.
+///
+/// Each item is one line, bulleted with a dash and at the same indentation as
+/// the tags.
+/// A caller nesting the block inside a larger document indents every line of
+/// it.
+/// Items are written as-is, so an item containing a newline breaks the one
+/// bullet per line shape.
+///
+/// No items renders as an empty block, which is why a caller with nothing to
+/// say says so itself rather than emitting one.
+pub fn to_list_with_root<I>(items: I, root: &str) -> String
+where
+    I: IntoIterator,
+    I::Item: Display,
+{
+    let mut out = format!("<{root}>\n");
+    for item in items {
+        let _ = writeln!(out, "- {item}");
+    }
+    let _ = write!(out, "</{root}>");
+
+    out
+}
 
 /// Serializes any Serializable type into a pretty-printed, LLM-friendly XML
 /// format.
@@ -134,3 +159,7 @@ fn infer_array_tag_name<T: ?Sized>() -> String {
         _ => convert_case::ccase!(snake, tag),
     }
 }
+
+#[cfg(test)]
+#[path = "xml_tests.rs"]
+mod tests;

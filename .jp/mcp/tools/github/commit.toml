@@ -54,10 +54,9 @@ type = "array"
 items.type = "string"
 summary = "List of changed file paths to fetch patches for."
 description = """
-If unspecified, the tool returns the commit's metadata, aggregate line
-stats, and a page of changed file metadata (filename, status, additions,
-deletions, changes) without patches. Use this to decide which files to
-fetch.
+If unspecified, the tool returns the commit's metadata and aggregate
+line stats, followed by a page of changed files (path, status, and line
+counts) without patches. Use this to decide which files to fetch.
 
 If set, the tool returns the patches for the named files. Filenames not
 present on the current `page` are returned in a `not_found` block; bump

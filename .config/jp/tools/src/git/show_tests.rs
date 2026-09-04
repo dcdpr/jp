@@ -68,8 +68,8 @@ fn basic_show() {
 
     assert!(content.contains("  <short_hash>abc123</short_hash>"));
     assert!(content.contains("feat: add widget"));
-    assert!(content.contains("    - src/widget.rs (+42,-10)"));
-    assert!(content.contains("    - src/lib.rs (+5,-3)"));
+    assert!(content.contains("  <files>\n  - src/widget.rs (+42,-10)\n"));
+    assert!(content.contains("  - src/lib.rs (+5,-3)\n  </files>\n"));
 }
 
 #[test]
@@ -116,7 +116,7 @@ fn file_stat_format_insertions_only() {
         insertions: "5".into(),
         deletions: "0".into(),
     };
-    assert_eq!(stat.to_string(), "- foo.rs (+5)");
+    assert_eq!(stat.to_string(), "foo.rs (+5)");
 }
 
 #[test]
@@ -126,7 +126,7 @@ fn file_stat_format_deletions_only() {
         insertions: "0".into(),
         deletions: "3".into(),
     };
-    assert_eq!(stat.to_string(), "- foo.rs (-3)");
+    assert_eq!(stat.to_string(), "foo.rs (-3)");
 }
 
 #[test]
@@ -136,7 +136,7 @@ fn file_stat_format_both() {
         insertions: "10".into(),
         deletions: "2".into(),
     };
-    assert_eq!(stat.to_string(), "- foo.rs (+10,-2)");
+    assert_eq!(stat.to_string(), "foo.rs (+10,-2)");
 }
 
 #[test]
@@ -146,5 +146,5 @@ fn file_stat_format_binary() {
         insertions: "-".into(),
         deletions: "-".into(),
     };
-    assert_eq!(stat.to_string(), "- img.png (binary)");
+    assert_eq!(stat.to_string(), "img.png (binary)");
 }

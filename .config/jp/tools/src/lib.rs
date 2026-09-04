@@ -14,6 +14,8 @@ mod unix;
 mod util;
 mod web;
 
+use std::fmt::Display;
+
 use jp_tool::Context;
 use serde::Serialize;
 use serde_json::{Map, Value};
@@ -117,6 +119,15 @@ pub fn to_simple_xml<T: Serialize>(data: &T) -> Result<String> {
 
 pub fn to_simple_xml_with_root<T: Serialize>(data: &T, root: &str) -> Result<String> {
     util::xml::to_simple_xml_with_root(data, root)
+}
+
+/// Renders a sequence as a bulleted list wrapped in `<root>` tags.
+pub fn to_list_with_root<I>(items: I, root: &str) -> String
+where
+    I: IntoIterator,
+    I::Item: Display,
+{
+    util::xml::to_list_with_root(items, root)
 }
 
 #[cfg(test)]

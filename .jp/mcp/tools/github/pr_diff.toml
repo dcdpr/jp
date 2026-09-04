@@ -55,10 +55,9 @@ type = "array"
 items.type = "string"
 summary = "List of changed file paths to fetch patches for."
 description = """
-If unspecified, the tool returns a page of changed file metadata
-(filename, status, additions, deletions, changes) without patches, plus
-the total `changed_files_count` for the PR. Use this to decide which
-files to fetch.
+If unspecified, the tool lists a page of changed files (path, status,
+and line counts) without patches, under a header naming the page and the
+PR's total changed-file count. Use this to decide which files to fetch.
 
 If set, the tool returns the patches for the named files. Filenames not
 present on the current `page` are returned in a `not_found` block; bump
@@ -70,8 +69,8 @@ type = "integer"
 summary = "1-indexed page of changed files. Defaults to 1."
 description = """
 Selects a page of changed files (100 per page). For PRs with more than
-100 changed files, walk pages until the page is short. The response
-exposes `changed_files_count` so you can tell when the list is
+100 changed files, walk pages until the page is short. The header states
+the PR's total changed-file count, so you can tell when the list is
 exhausted.
 
 `files` and `page` work together: when `files` is set, the tool searches

@@ -693,3 +693,46 @@ async fn test_empty_list() {
     assert!(files.notes().is_empty());
     assert!(files.into_files().is_empty());
 }
+
+#[test]
+fn renders_files_as_one_bulleted_block() {
+    let files = Files {
+        files: vec!["a.txt".to_owned(), "src/lib.rs".to_owned()],
+        skipped: vec![],
+    };
+
+    assert_eq!(files.render(), indoc::indoc! {"
+        <results>
+        - a.txt
+        - src/lib.rs
+        </results>"});
+}
+
+#[test]
+fn renders_an_empty_listing_as_a_sentence() {
+    let files = Files {
+        files: vec![],
+        skipped: vec![],
+    };
+
+    assert_eq!(files.render(), "No files found.");
+}
+
+#[test]
+fn renders_skip_notes_below_the_block() {
+    let files = Files {
+        files: vec!["a.txt".to_owned()],
+        skipped: vec![
+            Skipped::Denied("secret".to_owned()),
+            Skipped::Suppressed("vendor".to_owned()),
+        ],
+    };
+
+    assert_eq!(files.render(), indoc::indoc! {"
+        <results>
+        - a.txt
+        </results>
+
+        Note: 'secret' is not readable by this tool and was skipped. If you need it, ask the user to provide it.
+        Note: 'vendor' is suppressed from this tool's results. If you need it, ask the user to provide it."});
+}

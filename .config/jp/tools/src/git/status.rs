@@ -4,9 +4,12 @@ use camino::Utf8Path;
 use serde_json::{Map, Value};
 
 use super::env_from_options;
-use crate::util::{
-    ToolResult, error,
-    runner::{DuctProcessRunner, ProcessRunner},
+use crate::{
+    to_list_with_root,
+    util::{
+        ToolResult, error,
+        runner::{DuctProcessRunner, ProcessRunner},
+    },
 };
 
 /// Maximum number of untracked files to list before truncating.
@@ -91,25 +94,23 @@ fn format_status(entries: &[StatusEntry]) -> String {
     let (untracked, tracked): (Vec<&StatusEntry>, Vec<&StatusEntry>) =
         entries.iter().partition(|e| e.code == "??");
 
-    let mut out = String::from("<git_status>\n");
+    let shown = tracked
+        .iter()
+        .chain(untracked.iter().take(MAX_UNTRACKED))
+        .map(|e| format!("{} ({})", e.path, describe(&e.code)));
 
-    for e in tracked {
-        let _ = writeln!(out, "  - {} ({})", e.path, describe(&e.code));
-    }
+    let mut out = to_list_with_root(shown, "git_status");
 
-    for e in untracked.iter().take(MAX_UNTRACKED) {
-        let _ = writeln!(out, "  - {} ({})", e.path, describe(&e.code));
-    }
-
+    // Below the block: a count of what was withheld is not one of the entries,
+    // and a reader scanning the bullets for a path would have to skip it.
     if untracked.len() > MAX_UNTRACKED {
-        let _ = writeln!(
+        let _ = write!(
             out,
-            "  ... and {} more untracked files not shown (output truncated).",
+            "\n\n{} more untracked files not shown (output truncated).",
             untracked.len() - MAX_UNTRACKED
         );
     }
 
-    out.push_str("</git_status>");
     out
 }
 

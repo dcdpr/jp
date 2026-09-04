@@ -58,6 +58,26 @@ fn formats_clean_tree() {
 }
 
 #[test]
+fn formats_entries_as_one_bulleted_block() {
+    let entries = vec![
+        StatusEntry {
+            code: " M".into(),
+            path: "src/foo.rs".into(),
+        },
+        StatusEntry {
+            code: "??".into(),
+            path: "new.txt".into(),
+        },
+    ];
+
+    assert_eq!(format_status(&entries), indoc::indoc! {"
+        <git_status>
+        - src/foo.rs (modified, unstaged)
+        - new.txt (untracked)
+        </git_status>"});
+}
+
+#[test]
 fn basic_status() {
     let dir = tempdir().unwrap();
     let runner = MockProcessRunner::success(" M src/foo.rs\n?? new.txt\n");
@@ -110,7 +130,13 @@ fn caps_untracked_but_always_shows_tracked() {
         out.contains("- src/keep.rs (modified, unstaged)"),
         "tracked change must always show"
     );
-    assert!(out.contains("and 50 more untracked files not shown"));
+    // The count of withheld files is not one of the entries, so it sits below
+    // the block rather than inside it.
+    assert!(
+        out.ends_with("</git_status>\n\n50 more untracked files not shown (output truncated)."),
+        "unexpected tail: {}",
+        &out[out.len() - 100..]
+    );
     assert_eq!(out.matches("(untracked)").count(), MAX_UNTRACKED);
 }
 
