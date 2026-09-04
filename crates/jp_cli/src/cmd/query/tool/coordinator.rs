@@ -911,7 +911,6 @@ impl ToolCoordinator {
         mcp_client: &Client,
         root: &Utf8Path,
         tool_renderer: &ToolRenderer,
-        interactive: bool,
         is_tty: bool,
         interactive: bool,
     ) -> ExecutionResult {
