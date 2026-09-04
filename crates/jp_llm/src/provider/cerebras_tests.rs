@@ -229,6 +229,76 @@ async fn swallows_stream_error_after_completion() {
     );
 }
 
+/// A rate limit is where a Cerebras user most needs to know that the reserved
+/// quota per request is theirs to lower.
+///
+/// Cerebras reserves `min(max_completion_tokens, 16384)` tokens of the
+/// per-minute bucket at admission, so a default request reserves 16384 however
+/// few tokens it goes on to use.
+/// The message is only read once retries are exhausted, which is exactly when
+/// the setting is worth changing.
+#[test_log::test(tokio::test)]
+async fn a_rate_limit_names_the_setting_that_lowers_the_reservation() {
+    let response = http::Response::builder()
+        .status(429)
+        .header("retry-after", "60")
+        .body(
+            r#"{"message":"Tokens per minute limit exceeded - too many tokens processed.","type":"too_many_tokens_error","param":"quota","code":"token_quota_exceeded"}"#
+                .to_owned(),
+        )
+        .expect("valid response");
+    let rate_limited = SseError::InvalidStatusCode(
+        reqwest::StatusCode::TOO_MANY_REQUESTS,
+        reqwest::Response::from(response),
+    );
+
+    let out: Vec<_> = assemble_event_stream(stream::iter(vec![Err(rate_limited)]), false)
+        .collect()
+        .await;
+
+    let [Err(error)] = out.as_slice() else {
+        panic!("expected a single error, got {out:?}")
+    };
+
+    assert_eq!(error.kind, crate::error::StreamErrorKind::RateLimit);
+    assert_eq!(error.retry_after, Some(Duration::from_mins(1)));
+    assert!(
+        error.message().contains("max_tokens"),
+        "a rate limit must point at the setting, got: {}",
+        error.message()
+    );
+}
+
+/// Only a rate limit gets the hint; other failures are not about reservation
+/// size and the advice would be misleading.
+#[test_log::test(tokio::test)]
+async fn other_failures_do_not_mention_the_reservation() {
+    let response = http::Response::builder()
+        .status(404)
+        .body(
+            r#"{"message":"Model zai-glm-4.7 is archived and unavailable for the organization.","type":"model_archived_error"}"#
+                .to_owned(),
+        )
+        .expect("valid response");
+    let not_found = SseError::InvalidStatusCode(
+        reqwest::StatusCode::NOT_FOUND,
+        reqwest::Response::from(response),
+    );
+
+    let out: Vec<_> = assemble_event_stream(stream::iter(vec![Err(not_found)]), false)
+        .collect()
+        .await;
+
+    let [Err(error)] = out.as_slice() else {
+        panic!("expected a single error, got {out:?}")
+    };
+
+    assert_eq!(
+        error.message(),
+        "Model zai-glm-4.7 is archived and unavailable for the organization. (HTTP 404 Not Found)"
+    );
+}
+
 #[test]
 fn parse_cerebras_content_chunk() {
     let json = r#"{
