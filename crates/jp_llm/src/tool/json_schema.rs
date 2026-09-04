@@ -413,13 +413,15 @@ impl<'a> Node<'a> {
 
     /// Whether this node leaves the JSON type of its value open.
     ///
-    /// A schema with no `type` keyword accepts any value, which is how a server
-    /// declares a free-form parameter.
-    /// A node still holding a `$ref` that could not be followed is not open:
-    /// what it declares is unknown.
+    /// A schema object with no `type` keyword accepts any value, which is how a
+    /// server declares a free-form parameter.
+    /// Anything else that reads as declaring no type is not open, because what
+    /// it declares is unknown rather than unrestricted: a `$ref` that could not
+    /// be followed, a boolean schema, or a non-schema value such as a `null`
+    /// left in a `properties` map.
     #[must_use]
     pub fn is_unconstrained(&self) -> bool {
-        self.node.get("type").is_none() && self.node.get("$ref").is_none()
+        self.node.is_object() && self.node.get("type").is_none() && self.node.get("$ref").is_none()
     }
 
     /// Whether a value satisfies this node's declared types.

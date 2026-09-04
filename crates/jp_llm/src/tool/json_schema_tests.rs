@@ -524,6 +524,26 @@ mod validate {
         );
     }
 
+    /// A `properties` entry that is not a schema object declares nothing
+    /// usable.
+    /// JSON Schema's boolean form is legal, and `true` does mean "any value",
+    /// but no other keyword can be read from it, so it is rejected alongside
+    /// the shapes a schema-generation bug produces rather than forwarded to a
+    /// provider that will reject the whole request.
+    #[test]
+    fn a_property_that_is_not_a_schema_object_is_rejected() {
+        for value in [json!(null), json!("string"), json!(true), json!(false)] {
+            assert_eq!(
+                message_of(&json!({
+                    "type": "object",
+                    "properties": { "value": value }
+                })),
+                "Invalid schema at `tools.demo.parameters.value.type`: schema does not declare a \
+                 supported type"
+            );
+        }
+    }
+
     /// A `type` that is present but says nothing is malformed, not open.
     #[test]
     fn an_empty_type_list_is_rejected() {
