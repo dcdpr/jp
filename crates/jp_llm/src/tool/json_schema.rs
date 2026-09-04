@@ -194,7 +194,7 @@ fn validate_node_inner(
             });
         }
 
-        if node.accepts(value) {
+        if node.accepts_type(value) {
             validate_value(&format!("{path}.enum[{index}]"), value, node, "enum value")?;
             continue;
         }
@@ -233,7 +233,7 @@ fn validate_value(
     node: &Node<'_>,
     subject: &str,
 ) -> Result<(), ToolError> {
-    if !node.accepts(value) {
+    if !node.accepts_type(value) {
         return Err(ToolError::InvalidSchema {
             path: path.to_owned(),
             message: format!(
@@ -426,9 +426,13 @@ impl<'a> Node<'a> {
 
     /// Whether a value satisfies this node's declared types.
     ///
+    /// Ignores every other constraint the node carries; [`permits`] applies
+    /// those too.
     /// A node that declares no type accepts every value.
+    ///
+    /// [`permits`]: Self::permits
     #[must_use]
-    pub fn accepts(&self, value: &Value) -> bool {
+    pub fn accepts_type(&self, value: &Value) -> bool {
         if self.is_unconstrained() {
             return true;
         }
@@ -446,6 +450,20 @@ impl<'a> Node<'a> {
             Value::Array(_) => has("array"),
             Value::Object(_) => has("object"),
         }
+    }
+
+    /// Whether a value satisfies every constraint this node declares.
+    ///
+    /// A value must match the declared types, and appear in the `enum` when
+    /// there is one.
+    #[must_use]
+    pub fn permits(&self, value: &Value) -> bool {
+        if !self.accepts_type(value) {
+            return false;
+        }
+
+        let enumeration = self.enumeration();
+        enumeration.is_empty() || enumeration.contains(value)
     }
 
     /// The value inserted when the argument is omitted.

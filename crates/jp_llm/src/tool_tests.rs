@@ -335,6 +335,40 @@ fn leaves_strings_alone_for_a_parameter_with_no_declared_type() {
     assert_eq!(Value::Object(arguments), json!({ "value": "3" }));
 }
 
+/// A property with an `enum` and no `type` still says what it takes: the string
+/// the model sent is not a member, and the number it parses to is.
+#[test]
+fn coerces_a_string_the_enum_excludes_into_the_member_it_parses_to() {
+    let parameters = schema([("value", json!({ "enum": [3] }), false)]);
+    let mut arguments = json!({ "value": "3" }).as_object().cloned().unwrap();
+
+    ToolDefinition {
+        name: "test".to_owned(),
+        docs: ToolDocs::default(),
+        parameters,
+    }
+    .coerce_arguments(&mut arguments);
+
+    assert_eq!(Value::Object(arguments), json!({ "value": 3 }));
+}
+
+/// The mirror case: the enum lists the string itself, so parsing it would
+/// produce the one value the schema forbids.
+#[test]
+fn leaves_a_string_alone_when_the_enum_lists_it() {
+    let parameters = schema([("value", json!({ "enum": ["3"] }), false)]);
+    let mut arguments = json!({ "value": "3" }).as_object().cloned().unwrap();
+
+    ToolDefinition {
+        name: "test".to_owned(),
+        docs: ToolDocs::default(),
+        parameters,
+    }
+    .coerce_arguments(&mut arguments);
+
+    assert_eq!(Value::Object(arguments), json!({ "value": "3" }));
+}
+
 #[tokio::test]
 async fn execute_coerces_json_strings_before_calling_tool() {
     let partial: PartialToolConfig = serde_json::from_value(json!({

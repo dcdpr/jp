@@ -715,8 +715,8 @@ mod node {
 
         assert_eq!(kind.types(), vec!["string".to_owned()]);
         assert_eq!(kind.enumeration(), vec![json!("a"), json!("b")]);
-        assert!(kind.accepts(&json!("a")));
-        assert!(!kind.accepts(&json!(1)));
+        assert!(kind.accepts_type(&json!("a")));
+        assert!(!kind.accepts_type(&json!(1)));
     }
 
     /// Sibling keys win over the referenced definition, per JSON Schema
@@ -750,10 +750,27 @@ mod node {
 
         assert!(value.is_unconstrained());
         assert!(value.types().is_empty());
-        assert!(value.accepts(&json!("a")));
-        assert!(value.accepts(&json!(1)));
-        assert!(value.accepts(&json!(null)));
-        assert!(value.accepts(&json!({ "a": 1 })));
+        assert!(value.accepts_type(&json!("a")));
+        assert!(value.accepts_type(&json!(1)));
+        assert!(value.accepts_type(&json!(null)));
+        assert!(value.accepts_type(&json!({ "a": 1 })));
+    }
+
+    /// Leaving the type open leaves the `enum` in charge: every value is of an
+    /// acceptable type, and only the listed ones are permitted.
+    #[test]
+    fn an_enum_bounds_what_a_node_permits() {
+        let schema = json!({
+            "type": "object",
+            "properties": { "value": { "enum": [3] } }
+        });
+
+        let root = Node::root(&schema);
+        let (_, value) = root.properties().into_iter().next().expect("property");
+
+        assert!(value.accepts_type(&json!("3")));
+        assert!(!value.permits(&json!("3")));
+        assert!(value.permits(&json!(3)));
     }
 
     #[test]
