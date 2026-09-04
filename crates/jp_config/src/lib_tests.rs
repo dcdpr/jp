@@ -696,7 +696,9 @@ fn config_load_paths_append_across_layers() {
 
 #[test]
 fn assign_routes_nested_system_prompt_keys() {
-    use crate::types::string::{MergedStringStrategy, PartialMergeableString, PartialMergedString};
+    use crate::types::string::{
+        MergedStringStrategy, PartialMergeableString, PartialMergedString, StringDedup,
+    };
 
     // `--cfg assistant.system_prompt.dedup=false` addresses the merge metadata,
     // so it has to reach `PartialMergedString` rather than stopping at
@@ -716,7 +718,7 @@ fn assign_routes_nested_system_prompt_keys() {
             strategy: Some(MergedStringStrategy::Prepend),
             separator: None,
             discard_when_merged: None,
-            dedup: Some(false),
+            dedup: Some(StringDedup::Off),
         }))
     );
 
@@ -731,7 +733,7 @@ fn assign_routes_nested_system_prompt_keys() {
             strategy: Some(MergedStringStrategy::Prepend),
             separator: None,
             discard_when_merged: None,
-            dedup: Some(false),
+            dedup: Some(StringDedup::Off),
         }))
     );
 
@@ -767,7 +769,9 @@ fn metadata_only_system_prompt_keeps_the_default_prompt() {
 
 #[test]
 fn scalar_system_prompt_accepts_nested_metadata() {
-    use crate::types::string::{MergedStringStrategy, PartialMergeableString, PartialMergedString};
+    use crate::types::string::{
+        MergedStringStrategy, PartialMergeableString, PartialMergedString, StringDedup,
+    };
 
     // A lower layer supplying the common scalar form must not block a dotted
     // override. The scalar is promoted to `Merged` with `replace` pinned, which
@@ -791,7 +795,7 @@ fn scalar_system_prompt_accepts_nested_metadata() {
             strategy: Some(MergedStringStrategy::Replace),
             separator: None,
             discard_when_merged: None,
-            dedup: Some(false),
+            dedup: Some(StringDedup::Off),
         }))
     );
 

@@ -10,59 +10,7 @@ pub mod policy_spec;
 pub mod string;
 pub mod vec;
 
-use std::str::FromStr;
-
 use serde::de::{Deserializer, Error as DeError, Visitor};
-
-use crate::BoxedError;
-
-/// The three states a `dedup` setting can be written in.
-///
-/// `Inherit` carries no opinion, leaving the merge strategies to inherit one
-/// from the previous layer.
-/// Used to parse `dedup` from key-value assignments (`--cfg …dedup=inherit`),
-/// mirroring the values [`deserialize_dedup`] accepts from config files.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Dedup {
-    /// `true`
-    Enabled,
-
-    /// `false`
-    Disabled,
-
-    /// `"inherit"`
-    Inherit,
-}
-
-impl Dedup {
-    /// The opinion this state carries, if any.
-    pub(crate) const fn opinion(self) -> Option<bool> {
-        match self {
-            Self::Enabled => Some(true),
-            Self::Disabled => Some(false),
-            Self::Inherit => None,
-        }
-    }
-}
-
-impl From<bool> for Dedup {
-    fn from(v: bool) -> Self {
-        if v { Self::Enabled } else { Self::Disabled }
-    }
-}
-
-impl FromStr for Dedup {
-    type Err = BoxedError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "true" => Ok(Self::Enabled),
-            "false" => Ok(Self::Disabled),
-            "inherit" => Ok(Self::Inherit),
-            _ => Err(format!("expected `true`, `false` or `inherit`, got `{s}`").into()),
-        }
-    }
-}
 
 /// Deserialize a `dedup` field from `true`, `false`, or `"inherit"`.
 ///
