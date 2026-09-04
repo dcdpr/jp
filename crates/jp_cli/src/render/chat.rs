@@ -28,7 +28,7 @@
 //! | `Static`      | Show "reasoning..." once                 |
 //! | `Timer`       | Show a running timer, erase when done    |
 
-use std::{fmt::Write as _, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use crossterm::style::Stylize as _;
 use jp_config::style::{
@@ -719,7 +719,7 @@ impl ChatRenderer {
     /// this method cannot await the task's own asynchronous clear.
     fn cancel_reasoning_timer(&mut self) {
         if self.reasoning_timer.take().is_some() {
-            let _ = write!(self.printer.err_writer(), "\r\x1b[K");
+            self.printer.erase_line();
         }
     }
 

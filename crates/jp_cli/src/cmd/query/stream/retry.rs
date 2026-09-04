@@ -218,10 +218,7 @@ impl StreamRetryState {
             return;
         }
 
-        if can_redraw(self.is_tty, printer) {
-            let _ = write!(printer.err_writer(), "\r\x1b[K");
-        }
-
+        printer.erase_line();
         self.line_active = false;
     }
 
