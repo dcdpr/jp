@@ -184,11 +184,11 @@
     "summary": "Add `jp conversation edit` (opens directory in $EDITOR) and `jp conversation path` (prints conversation filesystem path)."
   },
   "048-four-channel-output-model.md": {
-    "hash": "38f68ad549fbc9416b3014ddc5b67b17da4aea9d2b15a61e4d621d8faf647f3f",
+    "hash": "0fde942857ca1a7f7a0dbf181f19df379b2255744eb92c8e4544f978c94b425b",
     "summary": "Separate JP output into four channels: stdout for responses, stderr for chrome, /dev/tty for prompts, log file for tracing."
   },
   "049-non-interactive-mode-and-detached-prompt-policy.md": {
-    "hash": "4946979e02b23975165d71f48fc3f3fedee72b8181c031d762a4f98e171b2261",
+    "hash": "824a8f0ae53f3c553ef9a1af4553200f76479c60b12b461c2b17f2c560cdf3fe",
     "summary": "Introduces configurable detached prompt policy, `--non-interactive` flag, and `exclusive` question property for non-interactive environments."
   },
   "050-scripting-ergonomics-for-conversation-management.md": {
@@ -360,7 +360,7 @@
     "summary": "JP gains Anthropic subscription auth with automatic fallback to API key billing when quotas exhaust."
   },
   "091-printer-owned-status-line.md": {
-    "hash": "0e3e054a3170e2cadfc3e3410fcbd6cc72e8e6261ebfcb4c39314d66ad1031cd",
+    "hash": "654e340514f57e8b195ff9c71e7e7ad070f5edde925ae8bd4e9c71de307f2af1",
     "summary": "Centralize ephemeral status-line rendering in the printer's worker thread to eliminate cross-site ordering bugs."
   },
   "092-predictable-and-responsive-interrupt-escalation.md": {
@@ -410,6 +410,10 @@
   "103-multi-value-conversation-labels.md": {
     "hash": "1c9a52e7756e2b35badcb201f11f4bf625421849532602355980ebdbef7c65ca",
     "summary": "Multi-valued labels replacing single-valued ones; add/set/rm verbs, set-membership filtering, config list-values, removes --label from query/fork."
+  },
+  "104-terminal-capability-and-promptability-signals.md": {
+    "hash": "730c2672d54c0124b7f17329b29b535cca1fd63b61e681012a653b6be82aa412",
+    "summary": "Separate four terminal-capability questions onto different signals to fix prompts and repaints in piped and redirected runs."
   },
   "106-collision-free-conversation-id-allocation.md": {
     "hash": "2b204d4e4446e9e9af62dea447259e8b07f4ef1d4a2644f687ae11a6313ba60e",

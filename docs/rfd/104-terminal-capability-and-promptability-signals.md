@@ -1,10 +1,11 @@
-# RFD D59: Terminal Capability and Promptability Signals
+# RFD 104: Terminal Capability and Promptability Signals
 
-- **Status**: Draft
+- **Status**: Discussion
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-09-04
 - **Extends**: [RFD 048]
+- **Required by**: [RFD 049], [RFD 091]
 
 ## Summary
 
@@ -527,10 +528,10 @@ the mechanical ones bisect apart.
 - `ssh -o BatchMode=yes` — prior art for failing rather than prompting.
 - `git`, `sudo`, `fzf` — prior art for `/dev/tty` as the prompt channel.
 
-[RFD 018]: ../018-typed-prompt-routing-enum.md
-[RFD 021]: ../021-printer-live-redirection.md
-[RFD 048]: ../048-four-channel-output-model.md
-[RFD 049]: ../049-non-interactive-mode-and-detached-prompt-policy.md
-[RFD 087]: ../087-session-scoped-active-workspace.md
-[RFD 091]: ../091-printer-owned-status-line.md
+[RFD 018]: 018-typed-prompt-routing-enum.md
+[RFD 021]: 021-printer-live-redirection.md
+[RFD 048]: 048-four-channel-output-model.md
+[RFD 049]: 049-non-interactive-mode-and-detached-prompt-policy.md
+[RFD 087]: 087-session-scoped-active-workspace.md
+[RFD 091]: 091-printer-owned-status-line.md
 [\#1068]: https://github.com/dcdpr/jp/issues/1068
