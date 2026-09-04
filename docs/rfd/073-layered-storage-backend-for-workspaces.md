@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-01
+- **Extended by**: [RFD 106](106-collision-free-conversation-id-allocation.md)
 
 ## Summary
 
