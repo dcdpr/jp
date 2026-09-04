@@ -30,6 +30,7 @@ fn access_on_mcp_tool_is_rejected_by_validation() {
                     ..Default::default()
                 }]
                 .into(),
+                ..Default::default()
             }),
             ..Default::default()
         });
@@ -63,6 +64,7 @@ fn access_on_local_tool_is_accepted_by_validation() {
                     ..Default::default()
                 }]
                 .into(),
+                ..Default::default()
             }),
             ..Default::default()
         });
