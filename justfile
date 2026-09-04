@@ -2975,10 +2975,7 @@ serve-tools CONTEXT TOOL:
 # local source automatically.
 [group('tools')]
 serve-bookworm: # _build-bookworm
-    # NOTE: had to patch this, because both `_build-bookworm` and `cargo metadata` require a working
-    # Cargo workspace, and the merge conflicts broke the build.
-    # @$(cargo metadata --format-version 1 | jq -r .build_directory)/release/bookworm mcp
-    /Users/jean/.cargo/bin/bookworm mcp
+    $(cargo metadata --format-version 1 | jq -r .build_directory)/release/bookworm mcp
 
 [private]
 @_build-bookworm:
