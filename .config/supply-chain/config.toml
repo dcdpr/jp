@@ -481,14 +481,6 @@ criteria = "safe-to-deploy"
 version = "0.103.6"
 criteria = "safe-to-deploy"
 
-[[exemptions.saphyr]]
-version = "0.0.6@git:b7dff7bf64516936b4ffc3ac76160138eb325118"
-criteria = "safe-to-deploy"
-
-[[exemptions.saphyr-parser]]
-version = "0.0.6@git:b7dff7bf64516936b4ffc3ac76160138eb325118"
-criteria = "safe-to-deploy"
-
 [[exemptions.scc]]
 version = "2.4.0"
 criteria = "safe-to-run"
