@@ -409,6 +409,12 @@ impl EnvRule {
     }
 
     /// Whether the rule applies to the variable `name`.
+    ///
+    /// Matching is case-sensitive on every platform.
+    /// Windows resolves variable names case-insensitively, so a rule written in
+    /// the wrong case does not apply there — but a config file is shared
+    /// across machines, and a rule that grants on one platform and denies on
+    /// another is worse than one that is uniformly strict.
     #[must_use]
     pub fn matches(&self, name: &str) -> bool {
         if self.is_exact() {
@@ -881,10 +887,10 @@ mod tests {
         );
     }
 
-    /// A shorter but more specific rule must not lose to a longer prefix rule
-    /// declared after it.
+    /// Specificity decides, not declaration order: the 21-byte exact rule wins
+    /// over the 4-byte `AWS_` prefix even though the prefix is declared last.
     #[test]
-    fn a_longer_prefix_beats_a_shorter_exact_rule() {
+    fn a_longer_exact_rule_beats_a_shorter_prefix_declared_after_it() {
         let policy = env_policy(&[("AWS_SECRET_ACCESS_KEY", false), ("AWS_*", true)]);
 
         assert!(

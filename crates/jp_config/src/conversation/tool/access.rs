@@ -253,6 +253,9 @@ pub struct EnvRuleConfig {
     pub name: String,
 
     /// Grant reading the variable's value.
+    ///
+    /// Defaults to `false`: a rule that omits `read` denies the names it
+    /// matches.
     pub read: Option<bool>,
 }
 

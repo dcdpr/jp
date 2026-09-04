@@ -280,7 +280,7 @@
     "summary": "Replace Workspace's optional Storage with four focused trait objects (Persist, Load, Lock, Session) for cleaner polymorphism."
   },
   "070-negative-config-deltas.md": {
-    "hash": "4302104ffbc8d0f6d22fd3550c9bb025cb7bf4fde484cad5ce90b435705ff0eb",
+    "hash": "c3cdd434315ce032df2aca57ba24b792bf9c0ea91602b473f0eb4b776c20ce25",
     "summary": "Introduces `-C` flag to selectively revert previously applied config sources using provenance tracking via claims maps."
   },
   "071-conversation-archiving.md": {
@@ -304,7 +304,7 @@
     "summary": "Mandatory OS-level sandboxing for tool subprocesses using platform-native mechanisms, extending access policy with subprocess and environment controls."
   },
   "076-tool-access-grants.md": {
-    "hash": "4e7e08a2603e287528d16ef229c40a9b44f87203b8a7d53fda85fd2844fbf20a",
+    "hash": "5062969e459ed21999272f77adbe7f05efc6625983b39d298c1e31e1d23b2c8d",
     "summary": "Adds typed access policy grants for tools to declare and enforce what workspace resources they can access."
   },
   "077-plugin-configuration-and-trust-policy.md": {

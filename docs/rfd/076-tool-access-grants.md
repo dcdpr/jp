@@ -438,6 +438,17 @@ sentinel.
 This keeps the matching algorithm simple and is not a practical restriction:
 POSIX env var names cannot contain `*`.
 
+Matching is case-sensitive on every platform, unlike host matching for `net`
+rules.
+Windows resolves environment variable names case-insensitively, so a rule
+written in the wrong case does not apply there.
+Matching the platform's identity rules instead would make one config file grant
+on Windows and deny elsewhere, and config is routinely shared across machines
+through a checked-in `.jp/config.toml` — a rule whose meaning depends on who
+ran it is worse than one that is uniformly strict.
+A consumer that needs to accommodate Windows callers normalizes the requested
+name before matching; the rule set itself does not change meaning.
+
 ### Runtime types
 
 The access policy types live in `jp_tool`, which defines the wire format between
