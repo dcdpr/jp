@@ -69,7 +69,7 @@ impl<'a> LockRequest<'a> {
         Self {
             workspace: &ctx.workspace,
             handle,
-            is_tty: ctx.term.is_tty,
+            is_tty: ctx.term.interactive,
             session: ctx.session.as_ref(),
             printer: &ctx.printer,
             signals: &ctx.signals,

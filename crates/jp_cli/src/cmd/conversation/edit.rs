@@ -174,7 +174,7 @@ impl Edit {
                 format!("The edited file could not be loaded back:\n\n{error}\n").red()
             );
 
-            if ctx.term.is_tty
+            if ctx.term.interactive
                 && Confirm::new("Re-open the editor to fix it?")
                     .with_default(true)
                     .prompt()

@@ -314,7 +314,7 @@ pub(crate) fn run_plugin(
         editor: crate::editor::build_editor_backend(&config.editor),
         // The configured mode, as every other inline reply in the CLI uses.
         edit_mode: reply_edit_mode(config.editor.inline.edit_mode),
-        is_tty: ctx.term.is_tty,
+        is_tty: ctx.term.interactive,
     };
 
     let PluginProcess {
@@ -1696,7 +1696,8 @@ pub(crate) async fn run_external(args: &[String], ctx: &mut Ctx) -> cmd::Output 
     }
 
     let config = ctx.config();
-    let Some(binary) = resolve_plugin_binary(subcommand, &config.plugins, ctx.term.is_tty).await?
+    let Some(binary) =
+        resolve_plugin_binary(subcommand, &config.plugins, ctx.term.interactive).await?
     else {
         return Err(unknown_subcommand_error(subcommand));
     };

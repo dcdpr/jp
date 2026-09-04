@@ -682,6 +682,7 @@ impl Query {
                 &ctx.mcp_client,
                 root,
                 ctx.term.is_tty,
+                ctx.term.interactive,
                 &thread.attachments,
                 lock,
                 tool_choice.clone(),
@@ -1018,6 +1019,7 @@ impl Query {
         mcp_client: &jp_mcp::Client,
         root: Utf8PathBuf,
         is_tty: bool,
+        interactive: bool,
         attachments: &[Attachment],
         lock: &ConversationLock,
         tool_choice: ToolChoice,
@@ -1059,6 +1061,7 @@ impl Query {
             mcp_client,
             &root,
             is_tty,
+            interactive,
             attachments,
             lock,
             tool_choice,
@@ -1733,7 +1736,7 @@ fn label_resolver<'a>(
     Resolver::new(
         &cfg.conversation.labels,
         ctx.workspace.root(),
-        ctx.term.is_tty,
+        ctx.term.interactive,
         &ctx.printer,
         prompts,
     )

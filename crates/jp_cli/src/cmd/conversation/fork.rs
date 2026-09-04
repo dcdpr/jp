@@ -236,7 +236,7 @@ pub(crate) async fn fork_conversation(
     let resolved = Resolver::new(
         &config.conversation.labels,
         ctx.workspace.root(),
-        ctx.term.is_tty,
+        ctx.term.interactive,
         &ctx.printer,
         &prompts,
     )

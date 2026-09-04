@@ -381,6 +381,7 @@ async fn test_interrupt_stop_during_streaming_persists_content() {
             &mcp_client,
             root,
             false, // is_tty
+            false, // interactive
             &[],   // attachments
             &lock,
             ToolChoice::Auto,
@@ -483,6 +484,7 @@ async fn test_streaming_interrupt_menu_cancel_escalates() {
             &mcp_client,
             root,
             false, // is_tty
+            false, // interactive
             &[],   // attachments
             &lock,
             ToolChoice::Auto,
@@ -566,6 +568,7 @@ async fn test_normal_completion_persists_content() {
         &mcp_client,
         root,
         false,
+        false, // interactive
         &[],
         &lock,
         ToolChoice::Auto,
@@ -651,6 +654,7 @@ async fn premature_stream_end_without_finished_returns_error() {
             &mcp_client,
             root,
             false,
+            false, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -714,6 +718,7 @@ async fn premature_stream_end_exhausts_retry_budget() {
             &mcp_client,
             root,
             false,
+            false, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -793,6 +798,7 @@ async fn output_ceiling_ends_turn_without_re_requesting() {
             &mcp_client,
             root,
             false,
+            false, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -897,6 +903,7 @@ async fn orphan_tool_call_is_sanitized_before_provider_request() {
         &mcp_client,
         root,
         false,
+        false, // interactive
         &[],
         &lock,
         ToolChoice::Auto,
@@ -981,6 +988,7 @@ async fn test_tool_call_cycle_completes_with_followup() {
         &mcp_client,
         root,
         false,
+        false, // interactive
         &[],
         &lock,
         ToolChoice::Auto,
@@ -1277,6 +1285,7 @@ async fn test_tool_interrupt_menu_cancel_escalates() {
             &mcp_client,
             root,
             false,
+            false, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -1425,6 +1434,7 @@ async fn test_tool_stop_on_interrupt_commits_responses_without_follow_up() {
             &mcp_client,
             root,
             false,
+            false, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -1567,7 +1577,8 @@ async fn test_interrupt_during_tool_prompt_completes_turn_early() {
             &router,
             &mcp_client,
             root,
-            true, // is_tty: user-targeted question prompts require a terminal
+            true, // is_tty
+            true, // interactive: user-targeted question prompts need a user
             &[],
             &lock,
             ToolChoice::Auto,
@@ -1679,6 +1690,7 @@ async fn test_multiple_tool_calls_in_sequence() {
         &mcp_client,
         root,
         false,
+        false, // interactive
         &[],
         &lock,
         ToolChoice::Auto,
@@ -1769,6 +1781,7 @@ async fn test_empty_tool_response_continues_cycle() {
         &mcp_client,
         root,
         false,
+        false, // interactive
         &[],
         &lock,
         ToolChoice::Auto,
@@ -1914,6 +1927,7 @@ async fn test_tool_restart_on_interrupt() {
             &mcp_client,
             root,
             false,
+            false, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -2035,6 +2049,7 @@ async fn test_merged_stream_exits_after_tool_response() {
             &mcp_client,
             root,
             false,
+            false, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -2161,7 +2176,8 @@ async fn test_tool_call_with_run_mode_ask_approves() {
             &router,
             &mcp_client,
             root,
-            true, // is_tty = true to enable prompts
+            true, // is_tty
+            true, // interactive = true to enable prompts
             &[],
             &lock,
             ToolChoice::Auto,
@@ -2304,6 +2320,7 @@ async fn test_tool_call_with_run_mode_ask_skips() {
             &mcp_client,
             root,
             true,
+            true, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -2449,7 +2466,8 @@ async fn test_tool_call_with_run_mode_unattended() {
             &router,
             &mcp_client,
             root,
-            true, // is_tty doesn't matter for Unattended
+            true, // is_tty
+            true, // interactive doesn't matter for Unattended
             &[],
             &lock,
             ToolChoice::Auto,
@@ -2597,6 +2615,7 @@ async fn test_tool_call_with_run_mode_skip() {
             &mcp_client,
             root,
             true,
+            true, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -2800,6 +2819,7 @@ async fn test_multiple_tools_with_different_run_modes() {
             &mcp_client,
             root,
             true,
+            true, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -2948,6 +2968,7 @@ async fn test_tool_call_returns_error() {
             &mcp_client,
             root,
             true,
+            true, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -3178,6 +3199,7 @@ async fn test_waiting_indicator_shows_during_delay() {
             &mcp_client,
             root,
             true, // is_tty = true to enable the indicator
+            true, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -3278,6 +3300,7 @@ async fn test_waiting_indicator_survives_keep_alive_and_shows_status() {
             &mcp_client,
             root,
             true, // is_tty = true to enable the indicator
+            true, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -3392,6 +3415,7 @@ async fn test_waiting_indicator_cleared_before_retry_notice() {
             &mcp_client,
             root,
             true, // is_tty
+            true, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -3477,6 +3501,7 @@ async fn test_waiting_indicator_not_shown_when_disabled() {
             &mcp_client,
             root,
             true, // is_tty
+            true, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -3553,6 +3578,7 @@ async fn test_waiting_indicator_not_shown_for_non_tty() {
             &mcp_client,
             root,
             false, // is_tty = false
+            false, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -3732,6 +3758,7 @@ async fn test_multi_part_tool_call_shows_preparing_spinner() {
             &mcp_client,
             root,
             true, // is_tty = true to enable the indicator
+            true, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -3819,6 +3846,7 @@ async fn test_turn_start_event_is_emitted() {
         &mcp_client,
         root,
         false,
+        false, // interactive
         &[],
         &lock,
         ToolChoice::Auto,
@@ -3882,6 +3910,7 @@ async fn test_turn_start_index_increments_across_turns() {
         &mcp_client,
         root,
         false,
+        false, // interactive
         &[],
         &lock,
         ToolChoice::Auto,
@@ -3917,6 +3946,7 @@ async fn test_turn_start_index_increments_across_turns() {
         &mcp_client,
         root,
         false,
+        false, // interactive
         &[],
         &lock,
         ToolChoice::Auto,
@@ -4011,6 +4041,7 @@ async fn test_markdown_flushed_before_tool_header() {
             root,
             // The streaming "Calling tool" indicator is a TTY affordance.
             true,
+            true, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -4195,6 +4226,7 @@ async fn test_parallel_tool_calls_rendered_atomically() {
             &mcp_client,
             root,
             false, // is_tty = false (no timer, keeps output deterministic)
+            false, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -4354,6 +4386,7 @@ async fn test_single_tool_call_rendered_with_args() {
             &mcp_client,
             root,
             false,
+            false, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -4760,6 +4793,7 @@ async fn test_tool_with_single_inquiry() {
             &mcp_client,
             root,
             false,
+            false, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -4888,6 +4922,7 @@ async fn test_secret_question_without_tty_fails_tool() {
             &mcp_client,
             root,
             false,
+            false, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -4997,6 +5032,7 @@ async fn test_secret_question_with_assistant_target_fails_tool() {
             &mcp_client,
             root,
             false,
+            false, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -5099,6 +5135,7 @@ async fn test_secret_prompter_answer_is_redacted() {
             &mcp_client,
             root,
             true,
+            true, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -5205,6 +5242,7 @@ async fn test_secret_static_answer_is_redacted() {
             &mcp_client,
             root,
             false,
+            false, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -5312,6 +5350,7 @@ async fn test_static_answer_records_answered_inquiry() {
             &mcp_client,
             root,
             false,
+            false, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -5427,6 +5466,7 @@ async fn test_remembered_answer_cache_hit_records_new_inquiry_pair() {
             &mcp_client,
             root,
             true,
+            true, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -5549,6 +5589,7 @@ async fn test_tool_with_multiple_inquiries() {
             &mcp_client,
             root,
             false,
+            false, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -5701,6 +5742,7 @@ async fn test_parallel_tools_one_with_inquiry() {
             &mcp_client,
             root,
             false,
+            false, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -5839,6 +5881,7 @@ async fn test_parallel_tools_both_with_inquiries() {
             &mcp_client,
             root,
             false,
+            false, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -5989,6 +6032,7 @@ async fn test_retry_counter_resets_on_successful_event() {
             &mcp_client,
             root,
             false,
+            false, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -6128,6 +6172,7 @@ async fn test_unavailable_tool_before_approved_does_not_panic() {
             &mcp_client,
             root,
             false,
+            false, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -6238,6 +6283,7 @@ async fn test_inquiry_failure_marks_tool_as_error() {
             &mcp_client,
             root,
             false,
+            false, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -6431,6 +6477,7 @@ async fn test_live_header_uses_configured_model_id_not_provider_returned() {
             &mcp_client,
             root,
             false,
+            false, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -6546,6 +6593,7 @@ async fn reasoning_before_a_tool_call_shades_the_tool_chrome() {
         &mcp_client,
         root,
         false,
+        false, // interactive
         &[],
         &lock,
         ToolChoice::Auto,
@@ -6674,6 +6722,7 @@ async fn test_rebuild_cap_stops_a_provider_that_keeps_requesting_rebuilds() {
         &mcp_client,
         root,
         false,
+        false, // interactive
         &[],
         &lock,
         ToolChoice::Auto,
@@ -6763,6 +6812,7 @@ async fn test_refused_rebuild_clears_the_retry_line() {
             &mcp_client,
             root,
             true, // is_tty
+            true, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -6847,6 +6897,7 @@ async fn test_refused_rebuild_persists_streamed_content() {
         &mcp_client,
         root,
         false,
+        false, // interactive
         &[],
         &lock,
         ToolChoice::Auto,

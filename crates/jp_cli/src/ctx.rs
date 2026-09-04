@@ -82,7 +82,24 @@ pub(crate) struct Term {
     /// If you pipe (|) or redirect (\>) the output, stdout is connected to a
     /// pipe or a regular file, respectively.
     /// These are not managed by the TTY subsystem.
+    ///
+    /// Answers "can the consumer of my output handle ANSI escapes?" — output
+    /// format resolution, spinners, cursor control, OSC sequences.
+    /// For "can a user answer a prompt?", use [`Self::interactive`] ([RFD
+    /// 048]).
+    ///
+    /// [RFD 048]: https://jp.computer/rfd/048
     pub(crate) is_tty: bool,
+
+    /// Whether a user is present to answer prompts.
+    ///
+    /// Gates every interactive prompt: tool permissions, label resolution,
+    /// lock-timeout handling, plugin approval, editor confirmations.
+    /// Distinct from [`Self::is_tty`], which asks whether output can carry ANSI
+    /// escapes ([RFD 048]).
+    ///
+    /// [RFD 048]: https://jp.computer/rfd/048
+    pub(crate) interactive: bool,
 
     /// Width in columns to lay output out against.
     ///
@@ -115,6 +132,10 @@ impl Ctx {
         let is_tty = io::stdout().is_terminal();
         let width = printer.output_width().columns();
 
+        // Same derivation as `is_tty` for now; the two diverge when the
+        // promptability signal moves to `/dev/tty` availability.
+        let interactive = is_tty;
+
         Self {
             exec,
             workspace,
@@ -123,6 +144,7 @@ impl Ctx {
             term: Term {
                 args,
                 is_tty,
+                interactive,
                 width,
             },
             session,

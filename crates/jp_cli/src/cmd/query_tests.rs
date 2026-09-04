@@ -177,6 +177,7 @@ async fn run_mock_turn(
         &mcp_client,
         root,
         false,
+        false, // interactive
         &[],
         lock,
         jp_config::assistant::tool_choice::ToolChoice::Auto,
