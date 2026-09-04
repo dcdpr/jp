@@ -286,13 +286,23 @@ impl StreamError {
 /// Try to extract a human-readable error message from a JSON error response
 /// body.
 ///
-/// Supports the common `{"error": {"message": "..."}}` shape used by OpenAI and
-/// compatible APIs, as well as Google's `{"error": {"message": "..."}}`.
+/// Two envelope shapes are recognized:
+///
+/// - Nested — `{"error": {"message": "..."}}`, used by OpenAI, Anthropic and
+///   Google.
+/// - Flat — `{"message": "...", "type": "...", "code": "..."}`, used by
+///   Cerebras for every status it returns.
+///
+/// A body carrying both is read as nested: a provider that nests is describing
+/// the failure there, and its outer `message` belongs to something else.
 fn extract_api_error_body(body: &str) -> Option<String> {
     let parsed: serde_json::Value = serde_json::from_str(body).ok()?;
-    parsed
-        .get("error")
-        .and_then(|e| e.get("message"))
+
+    let nested = parsed.get("error").and_then(|e| e.get("message"));
+    let flat = parsed.get("message");
+
+    nested
+        .or(flat)
         .and_then(serde_json::Value::as_str)
         .map(str::to_owned)
 }
