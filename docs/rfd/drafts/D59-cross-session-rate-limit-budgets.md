@@ -142,20 +142,40 @@ timeout_secs = 10      # then prompt
 ```rust
 /// What a provider reported about one of its rate-limit buckets, at one instant.
 pub struct RateLimitSnapshot {
-    pub unit: LimitUnit,        // Tokens | Requests
-    pub window: Duration,       // 60s, 3600s, 86400s
-    pub limit: u64,
+    pub bucket: BucketId,          // provider-labelled: unit plus scope
+    pub limit: Option<u64>,
     pub remaining: u64,
+    pub recovery: Recovery,
     pub observed_at: DateTime<Utc>,
 }
+
+/// How a bucket returns to full, as the provider describes it.
+pub enum Recovery {
+    /// Fully replenished at this instant.
+    FullAt(DateTime<Utc>),
+
+    /// Refills continuously at this many units per second, capped at `limit`.
+    Continuous { per_second: f64 },
+
+    /// Not reported. The reading is only good for the instant it was taken.
+    Unknown,
+}
 ```
+
+`Recovery` is an enum rather than a rate because providers describe
+replenishment differently, and the difference matters: Anthropic states the
+absolute instant a bucket is whole again, Cerebras documents a continuous refill
+and states nothing per response, and a provider that resets on a fixed boundary
+does neither.
+Assuming any one of these on a provider that means another invents headroom that
+does not exist.
 
 Providers extract zero or more snapshots from a response head:
 
 ```rust
 trait Provider {
-    /// Rate-limit buckets this provider reported, if it reports any.
-    fn rate_limit_snapshots(&self, _headers: &HeaderMap) -> Vec<RateLimitSnapshot> {
+    /// Rate-limit buckets this provider reported in a response head.
+    fn snapshots_from_headers(&self, _headers: &HeaderMap) -> Vec<RateLimitSnapshot> {
         vec![]
     }
 }
@@ -164,13 +184,23 @@ trait Provider {
 The default returns nothing, so a provider that reports nothing simply gets no
 throttling.
 
-Cerebras is the only provider whose headers have been examined; it yields six
-snapshots (tokens and requests, across minute, hour and day).
-OpenAI is the one other provider with in-tree evidence: `extract_retry_after`
-already parses its `x-ratelimit-reset-requests` and `x-ratelimit-reset-tokens`
-for retry timing, so the raw material is there.
-Nothing is known about the rest, and Phase 6 is where a second adapter
-establishes whether the shape generalizes rather than assuming it does.
+The method is named for its source because a response head is not the only one a
+provider could have.
+See [Ceilings, readings and other sources](#ceilings-readings-and-other-sources)
+below for what else exists and why none of it is built here.
+
+Two providers are known to supply the raw material, and they supply different
+amounts of it.
+Cerebras yields six snapshots (tokens and requests, across minute, hour and day)
+with a limit and a remaining each and no reset of any kind, so its recovery is
+`Continuous` derived from `limit / window`.
+Anthropic documents `anthropic-ratelimit-{requests,tokens,input-tokens,output-
+tokens}-{limit,remaining,reset}` on every Messages API response, where `reset`
+is an RFC 3339 instant, so its recovery is `FullAt` straight from the header and
+needs no arithmetic at all.
+OpenAI has in-tree evidence but only half of it: `extract_retry_after` already
+parses `x-ratelimit-reset-requests` and `x-ratelimit-reset-tokens` for retry
+timing, and whether it also reports remaining has not been checked.
 
 This keeps providers and buckets orthogonal: a new provider is one adapter, a
 new bucket kind touches no provider.
@@ -179,6 +209,44 @@ new bucket kind touches no provider.
 Headers arrive before the first byte of body, so a stream that fails or is
 interrupted still yields its observation — and those are exactly the
 observations taken during the trouble that makes throttling worth having.
+
+### Ceilings, readings and other sources
+
+A snapshot bundles two facts with very different half-lives.
+The **ceiling** (`limit`) changes when a plan changes, so a stale one is
+harmless.
+The **reading** (`remaining`) is stale within seconds.
+They arrive together in a response head today, which is why one struct carries
+both, but nothing in the design requires that they always do: `limit` is an
+`Option` precisely so a provider that reports remaining without a ceiling can
+still participate.
+
+Some providers expose the ceiling separately.
+Anthropic has a [Rate Limits API] that lists the configured limits for an
+organization and its workspaces.
+It is worth being precise about what that endpoint does and does not offer,
+because it is easy to read as a way to ask how much room is left:
+
+- It returns `{type, value}` pairs where `value` is the **configured limit**.
+  There is no remaining.
+  Anthropic's own documentation frames it as something to compare *against*
+  usage data from a separate API, not as a source of usage.
+- It requires **Admin API credentials**: an admin key, an OAuth token with
+  `org:admin`, or an unscoped account key.
+  The workspace-scoped key JP would use for inference does not work, and the
+  endpoint is unavailable to individual accounts entirely.
+
+So for Anthropic the endpoint would supply a number JP already gets for free
+from `anthropic-ratelimit-*-limit`, at the cost of a second privileged
+credential most users do not have.
+**No active source is built here**, and the trait carries no method for one.
+
+The axis is named rather than paved.
+A provider could plausibly report remaining from a queried endpoint rather than
+a response header, and if one does, adding `snapshots_from_query` beside
+`snapshots_from_headers` costs nothing that the current shape has spent.
+Building that plumbing now, for a case no provider presents, would be paying for
+a second source before there is one.
 
 ### The store
 
@@ -216,14 +284,15 @@ which sends.** A throttle that can stall the CLI is worse than no throttle.
 Before a provider request, a session loads the snapshots, projects each forward
 to now, and waits while any projected remaining sits below a floor.
 
-**Projection belongs to the adapter, not to the shared logic.** How a bucket
-recovers is a property of the provider: Cerebras documents continuous
-token-bucket replenishment, so its snapshots project at `limit / window` per
-second, capped at `limit`.
-A provider that resets on a fixed window instead recovers nothing until the
-boundary and then everything at once, and projecting it linearly would invent
-headroom that does not exist.
-The adapter that reads a provider's headers is the thing that knows which it is.
+Projection follows the snapshot's `Recovery`, which the adapter filled in from
+what the provider actually said.
+`FullAt` interpolates towards the stated instant, `Continuous` adds `per_second`
+capped at `limit`, and `Unknown` projects nothing: the reading stands as taken
+and ages into uselessness rather than into invented headroom.
+
+That the shared logic never assumes a recovery model is the point.
+Anthropic hands over a reset instant and Cerebras hands over nothing, and a
+single rate baked into the decision would be wrong for one of them.
 
 The floor cannot be a prediction of what this request will cost, for the reasons
 in the Motivation.
@@ -303,11 +372,13 @@ for most of every minute.
 
 ## Non-Goals
 
-**Accounting for consumers JP cannot see.** Another machine, another key, a
+**Anticipating consumers JP cannot see.** Another machine, another key, a
 script.
-The observed remaining already includes their effect, but JP cannot anticipate
-them, so a burst from elsewhere between two observations will still produce a
-429.
+Every reading already *includes* their effect, since the provider meters the
+account rather than the process — that is the whole reason for reading rather
+than computing.
+What JP cannot do is see them coming, so a burst from elsewhere between two
+observations will still produce a 429.
 
 **Organizations sharing one key across machines.** The store is user-local by
 design.
@@ -357,6 +428,23 @@ The fallback is to record "remaining was zero at this instant" from the status
 code alone, which is a different shape from a snapshot and may not be worth the
 special case.
 
+**A bucket's identity can shift under its own name.** Anthropic's
+`anthropic-ratelimit-tokens-*` headers report whichever limit is currently most
+restrictive, so the same header names describe an organization limit on one
+response and a workspace limit on the next.
+A store keyed by header name would silently compare two different buckets and
+conclude the budget had jumped.
+The `anthropic-workspace-id` response header names the scope a request counted
+against, which is probably the discriminator `BucketId` needs, and confirming
+that is part of the Anthropic adapter rather than a blocker for the design.
+
+**Readings can be deliberately imprecise.** Anthropic rounds every `*-remaining`
+to the nearest thousand.
+A floor computed from differences between rounded numbers inherits that error,
+which matters most when the remaining is small, which is exactly when the
+decision is being made.
+The floor may need to carry the reported precision rather than assume exactness.
+
 **Two records about the same credential.** [RFD 090] gives each credential
 profile an `exhausted_until` timestamp, persisted in the user data directory, so
 a fresh invocation skips a credential whose quota has not reset.
@@ -378,10 +466,10 @@ Output is a decision, not necessarily code.
 Everything else depends on it.
 
 **Phase 2 — Snapshot type and Cerebras extraction.** `RateLimitSnapshot`,
-`LimitUnit`, the defaulted trait method, and the Cerebras adapter with unit
-tests against captured header sets.
-The adapter carries its own projection rule, so the token-bucket arithmetic
-lands here rather than in the shared decision.
+`BucketId`, `Recovery`, the defaulted trait method, and the Cerebras adapter
+with unit tests against captured header sets.
+Cerebras fills `Recovery::Continuous` from `limit / window`, so the token-bucket
+arithmetic lands in the adapter rather than in the shared decision.
 Mergeable alone; nothing consumes it yet.
 
 **Phase 3 — The store.** Load, atomic write, advisory locking, the credential
@@ -400,8 +488,11 @@ Ctrl-C path, the non-TTY behaviour, and the silent bounded variant for the
 collect path.
 Depends on 4, and is the phase with a user-visible behaviour change.
 
-**Phase 6 — A second provider.** OpenAI or Anthropic, to confirm the snapshot
-shape generalizes before it is treated as settled.
+**Phase 6 — A second provider.** Anthropic, whose documented headers exercise
+the parts of the shape Cerebras does not: an explicit reset instant rather than
+a derived rate, a ceiling and a reading that need not travel together, rounded
+remainings, and a bucket whose scope can change between responses.
+If the shape survives that it is worth treating as settled.
 
 ## References
 
@@ -411,11 +502,15 @@ shape generalizes before it is treated as settled.
 - [RFD 090] — credential profiles and the boundary this design keys against
 - [`acquire_lock`] — the wait-then-prompt pattern this mirrors
 - [Cerebras rate limits] — dual-bucket model and token-bucket replenishment
+- [Anthropic rate limits] — per-response headers, including the reset instant
+- [Rate Limits API] — Anthropic's admin endpoint for configured ceilings
 
+[Anthropic rate limits]: https://platform.claude.com/docs/en/api/rate-limits
 [Cerebras rate limits]: https://inference-docs.cerebras.ai/support/rate-limits
 [Issue 1069]: https://github.com/dcdpr/jp/issues/1069
 [RFD 020]: ../020-parallel-conversations.md
 [RFD 045]: ../045-layered-interrupt-handler-stack.md
 [RFD 090]: ../090-anthropic-subscription-auth-with-credential-fallback.md
+[Rate Limits API]: https://platform.claude.com/docs/en/manage-claude/rate-limits-api
 [`acquire_lock`]: https://github.com/dcdpr/jp/blob/main/crates/jp_cli/src/cmd/lock.rs
 [`jp_workspace::user_data_dir`]: https://github.com/dcdpr/jp/blob/main/crates/jp_workspace/src/lib.rs
