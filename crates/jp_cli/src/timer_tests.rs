@@ -1,6 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
-use jp_printer::{OutputFormat, Printer};
+use jp_printer::{Chrome, OutputFormat, Printer};
 
 use super::*;
 
@@ -101,6 +101,27 @@ async fn test_line_timer_show_false_spawns_nothing() {
 async fn test_line_timer_json_format_spawns_nothing() {
     let (printer, _out, err) = Printer::memory(OutputFormat::Json);
     let printer = Arc::new(printer);
+
+    let timer = spawn_line_timer(
+        printer.clone(),
+        true,
+        Duration::ZERO,
+        Duration::from_millis(10),
+        |secs, _status| format!("\r\x1b[Ktick {secs:.1}s"),
+    );
+    assert!(timer.is_none());
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    printer.flush();
+    assert!(err.lock().is_empty());
+}
+
+// A silenced chrome channel discards the redraw on arrival, so spawning would
+// buy a task that formats a line every interval for nobody.
+#[tokio::test(flavor = "multi_thread")]
+async fn test_line_timer_silenced_chrome_spawns_nothing() {
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer.with_chrome(Chrome::Silenced));
 
     let timer = spawn_line_timer(
         printer.clone(),
