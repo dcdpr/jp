@@ -139,7 +139,7 @@ pub(super) async fn select(
         let candidates =
             generate(cfg, events.clone(), count, override_model, rejected.clone()).await?;
 
-        if !ctx.term.is_tty {
+        if !ctx.term.interactive {
             return Ok(candidates
                 .into_iter()
                 .next()

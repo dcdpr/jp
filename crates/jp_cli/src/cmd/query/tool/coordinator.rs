@@ -503,7 +503,7 @@ impl ToolCoordinator {
     /// # Pipeline steps
     ///
     /// 1. [`Self::decide_permission`] resolves the executor's run mode against
-    ///    persisted answers and TTY availability.
+    ///    persisted answers and whether a user is available to answer.
     /// 2. If the decision is `NeedsPrompt`, pre-render the call via
     ///    [`Self::pre_render_for_prompt`] (always for built-in parameter
     ///    styles; only when `format = "unattended"` for `Custom` formatters),
@@ -518,12 +518,12 @@ impl ToolCoordinator {
         &mut self,
         executor: Box<dyn Executor>,
         prompter: &ToolPrompter,
-        is_tty: bool,
+        interactive: bool,
         turn_state: &mut TurnState,
         tool_renderer: &ToolRenderer,
     ) -> ToolCallDecision {
         // Step 1: decide.
-        let decision = self.decide_permission(executor, is_tty, turn_state);
+        let decision = self.decide_permission(executor, interactive, turn_state);
 
         // Step 2: handle prompt path. After this match, `executor` is
         // approved and `pre_rendered` is `Some(content)` if pre-rendering
@@ -753,14 +753,14 @@ impl ToolCoordinator {
     pub fn decide_permission(
         &mut self,
         executor: Box<dyn Executor>,
-        is_tty: bool,
+        interactive: bool,
         turn_state: &TurnState,
     ) -> PermissionDecision {
         let Some(info) = executor.permission_info() else {
             return PermissionDecision::Approved(executor);
         };
 
-        if !is_tty && matches!(info.run_mode, RunMode::Ask | RunMode::Edit) {
+        if !interactive && matches!(info.run_mode, RunMode::Ask | RunMode::Edit) {
             self.set_tool_state(&info.tool_id, ToolCallState::Running);
             return PermissionDecision::Approved(executor);
         }
@@ -842,7 +842,7 @@ impl ToolCoordinator {
     pub async fn run_permission_phase(
         &mut self,
         prompter: &ToolPrompter,
-        is_tty: bool,
+        interactive: bool,
         turn_state: &mut TurnState,
         tool_renderer: &ToolRenderer,
     ) -> (
@@ -858,7 +858,13 @@ impl ToolCoordinator {
             // decide → pre-render → prompt → render policy stays in one
             // place.
             let decision = self
-                .resolve_tool_call_decision(executor, prompter, is_tty, turn_state, tool_renderer)
+                .resolve_tool_call_decision(
+                    executor,
+                    prompter,
+                    interactive,
+                    turn_state,
+                    tool_renderer,
+                )
                 .await;
 
             match decision {
@@ -881,6 +887,12 @@ impl ToolCoordinator {
         (approved_executors, skipped_responses)
     }
 
+    /// Run the approved tools, answering their questions and result prompts as
+    /// they arrive.
+    ///
+    /// `is_tty` gates the elapsed-time progress line, which is a
+    /// cursor-relative redraw and only belongs on a terminal.
+    /// `interactive` gates every question and result prompt.
     #[allow(clippy::too_many_arguments)]
     #[allow(clippy::too_many_lines)]
     pub async fn execute_with_prompting(
@@ -900,6 +912,7 @@ impl ToolCoordinator {
         root: &Utf8Path,
         tool_renderer: &ToolRenderer,
         is_tty: bool,
+        interactive: bool,
     ) -> ExecutionResult {
         if executors.is_empty() {
             return ExecutionResult {
@@ -977,6 +990,8 @@ impl ToolCoordinator {
             }
         });
 
+        // Progress is a terminal affordance, not a prompt: a `--no-interactive`
+        // run on a terminal still shows how long a tool has been going.
         let progress_config = tool_renderer.progress_config().clone();
         let mut progress_shown = false;
 
@@ -1039,7 +1054,7 @@ impl ToolCoordinator {
                         &cancellation_token,
                         event_tx.clone(),
                         turn_state,
-                        is_tty,
+                        interactive,
                         tool_renderer,
                     );
                 }
@@ -1496,7 +1511,7 @@ impl ToolCoordinator {
         cancellation_token: &CancellationToken,
         event_tx: mpsc::Sender<ExecutionEvent>,
         turn_state: &mut TurnState,
-        is_tty: bool,
+        interactive: bool,
         tool_renderer: &ToolRenderer,
     ) {
         match result {
@@ -1537,10 +1552,10 @@ impl ToolCoordinator {
                         });
                     }
                     result_mode @ (ResultMode::Ask | ResultMode::Edit) => {
-                        // Both Ask and Edit prompt on any tty: the Edit flow
-                        // uses the inline widget, which no longer requires a
-                        // configured editor.
-                        let can_prompt = is_tty;
+                        // Both Ask and Edit prompt whenever a user is there to
+                        // answer: the Edit flow uses the inline widget, which
+                        // does not need a configured editor.
+                        let can_prompt = interactive;
                         if can_prompt {
                             if *prompt_active {
                                 pending_prompts.push_back(PendingPrompt::ResultMode {
@@ -1673,11 +1688,11 @@ impl ToolCoordinator {
                     question_text = %question.text,
                     question_type = ?question.answer_type,
                     target = ?target,
-                    is_tty = is_tty,
+                    interactive = interactive,
                     "Tool question received, routing to target",
                 );
 
-                if is_tty && target.is_user() {
+                if interactive && target.is_user() {
                     if *prompt_active {
                         pending_prompts.push_back(PendingPrompt::Question {
                             index,

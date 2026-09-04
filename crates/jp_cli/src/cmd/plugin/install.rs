@@ -48,7 +48,7 @@ impl Install {
 
         // Third-party plugins need explicit approval.
         if !plugin.official {
-            if !ctx.term.is_tty {
+            if !ctx.term.interactive {
                 return Err(cmd::Error::from(format!(
                     "plugin `{}` is third-party and requires interactive approval",
                     self.name

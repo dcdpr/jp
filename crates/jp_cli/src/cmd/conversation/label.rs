@@ -178,7 +178,7 @@ impl Label {
             let resolver = Resolver::new(
                 &config.conversation.labels,
                 ctx.workspace.root(),
-                ctx.term.is_tty,
+                ctx.term.interactive,
                 &ctx.printer,
                 &prompts,
             );

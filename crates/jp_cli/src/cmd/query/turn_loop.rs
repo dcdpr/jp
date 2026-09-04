@@ -189,6 +189,7 @@ pub(super) async fn run_turn_loop(
     mcp_client: &jp_mcp::Client,
     root: &Utf8Path,
     is_tty: bool,
+    interactive: bool,
     attachments: &[Attachment],
     lock: &ConversationLock,
     mut tool_choice: ToolChoice,
@@ -668,7 +669,7 @@ pub(super) async fn run_turn_loop(
                                             .resolve_tool_call_decision(
                                                 executor,
                                                 &prompter,
-                                                is_tty,
+                                                interactive,
                                                 &mut turn_state,
                                                 &tool_renderer,
                                             )
@@ -764,7 +765,7 @@ pub(super) async fn run_turn_loop(
                     let (executors, skipped) = tool_coordinator
                         .run_permission_phase(
                             &restart_prompter,
-                            is_tty,
+                            interactive,
                             &mut turn_state,
                             &tool_renderer,
                         )
@@ -844,6 +845,7 @@ pub(super) async fn run_turn_loop(
                         root,
                         &tool_renderer,
                         is_tty,
+                        interactive,
                     )
                     .await;
 

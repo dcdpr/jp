@@ -72,7 +72,7 @@ pub(crate) struct Composer<'a> {
 
     editor: Option<Arc<dyn EditorBackend>>,
     edit_mode: ReplyEditMode,
-    is_tty: bool,
+    interactive: bool,
 }
 
 impl Composer<'_> {
@@ -84,8 +84,8 @@ impl Composer<'_> {
             values: vec![],
         };
 
-        if !self.is_tty {
-            debug!("Plugin asked to compose without a terminal to ask on.");
+        if !self.interactive {
+            debug!("Plugin asked to compose without a user to ask.");
             return response;
         }
 
@@ -314,7 +314,7 @@ pub(crate) fn run_plugin(
         editor: crate::editor::build_editor_backend(&config.editor),
         // The configured mode, as every other inline reply in the CLI uses.
         edit_mode: reply_edit_mode(config.editor.inline.edit_mode),
-        is_tty: ctx.term.is_tty,
+        interactive: ctx.term.interactive,
     };
 
     let PluginProcess {
@@ -1308,7 +1308,7 @@ pub(crate) fn find_any_plugin_binary(name: &str) -> Option<Utf8PathBuf> {
 pub(crate) async fn resolve_plugin_binary(
     name: &str,
     plugins_config: &PluginsConfig,
-    is_tty: bool,
+    interactive: bool,
 ) -> Result<Option<Utf8PathBuf>, cmd::Error> {
     let plugin_cfg = plugins_config.command.get(name);
 
@@ -1327,14 +1327,14 @@ pub(crate) async fn resolve_plugin_binary(
     }
 
     // 2. Check registry.
-    if let Some(path) = try_registry_install(name, plugins_config, is_tty).await? {
+    if let Some(path) = try_registry_install(name, plugins_config, interactive).await? {
         return Ok(Some(path));
     }
 
     // 3. Check $PATH with run policy.
     let segments: Vec<&str> = name.split('-').collect();
     if let Some(path) = find_plugin_binary(&segments) {
-        check_run_policy(name, &path, plugin_cfg, is_tty)?;
+        check_run_policy(name, &path, plugin_cfg, interactive)?;
         return Ok(Some(path));
     }
 
@@ -1368,7 +1368,7 @@ fn verify_checksum(
 async fn try_registry_install(
     name: &str,
     plugins_config: &PluginsConfig,
-    is_tty: bool,
+    interactive: bool,
 ) -> Result<Option<Utf8PathBuf>, cmd::Error> {
     let Some(reg) = registry::load_cached() else {
         return Ok(None);
@@ -1419,7 +1419,7 @@ async fn try_registry_install(
             )));
         }
         RunPolicy::Ask => {
-            if !is_tty {
+            if !interactive {
                 return Err(cmd::Error::from(format!(
                     "plugin `{id}` requires approval. Run `jp plugin install {id}` first, or set \
                      plugins.command.{id}.run = \"unattended\" in config."
@@ -1470,7 +1470,7 @@ fn check_run_policy(
     name: &str,
     binary_path: &Utf8Path,
     plugin_cfg: Option<&CommandPluginConfig>,
-    is_tty: bool,
+    interactive: bool,
 ) -> Result<(), cmd::Error> {
     // Verify pinned checksum first.
     verify_checksum(name, binary_path, plugin_cfg)?;
@@ -1483,7 +1483,7 @@ fn check_run_policy(
             "plugin `{name}` is denied by configuration"
         ))),
         RunPolicy::Ask => {
-            if !is_tty {
+            if !interactive {
                 return Err(cmd::Error::from(format!(
                     "plugin `jp-{name}` found on $PATH but requires approval. Set \
                      plugins.command.{name}.run = \"unattended\" in config, or run `jp {name}` in \
@@ -1696,7 +1696,8 @@ pub(crate) async fn run_external(args: &[String], ctx: &mut Ctx) -> cmd::Output 
     }
 
     let config = ctx.config();
-    let Some(binary) = resolve_plugin_binary(subcommand, &config.plugins, ctx.term.is_tty).await?
+    let Some(binary) =
+        resolve_plugin_binary(subcommand, &config.plugins, ctx.term.interactive).await?
     else {
         return Err(unknown_subcommand_error(subcommand));
     };
