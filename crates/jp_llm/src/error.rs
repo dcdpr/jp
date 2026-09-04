@@ -231,12 +231,23 @@ impl StreamError {
                     );
                 }
 
-                if looks_like_quota_error(&body) {
-                    return Self::new(StreamErrorKind::InsufficientQuota, display);
-                }
-
                 let retry_after = extract_retry_after(&headers);
                 let code = status.as_u16();
+
+                // A 429 is an authoritative rate-limit signal, so only a marker
+                // naming billing outright outranks it. The vaguer quota wording
+                // is also how several providers phrase the rate limit itself,
+                // and reading one as fatal ends the turn instead of waiting out
+                // a bucket that refills seconds later.
+                let out_of_quota = if code == 429 {
+                    looks_like_billing_exhaustion(&body)
+                } else {
+                    looks_like_quota_error(&body)
+                };
+
+                if out_of_quota {
+                    return Self::new(StreamErrorKind::InsufficientQuota, display);
+                }
 
                 // An oversized prompt is the same size on the next attempt, so
                 // it is classified before the retry heuristics below. A 429 is
@@ -540,16 +551,34 @@ impl PartialEq for ToolError {
 /// - Anthropic: `"billing_error"`, `"Your credit balance is too low"`
 /// - Google: `"RESOURCE_EXHAUSTED"`, `"Quota exceeded"`
 /// - OpenRouter: `"insufficient credits"`, `"out of credits"`
+///
+/// `"quota exceeded"` and `"resource_exhausted"` are also how providers word an
+/// ordinary rate limit.
+/// Where a status code already says the failure is one, reach for
+/// [`looks_like_billing_exhaustion`] instead.
 pub(crate) fn looks_like_quota_error(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
+
+    looks_like_billing_exhaustion(text)
+        || lower.contains("quota exceeded")
+        || lower.contains("resource_exhausted")
+}
+
+/// The subset of quota markers that name a billing or credit problem outright.
+///
+/// A drained account and an exhausted rate-limit bucket both arrive as HTTP 429
+/// from OpenAI, and only the wording separates them.
+/// So every marker here has to be one no provider uses for a bucket that
+/// refills on its own.
+pub(crate) fn looks_like_billing_exhaustion(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+
     lower.contains("insufficient_quota")
         || lower.contains("insufficient quota")
         || lower.contains("insufficient credits")
         || lower.contains("out of credits")
         || lower.contains("billing_error")
         || lower.contains("credit balance is too low")
-        || lower.contains("quota exceeded")
-        || lower.contains("resource_exhausted")
 }
 
 /// Heuristic check for a request exceeding the model's context window, based on
