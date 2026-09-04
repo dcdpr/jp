@@ -43,7 +43,7 @@ use crate::{
     cmd::target::{ConversationTarget, PickerFilter},
     config_pipeline::ConfigPipeline,
     resolve_config,
-    signals::testing::detached_router,
+    signals::testing::{detached_router, test_router},
 };
 
 fn make_partial_with_tools() -> PartialAppConfig {
@@ -331,7 +331,7 @@ async fn an_interrupt_during_mcp_startup_stops_the_turn_before_it_runs() {
     });
     let (mcp_servers, _lines) = startup_set(joins, vec![McpServerId::new("bookworm")]);
 
-    let router = detached_router();
+    let (router, signals) = test_router();
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
 
     let inputs = TurnInputs {
@@ -347,16 +347,17 @@ async fn an_interrupt_during_mcp_startup_stops_the_turn_before_it_runs() {
         workspace_id: workspace.id().clone(),
         pending_trim: PendingStreamTrim::default(),
         mcp_servers,
+        // Ctrl-C is how this turn is interrupted, and this test drives that
+        // through the router rather than over a channel.
+        interrupts: TurnInterrupts::none(),
     };
 
-    // Registered where the lock is taken, so the request reaches it even though
-    // the turn has not started. The notice waits on the channel until `run`
-    // polls it.
-    let interrupt = router.turn_interrupt(conversation_id);
-    assert!(
-        router.interrupt_scope(conversation_id),
-        "the handler exists as soon as the conversation is locked"
-    );
+    // Registered where the lock is taken, so the press reaches it even though
+    // the turn has not started. It is the only handler on the stack at this
+    // point, so it is the one a Ctrl-C finds, and the notice waits on the
+    // channel until `run` polls it.
+    let interrupt = router.turn_interrupt();
+    signals.interrupt().await;
 
     let stream = lock.events().clone();
     tokio::time::timeout(
@@ -408,7 +409,8 @@ async fn run_mock_turn(
         ChatRequest::from(prompt),
         InvocationContext::default(),
         PendingStreamTrim::default(),
-        router.turn_interrupt(lock.id()),
+        router.turn_interrupt(),
+        TurnInterrupts::none(),
     )
     .await
     .unwrap();

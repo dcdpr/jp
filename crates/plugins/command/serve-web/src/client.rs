@@ -322,16 +322,41 @@ impl PluginClient {
         }
     }
 
-    /// Ask the host to interrupt the turn it is running.
+    /// Ask the host to stop the turn it is running.
     ///
     /// Returns as soon as the request is on the wire.
     /// There is no reply to wait for: the interrupt lands in the conversation,
     /// and the turn's own outcome still arrives as the answer to the `query`
     /// that started it.
     pub fn interrupt(&self, conversation: &str) -> Result<(), ClientError> {
-        self.send(&PluginToHost::Interrupt(InterruptRequest {
-            conversation: conversation.to_owned(),
-        }))
+        self.send(&PluginToHost::Interrupt(InterruptRequest::stop(
+            conversation.to_owned(),
+        )))
+    }
+
+    /// Interrupt the turn the host is running and answer it with `content`.
+    ///
+    /// The assistant stops where it is, what it had produced is kept, and
+    /// `content` becomes the next thing it reads — all within the turn that
+    /// was already running, so the conversation is never unlocked in between.
+    ///
+    /// Awaited rather than fired off, because the answer is the difference
+    /// between a delivered reply and one aimed at a turn that had just
+    /// finished.
+    /// An `Err` means the message was not delivered and the caller still owns
+    /// it.
+    pub async fn reply(&self, conversation: &str, content: &str) -> Result<(), ClientError> {
+        let id = self.next_id();
+        let msg = PluginToHost::Interrupt(
+            InterruptRequest::reply(conversation.to_owned(), content.to_owned())
+                .with_id(id.clone()),
+        );
+
+        match self.request(&id, &msg).await? {
+            HostToPlugin::Done(_) => Ok(()),
+            HostToPlugin::Error(e) => Err(ClientError::Host(e.message)),
+            other => Err(ClientError::Unexpected(format!("{other:?}"))),
+        }
     }
 
     /// Register a request, send it, and await the matching response.

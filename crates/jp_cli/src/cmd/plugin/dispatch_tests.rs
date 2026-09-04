@@ -16,14 +16,6 @@ fn bare_workspace() -> Workspace {
     Workspace::in_memory("/tmp/jp-test-plugin")
 }
 
-/// A router with no signal source, for requests that never reach one.
-///
-/// Must be called inside a tokio runtime, which is why the tests using it are
-/// `#[tokio::test]` despite `handle_request` being synchronous.
-fn router() -> SignalRouter {
-    crate::signals::testing::detached_router()
-}
-
 /// How a conversation is spelled on the wire, matching `list_conversations`.
 fn wire_id(id: ConversationId) -> String {
     id.to_string()
@@ -42,63 +34,61 @@ fn conversation_id(secs: u64) -> ConversationId {
 /// A run whose `--log-file` names a directory that does not exist installs no
 /// tracing subscriber at all, and a `tracing` field expression does not run
 /// when its callsite is disabled.
-/// These tests install no subscriber either, so an `interrupt_scope` call
-/// written inside the macro is never made.
-#[tokio::test]
-async fn an_interrupt_is_issued_without_a_tracing_subscriber() {
+/// These tests install no subscriber either, so a delivery written inside the
+/// macro is never made.
+#[test]
+fn an_interrupt_is_issued_without_a_tracing_subscriber() {
     let mut ws = bare_workspace();
     let mut sink: Vec<u8> = Vec::new();
-    let signals = router();
+    let turns = RunningTurns::default();
 
     let id = conversation_id(1_700_000_000);
-    let (_guard, mut interrupted) = signals.push_handler_for(id);
+    let mut interrupted = turns.register(id);
 
     handle_request(
-        PluginToHost::Interrupt(InterruptRequest {
-            conversation: wire_id(id),
-        }),
+        PluginToHost::Interrupt(InterruptRequest::stop(wire_id(id))),
         &mut sink,
         &mut ws,
         &json!({}),
         None,
         None,
         &AppConfig::new_test(),
-        &signals,
+        &turns,
     )
     .unwrap();
 
-    assert!(
-        interrupted.try_recv().is_ok(),
+    assert_eq!(
+        interrupted.try_next(),
+        Some(InterruptAction::Stop),
         "the turn was never told to stop"
     );
 }
 
 /// An interrupt naming something that is not a conversation id is the plugin's
 /// bug, and must not be mistaken for a turn that already finished.
-#[tokio::test]
-async fn an_unparseable_interrupt_reaches_no_handler() {
+#[test]
+fn an_unparseable_interrupt_reaches_no_handler() {
     let mut ws = bare_workspace();
     let mut sink: Vec<u8> = Vec::new();
-    let signals = router();
+    let turns = RunningTurns::default();
 
-    let (_guard, mut interrupted) = signals.push_handler_for(conversation_id(1_700_000_000));
+    let mut interrupted = turns.register(conversation_id(1_700_000_000));
 
     handle_request(
-        PluginToHost::Interrupt(InterruptRequest {
-            conversation: "not-an-id".to_owned(),
-        }),
+        PluginToHost::Interrupt(InterruptRequest::stop("not-an-id".to_owned())),
         &mut sink,
         &mut ws,
         &json!({}),
         None,
         None,
         &AppConfig::new_test(),
-        &signals,
+        &turns,
     )
     .unwrap();
 
-    assert!(
-        interrupted.try_recv().is_err(),
+    assert_eq!(
+        interrupted.try_next(),
+        None,
         "a malformed id must not stop an unrelated turn"
     );
 }
@@ -600,7 +590,7 @@ async fn a_conversation_written_after_startup_is_listed() {
         None,
         None,
         &AppConfig::new_test(),
-        &router(),
+        &RunningTurns::default(),
     )
     .unwrap();
     assert_eq!(response, Flow::Continue);
@@ -650,7 +640,7 @@ async fn an_event_written_after_a_read_is_served_by_the_next_read() {
         None,
         None,
         &AppConfig::new_test(),
-        &router(),
+        &RunningTurns::default(),
     )
     .unwrap();
 
@@ -672,7 +662,7 @@ async fn an_event_written_after_a_read_is_served_by_the_next_read() {
         None,
         None,
         &AppConfig::new_test(),
-        &router(),
+        &RunningTurns::default(),
     )
     .unwrap();
 
@@ -738,7 +728,7 @@ async fn a_ready_carries_on_and_a_clean_exit_stops() {
             None,
             None,
             &AppConfig::new_test(),
-            &router(),
+            &RunningTurns::default(),
         )
         .unwrap(),
         Flow::Continue
@@ -756,7 +746,7 @@ async fn a_ready_carries_on_and_a_clean_exit_stops() {
             None,
             None,
             &AppConfig::new_test(),
-            &router(),
+            &RunningTurns::default(),
         )
         .unwrap(),
         Flow::Stop
@@ -781,7 +771,7 @@ async fn a_failing_exit_carries_its_code_and_reason() {
         None,
         None,
         &AppConfig::new_test(),
-        &router(),
+        &RunningTurns::default(),
     )
     .expect_err("a non-zero exit is an error");
 
@@ -961,13 +951,156 @@ async fn a_plugin_needing_a_newer_protocol_is_refused() {
         None,
         None,
         &AppConfig::new_test(),
-        &router(),
+        &RunningTurns::default(),
     )
     .expect_err("a plugin needing a newer protocol must be refused");
 
     assert!(
         error.to_string().contains("Reinstall the two together"),
         "{error}"
+    );
+}
+
+/// An interrupt reaches the turn it names and no other.
+///
+/// The failure this guards against is stopping the wrong turn: a host runs
+/// several at once, and the request is the only thing that says which.
+#[test]
+fn an_interrupt_reaches_only_the_turn_it_names() {
+    let turns = RunningTurns::default();
+    let wanted = conversation_id(1_700_000_000);
+    let other = conversation_id(1_700_000_001);
+
+    let mut wanted_rx = turns.register(wanted);
+    let mut other_rx = turns.register(other);
+
+    turns.interrupt(wanted, InterruptAction::Stop).unwrap();
+
+    assert_eq!(wanted_rx.try_next(), Some(InterruptAction::Stop));
+    assert_eq!(other_rx.try_next(), None);
+}
+
+/// A turn that has finished is reported as gone rather than silently accepting
+/// an interrupt nothing will read.
+///
+/// This is what lets a client tell "interrupted" from "it had already
+/// finished", and send its message as a new turn instead of losing it.
+#[test]
+fn interrupting_a_finished_turn_says_so() {
+    let turns = RunningTurns::default();
+    let id = conversation_id(1_700_000_000);
+
+    let _rx = turns.register(id);
+    turns.interrupt(id, InterruptAction::Stop).unwrap();
+
+    turns.finished(id);
+
+    let error = turns
+        .interrupt(id, InterruptAction::Stop)
+        .expect_err("the turn is gone");
+
+    assert_eq!(
+        error,
+        format!("no turn is running on conversation {id}"),
+        "the message names the conversation, because a client can be watching several"
+    );
+}
+
+/// A turn whose receiver is gone is reported as ended, not as never having
+/// existed: the entry is still registered, so the two are distinguishable.
+#[test]
+fn interrupting_a_turn_that_stopped_reading_says_it_ended() {
+    let turns = RunningTurns::default();
+    let id = conversation_id(1_700_000_000);
+
+    drop(turns.register(id));
+
+    let error = turns
+        .interrupt(id, InterruptAction::Stop)
+        .expect_err("nothing is reading");
+
+    assert_eq!(error, format!("the turn on conversation {id} has ended"));
+}
+
+/// The wire's `reply` carries the text the turn answers with.
+#[test]
+fn a_reply_request_carries_its_content_to_the_turn() {
+    let action = requested_action(&InterruptRequest::reply(
+        "jp-c17000000000".to_owned(),
+        "  use Rust instead  ".to_owned(),
+    ))
+    .expect("a reply with content is deliverable");
+
+    assert_eq!(action, InterruptAction::Reply {
+        // Trimmed, because a browser's textarea keeps the newline a user
+        // pressed Enter on before deciding to send.
+        content: "use Rust instead".to_owned(),
+
+        // Nobody watched this arrive at the terminal the turn runs in.
+        echo: true,
+    });
+}
+
+/// A `reply` with nothing to say is refused rather than delivered as an empty
+/// message the assistant has to answer.
+#[test]
+fn a_reply_request_without_content_is_refused() {
+    let blank = InterruptRequest {
+        content: Some("   \n ".to_owned()),
+        ..InterruptRequest::reply("jp-c17000000000".to_owned(), String::new())
+    };
+
+    assert_eq!(
+        requested_action(&blank).expect_err("a blank reply is not deliverable"),
+        "a reply needs `content`"
+    );
+
+    let missing = InterruptRequest {
+        action: WireAction::Reply,
+        ..InterruptRequest::stop("jp-c17000000000".to_owned())
+    };
+
+    assert_eq!(
+        requested_action(&missing).expect_err("a reply with no content field is not deliverable"),
+        "a reply needs `content`"
+    );
+}
+
+/// An `interrupt` from a protocol 8 plugin carries no action, and means the
+/// stop it meant then.
+#[test]
+fn an_interrupt_without_an_action_stops_the_turn() {
+    let request: InterruptRequest =
+        serde_json::from_value(json!({ "conversation": "jp-c17000000000" })).unwrap();
+
+    assert_eq!(requested_action(&request).unwrap(), InterruptAction::Stop);
+}
+
+/// A request that asked for an answer gets one; one that did not is left alone.
+///
+/// An uncorrelated response is a message the plugin has nowhere to put, and the
+/// dispatcher pairs replies to requests by id.
+#[test]
+fn only_an_interrupt_with_an_id_is_answered() {
+    let turns = RunningTurns::default();
+    let id = conversation_id(1_700_000_000);
+    let _rx = turns.register(id);
+
+    assert!(
+        handle_interrupt(InterruptRequest::stop(id.to_string()), &turns).is_none(),
+        "a fire-and-forget interrupt is not answered"
+    );
+
+    let answered = handle_interrupt(
+        InterruptRequest::stop(id.to_string()).with_id("req-1".to_owned()),
+        &turns,
+    );
+
+    assert_eq!(
+        answered,
+        Some(HostToPlugin::Done(DoneResponse {
+            id: Some("req-1".to_owned())
+        }))
     );
 }
 

@@ -172,7 +172,7 @@ fn streaming_interrupt_reply_submits() {
     );
     assert_eq!(action, InterruptAction::Reply {
         content: "my reply message".into(),
-        from_editor: false,
+        echo: false,
     });
 }
 
@@ -206,7 +206,7 @@ fn streaming_interrupt_reply_empty_returns_to_menu_then_submits() {
     );
     assert_eq!(action, InterruptAction::Reply {
         content: "second try".into(),
-        from_editor: false,
+        echo: false,
     });
 }
 
@@ -227,11 +227,11 @@ fn streaming_interrupt_open_editor_re_seeds_then_submits() {
         &make_printer(),
         true,
     );
-    // The `Ctrl+X` round-trip ends with a widget submission, so the reply
-    // counts as inline-composed (visible in scrollback).
+    // The `Ctrl+X` round-trip ends with a widget submission, so the text is on
+    // the terminal and echoing it would double it.
     assert_eq!(action, InterruptAction::Reply {
         content: "from the editor, edited inline".into(),
-        from_editor: false,
+        echo: false,
     });
 }
 
@@ -424,7 +424,7 @@ fn configured_streaming_reply_uses_inline_prompt() {
     );
     assert_eq!(action, InterruptAction::Reply {
         content: "changed my mind".into(),
-        from_editor: false,
+        echo: false,
     });
 }
 
@@ -521,7 +521,7 @@ fn compose_in_editor_opens_editor_directly() {
     );
     assert_eq!(action, InterruptAction::Reply {
         content: "written in the editor".into(),
-        from_editor: true,
+        echo: true,
     });
 }
 
@@ -579,7 +579,7 @@ fn compose_never_uses_inline_widget() {
     let action = handler(backend).handle_streaming_interrupt(&config, &make_printer(), true);
     assert_eq!(action, InterruptAction::Reply {
         content: "inline only".into(),
-        from_editor: false,
+        echo: false,
     });
 }
 
@@ -597,7 +597,7 @@ fn compose_in_editor_without_editor_falls_back_to_inline() {
     let action = handler(backend).handle_streaming_interrupt(&config, &make_printer(), true);
     assert_eq!(action, InterruptAction::Reply {
         content: "typed inline".into(),
-        from_editor: false,
+        echo: false,
     });
 }
 
@@ -621,7 +621,7 @@ fn compose_in_editor_spawn_failure_falls_back_to_inline() {
     );
     assert_eq!(action, InterruptAction::Reply {
         content: "typed inline".into(),
-        from_editor: false,
+        echo: false,
     });
 }
 
@@ -646,6 +646,6 @@ fn inline_editor_escape_spawn_failure_keeps_buffer() {
     );
     assert_eq!(action, InterruptAction::Reply {
         content: "draft, then more".into(),
-        from_editor: false,
+        echo: false,
     });
 }
