@@ -129,7 +129,7 @@ fn selecting_a_workspace_is_not_sticky_by_default() {
 // outranks the cwd from here on, stated once rather than extracted from
 // someone dismissing a prompt.
 #[test]
-fn always_pins_the_session_to_the_selection() {
+fn always_keeps_the_session_on_the_selection() {
     let tmp = tempdir().unwrap();
     let root = make_workspace(tmp.path(), "proj", "ws123");
     let session = env_session();
@@ -148,14 +148,14 @@ fn always_pins_the_session_to_the_selection() {
     let stdout = stdout_of(&printer, &out);
     assert!(
         stdout.contains("always"),
-        "the pin must be reported: {stdout}"
+        "the sticky flag must be reported: {stdout}"
     );
 }
 
-// A later plain `use` states the whole intent for the session, so the pin it
-// does not ask for is one it takes away.
+// A later plain `use` states the whole intent for the session, so the sticky
+// flag it does not ask for is one it takes away.
 #[test]
-fn selecting_again_without_always_releases_the_pin() {
+fn selecting_again_without_always_releases_the_flag() {
     let tmp = tempdir().unwrap();
     let first = make_workspace(tmp.path(), "first", "ws123");
     let second = make_workspace(tmp.path(), "second", "ws456");
@@ -180,7 +180,46 @@ fn selecting_again_without_always_releases_the_pin() {
     assert!(!env.store.load(&session).expect("mapping").sticky);
 }
 
-// `cwd` drops the record entirely; there would be nothing left to pin to.
+// Re-selecting the workspace that is already active takes the early-return
+// path, where the release is the only thing that happened: without the notice
+// the run reports a no-op while the record changed underneath.
+#[test]
+fn reselecting_the_active_workspace_reports_the_release() {
+    let tmp = tempdir().unwrap();
+    let root = make_workspace(tmp.path(), "proj", "ws123");
+    let session = env_session();
+    let env = env_at(tmp.path().to_owned(), tmp.path(), Some(&session), true);
+
+    let (printer, _out, _err) = Printer::memory(OutputFormat::Text);
+    Use {
+        target: Some(WorkspaceTarget::Path(root.clone())),
+        always: true,
+    }
+    .run(&printer, &env)
+    .unwrap();
+
+    let (printer, out, _err) = Printer::memory(OutputFormat::Text);
+    Use {
+        target: Some(WorkspaceTarget::Path(root)),
+        always: false,
+    }
+    .run(&printer, &env)
+    .unwrap();
+
+    assert!(!env.store.load(&session).expect("mapping").sticky);
+
+    let stdout = stdout_of(&printer, &out);
+    assert!(
+        stdout.contains("Already the session-active workspace"),
+        "unexpected output: {stdout}"
+    );
+    assert!(
+        stdout.contains("no longer always"),
+        "the release must be reported: {stdout}"
+    );
+}
+
+// `cwd` drops the record entirely; there would be nothing left to keep active.
 #[test]
 fn always_with_the_cwd_target_is_rejected() {
     let tmp = tempdir().unwrap();
