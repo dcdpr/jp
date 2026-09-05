@@ -5,6 +5,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-03
 - **Extends**: [RFD 048]
+- **Requires**: [RFD 104]
 
 ## Summary
 
@@ -158,37 +159,47 @@ surface (`finish().await`) this design removes.
 
 A status line renders iff:
 
-1. the resolved output format permits terminal control (`text-pretty`),
-2. the chrome channel (stderr) is an interactive terminal, and
-3. no tracing layer writes to stderr (`-v`, `--log`, or `--log-file=-`, absent
+1. the chrome channel can be repainted — [RFD 104]'s `can_repaint` on stderr,
+   which is escape capability and cursor addressability together — and
+2. no tracing layer writes to stderr (`-v`, `--log`, or `--log-file=-`, absent
    `--quiet`).
 
-| Situation                                     | Status line                                                                                         |
-| --------------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| `--format json` / `json-pretty`               | off (chrome is NDJSON)                                                                              |
-| `--format text`                               | off (the non-pretty `Sink` strips `\r` and escape sequences; the line would smear as repeated text) |
-| `text-pretty`, stderr is a terminal           | on                                                                                                  |
-| stderr is not a terminal                      | off, regardless of format                                                                           |
-| `-v` / `--log` / `--log-file=-` on a terminal | off (stderr carries live logs, a persistent stream outside the printer)                             |
+Conditions 1 and 2 of the original three are [RFD 104]'s to answer.
+This RFD reached them independently, from the status line rather than from the
+channel; 104 owns channel capability as a general property and the status line
+is one client of it.
+The table below is the same predicate, restated in terms of what each situation
+makes `can_repaint`.
 
-Condition 2 changes the tty *source* for this chrome from stdout to stderr:
-today chrome gating keys off stdout (`ctx.term.is_tty`), so `jp query 2>file`
-with stdout on a terminal writes `\r\x1b[K` bytes into the file — under this
-predicate it does not.
-`--format auto` continues to resolve by stdout tty-ness per [RFD 048]; this RFD
-does not change format resolution.
+| Situation                                     | Status line                                                                                              |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `--format json` / `json-pretty`               | off (chrome is NDJSON)                                                                                   |
+| explicit `--format text`                      | off (the non-pretty `Sink` strips `\r` and escape sequences; the line would accumulate as repeated text) |
+| `text-pretty`, stderr is a terminal           | on                                                                                                       |
+| stderr is not a terminal                      | off, regardless of format                                                                                |
+| `-v` / `--log` / `--log-file=-` on a terminal | off (stderr carries live logs, a persistent stream outside the printer)                                  |
 
-Condition 3 mirrors the guarantee's scope: tracing writes to stderr directly,
+Moving the tty *source* for this chrome from stdout to stderr is what makes the
+predicate correct: today chrome gating keys off stdout (`ctx.term.is_tty`), so
+`jp query 2>file` with stdout on a terminal writes `\r\x1b[K` bytes into the
+file.
+
+The `--format text` row is why the predicate needs escape capability as well as
+addressability.
+[RFD 104] resolves `--format auto` per channel, so a terminal stderr keeps its
+escapes even when stdout is piped, and that row applies only to an explicit
+`--format text`.
+
+Condition 2 mirrors the guarantee's scope: tracing writes to stderr directly,
 behind the worker's back, and a user opting into live logs has chosen stderr as
 a persistent stream where an ephemeral line cannot survive.
 The shell knows this at logging setup, before the printer is constructed, so it
-feeds the same constructor input as condition 2.
+feeds a constructor input alongside the channel capability.
 
-To make condition 2 explicit and testable, terminal capability is a constructor
-input: `Printer::terminal` captures stderr's tty-ness at construction, and the
-memory constructor accepts an explicit capability override so tests can exercise
-draw, clear, and redraw without a real terminal.
-The exact constructor shape is an implementation detail.
+Terminal capability as a constructor input, with an override on the memory
+constructor so tests can exercise draw, clear, and redraw without a real
+terminal, is [RFD 104]'s `ChannelCaps` and `Printer::memory_with`.
+This RFD consumes them rather than defining its own.
 
 ### Worker integration
 
@@ -373,9 +384,12 @@ Each phase is independently reviewable and mergeable.
   here.
 - `crates/jp_cli/src/timer.rs` — the `LineTimer` interim solution this RFD
   replaces.
+- [RFD 104: Terminal Capability and Promptability Signals][RFD 104] — owns
+  channel capability and `can_repaint`; this RFD's status line is one client.
 - `crates/jp_printer/src/printer.rs` — the worker loop this RFD extends.
 
 [RFD 048]: 048-four-channel-output-model.md
 [RFD 088]: 088-unified-editor-service-and-inline-reply-widget.md
+[RFD 104]: 104-terminal-capability-and-promptability-signals.md
 [Tesler]: https://en.wikipedia.org/wiki/Law_of_conservation_of_complexity
 [`ErrChannel`]: https://github.com/dcdpr/jp/blob/main/crates/jp_printer/src/printer.rs
