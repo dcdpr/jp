@@ -5,6 +5,7 @@ pub mod inline_code;
 pub mod lock_wait;
 pub mod markdown;
 pub mod mcp_startup;
+pub mod print_stderr;
 pub mod reasoning;
 pub mod streaming;
 pub mod tool_call;

@@ -1,4 +1,5 @@
 use super::*;
+use crate::region::OutputLines;
 
 #[test]
 fn test_printer_async_ordering() {
@@ -711,6 +712,53 @@ fn shutdown_erases_the_region() {
     printer.shutdown();
 
     assert_eq!(*err.lock(), "\r\x1b[Kwaiting\r\x1b[K");
+}
+
+#[test]
+fn a_burst_of_pushes_costs_one_command() {
+    const PUSHES: usize = 500;
+
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+    let printer =
+        printer.with_terminal(TerminalCapability::interactive(Some(80)).with_rows(Some(24)));
+
+    let region = printer.status_region(
+        RegionStyle::new(Duration::ZERO, Duration::from_mins(1), |_, _| {
+            "* status".to_owned()
+        })
+        .with_output(OutputLines::Rows(2)),
+    );
+    printer.flush();
+    err.lock().clear();
+
+    // Every line lands in the shared buffer, so none of them queues behind the
+    // next persistent write. The tick interval is a minute out, so whatever
+    // renders here came from the coalesced refresh rather than a tick.
+    let sink = region.source("build");
+    for n in 1..=PUSHES {
+        sink.push(format!("line {n}"));
+    }
+    printer.flush();
+
+    let chrome = err.lock();
+    assert!(
+        chrome.contains(&format!("line {PUSHES}")),
+        "the newest line is on screen: {chrome:?}"
+    );
+    assert!(
+        !chrome.contains("line 1 ") && !chrome.contains("line 100"),
+        "older lines were evicted rather than drawn: {chrome:?}"
+    );
+    // How many frames land depends on how often the worker gets scheduled
+    // during the burst, so the assertion is the property rather than a count:
+    // one frame per push would be 500, and coalescing has to keep it far below
+    // that however the two threads interleave.
+    let frames = chrome.matches("* status").count();
+    drop(chrome);
+    assert!(
+        frames < PUSHES / 10,
+        "{PUSHES} pushes drew {frames} frames; the refresh is not coalescing"
+    );
 }
 
 #[test]

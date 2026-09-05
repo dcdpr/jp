@@ -1,0 +1,70 @@
+# Manual verification fixture for RFD 091 phase 5: the MCP startup window.
+#
+# Two fake MCP servers that talk to stderr for ~20 and ~30 seconds and then
+# fail. Both are `optional`, so the failures are reported rather than aborting
+# the query, which exercises the second half of the phase in the same run.
+#
+#     jp query --cfg @crates/jp_printer/examples/mcp_window_fixture.toml "hi"
+#
+# Delete this alongside `region_spike.rs` once T-0994dfa can assert the same
+# things without a human watching.
+
+# Show the region from the first frame rather than waiting out the default 4s.
+[style.mcp_startup]
+delay_secs = 0
+interval_ms = 100
+
+# A server is only started when an enabled tool names it, so each fake server
+# needs a tool pointing at it.
+[conversation.tools.window_alpha_tool]
+source = "mcp.window_alpha"
+enable = true
+
+[conversation.tools.window_beta_tool]
+source = "mcp.window_beta"
+enable = true
+
+# Emits every 0.5s for ~20s. Lines 7, 13 and 19 are the interesting ones:
+# styled output, a hostile screen-clear, and a row far wider than any terminal.
+[providers.mcp.window_alpha]
+type = "stdio"
+optional = true
+startup_timeout_secs = 120
+command = "sh"
+arguments = [
+  "-c",
+  '''
+i=1
+while [ $i -le 40 ]; do
+  case $i in
+    7)  printf '   \033[32mFinished\033[0m dev profile in 3.2s\n' >&2 ;;
+    13) printf '   \033[2Jthis line tried to clear your screen\n' >&2 ;;
+    19) printf '   wide-row-%s-end\n' "$(printf 'x%.0s' $(seq 1 400))" >&2 ;;
+    *)  printf '   Compiling alpha-crate-%02d v1.0.%d\n' "$i" "$i" >&2 ;;
+  esac
+  sleep 0.5
+  i=$((i + 1))
+done
+exit 1
+''',
+]
+
+# Slower and longer, so it is still going after alpha gives up: that is when
+# the status row drops to one server while the window still holds both.
+[providers.mcp.window_beta]
+type = "stdio"
+optional = true
+startup_timeout_secs = 120
+command = "sh"
+arguments = [
+  "-c",
+  '''
+i=1
+while [ $i -le 40 ]; do
+  printf '   Building beta-target-%02d\n' "$i" >&2
+  sleep 0.8
+  i=$((i + 1))
+done
+exit 1
+''',
+]

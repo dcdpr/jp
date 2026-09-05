@@ -1,13 +1,14 @@
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 use camino_tempfile::Utf8TempDir;
 use jp_config::{
     AppConfig,
     conversation::tool::{CommandConfigOrString, style::ParametersStyle},
+    style::print_stderr::{PrintStderr, StderrRows},
 };
 use jp_conversation::event::ToolCallResponse;
 use jp_md::format::{BackgroundFill, DefaultBackground};
-use jp_printer::{ErrChannel, OutputFormat, Printer, SharedBuffer};
+use jp_printer::{ErrChannel, OutputFormat, Printer, SharedBuffer, TerminalCapability};
 use serde_json::{Map, Value};
 
 use super::*;
@@ -91,7 +92,6 @@ fn create_renderer() -> (ToolRenderer, SharedBuffer, SharedBuffer) {
         ErrChannel::new(Arc::new(printer)),
         config,
         "/tmp".into(),
-        false,
         jp_llm::tool::InvocationContext::default(),
     );
     (renderer, err, out)
@@ -101,15 +101,22 @@ fn create_renderer_with_show(show: bool) -> (ToolRenderer, SharedBuffer) {
     let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
     let mut config = AppConfig::new_test().style;
     config.tool_call.show = show;
-    // The temp line is TTY-gated, so these tests run as a TTY. `preparing.show`
-    // stays off to keep `register` from spawning a timer task (sync tests have
-    // no tokio runtime); `tick` is exercised by calling it directly.
-    config.tool_call.preparing.show = false;
+    // The preparing row is printer-owned chrome, so it renders only against a
+    // terminal; declare one and let it appear from the first frame instead of
+    // waiting out a delay.
+    config.tool_call.preparing.show = true;
+    config.tool_call.preparing.delay_secs = 0;
+    config.tool_call.preparing.interval_ms = 10;
+    config.tool_call.progress.show = true;
+    config.tool_call.progress.delay_secs = 0;
+    config.tool_call.progress.interval_ms = 10;
+    config.tool_call.progress.print_stderr = PrintStderr::Rows(StderrRows { rows: 2 });
+    let printer =
+        printer.with_terminal(TerminalCapability::interactive(Some(80)).with_rows(Some(24)));
     let renderer = ToolRenderer::new(
         ErrChannel::new(Arc::new(printer)),
         config,
         "/tmp".into(),
-        true,
         jp_llm::tool::InvocationContext::default(),
     );
     (renderer, err)
@@ -185,7 +192,6 @@ async fn test_render_custom_arguments_after_approval() {
         ErrChannel::new(Arc::new(printer)),
         config,
         root.path().to_owned(),
-        false,
         jp_llm::tool::InvocationContext::default(),
     );
 
@@ -361,27 +367,67 @@ fn test_empty_result_does_not_separate_following_header() {
 
 #[test]
 fn test_progress() {
-    let (renderer, out, _) = create_renderer();
-    renderer.render_progress(Duration::from_secs(5));
+    let (mut renderer, out) = create_renderer_with_show(true);
+    renderer.start_progress();
     renderer.channel.flush();
     let output = strip_ansi(&out.lock());
-    insta::assert_snapshot!(output, @"⏱ Running… 5.0s");
+    assert!(output.contains("⏱ Running…"), "output: {output:?}");
+}
+
+#[test]
+fn progress_window_shows_a_tool_s_stderr() {
+    let (mut renderer, out) = create_renderer_with_show(true);
+    renderer.start_progress();
+
+    let sink = renderer
+        .progress_source("cargo_test")
+        .expect("print_stderr is on");
+    sink.push("   Compiling serde v1.0.219");
+    renderer.channel.flush();
+
+    let output = strip_ansi(&out.lock());
+    assert!(
+        output.contains("Compiling serde v1.0.219"),
+        "output: {output:?}"
+    );
+    assert!(
+        !output.contains("[cargo_test]"),
+        "a single source renders verbatim: {output:?}"
+    );
+}
+
+#[test]
+fn progress_window_is_off_without_print_stderr() {
+    // The sink is `None` rather than a no-op, so a tool that floods costs
+    // nothing at all when nobody asked to watch it.
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let mut config = AppConfig::new_test().style;
+    config.tool_call.progress.print_stderr = PrintStderr::Off;
+    let renderer = ToolRenderer::new(
+        ErrChannel::new(Arc::new(printer)),
+        config,
+        "/tmp".into(),
+        jp_llm::tool::InvocationContext::default(),
+    );
+
+    assert!(renderer.progress_source("cargo_test").is_none());
 }
 
 #[test]
 fn test_clear_progress() {
-    let (renderer, out, _) = create_renderer();
+    let (mut renderer, out) = create_renderer_with_show(true);
+    renderer.start_progress();
     renderer.clear_progress();
     renderer.channel.flush();
-    // Raw output is \r\x1b[K which strips to empty after ANSI removal
-    assert!(strip_ansi(&out.lock()).is_empty());
+    // Releasing erases the row, so the last thing on the wire clears it.
+    let raw = out.lock().clone();
+    assert!(raw.ends_with("\r\x1b[K"), "raw: {raw:?}");
 }
 
 #[test]
 fn test_register_single_tool() {
     let (mut renderer, out) = create_renderer_with_show(true);
-    let (tx, _rx) = tokio::sync::mpsc::channel(1);
-    renderer.register("id1", "fs_read_file", &tx);
+    renderer.register("id1", "fs_read_file");
     renderer.channel.flush();
     let output = strip_ansi(&out.lock());
     assert!(output.contains("Calling tool"), "output: {output:?}");
@@ -395,23 +441,22 @@ fn test_register_single_tool() {
 #[test]
 fn test_register_multiple_tools_uses_plural() {
     let (mut renderer, out) = create_renderer_with_show(true);
-    let (tx, _rx) = tokio::sync::mpsc::channel(1);
-    renderer.register("id1", "fs_read_file", &tx);
-    renderer.register("id2", "cargo_check", &tx);
+    renderer.register("id1", "fs_read_file");
+    renderer.register("id2", "cargo_check");
     renderer.channel.flush();
     let output = strip_ansi(&out.lock());
     assert!(output.contains("Calling tools"), "output: {output:?}");
 }
 
 #[test]
-fn test_temp_line_separated_from_previous_tool_output() {
-    // While arguments stream, the temp line is the first thing rendered after a
-    // preceding result or custom-argument block. It must carry the owed
-    // blank-line separator so it isn't glued to that output on a TTY.
-    let (mut renderer, err) = create_renderer_with_show(true);
-    let (tx, _rx) = tokio::sync::mpsc::channel(1);
+fn test_header_pays_the_separator_owed_by_previous_tool_output() {
+    // The blank line owed after a result or custom-argument block is paid by
+    // the permanent header. The preparing row used to pay it, but that row is
+    // ephemeral now: a separator written into a row the printer erases is one
+    // nobody sees, and the persistent output is identical either way.
+    let (renderer, err, _) = create_renderer();
     renderer.render_formatted_arguments("plan output");
-    renderer.register("id1", "fs_read_file", &tx);
+    renderer.render_tool_call("fs_read_file", &Map::new(), &ParametersStyle::Off);
     renderer.channel.flush();
 
     let lines = visible_lines(&strip_ansi(&err.lock()));
@@ -419,27 +464,29 @@ fn test_temp_line_separated_from_previous_tool_output() {
         .iter()
         .position(|l| l == "plan output")
         .unwrap_or_else(|| panic!("plan output present: {lines:?}"));
-    assert_eq!(lines[idx + 1], "", "blank line before temp line: {lines:?}");
+    assert_eq!(
+        lines[idx + 1],
+        "",
+        "blank line before the header: {lines:?}"
+    );
     assert!(
         lines[idx + 2].contains("Calling tool"),
-        "temp line follows the blank: {lines:?}"
+        "header follows the blank: {lines:?}"
     );
 }
 
 #[test]
 fn test_register_duplicate_ignored() {
     let (mut renderer, _out) = create_renderer_with_show(true);
-    let (tx, _rx) = tokio::sync::mpsc::channel(1);
-    renderer.register("id1", "fs_read_file", &tx);
-    renderer.register("id1", "fs_read_file", &tx);
+    renderer.register("id1", "fs_read_file");
+    renderer.register("id1", "fs_read_file");
     assert_eq!(renderer.pending.len(), 1);
 }
 
 #[test]
 fn test_complete_removes_from_pending() {
     let (mut renderer, _out) = create_renderer_with_show(true);
-    let (tx, _rx) = tokio::sync::mpsc::channel(1);
-    renderer.register("id1", "fs_read_file", &tx);
+    renderer.register("id1", "fs_read_file");
 
     renderer.complete("id1");
 
@@ -481,13 +528,11 @@ fn test_completing_one_pending_tool_does_not_collide_with_header() {
         ErrChannel::new(Arc::new(printer)),
         config,
         "/tmp".into(),
-        true,
         jp_llm::tool::InvocationContext::default(),
     );
-    let (tx, _rx) = tokio::sync::mpsc::channel(1);
 
-    renderer.register("id1", "fs_read_file", &tx);
-    renderer.register("id2", "fs_read_file", &tx);
+    renderer.register("id1", "fs_read_file");
+    renderer.register("id2", "fs_read_file");
 
     renderer.complete("id1");
     let mut args = Map::new();
@@ -507,9 +552,8 @@ fn test_completing_one_pending_tool_does_not_collide_with_header() {
 #[test]
 fn test_cancel_all_clears_pending() {
     let (mut renderer, _out) = create_renderer_with_show(true);
-    let (tx, _rx) = tokio::sync::mpsc::channel(1);
-    renderer.register("id1", "tool_a", &tx);
-    renderer.register("id2", "tool_b", &tx);
+    renderer.register("id1", "tool_a");
+    renderer.register("id2", "tool_b");
     renderer.complete("id1");
     renderer.cancel_all();
     assert!(!renderer.has_pending(), "pending should be cleared");
@@ -518,8 +562,7 @@ fn test_cancel_all_clears_pending() {
 #[test]
 fn test_reset_clears_everything() {
     let (mut renderer, _out) = create_renderer_with_show(true);
-    let (tx, _rx) = tokio::sync::mpsc::channel(1);
-    renderer.register("id1", "tool_a", &tx);
+    renderer.register("id1", "tool_a");
     renderer.complete("id1");
     renderer.reset();
     assert!(!renderer.has_pending());
@@ -531,8 +574,7 @@ fn test_reset_clears_visible_temp_line() {
     // streaming cycle begins. `reset` must clear it rather than leave it
     // stranded on screen.
     let (mut renderer, err) = create_renderer_with_show(true);
-    let (tx, _rx) = tokio::sync::mpsc::channel(1);
-    renderer.register("id1", "fs_read_file", &tx);
+    renderer.register("id1", "fs_read_file");
     renderer.reset();
 
     renderer.channel.flush();
@@ -544,15 +586,15 @@ fn test_reset_clears_visible_temp_line() {
 }
 
 #[test]
-fn test_tick_with_pending_tools() {
+fn test_preparing_row_carries_the_elapsed_time() {
+    // The row ticks itself, so the elapsed time appears without anyone driving
+    // it; the value is whatever the worker measured when it painted.
     let (mut renderer, out) = create_renderer_with_show(true);
-    let (tx, _rx) = tokio::sync::mpsc::channel(1);
-    renderer.register("id1", "fs_read_file", &tx);
-    renderer.tick(Duration::from_millis(1500));
+    renderer.register("id1", "fs_read_file");
     renderer.channel.flush();
     let output = strip_ansi(&out.lock());
     assert!(output.contains("receiving arguments"), "output: {output:?}");
-    assert!(output.contains("1.5s"), "output: {output:?}");
+    assert!(output.contains('s'), "output: {output:?}");
 }
 
 #[test]
@@ -562,11 +604,9 @@ fn test_show_false_suppresses_preparing_output() {
         ErrChannel::new(Arc::new(Printer::sink())),
         config,
         "/tmp".into(),
-        false,
         jp_llm::tool::InvocationContext::default(),
     );
-    let (tx, _rx) = tokio::sync::mpsc::channel(1);
-    renderer.register("id1", "tool_a", &tx);
+    renderer.register("id1", "tool_a");
 
     renderer.complete("id1");
     // Should not panic; output goes to sink.
@@ -580,7 +620,6 @@ fn test_tool_call_show_false_suppresses_output() {
         ErrChannel::new(Arc::new(Printer::sink())),
         config,
         "/tmp".into(),
-        false,
         jp_llm::tool::InvocationContext::default(),
     );
     let mut args = Map::new();
@@ -825,23 +864,23 @@ fn clearing_a_region_with_none_unshades_following_chrome() {
 
 #[test]
 fn preparing_line_fills_to_the_edge_under_a_region() {
-    // The initial temp line can sit on screen for seconds before the first
-    // tick rewrites it; under a reasoning region it must erase to the right
-    // edge so the whole row is shaded, not just the span behind the text.
+    // Under a reasoning region the whole row must be shaded, not just the span
+    // behind the text (RFD 095). The worker asserts the background, then erases
+    // to the right edge — `\x1b[K` fills with whatever background is active —
+    // and only then writes the text over the start of the filled row.
     let (mut renderer, err) = create_renderer_with_show(true);
     renderer.set_region("id1", Some(terminal_region()));
 
-    let (tick_tx, _tick_rx) = tokio::sync::mpsc::channel(1);
-    renderer.register("id1", "fs_read_file", &tick_tx);
+    renderer.register("id1", "fs_read_file");
     renderer.channel.flush();
 
     let raw = err.lock().clone();
     assert!(
-        raw.contains("\x1b[48;5;236m"),
-        "the preparing line carries the region background: {raw:?}"
+        raw.contains("\x1b[48;5;236m\x1b[K"),
+        "the row is filled to the edge under the region background: {raw:?}"
     );
     assert!(
-        raw.ends_with("\x1b[K\x1b[49m"),
-        "the preparing line must erase to the edge before the region closes: {raw:?}"
+        raw.ends_with("\x1b[49m"),
+        "the background closes at the row's end so it never leaks below: {raw:?}"
     );
 }

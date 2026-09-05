@@ -146,6 +146,7 @@ PartialAppConfig {
             show: None,
             delay_secs: None,
             interval_ms: None,
+            print_stderr: None,
         },
         reasoning: PartialReasoningConfig {
             display: None,
@@ -168,10 +169,11 @@ PartialAppConfig {
         },
         tool_call: PartialToolCallConfig {
             show: None,
-            progress: PartialProgressConfig {
+            progress: PartialToolProgressConfig {
                 show: None,
                 delay_secs: None,
                 interval_ms: None,
+                print_stderr: None,
             },
             preparing: PartialPreparingConfig {
                 show: None,

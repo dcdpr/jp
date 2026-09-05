@@ -22,6 +22,14 @@ strip-ansi-escapes = { workspace = true }
 tracing = { workspace = true }
 vte = { workspace = true }
 
+[dev-dependencies]
+# `cursor::position` lets the region spike measure where the terminal actually
+# put the cursor instead of asking a human to look.
+crossterm = { workspace = true, features = ["events"] }
+# A screen model, so the region's multi-row draw and erase can be asserted
+# against what a terminal renders rather than the bytes it was sent.
+vt100 = { workspace = true }
+
 [lints]
 workspace = true
 

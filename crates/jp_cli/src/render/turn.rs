@@ -79,7 +79,6 @@ pub struct TurnRenderer {
     // Stable params for rebuilding sub-renderers.
     printer: Arc<Printer>,
     root: Utf8PathBuf,
-    is_tty: bool,
     source: ConfigSource,
     invocation: InvocationContext,
 
@@ -115,7 +114,6 @@ impl TurnRenderer {
         assistant_name: Option<String>,
         model_id: Option<String>,
         root: Utf8PathBuf,
-        is_tty: bool,
         source: ConfigSource,
         invocation: InvocationContext,
         style_overlay: Option<StyleOverlay>,
@@ -130,14 +128,12 @@ impl TurnRenderer {
             ErrChannel::new(printer.clone()),
             style,
             root.clone(),
-            is_tty,
             invocation.clone(),
         );
         view.set_tool_separator(tool.separator_flag());
         Self {
             printer,
             root,
-            is_tty,
             source,
             invocation,
             view,
@@ -289,7 +285,6 @@ impl TurnRenderer {
             ErrChannel::new(self.printer.clone()),
             style,
             self.root.clone(),
-            self.is_tty,
             self.invocation.clone(),
         );
         self.view.set_tool_separator(self.tool.separator_flag());

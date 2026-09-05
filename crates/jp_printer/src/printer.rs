@@ -5,7 +5,7 @@ use std::{
     io,
     sync::{
         Arc,
-        atomic::{AtomicU64, AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
         mpsc::{self, Receiver, RecvTimeoutError, Sender},
     },
     thread::{self, JoinHandle},
@@ -19,7 +19,7 @@ use crate::{
     ansi::AnsiStripper,
     region::{
         RegionCommand, RegionStack, RegionStyle, StatusRegion, SuspendGuard, TerminalCapability,
-        next_region_id,
+        WindowBuffer, next_region_id,
     },
     typewriter::VisibleCharsIterator,
 };
@@ -227,13 +227,18 @@ impl Printer {
         }
 
         let id = next_region_id();
+        let buffer = Arc::new(Mutex::new(WindowBuffer::default()));
+        let refresh = Arc::new(AtomicBool::new(false));
+
         self.send(Command::Region(RegionCommand::Claim {
             id,
             style,
-            columns: self.terminal.columns(),
+            terminal: self.terminal,
+            buffer: Arc::clone(&buffer),
+            refresh: Arc::clone(&refresh),
         }));
 
-        StatusRegion::new(id, self.tx.clone())
+        StatusRegion::new(id, self.tx.clone(), buffer, refresh)
     }
 
     /// Suspend status-region rendering until the returned guard drops.

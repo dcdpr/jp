@@ -306,6 +306,9 @@ Ok(
                     interval_ms: Some(
                         100,
                     ),
+                    print_stderr: Some(
+                        Auto,
+                    ),
                 },
                 reasoning: PartialReasoningConfig {
                     display: None,
@@ -350,7 +353,7 @@ Ok(
                     show: Some(
                         true,
                     ),
-                    progress: PartialProgressConfig {
+                    progress: PartialToolProgressConfig {
                         show: Some(
                             true,
                         ),
@@ -359,6 +362,9 @@ Ok(
                         ),
                         interval_ms: Some(
                             100,
+                        ),
+                        print_stderr: Some(
+                            Off,
                         ),
                     },
                     preparing: PartialPreparingConfig {

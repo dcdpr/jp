@@ -297,7 +297,6 @@ async fn test_pre_render_for_prompt_function_call_fires_before_approval() {
         ErrChannel::new(printer.clone()),
         style_config,
         Utf8PathBuf::from("/tmp"),
-        false,
         jp_llm::tool::InvocationContext::default(),
     );
 
@@ -362,7 +361,6 @@ async fn test_pre_render_for_prompt_custom_ask_defers_rendering() {
         ErrChannel::new(printer.clone()),
         style_config,
         Utf8PathBuf::from("/tmp"),
-        false,
         jp_llm::tool::InvocationContext::default(),
     );
 
@@ -420,6 +418,7 @@ impl Executor for EditableExecutor {
         _mcp_client: &jp_mcp::Client,
         _root: &camino::Utf8Path,
         _cancellation_token: tokio_util::sync::CancellationToken,
+        _stderr: Option<jp_llm::tool::StderrSink>,
     ) -> ExecutorResult {
         unreachable!("resolve_tool_call_decision does not invoke execute()")
     }
@@ -460,7 +459,6 @@ async fn test_resolve_tool_call_decision_invalidates_prerender_on_edit() {
         ErrChannel::new(printer.clone()),
         style_config,
         Utf8PathBuf::from("/tmp"),
-        false,
         jp_llm::tool::InvocationContext::default(),
     );
 

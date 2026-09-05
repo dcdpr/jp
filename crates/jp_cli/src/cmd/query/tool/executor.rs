@@ -52,7 +52,7 @@ use jp_conversation::event::{InquirySource, ToolCallRequest, ToolCallResponse};
 use jp_llm::{
     ExecutionOutcome,
     tool::{
-        InvocationContext, ToolDefinition,
+        InvocationContext, StderrSink, ToolDefinition,
         builtin::BuiltinExecutors,
         executor::{Executor, ExecutorResult, ExecutorSource, PermissionInfo},
     },
@@ -218,6 +218,7 @@ impl Executor for ToolExecutor {
         mcp_client: &Client,
         root: &Utf8Path,
         cancellation_token: CancellationToken,
+        stderr: Option<StderrSink>,
     ) -> ExecutorResult {
         // Compile this tool's access grants into a runtime policy, baking
         // approved external targets in. The policy travels to the tool in its
@@ -249,6 +250,7 @@ impl Executor for ToolExecutor {
                 &self.builtin_executors,
                 access.as_ref(),
                 &self.invocation,
+                stderr,
             )
             .await;
 

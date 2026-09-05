@@ -182,7 +182,6 @@ impl Print {
             assistant_name,
             model_id,
             root,
-            ctx.term.is_tty,
             source,
             invocation,
             style_overlay,

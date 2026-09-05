@@ -54,8 +54,10 @@ mod turn_loop;
 
 use std::{
     borrow::Cow,
-    collections::HashSet,
-    env, fs,
+    collections::{HashMap, HashSet},
+    env,
+    fmt::Write as _,
+    fs,
     io::{self, IsTerminal},
     sync::Arc,
     time::Duration,
@@ -64,6 +66,7 @@ use std::{
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
 use clap::{ArgAction, builder::TypedValueParser as _};
+use crossterm::style::Stylize as _;
 use indexmap::IndexMap;
 use jp_attachment::Attachment;
 use jp_config::{
@@ -100,12 +103,13 @@ use jp_llm::{
     },
 };
 use jp_mcp::{StartupSet, id::McpServerId};
-use jp_printer::{Printer, RegionStyle, StatusRegion};
+use jp_printer::{LineSink, Printer, RegionStyle, StatusRegion};
 use jp_storage::backend::Projection;
 use jp_task::task::TitleGeneratorTask;
 use jp_term::width::{display_width, truncate_to_width};
 use jp_workspace::{ConversationHandle, ConversationLock, Workspace};
 use minijinja::{Environment, UndefinedBehavior};
+use tokio::sync::broadcast::error::RecvError;
 use tool::{TerminalExecutorSource, ToolCoordinator};
 use tracing::{debug, trace, warn};
 use turn_loop::run_turn_loop;
@@ -136,7 +140,7 @@ use crate::{
     error::{Error, Result},
     output::print_json,
     parser::AttachmentUrlOrPath,
-    render::TurnView,
+    render::{TurnView, tool::output_lines},
     signals::SignalRouter,
 };
 
@@ -630,12 +634,13 @@ impl Query {
 
         // Wait for all MCP servers to finish loading, showing a timer line
         // when the wait takes long enough to be noticeable.
-        await_mcp_servers(
+        let skipped = await_mcp_servers(
             mcp_servers_handle,
             cfg.style.mcp_startup.clone(),
             ctx.printer.clone(),
         )
         .await?;
+        report_skipped_servers(&ctx.printer, &cfg, &skipped);
 
         let tools =
             tool_definitions(cfg.conversation.tools.iter(), &ctx.mcp_client, forced_tool).await?;
@@ -1221,37 +1226,124 @@ impl Query {
 
 /// Wait for background MCP server startups to complete.
 ///
-/// Shows a single aggregate status row on stderr once the wait exceeds the
-/// configured delay, updating the listed server names as startups finish.
+/// Shows an aggregate status row on stderr once the wait exceeds the configured
+/// delay, updating the listed server names as startups finish, with a rolling
+/// window of the servers' own stderr above it.
 /// Servers that finish within the delay never trigger the row.
 ///
-/// Returns the first startup error; the row is erased on the way out, so the
-/// error renders on a clean line.
+/// Returns the optional servers that failed and were skipped, so the caller can
+/// account for the tools that went with them.
+/// A required server's failure is returned as an error instead; the rows are
+/// erased on the way out, so it renders on a clean line.
 async fn await_mcp_servers(
     mut startup: StartupSet,
     config: McpStartupConfig,
     printer: Arc<Printer>,
-) -> std::result::Result<(), cmd::Error> {
+) -> std::result::Result<Vec<McpServerId>, cmd::Error> {
     if startup.joins.is_empty() {
-        return Ok(());
+        return Ok(Vec::new());
     }
 
     let region = claim_mcp_startup_region(&printer, &config);
     region.set_detail(mcp_startup_status(&startup.pending));
 
-    loop {
-        match startup.joins.join_next().await {
-            None => break Ok(()),
-            Some(Err(error)) => break Err(error.into()),
-            Some(Ok(Err(error))) => break Err(error.into()),
-            Some(Ok(Ok(id))) => {
-                startup.pending.retain(|pending| pending != &id);
-                if !startup.pending.is_empty() {
-                    region.set_detail(mcp_startup_status(&startup.pending));
+    // One sink per pending server, dropped the moment that server's join
+    // completes. The forwarder behind the channel runs until the *server*
+    // exits, which is long after it finished starting; a sink left open would
+    // let a started server's operational logging evict the build output of one
+    // still compiling.
+    let mut sinks: HashMap<McpServerId, LineSink> = startup
+        .pending
+        .iter()
+        .map(|id| (id.clone(), region.source(id.as_str())))
+        .collect();
+
+    let mut skipped = Vec::new();
+    let mut lines_open = true;
+
+    let result = loop {
+        tokio::select! {
+            line = startup.stderr.recv(), if lines_open => match line {
+                Ok((id, text)) => if let Some(sink) = sinks.get(&id) {
+                    sink.push(text);
+                },
+                // The window shows the most recent lines by definition, so
+                // falling behind costs nothing worth reporting.
+                Err(RecvError::Lagged(_)) => {}
+                Err(RecvError::Closed) => lines_open = false,
+            },
+            joined = startup.joins.join_next() => match joined {
+                None => break Ok(()),
+                Some(Err(error)) => break Err(cmd::Error::from(error)),
+                Some(Ok(Err(error))) => break Err(cmd::Error::from(error)),
+                Some(Ok(Ok(outcome))) => {
+                    let id = outcome.id();
+                    sinks.remove(id);
+                    startup.pending.retain(|pending| pending != id);
+                    if outcome.was_skipped() {
+                        skipped.push(id.clone());
+                    }
+                    if !startup.pending.is_empty() {
+                        region.set_detail(mcp_startup_status(&startup.pending));
+                    }
                 }
-            }
+            },
         }
+    };
+
+    result.map(|()| skipped)
+}
+
+/// Report optional MCP servers that failed to start.
+///
+/// A skipped server completes the wait successfully, so without this the query
+/// quietly loses tools: the `warn!` explaining why goes to the trace log, which
+/// is discarded unless the run itself fails.
+///
+/// Emitted whatever `style.mcp_startup.show` and `print_stderr` say.
+/// Those keys gate progress display; gating a failure report behind them would
+/// reproduce the silence this closes.
+fn report_skipped_servers(printer: &Printer, config: &AppConfig, skipped: &[McpServerId]) {
+    for id in skipped {
+        let tools = tools_backed_by(config, id);
+
+        if printer.format().is_json() {
+            let json = serde_json::json!({
+                "mcp_server_unavailable": id.as_str(),
+                "unavailable_tools": tools,
+            });
+            printer.eprintln(json.to_string());
+            continue;
+        }
+
+        let mut line = format!("Optional MCP server '{id}' did not start");
+        if !tools.is_empty() {
+            let _err = write!(line, "; unavailable tools: {}", tools.join(", "));
+        }
+        line.push_str(" (run with -v for the reason)");
+
+        printer.eprintln(line.yellow().to_string());
     }
+}
+
+/// Names of the enabled tools sourced from `server`.
+///
+/// Sorted, so the report reads the same way twice.
+fn tools_backed_by(config: &AppConfig, server: &McpServerId) -> Vec<String> {
+    let mut names: Vec<String> = config
+        .conversation
+        .tools
+        .iter()
+        .filter(|(_, tool)| tool.is_enabled())
+        .filter(|(_, tool)| match tool.source() {
+            ToolSource::Mcp { server: name, .. } => &McpServerId::new(name.as_str()) == server,
+            _ => false,
+        })
+        .map(|(name, _)| name.to_string())
+        .collect();
+
+    names.sort();
+    names
 }
 
 /// Claim the status region for the MCP server startup wait.
@@ -1268,11 +1360,14 @@ fn claim_mcp_startup_region(printer: &Printer, config: &McpStartupConfig) -> Sta
     // it.
     let columns = printer.chrome_columns();
 
-    printer.status_region(RegionStyle::new(
-        Duration::from_secs(config.delay_secs.into()),
-        Duration::from_millis(config.interval_ms.into()),
-        move |secs, detail| mcp_startup_line(secs, detail, columns),
-    ))
+    printer.status_region(
+        RegionStyle::new(
+            Duration::from_secs(config.delay_secs.into()),
+            Duration::from_millis(config.interval_ms.into()),
+            move |secs, detail| mcp_startup_line(secs, detail, columns),
+        )
+        .with_output(output_lines(config.print_stderr)),
+    )
 }
 
 /// Render the MCP startup status row for `secs` elapsed and `status`, bounding

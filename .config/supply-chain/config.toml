@@ -657,9 +657,17 @@ criteria = "safe-to-deploy"
 version = "0.9.5"
 criteria = "safe-to-deploy"
 
+[[exemptions.vt100]]
+version = "0.16.2"
+criteria = "safe-to-run"
+
 [[exemptions.vte]]
 version = "0.14.1"
 criteria = "safe-to-deploy"
+
+[[exemptions.vte]]
+version = "0.15.0"
+criteria = "safe-to-run"
 
 [[exemptions.wasm-streams]]
 version = "0.4.2"

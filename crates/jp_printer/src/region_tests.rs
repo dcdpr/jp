@@ -1,15 +1,22 @@
+use std::io::Write as _;
+
 use super::*;
 use crate::printer::OutputFormat;
 
+/// A terminal of unknown size: rows are neither truncated nor windowed.
+fn unsized_terminal() -> TerminalCapability {
+    TerminalCapability::interactive(None)
+}
+
 /// A stack holding one immediately-visible region, plus its id.
-fn visible_stack(columns: Option<u16>) -> (RegionStack, RegionId, Vec<u8>) {
+fn visible_stack(terminal: TerminalCapability) -> (RegionStack, RegionId, Vec<u8>) {
     let mut stack = RegionStack::new();
     let mut out = Vec::new();
     let style = RegionStyle::new(Duration::ZERO, Duration::from_millis(50), |_, detail| {
         detail.unwrap_or("waiting").to_owned()
     });
 
-    stack.claim(1, style, columns, &mut out);
+    stack.claim_test(1, style, terminal, &mut out);
     (stack, 1, out)
 }
 
@@ -37,7 +44,7 @@ fn regions_are_off_while_logs_go_to_stderr() {
 
 #[test]
 fn claiming_a_due_region_paints_it_immediately() {
-    let (_stack, _id, out) = visible_stack(None);
+    let (_stack, _id, out) = visible_stack(unsized_terminal());
 
     assert_eq!(String::from_utf8(out).unwrap(), "\r\x1b[Kwaiting");
 }
@@ -50,7 +57,7 @@ fn a_delayed_region_paints_nothing_until_its_delay_passes() {
         "waiting".to_owned()
     });
 
-    stack.claim(1, style, None, &mut out);
+    stack.claim_test(1, style, unsized_terminal(), &mut out);
     stack.redraw(&mut out);
 
     assert!(out.is_empty());
@@ -58,7 +65,7 @@ fn a_delayed_region_paints_nothing_until_its_delay_passes() {
 
 #[test]
 fn releasing_the_top_region_erases_its_row() {
-    let (mut stack, id, mut out) = visible_stack(None);
+    let (mut stack, id, mut out) = visible_stack(unsized_terminal());
     out.clear();
 
     stack.release(id, &mut out);
@@ -68,7 +75,7 @@ fn releasing_the_top_region_erases_its_row() {
 
 #[test]
 fn setting_a_detail_repaints_the_row() {
-    let (mut stack, id, mut out) = visible_stack(None);
+    let (mut stack, id, mut out) = visible_stack(unsized_terminal());
     out.clear();
 
     stack.set_detail(id, "starting bookworm".to_owned(), &mut out);
@@ -78,7 +85,7 @@ fn setting_a_detail_repaints_the_row() {
 
 #[test]
 fn a_background_wraps_the_row_and_its_erase() {
-    let (mut stack, id, mut out) = visible_stack(None);
+    let (mut stack, id, mut out) = visible_stack(unsized_terminal());
     out.clear();
 
     stack.set_background(id, Some("\x1b[48;5;236m".to_owned()), &mut out);
@@ -94,12 +101,12 @@ fn a_background_wraps_the_row_and_its_erase() {
 
 #[test]
 fn the_newest_claim_renders_and_release_re_exposes_the_one_below() {
-    let (mut stack, first, mut out) = visible_stack(None);
+    let (mut stack, first, mut out) = visible_stack(unsized_terminal());
 
     let style = RegionStyle::new(Duration::ZERO, Duration::from_millis(50), |_, _| {
         "running tool".to_owned()
     });
-    stack.claim(2, style, None, &mut out);
+    stack.claim_test(2, style, unsized_terminal(), &mut out);
     out.clear();
 
     stack.release(2, &mut out);
@@ -114,12 +121,12 @@ fn the_newest_claim_renders_and_release_re_exposes_the_one_below() {
 
 #[test]
 fn releasing_a_buried_claim_leaves_the_screen_alone() {
-    let (mut stack, buried, mut out) = visible_stack(None);
+    let (mut stack, buried, mut out) = visible_stack(unsized_terminal());
 
     let style = RegionStyle::new(Duration::ZERO, Duration::from_millis(50), |_, _| {
         "running tool".to_owned()
     });
-    stack.claim(2, style, None, &mut out);
+    stack.claim_test(2, style, unsized_terminal(), &mut out);
     out.clear();
 
     stack.release(buried, &mut out);
@@ -129,7 +136,7 @@ fn releasing_a_buried_claim_leaves_the_screen_alone() {
 
 #[test]
 fn suspension_erases_the_row_and_blocks_redraws() {
-    let (mut stack, id, mut out) = visible_stack(None);
+    let (mut stack, id, mut out) = visible_stack(unsized_terminal());
     out.clear();
 
     stack.suspend(&mut out);
@@ -151,7 +158,7 @@ fn suspension_erases_the_row_and_blocks_redraws() {
 
 #[test]
 fn nested_suspensions_resume_only_on_the_last_release() {
-    let (mut stack, _id, mut out) = visible_stack(None);
+    let (mut stack, _id, mut out) = visible_stack(unsized_terminal());
 
     stack.suspend(&mut out);
     stack.suspend(&mut out);
@@ -177,7 +184,7 @@ fn a_pending_region_ticks_at_its_remaining_delay() {
         String::new()
     });
 
-    stack.claim(1, style, None, &mut out);
+    stack.claim_test(1, style, unsized_terminal(), &mut out);
 
     let tick = stack.tick_after().expect("a claimed region ticks");
     assert!(
@@ -189,7 +196,7 @@ fn a_pending_region_ticks_at_its_remaining_delay() {
 
 #[test]
 fn a_visible_region_ticks_at_its_interval() {
-    let (stack, _id, _out) = visible_stack(None);
+    let (stack, _id, _out) = visible_stack(unsized_terminal());
 
     assert_eq!(stack.tick_after(), Some(Duration::from_millis(50)));
 }
@@ -209,9 +216,576 @@ fn rows_are_bounded_to_the_captured_column_count() {
         "0123456789".to_owned()
     });
 
-    stack.claim(1, style, Some(6), &mut out);
+    stack.claim_test(1, style, TerminalCapability::interactive(Some(6)), &mut out);
 
     assert_eq!(String::from_utf8(out).unwrap(), "\r\x1b[K012345");
+}
+
+/// A region with a three-row window on a terminal tall enough to allow it.
+fn windowed_stack(rows: u16) -> (RegionStack, RegionId, Vec<u8>) {
+    let mut stack = RegionStack::new();
+    let mut out = Vec::new();
+    let style = RegionStyle::new(Duration::ZERO, Duration::from_millis(50), |_, _| {
+        "* status".to_owned()
+    })
+    .with_output(OutputLines::Rows(3));
+
+    let terminal = TerminalCapability::interactive(None).with_rows(Some(rows));
+    stack.claim_test(1, style, terminal, &mut out);
+    out.clear();
+
+    (stack, 1, out)
+}
+
+#[test]
+fn a_window_paints_its_lines_above_the_status_row() {
+    let (mut stack, id, mut out) = windowed_stack(40);
+
+    // A push only mutates the buffer; the repaint is coalesced into the next
+    // tick, which is what keeps a burst of a thousand lines to one frame.
+    stack.push(id, Arc::from("build"), "compiling serde");
+    stack.push(id, Arc::from("build"), "compiling tokio");
+    out.clear();
+    stack.redraw(&mut out);
+
+    // Two window rows plus the status row: scroll two in, step back, fill three.
+    assert_eq!(
+        String::from_utf8(out).unwrap(),
+        "\n\n\x1b[2A\r\x1b[Kcompiling serde\n\r\x1b[Kcompiling tokio\n\r\x1b[K* status"
+    );
+}
+
+#[test]
+fn a_full_window_drops_its_oldest_line() {
+    let (mut stack, id, mut out) = windowed_stack(40);
+
+    for n in 1..=5 {
+        stack.push(id, Arc::from("build"), &format!("line {n}"));
+    }
+    out.clear();
+    stack.redraw(&mut out);
+
+    let frame = String::from_utf8(out).unwrap();
+    assert!(!frame.contains("line 1"), "oldest lines evict: {frame:?}");
+    assert!(!frame.contains("line 2"));
+    for kept in ["line 3", "line 4", "line 5"] {
+        assert!(
+            frame.contains(kept),
+            "{kept} should still be shown: {frame:?}"
+        );
+    }
+}
+
+#[test]
+fn one_source_renders_verbatim() {
+    let (mut stack, id, mut out) = windowed_stack(40);
+
+    stack.push(id, Arc::from("bookworm"), "compiling serde");
+    out.clear();
+    stack.redraw(&mut out);
+
+    let frame = String::from_utf8(out).unwrap();
+    assert!(frame.contains("\r\x1b[Kcompiling serde"), "{frame:?}");
+    assert!(
+        !frame.contains("[bookworm]"),
+        "no label for a single source: {frame:?}"
+    );
+}
+
+#[test]
+fn two_sources_label_every_line() {
+    let (mut stack, id, mut out) = windowed_stack(40);
+
+    stack.push(id, Arc::from("bookworm"), "compiling serde");
+    stack.push(id, Arc::from("grizzly"), "compiling tantivy");
+    out.clear();
+    stack.redraw(&mut out);
+
+    let frame = String::from_utf8(out).unwrap();
+    // Padded to the widest label so the output lines up, and coloured so two
+    // interleaved sources stay apart at a glance. Only the label is coloured;
+    // the line keeps whatever styling the source gave it.
+    assert!(
+        frame.contains("\x1b[96m[bookworm]\x1b[39m compiling serde"),
+        "{frame:?}"
+    );
+    assert!(
+        frame.contains("\x1b[34m[grizzly ]\x1b[39m compiling tantivy"),
+        "{frame:?}"
+    );
+}
+
+#[test]
+fn a_label_keeps_its_colour_across_runs() {
+    // The point of hashing the name rather than counting sources: a server is
+    // the same colour in every run, on every machine. Pinned so a change to the
+    // hash or the palette has to be a deliberate one.
+    assert_eq!(label_colour("bookworm"), 96);
+    assert_eq!(label_colour("grizzly"), 34);
+}
+
+#[test]
+fn two_labels_can_share_a_colour() {
+    // Ten colours and a hash means collisions, and this pair is one: they cost
+    // legibility when both are in the window at once, nothing more. Avoiding
+    // them entirely would mean assigning by position, which is what makes a
+    // colour change between runs.
+    assert_eq!(label_colour("bookworm"), label_colour("kagi"));
+}
+
+#[test]
+fn every_label_colour_comes_from_the_palette() {
+    let long = "x".repeat(50);
+    for name in ["", "a", "bb", "server-1", "server-2", "ééé", long.as_str()] {
+        assert!(
+            LABEL_COLOURS.contains(&label_colour(name)),
+            "{name:?} produced a colour outside the palette"
+        );
+    }
+}
+
+#[test]
+fn a_label_colour_closes_without_disturbing_the_row_background() {
+    // `\x1b[0m` would clear the row background a reasoning region asserted
+    // (RFD 095), so the label closes its foreground alone.
+    let (mut stack, id, mut out) = windowed_stack(40);
+
+    stack.set_background(id, Some("\x1b[48;5;236m".to_owned()), &mut out);
+    stack.push(id, Arc::from("alpha"), "one");
+    stack.push(id, Arc::from("beta"), "two");
+    out.clear();
+    stack.redraw(&mut out);
+
+    let frame = String::from_utf8(out).unwrap();
+    assert!(
+        !frame.contains("\x1b[0m"),
+        "a full reset would drop the row background: {frame:?}"
+    );
+    assert!(frame.contains("\x1b[39m"), "{frame:?}");
+}
+
+#[test]
+fn a_label_survives_its_source_falling_out_of_the_window() {
+    // Labelling keys on what is in the window, not on which sources are still
+    // pushing: a finished server's output must not be handed to the one still
+    // running.
+    let (mut stack, id, mut out) = windowed_stack(40);
+
+    stack.push(id, Arc::from("bookworm"), "compiling serde");
+    stack.push(id, Arc::from("grizzly"), "compiling tantivy");
+    stack.push(id, Arc::from("grizzly"), "compiling tantivy-query");
+    out.clear();
+    stack.redraw(&mut out);
+    assert!(
+        String::from_utf8(out.clone())
+            .unwrap()
+            .contains("[bookworm]"),
+        "both sources are still in the window"
+    );
+
+    // Pushing past bookworm's only line leaves grizzly alone in the window.
+    stack.push(id, Arc::from("grizzly"), "linking");
+    out.clear();
+    stack.redraw(&mut out);
+
+    let frame = String::from_utf8(out).unwrap();
+    assert!(
+        !frame.contains("[grizzly"),
+        "one source left, so no labels: {frame:?}"
+    );
+}
+
+#[test]
+fn a_shrinking_window_clears_the_rows_it_gives_back() {
+    let (mut stack, id, mut out) = windowed_stack(40);
+
+    stack.push(id, Arc::from("build"), "one");
+    stack.push(id, Arc::from("build"), "two");
+    stack.redraw(&mut out);
+    assert_eq!(stack.drawn_rows, 3);
+    out.clear();
+
+    // Drop straight to a bare status row and the two window rows below have to
+    // be cleared explicitly; nothing else will overwrite them.
+    stack.entries[0].buffer.lock().lines.clear();
+    stack.redraw(&mut out);
+
+    assert_eq!(
+        String::from_utf8(out).unwrap(),
+        "\x1b[2A\r\x1b[K* status\n\r\x1b[K\n\r\x1b[K\x1b[2A"
+    );
+}
+
+#[test]
+fn an_erase_walks_no_further_than_the_viewport_has_rows() {
+    // A terminal shrunk below the drawn row count has already lost its top rows
+    // to scrollback. Walking up anyway clears content that was never the
+    // region's, which is worse than leaving the stranded rows alone.
+    let (mut stack, id, mut out) = windowed_stack(40);
+
+    for n in 1..=3 {
+        stack.push(id, Arc::from("build"), &format!("line {n}"));
+    }
+    stack.redraw(&mut out);
+    assert_eq!(stack.drawn_rows, 4);
+
+    stack.entries[0].terminal = TerminalCapability::interactive(None).with_rows(Some(2));
+    out.clear();
+    stack.erase(&mut out);
+
+    assert_eq!(
+        String::from_utf8(out).unwrap(),
+        "\r\x1b[K\x1b[1A\r\x1b[K",
+        "two rows cleared, not four"
+    );
+}
+
+#[test]
+fn an_unknown_height_leaves_the_region_a_bare_status_row() {
+    let mut stack = RegionStack::new();
+    let mut out = Vec::new();
+    let style = RegionStyle::new(Duration::ZERO, Duration::from_millis(50), |_, _| {
+        "* status".to_owned()
+    })
+    .with_output(OutputLines::Rows(3));
+
+    stack.claim_test(1, style, unsized_terminal(), &mut out);
+    stack.push(1, Arc::from("build"), "compiling serde");
+    out.clear();
+    stack.redraw(&mut out);
+
+    assert_eq!(String::from_utf8(out).unwrap(), "\r\x1b[K* status");
+}
+
+#[test]
+fn auto_takes_a_tenth_of_the_terminal() {
+    assert_eq!(OutputLines::Auto.rows(Some(40)), 4);
+    assert_eq!(OutputLines::Auto.rows(Some(24)), 2);
+    assert_eq!(OutputLines::Off.rows(Some(40)), 0);
+    assert_eq!(OutputLines::Rows(6).rows(Some(40)), 6);
+}
+
+#[test]
+fn a_window_never_claims_the_whole_terminal() {
+    // The status row plus a row of context stay free, so the erase always has
+    // somewhere to walk back to.
+    assert_eq!(OutputLines::Rows(100).rows(Some(10)), 8);
+    assert_eq!(OutputLines::Rows(100).rows(Some(2)), 0);
+    assert_eq!(OutputLines::Auto.rows(None), 0);
+    assert_eq!(OutputLines::Rows(3).rows(None), 0);
+}
+
+#[test]
+fn the_filter_keeps_styling_and_closes_it() {
+    assert_eq!(filter_line("\x1b[31mred"), "\x1b[31mred\x1b[0m");
+    assert_eq!(filter_line("plain"), "plain");
+}
+
+#[test]
+fn the_filter_drops_everything_that_is_not_styling() {
+    // A child emitting an erase or cursor movement would corrupt the worker's
+    // own row accounting; one emitting `\x1b[2J` would wipe the screen.
+    assert_eq!(filter_line("\x1b[2Jwiped"), "wiped");
+    assert_eq!(filter_line("a\x1b[1Ab"), "ab");
+    assert_eq!(filter_line("\x1b]0;title\x07text"), "text");
+    assert_eq!(filter_line("tab\there"), "tabhere");
+}
+
+#[test]
+fn the_filter_removes_conceal_but_keeps_its_neighbours() {
+    // Text the reader cannot see has no place in a preview, but dropping the
+    // whole sequence would take the bold and the colour with it.
+    assert_eq!(filter_line("\x1b[1;8;31mx"), "\x1b[1;31mx\x1b[0m");
+    assert_eq!(filter_line("\x1b[8mhidden"), "hidden");
+}
+
+// --- Screen-level cases -----------------------------------------------------
+//
+// A byte assertion says what JP emitted. It cannot say what the terminal did
+// with it, and scrolling, deferred wrap, and cursor clamping only exist on the
+// far side of that boundary — which is where multi-row erasure goes wrong. The
+// cases below drive a VT screen model instead and assert on the rendered
+// result.
+
+/// Scrollback the test terminal keeps.
+///
+/// Enough that a case which scrolls rows off the top can still tell "pushed
+/// into history" apart from "destroyed".
+const SCROLLBACK: usize = 100;
+
+/// A terminal the region draws into.
+struct Terminal {
+    /// The screen model.
+    parser: vt100::Parser,
+}
+
+impl Terminal {
+    /// An empty terminal `rows` tall and `columns` wide.
+    fn new(rows: u16, columns: u16) -> Self {
+        Self {
+            parser: vt100::Parser::new(rows, columns, SCROLLBACK),
+        }
+    }
+
+    /// Write `count` numbered content lines, standing in for earlier output.
+    ///
+    /// Terminated with CRLF because there is no tty driver here to expand the
+    /// bare `\n` that JP writes.
+    /// The region's own rows are unaffected: every one of them starts with a
+    /// carriage return already.
+    fn content(&mut self, count: usize) {
+        for n in 1..=count {
+            let _err = write!(self.parser, "content {n:02}\r\n");
+        }
+    }
+
+    /// Leave the cursor on the last row with `count` content lines above it.
+    fn fill_to_bottom(&mut self, count: usize) {
+        for _ in 0..self.parser.screen().size().0 {
+            let _err = write!(self.parser, "\r\n");
+        }
+        self.content(count);
+    }
+
+    /// Resize, as dragging the window would.
+    fn resize(&mut self, rows: u16, columns: u16) {
+        self.parser.screen_mut().set_size(rows, columns);
+    }
+
+    /// Every visible row, trailing blanks trimmed.
+    fn rows(&self) -> Vec<String> {
+        let screen = self.parser.screen();
+        screen
+            .rows(0, screen.size().1)
+            .map(|row| row.trim_end().to_owned())
+            .collect()
+    }
+
+    /// The last `count` visible rows.
+    ///
+    /// For a block anchored to the bottom of the screen.
+    fn tail(&self, count: usize) -> Vec<String> {
+        let rows = self.rows();
+        rows[rows.len().saturating_sub(count)..].to_vec()
+    }
+
+    /// Every row up to the last one with anything on it.
+    ///
+    /// For a block with blank screen below it, where [`Self::tail`] would
+    /// return the empty rows underneath.
+    fn used(&self) -> Vec<String> {
+        let mut rows = self.rows();
+        while rows.last().is_some_and(String::is_empty) {
+            rows.pop();
+        }
+
+        rows
+    }
+
+    /// The cursor's `(row, column)`.
+    fn cursor(&self) -> (u16, u16) {
+        self.parser.screen().cursor_position()
+    }
+
+    /// Whether row `row` wrapped onto the one below it.
+    fn wrapped(&self, row: u16) -> bool {
+        self.parser.screen().row_wrapped(row)
+    }
+}
+
+impl io::Write for Terminal {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.parser.process(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
+    }
+}
+
+/// An empty stack, plus the style and capability for a region with `window`
+/// output rows on a terminal of the given size.
+fn windowed(
+    window: u16,
+    columns: u16,
+    rows: u16,
+) -> (RegionStack, RegionStyle, TerminalCapability) {
+    let style = RegionStyle::new(Duration::ZERO, Duration::from_millis(50), |_, _| {
+        "* status".to_owned()
+    })
+    .with_output(OutputLines::Rows(window));
+
+    (
+        RegionStack::new(),
+        style,
+        TerminalCapability::interactive(Some(columns)).with_rows(Some(rows)),
+    )
+}
+
+#[test]
+fn a_block_claimed_at_the_bottom_ends_on_the_last_row() {
+    // The reserve step emits one line break per row *below* the cursor's own.
+    // One per row leaves the block a row short of the bottom, which is what the
+    // RFD's wording would have produced and what the terminal spike measured.
+    let mut term = Terminal::new(8, 40);
+    term.fill_to_bottom(3);
+
+    let (mut stack, style, cap) = windowed(2, 40, 8);
+    stack.claim_test(1, style, cap, &mut term);
+    stack.push(1, Arc::from("build"), "one");
+    stack.push(1, Arc::from("build"), "two");
+    stack.redraw(&mut term);
+
+    assert_eq!(term.tail(4), ["content 03", "one", "two", "* status"]);
+    assert_eq!(
+        term.cursor().0,
+        7,
+        "the block ends flush against the bottom"
+    );
+}
+
+#[test]
+fn claiming_at_the_bottom_scrolls_content_up_rather_than_over_it() {
+    let mut term = Terminal::new(8, 40);
+    term.fill_to_bottom(3);
+
+    let (mut stack, style, cap) = windowed(2, 40, 8);
+    stack.claim_test(1, style, cap, &mut term);
+    stack.push(1, Arc::from("build"), "one");
+    stack.push(1, Arc::from("build"), "two");
+    stack.redraw(&mut term);
+
+    let rows = term.rows().join("\n");
+    for line in ["content 01", "content 02", "content 03"] {
+        assert!(rows.contains(line), "{line} was overwritten:\n{rows}");
+    }
+}
+
+#[test]
+fn releasing_a_block_puts_the_screen_back() {
+    let mut term = Terminal::new(10, 40);
+    term.content(3);
+    let before = term.rows();
+    let cursor_before = term.cursor();
+
+    let (mut stack, style, cap) = windowed(3, 40, 10);
+    stack.claim_test(1, style, cap, &mut term);
+    for line in ["one", "two", "three"] {
+        stack.push(1, Arc::from("build"), line);
+    }
+    stack.redraw(&mut term);
+    assert_eq!(term.used(), [
+        "content 01",
+        "content 02",
+        "content 03",
+        "one",
+        "two",
+        "three",
+        "* status"
+    ]);
+
+    stack.release(1, &mut term);
+
+    assert_eq!(term.rows(), before, "the erase leaves no trace");
+    assert_eq!(term.cursor(), cursor_before, "and the cursor is back");
+}
+
+#[test]
+fn a_persistent_write_lands_above_the_block() {
+    let mut term = Terminal::new(10, 40);
+    term.content(2);
+
+    let (mut stack, style, cap) = windowed(2, 40, 10);
+    stack.claim_test(1, style, cap, &mut term);
+    stack.push(1, Arc::from("build"), "one");
+    stack.redraw(&mut term);
+
+    // What the worker does around a `Print`: erase, let the content land,
+    // paint again.
+    stack.erase(&mut term);
+    let _err = write!(term, "written 01\r\n");
+    stack.redraw(&mut term);
+
+    assert_eq!(term.used(), [
+        "content 01",
+        "content 02",
+        "written 01",
+        "one",
+        "* status"
+    ]);
+}
+
+#[test]
+fn shrinking_below_the_block_spares_the_content_above_it() {
+    // A terminal shrunk below the drawn row count has already lost its top rows
+    // to scrollback; they cannot be reached again. Walking up the full count
+    // anyway would clear rows that were never the region's, which is the worse
+    // of the two failures.
+    let mut term = Terminal::new(12, 40);
+    term.content(2);
+
+    let (mut stack, style, cap) = windowed(5, 40, 12);
+    stack.claim_test(1, style, cap, &mut term);
+    for n in 1..=5 {
+        stack.push(1, Arc::from("build"), &format!("line {n}"));
+    }
+    stack.redraw(&mut term);
+    assert_eq!(stack.drawn_rows, 6);
+
+    // The user drags the window down to fewer rows than the block occupies.
+    term.resize(4, 40);
+    stack.entries[0].terminal = TerminalCapability::interactive(Some(40)).with_rows(Some(4));
+
+    stack.erase(&mut term);
+
+    assert!(
+        term.cursor().0 < 4,
+        "the walk stays inside the viewport: {:?}",
+        term.cursor()
+    );
+}
+
+#[test]
+fn a_row_exactly_the_terminal_width_does_not_wrap() {
+    // A wrapped row is one physical row the erase does not know about, so the
+    // boundary case has to stay unwrapped for the row accounting to hold.
+    let mut term = Terminal::new(8, 20);
+    term.content(2);
+
+    let (mut stack, style, cap) = windowed(1, 20, 8);
+    stack.claim_test(1, style, cap, &mut term);
+    stack.push(1, Arc::from("build"), &"x".repeat(20));
+    stack.redraw(&mut term);
+
+    let row = term.rows().iter().position(|r| r.starts_with('x')).unwrap();
+    assert_eq!(
+        term.rows()[row].len(),
+        20,
+        "the row fills the width exactly"
+    );
+    assert!(
+        !term.wrapped(u16::try_from(row).unwrap()),
+        "a full-width row must not spill onto the next"
+    );
+    assert_eq!(stack.drawn_rows, 2, "still two physical rows");
+}
+
+#[test]
+fn an_over_wide_row_is_cut_to_the_width() {
+    let mut term = Terminal::new(8, 20);
+    term.content(2);
+
+    let (mut stack, style, cap) = windowed(1, 20, 8);
+    stack.claim_test(1, style, cap, &mut term);
+    stack.push(1, Arc::from("build"), &"y".repeat(60));
+    stack.redraw(&mut term);
+
+    let rows = term.rows();
+    let row = rows.iter().position(|r| r.starts_with('y')).unwrap();
+    assert_eq!(rows[row].chars().count(), 20);
+    assert!(!term.wrapped(u16::try_from(row).unwrap()));
+    assert_eq!(stack.drawn_rows, 2);
 }
 
 #[test]

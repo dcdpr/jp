@@ -16,7 +16,7 @@ use jp_config::{
         CommandConfig,
         style::{InlineResults, LinkStyle, ParametersStyle, TruncateLines},
     },
-    style::StyleConfig,
+    style::{StyleConfig, print_stderr::PrintStderr},
 };
 use jp_conversation::event::ToolCallResponse;
 use jp_llm::{CommandResult, run_tool_command, tool::InvocationContext};
@@ -24,14 +24,24 @@ use jp_md::{
     format::{DefaultBackground, Formatter},
     shade::ShadedWriter,
 };
-use jp_printer::ErrChannel;
+use jp_printer::{ErrChannel, LineSink, OutputLines, RegionStyle, StatusRegion};
 use jp_term::osc::hyperlink;
 use serde_json::{Map, Value};
-use tokio::sync::mpsc::Sender;
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
-use crate::timer::spawn_tick_sender;
+/// Map the `print_stderr` config key onto the printer's window budget.
+///
+/// The two enums are deliberately separate: `jp_printer` knows nothing about
+/// JP's config tree, and the config key is a user-facing contract that outlives
+/// any one renderer.
+pub(crate) const fn output_lines(print_stderr: PrintStderr) -> OutputLines {
+    match print_stderr {
+        PrintStderr::Off => OutputLines::Off,
+        PrintStderr::Auto => OutputLines::Auto,
+        PrintStderr::Rows(rows) => OutputLines::Rows(rows.rows),
+    }
+}
 
 /// A tool in the pending list.
 struct PendingTool {
@@ -93,14 +103,15 @@ pub struct ToolRenderer {
     /// Tools not yet permanently displayed, in registration order.
     pending: Vec<PendingTool>,
 
-    /// Whether a temp line is currently on screen.
-    line_active: bool,
+    /// The row naming the tools whose arguments are still streaming.
+    ///
+    /// Held from the first registration until the last tool completes or the
+    /// cycle resets; the printer draws it, ticks its elapsed time, and erases
+    /// it around every persistent write.
+    preparing: StatusRegion,
 
-    /// Whether we're running in a TTY (controls timer spawning).
-    is_tty: bool,
-
-    /// Cancellation token for the tick timer task.
-    timer_token: Option<CancellationToken>,
+    /// The elapsed-time row for tools that are taking a while to run.
+    progress: StatusRegion,
 
     /// Whether the last rendered tool output (custom arguments or a result)
     /// owes a blank-line separator before the next tool call header.
@@ -138,7 +149,6 @@ impl ToolRenderer {
         channel: ErrChannel,
         config: StyleConfig,
         root: Utf8PathBuf,
-        is_tty: bool,
         invocation: InvocationContext,
     ) -> Self {
         let formatter = Formatter::new().theme(if channel.pretty_printing_enabled() {
@@ -154,9 +164,8 @@ impl ToolRenderer {
             invocation,
             formatter,
             pending: Vec::new(),
-            line_active: false,
-            is_tty,
-            timer_token: None,
+            preparing: StatusRegion::inert(),
+            progress: StatusRegion::inert(),
             separator: Arc::new(AtomicBool::new(false)),
             regions: HashMap::new(),
             current_region: None,
@@ -212,12 +221,6 @@ impl ToolRenderer {
         } else {
             let _ = write(&mut channel);
         }
-    }
-
-    /// Write cursor-relative chrome (the temp/progress line) shaded with the
-    /// currently-active region.
-    fn write_current_region(&self, content: &str) {
-        self.write_chrome(self.current_region.as_ref(), |w| write!(w, "{content}"));
     }
 
     /// Emit the blank-line separator owed by a preceding tool result or custom
@@ -333,21 +336,48 @@ impl ToolRenderer {
         self.separator.store(true, Ordering::Relaxed);
     }
 
-    /// Renders elapsed time for a long-running tool.
-    pub fn render_progress(&self, elapsed: Duration) {
-        let secs = elapsed.as_secs_f64();
-        self.write_current_region(&format!("\r\x1b[K⏱ Running… {secs:.1}s"));
+    /// Claim the elapsed-time row for tools that are now executing.
+    ///
+    /// The row ticks itself and is erased around every persistent write until
+    /// [`clear_progress`] drops it; claiming twice without releasing replaces
+    /// the first claim.
+    ///
+    /// [`clear_progress`]: Self::clear_progress
+    pub fn start_progress(&mut self) {
+        let config = &self.config.tool_call.progress;
+        self.progress = if config.show {
+            self.channel.status_region(
+                RegionStyle::new(
+                    Duration::from_secs(u64::from(config.delay_secs)),
+                    Duration::from_millis(u64::from(config.interval_ms)),
+                    |secs, _| format!("⏱ Running… {secs:.1}s"),
+                )
+                .with_output(output_lines(config.print_stderr)),
+            )
+        } else {
+            StatusRegion::inert()
+        };
+
+        Self::apply_background(&self.progress, self.current_region.as_ref());
     }
 
-    /// Clears the current progress line.
-    pub fn clear_progress(&self) {
-        // Carriage return + ANSI escape to clear to end of line
-        self.write_current_region("\r\x1b[K");
+    /// Drop the elapsed-time row.
+    pub fn clear_progress(&mut self) {
+        self.progress.release();
     }
 
-    /// Returns the progress configuration.
-    pub fn progress_config(&self) -> &jp_config::style::tool_call::ProgressConfig {
-        &self.config.tool_call.progress
+    /// A sink feeding one tool's stderr into the progress window.
+    ///
+    /// Labelled with the tool's name, so two running in parallel stay apart.
+    /// `None` when `style.tool_call.progress.print_stderr` is off, so a tool
+    /// that floods costs nothing when nobody asked to watch it.
+    pub fn progress_source(&self, tool: &str) -> Option<LineSink> {
+        self.config
+            .tool_call
+            .progress
+            .print_stderr
+            .is_enabled()
+            .then(|| self.progress.source(tool))
     }
 
     /// Renders a tool call result with language detection, truncation, and file
@@ -531,30 +561,24 @@ impl ToolRenderer {
 
     /// Registers a new tool call (name known, arguments pending).
     ///
-    /// Adds the tool to the rewritable temp line.
-    /// Starts the tick timer on the first registration.
-    pub fn register(&mut self, id: &str, name: &str, tick_tx: &Sender<Duration>) {
+    /// The first registration claims the preparing row; later ones retitle it.
+    pub fn register(&mut self, id: &str, name: &str) {
         if self.pending.iter().any(|t| t.id == id) {
             return;
         }
 
+        let first = self.pending.is_empty();
         self.pending.push(PendingTool {
             id: id.to_owned(),
             name: name.to_owned(),
         });
 
-        // The temp line is a cursor-relative redraw (`\r`, `\x1b[K`); it only
-        // makes sense on a TTY. On a pipe it would emit raw control bytes.
-        if self.is_tty {
-            if self.line_active {
-                self.rewrite_temp_line();
-            } else {
-                self.write_temp_line();
-                self.line_active = true;
-            }
+        if first {
+            self.preparing = self.claim_preparing();
+            Self::apply_background(&self.preparing, self.current_region.as_ref());
+        } else {
+            self.refresh_preparing();
         }
-
-        self.ensure_timer(tick_tx);
     }
 
     /// Completes a tool call and removes it from the temp line.
@@ -573,33 +597,11 @@ impl ToolRenderer {
         // correct when parallel tools sit in different regions).
         self.current_region = self.regions.get(id).cloned();
 
-        // Clear the temp line but don't redraw it for the still-pending tools.
-        // The caller prints the completed tool's permanent header immediately
-        // after this returns; a redraw here would land on the same line and the
-        // header would overwrite it, producing a glued "…toolCalling tool…"
-        // line. Remaining tools get a fresh temp line on the next tick.
-        if self.line_active {
-            self.write_current_region("\r\x1b[K");
-            self.line_active = false;
+        if self.pending.is_empty() {
+            self.preparing.release();
+        } else {
+            self.refresh_preparing();
         }
-    }
-
-    /// Updates the temp line with the elapsed time.
-    ///
-    /// Called on each tick from the timer task.
-    pub fn tick(&mut self, elapsed: Duration) {
-        if self.pending.is_empty() || !self.is_tty {
-            return;
-        }
-
-        let content = self.temp_line_content();
-        let secs = elapsed.as_secs_f64();
-        self.write_current_region(&format!(
-            "\r\x1b[K{content} (receiving arguments… {secs:.1}s)"
-        ));
-        // The tick now owns the temp line, so a later `complete` knows to clear
-        // it.
-        self.line_active = true;
     }
 
     /// Returns `true` if there are tools waiting for arguments.
@@ -608,38 +610,56 @@ impl ToolRenderer {
         !self.pending.is_empty()
     }
 
-    /// Clears the temp line visually without modifying state.
-    ///
-    /// Used before showing interrupt menus.
-    /// The next tick will redisplay the temp line.
-    pub fn clear_temp_line(&self) {
-        if !self.line_active {
-            return;
-        }
-        self.write_current_region("\r\x1b[K");
-    }
-
-    /// Clears the temp line and all pending state.
-    /// Stops the timer.
+    /// Drops the preparing row and every tool waiting on it.
     pub fn cancel_all(&mut self) {
-        self.stop_timer();
-
-        if self.line_active {
-            self.write_current_region("\r\x1b[K");
-            self.line_active = false;
-        }
-
+        self.preparing.release();
         self.pending.clear();
     }
 
     /// Resets all state for a new streaming cycle.
-    ///
-    /// Clears any on-screen temp line, drops pending tools, and stops the
-    /// timer.
-    /// Don't pre-clear `line_active`: that would skip `cancel_all`'s clear and
-    /// leave a stale temp line on screen.
     pub fn reset(&mut self) {
         self.cancel_all();
+    }
+
+    /// Claim the preparing row, or an inert handle when it is switched off.
+    fn claim_preparing(&self) -> StatusRegion {
+        let config = &self.config.tool_call.preparing;
+        if !config.show {
+            return StatusRegion::inert();
+        }
+
+        self.channel.status_region(
+            RegionStyle::new(
+                Duration::from_secs(u64::from(config.delay_secs)),
+                Duration::from_millis(u64::from(config.interval_ms)),
+                |secs, detail| {
+                    let names = detail.unwrap_or("tools");
+                    format!("{names} (receiving arguments… {secs:.1}s)")
+                },
+            )
+            // A zero-delay row paints on claim, before `set_detail` lands; the
+            // names have to be there or the first frame reads "tools".
+            .with_detail(self.temp_line_content()),
+        )
+    }
+
+    /// Retitle the preparing row and re-assert the reasoning background it is
+    /// drawn against.
+    ///
+    /// The row is a live aggregate over the tools pending right now, so it
+    /// follows whichever reasoning region is active rather than the one it was
+    /// claimed under.
+    fn refresh_preparing(&self) {
+        self.preparing.set_detail(self.temp_line_content());
+        Self::apply_background(&self.preparing, self.current_region.as_ref());
+    }
+
+    /// Point a region's row background at `region`, or clear it.
+    fn apply_background(status: &StatusRegion, region: Option<&DefaultBackground>) {
+        match region {
+            Some(background) => status.background().set(&background.param),
+            None => status.background().clear(),
+        }
     }
 
     fn temp_line_content(&self) -> String {
@@ -656,47 +676,6 @@ impl ToolRenderer {
             .collect();
 
         format!("Calling {label} {}", names.join(", "))
-    }
-
-    fn write_temp_line(&self) {
-        // The streaming temp line is the first thing to appear after a
-        // preceding tool result or custom argument block, so it pays the owed
-        // separator. The permanent header that replaces it later finds the debt
-        // already cleared, and the blank line above survives the in-place
-        // `complete`/header rewrite.
-        // The trailing erase fills the row to the right edge with the active
-        // background, so a shaded region covers the whole line while it waits
-        // for the first tick to rewrite it.
-        let content = self.temp_line_content();
-        self.write_chrome(self.current_region.as_ref(), |w| {
-            self.emit_separator_to(w)?;
-            write!(w, "{content}\x1b[K")
-        });
-    }
-
-    fn rewrite_temp_line(&self) {
-        let content = self.temp_line_content();
-        self.write_current_region(&format!("\r{content}\x1b[K"));
-    }
-
-    fn ensure_timer(&mut self, tick_tx: &Sender<Duration>) {
-        if self.timer_token.is_some() || !self.is_tty {
-            return;
-        }
-
-        let preparing = &self.config.tool_call.preparing;
-        self.timer_token = spawn_tick_sender(
-            tick_tx.clone(),
-            preparing.show,
-            Duration::from_secs(u64::from(preparing.delay_secs)),
-            Duration::from_millis(u64::from(preparing.interval_ms)),
-        );
-    }
-
-    fn stop_timer(&mut self) {
-        if let Some(token) = self.timer_token.take() {
-            token.cancel();
-        }
     }
 }
 

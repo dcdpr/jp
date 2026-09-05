@@ -1084,6 +1084,7 @@ impl Executor for SleepingExecutor {
         _mcp_client: &jp_mcp::Client,
         _root: &Utf8Path,
         cancellation_token: CancellationToken,
+        _stderr: Option<jp_llm::tool::StderrSink>,
     ) -> ExecutorResult {
         if let Some(started) = &self.started {
             started.notify_one();
@@ -3685,6 +3686,9 @@ async fn test_multi_part_tool_call_shows_preparing_spinner() {
         config.style.tool_call.preparing.show = true;
         config.style.tool_call.preparing.delay_secs = 0;
         config.style.tool_call.preparing.interval_ms = 50;
+        // The preparing row is printer-owned chrome and renders only against a
+        // terminal, so the memory printer has to declare one.
+        let terminal = TerminalCapability::interactive(Some(80));
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
         let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
@@ -3802,7 +3806,7 @@ async fn test_multi_part_tool_call_shows_preparing_spinner() {
             .unwrap();
 
         let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
-        let printer = Arc::new(printer);
+        let printer = Arc::new(printer.with_terminal(terminal));
         let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
@@ -4034,9 +4038,11 @@ async fn test_markdown_flushed_before_tool_header() {
 
         let mut config = AppConfig::new_test();
         config.style.tool_call.show = true;
-        // Disable the animated suffix so the streaming indicator doesn't spawn
-        // a timer task, keeping output deterministic.
-        config.style.tool_call.preparing.show = false;
+        config.style.tool_call.preparing.show = true;
+        config.style.tool_call.preparing.delay_secs = 0;
+        // The preparing row is printer-owned chrome and renders only against a
+        // terminal, so the memory printer has to declare one.
+        let terminal = TerminalCapability::interactive(Some(80));
 
         let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
         let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
@@ -4080,7 +4086,7 @@ async fn test_markdown_flushed_before_tool_header() {
             .unwrap();
 
         let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
-        let printer = Arc::new(printer);
+        let printer = Arc::new(printer.with_terminal(terminal));
         let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
@@ -4525,6 +4531,7 @@ impl Executor for InquiryMockExecutor {
         _mcp_client: &jp_mcp::Client,
         _root: &camino::Utf8Path,
         _cancellation_token: tokio_util::sync::CancellationToken,
+        _stderr: Option<jp_llm::tool::StderrSink>,
     ) -> ExecutorResult {
         for q in &self.questions {
             if !answers.contains_key(q.id.as_str()) {

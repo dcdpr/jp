@@ -3,7 +3,7 @@
 pub mod builtin;
 pub mod executor;
 
-use std::{ffi::OsStr, process::Stdio, sync::Arc};
+use std::{ffi::OsStr, fmt, process::Stdio, sync::Arc};
 
 pub use builtin::BuiltinTool;
 use camino::Utf8Path;
@@ -388,15 +388,38 @@ impl CommandResult {
     }
 }
 
+/// Receives a running tool's stderr lines as they arrive.
+///
+/// Called from the forwarder's read loop, so it must not block: the loop has to
+/// keep draining or the child fills its pipe and the tool call never completes.
+/// A consumer that falls behind drops rather than stalls.
+pub type StderrSink = Arc<dyn Fn(&str) + Send + Sync>;
+
 /// Identity of a tool invocation, used to tag stderr lines forwarded to
 /// tracing.
 ///
 /// Pass `None` to disable stderr forwarding (e.g. for argument-formatting
 /// invocations where stderr is not meaningful to the user).
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone)]
 pub struct ToolTrace<'a> {
     pub id: &'a str,
     pub name: &'a str,
+
+    /// Where to send each line for display, in addition to tracing.
+    ///
+    /// `None` when nothing is watching, which is the common case: tracing and
+    /// the accumulated buffer are unaffected either way.
+    pub stderr: Option<StderrSink>,
+}
+
+impl fmt::Debug for ToolTrace<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ToolTrace")
+            .field("id", &self.id)
+            .field("name", &self.name)
+            .field("stderr", &self.stderr.is_some())
+            .finish()
+    }
 }
 
 /// Custom minijinja formatter used by [`run_tool_command`].
@@ -586,11 +609,15 @@ async fn forward_stderr(
             break;
         }
 
-        if let Some(ToolTrace { id, name }) = trace_as {
+        if let Some(ToolTrace { id, name, stderr }) = &trace_as {
             let text = String::from_utf8_lossy(&line);
             let trimmed = text.trim_end_matches(['\n', '\r']);
             if !trimmed.is_empty() {
                 trace!(target: "tool::stderr", tool_id = id, tool_name = name, "{trimmed}");
+
+                if let Some(sink) = stderr {
+                    sink(trimmed);
+                }
             }
         }
 
@@ -770,6 +797,7 @@ impl ToolDefinition {
         builtin_executors: &builtin::BuiltinExecutors,
         access: Option<&jp_tool::AccessPolicy>,
         invocation: &InvocationContext,
+        stderr: Option<StderrSink>,
     ) -> Result<ExecutionOutcome, ToolError> {
         let mut arguments = arguments;
         if let Some(arguments) = arguments.as_object_mut() {
@@ -789,6 +817,7 @@ impl ToolDefinition {
                     cancellation_token,
                     access,
                     invocation,
+                    stderr,
                 )
                 .await
             }
@@ -815,6 +844,7 @@ impl ToolDefinition {
     /// This is the pure execution path for local tools.
     /// It validates arguments, runs the command, and converts the result to an
     /// `ExecutionOutcome`.
+    #[expect(clippy::too_many_arguments)]
     async fn execute_local(
         &self,
         id: String,
@@ -826,6 +856,7 @@ impl ToolDefinition {
         cancellation_token: CancellationToken,
         access: Option<&jp_tool::AccessPolicy>,
         invocation: &InvocationContext,
+        stderr: Option<StderrSink>,
     ) -> Result<ExecutionOutcome, ToolError> {
         let name = tool.unwrap_or(&self.name);
 
@@ -864,7 +895,11 @@ impl ToolDefinition {
             return Err(ToolError::MissingCommand);
         };
 
-        let trace_as = ToolTrace { id: &id, name };
+        let trace_as = ToolTrace {
+            id: &id,
+            name,
+            stderr,
+        };
 
         match run_tool_command(command, ctx, root, cancellation_token, Some(trace_as)).await? {
             CommandResult::Success(content) => Ok(ExecutionOutcome::Completed {
