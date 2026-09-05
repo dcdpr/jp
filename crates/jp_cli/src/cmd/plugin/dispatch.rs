@@ -1309,6 +1309,7 @@ pub(crate) async fn resolve_plugin_binary(
     name: &str,
     plugins_config: &PluginsConfig,
     interactive: bool,
+    printer: &Printer,
 ) -> Result<Option<Utf8PathBuf>, cmd::Error> {
     let plugin_cfg = plugins_config.command.get(name);
 
@@ -1327,14 +1328,14 @@ pub(crate) async fn resolve_plugin_binary(
     }
 
     // 2. Check registry.
-    if let Some(path) = try_registry_install(name, plugins_config, interactive).await? {
+    if let Some(path) = try_registry_install(name, plugins_config, interactive, printer).await? {
         return Ok(Some(path));
     }
 
     // 3. Check $PATH with run policy.
     let segments: Vec<&str> = name.split('-').collect();
     if let Some(path) = find_plugin_binary(&segments) {
-        check_run_policy(name, &path, plugin_cfg, interactive)?;
+        check_run_policy(name, &path, plugin_cfg, interactive, printer)?;
         return Ok(Some(path));
     }
 
@@ -1369,6 +1370,7 @@ async fn try_registry_install(
     name: &str,
     plugins_config: &PluginsConfig,
     interactive: bool,
+    printer: &Printer,
 ) -> Result<Option<Utf8PathBuf>, cmd::Error> {
     let Some(reg) = registry::load_cached() else {
         return Ok(None);
@@ -1426,17 +1428,13 @@ async fn try_registry_install(
                 )));
             }
 
-            let mut writer = std::io::stderr();
-            drop(writeln!(
-                writer,
-                "  \u{2192} Plugin `{id}` found in registry."
-            ));
+            printer.eprintln(format!("  \u{2192} Plugin `{id}` found in registry."));
             let options = vec![
                 InlineOption::new('y', "install and run"),
                 InlineOption::new('n', "cancel"),
             ];
             let answer = InlineSelect::new("Install and run it?", options)
-                .prompt(&mut writer)
+                .prompt(&mut printer.prompt_writer())
                 .map_err(|e| cmd::Error::from(format!("prompt failed: {e}")))?;
 
             if answer != 'y' {
@@ -1446,18 +1444,12 @@ async fn try_registry_install(
         RunPolicy::Unattended => {}
     }
 
-    drop(writeln!(
-        std::io::stderr(),
-        "  \u{2192} Installing jp-{id} for {target}..."
-    ));
+    printer.eprintln(format!("  \u{2192} Installing jp-{id} for {target}..."));
     let client = reqwest::Client::new();
     let data = registry::download_and_verify(&client, binary_info).await?;
 
     let path = registry::install_binary(id, &data)?;
-    drop(writeln!(
-        std::io::stderr(),
-        "  \u{2192} Installed to {path}",
-    ));
+    printer.eprintln(format!("  \u{2192} Installed to {path}"));
 
     // Verify against pinned checksum if configured.
     verify_checksum(id, &path, plugin_cfg)?;
@@ -1471,6 +1463,7 @@ fn check_run_policy(
     binary_path: &Utf8Path,
     plugin_cfg: Option<&CommandPluginConfig>,
     interactive: bool,
+    printer: &Printer,
 ) -> Result<(), cmd::Error> {
     // Verify pinned checksum first.
     verify_checksum(name, binary_path, plugin_cfg)?;
@@ -1501,10 +1494,8 @@ fn check_run_policy(
                 return Ok(());
             }
 
-            let mut writer = std::io::stderr();
-            drop(writeln!(
-                writer,
-                "  \u{2192} Found jp-{name} on $PATH ({binary_path})",
+            printer.eprintln(format!(
+                "  \u{2192} Found jp-{name} on $PATH ({binary_path})"
             ));
             let options = vec![
                 InlineOption::new('y', "run this time"),
@@ -1512,7 +1503,7 @@ fn check_run_policy(
                 InlineOption::new('n', "deny"),
             ];
             let answer = InlineSelect::new("Run it?", options)
-                .prompt(&mut writer)
+                .prompt(&mut printer.prompt_writer())
                 .map_err(|e| cmd::Error::from(format!("prompt failed: {e}")))?;
 
             match answer {
@@ -1696,8 +1687,13 @@ pub(crate) async fn run_external(args: &[String], ctx: &mut Ctx) -> cmd::Output 
     }
 
     let config = ctx.config();
-    let Some(binary) =
-        resolve_plugin_binary(subcommand, &config.plugins, ctx.term.interactive).await?
+    let Some(binary) = resolve_plugin_binary(
+        subcommand,
+        &config.plugins,
+        ctx.term.interactive,
+        &ctx.printer,
+    )
+    .await?
     else {
         return Err(unknown_subcommand_error(subcommand));
     };
