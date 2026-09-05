@@ -1,6 +1,6 @@
 # RFD 091: Printer-Owned Status Region
 
-- **Status**: Accepted
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-07-03
