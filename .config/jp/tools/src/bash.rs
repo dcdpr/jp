@@ -5,6 +5,11 @@
 //! script exits.
 //! Nothing carries over between calls.
 //!
+//! `options.install_script` mutates the base image before the assistant sees
+//! it.
+//! The result is cached under a content-addressed tag, so the build runs once
+//! per distinct base-and-script pair rather than once per call.
+//!
 //! Two grants decide what the container can see:
 //!
 //! - Workspace paths named in `mounts` go through [`Context::check_read`] and
@@ -23,7 +28,7 @@ use serde_json::{Map, Value};
 
 use crate::{
     Error, Tool,
-    bash::runtime::{RunSpec, Runtime, argv, detect},
+    bash::runtime::{Install, RunSpec, Runtime, argv, detect, ensure_image},
     to_xml,
     util::{
         OneOrMany, ToolResult,
@@ -43,6 +48,12 @@ const DEFAULT_IMAGE: &str = "registry.gitlab.com/gitlab-ci-utils/curl-jq:5.0.2";
 
 /// Directory inside the container that workspace mounts are placed under.
 const MOUNT_ROOT: &str = "/workspace";
+
+/// User the container runs as when `options.install_script` builds an image and
+/// `options.run_as` does not name one.
+///
+/// Matches the unprivileged user in [`DEFAULT_IMAGE`].
+const DEFAULT_RUN_AS: &str = "nonroot";
 
 /// Truncate stdout and stderr beyond this limit so a single runaway command
 /// cannot fill the assistant's context window.
@@ -89,6 +100,9 @@ pub fn run(ctx: Context, t: Tool) -> ToolResult {
 #[derive(Debug, PartialEq)]
 struct Plan {
     image: String,
+
+    /// Mutation applied to `image` before the commands run, if configured.
+    install: Option<Install>,
 
     /// Host path and container path for each read-only bind mount.
     mounts: Vec<(Utf8PathBuf, String)>,
@@ -143,17 +157,23 @@ fn resolve(
         return Ok(retry("`commands` must contain at least one command."));
     }
 
-    let image = match t.options.get("image") {
-        None | Some(Value::Null) => DEFAULT_IMAGE.to_owned(),
-        Some(Value::String(image)) => image.clone(),
-        // Falling back to the default image would run something other than what
-        // the operator configured, and report success for it.
-        Some(other) => {
-            return Err(format!(
-                "Invalid `image` option for tool 'bash': expected a string, got {other}"
-            )
-            .into());
+    let image = string_option(t, "image")?.unwrap_or_else(|| DEFAULT_IMAGE.to_owned());
+    let run_as = string_option(t, "run_as")?;
+    let install = match string_option(t, "install_script")? {
+        Some(script) => Some(Install {
+            script,
+            run_as: run_as.unwrap_or_else(|| DEFAULT_RUN_AS.to_owned()),
+        }),
+        // `run_as` only takes effect through the image build, so on its own it
+        // is configuration that silently does nothing.
+        None if run_as.is_some() => {
+            return Err(
+                "The `run_as` option for tool 'bash' requires `install_script`; without a build \
+                 there is no image to set a user on."
+                    .into(),
+            );
         }
+        None => None,
     };
 
     if let Some(name) = envs.iter().find(|name| !is_valid_env_name(name)) {
@@ -175,10 +195,28 @@ fn resolve(
 
     Ok(Resolution::Run(Plan {
         image,
+        install,
         mounts,
         envs,
         script: build_script(&commands),
     }))
+}
+
+/// Read a string option, failing the invocation when it is present but not a
+/// string.
+///
+/// A malformed value is not treated as absent: falling back to the default
+/// would run something other than what the operator configured, and report
+/// success for it.
+fn string_option(t: &Tool, key: &str) -> Result<Option<String>, Error> {
+    match t.options.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(value)) => Ok(Some(value.clone())),
+        Some(other) => Err(format!(
+            "Invalid `{key}` option for tool 'bash': expected a string, got {other}"
+        )
+        .into()),
+    }
 }
 
 /// Run the plan under `runtime` and render the result.
@@ -188,8 +226,10 @@ fn execute<R: ProcessRunner>(
     plan: &Plan,
     runner: &R,
 ) -> ToolResult {
+    let image = ensure_image(runtime, &plan.image, plan.install.as_ref(), root, runner)?;
+
     let spec = RunSpec {
-        image: plan.image.clone(),
+        image,
         mounts: plan.mounts.clone(),
         envs: plan.envs.iter().map(|(name, _)| name.clone()).collect(),
         workdir: (!plan.mounts.is_empty()).then(|| MOUNT_ROOT.to_owned()),

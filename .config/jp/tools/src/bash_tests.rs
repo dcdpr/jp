@@ -69,8 +69,76 @@ fn commands_become_one_script_under_strict_mode() {
 
     assert_eq!(plan.script, "set -euo pipefail\necho one\necho two\n");
     assert_eq!(plan.image, DEFAULT_IMAGE);
+    assert_eq!(plan.install, None);
     assert!(plan.mounts.is_empty());
     assert!(plan.envs.is_empty());
+}
+
+#[test]
+fn an_install_script_defaults_to_the_unprivileged_user() {
+    let dir = workspace();
+    let mut t = tool(&json!({"commands": ["true"]}));
+    t.options.insert(
+        "install_script".to_owned(),
+        json!("apk add --no-cache python3"),
+    );
+
+    let plan = assert_matches!(resolve_bare(&ctx(&dir, None), &t), Resolution::Run(plan) => plan);
+
+    assert_eq!(
+        plan.install,
+        Some(Install {
+            script: "apk add --no-cache python3".to_owned(),
+            run_as: "nonroot".to_owned(),
+        })
+    );
+}
+
+#[test]
+fn run_as_overrides_the_default_user() {
+    let dir = workspace();
+    let mut t = tool(&json!({"commands": ["true"]}));
+    t.options.insert(
+        "install_script".to_owned(),
+        json!("apk add --no-cache python3"),
+    );
+    t.options.insert("run_as".to_owned(), json!("root"));
+
+    let plan = assert_matches!(resolve_bare(&ctx(&dir, None), &t), Resolution::Run(plan) => plan);
+
+    assert_eq!(plan.install.unwrap().run_as, "root");
+}
+
+/// `run_as` only takes effect through the image build, so accepting it without
+/// `install_script` would be config that silently does nothing.
+#[test]
+fn run_as_without_an_install_script_is_rejected() {
+    let dir = workspace();
+    let mut t = tool(&json!({"commands": ["true"]}));
+    t.options.insert("run_as".to_owned(), json!("root"));
+
+    let error = resolve(&ctx(&dir, None), &t, |_| None).unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "The `run_as` option for tool 'bash' requires `install_script`; without a build there is \
+         no image to set a user on."
+    );
+}
+
+#[test]
+fn a_non_string_install_script_fails_the_invocation() {
+    let dir = workspace();
+    let mut t = tool(&json!({"commands": ["true"]}));
+    t.options
+        .insert("install_script".to_owned(), json!(["apk", "add"]));
+
+    let error = resolve(&ctx(&dir, None), &t, |_| None).unwrap_err();
+
+    assert_eq!(
+        error.to_string(),
+        "Invalid `install_script` option for tool 'bash': expected a string, got [\"apk\",\"add\"]"
+    );
 }
 
 #[test]
@@ -451,6 +519,7 @@ fn output_beyond_the_cap_is_truncated_with_a_note() {
     let dir = workspace();
     let plan = Plan {
         image: DEFAULT_IMAGE.to_owned(),
+        install: None,
         mounts: vec![],
         envs: vec![],
         script: "set -euo pipefail\nyes\n".to_owned(),
@@ -477,6 +546,7 @@ fn a_successful_run_still_reports_its_exit_code() {
     let dir = workspace();
     let plan = Plan {
         image: DEFAULT_IMAGE.to_owned(),
+        install: None,
         mounts: vec![],
         envs: vec![],
         script: "set -euo pipefail\necho hi\n".to_owned(),
@@ -490,6 +560,43 @@ fn a_successful_run_still_reports_its_exit_code() {
     assert_eq!(
         content,
         "```xml\n<CommandOutput>\n  <stdout>hi</stdout>\n  \
+         <status>0</status>\n</CommandOutput>\n```"
+    );
+}
+
+/// The install script's whole point: a base image without python gets it, and
+/// the built image is what the commands then run in.
+///
+/// Also covers the `USER` round-trip — the script installs as root, and
+/// `python3 -c` runs as `nonroot` afterwards, which only works if the restore
+/// resolved to a user the base image actually defines.
+///
+/// Needs a container runtime and network access for the package install.
+/// The first run builds; later runs hit the cached tag and take about as long
+/// as any other call.
+#[test]
+#[ignore = "builds a real image"]
+fn an_install_script_adds_a_tool_the_base_image_lacks() {
+    let dir = workspace();
+    let plan = Plan {
+        image: DEFAULT_IMAGE.to_owned(),
+        install: Some(Install {
+            script: "apk add --no-cache python3".to_owned(),
+            run_as: DEFAULT_RUN_AS.to_owned(),
+        }),
+        mounts: vec![],
+        envs: vec![],
+        script: "set -euo pipefail\npython3 -c 'print(1 + 1)'\nid -un\n".to_owned(),
+    };
+    let runtime = detect().expect("a container runtime must be installed");
+
+    let content = execute(dir.path(), runtime, &plan, &DuctProcessRunner)
+        .unwrap()
+        .unwrap_content();
+
+    assert_eq!(
+        content,
+        "```xml\n<CommandOutput>\n  <stdout>2\nnonroot</stdout>\n  \
          <status>0</status>\n</CommandOutput>\n```"
     );
 }
@@ -510,6 +617,7 @@ fn a_mounted_path_is_read_only_in_the_container() {
     let dir = workspace();
     let plan = Plan {
         image: DEFAULT_IMAGE.to_owned(),
+        install: None,
         mounts: vec![(
             dir.path().join("crates").canonicalize_utf8().unwrap(),
             "/workspace/crates".to_owned(),
