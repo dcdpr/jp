@@ -1,0 +1,132 @@
+[conversation.tools.bash]
+enable = false
+format = "unattended"
+run = "ask"
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "Run bash commands inside a throwaway container."
+description = """
+Runs a short sequence of bash commands in a fresh container, then throws the
+container away. Use it for things the purpose-built tools don't cover — an HTTP
+request with `curl`, reshaping data with `jq`, a quick one-off computation.
+
+The container has `curl`, `jq`, `bash`, `git`, GNU `coreutils`, and `zip`, and
+nothing else unless this workspace's config adds more. It runs as an
+unprivileged user, so packages cannot be installed at runtime — if a command
+needs a tool that isn't available, say so and suggest the operator add it,
+rather than trying to fetch it mid-run.
+
+Nothing persists between calls. Every call gets a new container: no files you
+wrote and no shell state survive into the next one. If a step depends on an
+earlier one, put both in the same `commands` array.
+
+Workspace paths are only visible if you name them in `mounts`, and they are
+mounted **read-only** at `/workspace/<path>` — this tool cannot change anything
+in the workspace. To read, search, or edit workspace files, use the `fs_*` and
+`git_*` tools; they understand the repository and produce far better output
+than shelling out.
+
+The commands run as one script under `set -euo pipefail`, so the sequence stops
+at the first failure. Stdout, stderr, and the exit code are all reported, each
+truncated at 100 KB.
+"""
+
+examples = """
+Fetch a URL and pull one field out of the JSON:
+```json
+{"commands": ["curl -sS https://api.example.com/status > /tmp/out.json", "jq -r .version /tmp/out.json"]}
+```
+
+Use a credential the operator has granted:
+```json
+{"commands": ["curl -sS -H \\"Authorization: Bearer $API_TOKEN\\" https://api.example.com/me"], "envs": ["API_TOKEN"]}
+```
+
+Run a command over workspace files, mounted read-only:
+```json
+{"commands": ["wc -l /workspace/crates/jp_cli/src/main.rs"], "mounts": ["crates/jp_cli/src/main.rs"]}
+```
+"""
+
+# Base image the commands run in, defaulting to
+# `registry.gitlab.com/gitlab-ci-utils/curl-jq:5.0.2`.
+#
+# options.image = "ghcr.io/example/jp-bash:v1"
+
+# Shell script run as root on top of the base image, before the assistant's
+# commands. Use it to add tools the base image lacks:
+#
+# options.install_script = "apk add --no-cache python3 py3-pip"
+#
+# The result is cached under a tag derived from the base image and this script,
+# so the build runs once and every later call reuses it. Editing the script — a
+# comment counts — changes the tag and forces a rebuild, which is also the only
+# way to pick up newer package versions: a built image is frozen until then.
+#
+# The script runs with `sh` under `set -eu`, so a failing command fails the
+# build instead of baking a half-installed image. Matching it to the base image
+# is the operator's job — nothing here checks that `apk` exists.
+
+# User the container runs as once `install_script` has finished. Defaults to
+# `nonroot`, the unprivileged user in the default image; set it to `root` to
+# let commands write inside the container. Only meaningful alongside
+# `install_script`, and rejected without it.
+#
+# options.run_as = "root"
+
+[conversation.tools.bash.style]
+parameters = "just serve-tools {{context}} {{tool}}"
+inline_results = "full"
+results_file_link = "off"
+
+# Environment variables the tool may forward into the container. A variable no
+# rule mentions prompts before it is exposed; `read = false` refuses outright.
+# A trailing `*` matches by prefix.
+#
+# [[conversation.tools.bash.access.env]]
+# name = "GITHUB_TOKEN"
+# read = true
+
+[conversation.tools.bash.parameters.commands]
+required = true
+type = "array"
+items = { type = "string" }
+summary = "Bash commands to run, in sequence."
+description = """
+Joined into one script and run with `bash -c` under `set -euo pipefail`, so \
+execution stops at the first command that fails.
+
+All commands share one container, so a file written by one is visible to the \
+next. Nothing survives past the call.
+"""
+
+[conversation.tools.bash.parameters.envs]
+type = "array"
+items = { type = "string" }
+summary = "Environment variables to expose inside the container."
+description = """
+Names only — values are read on the host and never appear in the command line.
+
+Variables the operator has granted are forwarded silently. Anything else \
+prompts the user for a one-time approval, so ask only for what the commands \
+actually read.
+
+A variable that is not set on the host fails the call rather than being \
+forwarded empty.
+"""
+
+[conversation.tools.bash.parameters.mounts]
+type = "array"
+items = { type = "string" }
+summary = "Workspace-relative paths to mount read-only inside the container."
+description = """
+Each path appears at `/workspace/<path>`, and the working directory is \
+`/workspace`. Files and directories both work.
+
+Mounts are read-only: writes inside the container never reach the workspace. \
+Paths outside the workspace, and paths the tool's access policy denies, are \
+refused.
+
+Nothing is mounted unless you ask for it. Prefer the `fs_*` tools for reading \
+workspace files; mount only what a command needs to operate on directly.
+"""
