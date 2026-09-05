@@ -27,7 +27,7 @@ use super::{
     openai_compat::{merge_consecutive_assistant_messages, parse_chunk},
 };
 use crate::{
-    error::{Error, Result, StreamError},
+    error::{Error, Result, StreamError, StreamErrorKind},
     event::{Event, FinishReason},
     model::{ModelDeprecation, ReasoningDetails},
     provider::trace_to_tmpfile,
@@ -161,13 +161,34 @@ where
                 match result {
                     Ok(v) => stream::iter(v).boxed(),
                     Err(e) => {
-                        stream::iter(vec![Err(StreamError::from_eventsource(e).await)]).boxed()
+                        let error = annotate_rate_limit(StreamError::from_eventsource(e).await);
+                        stream::iter(vec![Err(error)]).boxed()
                     }
                 }
             }
         })
         .flatten()
         .boxed()
+}
+
+/// Point a rate limit at the setting that decides how much quota a request
+/// reserves.
+///
+/// Cerebras meters tokens per minute across an organization and takes a
+/// request's share when it admits the request, sized at `max_completion_tokens`
+/// and capped at 16384 — also the size it assumes when the field is absent.
+/// So a one-word answer costs the same quota as a long one, and the ceiling is
+/// the only lever the user has.
+fn annotate_rate_limit(error: StreamError) -> StreamError {
+    if error.kind != StreamErrorKind::RateLimit {
+        return error;
+    }
+
+    error.with_hint(
+        "Cerebras reserves quota when it admits a request: \
+         `assistant.model.parameters.max_tokens` tokens, capped at 16384, which is also what it \
+         assumes when that setting is unset. Lowering it fits more requests into each minute.",
+    )
 }
 
 impl TryFrom<&CerebrasConfig> for Cerebras {

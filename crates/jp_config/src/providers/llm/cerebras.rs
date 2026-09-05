@@ -1,4 +1,28 @@
 //! Cerebras API configuration.
+//!
+//! ```toml
+//! [providers.llm.cerebras]
+//! api_key_env = "CEREBRAS_API_KEY"
+//! ```
+//!
+//! # Staying under the rate limit
+//!
+//! Cerebras meters tokens per minute across your whole organization, and
+//! reserves a request's share when it admits the request rather than when it
+//! finishes.
+//! The reservation is `assistant.model.parameters.max_tokens`, capped at 16384
+//! — which is also what it assumes when that setting is unset.
+//!
+//! So a short answer costs the same quota as a long one, and every parallel JP
+//! session draws from the same bucket.
+//! On a 30000 tokens-per-minute plan that is under two requests a minute.
+//! Setting a smaller ceiling reserves less and fits more requests into the same
+//! minute, at the cost of truncating answers that run past it:
+//!
+//! ```toml
+//! [assistant.model.parameters]
+//! max_tokens = 4096
+//! ```
 
 use schematic::Config;
 

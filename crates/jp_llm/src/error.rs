@@ -103,6 +103,18 @@ impl StreamError {
         self
     }
 
+    /// Append a paragraph of guidance to the message.
+    ///
+    /// For advice the shared classifier cannot know, such as which setting to
+    /// change or where a provider keeps its billing page.
+    /// The message is what a caller reads once retries are exhausted, so a hint
+    /// lands at the point the reader can act on it.
+    #[must_use]
+    pub fn with_hint(mut self, hint: impl fmt::Display) -> Self {
+        self.message = format!("{}\n\n{hint}", self.message);
+        self
+    }
+
     /// Set the source error.
     #[must_use]
     pub fn with_source(
