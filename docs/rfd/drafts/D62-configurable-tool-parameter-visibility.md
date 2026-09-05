@@ -1,4 +1,4 @@
-# RFD D52: Configurable Tool Parameter Visibility
+# RFD D62: Configurable Tool Parameter Visibility
 
 - **Status**: Draft
 - **Category**: Design
