@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-11
+- **Extended by**: [RFD 106]
 
 ## Summary
 
@@ -258,3 +259,4 @@ This is a single-phase change that can be merged in one PR.
 - [RFD 020] — conversation locks that protect concurrent write access
 
 [RFD 020]: 020-parallel-conversations.md
+[RFD 106]: 106-collision-free-conversation-id-allocation.md

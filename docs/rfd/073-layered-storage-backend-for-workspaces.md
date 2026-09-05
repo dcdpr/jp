@@ -4,6 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-01
+- **Extended by**: [RFD 106]
 
 ## Summary
 
@@ -812,3 +813,4 @@ remains, backed by the trait swap).
 [RFD 031]: 031-durable-conversation-storage-with-workspace-projection.md
 [RFD 052]: 052-workspace-data-store-sanitization.md
 [RFD 069]: 069-guard-scoped-persistence-for-conversations.md
+[RFD 106]: 106-collision-free-conversation-id-allocation.md
