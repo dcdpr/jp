@@ -114,7 +114,8 @@ expression: v
       "mcp_startup": {
         "show": true,
         "delay_secs": 4,
-        "interval_ms": 100
+        "interval_ms": 100,
+        "print_stderr": "auto"
       },
       "reasoning": {
         "display": "full",
@@ -139,7 +140,8 @@ expression: v
         "progress": {
           "show": true,
           "delay_secs": 3,
-          "interval_ms": 100
+          "interval_ms": 100,
+          "print_stderr": "off"
         },
         "preparing": {
           "show": true,

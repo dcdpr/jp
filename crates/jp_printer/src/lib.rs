@@ -34,5 +34,6 @@ mod typewriter;
 
 pub use printer::*;
 pub use region::{
-    RegionStyle, RowBackground, StatusDetail, StatusRegion, SuspendGuard, TerminalCapability,
+    LineSink, OutputLines, RegionStyle, RowBackground, StatusDetail, StatusRegion, SuspendGuard,
+    TerminalCapability,
 };

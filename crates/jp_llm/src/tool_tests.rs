@@ -400,6 +400,7 @@ async fn execute_coerces_json_strings_before_calling_tool() {
             &builtins,
             None,
             &InvocationContext::default(),
+            None,
         )
         .await
         .unwrap();
@@ -1081,6 +1082,7 @@ async fn test_execute_local_exposes_invocation_ids_in_context() {
             &builtins,
             None,
             &invocation,
+            None,
         )
         .await
         .expect("execution succeeds");
@@ -1147,6 +1149,7 @@ async fn test_execute_builtin_dispatches_on_source_name() {
             &builtins,
             None,
             &InvocationContext::default(),
+            None,
         )
         .await
         .expect("execution succeeds");

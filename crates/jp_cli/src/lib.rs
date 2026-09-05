@@ -15,7 +15,6 @@ mod schema;
 mod session;
 mod shared;
 mod signals;
-mod timer;
 
 use std::{
     env, fmt, fs,

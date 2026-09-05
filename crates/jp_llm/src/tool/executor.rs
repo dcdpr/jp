@@ -10,7 +10,7 @@ use jp_tool::Question;
 use serde_json::{Map, Value};
 use tokio_util::sync::CancellationToken;
 
-use super::ToolDefinition;
+use super::{StderrSink, ToolDefinition};
 
 /// Trait for tool execution, enabling mock implementations for testing.
 ///
@@ -73,12 +73,17 @@ pub trait Executor: Send + Sync {
     /// - `mcp_client` - MCP client for remote tool execution
     /// - `root` - Project root directory
     /// - `cancellation_token` - Token to cancel execution
+    /// - `stderr` - Receives the tool's stderr lines as they arrive, for a
+    ///   caller showing progress while it runs.
+    ///   `None` when nothing is watching; the lines still reach tracing and the
+    ///   accumulated buffer either way.
     async fn execute(
         &self,
         answers: &IndexMap<String, Value>,
         mcp_client: &Client,
         root: &Utf8Path,
         cancellation_token: CancellationToken,
+        stderr: Option<StderrSink>,
     ) -> ExecutorResult;
 }
 
@@ -247,6 +252,7 @@ impl Executor for MockExecutor {
         _mcp_client: &Client,
         _root: &Utf8Path,
         _cancellation_token: CancellationToken,
+        _stderr: Option<StderrSink>,
     ) -> ExecutorResult {
         self.result.lock().unwrap().take().unwrap_or_else(|| {
             ExecutorResult::Completed(ToolCallResponse {

@@ -8,7 +8,7 @@ use indexmap::IndexMap;
 use jp_config::providers::mcp::{McpProviderConfig, StdioConfig};
 use tokio::{process::Command, runtime::Handle};
 
-use super::{render_command, render_stderr_tail};
+use super::{Startup, render_command, render_stderr_tail};
 use crate::{Client, Error, id::McpServerId};
 
 fn stdio_config(command: &str, optional: bool) -> McpProviderConfig {
@@ -147,7 +147,7 @@ async fn startup_timeout_attaches_stderr_tail() {
         startup_timeout_secs: 1,
     });
 
-    let error = Client::create_client(&McpServerId::new("slow"), &config, None)
+    let error = Client::create_client(&McpServerId::new("slow"), &config, None, None)
         .await
         .expect_err("a server that never completes the handshake must time out");
 
@@ -181,7 +181,7 @@ async fn zero_startup_timeout_disables_timeout() {
         startup_timeout_secs: 0,
     });
 
-    let error = Client::create_client(&McpServerId::new("instant"), &config, None)
+    let error = Client::create_client(&McpServerId::new("instant"), &config, None, None)
         .await
         .expect_err("a child that exits without a handshake fails initialization");
 
@@ -216,7 +216,7 @@ async fn optional_server_failure_is_tolerated() {
         let completed = joined
             .expect("task did not panic")
             .expect("optional failure is swallowed inside the task");
-        assert_eq!(completed, server_id);
+        assert_eq!(completed, Startup::Skipped(server_id.clone()));
     }
 
     assert!(

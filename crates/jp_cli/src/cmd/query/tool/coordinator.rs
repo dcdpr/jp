@@ -80,7 +80,6 @@
 use std::{
     collections::{HashMap, VecDeque},
     sync::Arc,
-    time::Duration,
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
@@ -102,7 +101,10 @@ use jp_conversation::{
 };
 use jp_editor::EditorBackend;
 use jp_inquire::{ReplyEditMode, prompt::PromptBackend};
-use jp_llm::tool::executor::{Executor, ExecutorResult, ExecutorSource, PermissionInfo};
+use jp_llm::tool::{
+    StderrSink,
+    executor::{Executor, ExecutorResult, ExecutorSource, PermissionInfo},
+};
 use jp_mcp::Client;
 use jp_printer::Printer;
 use jp_tool::{AnswerType, Question};
@@ -173,10 +175,6 @@ enum ExecutionEvent {
         tool_id: String,
         response: ToolCallResponse,
     },
-
-    ProgressTick {
-        elapsed: Duration,
-    },
 }
 
 #[derive(Debug)]
@@ -236,11 +234,29 @@ impl ExecutionOutcome {
     }
 }
 
+/// Route a tool's stderr into the progress window, when one is showing.
+///
+/// The closure runs on the forwarder's read loop, so it must not block:
+/// `LineSink::push` writes into a bounded shared buffer and returns, which is
+/// what keeps the child off a full pipe while the terminal catches up.
+fn stderr_sink(renderer: &ToolRenderer, tool_name: &str) -> Option<StderrSink> {
+    let sink = renderer.progress_source(tool_name)?;
+
+    Some(Arc::new(move |line: &str| sink.push(line)))
+}
+
 struct ExecutingTool {
     executor: Arc<dyn Executor>,
     tool_id: String,
     tool_name: String,
     accumulated_answers: IndexMap<String, Value>,
+
+    /// Where this tool's stderr goes while it runs.
+    ///
+    /// Built once when the tool is first spawned and reused across the
+    /// re-spawns an answered question triggers, so a tool that asks a question
+    /// keeps feeding the same window row afterwards.
+    stderr: Option<StderrSink>,
 }
 
 #[derive(Debug)]
@@ -890,9 +906,9 @@ impl ToolCoordinator {
     /// Run the approved tools, answering their questions and result prompts as
     /// they arrive.
     ///
-    /// `is_tty` gates the elapsed-time progress line, which is a
-    /// cursor-relative redraw and only belongs on a terminal.
     /// `interactive` gates every question and result prompt.
+    /// The elapsed-time progress row takes no parameter: it is a status region,
+    /// so the printer's own terminal capability decides whether it renders.
     #[allow(clippy::too_many_arguments)]
     #[allow(clippy::too_many_lines)]
     pub async fn execute_with_prompting(
@@ -910,8 +926,7 @@ impl ToolCoordinator {
         conv: &ConversationMut,
         mcp_client: &Client,
         root: &Utf8Path,
-        tool_renderer: &ToolRenderer,
-        is_tty: bool,
+        tool_renderer: &mut ToolRenderer,
         interactive: bool,
     ) -> ExecutionResult {
         if executors.is_empty() {
@@ -954,11 +969,14 @@ impl ToolCoordinator {
 
             let executor: Arc<dyn Executor> = Arc::from(executor);
 
+            let stderr = stderr_sink(tool_renderer, &tool_name);
+
             executing_tools.insert(index, ExecutingTool {
                 executor: Arc::clone(&executor),
                 tool_id: tool_id.clone(),
                 tool_name: tool_name.clone(),
                 accumulated_answers: accumulated_answers.clone(),
+                stderr: stderr.clone(),
             });
 
             self.set_tool_state(&tool_id, ToolCallState::Running);
@@ -971,6 +989,7 @@ impl ToolCoordinator {
                 root.to_path_buf(),
                 cancellation_token.child_token(),
                 event_tx.clone(),
+                stderr,
             );
         }
 
@@ -990,35 +1009,15 @@ impl ToolCoordinator {
             }
         });
 
-        // Progress is a terminal affordance, not a prompt: a `--no-interactive`
-        // run on a terminal still shows how long a tool has been going.
-        let progress_config = tool_renderer.progress_config().clone();
-        let mut progress_shown = false;
-
-        let (progress_tx, mut progress_rx) = tokio::sync::mpsc::channel::<Duration>(1);
-        let progress_token = if is_tty {
-            let event_tx = event_tx.clone();
-            tokio::spawn(async move {
-                while let Some(elapsed) = progress_rx.recv().await {
-                    if event_tx
-                        .send(ExecutionEvent::ProgressTick { elapsed })
-                        .await
-                        .is_err()
-                    {
-                        break;
-                    }
-                }
-            });
-
-            crate::timer::spawn_tick_sender(
-                progress_tx,
-                progress_config.show,
-                Duration::from_secs(u64::from(progress_config.delay_secs)),
-                Duration::from_millis(u64::from(progress_config.interval_ms)),
-            )
-        } else {
-            None
-        };
+        // The elapsed-time row ticks itself and is erased around every write
+        // the printer makes, so it stays claimed for the whole execution rather
+        // than being torn down and rebuilt around each event. A prompt suspends
+        // it for the widget's lifetime without the coordinator arranging it.
+        //
+        // Progress is a terminal affordance, not a prompt, so nothing here
+        // consults `interactive`: a `--no-interactive` run on a terminal still
+        // shows how long a tool has been going.
+        tool_renderer.start_progress();
 
         let mut outcome = ExecutionOutcome::Completed;
         let mut tools_cancelled = false;
@@ -1026,14 +1025,8 @@ impl ToolCoordinator {
         let mut cancelled_indices: Vec<usize> = Vec::new();
 
         while let Some(event) = event_rx.recv().await {
-            let was_prompting = prompt_active;
-
             match event {
                 ExecutionEvent::ToolResult { index, result } => {
-                    if progress_shown {
-                        tool_renderer.clear_progress();
-                        progress_shown = false;
-                    }
                     let Some(tool) = executing_tools.get_mut(&index) else {
                         warn!(index, "Received ToolResult for unknown tool.");
                         continue;
@@ -1108,6 +1101,7 @@ impl ToolCoordinator {
                                 root.to_path_buf(),
                                 cancellation_token.child_token(),
                                 event_tx.clone(),
+                                tool.stderr.clone(),
                             );
                         } else {
                             warn!(index, "Received InquiryResult for unknown tool.");
@@ -1164,10 +1158,6 @@ impl ToolCoordinator {
                     tool_id,
                     response,
                 } => {
-                    if progress_shown {
-                        tool_renderer.clear_progress();
-                        progress_shown = false;
-                    }
                     prompt_active = false;
                     let tool_name = executing_tools
                         .get(&index)
@@ -1210,10 +1200,6 @@ impl ToolCoordinator {
                         // the menu on top of the prompt.
                         notice.decline();
                     } else {
-                        if progress_shown {
-                            tool_renderer.clear_progress();
-                            progress_shown = false;
-                        }
                         let result = handle_tool_interrupt(
                             &cancellation_token,
                             turn_coordinator,
@@ -1276,18 +1262,8 @@ impl ToolCoordinator {
                         }
                     }
                 }
-                ExecutionEvent::ProgressTick { elapsed } => {
-                    if !prompt_active {
-                        tool_renderer.render_progress(elapsed);
-                        progress_shown = true;
-                    }
-                }
             }
 
-            if !was_prompting && prompt_active && progress_shown {
-                tool_renderer.clear_progress();
-                progress_shown = false;
-            }
             if results.iter().all(Option::is_some) {
                 break;
             }
@@ -1297,12 +1273,7 @@ impl ToolCoordinator {
         // when the notification channel closes.
         drop(interrupt_guard);
 
-        if let Some(token) = progress_token {
-            token.cancel();
-        }
-        if progress_shown {
-            tool_renderer.clear_progress();
-        }
+        tool_renderer.clear_progress();
 
         let mut responses: Vec<(usize, ToolCallResponse)> = plan_indices
             .into_iter()
@@ -1362,9 +1333,12 @@ impl ToolCoordinator {
         root: Utf8PathBuf,
         token: CancellationToken,
         tx: mpsc::Sender<ExecutionEvent>,
+        stderr: Option<StderrSink>,
     ) {
         tokio::spawn(async move {
-            let result = executor.execute(&answers, &client, &root, token).await;
+            let result = executor
+                .execute(&answers, &client, &root, token, stderr)
+                .await;
             let _err = tx.send(ExecutionEvent::ToolResult { index, result }).await;
         });
     }
@@ -1650,6 +1624,7 @@ impl ToolCoordinator {
                             root.to_path_buf(),
                             cancellation_token.clone(),
                             event_tx,
+                            tool.stderr.clone(),
                         );
                         return;
                     }
@@ -1673,6 +1648,7 @@ impl ToolCoordinator {
                         root.to_path_buf(),
                         cancellation_token.clone(),
                         event_tx,
+                        tool.stderr.clone(),
                     );
                     return;
                 }
@@ -1805,6 +1781,7 @@ impl ToolCoordinator {
                 root.to_path_buf(),
                 cancellation_token.clone(),
                 event_tx.clone(),
+                tool.stderr.clone(),
             );
         }
         self.process_next_prompt(
