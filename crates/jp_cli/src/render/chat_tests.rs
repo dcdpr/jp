@@ -11,7 +11,7 @@ fn strip_ansi(s: &str) -> String {
 
 fn create_renderer_with_config(config: AppConfig) -> (ChatRenderer, SharedBuffer, SharedBuffer) {
     let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
-    let renderer = ChatRenderer::new(Arc::new(printer), config.style);
+    let renderer = ChatRenderer::new(Arc::new(printer), config.style, RenderFlow::Replay);
     (renderer, out, err)
 }
 
@@ -53,6 +53,7 @@ fn reasoning_fill_defers_to_the_terminal_for_a_measured_width() {
     let renderer = ChatRenderer::new(
         Arc::new(printer.with_output_width(OutputWidth::Terminal(40))),
         config.style,
+        RenderFlow::Replay,
     );
 
     assert_eq!(
@@ -72,6 +73,7 @@ fn reasoning_fill_pads_with_spaces_for_a_declared_width() {
     let renderer = ChatRenderer::new(
         Arc::new(printer.with_output_width(OutputWidth::Declared(40))),
         config.style,
+        RenderFlow::Replay,
     );
 
     assert_eq!(
@@ -93,6 +95,7 @@ fn reasoning_code_block_in_a_list_stays_within_the_declared_width() {
     let mut renderer = ChatRenderer::new(
         Arc::new(printer.with_output_width(OutputWidth::Declared(40))),
         config.style,
+        RenderFlow::Replay,
     );
 
     renderer.render_response(&ChatResponse::Reasoning {
@@ -139,6 +142,7 @@ fn test_table_is_fitted_to_the_printers_terminal_width() {
     let mut renderer = ChatRenderer::new(
         Arc::new(printer.with_output_width(OutputWidth::Terminal(30))),
         config.style,
+        RenderFlow::Replay,
     );
 
     renderer.render_response(&ChatResponse::Message {
@@ -178,6 +182,7 @@ fn test_table_continuation_edge_follows_the_config() {
     let mut renderer = ChatRenderer::new(
         Arc::new(printer.with_output_width(OutputWidth::Terminal(30))),
         config.style,
+        RenderFlow::Replay,
     );
 
     renderer.render_response(&ChatResponse::Message {

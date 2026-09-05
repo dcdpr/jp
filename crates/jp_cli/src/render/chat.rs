@@ -77,6 +77,23 @@ enum SeparatorOrigin {
     ToolCall,
 }
 
+/// Which of the two rendering flows a renderer belongs to.
+///
+/// The flows disagree about where a turn's framing belongs — the role header
+/// naming who speaks next, and the echo of the user's own request.
+/// A live run narrates itself, so its framing is chrome and stdout carries the
+/// assistant's answer alone.
+/// A replay builds a document out of stored events, where the same header
+/// delimits one turn from the next and belongs with the content it introduces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RenderFlow {
+    /// A turn as it happens, from the streaming-query pipeline.
+    Live,
+
+    /// A stored turn, replayed by `jp conversation print`.
+    Replay,
+}
+
 /// Renders chat events to the terminal.
 ///
 /// Handles user messages, assistant reasoning, and assistant message content,
@@ -88,6 +105,9 @@ pub struct ChatRenderer {
     buffer: Buffer,
     formatter: Formatter,
     printer: Arc<Printer>,
+    /// Which flow this renderer belongs to, deciding the channel its turn
+    /// framing goes out on.
+    flow: RenderFlow,
     config: StyleConfig,
     last_content_kind: Option<ContentKind>,
     /// The kind of the last *chat response* (reasoning or message), preserved
@@ -134,7 +154,7 @@ pub struct ChatRenderer {
 }
 
 impl ChatRenderer {
-    pub fn new(printer: Arc<Printer>, config: StyleConfig) -> Self {
+    pub fn new(printer: Arc<Printer>, config: StyleConfig, flow: RenderFlow) -> Self {
         let pretty = printer.pretty_printing_enabled();
         let formatter = formatter_from_config(&config, pretty, printer.output_width().columns());
         // Configure the printer's bounded-latency controller from the
@@ -146,6 +166,7 @@ impl ChatRenderer {
             buffer: Buffer::new(),
             formatter,
             printer,
+            flow,
             config,
             last_content_kind: None,
             last_response_kind: None,
@@ -185,7 +206,7 @@ impl ChatRenderer {
             .formatter
             .format_terminal(content.trim_end())
             .unwrap_or_else(|_| content.trim_end().to_owned());
-        self.printer.println(&formatted);
+        self.print_framing(&formatted);
 
         self.last_content_kind = Some(ContentKind::Message);
         // A user message ends any reasoning region; a tool call that follows
@@ -220,14 +241,26 @@ impl ChatRenderer {
             pretty,
         );
 
-        self.printer.println("");
-        self.printer.println(&line);
-        self.printer.println("");
+        self.print_framing("");
+        self.print_framing(&line);
+        self.print_framing("");
 
         self.last_content_kind = None;
         // A role boundary ends any reasoning region: a region never spans a
         // turn boundary or survives a user message.
         self.last_response_kind = None;
+    }
+
+    /// Print a line of turn framing on the channel this flow puts it on.
+    ///
+    /// Both streams are serialized through the same printer worker, so framing
+    /// on the chrome channel still lands in order with the content it
+    /// introduces.
+    fn print_framing(&self, content: &str) {
+        match self.flow {
+            RenderFlow::Live => self.printer.eprintln(content),
+            RenderFlow::Replay => self.printer.println(content),
+        }
     }
 
     /// Flush the markdown buffer if the content kind is changing.
