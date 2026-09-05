@@ -168,7 +168,10 @@ async fn prompt_contention(r: LockRequest<'_>) -> Result<LockOutcome> {
     }
     options.push("Cancel");
 
-    let selected = Select::new(&msg, options).prompt_with_writer(&mut r.printer.err_writer())?;
+    // The prompt channel, not the error stream: this asks the user a question,
+    // and a run that silences chrome must not silence the question it is
+    // blocking on.
+    let selected = Select::new(&msg, options).prompt_with_writer(&mut r.printer.prompt_writer())?;
 
     match selected {
         "Continue waiting" => Box::pin(acquire_lock(r)).await,
