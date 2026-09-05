@@ -22,33 +22,36 @@ exact `created_at` to conversation metadata.
 `ConversationId::default()` returns `Utc::now()` truncated, and every creation
 path goes through it.
 
-`jp conversation fork A B` loops over its sources in one process (`fork.rs:82`),
-calling `create_and_lock_conversation_with_projection` per iteration.
+`jp conversation fork A B` loops over its sources in one process (`fork_each` in
+`fork.rs`), calling `create_and_lock_conversation_with_projection` per
+iteration.
 Both land in the same decisecond on typical local storage, where the
 per-iteration persist is three small JSON writes.
 Then:
 
 1. The second creation runs `entry(id).insert_entry(OnceLock::new())`
-   (`jp_workspace/src/lib.rs:330`), replacing the first fork's in-memory state;
-   the result is discarded with `let _err =`.
+   (`create_conversation_with_projection` in `jp_workspace/src/lib.rs`),
+   replacing the first fork's in-memory state; the result is discarded with `let
+   _err =`.
 2. The first fork's `ConversationLock` dropped at the end of its iteration, so
    `try_lock` succeeds and no error surfaces.
-3. On persist, `reconcile_conversation_dir` (`jp_storage/src/lib.rs:925`)
-   renames the first fork's directory into the second's name and
-   `remove_dir_all`s the rest.
+3. On persist, `reconcile_conversation_dir` (`jp_storage/src/lib.rs`) renames
+   the first fork's directory into the second's name and `remove_dir_all`s the
+   rest.
 
 The first fork is gone.
 No error, no warning, exit status 0.
 
 This needs no concurrency and no unusual timing, though it is not guaranteed:
-`fork --compact` runs an LLM call per iteration (`fork.rs:127-149`), which
-separates them by seconds.
+`fork --compact` runs an LLM call per iteration (`fork.rs`), which separates
+them by seconds.
 The cross-process cases are probabilistic, and [RFD 050] makes them routine —
 `conversation new` and `fork` exist to be driven from scripts, and `fork` prints
 one ID per source, so a script can receive the same ID twice.
 
-The existing test (`fork_tests.rs:75`) forks a *single* source against a stubbed
-epoch clock, so it always passes; the multi-source path has no coverage.
+The existing test (`test_conversation_fork` in `fork_tests.rs`) forks a *single*
+source against a stubbed epoch clock, so it always passes; the multi-source path
+has no coverage.
 
 ## Design
 
@@ -69,26 +72,37 @@ Three behavioral changes:
   yields N distinct IDs in ascending order, skipping occupied slots.
 - **IDs allocated within one process are strictly increasing.** Across process
   restarts, clock corrections, and conversations arriving through git they stay
-  unique but do not define creation order; `created_at` does.
+  unique but do not define creation order.
+  `created_at` records the exact instant of creation, undrifted, but it orders
+  conversations only as far as the clocks that stamped them agree.
 - **A burst that runs the allocator far ahead of wall-clock time fails with a
   clear error** rather than succeeding with a badly-dated ID.
 
 The ID-ordered interfaces stay approximate by design.
-`--sort created`, the `--from` / `--until` thresholds, and the `newest` target
-all read `id.timestamp()` (`cmd/target.rs:441-449`), so a backwards clock
-correction can leave `newest` pointing at the earlier conversation.
+`--sort created`, the `--created-since` / `--created-before` thresholds, and the
+`newest` target all read `id.timestamp()` (`cmd/target.rs`), so a backwards
+clock correction can leave `newest` pointing at the earlier conversation.
 (`latest` is unaffected: it sorts on `last_activated_at`.)
+
 `metadata.json` gains an exact `created_at`, and `jp conversation show` a
-`Created` row, keyed as `details.Created` under `-F json`.
+`Created` row backed by a top-level `created_at` key in its `-F json` payload
+(`DetailsFmt::json` in `format/conversation.rs`).
+`jp conversation ls -F json` already emits a `created_at` derived from the ID
+(`payload` in `ls.rs`); it switches to the stored value, falling back to
+`id.timestamp()` when the field is absent, so the two commands cannot report
+different creation times for the same conversation.
+Ordering and filtering stay on the ID everywhere, `--sort created` included.
 
 ### Why the ID format is worth keeping
 
-Six behaviors read the ID's timestamp: `--sort created` (`ls.rs:165`,
-`grep.rs:547`), the `last_event_at` fallback for an empty conversation
-(`ls.rs:125`), the `--from` / `--until` thresholds (`time.rs:46,119-120`),
-`expires_at = id.timestamp() + ttl` (`query.rs:811`), `newest` resolution
-(`target.rs:444`), and the seed for `ConversationStream::created_at`
-(`load.rs:197`, `jp_workspace/lib.rs:345`).
+Seven behaviors read the ID's timestamp: `--sort created` (`ls.rs`, `grep.rs`),
+the `last_event_at` fallback for an empty conversation (`ls.rs`), the
+`created_at` key in `conversation ls -F json` (`payload` in `ls.rs`), the
+`--created-since` / `--created-before` thresholds (`CreationRange::matches` in
+`time.rs`), `expires_at = id.timestamp() + ttl` (`create_new_conversation` in
+`query.rs`), `newest` resolution (`target.rs`), and the seed for
+`ConversationStream::created_at` (`jp_storage/load.rs`,
+`jp_workspace/src/lib.rs`).
 Any format change — random suffix, ULID, added precision — invalidates some or
 all of them plus every directory name on disk.
 Allocating within the existing encoding fixes the collision without touching the
@@ -112,26 +126,30 @@ claim candidate
 
 A slot is **occupied** when a conversation directory exists for it in any
 partition of any storage root, or when its conversation lock is currently held.
-Those two conditions have no gap: a `ConversationLock` persists before releasing
-its guard, so the directory covers an ID from the moment the lock stops doing
-so.
-The implementation must preserve that ordering.
+Neither condition alone covers a slot for its whole life: between the claim and
+the persist only the lock does, and once the lock is released only the directory
+does.
+A `ConversationLock` persists before releasing its guard, so the two overlap
+instead of leaving a gap, and the implementation must preserve that ordering.
+Observing both without a gap is a separate problem, which
+[Exclusion](#exclusion) covers.
 `process_high_water` is bumped per allocation so a twelve-source fork does not
 hand out a slot it claimed but has not yet persisted.
 
 **Occupancy comes from storage, not from a cursor file.** Allocated IDs are
 already durably recorded as directory names, and `scan_conversation_ids`
-(`jp_storage/load.rs:154`) already reads them.
+(`jp_storage/load.rs`) already reads them.
 The scan runs once per allocation, under the allocator lock, into a `HashSet`.
 It cannot be hoisted to once per process: a set built before the first
 allocation goes stale as soon as another process persists, which is the race
 [Exclusion](#exclusion) covers.
 Nor is a per-candidate check cheaper — directories are named `{id}-{title}`, so
-testing one candidate is itself a `read_dir` (`jp_storage/src/lib.rs:952`).
+testing one candidate is itself a `read_dir` (`conversation_dirs_for_id` in
+`jp_storage/src/lib.rs`).
 
 The scan covers both roots *and* both partitions.
 `load_conversation_index` filters to the active directory or `.archive/`, not
-both (`load.rs:116-123`), so an occupancy set built from the workspace index
+both (`jp_storage/load.rs`), so an occupancy set built from the workspace index
 alone would miss archived IDs and `unarchive_conversation` could land on an
 occupied directory.
 
@@ -140,8 +158,8 @@ conversations ([RFD 073] made `Storage` an internal detail behind it):
 `FsStorageBackend` answers with a union scan, `InMemoryStorageBackend` from its
 own map.
 Allocation therefore reads through `loader` and claims through `locker`
-(`jp_workspace/src/lib.rs:55-64`), which is sound only when both describe the
-same conversation set — a requirement worth stating rather than assuming.
+(`jp_workspace/src/lib.rs`), which is sound only when both describe the same
+conversation set — a requirement worth stating rather than assuming.
 `--no-persist` breaks it deliberately: the loader stays filesystem-backed while
 the locker becomes `NullLockBackend`, so occupancy reflects durable state the
 run will never add to.
@@ -149,8 +167,11 @@ run will never add to.
 Because the floor is `now` rather than the stored maximum, an imported
 future-dated ID costs one skipped slot instead of blocking creation until local
 time catches up.
-A backwards clock jump reuses low free slots: IDs stop increasing, uniqueness
-holds.
+After a backwards clock jump the next process reuses the low free slots: IDs
+stop increasing, uniqueness holds.
+Within the process that saw the jump the high-water mark still applies, so
+allocation stays above the last ID it handed out and the drift budget decides
+what happens next.
 
 ### Exclusion
 
@@ -161,31 +182,60 @@ and absent from its stale snapshot, and overwrites Q.
 
 The per-conversation lock cannot close that on its own, and not only because of
 the snapshot: `ConversationFileLock::drop` releases the `flock` *before*
-unlinking the pathname (`jp_storage/src/lock.rs:117-124`), so two processes can
-hold exclusive locks on different inodes for the same path.
+unlinking the pathname (`jp_storage/src/lock.rs`), so two processes can hold
+exclusive locks on different inodes for the same path.
 
 So each allocation runs under a single stable lock, `locks/allocator.lock`, held
 from the scan through the claim:
 
 ```text
 acquire locks/allocator.lock
-    scan occupancy
-    walk to the first free candidate
+    scan occupancy into a set
+    walk to the first candidate the set does not hold and no lock covers
     claim it (per-conversation lock, as today)
+    re-read occupancy for that one ID
+    still free: keep it. occupied: release the claim, advance, repeat
 release locks/allocator.lock
 ```
+
+**The re-read is what makes the snapshot safe to act on.** The scan describes
+the directories at one instant and the lock test describes the locks at a later
+one, so a writer that persists and releases in between reads as free on both:
+absent from the snapshot, and unlocked by the time the walk asks.
+Taking the observations in the other order settles it.
+Nobody else can claim while this process holds the allocator lock, so a
+candidate whose lock this process now holds and whose directory is absent from a
+fresh read was unclaimed at both instants.
+The up-front scan stays as the cheap skip-list; the re-read costs one more scan
+per allocation, not one per candidate.
+It also takes allocation out of reach of the release-then-unlink defect: two
+processes holding `flock`s on different inodes for the same path still cannot
+both keep the candidate, because the loser's re-read finds the winner's
+directory.
+
+**Partition moves are the one transition the scan cannot serialize.**
+`archive_conversation` holds the conversation lock across the rename
+(`jp_workspace/src/lib.rs`), so the lock test covers it.
+`unarchive_conversation` takes no lock at all (ticket `T-02ynsca`), so a rename
+out of `.archive/` can slip between the two halves of a scan and be missed by
+both.
+The union therefore reads `.archive/` before the active partition — the
+ordering `cleanup_stale_files` already uses against the same defect — so
+whichever read follows the rename finds the directory.
+An archived ID only becomes a candidate after a backwards clock correction past
+its creation time, so the ordering is cheap insurance rather than a live hazard.
 
 The lock file is never unlinked, so it is a stable inode and the
 release-then-unlink hazard does not apply to it.
 Nothing may prune it while allocation can run, including the reclamation pass
 that exists today (see Risks).
-The critical section is one directory scan, so serializing it costs nothing for
+The critical section is two directory scans, so serializing it costs nothing for
 a single-user CLI and leaves per-conversation lock semantics untouched.
 Occupancy checking **fails closed**: a scan that returns an I/O error fails the
 allocation rather than proceeding on unknown state.
 
 **The allocator lock belongs to `LockBackend`**, which already owns exclusion
-(`jp_storage/src/backend/lock.rs:13-29`).
+(`jp_storage/src/backend/lock.rs`).
 It gains one operation returning a guard that releases the OS lock on drop and
 leaves the pathname in place: `flock` for `FsStorageBackend`, a process mutex
 for `InMemoryStorageBackend`, unconditionally granted by `NullLockBackend` (as
@@ -193,47 +243,54 @@ for `InMemoryStorageBackend`, unconditionally granted by `NullLockBackend` (as
 uniqueness).
 It is *not* `try_lock` with a synthetic identifier — that signature accepts
 `"allocator"`, but its guard unlinks the path on drop
-(`jp_storage/src/lock.rs:117-124`), the one property this lock must not have.
+(`ConversationFileLock::drop` in `jp_storage/src/lock.rs`), the one property
+this lock must not have.
 
 **Contention waits briefly, then fails.** `try_lock` is non-blocking and the
-creation path turns `Ok(None)` into an immediate error
-(`jp_workspace/src/lib.rs:426-429`); inheriting that would fail one of two
-concurrent forks on a lock held for the duration of a scan.
+creation path turns `Ok(None)` into an immediate error (`lock_new_conversation`
+in `jp_workspace/src/lib.rs`); inheriting that would fail one of two concurrent
+forks on a lock held for the duration of a scan.
 The allocator lock blocks with a bounded retry against a constant,
 `ALLOCATOR_LOCK_WAIT`, set to one second, then returns a typed contention error.
 It does not prompt and does not reuse `style.lock_wait`, which covers a
 ten-second human-scale wait on a lock held by another *session*, ending in an
-interactive choice (`jp_cli/src/cmd/lock.rs:103-172`).
+interactive choice (`acquire_lock` in `jp_cli/src/cmd/lock.rs`).
 This lock is held by a scan, and there is nothing for the user to decide.
 
 The release-before-unlink defect still affects write exclusion on *existing*
 conversations; that is a pre-existing bug, out of scope here.
 `create_conversation`, the unlocked variant, takes no allocator lock and its doc
 comment says it carries no guarantee; every production caller uses the locking
-variants (`cmd/query.rs:798`, `conversation/fork.rs:195`).
+variants (`cmd/query.rs`, `conversation/fork.rs`).
 
 ### Drift budget
 
-The allocator can run ahead of wall-clock time, and the consumers in the table
-above treat the ID's timestamp as a time: an ID 100 seconds ahead is excluded by
-`--until now` and expires 100 seconds late.
+The allocator can run ahead of wall-clock time, and the consumers listed above
+treat the ID's timestamp as a time: an ID 100 seconds ahead is excluded by a
+`--created-before` cutoff at the current time and expires 100 seconds late.
 Drift decays during idle time, but it needs a ceiling.
 
 `MAX_ID_DRIFT` is a constant, 5 seconds (50 slots).
 A candidate past `now + MAX_ID_DRIFT` returns a typed error.
-Local burst is the only thing that can push it that far — an imported
-future-dated ID occupies one slot rather than moving the floor — so the
-diagnosis is accurate:
+Two things push a candidate that far: a local burst, and a backwards clock step
+inside a process that has already allocated, whose high-water floor stays where
+the old clock left it.
+An imported future-dated ID is neither — it occupies one slot rather than
+moving the floor — so the error can name both causes it has:
 
 ```text
 Error: cannot allocate a conversation ID: allocation is 5s ahead of wall-clock
-time. Conversations are being created faster than the ID format allows (10 per
-second). Slow down, or open an issue describing the workload.
+time. Either conversations are being created faster than the ID format allows
+(10 per second), or the system clock moved backwards during this run. Slow down,
+or open an issue describing the workload.
 ```
 
 Five seconds covers every realistic burst ([RFD 050] designs for N positional
 fork sources; a dozen is plausible) and keeps the error on derived behavior
 negligible.
+A clock step larger than the budget blocks creation in the process that saw it
+until wall-clock time catches up; a process started afterwards is unaffected,
+having no high-water mark to carry.
 
 ### Exact `created_at`
 
@@ -241,27 +298,31 @@ negligible.
 skip_serializing_if = "Option::is_none")]`, so conversations written before this
 change load unchanged and absent means "fall back to `id.timestamp()`".
 It carries no `serialize_with`, so it serializes as RFC 3339 rather than the
-`"YYYY-MM-DD HH:MM:SS.f"` shape the other timestamps use
-(`jp_conversation/src/lib.rs:80-129`): RFC 3339 is where those fields are
+`"YYYY-MM-DD HH:MM:SS.f"` shape the other timestamps use (`Conversation` in
+`jp_conversation/src/conversation.rs`): RFC 3339 is where those fields are
 headed, and `parse_dt` already reads both.
 
 **The allocating path stamps the field.** `create_and_lock_conversation*`
 captures one instant, derives the decisecond floor from it, and writes it after
 the ID is claimed, overwriting whatever the caller passed in.
 Both production sites need that: `jp query` passes `Conversation::default()`
-(`cmd/query.rs:798-803`), and `fork_conversation` clones the source's metadata,
-resetting only `last_activated_at` and `expires_at`
-(`conversation/fork.rs:179-183`), so a fork would otherwise report its source's
-creation time.
+(`create_new_conversation` in `cmd/query.rs`), and `fork_conversation` clones
+the source's metadata, resetting only `last_activated_at` and `expires_at`
+(`conversation/fork.rs`), so a fork would otherwise report its source's creation
+time.
 The same instant seeds `ConversationStream::created_at` — today derived from
-`id.timestamp()` (`jp_storage/load.rs:197`) — so the two cannot disagree.
+`id.timestamp()` (`jp_storage/load.rs`) — so the two cannot disagree.
 The explicit-ID variants, used only in tests, leave an existing `created_at`
 alone: restoring or importing preserves creation time, allocating does not.
 
 Sort and filter paths keep reading `id.timestamp()`.
-Routing `--from` / `--until` through metadata would turn a free integer
-comparison into a metadata read per conversation, and their error is bounded by
-the drift budget.
+Routing `--created-since` / `--created-before` through metadata would turn a
+free integer comparison into a metadata read per conversation, and their error
+is bounded by the drift budget.
+`conversation ls -F json` is the exception, and only for the value it reports:
+it already loads every conversation's metadata to build its rows (`ls.rs`,
+`Workspace::conversations` in `jp_workspace/src/lib.rs`), so reporting the
+stored `created_at` there costs nothing.
 
 ## Drawbacks
 
@@ -280,6 +341,8 @@ the drift budget.
   listing paths.
 - **A new failure mode:** creation can fail on drift where it previously
   succeeded with a colliding ID.
+  A backwards clock step larger than `MAX_ID_DRIFT` does the same to a process
+  that has already allocated, until wall-clock time catches up.
 - **`created_at` has no consumer that strictly needs it today.** It exists
   because once the ID is approximate, something has to hold the exact value.
 
@@ -332,8 +395,8 @@ implementations as the two it wraps.)
   answer here.
 - **What the storage layer does with a duplicate ID once one exists.** Under
   collision, `reconcile_conversation_dir` renames one match into the target and
-  `remove_dir_all`s the rest (`jp_storage/src/lib.rs:932-944`), destroying a
-  live conversation.
+  `remove_dir_all`s the rest (`jp_storage/src/lib.rs`), destroying a live
+  conversation.
   That is one of several operations that delete conversation data as a side
   effect; making all of them non-destructive is separate work.
   Neither effort gates the other: this RFD lowers the rate at which same-ID
@@ -353,7 +416,7 @@ implementations as the two it wraps.)
 - **Creation must persist for the sequential case to hold.** A process leaves a
   directory behind only when the conversation was made dirty;
   `ConversationMut::drop` returns early otherwise
-  (`jp_workspace/src/conversation_lock.rs:398-400`).
+  (`jp_workspace/src/conversation_lock.rs`).
   A `jp conversation new` that never mutates would write nothing, and once its
   lock file is unlinked the next process has nothing to skip.
   [RFD 050] owns that command; this is a constraint on it, not something this
@@ -364,9 +427,9 @@ implementations as the two it wraps.)
   Worth measuring before assuming it is free.
 - **The reclamation that exists today would delete the allocator lock.**
   `Workspace::cleanup_stale_files` runs at the end of every invocation
-  (`jp_cli/src/lib.rs:577`) and removes every unheld `*.lock` in the user
-  `locks/` directory (`jp_workspace/src/session_mapping.rs:233`,
-  `jp_storage/src/lib.rs:475-492`).
+  (`jp_cli/src/lib.rs`) and removes every unheld `*.lock` in the user `locks/`
+  directory (`jp_workspace/src/session_mapping.rs`, `list_orphaned_lock_files`
+  in `jp_storage/src/lib.rs`).
   An unlink landing between one process opening the path and another opening it
   leaves the two holding `flock`s on different inodes — the hazard the stable
   lock exists to avoid.
@@ -377,8 +440,8 @@ implementations as the two it wraps.)
 ### Phase 1: Occupancy on `LoadBackend`
 
 Add the occupancy operation to `LoadBackend`, implemented for `FsStorageBackend`
-as a union scan of active and `.archive/` across both roots, and for
-`InMemoryStorageBackend` from its own map.
+as a union scan across both roots reading `.archive/` before the active
+partition, and for `InMemoryStorageBackend` from its own map.
 Fails closed on I/O error.
 
 - Test: a workspace holding an archived conversation reports that ID as
@@ -392,7 +455,8 @@ and exclude `locks/allocator.lock` from `list_orphaned_lock_files` so the
 end-of-run reclamation leaves it alone.
 Then add the allocator to `Workspace`: acquire the allocator lock, scan
 occupancy, walk from `max(now, process_high_water + 1)` to the first unoccupied
-candidate, claim it via the existing `try_lock`, release.
+candidate, claim it via the existing `try_lock`, re-read occupancy for that
+candidate and advance if it is no longer free, release.
 Route `create_and_lock_conversation*` through it.
 Document `create_conversation` as offering no collision guarantee.
 
@@ -405,6 +469,9 @@ Document `create_conversation` as offering no collision guarantee.
   `locks/allocator.lock` in place.
 - Test: an ID persisted by another process after this process's first allocation
   is skipped by its second (the rescan-under-lock case).
+- Test: an occupancy answer that changes between the scan and the re-read makes
+  the allocation release that candidate and advance, rather than keeping a slot
+  another writer has published.
 - Test: an occupied slot at `now`, directory present and no lock held, allocates
   `now + 1` (the case a lock-only claim misses).
 - Test: a second process holding the lock for `T` allocates `T + 1`.
@@ -424,8 +491,9 @@ Add `MAX_ID_DRIFT` and the typed error.
 
 Add the field, stamp it in the allocating creation path from the instant that
 seeds the decisecond floor, prefer it over `id.timestamp()` when seeding
-`ConversationStream::created_at`, and add the `Created` row to `conversation
-show`.
+`ConversationStream::created_at`, add the `Created` row and the top-level
+`created_at` key to `conversation show`, and switch the `created_at` key in
+`conversation ls -F json` to the stored value.
 
 - Test: a fork of a conversation with a known `created_at` records its own
   creation time, not the source's.
@@ -433,6 +501,9 @@ show`.
 - Test: a conversation written without the field loads and behaves as before.
 - Test: a `metadata.json` round-trip emits RFC 3339 for `created_at` and the
   existing space-separated format for `last_activated_at`.
+- Test: `conversation show -F json` carries a top-level RFC 3339 `created_at`.
+- Test: `conversation ls -F json` reports the stored `created_at` when the
+  conversation has one, and the ID's timestamp when it does not.
 
 ### Phase 5: Vocabulary
 
