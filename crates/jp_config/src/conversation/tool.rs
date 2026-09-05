@@ -17,7 +17,7 @@ use crate::{
         access::{AccessConfig, PartialAccessConfig},
         style::{DisplayStyleConfig, PartialDisplayStyleConfig},
     },
-    delta::{PartialConfigDelta, delta_opt, delta_opt_partial, delta_opt_vec, delta_vec},
+    delta::{PartialConfigDelta, delta_map, delta_opt, delta_opt_partial, delta_vec},
     fill::FillDefaults,
     partial::{ToPartial, partial_opt, partial_opt_config, partial_opts},
     types::json_value::JsonValue,
@@ -62,19 +62,7 @@ impl PartialConfigDelta for PartialToolsConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
             defaults: self.defaults.delta(next.defaults),
-            tools: next
-                .tools
-                .into_iter()
-                .filter_map(|(name, next)| {
-                    let next = match self.tools.get(&name) {
-                        Some(prev) if prev == &next => return None,
-                        Some(prev) => prev.delta(next),
-                        None => next,
-                    };
-
-                    Some((name, next))
-                })
-                .collect(),
+            tools: delta_map(&self.tools, next.tools),
         }
     }
 }
@@ -537,23 +525,7 @@ impl PartialConfigDelta for PartialToolConfig {
             summary: delta_opt(self.summary.as_ref(), next.summary),
             description: delta_opt(self.description.as_ref(), next.description),
             examples: delta_opt(self.examples.as_ref(), next.examples),
-            parameters: next
-                .parameters
-                .into_iter()
-                .filter_map(|(k, next)| {
-                    let prev = self.parameters.get(&k);
-                    if prev.is_some_and(|prev| prev == &next) {
-                        return None;
-                    }
-
-                    let next = match prev {
-                        Some(prev) => prev.delta(next),
-                        None => next,
-                    };
-
-                    Some((k, next))
-                })
-                .collect(),
+            parameters: delta_map(&self.parameters, next.parameters),
             run: delta_opt(self.run.as_ref(), next.run),
             format: delta_opt(self.format.as_ref(), next.format),
             result: delta_opt(self.result.as_ref(), next.result),
@@ -562,23 +534,7 @@ impl PartialConfigDelta for PartialToolConfig {
                 next.cancellation_response,
             ),
             style: delta_opt_partial(self.style.as_ref(), next.style),
-            questions: next
-                .questions
-                .into_iter()
-                .filter_map(|(k, next)| {
-                    let prev = self.questions.get(&k);
-                    if prev.is_some_and(|prev| prev == &next) {
-                        return None;
-                    }
-
-                    let next = match prev {
-                        Some(prev) => prev.delta(next),
-                        None => next,
-                    };
-
-                    Some((k, next))
-                })
-                .collect(),
+            questions: delta_map(&self.questions, next.questions),
             options: next
                 .options
                 .into_iter()
@@ -726,23 +682,11 @@ impl PartialConfigDelta for PartialToolParameterConfig {
             summary: delta_opt(self.summary.as_ref(), next.summary),
             description: delta_opt(self.description.as_ref(), next.description),
             examples: delta_opt(self.examples.as_ref(), next.examples),
-            enumeration: delta_opt_vec(self.enumeration.as_ref(), next.enumeration),
+            // `enum` replaces on merge rather than appending, so a change to
+            // any element has to record the whole list.
+            enumeration: delta_opt(self.enumeration.as_ref(), next.enumeration),
             items: delta_opt(self.items.as_ref(), next.items),
-            properties: next
-                .properties
-                .into_iter()
-                .filter_map(|(k, next)| {
-                    let prev = self.properties.get(&k);
-                    if prev.is_some_and(|prev| prev == &next) {
-                        return None;
-                    }
-                    let next = match prev {
-                        Some(prev) => prev.delta(next),
-                        None => next,
-                    };
-                    Some((k, next))
-                })
-                .collect(),
+            properties: delta_map(&self.properties, next.properties),
         }
     }
 }

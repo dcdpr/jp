@@ -527,6 +527,49 @@ fn an_explicit_inquiry_value_survives_a_partial_round_trip() {
     );
 }
 
+/// An MCP server whose only difference cannot be expressed as a delta does not
+/// produce one.
+///
+/// `arguments` merges by appending, so a dropped argument has no delta to
+/// record.
+/// Keeping the server in the map anyway makes the whole partial look non-empty,
+/// and every turn then writes a `config_delta` event holding nothing but the
+/// server's transport tag.
+#[test]
+fn an_mcp_server_with_no_expressible_change_yields_no_delta() {
+    use crate::providers::mcp::{McpProviderConfig, StdioConfig};
+
+    let server = |arguments: &[&str]| {
+        McpProviderConfig::Stdio(StdioConfig {
+            command: "just".into(),
+            arguments: arguments.iter().map(|a| (*a).to_owned()).collect(),
+            variables: vec![],
+            checksum: None,
+            optional: false,
+            startup_timeout_secs: 60,
+        })
+    };
+
+    let mut prev = AppConfig::new_test();
+    prev.providers
+        .mcp
+        .insert("bookworm".to_owned(), server(&["serve", "--verbose"]));
+
+    let mut next = prev.clone();
+    next.providers
+        .mcp
+        .insert("bookworm".to_owned(), server(&["serve"]));
+
+    let delta = prev.to_partial().delta(next.to_partial());
+
+    assert!(
+        delta.providers.mcp.is_empty(),
+        "expected no server entry, got: {:?}",
+        delta.providers.mcp
+    );
+    assert!(delta.is_empty(), "expected an empty delta, got: {delta:?}");
+}
+
 /// A union that names an expanded form contributes both the shorthand path and
 /// the expanded keys; a union of distinct values contributes only its path.
 ///

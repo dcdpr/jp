@@ -8,7 +8,7 @@ use schematic::Config;
 
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
-    delta::PartialConfigDelta,
+    delta::{PartialConfigDelta, delta_map},
     fill::FillDefaults,
     partial::ToPartial,
     providers::{
@@ -55,23 +55,7 @@ impl PartialConfigDelta for PartialProviderConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
             llm: self.llm.delta(next.llm),
-            mcp: next
-                .mcp
-                .into_iter()
-                .filter_map(|(k, next)| {
-                    let prev = self.mcp.get(&k);
-                    if prev.is_some_and(|prev| prev == &next) {
-                        return None;
-                    }
-
-                    let next = match prev {
-                        Some(prev) => prev.delta(next),
-                        None => next,
-                    };
-
-                    Some((k, next))
-                })
-                .collect(),
+            mcp: delta_map(&self.mcp, next.mcp),
         }
     }
 }

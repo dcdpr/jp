@@ -40,7 +40,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     BoxedError,
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
-    delta::{PartialConfigDelta, delta_opt, delta_opt_vec},
+    delta::{PartialConfigDelta, delta_opt},
     partial::{ToPartial, partial_opt},
 };
 
@@ -287,7 +287,9 @@ impl PartialConfigDelta for PartialCommandConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
             program: delta_opt(self.program.as_ref(), next.program),
-            args: delta_opt_vec(self.args.as_ref(), next.args),
+            // `args` replaces on merge rather than appending, so a change to
+            // any argument has to record the whole list.
+            args: delta_opt(self.args.as_ref(), next.args),
             shell: delta_opt(self.shell.as_ref(), next.shell),
         }
     }
