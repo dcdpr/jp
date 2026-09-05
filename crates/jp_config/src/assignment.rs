@@ -193,6 +193,30 @@ impl KvAssignment {
         matches!(self.strategy, Strategy::Merge)
     }
 
+    /// Create an assignment that clears the field at `path`.
+    ///
+    /// The value is JSON `null`, which every leaf setter already reads as "no
+    /// value": a scalar field becomes `None`, a list is emptied, and a map
+    /// entry is removed.
+    /// Clearing is what a partial config needs to express a change that its
+    /// field's merge strategy cannot reach on its own — an appending list
+    /// cannot drop an element, but a cleared list followed by a merge lands the
+    /// new value verbatim.
+    ///
+    /// The path is dot-delimited: `providers.mcp.bookworm.arguments`.
+    #[must_use]
+    pub fn unset(path: &str) -> Self {
+        Self {
+            key: KvKey {
+                path: path.to_owned(),
+                delim: KeyDelim::Dot,
+                full_path: path.to_owned(),
+            },
+            value: KvValue::Json(Value::Null),
+            strategy: Strategy::Set,
+        }
+    }
+
     /// Create a root-level JSON assignment with an empty key.
     ///
     /// When assigned via [`AssignKeyValue::assign`], the object's top-level
@@ -249,6 +273,26 @@ impl KvAssignment {
     where
         V: AssignKeyValue + Default,
     {
+        // `null` clears rather than assigns: with no key segment left the whole
+        // map goes, with one segment left that entry goes. Removing the entry —
+        // rather than descending and clearing its fields — is what distinguishes
+        // "this server is gone" from "this server has no arguments".
+        if self.is_json_null() {
+            match self.trim_prefix_any() {
+                Some(key) if self.key.is_empty() => {
+                    map.shift_remove(&key);
+                }
+                Some(key) => {
+                    if let Some(entry) = map.get_mut(&key) {
+                        entry.assign(self)?;
+                    }
+                }
+                None => map.clear(),
+            }
+
+            return Ok(());
+        }
+
         // Whole-collection form, e.g. `aliases:={ ... }`: no map key remains to
         // consume, so distribute the object's top-level keys across entries.
         if self.key.is_empty() {
@@ -843,6 +887,13 @@ impl KvAssignment {
         vec: &mut Vec<T>,
         parser: impl Fn(Self) -> Result<T, BoxedError>,
     ) -> Result<(), KvAssignmentError> {
+        // `null` on the list itself empties it. An index is left to the parser
+        // below, where `null` is a type error against the element type.
+        if self.is_json_null() && self.key.is_empty() {
+            vec.clear();
+            return Ok(());
+        }
+
         // If the key is an index into the array, assign the value to the
         // element, if it exists.
         if let Some(i) = self.key.trim_index() {
@@ -915,6 +966,23 @@ impl KvAssignment {
         Ok(())
     }
 
+    /// Convenience method for [`Self::try_vec`] that takes an optional target.
+    ///
+    /// A `null` value clears the field to `None` rather than to an empty list;
+    /// the two merge differently.
+    pub(crate) fn try_some_vec<T>(
+        self,
+        vec: &mut Option<Vec<T>>,
+        parser: impl Fn(Self) -> Result<T, BoxedError>,
+    ) -> Result<(), KvAssignmentError> {
+        if self.is_json_null() && self.key.is_empty() {
+            *vec = None;
+            return Ok(());
+        }
+
+        self.try_vec(vec.get_or_insert_default(), parser)
+    }
+
     /// Specialized version of [`Self::try_vec`] for parsing a JSON array of
     /// strings.
     pub(crate) fn try_vec_of_strings<T>(self, vec: &mut Vec<T>) -> Result<(), KvAssignmentError>
@@ -938,6 +1006,14 @@ impl KvAssignment {
     where
         T: From<String>,
     {
+        // An absent list and an empty one merge differently: `None` lets a later
+        // layer's value land verbatim, `Some([])` still runs the field's merge
+        // strategy against it.
+        if self.is_json_null() && self.key.is_empty() {
+            *vec = None;
+            return Ok(());
+        }
+
         self.try_vec_of_strings(vec.get_or_insert_default())
     }
 

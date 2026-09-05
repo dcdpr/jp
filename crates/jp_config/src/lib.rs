@@ -233,7 +233,7 @@ impl AssignKeyValue for PartialAppConfig {
                     _ => type_error(kv.key(), &kv.value, &["string"]).map_err(Into::into),
                 };
 
-                kv.try_vec(self.config_load_paths.get_or_insert_default(), parser)?;
+                kv.try_some_vec(&mut self.config_load_paths, parser)?;
             }
             _ if kv.p("assistant") => self.assistant.assign(kv)?,
             _ if kv.p("conversation") => self.conversation.assign(kv)?,
@@ -661,6 +661,25 @@ impl PartialAppConfig {
         <Self as PartialConfig>::empty()
     }
 
+    /// Clear the field at `path`, leaving it unset.
+    ///
+    /// `path` is dot-delimited and names a field the way a `--cfg` key does:
+    /// `assistant.name`, `providers.mcp.bookworm.arguments`.
+    /// A path naming a map entry removes the entry.
+    ///
+    /// Clearing matters because merging is per-field: a field that merges by
+    /// appending combines the two layers' values, so it cannot reach a value
+    /// that drops an element.
+    /// Clearing first and merging second lands the new value verbatim, since a
+    /// merge strategy only runs when both layers hold a value.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `path` does not name a field.
+    pub fn unset(&mut self, path: &str) -> Result<(), BoxedError> {
+        self.assign(KvAssignment::unset(path))
+    }
+
     /// Create a new partial configuration from environment variables.
     ///
     /// # Errors
@@ -763,3 +782,7 @@ impl From<Arc<Self>> for AppConfig {
 #[cfg(test)]
 #[path = "lib_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "unset_tests.rs"]
+mod unset_tests;

@@ -123,9 +123,15 @@ impl AssignKeyValue for PartialStdioConfig {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
             "command" => self.command = kv.try_some_from_str()?,
-            _ if kv.p("args") => kv.try_some_vec_of_strings(&mut self.arguments)?,
-            _ if kv.p("env") => kv.try_some_vec_of_strings(&mut self.variables)?,
-            _ if kv.p("binary_checksum") => self.checksum.assign(kv)?,
+            // The config-file spelling comes first; the short forms are
+            // accepted so a key that works on the command line keeps working.
+            _ if kv.p("arguments") || kv.p("args") => {
+                kv.try_some_vec_of_strings(&mut self.arguments)?;
+            }
+            _ if kv.p("variables") || kv.p("env") => {
+                kv.try_some_vec_of_strings(&mut self.variables)?;
+            }
+            _ if kv.p("checksum") || kv.p("binary_checksum") => self.checksum.assign(kv)?,
             "optional" => self.optional = kv.try_some_bool()?,
             "startup_timeout_secs" => self.startup_timeout_secs = kv.try_some_u32()?,
             _ => return missing_key(&kv),
