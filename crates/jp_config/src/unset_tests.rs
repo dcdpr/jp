@@ -78,29 +78,12 @@ fn unset_of_an_absent_map_entry_is_a_no_op() {
 
 /// Paths that clearing does not reach, and why.
 ///
-/// The first two are not settable by `--cfg` either: `extends` and `loader` are
-/// read while the file declaring them is loaded, and only their effect outlives
-/// that ([RFD 038]), so neither has a key-value arm to reach.
-///
-/// The rest parse their value as an object or a string and reject anything
-/// else, `null` included.
-/// Each merges by replacement, so a delta can always carry the new value whole
-/// and never needs to clear one of these first.
+/// Neither is settable by `--cfg` either: `extends` and `loader` are read while
+/// the file declaring them is loaded, and only their effect outlives that ([RFD
+/// 038]), so neither has a key-value arm to reach.
 ///
 /// [RFD 038]: https://jp.computer/rfd/038
-const UNREACHABLE: &[&str] = &[
-    "extends",
-    "loader.reset",
-    "assistant.model.id",
-    "assistant.model.parameters.reasoning",
-    "conversation.inquiry.assistant.model.id",
-    "conversation.inquiry.assistant.model.parameters.reasoning",
-    "conversation.title.generate.model.id",
-    "conversation.title.generate.model.parameters.reasoning",
-    "editor.cmd",
-    "style.reasoning.summary_model.id",
-    "style.reasoning.summary_model.parameters.reasoning",
-];
+const UNREACHABLE: &[&str] = &["extends", "loader.reset"];
 
 /// Every field the schema names is reachable by path, or listed as not.
 ///

@@ -43,6 +43,10 @@ pub enum ModelIdOrAliasConfig {
 impl AssignKeyValue for PartialModelIdOrAliasConfig {
     fn assign(&mut self, kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
+            // Clearing replaces the whole id: it is one value spelled across two
+            // fields, and half an id takes its missing half from whatever model
+            // the layer below names.
+            "" if kv.is_json_null() => *self = Self::empty(),
             "" => *self = kv.try_object_or_from_str()?,
             "provider" | "name" => match self {
                 Self::Id(id) => id.assign(kv)?,

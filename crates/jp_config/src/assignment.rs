@@ -33,6 +33,14 @@ where
     T: AssignKeyValue + Default,
 {
     fn assign(&mut self, kv: KvAssignment) -> Result<(), BoxedError> {
+        // `null` naming the field itself clears it. A key naming something
+        // inside it descends instead, so `checksum.value=null` clears one field
+        // rather than the block holding it.
+        if kv.is_json_null() && kv.key.is_empty() {
+            *self = None;
+            return Ok(());
+        }
+
         self.get_or_insert_default().assign(kv)
     }
 }
@@ -482,7 +490,7 @@ impl KvAssignment {
     }
 
     /// Returns `true` if the value is JSON `null`.
-    const fn is_json_null(&self) -> bool {
+    pub(crate) const fn is_json_null(&self) -> bool {
         matches!(&self.value, KvValue::Json(Value::Null))
     }
 
