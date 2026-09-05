@@ -1,3 +1,5 @@
+use std::mem;
+
 use camino::{Utf8Path, Utf8PathBuf};
 use grep_printer::StandardBuilder;
 use grep_searcher::{BinaryDetection, SearcherBuilder};
@@ -55,6 +57,8 @@ pub(crate) async fn fs_grep_files(
 
     let matcher = FancyMatcher::new(&pattern)?;
 
+    // No path is given to the printer, so it prints bare `<line>:<content>`
+    // and the path is written once per file below.
     let mut printer = StandardBuilder::new()
         .max_columns(Some(1000))
         .max_columns_preview(true)
@@ -72,12 +76,24 @@ pub(crate) async fn fs_grep_files(
         .binary_detection(BinaryDetection::quit(0))
         .build();
 
+    let mut matches = String::new();
     for file in files {
         let absolute = root.join(&file);
-        searcher.search_path(&matcher, &absolute, printer.sink_with_path(&matcher, &file))?;
-    }
+        let count = {
+            let mut sink = printer.sink(&matcher);
+            searcher.search_path(&matcher, &absolute, &mut sink)?;
+            sink.match_count()
+        };
 
-    let matches = String::from_utf8(printer.into_inner().into_inner())?;
+        // Every file writes into the same buffer, so its lines are taken out
+        // before the next search appends to them.
+        let group = String::from_utf8(mem::take(printer.get_mut().get_mut()))?;
+        if count == 0 {
+            continue;
+        }
+
+        matches.push_str(&format!("{file} ({count} matches)\n{group}"));
+    }
 
     let lines = matches.lines().count();
     let body = if matches.is_empty() {
