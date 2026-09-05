@@ -867,6 +867,31 @@ mod map_model {
     }
 
     #[test]
+    fn gpt_6_astra_uses_latest_metadata() {
+        let details = map_model(model("gpt-6-astra")).unwrap();
+
+        assert_eq!(details.display_name.as_deref(), Some("GPT-6 Astra"));
+        assert_eq!(details.context_window, Some(1_050_000));
+        assert_eq!(details.max_output_tokens, Some(128_000));
+        // `none` is rejected, so reasoning cannot be turned off.
+        assert_eq!(
+            details.reasoning,
+            Some(ReasoningDetails::leveled(false, true, true, true, true, true).always_on())
+        );
+        assert_eq!(
+            details.knowledge_cutoff,
+            chrono::NaiveDate::from_ymd_opt(2026, 4, 30)
+        );
+        assert_eq!(details.deprecated, Some(ModelDeprecation::Active));
+        assert_eq!(details.features, vec![
+            TEMP_REQUIRES_NO_REASONING,
+            REASONING_PRO_MODE,
+            PERSISTED_REASONING,
+            EXPLICIT_PROMPT_CACHING
+        ]);
+    }
+
+    #[test]
     fn gpt_5_6_sol_uses_latest_metadata() {
         let details = map_model(model("gpt-5.6-sol")).unwrap();
 
@@ -1007,6 +1032,88 @@ mod map_model {
                 &"recommended replacement: gpt-5.5",
                 chrono::NaiveDate::from_ymd_opt(2026, 12, 11),
             ))
+        );
+    }
+}
+
+mod create_request {
+    use chrono::{TimeZone as _, Utc};
+    use jp_config::{
+        AppConfig,
+        model::{
+            id::{ModelIdConfig, ModelIdOrAliasConfig, ProviderId},
+            parameters::ReasoningConfig,
+        },
+        providers::llm::LlmProviderConfig,
+    };
+    use jp_conversation::{
+        ConversationStream,
+        event::{ChatRequest, ConversationEvent, TurnStart},
+        thread::ThreadBuilder,
+    };
+
+    use super::super::{ModelResponse, map_model};
+    use crate::{provider::build_request_value, query::ChatQuery};
+
+    /// GPT-6 Astra rejects `effort: none`, so `reasoning = "off"` falls back to
+    /// its lowest supported level instead of the explicit disable other OpenAI
+    /// models accept.
+    /// Reasoning is then always active, which is what strips `temperature` and
+    /// `top_p` — parameters the model rejects outright.
+    #[test]
+    fn astra_reasoning_off_sends_low_effort_and_strips_sampling() {
+        let ts = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
+
+        let mut config = AppConfig::new_test();
+        config.assistant.model.id = ModelIdOrAliasConfig::Id(ModelIdConfig {
+            provider: ProviderId::Openai,
+            name: "gpt-6-astra".parse().unwrap(),
+        });
+        config.assistant.model.parameters.reasoning = Some(ReasoningConfig::Off);
+        config.assistant.model.parameters.temperature = Some(0.7);
+        config.assistant.model.parameters.top_p = Some(0.9);
+
+        let mut stream = ConversationStream::new(config.into()).with_created_at(ts);
+        stream.extend([
+            ConversationEvent::new(TurnStart, ts),
+            ConversationEvent::new(ChatRequest::from("A question"), ts),
+        ]);
+
+        let thread = ThreadBuilder::new().with_events(stream).build().unwrap();
+
+        // Dummy API key env var, mirroring the VCR harness.
+        let env = if cfg!(windows) { "USERNAME" } else { "USER" }.to_owned();
+        let mut providers = LlmProviderConfig::default();
+        providers.openai.api_key_env = env;
+
+        let details = map_model(ModelResponse {
+            id: "gpt-6-astra".to_owned(),
+            _object: "model".to_owned(),
+            _created: Utc.with_ymd_and_hms(2026, 9, 3, 0, 0, 0).unwrap(),
+            _owned_by: "openai".to_owned(),
+        })
+        .unwrap();
+
+        let request = build_request_value(
+            ProviderId::Openai,
+            &providers,
+            &details,
+            ChatQuery::from(thread),
+        )
+        .unwrap()
+        .to_string();
+
+        assert!(
+            request.contains(r#""effort":"low""#),
+            "reasoning not clamped to the lowest supported effort: {request}"
+        );
+        assert!(
+            request.contains(r#""temperature":null"#),
+            "temperature not stripped: {request}"
+        );
+        assert!(
+            request.contains(r#""top_p":null"#),
+            "top_p not stripped: {request}"
         );
     }
 }
