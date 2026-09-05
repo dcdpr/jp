@@ -7,7 +7,7 @@ use schematic::Config;
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     conversation::title::generate::{GenerateConfig, PartialGenerateConfig},
-    delta::{PartialConfigDelta, delta_opt},
+    delta::{PartialConfigDelta, delta_opt, path},
     fill::FillDefaults,
     partial::{ToPartial, partial_opt},
 };
@@ -53,6 +53,17 @@ impl PartialConfigDelta for PartialTitleConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
             generate: self.generate.delta(next.generate),
+            from_heading: delta_opt(self.from_heading.as_ref(), next.from_heading),
+        }
+    }
+
+    fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
+        Self {
+            generate: self.generate.delta_with_unsets(
+                next.generate,
+                &path(prefix, "generate"),
+                unsets,
+            ),
             from_heading: delta_opt(self.from_heading.as_ref(), next.from_heading),
         }
     }

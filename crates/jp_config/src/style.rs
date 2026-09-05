@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
-    delta::PartialConfigDelta,
+    delta::{PartialConfigDelta, path},
     fill::FillDefaults,
     partial::ToPartial,
     style::{
@@ -123,6 +123,24 @@ impl PartialConfigDelta for PartialStyleConfig {
             markdown: self.markdown.delta(next.markdown),
             mcp_startup: self.mcp_startup.delta(next.mcp_startup),
             reasoning: self.reasoning.delta(next.reasoning),
+            lock_wait: self.lock_wait.delta(next.lock_wait),
+            streaming: self.streaming.delta(next.streaming),
+            tool_call: self.tool_call.delta(next.tool_call),
+            typewriter: self.typewriter.delta(next.typewriter),
+        }
+    }
+
+    fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
+        Self {
+            code: self.code.delta(next.code),
+            inline_code: self.inline_code.delta(next.inline_code),
+            markdown: self.markdown.delta(next.markdown),
+            mcp_startup: self.mcp_startup.delta(next.mcp_startup),
+            reasoning: self.reasoning.delta_with_unsets(
+                next.reasoning,
+                &path(prefix, "reasoning"),
+                unsets,
+            ),
             lock_wait: self.lock_wait.delta(next.lock_wait),
             streaming: self.streaming.delta(next.streaming),
             tool_call: self.tool_call.delta(next.tool_call),

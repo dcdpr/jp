@@ -124,23 +124,7 @@ impl PartialConfigDelta for PartialLlmProviderConfig {
 
     fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
         Self {
-            aliases: next
-                .aliases
-                .into_iter()
-                .filter_map(|(k, next)| {
-                    let prev = self.aliases.get(&k);
-                    if prev.is_some_and(|prev| prev == &next) {
-                        return None;
-                    }
-
-                    let next = match prev {
-                        Some(prev) => prev.delta(next),
-                        None => next,
-                    };
-
-                    Some((k, next))
-                })
-                .collect(),
+            aliases: delta_map(&self.aliases, next.aliases),
             anthropic: self.anthropic.delta_with_unsets(
                 next.anthropic,
                 &path(prefix, "anthropic"),
