@@ -4878,6 +4878,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha1",
+ "sha2",
  "similar",
  "strip-ansi-escapes",
  "test-log",
