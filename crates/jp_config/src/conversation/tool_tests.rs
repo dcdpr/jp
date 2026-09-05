@@ -3,7 +3,28 @@ use schematic::{SchemaBuilder, SchemaType, schema::LiteralValue};
 use serde_json::json;
 
 use super::*;
-use crate::types::json_value::JsonValue;
+use crate::{PartialAppConfig, types::json_value::JsonValue, util::build};
+
+// `--tool` and `--no-tool` read a comma as the separator between tool names, so
+// a tool named `read,write` could never be enabled or disabled from the CLI.
+#[test]
+fn comma_in_tool_name_is_rejected_by_validation() {
+    let mut partial = PartialAppConfig::new_test();
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("read,write".to_owned(), PartialToolConfig {
+            source: Some(ToolSource::Local { tool: None }),
+            ..Default::default()
+        });
+
+    let err = build(partial).unwrap_err().to_string();
+    assert!(
+        err.contains("conversation.tools.read,write: a tool name cannot contain a comma"),
+        "unexpected error: {err}"
+    );
+}
 
 #[test]
 fn access_on_mcp_tool_is_rejected_by_validation() {

@@ -21,6 +21,43 @@ fn assert_path(s: &str, expected: &str) {
 }
 
 #[test]
+fn split_list_splits_trims_and_parses() {
+    let names: Vec<String> = split_list("read, write ,edit", "tool name").unwrap();
+
+    assert_eq!(names, ["read", "write", "edit"]);
+}
+
+#[test]
+fn split_list_keeps_a_single_value_whole() {
+    let names: Vec<String> = split_list("read", "tool name").unwrap();
+
+    assert_eq!(names, ["read"]);
+}
+
+#[test]
+fn split_list_rejects_an_empty_item() {
+    for value in ["read,,write", "read,", ",read", "read, ,write"] {
+        let error = split_list::<String>(value, "tool name").unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains(&format!("empty tool name in '{value}'")),
+            "unexpected message for {value:?}: {error}"
+        );
+    }
+}
+
+#[test]
+fn split_list_reports_the_item_that_failed_to_parse() {
+    let error = split_list::<u8>("1,300,3", "count").unwrap_err();
+
+    assert!(
+        error.to_string().contains("invalid count '300'"),
+        "unexpected message: {error}"
+    );
+}
+
+#[test]
 fn already_a_url_passes_through() {
     assert_url("https://example.com/x", "https://example.com/x");
     assert_url("file:///etc/hosts", "file:///etc/hosts");

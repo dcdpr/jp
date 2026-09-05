@@ -265,6 +265,23 @@ Four operators are available:
 | `+=`     | Merge a string value into a list.   |
 | `:+=`    | Merge a raw JSON value into a list. |
 
+For a list-valued option, a comma separates the values, and space around a value
+is ignored:
+
+```bash
+$ jp --cfg 'conversation.labels.crate=jp_config, jp_llm'   # two values
+$ jp --cfg 'conversation.labels.crate='                    # no values
+```
+
+A missing value is an error, so a stray comma is reported rather than dropped:
+`crate=jp_config,` and `crate=jp_config,,jp_llm` are both refused.
+To name a value that itself contains a comma, use the JSON form, which takes the
+string as written:
+
+```bash
+$ jp --cfg 'conversation.labels.branch:="feat,exp"'        # one value
+```
+
 #### Path To An Existing Configuration File
 
 If the value is a path to an existing configuration file, it will be loaded and

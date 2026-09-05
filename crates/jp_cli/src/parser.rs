@@ -1,6 +1,7 @@
-use std::convert::Infallible;
+use std::{convert::Infallible, fmt, str::FromStr};
 
 use camino::{FromPathBufError, Utf8Path, Utf8PathBuf, absolute_utf8};
+use clap::error::ErrorKind;
 use clean_path::Clean as _;
 use jp_id::Parts;
 use relative_path::RelativePathBuf;
@@ -8,6 +9,42 @@ use tracing::trace;
 use url::Url;
 
 use crate::error::{Error, Result};
+
+/// Split a comma-separated flag value into its items.
+///
+/// Space around an item is ignored, so `"read, write"` and `"read,write"` name
+/// the same two items.
+/// `item` names what is being parsed ("tool name", "label") and appears in the
+/// error message.
+///
+/// Only for values whose items cannot themselves contain a comma.
+/// Prefer clap's `value_delimiter(',')` unless the flag also gives the empty
+/// value a meaning of its own, which the delimiter would make unreachable.
+///
+/// # Errors
+///
+/// Returns an error if an item is empty or fails to parse.
+pub(crate) fn split_list<T>(value: &str, item: &str) -> std::result::Result<Vec<T>, clap::Error>
+where
+    T: FromStr,
+    T::Err: fmt::Display,
+{
+    value
+        .split(',')
+        .map(|part| match part.trim() {
+            "" => Err(clap::Error::raw(
+                ErrorKind::InvalidValue,
+                format!("empty {item} in '{value}'\n"),
+            )),
+            part => part.parse().map_err(|error| {
+                clap::Error::raw(
+                    ErrorKind::InvalidValue,
+                    format!("invalid {item} '{part}': {error}\n"),
+                )
+            }),
+        })
+        .collect()
+}
 
 #[derive(Debug, Clone)]
 pub(crate) enum AttachmentUrlOrPath {
