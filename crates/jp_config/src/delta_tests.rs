@@ -66,6 +66,67 @@ fn removed_vec_element_has_no_delta() {
     assert_eq!(delta_opt_vec(Some(&prev), Some(next)), None);
 }
 
+/// A one-server config, keyed as `kagi`.
+fn config_with_server(arguments: &[&str]) -> crate::PartialAppConfig {
+    let mut partial = crate::PartialAppConfig::empty();
+    partial
+        .providers
+        .mcp
+        .insert("kagi".to_owned(), server(arguments));
+    partial
+}
+
+/// A change appending can reach reports no path, and the delta is the tail.
+#[test]
+fn an_appended_argument_reports_no_path() {
+    let prev = config_with_server(&["--a"]);
+    let next = config_with_server(&["--a", "--b"]);
+
+    let mut unsets = Vec::new();
+    let delta = prev.delta_with_unsets(next, "", &mut unsets);
+
+    assert!(unsets.is_empty());
+    assert_eq!(
+        arguments(&delta.providers.mcp["kagi"]),
+        Some(&vec!["--b".to_owned()])
+    );
+}
+
+/// A change appending cannot reach reports its path and carries the whole list.
+///
+/// The path is what the fold clears, which is what lets the list that follows
+/// land verbatim instead of being appended to the one already there.
+#[test]
+fn a_dropped_argument_reports_its_path_and_carries_the_whole_list() {
+    let prev = config_with_server(&["--a", "--b"]);
+    let next = config_with_server(&["--a"]);
+
+    let mut unsets = Vec::new();
+    let delta = prev.delta_with_unsets(next, "", &mut unsets);
+
+    assert_eq!(unsets, ["providers.mcp.kagi.arguments"]);
+    assert_eq!(
+        arguments(&delta.providers.mcp["kagi"]),
+        Some(&vec!["--a".to_owned()])
+    );
+}
+
+/// Reordering is not an extension either, so it clears too.
+#[test]
+fn a_reordered_argument_list_reports_its_path() {
+    let prev = config_with_server(&["--a", "--b"]);
+    let next = config_with_server(&["--b", "--a"]);
+
+    let mut unsets = Vec::new();
+    let delta = prev.delta_with_unsets(next, "", &mut unsets);
+
+    assert_eq!(unsets, ["providers.mcp.kagi.arguments"]);
+    assert_eq!(
+        arguments(&delta.providers.mcp["kagi"]),
+        Some(&vec!["--b".to_owned(), "--a".to_owned()])
+    );
+}
+
 #[test]
 fn map_delta_keeps_an_entry_only_next_has() {
     let prev = IndexMap::new();

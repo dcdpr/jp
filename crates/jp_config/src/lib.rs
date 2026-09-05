@@ -56,6 +56,7 @@ pub(crate) mod validate;
 
 use std::sync::Arc;
 
+pub use delta::PartialConfigDelta;
 pub use error::Error;
 pub use fill::FillDefaults;
 use indexmap::IndexMap;
@@ -72,7 +73,7 @@ use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key, type_error},
     assistant::{AssistantConfig, PartialAssistantConfig},
     conversation::{ConversationConfig, PartialConversationConfig},
-    delta::{PartialConfigDelta, delta_opt_vec},
+    delta::{delta_opt_vec, delta_opt_vec_at, path as delta_path},
     editor::{EditorConfig, PartialEditorConfig},
     interrupt::{InterruptConfig, PartialInterruptConfig},
     loader::{LoaderConfig, PartialLoaderConfig},
@@ -282,6 +283,39 @@ impl PartialConfigDelta for PartialAppConfig {
             editor: self.editor.delta(next.editor),
             template: self.template.delta(next.template),
             providers: self.providers.delta(next.providers),
+            plugins: self.plugins.delta(next.plugins),
+            user: self.user.delta(next.user),
+        }
+    }
+
+    fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
+        Self {
+            extends: None,
+            inherit: None,
+            loader: PartialLoaderConfig::default(),
+
+            config_load_paths: delta_opt_vec_at(
+                &delta_path(prefix, "config_load_paths"),
+                self.config_load_paths.as_ref(),
+                next.config_load_paths,
+                unsets,
+            ),
+
+            assistant: self.assistant.delta(next.assistant),
+            conversation: self.conversation.delta(next.conversation),
+            style: self.style.delta(next.style),
+            interrupt: self.interrupt.delta(next.interrupt),
+            editor: self.editor.delta_with_unsets(
+                next.editor,
+                &delta_path(prefix, "editor"),
+                unsets,
+            ),
+            template: self.template.delta(next.template),
+            providers: self.providers.delta_with_unsets(
+                next.providers,
+                &delta_path(prefix, "providers"),
+                unsets,
+            ),
             plugins: self.plugins.delta(next.plugins),
             user: self.user.delta(next.user),
         }

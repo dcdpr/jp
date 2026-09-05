@@ -1168,7 +1168,7 @@ fn query_cfg_sourced_compaction_persists_as_config_delta() {
         .expect("cfg-sourced compaction config should produce a delta");
 
     assert!(
-        !delta.conversation.compaction.rules.is_empty(),
+        !delta.delta.conversation.compaction.rules.is_empty(),
         "compaction config from the config layers must persist as a conversation delta",
     );
 }

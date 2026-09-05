@@ -8,7 +8,7 @@ use schematic::Config;
 
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
-    delta::{PartialConfigDelta, delta_map},
+    delta::{PartialConfigDelta, delta_map, delta_map_with_unsets, path},
     fill::{FillDefaults, fill_map},
     partial::ToPartial,
     providers::{
@@ -56,6 +56,13 @@ impl PartialConfigDelta for PartialProviderConfig {
         Self {
             llm: self.llm.delta(next.llm),
             mcp: delta_map(&self.mcp, next.mcp),
+        }
+    }
+
+    fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
+        Self {
+            llm: self.llm.delta(next.llm),
+            mcp: delta_map_with_unsets(&path(prefix, "mcp"), &self.mcp, next.mcp, unsets),
         }
     }
 }

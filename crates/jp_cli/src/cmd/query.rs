@@ -67,7 +67,7 @@ use clap::{ArgAction, builder::TypedValueParser as _};
 use indexmap::IndexMap;
 use jp_attachment::Attachment;
 use jp_config::{
-    AppConfig, PartialAppConfig, PartialConfig as _,
+    AppConfig, PartialAppConfig, PartialConfig as _, PartialConfigDelta as _,
     assignment::{AssignKeyValue as _, KvAssignment},
     assistant::{
         AssistantConfig, instructions::InstructionsConfig, sections::SectionConfig,
@@ -1838,23 +1838,29 @@ fn persist_config_reset(
     events.add_config_reset(ResetDelta { timestamp }, layers);
 }
 
+/// The config change this invocation makes to the conversation, if any.
+///
+/// A field whose merge strategy cannot reach the new value carries it whole and
+/// has its path recorded in the returned `unsets`, which clear the field before
+/// the delta merges.
 fn get_config_delta_from_cli(
     cfg: &AppConfig,
     lock: &ConversationLock,
-) -> Result<Option<PartialAppConfig>> {
+) -> Result<Option<ApplyDelta>> {
     let partial = lock
         .events()
         .config()
         .map(|c| c.to_partial())
         .map_err(jp_conversation::Error::from)?;
 
-    let partial = partial.delta(cfg.to_partial());
+    let mut unsets = Vec::new();
+    let partial = partial.delta_with_unsets(cfg.to_partial(), "", &mut unsets);
 
-    if partial.is_empty() {
+    if partial.is_empty() && unsets.is_empty() {
         return Ok(None);
     }
 
-    Ok(Some(partial))
+    Ok(Some(ApplyDelta::with_unsets(Utc::now(), partial, unsets)))
 }
 
 impl IntoPartialAppConfig for Query {
