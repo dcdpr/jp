@@ -552,8 +552,8 @@ impl PartialEq for ToolError {
 /// - Google: `"RESOURCE_EXHAUSTED"`, `"Quota exceeded"`
 /// - OpenRouter: `"insufficient credits"`, `"out of credits"`
 ///
-/// `"quota exceeded"` and `"resource_exhausted"` are also how providers word an
-/// ordinary rate limit.
+/// `"quota exceeded"`, `"resource_exhausted"` and `"insufficient quota"` are
+/// also how providers word an ordinary rate limit.
 /// Where a status code already says the failure is one, reach for
 /// [`looks_like_billing_exhaustion`] instead.
 pub(crate) fn looks_like_quota_error(text: &str) -> bool {
@@ -562,6 +562,7 @@ pub(crate) fn looks_like_quota_error(text: &str) -> bool {
     looks_like_billing_exhaustion(text)
         || lower.contains("quota exceeded")
         || lower.contains("resource_exhausted")
+        || lower.contains("insufficient quota")
 }
 
 /// The subset of quota markers that name a billing or credit problem outright.
@@ -569,12 +570,16 @@ pub(crate) fn looks_like_quota_error(text: &str) -> bool {
 /// A drained account and an exhausted rate-limit bucket both arrive as HTTP 429
 /// from OpenAI, and only the wording separates them.
 /// So every marker here has to be one no provider uses for a bucket that
-/// refills on its own.
+/// refills on its own: a typed code, or words that name money.
+///
+/// `"insufficient_quota"` qualifies on the first count, as OpenAI's error code.
+/// Its prose spelling does not: without the underscore it is the ambiguous word
+/// `quota` with a qualifier in front, which is the shape of a rate limit as
+/// readily as of a drained account.
 pub(crate) fn looks_like_billing_exhaustion(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
 
     lower.contains("insufficient_quota")
-        || lower.contains("insufficient quota")
         || lower.contains("insufficient credits")
         || lower.contains("out of credits")
         || lower.contains("billing_error")

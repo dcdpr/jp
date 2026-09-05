@@ -103,17 +103,24 @@ fn invalid_status_retry_after(
     )
 }
 
-/// `quota exceeded` and `resource_exhausted` are also how providers word an
-/// ordinary rate limit, so on a 429 they must not outrank the status code.
+/// `quota exceeded`, `resource_exhausted` and `insufficient quota` are also how
+/// providers word an ordinary rate limit, so on a 429 they must not outrank the
+/// status code.
 ///
 /// Misreading one costs more than a wrong label: `InsufficientQuota` is fatal,
 /// so the turn ends instead of waiting, and the `Retry-After` the provider sent
 /// is discarded with it.
+///
+/// The third body is the prose spelling of OpenAI's `insufficient_quota` code.
+/// The code earns its place among the billing markers by being typed; spelled
+/// out with a space it is just the ambiguous word `quota` with a qualifier, and
+/// no provider is known to send it at all.
 #[tokio::test]
 async fn a_429_outranks_vague_quota_phrasing_in_the_body() {
     for body in [
         r#"{"message":"Token quota exceeded for this organization."}"#,
         r#"{"error":{"status":"RESOURCE_EXHAUSTED","message":"too many requests"}}"#,
+        r#"{"message":"Insufficient quota for this service tier."}"#,
     ] {
         let err = StreamError::from_eventsource(invalid_status_retry_after(429, body, 60)).await;
 
