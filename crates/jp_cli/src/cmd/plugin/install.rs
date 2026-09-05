@@ -1,7 +1,5 @@
 //! `jp plugin install` subcommand.
 
-use std::io::Write as _;
-
 use jp_inquire::{InlineOption, InlineSelect};
 
 use super::registry;
@@ -44,8 +42,6 @@ impl Install {
             ))
         })?;
 
-        let mut err = std::io::stderr();
-
         // Third-party plugins need explicit approval.
         if !plugin.official {
             if !ctx.term.interactive {
@@ -55,8 +51,7 @@ impl Install {
                 )));
             }
 
-            drop(writeln!(
-                err,
+            ctx.printer.eprintln(format!(
                 "  \u{2192} Plugin `{}` is third-party (not official).",
                 self.name
             ));
@@ -65,22 +60,22 @@ impl Install {
                 InlineOption::new('n', "cancel"),
             ];
             let answer = InlineSelect::new("Install it?", options)
-                .prompt(&mut err)
+                .prompt(&mut ctx.printer.prompt_writer())
                 .map_err(|e| cmd::Error::from(format!("prompt failed: {e}")))?;
             if answer != 'y' {
                 return Err(cmd::Error::from("installation cancelled"));
             }
         }
 
-        drop(writeln!(
-            err,
+        ctx.printer.eprintln(format!(
             "  \u{2192} Downloading jp-{} for {target}...",
             self.name
         ));
         let data = registry::download_and_verify(&client, binary).await?;
 
         let path = registry::install_binary(&self.name, &data)?;
-        drop(writeln!(err, "  \u{2192} Installed to {path}"));
+        ctx.printer
+            .eprintln(format!("  \u{2192} Installed to {path}"));
 
         Ok(())
     }

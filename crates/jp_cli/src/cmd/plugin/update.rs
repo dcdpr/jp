@@ -1,6 +1,6 @@
 //! `jp plugin update` subcommand.
 
-use std::io::Write as _;
+use jp_printer::Printer;
 
 use super::registry;
 use crate::{Ctx, cmd};
@@ -11,16 +11,15 @@ pub(crate) struct Update;
 
 impl Update {
     #[allow(clippy::unused_self)]
-    pub(crate) async fn run(&self, _ctx: &Ctx) -> cmd::Output {
-        let mut err = std::io::stderr();
+    pub(crate) async fn run(&self, ctx: &Ctx) -> cmd::Output {
+        let printer = &ctx.printer;
 
-        drop(writeln!(err, "  \u{2192} Refreshing plugin registry..."));
+        printer.eprintln("  \u{2192} Refreshing plugin registry...");
         let client = reqwest::Client::new();
         let reg = registry::fetch(&client).await?;
 
         registry::save_cache(&reg)?;
-        drop(writeln!(
-            err,
+        printer.eprintln(format!(
             "  \u{2192} Registry updated ({} plugin{}).",
             reg.plugins.len(),
             if reg.plugins.len() == 1 { "" } else { "s" }
@@ -33,7 +32,7 @@ impl Update {
         }
 
         let target = registry::current_target();
-        let mut any_updates = false;
+        let mut outdated = Vec::new();
 
         for (name, path) in &installed {
             // Installed plugins are stored by id. Find the matching
@@ -48,18 +47,32 @@ impl Update {
                 continue;
             };
             if current_sha != binary.sha256 {
-                drop(writeln!(err, "  \u{2192} {name}: update available"));
-                any_updates = true;
+                outdated.push(name.clone());
             }
         }
 
-        if !any_updates {
-            drop(writeln!(
-                err,
-                "  \u{2192} All installed plugins are up to date."
-            ));
-        }
+        report_updates(printer, &outdated);
 
         Ok(())
     }
 }
+
+/// Report which installed plugins have a newer binary in the registry.
+///
+/// `outdated` names the plugins whose installed binary no longer matches the
+/// registry's checksum.
+/// An empty slice reports that everything is current, so callers skip the call
+/// when nothing is installed at all.
+fn report_updates(printer: &Printer, outdated: &[String]) {
+    for name in outdated {
+        printer.eprintln(format!("  \u{2192} {name}: update available"));
+    }
+
+    if outdated.is_empty() {
+        printer.eprintln("  \u{2192} All installed plugins are up to date.");
+    }
+}
+
+#[cfg(test)]
+#[path = "update_tests.rs"]
+mod tests;
