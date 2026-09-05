@@ -1678,11 +1678,12 @@ impl clap::Args for ToolDirectives {
                     "The tool(s) to enable.\n\nIf an existing tool is configured with a matching \
                      name, it is enabled for this query and every later one on the conversation; \
                      use `--no-tool` to turn it back off.\n\nTo run a disabled tool just once, \
-                     use `--tool-use NAME` instead.\n\nIf no arguments are provided, all \
-                     configured tools will be enabled.\n\nName several tools at once by \
-                     separating them with commas (`--tool=read,write`), or by providing this flag \
-                     multiple times. Flags are evaluated left-to-right, so `--no-tools \
-                     --tool=write` first disables everything, then re-enables only 'write'.",
+                     use `--tool-use NAME` instead.\n\nIf no arguments are provided, every tool \
+                     that allows it is enabled; a tool set to `explicit` or `always` is \
+                     unaffected.\n\nName several tools at once by separating them with commas \
+                     (`--tool=read,write`), or by providing this flag multiple times. Flags are \
+                     evaluated left-to-right, so `--no-tools --tool=write` first disables \
+                     everything, then re-enables only 'write'.",
                 )
                 .action(ArgAction::Append)
                 .num_args(0..=1)
@@ -1699,12 +1700,13 @@ impl clap::Args for ToolDirectives {
                 .alias("no-tools")
                 .help("Disable tool(s)")
                 .long_help(
-                    "Disable tool(s).\n\nIf provided without a value, all enabled tools will be \
-                     disabled, otherwise name the tools to disable, separated by commas \
-                     (`--no-tool=read,write`) or across repeated flags.\n\nThe change applies to \
-                     this query and every later one on the conversation; use `--tool` to turn \
-                     tools back on. To suppress tools for a single query, use \
-                     `--no-tool-use`.\n\nFlags are evaluated left-to-right together with `--tool`.",
+                    "Disable tool(s).\n\nIf provided without a value, every tool that allows it \
+                     is disabled (a tool set to `explicit` or `always` is unaffected), otherwise \
+                     name the tools to disable, separated by commas (`--no-tool=read,write`) or \
+                     across repeated flags.\n\nThe change applies to this query and every later \
+                     one on the conversation; use `--tool` to turn tools back on. To suppress \
+                     tools for a single query, use `--no-tool-use`.\n\nFlags are evaluated \
+                     left-to-right together with `--tool`.",
                 )
                 .action(ArgAction::Append)
                 .num_args(0..=1)

@@ -163,9 +163,12 @@ jp query --no-tool=fs_modify_file "Review this function."
 
 Both flags apply to the whole conversation: the change carries into every later
 query until you change it back.
-Without a value they cover every configured tool, and they are evaluated left to
-right, so this leaves `fs_read_file` as the only tool for the rest of the
-conversation:
+Without a value they apply to every tool that permits it: a tool configured with
+`enable = "explicit"` responds only when it is named, and one configured with
+`enable = "always"` (such as the built-in `describe_tools`) can never be turned
+off.
+They are evaluated left to right, so this enables `fs_read_file` and nothing
+else that is optional:
 
 ```sh
 jp query -T -t fs_read_file "What does this module do?"
@@ -175,7 +178,8 @@ jp query -T -t fs_read_file "What does this module do?"
 
 You can disable the use of tools for a single query with the `--no-tool-use`
 flag, or the short-hand `-U` flag.
-The next query has its tools back; use `--no-tool` to turn them off for good.
+The next query has its tools back; use `--no-tool` to turn them off for the rest
+of the conversation.
 
 ```sh
 jp query --no-tool-use "How many hours are there in a day?"
@@ -208,6 +212,8 @@ name.
 You can force the use of a specific tool by using the `--tool-use=<name>` flag.
 The named tool runs even if it is disabled, and the choice applies to this query
 only.
+A tool locked off with `enable = { state = false, allow_toggle = "never" }` is
+refused instead of forced.
 
 ```sh
 jp query --tool-use=cargo_test "Any idea what causes this test to fail?"

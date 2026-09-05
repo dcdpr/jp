@@ -835,7 +835,9 @@ impl KvAssignment {
     ///
     /// Three shapes reach the list: a JSON array is taken element-wise, a JSON
     /// string is one element, and a bare string is split on commas, with each
-    /// element trimmed and empty ones dropped.
+    /// element trimmed.
+    /// An empty element is an error; a value that is empty in its entirety
+    /// names no elements at all.
     /// The comma shorthand is confined to the bare form, so `key:="a,b"` names
     /// one element and `key=a,b` names two.
     pub(crate) fn try_vec<T>(

@@ -41,7 +41,8 @@ pub struct ToolsConfig {
     /// Tool config
     ///
     /// This section configures individual tools.
-    /// The key is the tool ID.
+    /// The key is the tool ID, and cannot contain a comma: a comma separates
+    /// one tool ID from the next wherever several are named at once.
     #[setting(nested, flatten, merge = merge_nested_indexmap)]
     tools: IndexMap<String, ToolConfig>,
 }
