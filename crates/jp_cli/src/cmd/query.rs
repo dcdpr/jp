@@ -1830,13 +1830,10 @@ fn persist_config_reset(
     let mut layers = Vec::with_capacity(2);
 
     if let ConfigReset::Workspace(delta) = reset.reset {
-        layers.push(ApplyDelta { timestamp, delta });
+        layers.push(ApplyDelta::new(timestamp, delta));
     }
 
-    layers.push(ApplyDelta {
-        timestamp,
-        delta: reset.post,
-    });
+    layers.push(ApplyDelta::new(timestamp, reset.post));
 
     events.add_config_reset(ResetDelta { timestamp }, layers);
 }

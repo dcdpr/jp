@@ -243,6 +243,47 @@ pub struct ApplyDelta {
 
     /// The configuration delta.
     pub delta: Box<PartialAppConfig>,
+
+    /// Dotted paths of fields cleared before [`delta`] is merged.
+    ///
+    /// Merging is per field, so a field that merges by appending cannot reach a
+    /// value that drops one of its elements: whatever the delta carries is
+    /// added to what is already there.
+    /// Clearing the field first leaves the merge nothing to combine with, and
+    /// the delta's value lands whole.
+    ///
+    /// A path that names no field is ignored, so a delta written by a newer
+    /// version, or naming a field since removed, still replays.
+    ///
+    /// [`delta`]: Self::delta
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unsets: Vec<String>,
+}
+
+impl ApplyDelta {
+    /// An apply that merges `delta` and clears nothing.
+    #[must_use]
+    pub fn new(timestamp: DateTime<Utc>, delta: impl Into<Box<PartialAppConfig>>) -> Self {
+        Self {
+            timestamp,
+            delta: delta.into(),
+            unsets: Vec::new(),
+        }
+    }
+
+    /// An apply that clears `unsets` before merging `delta`.
+    #[must_use]
+    pub fn with_unsets(
+        timestamp: DateTime<Utc>,
+        delta: impl Into<Box<PartialAppConfig>>,
+        unsets: Vec<String>,
+    ) -> Self {
+        Self {
+            timestamp,
+            delta: delta.into(),
+            unsets,
+        }
+    }
 }
 
 /// A configuration delta that discards the accumulated config state, resetting
@@ -268,10 +309,7 @@ impl From<ResetDelta> for ConfigDelta {
 
 impl From<PartialAppConfig> for ConfigDelta {
     fn from(config: PartialAppConfig) -> Self {
-        Self::Apply(ApplyDelta {
-            timestamp: Utc::now(),
-            delta: Box::new(config),
-        })
+        Self::Apply(ApplyDelta::new(Utc::now(), config))
     }
 }
 
@@ -290,6 +328,7 @@ fn config_delta_subtree(value: &Value) -> Value {
     obj.remove("type");
     obj.remove("timestamp");
     obj.remove("op");
+    obj.remove("unsets");
     Value::Object(obj)
 }
 
@@ -324,11 +363,25 @@ pub(crate) fn deserialize_config_delta(value: &Value) -> Result<ConfigDelta, Str
         }
     }
 
+    // The hand-rolled deserializer bypasses the derived one, so the field's
+    // `#[serde(default)]` never runs and the key has to be read here.
+    let unsets = value
+        .get("unsets")
+        .and_then(Value::as_array)
+        .map(|paths| {
+            paths
+                .iter()
+                .filter_map(|path| path.as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default();
+
     let delta = deserialize_partial_config(config_delta_subtree(value));
 
     Ok(ConfigDelta::Apply(ApplyDelta {
         timestamp,
         delta: Box::new(delta),
+        unsets,
     }))
 }
 
@@ -343,7 +396,15 @@ pub(crate) fn deserialize_config_delta(value: &Value) -> Result<ConfigDelta, Str
 /// [`Reset`]: ConfigDelta::Reset
 fn fold_config_delta(state: &mut PartialAppConfig, delta: ConfigDelta) -> Result<(), ConfigError> {
     match delta {
-        ConfigDelta::Apply(apply) => state.merge(&(), *apply.delta),
+        ConfigDelta::Apply(apply) => {
+            for path in &apply.unsets {
+                if let Err(error) = state.unset(path) {
+                    warn!(%path, %error, "Ignoring a config delta unset for an unknown field.");
+                }
+            }
+
+            state.merge(&(), *apply.delta)
+        }
         ConfigDelta::Reset(_) => {
             *state = PartialAppConfig::default();
             Ok(())
@@ -518,7 +579,14 @@ impl ConversationStream {
     /// [`Reset`]: ConfigDelta::Reset
     pub fn add_config_delta(&mut self, delta: impl Into<ConfigDelta>) {
         let delta = match delta.into() {
-            ConfigDelta::Apply(ApplyDelta { delta, timestamp }) => {
+            // An apply that clears fields is stored as given. Its values were
+            // computed against a state that has the clears applied, and
+            // re-diffing them against a state that does not would drop the very
+            // values the clears make room for.
+            ConfigDelta::Apply(apply) if !apply.unsets.is_empty() => ConfigDelta::Apply(apply),
+            ConfigDelta::Apply(ApplyDelta {
+                delta, timestamp, ..
+            }) => {
                 let delta = match self.config() {
                     Ok(config) => config.to_partial().delta(*delta),
                     Err(error) => {
@@ -531,10 +599,7 @@ impl ConversationStream {
                     return;
                 }
 
-                ConfigDelta::Apply(ApplyDelta {
-                    delta: Box::new(delta),
-                    timestamp,
-                })
+                ConfigDelta::Apply(ApplyDelta::new(timestamp, delta))
             }
             reset @ ConfigDelta::Reset(_) => reset,
         };
@@ -1543,10 +1608,7 @@ impl Extend<ConversationEventWithConfig> for ConversationStream {
             let config_delta = tail.delta(config.clone());
 
             if !config_delta.is_empty() {
-                self.add_config_delta(ApplyDelta {
-                    delta: Box::new(config_delta),
-                    timestamp: event.timestamp,
-                });
+                self.add_config_delta(ApplyDelta::new(event.timestamp, config_delta));
             }
 
             tail = config;
