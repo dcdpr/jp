@@ -21,7 +21,7 @@ use rayon::prelude::*;
 use regex::RegexBuilder;
 use tracing::warn;
 
-use crate::ctx::Ctx;
+use crate::{ctx::Ctx, format::label_text};
 
 /// The leaf partitioning of conversation content — the actual surfaces against
 /// which text search runs.
@@ -30,6 +30,7 @@ use crate::ctx::Ctx;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum ConcreteScope {
     Title,
+    Label,
     User,
     Assistant,
     Reasoning,
@@ -40,8 +41,9 @@ pub(crate) enum ConcreteScope {
 }
 
 impl ConcreteScope {
-    pub(crate) const ALL: [Self; 8] = [
+    pub(crate) const ALL: [Self; 9] = [
         Self::Title,
+        Self::Label,
         Self::User,
         Self::Assistant,
         Self::Reasoning,
@@ -54,6 +56,7 @@ impl ConcreteScope {
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::Title => "title",
+            Self::Label => "label",
             Self::User => "user",
             Self::Assistant => "assistant",
             Self::Reasoning => "reasoning",
@@ -139,6 +142,24 @@ pub(crate) fn title_for(ctx: &Ctx, handle: &ConversationHandle) -> Option<String
         .metadata(handle)
         .ok()
         .and_then(|m| m.title.clone())
+}
+
+/// The conversation's labels as searchable lines, one per key-value pair.
+///
+/// A pair reads as `key=value`, and a bare label as its key alone — the same
+/// text `--label` takes — so a pattern can match a key, a value, or the whole
+/// pair.
+/// Keys are sorted, and a key's values keep the order they were added in.
+pub(crate) fn label_lines(ctx: &Ctx, handle: &ConversationHandle) -> Vec<String> {
+    let Ok(metadata) = ctx.workspace.metadata(handle) else {
+        return vec![];
+    };
+
+    metadata
+        .labels
+        .iter()
+        .flat_map(|(key, values)| values.iter().map(|value| label_text(key, value)))
+        .collect()
 }
 
 /// Whether matching should ignore case.
@@ -332,8 +353,9 @@ impl Matcher {
 ///
 /// Smart-case: case-insensitive unless `pattern` contains an uppercase
 /// character.
-/// Every searchable scope is read: title, chat text, reasoning, structured
-/// output, tool call names and arguments, tool results, and inquiry questions.
+/// Every searchable scope is read: title, labels, chat text, reasoning,
+/// structured output, tool call names and arguments, tool results, and inquiry
+/// questions.
 /// That is the same set `conversation grep` searches by default.
 /// Runs in parallel via rayon and short-circuits on the first match per
 /// conversation.
@@ -363,6 +385,13 @@ fn id_matches(ctx: &Ctx, id: ConversationId, matcher: &Matcher) -> bool {
 
     if let Some(title) = title_for(ctx, &handle)
         && matcher.is_match(&title)
+    {
+        return true;
+    }
+
+    if label_lines(ctx, &handle)
+        .iter()
+        .any(|line| matcher.is_match(line))
     {
         return true;
     }

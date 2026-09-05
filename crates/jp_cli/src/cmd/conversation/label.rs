@@ -1,7 +1,9 @@
 //! `jp conversation label`: manage the labels on a conversation.
 //!
 //! Keys and `key=value` pairs are bare arguments, so the shell splits them and
-//! a value may contain any character, commas included.
+//! a value may contain any character but a line break, commas included.
+//! A line break in a value is stored as a space, so one label is always one
+//! line of output.
 //! The conversation is named with `--id`, which is accepted on either side of
 //! the verb.
 

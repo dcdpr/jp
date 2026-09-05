@@ -150,6 +150,57 @@ fn removing_a_value_a_key_does_not_hold_reports_it() {
     assert_eq!(labels, Labels::from_iter([("crate", ["jp_config"])]));
 }
 
+// ── Single-line values ──────────────────────────────────────────────────
+
+/// A label is one line of text wherever it is shown or searched, so a break in
+/// a value would put text on a line that nothing identifies as part of it.
+#[test]
+fn a_line_break_in_a_value_becomes_a_space() {
+    let mut labels = Labels::default();
+
+    labels.insert("note", "first\nsecond");
+    labels.set("other", ["a\r\nb", "trailing\r"]);
+
+    assert_eq!(values(&labels, "note"), ["first second"]);
+    assert_eq!(
+        values(&labels, "other"),
+        ["a b", "trailing "],
+        "a break is folded, not stripped"
+    );
+}
+
+#[test]
+fn folding_collapses_values_that_differ_only_in_their_line_breaks() {
+    let mut labels = Labels::default();
+
+    labels.set("note", ["a\nb", "a b"]);
+
+    assert_eq!(
+        values(&labels, "note"),
+        ["a b"],
+        "the first occurrence wins"
+    );
+}
+
+/// A hand-edited file can carry a break that the API would have folded.
+#[test]
+fn a_line_break_on_disk_is_folded_on_load() {
+    let labels: Labels = serde_json::from_str(r#"{"note":"first\nsecond"}"#).unwrap();
+
+    assert_eq!(values(&labels, "note"), ["first second"]);
+}
+
+/// The value a user writes to name a label is folded the same way the stored
+/// one was, so a probe carrying a break still finds it.
+#[test]
+fn a_probe_carrying_a_line_break_finds_the_folded_value() {
+    let mut labels = Labels::from_iter([("note", ["first second"])]);
+
+    assert!(labels.contains("note", "first\nsecond"));
+    assert!(labels.remove_value("note", "first\nsecond"));
+    assert!(labels.is_empty());
+}
+
 #[test]
 fn contains_matches_on_set_membership() {
     let labels = Labels::from_iter([("crate", ["jp_config", "jp_llm"])]);

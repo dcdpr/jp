@@ -23,7 +23,8 @@ use crate::{
     ctx::Ctx,
     output::print_json,
     shared::search::{
-        ConcreteScope, Matcher, event_lines, event_scope, resolve_ignore_case, title_for,
+        ConcreteScope, Matcher, event_lines, event_scope, label_lines, resolve_ignore_case,
+        title_for,
     },
 };
 
@@ -311,8 +312,7 @@ impl Grep {
         wanted: &HashSet<ConcreteScope>,
         ctx: &Ctx,
     ) -> Vec<ConversationHits> {
-        // Any scope other than `Title` is sourced from the event stream.
-        // Skipping the event pass entirely when it can't contribute avoids a
+        // Skipping the event pass when no wanted scope can contribute avoids a
         // sequential disk read per conversation.
         let needs_events = needs_events_for(wanted);
 
@@ -374,6 +374,21 @@ impl Grep {
                 &mut group.hits,
                 None,
                 ConcreteScope::Title,
+                None,
+                &lines,
+                matcher,
+                self.context,
+                &mut budget,
+            );
+        }
+
+        if wanted.contains(&ConcreteScope::Label) {
+            let labels = label_lines(ctx, &handle);
+            let lines: Vec<&str> = labels.iter().map(String::as_str).collect();
+            collect_scope_hits(
+                &mut group.hits,
+                None,
+                ConcreteScope::Label,
                 None,
                 &lines,
                 matcher,
@@ -662,6 +677,9 @@ enum Scope {
     /// The conversation title.
     Title,
 
+    /// Conversation labels, each read as `key=value` or as a bare key.
+    Label,
+
     /// User chat requests.
     User,
 
@@ -684,10 +702,15 @@ enum Scope {
     Inquiry,
 }
 
-/// Whether the wanted scope set contains anything sourced from the event stream
-/// (i.e. something beyond `Title`).
+/// Whether the wanted scope set contains anything sourced from the event
+/// stream.
+///
+/// `Title` and `Label` come from the conversation's metadata, so a search
+/// restricted to them never touches the stream.
 fn needs_events_for(wanted: &HashSet<ConcreteScope>) -> bool {
-    wanted.iter().any(|s| *s != ConcreteScope::Title)
+    wanted
+        .iter()
+        .any(|s| !matches!(s, ConcreteScope::Title | ConcreteScope::Label))
 }
 
 /// Expand a user-facing list of scopes to the concrete set the search uses.
@@ -714,6 +737,7 @@ fn expand_scopes(scopes: &[Scope]) -> HashSet<ConcreteScope> {
                 out.extend([ConcreteScope::ToolCall, ConcreteScope::ToolResult]);
             }
             Scope::Title => _ = out.insert(ConcreteScope::Title),
+            Scope::Label => _ = out.insert(ConcreteScope::Label),
             Scope::User => _ = out.insert(ConcreteScope::User),
             Scope::Assistant => _ = out.insert(ConcreteScope::Assistant),
             Scope::Reasoning => _ = out.insert(ConcreteScope::Reasoning),
@@ -734,8 +758,9 @@ struct ConversationHits {
 
     /// Total turns in the conversation, as a sense of its size.
     ///
-    /// `None` when the event stream was never read — a title-only search skips
-    /// it — so the figure is omitted rather than reported as zero.
+    /// `None` when the event stream was never read — a search restricted to
+    /// the title and labels skips it — so the figure is omitted rather than
+    /// reported as zero.
     turn_count: Option<usize>,
 
     hits: Vec<Hit>,

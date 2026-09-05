@@ -22,6 +22,9 @@ use serde::{Deserialize, Deserializer, Serialize, de};
 /// adding a real value drops the marker, and adding the marker to a key that
 /// already holds a value changes nothing.
 ///
+/// A value holds no line break: each one becomes a space as the value is
+/// stored, so one label is always one line of text.
+///
 /// Keys are sorted; values keep the order they were added in, and that order is
 /// part of the on-disk contract.
 ///
@@ -51,9 +54,15 @@ impl Labels {
     }
 
     /// Whether `key` holds `value`.
+    ///
+    /// `value` is folded onto one line before the lookup, the same way storing
+    /// it would be, so a probe written with a line break finds the value it
+    /// names.
     #[must_use]
     pub fn contains(&self, key: &str, value: &str) -> bool {
-        self.0.get(key).is_some_and(|values| values.contains(value))
+        self.0
+            .get(key)
+            .is_some_and(|values| values.contains(&single_line(value)))
     }
 
     /// Iterate over every key and the values it holds, sorted by key.
@@ -67,7 +76,7 @@ impl Labels {
     /// value, or `value` is the presence marker and the key already holds a
     /// real one.
     pub fn insert(&mut self, key: impl Into<String>, value: impl Into<String>) -> bool {
-        let value = value.into();
+        let value = single_line(&value.into());
         let values = self.0.entry(key.into()).or_default();
 
         if value.is_empty() {
@@ -112,13 +121,15 @@ impl Labels {
     /// leaves it empty.
     ///
     /// Returns `false` when the key did not hold that value.
+    /// `value` is folded onto one line before the lookup, the same way storing
+    /// it would be.
     pub fn remove_value(&mut self, key: &str, value: &str) -> bool {
         let Some(values) = self.0.get_mut(key) else {
             return false;
         };
 
         // Shift rather than swap: the remaining values keep their order.
-        let removed = values.shift_remove(value);
+        let removed = values.shift_remove(&single_line(value));
         if values.is_empty() {
             self.0.remove(key);
         }
@@ -177,16 +188,36 @@ impl<'de> Deserialize<'de> for Labels {
     }
 }
 
-/// Drop the presence marker from a set that carries a real value.
+/// Fold every value onto one line, and drop the presence marker from a set that
+/// carries a real value.
 ///
 /// More than one value means at least one of them is non-empty, so the marker
 /// is redundant.
-fn canonical(mut values: IndexSet<String>) -> IndexSet<String> {
+fn canonical(values: IndexSet<String>) -> IndexSet<String> {
+    // Folding can make two values equal, so the set is rebuilt rather than
+    // edited in place; the first occurrence wins, as it does on the way in.
+    let mut values: IndexSet<String> = values
+        .into_iter()
+        .map(|value| single_line(&value))
+        .collect();
+
     if values.len() > 1 {
         values.shift_remove("");
     }
 
     values
+}
+
+/// Fold `value` onto a single line, replacing each line break with a space.
+///
+/// A label is rendered as one line of text wherever it is shown or searched, so
+/// a value carrying a break would produce a second line that nothing identifies
+/// as part of the label.
+fn single_line(value: &str) -> String {
+    // `\r\n` first, so the pair collapses to one space rather than two. A lone
+    // `\r` matters on its own: it returns the cursor to the start of the line a
+    // terminal is drawing.
+    value.replace("\r\n", "\n").replace(['\n', '\r'], " ")
 }
 
 /// One key's values as written on disk: a single string, or an array of them.

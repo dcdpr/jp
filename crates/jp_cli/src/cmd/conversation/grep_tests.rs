@@ -5,7 +5,7 @@ use chrono::{TimeZone as _, Utc};
 use clap::Parser as _;
 use jp_config::AppConfig;
 use jp_conversation::{
-    Conversation, ConversationEvent, ConversationId,
+    Conversation, ConversationEvent, ConversationId, Labels,
     event::{ChatRequest, ChatResponse, ToolCallRequest, ToolCallResponse, TurnStart},
 };
 use jp_printer::{OutputFormat, OutputWidth, Printer, SharedBuffer};
@@ -1746,6 +1746,101 @@ fn scope_title_does_not_match_events() {
 }
 
 #[test]
+fn label_hits_report_the_whole_conversation_range() {
+    // A label is no more turn-scoped than a title, and it is searched as the
+    // user writes it, so a `key=value` pattern matches the same text `--label`
+    // takes.
+    let id = make_id(9210);
+    let conv = Conversation {
+        labels: Labels::from_iter([("crate", ["jp_config"])]),
+        ..Default::default()
+    };
+    let (mut ctx, out) = setup_conversations(vec![(id, conv, vec![])]);
+
+    assert_eq!(run(grep("jp_config"), &mut ctx, &out), [format!(
+        "{id}:..:label:m:crate=jp_config"
+    )]);
+}
+
+#[test]
+fn a_bare_label_is_matched_by_its_key_alone() {
+    // A bare label stores the empty value. Searching it as `draft=` would put a
+    // character after the key that the user never typed, so an anchored pattern
+    // on the key alone has to match.
+    let id = make_id(9220);
+    let conv = Conversation {
+        labels: Labels::from_iter([("draft", [""])]),
+        ..Default::default()
+    };
+    let (mut ctx, out) = setup_conversations(vec![(id, conv, vec![])]);
+
+    let grep = Grep {
+        regex: true,
+        ..grep("^draft$")
+    };
+    assert_eq!(run(grep, &mut ctx, &out), [format!(
+        "{id}:..:label:m:draft"
+    )]);
+}
+
+#[test]
+fn every_value_under_a_key_is_searched_on_its_own_line() {
+    // A key holding several values would otherwise need one pattern to span
+    // them, and `--context` would have nothing to work with.
+    let id = make_id(9230);
+    let conv = Conversation {
+        labels: Labels::from_iter([("crate", ["jp_config", "jp_llm"])]),
+        ..Default::default()
+    };
+    let (mut ctx, out) = setup_conversations(vec![(id, conv, vec![])]);
+
+    assert_eq!(run(grep("crate="), &mut ctx, &out), [
+        format!("{id}:..:label:m:crate=jp_config"),
+        format!("{id}:..:label:m:crate=jp_llm"),
+    ]);
+}
+
+#[test]
+fn a_label_written_with_a_line_break_stays_one_record() {
+    // Line mode promises every emitted line is a coordinate record. A value
+    // carrying a break is folded as it is stored, so the hit cannot spill onto
+    // a second line that carries no coordinate.
+    let id = make_id(9235);
+    let conv = Conversation {
+        labels: Labels::from_iter([("note", ["first\nsecond"])]),
+        ..Default::default()
+    };
+    let (mut ctx, out) = setup_conversations(vec![(id, conv, vec![])]);
+
+    assert_eq!(run(grep("second"), &mut ctx, &out), [format!(
+        "{id}:..:label:m:note=first second"
+    )]);
+}
+
+#[test]
+fn scope_label_does_not_match_events() {
+    let id = make_id(9240);
+    let conv = Conversation {
+        labels: Labels::from_iter([("crate", ["jp_config"])]),
+        ..Default::default()
+    };
+    let (mut ctx, _out) = setup_conversations(vec![(
+        id,
+        conv,
+        turn(vec![ConversationEvent::new(
+            ChatRequest::from("omega-in-request"),
+            ts(),
+        )]),
+    )]);
+
+    let grep = Grep {
+        scopes: vec![Scope::Label],
+        ..grep("omega")
+    };
+    assert!(grep.run(&mut ctx, vec![]).is_err());
+}
+
+#[test]
 fn scope_tool_call_searches_arguments() {
     let id = make_id(9300);
     let mut args = Map::new();
@@ -1844,10 +1939,15 @@ fn expand_scopes_mixed() {
 }
 
 #[test]
-fn a_title_only_search_never_reads_the_event_stream() {
+fn a_metadata_only_search_never_reads_the_event_stream() {
     assert!(!needs_events_for(&expand_scopes(&[Scope::Title])));
-    assert!(needs_events_for(&expand_scopes(&[
+    assert!(!needs_events_for(&expand_scopes(&[Scope::Label])));
+    assert!(!needs_events_for(&expand_scopes(&[
         Scope::Title,
+        Scope::Label
+    ])));
+    assert!(needs_events_for(&expand_scopes(&[
+        Scope::Label,
         Scope::User
     ])));
 }

@@ -41,8 +41,8 @@ jp c use jp-c17727547754                  # switch to that conversation
 jp query --attach 'jp-c17727547754?a:142' # attach that turn to a new question
 ```
 
-A hit in the conversation *title* isn't turn-scoped, so its turn field is `..`
-— "all turns", which `--turn` also accepts.
+A hit in the conversation *title* or in a *label* isn't turn-scoped, so its turn
+field is `..` — "all turns", which `--turn` also accepts.
 `jp c print <id> --turn ..` prints the whole conversation.
 
 ## Reading the output
@@ -153,8 +153,9 @@ you.
 ## Restricting the search
 
 `--scope` limits which parts of a conversation are searched.
-It accepts the concrete scopes `title`, `user`, `assistant`, `reasoning`,
-`structured`, `tool-call`, `tool-result`, and `inquiry`, plus two shorthands:
+It accepts the concrete scopes `title`, `label`, `user`, `assistant`,
+`reasoning`, `structured`, `tool-call`, `tool-result`, and `inquiry`, plus two
+shorthands:
 
 | Scope  | Expands to                                     |
 | ------ | ---------------------------------------------- |
@@ -166,6 +167,23 @@ It accepts the concrete scopes `title`, `user`, `assistant`, `reasoning`,
 jp c grep --scope chat 'retry'          # only what was said
 jp c grep --scope tool-call 'fs_modify' # only tool invocations
 jp c grep --scope title 'triage'        # only titles
+jp c grep --scope label 'jp_config'     # only labels
+```
+
+A label is searched one key-value pair per line, written the way you write it on
+the command line: `crate=jp_config`, or the bare key when it holds no value.
+So a pattern can match a key, a value, or the whole pair:
+
+```sh
+jp c grep --scope label 'crate='          # every conversation labelled by crate
+jp c grep --scope label 'crate=jp_config' # one crate
+```
+
+That is distinct from `--label`, which *filters* the conversations searched
+rather than searching their labels:
+
+```sh
+jp c grep --label crate=jp_config 'retry' # 'retry' in jp_config conversations
 ```
 
 For more than one scope, repeat the flag or comma-separate the values:
@@ -175,8 +193,8 @@ jp c grep --scope user --scope assistant 'retry'
 jp c grep --scope user,assistant 'retry'
 ```
 
-Searching `title` alone never reads the event streams, so it stays fast across a
-large workspace.
+Searching `title` and `label` alone never reads the event streams, so it stays
+fast across a large workspace.
 
 Every live conversation is searched unless `--id` narrows it:
 
