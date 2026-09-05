@@ -24,35 +24,21 @@ use super::*;
 use crate::env_testing::EnvVarGuard;
 
 #[test]
-fn a_piped_successful_run_never_announces_its_trace_log() {
-    // Two uninvited lines on stderr corrupt any program that owns the screen,
-    // and in `jp … | fzf` stderr *is* the terminal. `JP_DEBUG` is pinned on
-    // here because it's the only reason a non-failing run would print at all.
-    assert!(!should_report_trace_log(
-        RunOutcome::AsExpected,
-        false,
-        true
-    ));
+fn a_successful_run_announces_its_trace_log_only_under_jp_debug() {
+    // `JP_DEBUG` is the whole question for a run that did what was asked. The
+    // report names a file a developer went looking for, so a redirected or
+    // piped stdout does not withdraw it.
+    assert!(should_report_trace_log(RunOutcome::AsExpected, true));
+    assert!(!should_report_trace_log(RunOutcome::AsExpected, false));
 }
 
 #[test]
-fn a_successful_run_on_a_terminal_announces_its_trace_log_only_under_jp_debug() {
-    assert!(should_report_trace_log(RunOutcome::AsExpected, true, true));
-    assert!(!should_report_trace_log(
-        RunOutcome::AsExpected,
-        true,
-        false
-    ));
-}
-
-#[test]
-fn a_failed_run_announces_its_trace_log_even_when_piped() {
-    // Diagnosing a failure beats keeping the pipeline clean, so neither the tty
-    // nor `JP_DEBUG` has a say. A command that exits non-zero to report a
-    // result (`grep` finding nothing) is `AsExpected`, not `Failed`, and takes
-    // the rules above instead.
-    assert!(should_report_trace_log(RunOutcome::Failed, false, false));
-    assert!(should_report_trace_log(RunOutcome::Failed, true, false));
+fn a_failed_run_always_announces_its_trace_log() {
+    // Diagnosing a failure beats keeping the stream clean, so `JP_DEBUG` has no
+    // say. A command that exits non-zero to report a result (`grep` finding
+    // nothing) is `AsExpected`, not `Failed`, and takes the rule above instead.
+    assert!(should_report_trace_log(RunOutcome::Failed, false));
+    assert!(should_report_trace_log(RunOutcome::Failed, true));
 }
 
 // The flag has to reach the printer to mean anything: it names a policy the

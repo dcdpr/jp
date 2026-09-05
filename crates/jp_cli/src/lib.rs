@@ -474,7 +474,7 @@ pub fn run() -> ExitCode {
     // its inputs.
     let debug_enabled = env_opt_out("JP_DEBUG");
 
-    if should_report_trace_log(outcome, is_tty, debug_enabled)
+    if should_report_trace_log(outcome, debug_enabled)
         && let Some(path) = guard.and_then(TracingGuard::persist)
     {
         if format.is_json() {
@@ -510,20 +510,15 @@ enum RunOutcome {
 /// The exit status alone doesn't answer this, since a command can exit non-zero
 /// to report a result rather than a failure.
 ///
-/// Every other run makes the report opt-in via `JP_DEBUG`, and only when stdout
-/// is a terminal.
-/// A piped stdout means `jp` is a component in someone else's pipeline, and a
-/// program consuming it may own the screen: an `fzf` list or preview, for
-/// instance, where two uninvited lines corrupt the layout.
-/// Note that stderr's own tty-ness is the wrong test: in `jp … | fzf`, stderr
-/// *is* the terminal, which is exactly how the corruption happens.
-///
-/// Set `--log-file` to choose the path when a piped run needs to be traced;
-/// nothing has to be announced when the caller picked the destination.
-fn should_report_trace_log(outcome: RunOutcome, stdout_is_tty: bool, debug_enabled: bool) -> bool {
+/// Every other run makes the report opt-in via `JP_DEBUG`.
+/// The report is developer output that someone asked for by name, so where the
+/// run's own streams are pointed has no say in it.
+/// It goes to stderr either way, and a caller who wants it gone redirects that
+/// stream or unsets the variable.
+const fn should_report_trace_log(outcome: RunOutcome, debug_enabled: bool) -> bool {
     match outcome {
         RunOutcome::Failed => true,
-        RunOutcome::AsExpected => stdout_is_tty && debug_enabled,
+        RunOutcome::AsExpected => debug_enabled,
     }
 }
 
