@@ -141,7 +141,14 @@ fn validate_node_inner(
     visiting: &mut Vec<String>,
 ) -> Result<(), ToolError> {
     let types = node.types();
-    validate_types(path, &types)?;
+    // A schema with no `type` keyword accepts any value, and constrains
+    // nothing that could contradict its `items`, `properties`, `enum` or
+    // `default`. A `type` that is present but empty or unrecognised, and a
+    // `$ref` that could not be followed, remain malformed.
+    let unconstrained = node.is_unconstrained();
+    if !unconstrained {
+        validate_types(path, &types)?;
+    }
 
     let items = node.items();
     if types.iter().any(|type_| type_ == "array") && items.is_none() {
@@ -152,7 +159,7 @@ fn validate_node_inner(
     }
 
     if let Some(items) = &items {
-        if !types.iter().any(|type_| type_ == "array") {
+        if !unconstrained && !types.iter().any(|type_| type_ == "array") {
             return Err(ToolError::InvalidSchema {
                 path: format!("{path}.items"),
                 message: format!(
@@ -165,7 +172,7 @@ fn validate_node_inner(
     }
 
     let properties = node.properties();
-    if !properties.is_empty() && !types.iter().any(|type_| type_ == "object") {
+    if !unconstrained && !properties.is_empty() && !types.iter().any(|type_| type_ == "object") {
         return Err(ToolError::InvalidSchema {
             path: format!("{path}.properties"),
             message: format!(
@@ -187,7 +194,7 @@ fn validate_node_inner(
             });
         }
 
-        if node.accepts(value) {
+        if node.accepts_type(value) {
             validate_value(&format!("{path}.enum[{index}]"), value, node, "enum value")?;
             continue;
         }
@@ -226,7 +233,7 @@ fn validate_value(
     node: &Node<'_>,
     subject: &str,
 ) -> Result<(), ToolError> {
-    if !node.accepts(value) {
+    if !node.accepts_type(value) {
         return Err(ToolError::InvalidSchema {
             path: path.to_owned(),
             message: format!(
@@ -293,6 +300,41 @@ fn validate_types(path: &str, types: &[String]) -> Result<(), ToolError> {
     }
 
     Ok(())
+}
+
+/// Whether any node in the document leaves the JSON type of its value open.
+///
+/// Walks properties and array items, reading through `$ref` the way [`Node`]
+/// does, and stops at a definition already on the path so a recursive schema
+/// terminates.
+#[must_use]
+pub fn has_unconstrained_node(schema: &Value) -> bool {
+    Node::root(schema)
+        .properties()
+        .iter()
+        .any(|(_, property)| is_open(property, &mut vec![]))
+}
+
+fn is_open(node: &Node<'_>, visiting: &mut Vec<String>) -> bool {
+    if let Some(origin) = node.origin() {
+        if visiting.iter().any(|seen| seen == origin) {
+            return false;
+        }
+        visiting.push(origin.to_owned());
+    }
+
+    let open = node.is_unconstrained()
+        || node.items().is_some_and(|items| is_open(&items, visiting))
+        || node
+            .properties()
+            .iter()
+            .any(|(_, property)| is_open(property, visiting));
+
+    if node.origin().is_some() {
+        visiting.pop();
+    }
+
+    open
 }
 
 /// Expand every same-document `$ref` and drop the definitions block.
@@ -404,9 +446,32 @@ impl<'a> Node<'a> {
         }
     }
 
-    /// Whether a value satisfies this node's declared types.
+    /// Whether this node leaves the JSON type of its value open.
+    ///
+    /// A schema object with no `type` keyword accepts any value, which is how a
+    /// server declares a free-form parameter.
+    /// Anything else that reads as declaring no type is not open, because what
+    /// it declares is unknown rather than unrestricted: a `$ref` that could not
+    /// be followed, a boolean schema, or a non-schema value such as a `null`
+    /// left in a `properties` map.
     #[must_use]
-    pub fn accepts(&self, value: &Value) -> bool {
+    pub fn is_unconstrained(&self) -> bool {
+        self.node.is_object() && self.node.get("type").is_none() && self.node.get("$ref").is_none()
+    }
+
+    /// Whether a value satisfies this node's declared types.
+    ///
+    /// Ignores every other constraint the node carries; [`permits`] applies
+    /// those too.
+    /// A node that declares no type accepts every value.
+    ///
+    /// [`permits`]: Self::permits
+    #[must_use]
+    pub fn accepts_type(&self, value: &Value) -> bool {
+        if self.is_unconstrained() {
+            return true;
+        }
+
         let types = self.types();
         let has = |type_: &str| types.iter().any(|candidate| candidate == type_);
 
@@ -420,6 +485,20 @@ impl<'a> Node<'a> {
             Value::Array(_) => has("array"),
             Value::Object(_) => has("object"),
         }
+    }
+
+    /// Whether a value satisfies every constraint this node declares.
+    ///
+    /// A value must match the declared types, and appear in the `enum` when
+    /// there is one.
+    #[must_use]
+    pub fn permits(&self, value: &Value) -> bool {
+        if !self.accepts_type(value) {
+            return false;
+        }
+
+        let enumeration = self.enumeration();
+        enumeration.is_empty() || enumeration.contains(value)
     }
 
     /// The value inserted when the argument is omitted.
