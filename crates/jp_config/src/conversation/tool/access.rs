@@ -45,7 +45,7 @@ use crate::{
     delta::PartialConfigDelta,
     internal::merge::vec_with_strategy,
     partial::{ToPartial, partial_opt, partial_opts},
-    types::vec::{MergeableVec, vec_to_mergeable_partial},
+    types::vec::{MergeableVec, MergedVec, MergedVecStrategy, vec_to_mergeable_partial},
 };
 
 /// Resource access grants for a tool.
@@ -68,6 +68,10 @@ pub struct AccessConfig {
     pub fs: Vec<FsRuleConfig>,
 
     /// Environment variable access rules.
+    ///
+    /// When absent or empty, the tool may read any environment variable.
+    /// Declaring at least one rule switches to default-deny: a variable is
+    /// readable only when a rule matching it grants `read`.
     ///
     /// Each rule names one variable, or a name prefix when `name` ends in `*`.
     /// Rules from later config layers append by default; the most specific
@@ -96,18 +100,39 @@ impl AssignKeyValue for PartialAccessConfig {
 impl PartialConfigDelta for PartialAccessConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
-            fs: next
-                .fs
-                .into_iter()
-                .filter(|v| !self.fs.contains(v))
-                .collect(),
-            env: next
-                .env
-                .into_iter()
-                .filter(|v| !self.env.contains(v))
-                .collect(),
+            fs: rule_delta(&self.fs, next.fs),
+            env: rule_delta(&self.env, next.env),
         }
     }
+}
+
+/// Diff two rule lists into a delta that replays to `next`.
+///
+/// An append-shaped delta can only add, so a rule that disappeared between
+/// `prev` and `next` would come back when the delta is folded over `prev`
+/// again.
+/// When anything is missing from `next`, the delta therefore carries the whole
+/// list with `replace`; otherwise it carries just the new rules and appends.
+///
+/// `next` comes from a fully resolved config, so it is the complete rule set
+/// and replacing with it loses nothing.
+fn rule_delta<T: Clone + PartialEq>(
+    prev: &MergeableVec<T>,
+    next: MergeableVec<T>,
+) -> MergeableVec<T> {
+    if prev.iter().all(|rule| next.contains(rule)) {
+        return next
+            .into_iter()
+            .filter(|rule| !prev.contains(rule))
+            .collect();
+    }
+
+    MergeableVec::Merged(MergedVec {
+        value: next.into_vec(),
+        strategy: Some(MergedVecStrategy::Replace),
+        dedup: None,
+        discard_when_merged: false,
+    })
 }
 
 impl ToPartial for AccessConfig {

@@ -410,11 +410,17 @@ impl EnvRule {
 
     /// Whether the rule applies to the variable `name`.
     ///
-    /// Matching is case-sensitive on every platform.
-    /// Windows resolves variable names case-insensitively, so a rule written in
-    /// the wrong case does not apply there — but a config file is shared
-    /// across machines, and a rule that grants on one platform and denies on
-    /// another is worse than one that is uniformly strict.
+    /// Matching is case-sensitive, on every platform.
+    ///
+    /// Where the OS resolves variable names case-insensitively, as Windows
+    /// does, a request spelled differently from the rule misses it — including
+    /// a rule that denies.
+    /// `GITHUB_TOKEN` with `read = false` does not match a request for
+    /// `github_token`, which then falls through to whatever broader rule does,
+    /// while the OS resolves both spellings to the same variable.
+    /// A consumer on such a platform has to canonicalize the requested name
+    /// *and* the rule names to one form before matching; canonicalizing only
+    /// the request leaves the exact rule unmatched.
     #[must_use]
     pub fn matches(&self, name: &str) -> bool {
         if self.is_exact() {

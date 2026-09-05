@@ -102,6 +102,48 @@ fn an_interior_star_in_an_env_name_is_rejected() {
     assert_eq!(error, CompileError::InvalidEnvName("AWS_*_KEY".to_owned()));
 }
 
+/// `KEY=VALUE` is how environment variables are usually written down, so a rule
+/// name carrying an `=` is a plausible mistake.
+/// It can never match a real variable, and a denying rule that never matches
+/// leaves the variable to whatever broader rule does.
+#[test]
+fn an_assignment_shaped_env_name_is_rejected() {
+    let dir = camino_tempfile::tempdir().unwrap();
+    let config = env_config(vec![env_rule("AWS_PROFILE=prod", false)]);
+
+    let error = compile_policy(&config, dir.path(), |_, _| unreachable!()).unwrap_err();
+
+    assert_eq!(
+        error,
+        CompileError::InvalidEnvName("AWS_PROFILE=prod".to_owned())
+    );
+}
+
+#[test]
+fn a_null_byte_in_an_env_name_is_rejected() {
+    let dir = camino_tempfile::tempdir().unwrap();
+    let config = env_config(vec![env_rule("AWS\0KEY", true)]);
+
+    let error = compile_policy(&config, dir.path(), |_, _| unreachable!()).unwrap_err();
+
+    assert_eq!(error, CompileError::InvalidEnvName("AWS\0KEY".to_owned()));
+}
+
+/// Windows ships names like `ProgramFiles(x86)`, so only the two characters a
+/// name genuinely cannot hold are rejected.
+#[test]
+fn an_unusual_but_legal_env_name_is_accepted() {
+    let dir = camino_tempfile::tempdir().unwrap();
+    let config = env_config(vec![env_rule("ProgramFiles(x86)", true)]);
+
+    let (policy, _) = compile_policy(&config, dir.path(), |_, _| unreachable!()).unwrap();
+
+    assert_eq!(policy.env, vec![EnvRule {
+        name: "ProgramFiles(x86)".to_owned(),
+        read: true,
+    }]);
+}
+
 #[test]
 fn an_empty_env_name_is_rejected() {
     let dir = camino_tempfile::tempdir().unwrap();

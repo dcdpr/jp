@@ -41,11 +41,12 @@ pub enum CompileError {
     )]
     ExternalInsideWorkspace(String),
 
-    /// An `env` rule name is empty, or contains a `*` somewhere other than the
-    /// final character.
+    /// An `env` rule name is empty, carries a `*` somewhere other than the
+    /// final character, or contains a character no environment variable name
+    /// can hold.
     #[error(
-        "access.env rule name '{0}' is invalid; a name must be non-empty and may only use '*' as \
-         its final character"
+        "access.env rule name '{0}' is invalid; a name must be non-empty, may only use '*' as its \
+         final character, and cannot contain '=' or a null byte"
     )]
     InvalidEnvName(String),
 }
@@ -198,16 +199,23 @@ pub fn compile_policy(
 
 /// Validate and convert `access.env` rules into [`EnvRule`]s.
 ///
+/// A name that cannot match any real variable is rejected rather than compiled
+/// into a rule that silently never fires: a denying rule that never fires
+/// leaves the variable to whatever broader rule matches instead.
+/// `=` and the null byte are the two characters no environment variable name
+/// can hold — the rest of the character set is left alone, because real names
+/// range from POSIX `SHOUTY_SNAKE` to Windows' `ProgramFiles(x86)`.
+///
 /// # Errors
 ///
-/// Returns [`CompileError::InvalidEnvName`] for an empty name, or one carrying
-/// a `*` anywhere but the final character.
+/// Returns [`CompileError::InvalidEnvName`] for an empty name, one carrying a
+/// `*` anywhere but the final character, or one containing `=` or a null byte.
 fn compile_env(config: &[EnvRuleConfig]) -> Result<Vec<EnvRule>, CompileError> {
     config
         .iter()
         .map(|rule| {
             let literal = rule.name.strip_suffix('*').unwrap_or(&rule.name);
-            if rule.name.is_empty() || literal.contains('*') {
+            if rule.name.is_empty() || literal.contains('*') || rule.name.contains(['=', '\0']) {
                 return Err(CompileError::InvalidEnvName(rule.name.clone()));
             }
             Ok(EnvRule {
