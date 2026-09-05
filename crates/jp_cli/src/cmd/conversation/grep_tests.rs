@@ -1778,7 +1778,9 @@ fn a_bare_label_is_matched_by_its_key_alone() {
         regex: true,
         ..grep("^draft$")
     };
-    assert_eq!(run(grep, &mut ctx, &out), [format!("{id}:..:label:m:draft")]);
+    assert_eq!(run(grep, &mut ctx, &out), [format!(
+        "{id}:..:label:m:draft"
+    )]);
 }
 
 #[test]
@@ -1796,6 +1798,23 @@ fn every_value_under_a_key_is_searched_on_its_own_line() {
         format!("{id}:..:label:m:crate=jp_config"),
         format!("{id}:..:label:m:crate=jp_llm"),
     ]);
+}
+
+#[test]
+fn a_label_written_with_a_line_break_stays_one_record() {
+    // Line mode promises every emitted line is a coordinate record. A value
+    // carrying a break is folded as it is stored, so the hit cannot spill onto
+    // a second line that carries no coordinate.
+    let id = make_id(9235);
+    let conv = Conversation {
+        labels: Labels::from_iter([("note", ["first\nsecond"])]),
+        ..Default::default()
+    };
+    let (mut ctx, out) = setup_conversations(vec![(id, conv, vec![])]);
+
+    assert_eq!(run(grep("second"), &mut ctx, &out), [format!(
+        "{id}:..:label:m:note=first second"
+    )]);
 }
 
 #[test]

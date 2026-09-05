@@ -306,6 +306,22 @@ Values carry no such restriction.
 A value is one whole argument, so it may contain any character the shell can
 pass through, commas and equals signs included.
 
+> [!TIP]
+> One exception: a value holds no line break.
+> Every surface that shows a label gives it a single line — the `key=value`
+> lines `jp conversation label` and `jp conversation ls` print, and the
+> `ID:TURN:SCOPE:KIND:TEXT` records `jp conversation grep` emits — and a value
+> carrying a break would put text on a line that nothing identifies as part of
+> the label.
+> `Labels` folds each `\n`, `\r\n`, and `\r` in a value to a single space as it
+> is stored, so the restriction holds for hand-edited `metadata.json` as well as
+> for values JP wrote.
+> Two values that differ only in their line breaks collapse into one.
+>
+> A value written with a break is folded the same way when it is used to *name*
+> a label, so `--label` filters and `jp conversation label rm` still find what
+> they name.
+
 ### Config shape
 
 A new module `jp_config::conversation::label` mirrors the shape of

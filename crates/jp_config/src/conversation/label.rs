@@ -32,6 +32,9 @@
 //! A label key starts with an ASCII letter, followed by any number of letters,
 //! digits, underscores, and hyphens.
 //!
+//! A value may hold any character but a line break; each one is stored as a
+//! space, so one label is always one line of output.
+//!
 //! Assigned from the command line, a comma separates values, and the JSON form
 //! names a value that contains one:
 //!
@@ -181,6 +184,9 @@ pub struct LabelObject {
     /// entry.
     /// An empty list produces no label.
     /// Defaults to an empty value, which renders as a bare label.
+    ///
+    /// A line break in a value is stored as a space, so one label is always one
+    /// line of output.
     ///
     /// On the command line a comma separates values, as it does for every other
     /// list setting: `--cfg 'conversation.labels.crate=jp_config,jp_llm'` names
