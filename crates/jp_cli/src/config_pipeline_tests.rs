@@ -1,8 +1,10 @@
 use assert_matches::assert_matches;
 use camino::Utf8Path;
 use jp_config::{
-    PartialAppConfig, PartialConfig as _, assignment::KvAssignment,
+    PartialAppConfig, PartialConfig as _,
+    assignment::KvAssignment,
     conversation::DefaultConversationId,
+    providers::mcp::{PartialMcpProviderConfig, PartialStdioConfig},
 };
 
 use super::*;
@@ -58,6 +60,86 @@ fn conversation_layer_overrides_base() {
 
     let partial = pipeline.partial_with_conversation(conv).unwrap();
     assert_eq!(partial.conversation.start_local, Some(true));
+}
+
+/// An MCP server entry with a command and one argument.
+fn mcp_server(argument: &str) -> PartialMcpProviderConfig {
+    PartialMcpProviderConfig::Stdio(PartialStdioConfig {
+        command: Some("just".into()),
+        arguments: Some(vec![argument.to_owned()]),
+        ..PartialStdioConfig::default()
+    })
+}
+
+/// The `arguments` of a server in a resolved partial.
+fn mcp_arguments(partial: &PartialAppConfig, server: &str) -> Option<Vec<String>> {
+    let PartialMcpProviderConfig::Stdio(config) = partial.providers.mcp.get(server)?;
+    config.arguments.clone()
+}
+
+/// The per-conversation layer is a resolved snapshot, not a contribution.
+///
+/// Applying it over the file layer must not re-run a field's combining merge
+/// strategy, or every field that merges by appending doubles: the conversation
+/// was resolved from the same files, so both layers carry the same list.
+#[test]
+fn conversation_layer_does_not_duplicate_an_appended_list() {
+    let mut base = PartialAppConfig::empty();
+    base.providers
+        .mcp
+        .insert("bookworm".to_owned(), mcp_server("serve-bookworm"));
+
+    // The conversation was created from this same config.
+    let conversation = base.clone();
+
+    let pipeline = ConfigPipeline {
+        base,
+        cfg_args: vec![],
+    };
+    let partial = pipeline.partial_with_conversation(conversation).unwrap();
+
+    assert_eq!(
+        mcp_arguments(&partial, "bookworm"),
+        Some(vec!["serve-bookworm".to_owned()])
+    );
+}
+
+/// A server the conversation never saw still reaches it.
+///
+/// The conversation layer shadows the file layer field by field, so a map has
+/// to keep the entries only the file layer holds — otherwise adding a server
+/// to the workspace config would hide it from every existing conversation.
+#[test]
+fn conversation_layer_keeps_a_server_only_the_file_layer_has() {
+    let mut base = PartialAppConfig::empty();
+    base.providers
+        .mcp
+        .insert("bookworm".to_owned(), mcp_server("serve-bookworm"));
+    base.providers
+        .mcp
+        .insert("kagi".to_owned(), mcp_server("serve-kagi"));
+
+    // The conversation predates the `kagi` entry.
+    let mut conversation = PartialAppConfig::empty();
+    conversation
+        .providers
+        .mcp
+        .insert("bookworm".to_owned(), mcp_server("serve-bookworm"));
+
+    let pipeline = ConfigPipeline {
+        base,
+        cfg_args: vec![],
+    };
+    let partial = pipeline.partial_with_conversation(conversation).unwrap();
+
+    assert_eq!(
+        mcp_arguments(&partial, "kagi"),
+        Some(vec!["serve-kagi".to_owned()])
+    );
+    assert_eq!(
+        mcp_arguments(&partial, "bookworm"),
+        Some(vec!["serve-bookworm".to_owned()])
+    );
 }
 
 /// Write `content` to `name` inside `root` and return the file's path.
