@@ -463,7 +463,7 @@ fn test_load_partial_at_path_recursive() {
             root: None,
             want: Ok(Some((
                 "/assistant/system_prompt",
-                Some(json!({ "value": "foobarbaz", "strategy": "prepend" })),
+                Some(json!({ "value": "foo\n\nbar\n\nbaz", "strategy": "prepend" })),
             ))),
         }),
         ("nested extends with merged string", TestCase {
@@ -511,7 +511,7 @@ fn test_load_partial_at_path_recursive() {
             root: None,
             want: Ok(Some((
                 "/assistant/system_prompt",
-                Some(json!({ "value": "foobarbazqux", "strategy": "prepend" })),
+                Some(json!({ "value": "foo\n\nbar\n\nbaz\n\nqux", "strategy": "prepend" })),
             ))),
         }),
         ("complex extends", TestCase {
@@ -583,7 +583,7 @@ fn test_load_partial_at_path_recursive() {
             root: None,
             want: Ok(Some((
                 "/assistant/system_prompt",
-                Some(json!({"value": "fooquuxbarbazqux", "strategy": "append"})),
+                Some(json!({"value": "foo\n\nquux\n\nbar\n\nbaz\n\nqux", "strategy": "append"})),
             ))),
         }),
     ];
@@ -1003,6 +1003,101 @@ fn test_load_partial_at_path_dedups_load_paths_across_files() {
     let partial = load_partial_at_path(root.join("a.toml")).unwrap().unwrap();
 
     assert_eq!(load_paths(&partial), ["shared", "b-only", "a-only"]);
+}
+
+#[test]
+fn test_shared_extends_file_across_config_layers_applies_once() {
+    // The workspace config and a `--cfg <name>` argument are separate `extends`
+    // graphs, each reduced to one entry per file on its own. A knowledge file
+    // both graphs extend is loaded once per graph, so nothing but the
+    // value-level dedup keeps its contribution from landing twice.
+    //
+    // `web.toml` is reached from the workspace config through
+    // `personas/default.toml`, and again from `personas/dev.toml` as if by
+    // `--cfg dev`.
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+
+    write_config(
+        &root.join("skill/web.toml"),
+        indoc::indoc!(
+            r#"
+                [[assistant.system_prompt_sections]]
+                tag = "web_skill"
+                content = "Use the web tools."
+
+                [[assistant.instructions]]
+                title = "Tool Usage"
+                items = ["Use the web tools."]
+
+                [assistant.system_prompt]
+                strategy = "append"
+                separator = "paragraph"
+                value = "You can browse the web."
+            "#
+        ),
+    );
+    write_config(
+        &root.join("skill/coding.toml"),
+        indoc::indoc!(
+            r#"
+                [assistant.system_prompt]
+                strategy = "append"
+                separator = "line"
+                value = "You can write code."
+            "#
+        ),
+    );
+    write_config(
+        &root.join("personas/default.toml"),
+        r#"extends = ["../skill/web.toml", "../skill/coding.toml"]"#,
+    );
+    write_config(
+        &root.join("personas/dev.toml"),
+        r#"extends = ["../skill/web.toml"]"#,
+    );
+    write_config(
+        &root.join("config.toml"),
+        indoc::indoc!(
+            r#"
+                extends = ["personas/default.toml"]
+                assistant.model.id = "anthropic/claude-sonnet-4"
+            "#
+        ),
+    );
+
+    let base = load_partial_at_path(root.join("config.toml"))
+        .unwrap()
+        .unwrap();
+    let dev = load_partial_at_path(root.join("personas/dev.toml"))
+        .unwrap()
+        .unwrap();
+    let merged = crate::fs::load_partial(base, dev).unwrap();
+
+    let sections: Vec<_> = merged
+        .assistant
+        .system_prompt_sections
+        .iter()
+        .map(|s| s.tag.as_deref())
+        .collect();
+    assert_eq!(sections, [Some("web_skill")]);
+
+    let instructions: Vec<_> = merged
+        .assistant
+        .instructions
+        .iter()
+        .map(|i| i.title.as_deref())
+        .collect();
+    assert_eq!(instructions, [Some("Tool Usage")]);
+
+    // `web.toml`'s block is followed by `coding.toml`'s, joined with the `line`
+    // separator that file appends with rather than the `paragraph` one
+    // `web.toml` carries. Anchoring the match on the line break rather than on
+    // either separator is what recognizes the repeat and skips it.
+    assert_eq!(
+        merged.assistant.system_prompt.as_deref(),
+        Some("You can browse the web.\nYou can write code.")
+    );
 }
 
 #[test]

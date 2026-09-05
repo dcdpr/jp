@@ -1,7 +1,7 @@
 use test_log::test;
 
 use super::*;
-use crate::types::string::MergedStringSeparator;
+use crate::types::string::{MergedStringSeparator, StringDedup};
 
 #[test]
 fn test_string_with_append_strategy() {
@@ -648,7 +648,7 @@ fn test_finalized_round_trip_does_not_double_prepend() {
 }
 
 /// Build an appending partial with a paragraph separator.
-fn appending(value: &str, dedup: Option<bool>) -> PartialMergeableString {
+fn appending(value: &str, dedup: Option<StringDedup>) -> PartialMergeableString {
     PartialMergeableString::Merged(PartialMergedString {
         value: Some(value.to_owned()),
         strategy: Some(MergedStringStrategy::Append),
@@ -694,6 +694,27 @@ fn test_append_matches_first_and_last_block() {
 }
 
 #[test]
+fn test_append_skips_block_followed_by_a_different_separator() {
+    // Two sources appended their blocks with different separators, so the
+    // first block is followed by a single newline while the value re-supplying
+    // it carries a paragraph separator. It is still the same whole block, and
+    // appending it again duplicates it in the prompt.
+    let accumulated = PartialMergeableString::Merged(PartialMergedString {
+        value: Some("knowledge\npersona".to_owned()),
+        strategy: Some(MergedStringStrategy::Append),
+        separator: Some(MergedStringSeparator::Line),
+        discard_when_merged: None,
+        dedup: None,
+    });
+
+    let result = string_with_strategy(accumulated, appending("knowledge", None), &())
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(result.as_ref(), "knowledge\npersona");
+}
+
+#[test]
 fn test_append_ignores_match_inside_a_block() {
     // "brief" occurs inside a block but is not a block of its own, so it is a
     // genuinely new contribution and must be appended.
@@ -708,10 +729,111 @@ fn test_append_ignores_match_inside_a_block() {
     assert_eq!(result.as_ref(), "Be brief and clear.\n\nbrief");
 }
 
+/// Build an appending partial with a space separator and a stated dedup mode.
+fn appending_words(value: &str, dedup: StringDedup) -> PartialMergeableString {
+    PartialMergeableString::Merged(PartialMergedString {
+        value: Some(value.to_owned()),
+        strategy: Some(MergedStringStrategy::Append),
+        separator: Some(MergedStringSeparator::Space),
+        discard_when_merged: None,
+        dedup: Some(dedup),
+    })
+}
+
+#[test]
+fn test_contains_mode_skips_a_value_merged_without_a_line_break() {
+    // Space-joined values leave no line break for `block` to anchor on, which
+    // is the case `contains` exists for.
+    let accumulated = PartialMergeableString::String("knowledge persona".to_owned());
+
+    let result = string_with_strategy(
+        accumulated.clone(),
+        appending_words("knowledge", StringDedup::Block),
+        &(),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(result.as_ref(), "knowledge persona knowledge");
+
+    let result = string_with_strategy(
+        accumulated,
+        appending_words("knowledge", StringDedup::Contains),
+        &(),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(result.as_ref(), "knowledge persona");
+}
+
+#[test]
+fn test_contains_mode_also_skips_a_value_inside_a_word() {
+    // The cost of `contains`: a short value that occurs anywhere counts as
+    // present, so a value the author meant to add is dropped.
+    let result = string_with_strategy(
+        PartialMergeableString::String("Be brief and clear.".to_owned()),
+        appending_words("brief", StringDedup::Contains),
+        &(),
+    )
+    .unwrap()
+    .unwrap();
+
+    assert_eq!(result.as_ref(), "Be brief and clear.");
+}
+
+#[test]
+fn test_exact_mode_skips_only_a_whole_string_match() {
+    // A block that is present, but alongside others, is merged again: `exact`
+    // only recognizes a value that is the entire accumulated string.
+    let result = string_with_strategy(
+        PartialMergeableString::String("knowledge\n\npersona".to_owned()),
+        appending("knowledge", Some(StringDedup::Exact)),
+        &(),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(result.as_ref(), "knowledge\n\npersona\n\nknowledge");
+
+    let result = string_with_strategy(
+        PartialMergeableString::String("knowledge".to_owned()),
+        appending("knowledge", Some(StringDedup::Exact)),
+        &(),
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(result.as_ref(), "knowledge");
+}
+
+#[test]
+fn test_excerpt_cuts_a_value_down_to_one_short_line() {
+    assert_eq!(excerpt("Be brief."), "Be brief.");
+    assert_eq!(excerpt("first\nsecond"), "first\u{2026}");
+
+    // Cutting counts characters, not bytes, so a multi-byte character is never
+    // split down the middle.
+    let wide = "\u{4e00}".repeat(80);
+    assert_eq!(excerpt(&wide).chars().count(), 61);
+    assert!(excerpt(&wide).ends_with('\u{2026}'));
+}
+
+#[test]
+fn test_dedup_mode_is_read_from_a_config_file() {
+    let merged: PartialMergedString =
+        serde_json::from_str(r#"{"value":"foo","dedup":"contains"}"#).unwrap();
+    assert_eq!(merged.dedup, Some(StringDedup::Contains));
+
+    let error = serde_json::from_str::<PartialMergedString>(r#"{"value":"foo","dedup":"maybe"}"#)
+        .unwrap_err();
+    assert!(
+        error.to_string().contains("got `maybe`"),
+        "an undocumented mode should be rejected by name: {error}"
+    );
+}
+
 #[test]
 fn test_append_without_separator_only_skips_exact_match() {
-    // With no separator there are no block boundaries to anchor a match on, so
-    // only a whole-string match counts as already present.
+    // Values glued together with no separator sit inside one line, which leaves
+    // no boundary for `block` to anchor a match on, so only a whole-string
+    // match counts as already present.
     let no_separator = |value: &str| {
         PartialMergeableString::Merged(PartialMergedString {
             value: Some(value.to_owned()),
@@ -745,7 +867,7 @@ fn test_append_without_separator_only_skips_exact_match() {
 fn test_append_duplicates_when_dedup_disabled() {
     let result = string_with_strategy(
         PartialMergeableString::String("knowledge".to_owned()),
-        appending("knowledge", Some(false)),
+        appending("knowledge", Some(StringDedup::Off)),
         &(),
     )
     .unwrap()
@@ -769,7 +891,7 @@ fn test_dedup_opt_out_survives_a_plain_string_replacement() {
         strategy: None,
         separator: None,
         discard_when_merged: None,
-        dedup: Some(false),
+        dedup: Some(StringDedup::Off),
     });
 
     let replaced = string_with_strategy(
@@ -797,7 +919,7 @@ fn test_dedup_opt_out_survives_a_discarded_default() {
         strategy: None,
         separator: None,
         discard_when_merged: Some(true),
-        dedup: Some(false),
+        dedup: Some(StringDedup::Off),
     });
 
     let replaced = string_with_strategy(
@@ -859,6 +981,44 @@ fn test_unstated_strategy_appends() {
 }
 
 #[test]
+fn test_unstated_separator_is_a_paragraph() {
+    // `MergedStringSeparator` defaults to `paragraph`, so a config that appends
+    // a value without naming a separator gets a blank line between the two.
+    let no_separator = PartialMergeableString::Merged(PartialMergedString {
+        value: Some("bar".to_owned()),
+        strategy: Some(MergedStringStrategy::Append),
+        separator: None,
+        discard_when_merged: None,
+        dedup: None,
+    });
+
+    let result = string_with_strategy(
+        PartialMergeableString::String("foo".to_owned()),
+        no_separator,
+        &(),
+    )
+    .unwrap()
+    .unwrap();
+
+    assert_eq!(result.as_ref(), "foo\n\nbar");
+}
+
+#[test]
+fn test_append_to_an_empty_value_adds_no_separator() {
+    // There is nothing to separate the appended value from, so it stands alone
+    // rather than arriving behind a leading blank line.
+    let result = string_with_strategy(
+        PartialMergeableString::String(String::new()),
+        appending("persona", None),
+        &(),
+    )
+    .unwrap()
+    .unwrap();
+
+    assert_eq!(result.as_ref(), "persona");
+}
+
+#[test]
 fn test_dedup_accepts_inherit() {
     let merged: PartialMergedString =
         serde_json::from_str(r#"{"value":"foo","dedup":"inherit"}"#).unwrap();
@@ -866,7 +1026,7 @@ fn test_dedup_accepts_inherit() {
 
     let merged: PartialMergedString =
         serde_json::from_str(r#"{"value":"foo","dedup":false}"#).unwrap();
-    assert_eq!(merged.dedup, Some(false));
+    assert_eq!(merged.dedup, Some(StringDedup::Off));
 
     let merged: PartialMergedString = serde_json::from_str(r#"{"value":"foo"}"#).unwrap();
     assert_eq!(merged.dedup, None);
@@ -877,13 +1037,21 @@ fn test_dedup_assignment_accepts_every_documented_value() {
     use crate::assignment::{AssignKeyValue as _, KvAssignment};
 
     // The leaf parser accepts every value the field documents, matching what
-    // `deserialize_dedup` accepts from a config file. `true` and `false` start
-    // from the opposite opinion so the assertion cannot pass on a no-op;
+    // `deserialize_string_dedup` accepts from a config file. Each mode starts
+    // from a different opinion so the assertion cannot pass on a no-op;
     // `inherit` states no opinion and must leave the seed standing.
     for (input, seed, want) in [
-        ("true", Some(false), Some(true)),
-        ("false", Some(true), Some(false)),
-        ("inherit", Some(false), Some(false)),
+        ("off", Some(StringDedup::Block), Some(StringDedup::Off)),
+        ("exact", Some(StringDedup::Block), Some(StringDedup::Exact)),
+        ("block", Some(StringDedup::Off), Some(StringDedup::Block)),
+        (
+            "contains",
+            Some(StringDedup::Block),
+            Some(StringDedup::Contains),
+        ),
+        ("true", Some(StringDedup::Off), Some(StringDedup::Block)),
+        ("false", Some(StringDedup::Block), Some(StringDedup::Off)),
+        ("inherit", Some(StringDedup::Off), Some(StringDedup::Off)),
         ("inherit", None, None),
     ] {
         let mut partial = PartialMergedString {
@@ -911,7 +1079,7 @@ fn test_inherited_dedup_opt_out_still_duplicates_on_append() {
     // `dedup=inherit` leaves a lower layer's opt-out in force, which is only
     // observable through the merge it governs: the append below must duplicate.
     let mut opted_out = PartialMergedString {
-        dedup: Some(false),
+        dedup: Some(StringDedup::Off),
         ..Default::default()
     };
     let kv = KvAssignment::try_from_cli("dedup", "inherit").unwrap();
