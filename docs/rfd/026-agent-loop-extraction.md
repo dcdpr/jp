@@ -305,9 +305,10 @@ A builder or context struct could help, but that's a separate refactor.
 > That separate refactor has landed: `TurnInputs` in `jp_cli::cmd::query`
 > gathers a turn's inputs and splits the work in two, where collecting reads the
 > CLI context and running does not.
-> Its fields are the "context that varies by caller" set this RFD names above,
-> and `TurnInputs::run` is the call site Phase 4 replaces with
-> `jp_agent::run_turn_loop`.
+> Its fields are the "context that varies by caller" set this RFD names above.
+> `Query::run_turn` holds the call Phase 4 redirects to
+> `jp_agent::run_turn_loop`; `TurnInputs::run` is steps 3 to 5 of the
+> orchestration list above, which stay in `jp_cli`.
 > It already takes a `&ConversationLock` rather than a `&mut Workspace`, so the
 > `ConversationStore` trait has less to cover than assumed here.
 

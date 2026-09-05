@@ -117,11 +117,15 @@ pub(crate) fn needs_mcp_server(uri: &Url) -> bool {
 /// Takes the two things a handler is given so a caller that no longer holds the
 /// context can still resolve one.
 /// `jp://` is not handled here: reading a conversation needs the workspace.
+///
+/// Returns one group per URL, in the order the URLs were given.
+/// A URL can yield several attachments, so a caller that has to place them back
+/// among others needs the grouping to know where each one ends.
 pub(crate) async fn resolve_attachments(
     root: &Utf8Path,
     mcp_client: &jp_mcp::Client,
     urls: Vec<Url>,
-) -> Result<Vec<jp_attachment::Attachment>> {
+) -> Result<Vec<Vec<jp_attachment::Attachment>>> {
     let futs = urls.into_iter().map(|uri| async move {
         let scheme = attachment_scheme(&uri);
         let Some(mut handler) = jp_attachment::find_handler_by_scheme(scheme) else {
@@ -142,11 +146,7 @@ pub(crate) async fn resolve_attachments(
             .map_err(|source| Error::AttachmentFailed { uri, source })
     });
 
-    Ok(futures::future::try_join_all(futs)
-        .await?
-        .into_iter()
-        .flatten()
-        .collect())
+    futures::future::try_join_all(futs).await
 }
 
 pub(crate) async fn register_attachment(
@@ -192,10 +192,13 @@ pub(crate) async fn register_attachment(
 /// attachment was registered: those references are warned about and skipped
 /// rather than aborting the whole query.
 /// Every other failure (invalid URI, real I/O error, etc.) is propagated.
+///
+/// Returns one group per URL, in the order the URLs were given; a skipped
+/// reference yields an empty group, keeping the groups aligned with the input.
 pub(crate) async fn load_conversation_attachments(
     ctx: &Ctx,
     urls: Vec<Url>,
-) -> Result<Vec<jp_attachment::Attachment>> {
+) -> Result<Vec<Vec<jp_attachment::Attachment>>> {
     // Handle the missing-conversation case inside each future so the outer
     // `try_join_all` keeps its fail-fast behavior for real errors: a
     // structural failure aborts the batch immediately instead of waiting
@@ -214,12 +217,7 @@ pub(crate) async fn load_conversation_attachments(
             Err(error) => Err(error),
         }
     });
-    let attachments = futures::future::try_join_all(futs)
-        .await?
-        .into_iter()
-        .flatten()
-        .collect();
-    Ok(attachments)
+    futures::future::try_join_all(futs).await
 }
 
 #[cfg(test)]

@@ -646,7 +646,6 @@ impl Query {
             chat_request,
             pending_trim,
             mcp_servers_handle,
-            // Typed at this terminal, so it renders here.
             ctx.printer.clone(),
         )
         .await?;
@@ -1192,6 +1191,15 @@ impl Query {
     }
 }
 
+/// One configured attachment, at the position the user declared it.
+enum AttachmentSlot {
+    /// Resolved while the context was still in hand.
+    Ready(Vec<Attachment>),
+
+    /// Read from an MCP server, so it waits for one to be running.
+    Deferred(Url),
+}
+
 /// The turn's attachments, some of which cannot resolve yet.
 ///
 /// Resolving one can read a conversation out of the workspace, fetch over HTTP,
@@ -1199,26 +1207,51 @@ impl Query {
 /// The first needs a context the turn no longer holds and the last needs a
 /// server that is still starting, so they are resolved at different points and
 /// meet here.
+///
+/// One slot per configured attachment, in declaration order.
+/// The order reaches the provider: every attachment is sent as a document in
+/// this order, numbered by its position.
 struct PendingAttachments {
-    /// Resolved while the context was still in hand.
-    resolved: Vec<Attachment>,
-
-    /// Read from an MCP server, so they wait for one to be running.
-    deferred: Vec<Url>,
+    slots: Vec<AttachmentSlot>,
 }
 
 impl PendingAttachments {
-    /// Resolve what is left and return the whole set.
+    /// Resolve what is left and return the whole set, in declaration order.
     async fn resolve(
         self,
         root: &Utf8Path,
         mcp_client: &jp_mcp::Client,
     ) -> Result<Vec<Attachment>> {
-        let mut attachments = self.resolved;
-        attachments.extend(resolve_attachments(root, mcp_client, self.deferred).await?);
+        let deferred: Vec<Url> = self
+            .slots
+            .iter()
+            .filter_map(|slot| match slot {
+                AttachmentSlot::Deferred(url) => Some(url.clone()),
+                AttachmentSlot::Ready(_) => None,
+            })
+            .collect();
 
-        Ok(attachments)
+        let resolved = resolve_attachments(root, mcp_client, deferred).await?;
+
+        Ok(splice(self.slots, resolved))
     }
+}
+
+/// Flatten the slots, putting each resolved group back where its URL was.
+///
+/// `deferred` holds one group per [`AttachmentSlot::Deferred`], in slot order:
+/// the caller collects those URLs in that order and the resolver answers in
+/// kind.
+fn splice(slots: Vec<AttachmentSlot>, deferred: Vec<Vec<Attachment>>) -> Vec<Attachment> {
+    let mut deferred = deferred.into_iter();
+
+    slots
+        .into_iter()
+        .flat_map(|slot| match slot {
+            AttachmentSlot::Ready(attachments) => attachments,
+            AttachmentSlot::Deferred(_) => deferred.next().unwrap_or_default(),
+        })
+        .collect()
 }
 
 /// Everything a turn needs, gathered in one place.
@@ -1293,22 +1326,38 @@ impl TurnInputs {
         mcp_servers: StartupSet,
         printer: Arc<Printer>,
     ) -> Result<Self> {
-        let attachment_urls: Vec<_> = config
+        let urls: Vec<Url> = config
             .conversation
             .attachments
             .iter()
             .map(AttachmentConfig::to_url)
             .collect::<std::result::Result<Vec<_>, _>>()?;
 
-        let (deferred, attachment_urls): (Vec<_>, Vec<_>) =
-            attachment_urls.into_iter().partition(needs_mcp_server);
+        // Resolve what can be resolved now, then rebuild the declared order
+        // with a placeholder where each MCP-backed attachment goes.
+        let eager: Vec<Url> = urls
+            .iter()
+            .filter(|url| !needs_mcp_server(url))
+            .cloned()
+            .collect();
 
-        let resolved = load_conversation_attachments(ctx, attachment_urls).await?;
+        let mut ready = load_conversation_attachments(ctx, eager).await?.into_iter();
+        let slots: Vec<AttachmentSlot> = urls
+            .iter()
+            .map(|url| {
+                if needs_mcp_server(url) {
+                    AttachmentSlot::Deferred(url.clone())
+                } else {
+                    AttachmentSlot::Ready(ready.next().unwrap_or_default())
+                }
+            })
+            .collect();
 
+        let deferred: Vec<&Url> = urls.iter().filter(|url| needs_mcp_server(url)).collect();
         debug!(
-            count = resolved.len(),
+            count = urls.len(),
             deferred = deferred.len(),
-            deferred_uris = ?deferred.iter().map(Url::as_str).collect::<Vec<_>>(),
+            deferred_uris = ?deferred.iter().map(|url| url.as_str()).collect::<Vec<_>>(),
             "Attachments loaded."
         );
 
@@ -1321,7 +1370,7 @@ impl TurnInputs {
             printer,
             is_tty: ctx.term.is_tty,
             terminal_width: ctx.term.width,
-            attachments: PendingAttachments { resolved, deferred },
+            attachments: PendingAttachments { slots },
             mcp_servers,
             chat_request,
             pending_trim,

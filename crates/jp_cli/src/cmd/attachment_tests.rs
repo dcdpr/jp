@@ -124,17 +124,15 @@ fn load_conversation_attachments_skips_missing_references() {
     let first = Url::parse(&format!("jp://{}", make_id(1_700_000_002))).unwrap();
     let second = Url::parse(&format!("jp://{}", make_id(1_700_000_003))).unwrap();
 
-    let attachments = runtime
+    let groups = runtime
         .block_on(load_conversation_attachments(&ctx, vec![first, second]))
         .expect("missing references should not propagate as errors");
 
     // Both URLs point at conversations the workspace doesn't know about, so
-    // both get warn-and-skipped. The query continues with zero attachments.
-    assert!(
-        attachments.is_empty(),
-        "got {} attachments",
-        attachments.len()
-    );
+    // both get warn-and-skipped. A skipped reference still holds its slot, so
+    // the groups stay aligned with the URLs and carry no attachments.
+    assert_eq!(groups.len(), 2);
+    assert!(groups.iter().all(Vec::is_empty), "got {groups:?}");
 }
 
 #[test]
