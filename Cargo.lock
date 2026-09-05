@@ -2631,7 +2631,7 @@ dependencies = [
  "crossterm",
  "libc",
  "portable-pty",
- "thiserror 2.0.18",
+ "thiserror 2.0.20",
  "vt100",
 ]
 
