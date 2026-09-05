@@ -301,9 +301,19 @@ impl PartialConfigDelta for PartialAppConfig {
                 unsets,
             ),
 
-            assistant: self.assistant.delta(next.assistant),
-            conversation: self.conversation.delta(next.conversation),
-            style: self.style.delta(next.style),
+            assistant: self.assistant.delta_with_unsets(
+                next.assistant,
+                &delta_path(prefix, "assistant"),
+                unsets,
+            ),
+            conversation: self.conversation.delta_with_unsets(
+                next.conversation,
+                &delta_path(prefix, "conversation"),
+                unsets,
+            ),
+            style: self
+                .style
+                .delta_with_unsets(next.style, &delta_path(prefix, "style"), unsets),
             interrupt: self.interrupt.delta(next.interrupt),
             editor: self.editor.delta_with_unsets(
                 next.editor,

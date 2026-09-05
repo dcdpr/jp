@@ -78,6 +78,25 @@ pub fn delta_opt_vec_at<T: PartialEq + Clone>(
     Some(next)
 }
 
+/// Delta for an optional nested partial, reporting the fields it cannot reach.
+///
+/// Mirrors [`delta_opt_partial`], descending with `path` as the nested value's
+/// own dotted path.
+pub fn delta_opt_partial_at<T: PartialConfigDelta + PartialEq>(
+    path: &str,
+    prev: Option<&T>,
+    next: Option<T>,
+    unsets: &mut Vec<String>,
+) -> Option<T> {
+    match (prev, next) {
+        (Some(prev), Some(next)) if prev != &next => {
+            Some(prev.delta_with_unsets(next, path, unsets))
+        }
+        (None, next) => next,
+        _ => None,
+    }
+}
+
 /// Calculate the delta between two maps, reporting each entry's unsets.
 ///
 /// Mirrors [`delta_map`], descending into each entry with the entry's own

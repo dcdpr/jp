@@ -9,7 +9,9 @@ use serde::{Deserialize, Deserializer, Serialize, de::Error as DeError};
 use crate::{
     BoxedError,
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
-    delta::{PartialConfigDelta, delta_opt, delta_opt_partial, delta_opt_vec},
+    delta::{
+        PartialConfigDelta, delta_opt, delta_opt_partial, delta_opt_vec, delta_opt_vec_at, path,
+    },
     fill::{FillDefaults, fill_opt},
     partial::{ToPartial, partial_opt, partial_opt_config, partial_opts},
     types::json_value::JsonValue,
@@ -198,6 +200,23 @@ impl PartialConfigDelta for PartialParametersConfig {
             top_p: delta_opt(self.top_p.as_ref(), next.top_p),
             top_k: delta_opt(self.top_k.as_ref(), next.top_k),
             stop_words: delta_opt_vec(self.stop_words.as_ref(), next.stop_words),
+            other: delta_opt(self.other.as_ref(), next.other),
+        }
+    }
+
+    fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
+        Self {
+            max_tokens: delta_opt(self.max_tokens.as_ref(), next.max_tokens),
+            reasoning: delta_opt_partial(self.reasoning.as_ref(), next.reasoning),
+            temperature: delta_opt(self.temperature.as_ref(), next.temperature),
+            top_p: delta_opt(self.top_p.as_ref(), next.top_p),
+            top_k: delta_opt(self.top_k.as_ref(), next.top_k),
+            stop_words: delta_opt_vec_at(
+                &path(prefix, "stop_words"),
+                self.stop_words.as_ref(),
+                next.stop_words,
+                unsets,
+            ),
             other: delta_opt(self.other.as_ref(), next.other),
         }
     }

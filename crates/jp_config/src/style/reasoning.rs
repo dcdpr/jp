@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
-    delta::{PartialConfigDelta, delta_opt, delta_opt_partial},
+    delta::{PartialConfigDelta, delta_opt, delta_opt_partial, delta_opt_partial_at, path},
     fill::{FillDefaults, fill_opt},
     model::{ModelConfig, PartialModelConfig},
     partial::{ToPartial, partial_opt, partial_opt_config, partial_opts},
@@ -93,6 +93,23 @@ impl PartialConfigDelta for PartialReasoningConfig {
         Self {
             display: delta_opt(self.display.as_ref(), next.display),
             summary_model: delta_opt_partial(self.summary_model.as_ref(), next.summary_model),
+            background: delta_opt(self.background.as_ref(), next.background),
+            extend_across_tool_calls: delta_opt(
+                self.extend_across_tool_calls.as_ref(),
+                next.extend_across_tool_calls,
+            ),
+        }
+    }
+
+    fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
+        Self {
+            display: delta_opt(self.display.as_ref(), next.display),
+            summary_model: delta_opt_partial_at(
+                &path(prefix, "summary_model"),
+                self.summary_model.as_ref(),
+                next.summary_model,
+                unsets,
+            ),
             background: delta_opt(self.background.as_ref(), next.background),
             extend_across_tool_calls: delta_opt(
                 self.extend_across_tool_calls.as_ref(),

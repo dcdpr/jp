@@ -7,7 +7,7 @@ use schematic::Config;
 
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
-    delta::PartialConfigDelta,
+    delta::{PartialConfigDelta, path},
     fill::FillDefaults,
     model::{
         id::{ModelIdOrAliasConfig, PartialModelIdOrAliasConfig},
@@ -55,6 +55,17 @@ impl PartialConfigDelta for PartialModelConfig {
         Self {
             id: self.id.delta(next.id),
             parameters: self.parameters.delta(next.parameters),
+        }
+    }
+
+    fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
+        Self {
+            id: self.id.delta(next.id),
+            parameters: self.parameters.delta_with_unsets(
+                next.parameters,
+                &path(prefix, "parameters"),
+                unsets,
+            ),
         }
     }
 }

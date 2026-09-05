@@ -150,6 +150,41 @@ fn a_dropped_beta_header_reports_its_full_path() {
     );
 }
 
+/// `stop_words` is reached through four separate paths; each reports its own.
+#[test]
+fn a_dropped_stop_word_reports_the_path_it_was_reached_by() {
+    let words = |values: &[&str]| Some(values.iter().map(|v| (*v).to_owned()).collect::<Vec<_>>());
+
+    let mut prev = crate::PartialAppConfig::empty();
+    prev.assistant.model.parameters.stop_words = words(&["halt", "stop"]);
+    prev.style.reasoning.summary_model = Some(crate::model::PartialModelConfig {
+        parameters: crate::model::parameters::PartialParametersConfig {
+            stop_words: words(&["halt", "stop"]),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+
+    let mut next = prev.clone();
+    next.assistant.model.parameters.stop_words = words(&["halt"]);
+    if let Some(model) = next.style.reasoning.summary_model.as_mut() {
+        model.parameters.stop_words = words(&["halt"]);
+    }
+
+    let mut unsets = Vec::new();
+    let delta = prev.delta_with_unsets(next, "", &mut unsets);
+
+    unsets.sort();
+    assert_eq!(unsets, [
+        "assistant.model.parameters.stop_words",
+        "style.reasoning.summary_model.parameters.stop_words",
+    ]);
+    assert_eq!(
+        delta.assistant.model.parameters.stop_words,
+        Some(vec!["halt".to_owned()])
+    );
+}
+
 #[test]
 fn map_delta_keeps_an_entry_only_next_has() {
     let prev = IndexMap::new();
