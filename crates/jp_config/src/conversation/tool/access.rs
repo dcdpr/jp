@@ -1,4 +1,4 @@
-//! Filesystem access grants for a tool.
+//! Resource access grants for a tool.
 //!
 //! `access.fs` declares which paths a tool may touch and what it may do there.
 //! When the section is absent the tool keeps unrestricted (workspace-confined)
@@ -19,6 +19,20 @@
 //! A rule with `external = true` acknowledges that its `path` is a symlink that
 //! resolves outside the workspace; the canonical target is approved host-side
 //! on first use.
+//!
+//! `access.env` declares which environment variables a tool may read.
+//! A trailing `*` in `name` makes the rule a prefix match; without it the rule
+//! matches one variable exactly.
+//!
+//! ```toml
+//! [[conversation.tools.bash.access.env]]
+//! name = "AWS_*"
+//! read = true
+//!
+//! [[conversation.tools.bash.access.env]]
+//! name = "AWS_SECRET_ACCESS_KEY"
+//! read = false
+//! ```
 
 use std::str::FromStr;
 
@@ -31,13 +45,13 @@ use crate::{
     delta::PartialConfigDelta,
     internal::merge::vec_with_strategy,
     partial::{ToPartial, partial_opt, partial_opts},
-    types::vec::{MergeableVec, vec_to_mergeable_partial},
+    types::vec::{MergeableVec, MergedVec, MergedVecStrategy, vec_to_mergeable_partial},
 };
 
 /// Resource access grants for a tool.
 ///
-/// Only filesystem grants (`fs`) are modelled here; network and environment
-/// grants are a separate concern.
+/// Filesystem (`fs`) and environment-variable (`env`) grants are modelled here;
+/// network grants are a separate concern.
 #[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct AccessConfig {
@@ -52,6 +66,22 @@ pub struct AccessConfig {
         merge = vec_with_strategy,
     )]
     pub fs: Vec<FsRuleConfig>,
+
+    /// Environment variable access rules.
+    ///
+    /// When absent or empty, the tool may read any environment variable.
+    /// Declaring at least one rule switches to default-deny: a variable is
+    /// readable only when a rule matching it grants `read`.
+    ///
+    /// Each rule names one variable, or a name prefix when `name` ends in `*`.
+    /// Rules from later config layers append by default; the most specific
+    /// (longest literal name) rule wins for a given variable.
+    #[setting(
+        nested,
+        partial_via = MergeableVec::<EnvRuleConfig>,
+        merge = vec_with_strategy,
+    )]
+    pub env: Vec<EnvRuleConfig>,
 }
 
 impl AssignKeyValue for PartialAccessConfig {
@@ -59,6 +89,7 @@ impl AssignKeyValue for PartialAccessConfig {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
             _ if kv.p("fs") => kv.try_vec_of_nested(self.fs.as_mut())?,
+            _ if kv.p("env") => kv.try_vec_of_nested(self.env.as_mut())?,
             _ => return missing_key(&kv),
         }
 
@@ -69,19 +100,46 @@ impl AssignKeyValue for PartialAccessConfig {
 impl PartialConfigDelta for PartialAccessConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
-            fs: next
-                .fs
-                .into_iter()
-                .filter(|v| !self.fs.contains(v))
-                .collect(),
+            fs: rule_delta(&self.fs, next.fs),
+            env: rule_delta(&self.env, next.env),
         }
     }
+}
+
+/// Diff two rule lists into a delta that replays to `next`.
+///
+/// An append-shaped delta can only add, so a rule that disappeared between
+/// `prev` and `next` would come back when the delta is folded over `prev`
+/// again.
+/// When anything is missing from `next`, the delta therefore carries the whole
+/// list with `replace`; otherwise it carries just the new rules and appends.
+///
+/// `next` comes from a fully resolved config, so it is the complete rule set
+/// and replacing with it loses nothing.
+fn rule_delta<T: Clone + PartialEq>(
+    prev: &MergeableVec<T>,
+    next: MergeableVec<T>,
+) -> MergeableVec<T> {
+    if prev.iter().all(|rule| next.contains(rule)) {
+        return next
+            .into_iter()
+            .filter(|rule| !prev.contains(rule))
+            .collect();
+    }
+
+    MergeableVec::Merged(MergedVec {
+        value: next.into_vec(),
+        strategy: Some(MergedVecStrategy::Replace),
+        dedup: None,
+        discard_when_merged: false,
+    })
 }
 
 impl ToPartial for AccessConfig {
     fn to_partial(&self) -> Self::Partial {
         Self::Partial {
             fs: vec_to_mergeable_partial(&self.fs),
+            env: vec_to_mergeable_partial(&self.env),
         }
     }
 }
@@ -199,6 +257,72 @@ impl ToPartial for FsRuleConfig {
             update: partial_opts(self.update.as_ref(), defaults.update),
             delete: partial_opts(self.delete.as_ref(), defaults.delete),
             execute: partial_opts(self.execute.as_ref(), defaults.execute),
+        }
+    }
+}
+
+/// A single environment variable access rule.
+///
+/// `read` defaults to denied.
+/// A `name` ending in `*` matches every variable starting with the literal
+/// portion; the `*` itself is a sentinel and is not matched against.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Config)]
+#[config(rename_all = "snake_case")]
+pub struct EnvRuleConfig {
+    /// The variable name the rule applies to.
+    ///
+    /// `name = "GITHUB_TOKEN"` matches only `GITHUB_TOKEN`.
+    /// `name = "AWS_*"` matches every variable starting with `AWS_`.
+    /// `*` may only appear as the final character.
+    #[setting(required)]
+    pub name: String,
+
+    /// Grant reading the variable's value.
+    ///
+    /// Defaults to `false`: a rule that omits `read` denies the names it
+    /// matches.
+    pub read: Option<bool>,
+}
+
+impl EnvRuleConfig {
+    /// Whether the rule grants read access.
+    #[must_use]
+    pub fn read(&self) -> bool {
+        self.read.unwrap_or(false)
+    }
+}
+
+impl AssignKeyValue for PartialEnvRuleConfig {
+    fn assign(&mut self, kv: KvAssignment) -> AssignResult {
+        match kv.key_string().as_str() {
+            "" => kv.try_merge_object(self)?,
+            "name" => self.name = kv.try_some_string()?,
+            "read" => self.read = kv.try_some_bool()?,
+            _ => return missing_key(&kv),
+        }
+
+        Ok(())
+    }
+}
+
+impl FromStr for PartialEnvRuleConfig {
+    type Err = BoxedError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self {
+            name: Some(s.to_owned()),
+            ..Default::default()
+        })
+    }
+}
+
+impl ToPartial for EnvRuleConfig {
+    fn to_partial(&self) -> Self::Partial {
+        let defaults = Self::Partial::default();
+
+        Self::Partial {
+            name: partial_opt(&self.name, defaults.name),
+            read: partial_opts(self.read.as_ref(), defaults.read),
         }
     }
 }

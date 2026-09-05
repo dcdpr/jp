@@ -1,15 +1,18 @@
-//! Host-side compilation of `access.fs` config rules into a
+//! Host-side compilation of `access` config rules into a
 //! [`jp_tool::AccessPolicy`].
 //!
-//! Compilation canonicalizes each rule path, runs the approval lifecycle for
-//! `external` rules, and bakes the approved canonical target into the compiled
-//! [`FsRule`].
+//! Compilation canonicalizes each `fs` rule path, runs the approval lifecycle
+//! for `external` rules, and bakes the approved canonical target into the
+//! compiled [`FsRule`].
+//! `env` rules are validated for pattern syntax and carried through as-is.
 //! The cooperative checker and the OS sandbox both consume the resulting
 //! policy.
 
 use camino::Utf8Path;
-use jp_config::conversation::tool::access::{AccessConfig, FsRuleConfig};
-use jp_tool::{AccessPolicy, FsRule, canonicalize_workspace_target, lexical_workspace_relative};
+use jp_config::conversation::tool::access::{AccessConfig, EnvRuleConfig, FsRuleConfig};
+use jp_tool::{
+    AccessPolicy, EnvRule, FsRule, canonicalize_workspace_target, lexical_workspace_relative,
+};
 use tracing::warn;
 
 use crate::access::approvals::{ApprovalLookup, ApprovalStore};
@@ -37,6 +40,15 @@ pub enum CompileError {
          pointing at the external symlink instead"
     )]
     ExternalInsideWorkspace(String),
+
+    /// An `env` rule name is empty, carries a `*` somewhere other than the
+    /// final character, or contains a character no environment variable name
+    /// can hold.
+    #[error(
+        "access.env rule name '{0}' is invalid; a name must be non-empty, may only use '*' as its \
+         final character, and cannot contain '=' or a null byte"
+    )]
+    InvalidEnvName(String),
 }
 
 /// The outcome of compiling a set of `access.fs` rules.
@@ -164,6 +176,7 @@ pub fn compile_policy(
     root: &Utf8Path,
     approve: impl FnMut(&str, &Utf8Path) -> ApprovalDecision,
 ) -> Result<(AccessPolicy, Vec<String>), CompileError> {
+    let env = compile_env(&config.env)?;
     let compiled = compile_fs(config, root, approve)?;
     let mut rules = compiled.rules;
 
@@ -178,9 +191,39 @@ pub fn compile_policy(
 
     let policy = AccessPolicy {
         fs: rules,
+        env,
         ..AccessPolicy::default()
     };
     Ok((policy, compiled.warnings))
+}
+
+/// Validate and convert `access.env` rules into [`EnvRule`]s.
+///
+/// A name that cannot match any real variable is rejected rather than compiled
+/// into a rule that silently never fires: a denying rule that never fires
+/// leaves the variable to whatever broader rule matches instead.
+/// `=` and the null byte are the two characters no environment variable name
+/// can hold — the rest of the character set is left alone, because real names
+/// range from POSIX `SHOUTY_SNAKE` to Windows' `ProgramFiles(x86)`.
+///
+/// # Errors
+///
+/// Returns [`CompileError::InvalidEnvName`] for an empty name, one carrying a
+/// `*` anywhere but the final character, or one containing `=` or a null byte.
+fn compile_env(config: &[EnvRuleConfig]) -> Result<Vec<EnvRule>, CompileError> {
+    config
+        .iter()
+        .map(|rule| {
+            let literal = rule.name.strip_suffix('*').unwrap_or(&rule.name);
+            if rule.name.is_empty() || literal.contains('*') || rule.name.contains(['=', '\0']) {
+                return Err(CompileError::InvalidEnvName(rule.name.clone()));
+            }
+            Ok(EnvRule {
+                name: rule.name.clone(),
+                read: rule.read(),
+            })
+        })
+        .collect()
 }
 
 fn build_rule(

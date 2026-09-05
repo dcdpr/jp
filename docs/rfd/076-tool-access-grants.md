@@ -438,6 +438,28 @@ sentinel.
 This keeps the matching algorithm simple and is not a practical restriction:
 POSIX env var names cannot contain `*`.
 
+Matching is case-sensitive, unlike host matching for `net` rules.
+A rule set means the same thing wherever it is read, which matters because
+config is routinely shared across machines through a checked-in
+`.jp/config.toml`.
+
+This does not by itself preserve a deny on a platform whose OS resolves variable
+names case-insensitively.
+Given `*` granting reads and `GITHUB_TOKEN` denying them, a Windows request for
+`github_token` misses the exact deny, selects the wildcard grant, and then
+resolves to the same OS variable; on Unix the same request usually finds no
+variable at all.
+Canonicalizing the requested name alone does not close this — an exact rule
+written in another case still misses.
+
+> [!NOTE]
+> **Open question.** The case-insensitive-platform rule needs a deny-preserving
+> definition before the first `env` consumer ships.
+> Candidates are canonicalizing requests *and* rule names to one form, or
+> matching denies case-insensitively while keeping grants exact.
+> Neither is settled, and the choice belongs with the consumer that first needs
+> it.
+
 ### Runtime types
 
 The access policy types live in `jp_tool`, which defines the wire format between

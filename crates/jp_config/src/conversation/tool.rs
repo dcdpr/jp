@@ -491,12 +491,14 @@ pub struct ToolConfig {
     #[setting(nested, merge = merge_nested_indexmap)]
     pub options: IndexMap<String, JsonValue>,
 
-    /// Filesystem access grants for the tool.
+    /// Resource access grants for the tool.
     ///
-    /// Declares which workspace-relative paths the tool may touch and what it
-    /// may do there.
-    /// When absent, the tool keeps unrestricted (but workspace-confined)
-    /// access; declaring any rule switches the tool to default-deny.
+    /// `access.fs` declares which workspace-relative paths the tool may touch
+    /// and what it may do there; `access.env` declares which environment
+    /// variables it may read.
+    /// When `access.fs` is absent, the tool keeps unrestricted (but
+    /// workspace-confined) filesystem access; declaring any rule switches the
+    /// tool to default-deny.
     #[setting(nested)]
     pub access: Option<AccessConfig>,
 }
@@ -1220,7 +1222,7 @@ impl ToolConfigWithDefaults {
         &self.tool.options
     }
 
-    /// Return the filesystem access grants for the tool, if declared.
+    /// Return the resource access grants for the tool, if declared.
     #[must_use]
     pub const fn access(&self) -> Option<&AccessConfig> {
         self.tool.access.as_ref()

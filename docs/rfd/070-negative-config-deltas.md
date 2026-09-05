@@ -712,8 +712,19 @@ records a delta that deep-merges on the next fold, and a rule the replacement
 dropped comes back.
 `attachments` (a `MergeableVec`) and `conversation.tools` (a plain `IndexMap`)
 behave the same way.
-This RFD's `unsets` mechanism is what closes it; until then the gap is uniform
-across every container-backed field.
+
+Two fields have since been fixed in place, each by detecting the removal and
+emitting the whole container with `strategy = "replace"` instead of a minimal
+append: `conversation.labels`, and `access.fs` / `access.env` on a tool (via
+`rule_delta` in `jp_config::conversation::tool::access`).
+Both carry security-relevant grants, which is why they were worth closing ahead
+of the general mechanism.
+They are point fixes, not a pattern to copy blindly — each one hard-codes
+"absent means removed" for its own container, which is precisely the judgement
+`unsets` makes explicit.
+
+This RFD's `unsets` mechanism is what closes the rest, and what lets the two
+point fixes be deleted.
 
 A revert delta that encoded its target value with, say, Append strategy would
 concatenate the target onto the current resolved state rather than replacing it.

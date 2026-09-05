@@ -1,7 +1,24 @@
 use super::*;
 
 fn fs_config(rules: Vec<FsRuleConfig>) -> AccessConfig {
-    AccessConfig { fs: rules }
+    AccessConfig {
+        fs: rules,
+        env: vec![],
+    }
+}
+
+fn env_config(rules: Vec<EnvRuleConfig>) -> AccessConfig {
+    AccessConfig {
+        fs: vec![],
+        env: rules,
+    }
+}
+
+fn env_rule(name: &str, read: bool) -> EnvRuleConfig {
+    EnvRuleConfig {
+        name: name.to_owned(),
+        read: Some(read),
+    }
 }
 
 fn rule(path: &str) -> FsRuleConfig {
@@ -15,6 +32,126 @@ fn rule(path: &str) -> FsRuleConfig {
         delete: None,
         execute: None,
     }
+}
+
+#[test]
+fn env_rules_carry_through_to_the_policy() {
+    let dir = camino_tempfile::tempdir().unwrap();
+    let config = env_config(vec![
+        env_rule("AWS_*", true),
+        env_rule("AWS_SECRET_ACCESS_KEY", false),
+    ]);
+
+    let (policy, warnings) = compile_policy(&config, dir.path(), |_, _| {
+        panic!("env rules must not consult the approver")
+    })
+    .unwrap();
+
+    assert!(warnings.is_empty());
+    assert_eq!(policy.env, vec![
+        EnvRule {
+            name: "AWS_*".to_owned(),
+            read: true,
+        },
+        EnvRule {
+            name: "AWS_SECRET_ACCESS_KEY".to_owned(),
+            read: false,
+        },
+    ]);
+}
+
+/// An `env` rule with no `read` key denies, matching how `fs` capabilities
+/// default.
+#[test]
+fn an_env_rule_without_read_denies() {
+    let dir = camino_tempfile::tempdir().unwrap();
+    let config = env_config(vec![EnvRuleConfig {
+        name: "HOME".to_owned(),
+        read: None,
+    }]);
+
+    let (policy, _) = compile_policy(&config, dir.path(), |_, _| unreachable!()).unwrap();
+
+    assert_eq!(policy.env, vec![EnvRule {
+        name: "HOME".to_owned(),
+        read: false,
+    }]);
+}
+
+/// Declaring only `env` rules leaves filesystem access unrestricted: the
+/// deny-all sentinel is an `access.fs` construct and must not be synthesized
+/// for a config that never mentioned `fs`.
+#[test]
+fn env_only_config_leaves_fs_unrestricted() {
+    let dir = camino_tempfile::tempdir().unwrap();
+    let config = env_config(vec![env_rule("GITHUB_TOKEN", true)]);
+
+    let (policy, _) = compile_policy(&config, dir.path(), |_, _| unreachable!()).unwrap();
+
+    assert!(policy.fs.is_empty());
+    assert!(!policy.is_restricted());
+}
+
+#[test]
+fn an_interior_star_in_an_env_name_is_rejected() {
+    let dir = camino_tempfile::tempdir().unwrap();
+    let config = env_config(vec![env_rule("AWS_*_KEY", true)]);
+
+    let error = compile_policy(&config, dir.path(), |_, _| unreachable!()).unwrap_err();
+
+    assert_eq!(error, CompileError::InvalidEnvName("AWS_*_KEY".to_owned()));
+}
+
+/// `KEY=VALUE` is how environment variables are usually written down, so a rule
+/// name carrying an `=` is a plausible mistake.
+/// It can never match a real variable, and a denying rule that never matches
+/// leaves the variable to whatever broader rule does.
+#[test]
+fn an_assignment_shaped_env_name_is_rejected() {
+    let dir = camino_tempfile::tempdir().unwrap();
+    let config = env_config(vec![env_rule("AWS_PROFILE=prod", false)]);
+
+    let error = compile_policy(&config, dir.path(), |_, _| unreachable!()).unwrap_err();
+
+    assert_eq!(
+        error,
+        CompileError::InvalidEnvName("AWS_PROFILE=prod".to_owned())
+    );
+}
+
+#[test]
+fn a_null_byte_in_an_env_name_is_rejected() {
+    let dir = camino_tempfile::tempdir().unwrap();
+    let config = env_config(vec![env_rule("AWS\0KEY", true)]);
+
+    let error = compile_policy(&config, dir.path(), |_, _| unreachable!()).unwrap_err();
+
+    assert_eq!(error, CompileError::InvalidEnvName("AWS\0KEY".to_owned()));
+}
+
+/// Windows ships names like `ProgramFiles(x86)`, so only the two characters a
+/// name genuinely cannot hold are rejected.
+#[test]
+fn an_unusual_but_legal_env_name_is_accepted() {
+    let dir = camino_tempfile::tempdir().unwrap();
+    let config = env_config(vec![env_rule("ProgramFiles(x86)", true)]);
+
+    let (policy, _) = compile_policy(&config, dir.path(), |_, _| unreachable!()).unwrap();
+
+    assert_eq!(policy.env, vec![EnvRule {
+        name: "ProgramFiles(x86)".to_owned(),
+        read: true,
+    }]);
+}
+
+#[test]
+fn an_empty_env_name_is_rejected() {
+    let dir = camino_tempfile::tempdir().unwrap();
+    let config = env_config(vec![env_rule("", true)]);
+
+    let error = compile_policy(&config, dir.path(), |_, _| unreachable!()).unwrap_err();
+
+    assert_eq!(error, CompileError::InvalidEnvName(String::new()));
 }
 
 #[test]

@@ -2424,7 +2424,10 @@ fn create_mount_effects(
 
     // Compile the just-created mounts against the seeded approvals to confirm
     // they resolve to a usable policy, surfacing broken or unapproved targets.
-    let access = AccessConfig { fs: rules };
+    let access = AccessConfig {
+        fs: rules,
+        env: vec![],
+    };
     let (_, warnings) = compile_policy(&access, &root, |rule_path, candidate| {
         match store.lookup(rule_path, candidate) {
             ApprovalLookup::Approved => ApprovalDecision::Approved,
