@@ -259,7 +259,7 @@ async fn ignored_directory_is_searched_when_named() {
 
     assert_eq!(
         matches,
-        "crates/tests/fixtures/a.snap:1:context_window: None\n"
+        "crates/tests/fixtures/a.snap (1 matches)\n1:context_window: None\n"
     );
 }
 
@@ -284,7 +284,7 @@ async fn explicitly_named_ignored_file_is_searched() {
 
     assert_eq!(
         matches,
-        "crates/tests/fixtures/a.snap:1:context_window: None\n"
+        "crates/tests/fixtures/a.snap (1 matches)\n1:context_window: None\n"
     );
 }
 
@@ -319,6 +319,59 @@ async fn suppressed_path_is_reported_so_the_caller_can_ask_the_user() {
     );
 }
 
+#[tokio::test]
+async fn matches_are_grouped_under_one_header_per_file() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(root.join("a.txt"), "needle\nfiller\nneedle\n").unwrap();
+    std::fs::write(root.join("b.txt"), "needle\n").unwrap();
+
+    let matches = fs_grep_files(
+        root,
+        None,
+        "needle".to_owned(),
+        None,
+        None,
+        None,
+        &Gitignore::empty(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        matches,
+        "a.txt (2 matches)\n1:needle\n3:needle\nb.txt (1 matches)\n1:needle\n"
+    );
+}
+
+#[tokio::test]
+async fn context_lines_are_marked_and_separated_within_a_group() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(
+        root.join("a.txt"),
+        "needle\nfiller\nfiller\nfiller\nneedle\n",
+    )
+    .unwrap();
+
+    let matches = fs_grep_files(
+        root,
+        None,
+        "needle".to_owned(),
+        Some(1),
+        None,
+        None,
+        &Gitignore::empty(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        matches,
+        "a.txt (2 matches)\n1:needle\n2-filler\n--\n4-filler\n5:needle\n"
+    );
+}
+
 /// Search a single-file workspace, returning the tool's rendered output.
 ///
 /// The pattern semantics below are the contract the tool exposes to callers;
@@ -345,7 +398,7 @@ async fn grep_one_file(content: &[u8], pattern: &str) -> String {
 async fn caret_and_dollar_anchor_per_line() {
     let matches = grep_one_file(b"alpha\nbeta\nalphabet\n", "^alpha$").await;
 
-    assert_eq!(matches, "a.txt:1:alpha\n");
+    assert_eq!(matches, "a.txt (1 matches)\n1:alpha\n");
 }
 
 #[tokio::test]
@@ -362,21 +415,21 @@ async fn dot_does_not_match_across_lines() {
 async fn word_boundaries_hold_and_matching_is_case_sensitive() {
     let matches = grep_one_file(b"foo\nfoobar\nFOO\n", r"\bfoo\b").await;
 
-    assert_eq!(matches, "a.txt:1:foo\n");
+    assert_eq!(matches, "a.txt (1 matches)\n1:foo\n");
 }
 
 #[tokio::test]
 async fn repeated_match_on_one_line_prints_the_line_once() {
     let matches = grep_one_file(b"foo bar foo\n", "foo").await;
 
-    assert_eq!(matches, "a.txt:1:foo bar foo\n");
+    assert_eq!(matches, "a.txt (1 matches)\n1:foo bar foo\n");
 }
 
 #[tokio::test]
 async fn a_zero_width_pattern_matches_an_empty_line() {
     let matches = grep_one_file(b"alpha\n\nbeta\n", "^$").await;
 
-    assert_eq!(matches, "a.txt:2:\n");
+    assert_eq!(matches, "a.txt (1 matches)\n2:\n");
 }
 
 #[tokio::test]
@@ -386,28 +439,28 @@ async fn a_line_that_is_not_utf8_does_not_abort_the_search() {
     // UTF-8 decode of the printer buffer intact.
     let matches = grep_one_file(b"caf\xe9 latte\nneedle here\n", "needle").await;
 
-    assert_eq!(matches, "a.txt:2:needle here\n");
+    assert_eq!(matches, "a.txt (1 matches)\n2:needle here\n");
 }
 
 #[tokio::test]
 async fn negative_lookahead_excludes_a_match() {
     let matches = grep_one_file(b"foo bar\nfoo baz\n", "foo (?!bar)").await;
 
-    assert_eq!(matches, "a.txt:2:foo baz\n");
+    assert_eq!(matches, "a.txt (1 matches)\n2:foo baz\n");
 }
 
 #[tokio::test]
 async fn lookbehind_sees_text_before_the_match() {
     let matches = grep_one_file(b"let needle\nfn needle\n", "(?<=let )needle").await;
 
-    assert_eq!(matches, "a.txt:1:let needle\n");
+    assert_eq!(matches, "a.txt (1 matches)\n1:let needle\n");
 }
 
 #[tokio::test]
 async fn backreference_matches_a_repeated_group() {
     let matches = grep_one_file(b"hello hello\nhello world\n", r"(\w+) \1").await;
 
-    assert_eq!(matches, "a.txt:1:hello hello\n");
+    assert_eq!(matches, "a.txt (1 matches)\n1:hello hello\n");
 }
 
 #[tokio::test]
@@ -417,7 +470,7 @@ async fn a_backreference_survives_the_trailing_quote_recovery() {
     // up pointing at a group that never participates and nothing matches.
     let matches = grep_one_file(b"hello hello\nhello world\n", r#"(\w+) \1""#).await;
 
-    assert_eq!(matches, "a.txt:1:hello hello\n");
+    assert_eq!(matches, "a.txt (1 matches)\n1:hello hello\n");
 }
 
 #[tokio::test]
@@ -436,9 +489,10 @@ async fn test_grep_files() {
             paths: vec!["test/a.txt"],
             given: vec![("test/a.txt", "hello\nhi\ngoodbye")],
             expected: vec![
-                "test/a.txt-1-hello\n",
-                "test/a.txt:2:hi\n",
-                "test/a.txt-3-goodbye\n",
+                "test/a.txt (1 matches)\n",
+                "1-hello\n",
+                "2:hi\n",
+                "3-goodbye\n",
             ],
         }),
         ("dont-return-entire-file", TestCase {
@@ -446,14 +500,15 @@ async fn test_grep_files() {
             paths: vec!["test/a.txt"],
             given: vec![("test/a.txt", "1\n2\n3\n4\n5\n6\n7\n8\n9")],
             expected: vec![
-                "test/a.txt:1:1\n",
-                "test/a.txt:2:2\n",
-                "test/a.txt:3:3\n",
-                "test/a.txt-4-4\n",
-                "test/a.txt-5-5\n",
-                "test/a.txt-6-6\n",
-                "test/a.txt-7-7\n",
-                "test/a.txt-8-8\n",
+                "test/a.txt (3 matches)\n",
+                "1:1\n",
+                "2:2\n",
+                "3:3\n",
+                "4-4\n",
+                "5-5\n",
+                "6-6\n",
+                "7-7\n",
+                "8-8\n",
             ],
         }),
         ("multiple-files", TestCase {
@@ -464,29 +519,31 @@ async fn test_grep_files() {
                 ("test/b.txt", "1\n2\n3\n4\n5\n6\n7\n8\n9"),
             ],
             expected: vec![
-                "test/a.txt:1:1\n",
-                "test/a.txt:2:2\n",
-                "test/a.txt:3:3\n",
-                "test/a.txt-4-4\n",
-                "test/a.txt-5-5\n",
-                "test/a.txt-6-6\n",
-                "test/a.txt-7-7\n",
-                "test/a.txt-8-8\n",
-                "test/b.txt:1:1\n",
-                "test/b.txt:2:2\n",
-                "test/b.txt:3:3\n",
-                "test/b.txt-4-4\n",
-                "test/b.txt-5-5\n",
-                "test/b.txt-6-6\n",
-                "test/b.txt-7-7\n",
-                "test/b.txt-8-8\n",
+                "test/a.txt (3 matches)\n",
+                "1:1\n",
+                "2:2\n",
+                "3:3\n",
+                "4-4\n",
+                "5-5\n",
+                "6-6\n",
+                "7-7\n",
+                "8-8\n",
+                "test/b.txt (3 matches)\n",
+                "1:1\n",
+                "2:2\n",
+                "3:3\n",
+                "4-4\n",
+                "5-5\n",
+                "6-6\n",
+                "7-7\n",
+                "8-8\n",
             ],
         }),
-        ("multiple-files", TestCase {
+        ("file-without-a-match-gets-no-group", TestCase {
             pattern: "foo",
             paths: vec![],
             given: vec![("test/a.txt", "foo"), ("test/b.txt", "bar")],
-            expected: vec!["test/a.txt:1:foo\n"],
+            expected: vec!["test/a.txt (1 matches)\n", "1:foo\n"],
         }),
         ("search-in-subdir", TestCase {
             pattern: "foo",
@@ -496,16 +553,17 @@ async fn test_grep_files() {
                 ("test/b.txt", "bar"),
                 ("test/subdir/c.txt", "foo"),
             ],
-            expected: vec!["test/subdir/c.txt:1:foo\n"],
+            expected: vec!["test/subdir/c.txt (1 matches)\n", "1:foo\n"],
         }),
         ("escape-double-quote", TestCase {
             pattern: "hi\"",
             paths: vec!["test/a.txt"],
             given: vec![("test/a.txt", "hello\nhi\ngoodbye")],
             expected: vec![
-                "test/a.txt-1-hello\n",
-                "test/a.txt:2:hi\n",
-                "test/a.txt-3-goodbye\n",
+                "test/a.txt (1 matches)\n",
+                "1-hello\n",
+                "2:hi\n",
+                "3-goodbye\n",
             ],
         }),
     ]);

@@ -19,14 +19,27 @@ source = "local"
 command = "just serve-tools {{context}} {{tool}}"
 summary = "Grep files in the project's local filesystem."
 description = """
+Results are grouped by file. Each group opens with a header naming the file and
+its match count, followed by the matching lines. A line number followed by `:`
+is a match, followed by `-` is a context line, and a bare `--` separates
+non-adjacent groups of lines within the same file:
+
+```
+crates/jp_cli/src/lib.rs (2 matches)
+41-use jp_config::AppConfig;
+42:fn build_thread(config: &AppConfig) {
+--
+88:fn build_thread_from_parts() {
+```
+
 If misused, this tool can return *A LOT* of matches, making it difficult to
 parse the results. It is recommended to use search patterns that are as specific
 as possible to the content you are looking for.
 
-If the number of results exceeds 100, the `context` option is disabled, and 50
-matches are returned without context. You can re-run the tool with a more
-specific pattern or limited to specific paths to narrow down the results with
-context.
+If the output exceeds 200 lines, the `context` option is dropped and the search
+is re-run without it. If the output still exceeds 100 lines, only the first 100
+are returned. You can re-run the tool with a more specific pattern or limited to
+specific paths to narrow down the results with context.
 """
 
 examples = """
