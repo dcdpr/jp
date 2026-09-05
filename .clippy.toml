@@ -5,6 +5,7 @@ disallowed-types = []
 too-many-arguments-threshold = 10
 doc-valid-idents = [
     "CommonMark",
+    "ConPTY",
     "LlamaCPP",
     "OpenAI",
     "OpenRouter",
