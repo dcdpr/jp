@@ -1,5 +1,7 @@
 use std::io::Write as _;
 
+use jp_pty::{Screen, Size, Terminal, Writer};
+
 use super::*;
 use crate::printer::OutputFormat;
 
@@ -238,24 +240,6 @@ fn windowed_stack(rows: u16) -> (RegionStack, RegionId, Vec<u8>) {
 }
 
 #[test]
-fn a_window_paints_its_lines_above_the_status_row() {
-    let (mut stack, id, mut out) = windowed_stack(40);
-
-    // A push only mutates the buffer; the repaint is coalesced into the next
-    // tick, which is what keeps a burst of a thousand lines to one frame.
-    stack.push(id, Arc::from("build"), "compiling serde");
-    stack.push(id, Arc::from("build"), "compiling tokio");
-    out.clear();
-    stack.redraw(&mut out);
-
-    // Two window rows plus the status row: scroll two in, step back, fill three.
-    assert_eq!(
-        String::from_utf8(out).unwrap(),
-        "\n\n\x1b[2A\r\x1b[Kcompiling serde\n\r\x1b[Kcompiling tokio\n\r\x1b[K* status"
-    );
-}
-
-#[test]
 fn a_full_window_drops_its_oldest_line() {
     let (mut stack, id, mut out) = windowed_stack(40);
 
@@ -396,51 +380,6 @@ fn a_label_survives_its_source_falling_out_of_the_window() {
 }
 
 #[test]
-fn a_shrinking_window_clears_the_rows_it_gives_back() {
-    let (mut stack, id, mut out) = windowed_stack(40);
-
-    stack.push(id, Arc::from("build"), "one");
-    stack.push(id, Arc::from("build"), "two");
-    stack.redraw(&mut out);
-    assert_eq!(stack.drawn_rows, 3);
-    out.clear();
-
-    // Drop straight to a bare status row and the two window rows below have to
-    // be cleared explicitly; nothing else will overwrite them.
-    stack.entries[0].buffer.lock().lines.clear();
-    stack.redraw(&mut out);
-
-    assert_eq!(
-        String::from_utf8(out).unwrap(),
-        "\x1b[2A\r\x1b[K* status\n\r\x1b[K\n\r\x1b[K\x1b[2A"
-    );
-}
-
-#[test]
-fn an_erase_walks_no_further_than_the_viewport_has_rows() {
-    // A terminal shrunk below the drawn row count has already lost its top rows
-    // to scrollback. Walking up anyway clears content that was never the
-    // region's, which is worse than leaving the stranded rows alone.
-    let (mut stack, id, mut out) = windowed_stack(40);
-
-    for n in 1..=3 {
-        stack.push(id, Arc::from("build"), &format!("line {n}"));
-    }
-    stack.redraw(&mut out);
-    assert_eq!(stack.drawn_rows, 4);
-
-    stack.entries[0].terminal = TerminalCapability::interactive(None).with_rows(Some(2));
-    out.clear();
-    stack.erase(&mut out);
-
-    assert_eq!(
-        String::from_utf8(out).unwrap(),
-        "\r\x1b[K\x1b[1A\r\x1b[K",
-        "two rows cleared, not four"
-    );
-}
-
-#[test]
 fn an_unknown_height_leaves_the_region_a_bare_status_row() {
     let mut stack = RegionStack::new();
     let mut out = Vec::new();
@@ -504,103 +443,64 @@ fn the_filter_removes_conceal_but_keeps_its_neighbours() {
 // A byte assertion says what JP emitted. It cannot say what the terminal did
 // with it, and scrolling, deferred wrap, and cursor clamping only exist on the
 // far side of that boundary — which is where multi-row erasure goes wrong. The
-// cases below drive a VT screen model instead and assert on the rendered
-// result.
+// cases below drive a terminal instead — a real pty where the platform has one
+// — and assert on the rendered result.
 
-/// Scrollback the test terminal keeps.
+/// A terminal `rows` tall and `columns` wide, and a handle to draw into it.
+fn terminal(rows: u16, columns: u16) -> (Terminal, Writer) {
+    let terminal = Terminal::open(Size::new(rows, columns));
+    let writer = terminal.writer().expect("an open terminal is writable");
+
+    (terminal, writer)
+}
+
+/// Write `count` numbered content lines, standing in for earlier output.
+fn content(writer: &mut Writer, count: usize) {
+    for n in 1..=count {
+        writeln!(writer, "content {n:02}").unwrap();
+    }
+}
+
+/// Leave the cursor on the last row with `count` content lines above it.
+fn fill_to_bottom(writer: &mut Writer, rows: u16, count: usize) {
+    for _ in 0..rows {
+        writeln!(writer).unwrap();
+    }
+    content(writer, count);
+}
+
+/// Wait until the screen's last rows are exactly `rows`, and return it.
 ///
-/// Enough that a case which scrolls rows off the top can still tell "pushed
-/// into history" apart from "destroyed".
-const SCROLLBACK: usize = 100;
-
-/// A terminal the region draws into.
-struct Terminal {
-    /// The screen model.
-    parser: vt100::Parser,
+/// For a block anchored to the bottom of the screen.
+fn wait_for_tail(terminal: &Terminal, rows: &[&str]) -> Screen {
+    wait(
+        terminal,
+        &format!("the screen to end with {rows:?}"),
+        |screen| screen.tail(rows.len()) == rows,
+    )
 }
 
-impl Terminal {
-    /// An empty terminal `rows` tall and `columns` wide.
-    fn new(rows: u16, columns: u16) -> Self {
-        Self {
-            parser: vt100::Parser::new(rows, columns, SCROLLBACK),
-        }
-    }
-
-    /// Write `count` numbered content lines, standing in for earlier output.
-    ///
-    /// Terminated with CRLF because there is no tty driver here to expand the
-    /// bare `\n` that JP writes.
-    /// The region's own rows are unaffected: every one of them starts with a
-    /// carriage return already.
-    fn content(&mut self, count: usize) {
-        for n in 1..=count {
-            let _err = write!(self.parser, "content {n:02}\r\n");
-        }
-    }
-
-    /// Leave the cursor on the last row with `count` content lines above it.
-    fn fill_to_bottom(&mut self, count: usize) {
-        for _ in 0..self.parser.screen().size().0 {
-            let _err = write!(self.parser, "\r\n");
-        }
-        self.content(count);
-    }
-
-    /// Resize, as dragging the window would.
-    fn resize(&mut self, rows: u16, columns: u16) {
-        self.parser.screen_mut().set_size(rows, columns);
-    }
-
-    /// Every visible row, trailing blanks trimmed.
-    fn rows(&self) -> Vec<String> {
-        let screen = self.parser.screen();
-        screen
-            .rows(0, screen.size().1)
-            .map(|row| row.trim_end().to_owned())
-            .collect()
-    }
-
-    /// The last `count` visible rows.
-    ///
-    /// For a block anchored to the bottom of the screen.
-    fn tail(&self, count: usize) -> Vec<String> {
-        let rows = self.rows();
-        rows[rows.len().saturating_sub(count)..].to_vec()
-    }
-
-    /// Every row up to the last one with anything on it.
-    ///
-    /// For a block with blank screen below it, where [`Self::tail`] would
-    /// return the empty rows underneath.
-    fn used(&self) -> Vec<String> {
-        let mut rows = self.rows();
-        while rows.last().is_some_and(String::is_empty) {
-            rows.pop();
-        }
-
-        rows
-    }
-
-    /// The cursor's `(row, column)`.
-    fn cursor(&self) -> (u16, u16) {
-        self.parser.screen().cursor_position()
-    }
-
-    /// Whether row `row` wrapped onto the one below it.
-    fn wrapped(&self, row: u16) -> bool {
-        self.parser.screen().row_wrapped(row)
-    }
+/// Wait until every row with content on it is exactly `rows`, and return it.
+///
+/// For a block with blank screen below it, where [`wait_for_tail`] would have
+/// to name the empty rows underneath.
+fn wait_for_used(terminal: &Terminal, rows: &[&str]) -> Screen {
+    wait(
+        terminal,
+        &format!("the screen to show {rows:?}"),
+        |screen| screen.used() == rows,
+    )
 }
 
-impl io::Write for Terminal {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.parser.process(buf);
-        Ok(buf.len())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        Ok(())
+/// Wait for `predicate`, failing with the screen when it does not hold.
+///
+/// The wait carries the assertion: on a pty the region's bytes arrive on
+/// another thread, so reading the screen without one can catch a half-drawn
+/// frame.
+fn wait(terminal: &Terminal, what: &str, predicate: impl Fn(&Screen) -> bool) -> Screen {
+    match terminal.wait_for(what, predicate) {
+        Ok(screen) => screen,
+        Err(error) => panic!("{error}"),
     }
 }
 
@@ -628,121 +528,202 @@ fn a_block_claimed_at_the_bottom_ends_on_the_last_row() {
     // The reserve step emits one line break per row *below* the cursor's own.
     // One per row leaves the block a row short of the bottom, which is what the
     // RFD's wording would have produced and what the terminal spike measured.
-    let mut term = Terminal::new(8, 40);
-    term.fill_to_bottom(3);
+    let (term, mut tty) = terminal(8, 40);
+    fill_to_bottom(&mut tty, 8, 3);
 
     let (mut stack, style, cap) = windowed(2, 40, 8);
-    stack.claim_test(1, style, cap, &mut term);
+    stack.claim_test(1, style, cap, &mut tty);
     stack.push(1, Arc::from("build"), "one");
     stack.push(1, Arc::from("build"), "two");
-    stack.redraw(&mut term);
+    stack.redraw(&mut tty);
 
-    assert_eq!(term.tail(4), ["content 03", "one", "two", "* status"]);
+    let screen = wait_for_tail(&term, &["content 03", "one", "two", "* status"]);
     assert_eq!(
-        term.cursor().0,
+        screen.cursor().0,
         7,
         "the block ends flush against the bottom"
     );
 }
 
 #[test]
-fn claiming_at_the_bottom_scrolls_content_up_rather_than_over_it() {
-    let mut term = Terminal::new(8, 40);
-    term.fill_to_bottom(3);
+fn a_block_released_at_the_bottom_leaves_no_row_behind() {
+    // The block grows a row at a time as its sources push, rather than arriving
+    // at full height in one redraw, and a persistent write follows the release.
+    // That is the order a live client produces and the order the pty probe
+    // reproduces.
+    let (term, mut tty) = terminal(8, 40);
+    fill_to_bottom(&mut tty, 8, 3);
 
     let (mut stack, style, cap) = windowed(2, 40, 8);
-    stack.claim_test(1, style, cap, &mut term);
+    stack.claim_test(1, style, cap, &mut tty);
+    // Both pushes coalesce into one repaint, so the block grows from one row to
+    // three in a single frame. That is the live path: a burst raises at most one
+    // refresh, and the worker sees the window already full.
     stack.push(1, Arc::from("build"), "one");
     stack.push(1, Arc::from("build"), "two");
-    stack.redraw(&mut term);
+    stack.redraw(&mut tty);
+    wait_for_tail(&term, &["content 03", "one", "two", "* status"]);
 
-    let rows = term.rows().join("\n");
-    for line in ["content 01", "content 02", "content 03"] {
-        assert!(rows.contains(line), "{line} was overwritten:\n{rows}");
+    stack.release(1, &mut tty);
+    writeln!(tty, "released").unwrap();
+
+    let screen = wait(&term, "the release to land", |screen| {
+        screen.contains("released")
+    });
+    assert!(
+        !screen.contains("* status") && !screen.contains("one") && !screen.contains("two"),
+        "every block row is erased:\n{screen}"
+    );
+    assert!(
+        screen.contains("content 03"),
+        "the content above the block survived:\n{screen}"
+    );
+}
+
+#[test]
+fn claiming_at_the_bottom_scrolls_content_up_rather_than_over_it() {
+    let (term, mut tty) = terminal(8, 40);
+    fill_to_bottom(&mut tty, 8, 3);
+
+    let (mut stack, style, cap) = windowed(2, 40, 8);
+    stack.claim_test(1, style, cap, &mut tty);
+    stack.push(1, Arc::from("build"), "one");
+    stack.push(1, Arc::from("build"), "two");
+    stack.redraw(&mut tty);
+
+    let screen = wait_for_tail(&term, &["content 03", "one", "two", "* status"]);
+    for line in ["content 01", "content 02"] {
+        assert!(screen.contains(line), "{line} was overwritten:\n{screen}");
     }
 }
 
 #[test]
 fn releasing_a_block_puts_the_screen_back() {
-    let mut term = Terminal::new(10, 40);
-    term.content(3);
-    let before = term.rows();
-    let cursor_before = term.cursor();
+    let (term, mut tty) = terminal(10, 40);
+    content(&mut tty, 3);
+    let before = wait_for_used(&term, &["content 01", "content 02", "content 03"]);
 
     let (mut stack, style, cap) = windowed(3, 40, 10);
-    stack.claim_test(1, style, cap, &mut term);
+    stack.claim_test(1, style, cap, &mut tty);
     for line in ["one", "two", "three"] {
         stack.push(1, Arc::from("build"), line);
     }
-    stack.redraw(&mut term);
-    assert_eq!(term.used(), [
+    stack.redraw(&mut tty);
+    wait_for_used(&term, &[
         "content 01",
         "content 02",
         "content 03",
         "one",
         "two",
         "three",
-        "* status"
+        "* status",
     ]);
 
-    stack.release(1, &mut term);
+    stack.release(1, &mut tty);
 
-    assert_eq!(term.rows(), before, "the erase leaves no trace");
-    assert_eq!(term.cursor(), cursor_before, "and the cursor is back");
+    // Rows and cursor both: a screen equal to the one before the claim is an
+    // erase that left no trace and put the cursor back where it found it.
+    wait(&term, "the screen the block was drawn over", |screen| {
+        *screen == before
+    });
 }
 
 #[test]
 fn a_persistent_write_lands_above_the_block() {
-    let mut term = Terminal::new(10, 40);
-    term.content(2);
+    let (term, mut tty) = terminal(10, 40);
+    content(&mut tty, 2);
 
     let (mut stack, style, cap) = windowed(2, 40, 10);
-    stack.claim_test(1, style, cap, &mut term);
+    stack.claim_test(1, style, cap, &mut tty);
     stack.push(1, Arc::from("build"), "one");
-    stack.redraw(&mut term);
+    stack.redraw(&mut tty);
 
     // What the worker does around a `Print`: erase, let the content land,
     // paint again.
-    stack.erase(&mut term);
-    let _err = write!(term, "written 01\r\n");
-    stack.redraw(&mut term);
+    stack.erase(&mut tty);
+    writeln!(tty, "written 01").unwrap();
+    stack.redraw(&mut tty);
 
-    assert_eq!(term.used(), [
+    wait_for_used(&term, &[
         "content 01",
         "content 02",
         "written 01",
         "one",
-        "* status"
+        "* status",
     ]);
 }
 
 #[test]
-fn shrinking_below_the_block_spares_the_content_above_it() {
-    // A terminal shrunk below the drawn row count has already lost its top rows
-    // to scrollback; they cannot be reached again. Walking up the full count
-    // anyway would clear rows that were never the region's, which is the worse
-    // of the two failures.
-    let mut term = Terminal::new(12, 40);
-    term.content(2);
+fn a_window_that_shrinks_clears_the_rows_it_gives_back() {
+    let (term, mut tty) = terminal(10, 40);
+    content(&mut tty, 2);
+
+    let (mut stack, style, cap) = windowed(3, 40, 10);
+    stack.claim_test(1, style, cap, &mut tty);
+    stack.push(1, Arc::from("build"), "one");
+    stack.push(1, Arc::from("build"), "two");
+    stack.redraw(&mut tty);
+    wait_for_used(&term, &[
+        "content 01",
+        "content 02",
+        "one",
+        "two",
+        "* status",
+    ]);
+
+    // The window empties and the block drops to a bare status row. Nothing will
+    // overwrite the two rows it gave back, so it has to clear them itself.
+    stack.entries[0].buffer.lock().lines.clear();
+    stack.redraw(&mut tty);
+
+    let screen = wait_for_used(&term, &["content 01", "content 02", "* status"]);
+    assert_eq!(screen.cursor().0, 2, "the cursor ends on the status row");
+}
+
+#[test]
+fn an_erase_after_a_shrink_stops_at_the_top_of_the_viewport() {
+    // A terminal shrunk below the drawn row count cannot reach the rows it lost;
+    // the erase walks no further than the viewport has, clearing what it can and
+    // leaving the rest.
+    //
+    // Which rows survive a shrink is the terminal's reflow policy — whether it
+    // truncates from the bottom or scrolls the top into scrollback — and the
+    // screen model imitates neither, so that half is not what this pins.
+    let (term, mut tty) = terminal(12, 40);
+    content(&mut tty, 2);
 
     let (mut stack, style, cap) = windowed(5, 40, 12);
-    stack.claim_test(1, style, cap, &mut term);
+    stack.claim_test(1, style, cap, &mut tty);
     for n in 1..=5 {
         stack.push(1, Arc::from("build"), &format!("line {n}"));
     }
-    stack.redraw(&mut term);
+    stack.redraw(&mut tty);
+    wait_for_used(&term, &[
+        "content 01",
+        "content 02",
+        "line 1",
+        "line 2",
+        "line 3",
+        "line 4",
+        "line 5",
+        "* status",
+    ]);
     assert_eq!(stack.drawn_rows, 6);
 
     // The user drags the window down to fewer rows than the block occupies.
-    term.resize(4, 40);
+    term.resize(Size::new(4, 40)).unwrap();
     stack.entries[0].terminal = TerminalCapability::interactive(Some(40)).with_rows(Some(4));
 
-    stack.erase(&mut term);
+    stack.erase(&mut tty);
 
+    let screen = wait(
+        &term,
+        "the erase to reach the top of the viewport",
+        |screen| screen.cursor() == (0, 0),
+    );
     assert!(
-        term.cursor().0 < 4,
-        "the walk stays inside the viewport: {:?}",
-        term.cursor()
+        screen.used().is_empty(),
+        "every reachable row was cleared:\n{screen}"
     );
 }
 
@@ -750,22 +731,22 @@ fn shrinking_below_the_block_spares_the_content_above_it() {
 fn a_row_exactly_the_terminal_width_does_not_wrap() {
     // A wrapped row is one physical row the erase does not know about, so the
     // boundary case has to stay unwrapped for the row accounting to hold.
-    let mut term = Terminal::new(8, 20);
-    term.content(2);
+    let (term, mut tty) = terminal(8, 20);
+    content(&mut tty, 2);
 
     let (mut stack, style, cap) = windowed(1, 20, 8);
-    stack.claim_test(1, style, cap, &mut term);
+    stack.claim_test(1, style, cap, &mut tty);
     stack.push(1, Arc::from("build"), &"x".repeat(20));
-    stack.redraw(&mut term);
+    stack.redraw(&mut tty);
 
-    let row = term.rows().iter().position(|r| r.starts_with('x')).unwrap();
-    assert_eq!(
-        term.rows()[row].len(),
-        20,
-        "the row fills the width exactly"
-    );
+    let screen = wait_for_used(&term, &[
+        "content 01",
+        "content 02",
+        &"x".repeat(20),
+        "* status",
+    ]);
     assert!(
-        !term.wrapped(u16::try_from(row).unwrap()),
+        !screen.wrapped(2),
         "a full-width row must not spill onto the next"
     );
     assert_eq!(stack.drawn_rows, 2, "still two physical rows");
@@ -773,18 +754,21 @@ fn a_row_exactly_the_terminal_width_does_not_wrap() {
 
 #[test]
 fn an_over_wide_row_is_cut_to_the_width() {
-    let mut term = Terminal::new(8, 20);
-    term.content(2);
+    let (term, mut tty) = terminal(8, 20);
+    content(&mut tty, 2);
 
     let (mut stack, style, cap) = windowed(1, 20, 8);
-    stack.claim_test(1, style, cap, &mut term);
+    stack.claim_test(1, style, cap, &mut tty);
     stack.push(1, Arc::from("build"), &"y".repeat(60));
-    stack.redraw(&mut term);
+    stack.redraw(&mut tty);
 
-    let rows = term.rows();
-    let row = rows.iter().position(|r| r.starts_with('y')).unwrap();
-    assert_eq!(rows[row].chars().count(), 20);
-    assert!(!term.wrapped(u16::try_from(row).unwrap()));
+    let screen = wait_for_used(&term, &[
+        "content 01",
+        "content 02",
+        &"y".repeat(20),
+        "* status",
+    ]);
+    assert!(!screen.wrapped(2));
     assert_eq!(stack.drawn_rows, 2);
 }
 

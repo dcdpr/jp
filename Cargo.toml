@@ -31,6 +31,7 @@ jp_md = { path = "crates/jp_md" }
 jp_openrouter = { path = "crates/jp_openrouter" }
 jp_plugin = { path = "crates/jp_plugin" }
 jp_printer = { path = "crates/jp_printer" }
+jp_pty = { path = "crates/jp_pty" }
 jp_storage = { path = "crates/jp_storage" }
 jp_task = { path = "crates/jp_task" }
 jp_term = { path = "crates/jp_term" }
@@ -104,6 +105,7 @@ openai_responses = { version = "0.1", default-features = false }
 parking_lot = { version = "0.12", default-features = false, features = ["arc_lock"] }
 paste = { version = "1", default-features = false }
 percent-encoding = { version = "2", default-features = false }
+portable-pty = { version = "0.9", default-features = false }
 pretty_assertions = { version = "1", default-features = false }
 proc-macro2 = { version = "1", default-features = false }
 proptest = { version = "1", default-features = false }

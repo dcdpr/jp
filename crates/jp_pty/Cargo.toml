@@ -1,0 +1,34 @@
+[package]
+name = "jp_pty"
+
+authors.workspace = true
+description.workspace = true
+documentation.workspace = true
+edition.workspace = true
+homepage.workspace = true
+license-file.workspace = true
+publish.workspace = true
+readme.workspace = true
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+# Reads the terminal size the probe binary was given, so a spawn test can assert
+# that a resize reached the child.
+crossterm = { workspace = true }
+# Cross-platform pty: `openpty` on unix, ConPTY on Windows.
+portable-pty = { workspace = true }
+thiserror = { workspace = true }
+# The screen model: what a terminal makes of the bytes, rather than the bytes.
+vt100 = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+# `O_NOCTTY`, so opening a pty's subsidiary end never makes it this process's
+# controlling terminal.
+libc = { workspace = true }
+
+[lints]
+workspace = true
+
+[lib]
+doctest = false
