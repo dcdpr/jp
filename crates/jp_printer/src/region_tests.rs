@@ -546,6 +546,41 @@ fn a_block_claimed_at_the_bottom_ends_on_the_last_row() {
 }
 
 #[test]
+fn a_block_released_at_the_bottom_leaves_no_row_behind() {
+    // The block grows a row at a time as its sources push, rather than arriving
+    // at full height in one redraw, and a persistent write follows the release.
+    // That is the order a live client produces and the order the pty probe
+    // reproduces.
+    let (term, mut tty) = terminal(8, 40);
+    fill_to_bottom(&mut tty, 8, 3);
+
+    let (mut stack, style, cap) = windowed(2, 40, 8);
+    stack.claim_test(1, style, cap, &mut tty);
+    // Both pushes coalesce into one repaint, so the block grows from one row to
+    // three in a single frame. That is the live path: a burst raises at most one
+    // refresh, and the worker sees the window already full.
+    stack.push(1, Arc::from("build"), "one");
+    stack.push(1, Arc::from("build"), "two");
+    stack.redraw(&mut tty);
+    wait_for_tail(&term, &["content 03", "one", "two", "* status"]);
+
+    stack.release(1, &mut tty);
+    writeln!(tty, "released").unwrap();
+
+    let screen = wait(&term, "the release to land", |screen| {
+        screen.contains("released")
+    });
+    assert!(
+        !screen.contains("* status") && !screen.contains("one") && !screen.contains("two"),
+        "every block row is erased:\n{screen}"
+    );
+    assert!(
+        screen.contains("content 03"),
+        "the content above the block survived:\n{screen}"
+    );
+}
+
+#[test]
 fn claiming_at_the_bottom_scrolls_content_up_rather_than_over_it() {
     let (term, mut tty) = terminal(8, 40);
     fill_to_bottom(&mut tty, 8, 3);

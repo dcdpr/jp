@@ -106,7 +106,7 @@ defers to `Display`, so an `unwrap` in a test prints it.
 | Claiming with the cursor on the last row         | `a_block_claimed_at_the_bottom_ends_on_the_last_row`, `claiming_at_the_bottom_scrolls_content_up_rather_than_over_it` |
 | A persistent write while the region is drawn     | `a_persistent_write_lands_above_the_block`                                                                            |
 | The terminal shrinking below the drawn row count | `an_erase_after_a_shrink_stops_at_the_top_of_the_viewport`                                                            |
-| Windows                                          | the whole `jp_printer` set, on the model backend; `jp_pty/tests/spawn.rs` on ConPTY                                   |
+| Windows                                          | `jp_printer/tests/region_pty.rs`, spawning `region_probe` into a ConPTY; the in-process set on the model backend      |
 
 Three byte snapshots of multi-row draw and erase are gone, replaced by screen
 assertions: `a_window_paints_its_lines_above_the_status_row`,
@@ -114,7 +114,27 @@ assertions: `a_window_paints_its_lines_above_the_status_row`,
 `a_window_that_shrinks_clears_the_rows_it_gives_back`), and
 `an_erase_walks_no_further_than_the_viewport_has_rows`.
 
-## Two things worth knowing
+The Windows row needs the spawn path rather than the model backend.
+Running the in-process set there is regression coverage — it catches a change
+to JP's own sequence — but it is the same platform-independent Rust that runs
+on Linux, so it cannot answer what a console does with that sequence.
+That was the question phase 4's spike left open, and only a child drawing a
+region into a real ConPTY closes it.
+`region_probe` is that child: it prints past the bottom of the screen, claims a
+region with a two-row window, and either holds the block or releases it and
+writes over where it was.
+
+## Three things worth knowing
+
+**A pty echoes what is typed into it, and that moves the screen.** The probe
+first took its step as a command on stdin. An echoed line lands at the cursor,
+which sits inside the block, and scrolls the screen by a row the region never
+accounted for — stranding the block's top row and putting every later erase one
+row low. It reproduced identically on every run and looked exactly like a
+multi-row erase bug; the in-process case for the same sequence passed, which is
+what placed it in the measurement rather than the code. The step is an argument
+now and nothing is typed at the probe. `tests/spawn.rs` matches on content
+rather than rows for a related reason, and says so.
 
 **The shrink case was asserting less than its name claimed.** It was
 `assert!(term.cursor().0 < 4)`, which holds whether or not the erase is capped
@@ -127,10 +147,11 @@ and stops at the top of the viewport — and the comment says the rest is
 unmodelled.
 It now fails if the erase is removed.
 
-**Nothing spawns `jp` yet.** The harness supports it and `tests/spawn.rs`
-exercises the path end to end against a probe binary, but the interactive-prompt
-tests from issue 392 are still to be written, and
-`examples/mcp_window_fixture.toml` is still a by-hand run for RFD 091 phase 5.
+**Nothing spawns `jp` itself yet.** Two probe binaries go through the spawn
+path, but the interactive-prompt tests from issue 392 are still to be written,
+and `examples/mcp_window_fixture.toml` is still a by-hand run for RFD 091
+phase 5: the harness can spawn `jp` into a terminal, but nothing drives two MCP
+servers through it.
 
 RFD 091 phase 4 still reads "JP has no PTY harness"; left alone rather than
 editing an accepted design record on a chore.
