@@ -1,4 +1,4 @@
-# RFD D52: Session as a Cross-Client Concept
+# RFD D62: Session as a Cross-Client Concept
 
 - **Status**: Draft
 - **Category**: Design

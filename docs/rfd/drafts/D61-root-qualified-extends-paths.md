@@ -1,4 +1,4 @@
-# RFD D38: Root-Qualified Extends Paths
+# RFD D61: Root-Qualified Extends Paths
 
 - **Status**: Draft
 - **Category**: Design
