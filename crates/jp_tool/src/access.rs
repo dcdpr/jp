@@ -124,6 +124,32 @@ impl AccessPolicy {
         }
     }
 
+    /// The most specific env rule matching `name`, breaking ties toward the
+    /// rule declared last.
+    ///
+    /// Specificity is the byte length of the rule's literal name (excluding a
+    /// trailing `*`); at equal length an exact rule beats a prefix rule.
+    ///
+    /// `None` means no rule mentions the variable.
+    /// That is distinct from a rule with `read = false`: the caller decides
+    /// whether an unmentioned variable is refused outright or escalated to the
+    /// user.
+    #[must_use]
+    pub fn matching_env_rule(&self, name: &str) -> Option<&EnvRule> {
+        let mut best: Option<(usize, bool, usize)> = None;
+        for (index, rule) in self.env.iter().enumerate() {
+            if !rule.matches(name) {
+                continue;
+            }
+            let candidate = (rule.literal().len(), rule.is_exact());
+            match best {
+                Some((literal_size, exact, _)) if candidate < (literal_size, exact) => {}
+                _ => best = Some((candidate.0, candidate.1, index)),
+            }
+        }
+        best.map(|(_, _, index)| &self.env[index])
+    }
+
     /// The workspace-relative paths whose rules grant `capability`, for
     /// building helpful error messages.
     ///
@@ -367,6 +393,36 @@ pub struct EnvRule {
     pub name: String,
     #[serde(default)]
     pub read: bool,
+}
+
+impl EnvRule {
+    /// The matched portion of `name`, with a trailing `*` sentinel removed.
+    #[must_use]
+    pub fn literal(&self) -> &str {
+        self.name.strip_suffix('*').unwrap_or(&self.name)
+    }
+
+    /// Whether the rule matches one variable exactly (no trailing `*`).
+    #[must_use]
+    pub fn is_exact(&self) -> bool {
+        !self.name.ends_with('*')
+    }
+
+    /// Whether the rule applies to the variable `name`.
+    ///
+    /// Matching is case-sensitive on every platform.
+    /// Windows resolves variable names case-insensitively, so a rule written in
+    /// the wrong case does not apply there — but a config file is shared
+    /// across machines, and a rule that grants on one platform and denies on
+    /// another is worse than one that is uniformly strict.
+    #[must_use]
+    pub fn matches(&self, name: &str) -> bool {
+        if self.is_exact() {
+            name == self.name
+        } else {
+            name.starts_with(self.literal())
+        }
+    }
 }
 
 /// Failure reasons for a filesystem access check.
@@ -778,6 +834,91 @@ mod tests {
             policy.granting_paths(Capability::Read).collect::<Vec<_>>(),
             vec![Utf8Path::new(".")]
         );
+    }
+
+    fn env_policy(rules: &[(&str, bool)]) -> AccessPolicy {
+        AccessPolicy {
+            env: rules
+                .iter()
+                .map(|(name, read)| EnvRule {
+                    name: (*name).to_owned(),
+                    read: *read,
+                })
+                .collect(),
+            ..AccessPolicy::default()
+        }
+    }
+
+    #[test]
+    fn an_exact_env_rule_does_not_prefix_match() {
+        let policy = env_policy(&[("GITHUB_TOKEN", true)]);
+
+        assert!(policy.matching_env_rule("GITHUB_TOKEN").unwrap().read);
+        assert_eq!(policy.matching_env_rule("GITHUB_TOKEN_LOG"), None);
+        assert_eq!(policy.matching_env_rule("HOME"), None);
+    }
+
+    #[test]
+    fn a_star_suffix_matches_by_prefix() {
+        let policy = env_policy(&[("AWS_*", true)]);
+
+        assert!(policy.matching_env_rule("AWS_REGION").unwrap().read);
+        assert!(policy.matching_env_rule("AWS_").unwrap().read);
+        assert_eq!(policy.matching_env_rule("AW"), None);
+    }
+
+    #[test]
+    fn a_bare_star_matches_every_variable() {
+        let policy = env_policy(&[("*", false)]);
+
+        assert!(!policy.matching_env_rule("ANYTHING").unwrap().read);
+    }
+
+    #[test]
+    fn the_longest_literal_env_name_wins() {
+        let policy = env_policy(&[("AWS_*", true), ("AWS_SECRET_ACCESS_KEY", false)]);
+
+        assert!(policy.matching_env_rule("AWS_REGION").unwrap().read);
+        assert!(
+            !policy
+                .matching_env_rule("AWS_SECRET_ACCESS_KEY")
+                .unwrap()
+                .read
+        );
+    }
+
+    /// Specificity decides, not declaration order: the 21-byte exact rule wins
+    /// over the 4-byte `AWS_` prefix even though the prefix is declared last.
+    #[test]
+    fn a_longer_exact_rule_beats_a_shorter_prefix_declared_after_it() {
+        let policy = env_policy(&[("AWS_SECRET_ACCESS_KEY", false), ("AWS_*", true)]);
+
+        assert!(
+            !policy
+                .matching_env_rule("AWS_SECRET_ACCESS_KEY")
+                .unwrap()
+                .read
+        );
+    }
+
+    /// `AWS_TOKEN` (exact, 9 bytes) beats `AWS_TOKEN*` (prefix, 9 bytes)
+    /// regardless of declaration order.
+    #[test]
+    fn exact_beats_prefix_at_equal_literal_size() {
+        let policy = env_policy(&[("AWS_TOKEN", false), ("AWS_TOKEN*", true)]);
+        assert!(!policy.matching_env_rule("AWS_TOKEN").unwrap().read);
+        // The prefix rule still covers everything the exact rule does not.
+        assert!(policy.matching_env_rule("AWS_TOKEN_ID").unwrap().read);
+
+        let policy = env_policy(&[("AWS_TOKEN*", true), ("AWS_TOKEN", false)]);
+        assert!(!policy.matching_env_rule("AWS_TOKEN").unwrap().read);
+    }
+
+    #[test]
+    fn equal_specificity_env_rules_break_toward_the_last() {
+        let policy = env_policy(&[("CI", true), ("CI", false)]);
+
+        assert!(!policy.matching_env_rule("CI").unwrap().read);
     }
 
     #[test]

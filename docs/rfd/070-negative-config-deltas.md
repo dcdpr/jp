@@ -711,7 +711,12 @@ A layer that replaced the map wholesale (`strategy = "replace"`) therefore
 records a delta that deep-merges on the next fold, and a rule the replacement
 dropped comes back.
 `attachments` (a `MergeableVec`) and `conversation.tools` (a plain `IndexMap`)
-behave the same way.
+behave the same way, as do `access.fs` and `access.env` on a tool: their
+`ToPartial` emits `Merged` with `strategy = "replace"`, and
+`PartialAccessConfig::delta` collects the changed entries back into a bare
+`MergeableVec::Vec`, which appends.
+A `--cfg` layer that narrows a tool's env grants therefore records a delta that
+re-grants what it dropped on the next fold.
 This RFD's `unsets` mechanism is what closes it; until then the gap is uniform
 across every container-backed field.
 

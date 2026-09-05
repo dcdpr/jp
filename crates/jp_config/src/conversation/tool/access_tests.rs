@@ -53,10 +53,33 @@ fn to_partial_round_trips_rules() {
                 execute: None,
             },
         ],
+        env: vec![EnvRuleConfig {
+            name: "AWS_*".to_owned(),
+            read: Some(true),
+        }],
     };
 
     let partial = config.to_partial();
     assert_eq!(partial.fs.len(), 2);
     assert_eq!(partial.fs[1].path.as_deref(), Some("fork"));
     assert_eq!(partial.fs[1].external, Some(true));
+    assert_eq!(partial.env.len(), 1);
+    assert_eq!(partial.env[0].name.as_deref(), Some("AWS_*"));
+    assert_eq!(partial.env[0].read, Some(true));
+}
+
+#[test]
+fn deserializes_env_rule() {
+    let rule: EnvRuleConfig = serde_json::from_str(r#"{"name":"AWS_*","read":true}"#).unwrap();
+
+    assert_eq!(rule.name, "AWS_*");
+    assert!(rule.read());
+}
+
+#[test]
+fn an_env_rule_without_read_denies() {
+    let rule: EnvRuleConfig = serde_json::from_str(r#"{"name":"HOME"}"#).unwrap();
+
+    assert_eq!(rule.read, None);
+    assert!(!rule.read());
 }
