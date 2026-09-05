@@ -688,7 +688,6 @@ impl Query {
             chat_request,
             pending_trim,
             mcp_servers_handle,
-            // Typed at this terminal, so it renders here.
             ctx.printer.clone(),
         )
         .await?;
@@ -1237,6 +1236,15 @@ impl Query {
     }
 }
 
+/// One configured attachment, at the position the user declared it.
+enum AttachmentSlot {
+    /// Resolved while the context was still in hand.
+    Ready(Vec<Attachment>),
+
+    /// Read from an MCP server, so it waits for one to be running.
+    Deferred(Url),
+}
+
 /// The turn's attachments, some of which cannot resolve yet.
 ///
 /// Resolving one can read a conversation out of the workspace, fetch over HTTP,
@@ -1244,26 +1252,51 @@ impl Query {
 /// The first needs a context the turn no longer holds and the last needs a
 /// server that is still starting, so they are resolved at different points and
 /// meet here.
+///
+/// One slot per configured attachment, in declaration order.
+/// The order reaches the provider: every attachment is sent as a document in
+/// this order, numbered by its position.
 struct PendingAttachments {
-    /// Resolved while the context was still in hand.
-    resolved: Vec<Attachment>,
-
-    /// Read from an MCP server, so they wait for one to be running.
-    deferred: Vec<Url>,
+    slots: Vec<AttachmentSlot>,
 }
 
 impl PendingAttachments {
-    /// Resolve what is left and return the whole set.
+    /// Resolve what is left and return the whole set, in declaration order.
     async fn resolve(
         self,
         root: &Utf8Path,
         mcp_client: &jp_mcp::Client,
     ) -> Result<Vec<Attachment>> {
-        let mut attachments = self.resolved;
-        attachments.extend(resolve_attachments(root, mcp_client, self.deferred).await?);
+        let deferred: Vec<Url> = self
+            .slots
+            .iter()
+            .filter_map(|slot| match slot {
+                AttachmentSlot::Deferred(url) => Some(url.clone()),
+                AttachmentSlot::Ready(_) => None,
+            })
+            .collect();
 
-        Ok(attachments)
+        let resolved = resolve_attachments(root, mcp_client, deferred).await?;
+
+        Ok(splice(self.slots, resolved))
     }
+}
+
+/// Flatten the slots, putting each resolved group back where its URL was.
+///
+/// `deferred` holds one group per [`AttachmentSlot::Deferred`], in slot order:
+/// the caller collects those URLs in that order and the resolver answers in
+/// kind.
+fn splice(slots: Vec<AttachmentSlot>, deferred: Vec<Vec<Attachment>>) -> Vec<Attachment> {
+    let mut deferred = deferred.into_iter();
+
+    slots
+        .into_iter()
+        .flat_map(|slot| match slot {
+            AttachmentSlot::Ready(attachments) => attachments,
+            AttachmentSlot::Deferred(_) => deferred.next().unwrap_or_default(),
+        })
+        .collect()
 }
 
 /// Everything a turn needs, gathered in one place.
@@ -1327,47 +1360,63 @@ impl TurnInputs {
     /// turn typed there, or a sink printer, which writes nothing, for a turn
     /// started from somewhere with no terminal attached.
     pub(crate) async fn collect(
-        ctx: &Ctx,
-        config: Arc<AppConfig>,
-        chat_request: ChatRequest,
-        pending_trim: PendingStreamTrim,
-        mcp_servers: StartupSet,
-        printer: Arc<Printer>,
-    ) -> Result<Self> {
-        let attachment_urls: Vec<_> = config
-            .conversation
-            .attachments
-            .iter()
-            .map(AttachmentConfig::to_url)
-            .collect::<std::result::Result<Vec<_>, _>>()?;
+    ctx: &Ctx,
+    config: Arc<AppConfig>,
+    chat_request: ChatRequest,
+    pending_trim: PendingStreamTrim,
+    mcp_servers: StartupSet,
+    printer: Arc<Printer>,
+) -> Result<Self> {
+    let urls: Vec<Url> = config
+        .conversation
+        .attachments
+        .iter()
+        .map(AttachmentConfig::to_url)
+        .collect::<std::result::Result<Vec<_>, _>>()?;
 
-        let (deferred, attachment_urls): (Vec<_>, Vec<_>) =
-            attachment_urls.into_iter().partition(needs_mcp_server);
+    // Resolve what can be resolved now, then rebuild the declared order
+    // with a placeholder where each MCP-backed attachment goes.
+    let eager: Vec<Url> = urls
+        .iter()
+        .filter(|url| !needs_mcp_server(url))
+        .cloned()
+        .collect();
 
-        let resolved = load_conversation_attachments(ctx, attachment_urls).await?;
-
-        debug!(
-            count = resolved.len(),
-            deferred = deferred.len(),
-            deferred_uris = ?deferred.iter().map(Url::as_str).collect::<Vec<_>>(),
-            "Attachments loaded."
-        );
-
-        Ok(Self {
-            workspace_root: ctx.workspace.root().to_path_buf(),
-            approvals: Arc::new(load_approval_store(ctx.fs_backend.as_deref())),
-            workspace_id: ctx.workspace.id().clone(),
-            signals: ctx.signals.clone(),
-            mcp_client: ctx.mcp_client.clone(),
-            printer,
-            interactive: ctx.term.interactive,
-            attachments: PendingAttachments { resolved, deferred },
-            mcp_servers,
-            chat_request,
-            pending_trim,
-            config,
+    let mut ready = load_conversation_attachments(ctx, eager).await?.into_iter();
+    let slots: Vec<AttachmentSlot> = urls
+        .iter()
+        .map(|url| {
+            if needs_mcp_server(url) {
+                AttachmentSlot::Deferred(url.clone())
+            } else {
+                AttachmentSlot::Ready(ready.next().unwrap_or_default())
+            }
         })
-    }
+        .collect();
+
+    let deferred: Vec<&Url> = urls.iter().filter(|url| needs_mcp_server(url)).collect();
+    debug!(
+        count = urls.len(),
+        deferred = deferred.len(),
+        deferred_uris = ?deferred.iter().map(|url| url.as_str()).collect::<Vec<_>>(),
+        "Attachments loaded."
+    );
+
+    Ok(Self {
+        workspace_root: ctx.workspace.root().to_path_buf(),
+        approvals: Arc::new(load_approval_store(ctx.fs_backend.as_deref())),
+        workspace_id: ctx.workspace.id().clone(),
+        signals: ctx.signals.clone(),
+        mcp_client: ctx.mcp_client.clone(),
+        printer,
+        interactive: ctx.term.interactive,
+        attachments: PendingAttachments { slots },
+        mcp_servers,
+        chat_request,
+        pending_trim,
+        config,
+    })
+}
 
     /// Finish preparing, then run the turn.
     ///
@@ -1375,80 +1424,80 @@ impl TurnInputs {
     /// this.
     /// `stream` is the snapshot the thread is assembled from.
     pub(crate) async fn run(
-        self,
-        lock: &ConversationLock,
-        stream: ConversationStream,
-    ) -> Result<()> {
-        let cfg = &self.config;
+    self,
+    lock: &ConversationLock,
+    stream: ConversationStream,
+) -> Result<()> {
+    let cfg = &self.config;
 
-        // Wait for all MCP servers to finish loading, showing a timer line when the
-        // wait takes long enough to be noticeable. Starting a server can mean
-        // compiling one, so this is not a wait to hold anything else up for.
-        let waited = Instant::now();
-        let skipped = await_mcp_servers(
-            self.mcp_servers,
-            cfg.style.mcp_startup.clone(),
-            self.printer.clone(),
-        )
+    // Wait for all MCP servers to finish loading, showing a timer line when the
+    // wait takes long enough to be noticeable. Starting a server can mean
+    // compiling one, so this is not a wait to hold anything else up for.
+    let waited = Instant::now();
+    let skipped = await_mcp_servers(
+        self.mcp_servers,
+        cfg.style.mcp_startup.clone(),
+        self.printer.clone(),
+    )
+    .await?;
+    report_skipped_servers(&self.printer, cfg, &skipped);
+    debug!(
+        elapsed_ms = waited.elapsed().as_millis(),
+        "MCP servers ready."
+    );
+
+    // Only now can the deferred ones resolve: the handler reads a resource
+    // from a running server, and until the wait above returns there is none.
+    let resolving = Instant::now();
+    let attachments = self
+        .attachments
+        .resolve(&self.workspace_root, &self.mcp_client)
         .await?;
-        report_skipped_servers(&self.printer, cfg, &skipped);
-        debug!(
-            elapsed_ms = waited.elapsed().as_millis(),
-            "MCP servers ready."
-        );
+    debug!(
+        count = attachments.len(),
+        elapsed_ms = resolving.elapsed().as_millis(),
+        "Attachments resolved."
+    );
 
-        // Only now can the deferred ones resolve: the handler reads a resource
-        // from a running server, and until the wait above returns there is none.
-        let resolving = Instant::now();
-        let attachments = self
-            .attachments
-            .resolve(&self.workspace_root, &self.mcp_client)
-            .await?;
-        debug!(
-            count = attachments.len(),
-            elapsed_ms = resolving.elapsed().as_millis(),
-            "Attachments resolved."
-        );
+    let forced_tool = cfg.assistant.tool_choice.function_name();
+    let tools =
+        tool_definitions(cfg.conversation.tools.iter(), &self.mcp_client, forced_tool).await?;
+    debug!(count = tools.len(), forced_tool, "Tools resolved.");
 
-        let forced_tool = cfg.assistant.tool_choice.function_name();
-        let tools =
-            tool_definitions(cfg.conversation.tools.iter(), &self.mcp_client, forced_tool).await?;
-        debug!(count = tools.len(), forced_tool, "Tools resolved.");
+    let thread = build_thread(stream, attachments, &cfg.assistant, !tools.is_empty())?;
+    debug!(
+        events = thread.events.len(),
+        attachments = thread.attachments.len(),
+        "Thread assembled."
+    );
 
-        let thread = build_thread(stream, attachments, &cfg.assistant, !tools.is_empty())?;
-        debug!(
-            events = thread.events.len(),
-            attachments = thread.attachments.len(),
-            "Thread assembled."
-        );
+    // Sanitize any structural issues (orphaned tool calls, missing user
+    // messages, etc.) before sending the stream to the provider.
+    lock.as_mut().update_events(ConversationStream::sanitize);
 
-        // Sanitize any structural issues (orphaned tool calls, missing user
-        // messages, etc.) before sending the stream to the provider.
-        lock.as_mut().update_events(ConversationStream::sanitize);
-
-        Query::run_turn(
-            cfg,
-            &self.signals,
-            &self.mcp_client,
-            self.workspace_root,
-            self.interactive,
-            &thread.attachments,
-            lock,
-            cfg.assistant.tool_choice.clone(),
-            &tools,
-            self.printer,
-            self.approvals,
-            self.chat_request,
-            // Built from the lock the turn actually runs against, so it cannot
-            // name one conversation while the events land in another.
-            InvocationContext {
-                workspace_id: self.workspace_id.into_string(),
-                conversation_id: lock.id().to_string(),
-            },
-            self.pending_trim,
-        )
-        .await
-    }
+    Query::run_turn(
+        cfg,
+        &self.signals,
+        &self.mcp_client,
+        self.workspace_root,
+        self.interactive,
+        &thread.attachments,
+        lock,
+        cfg.assistant.tool_choice.clone(),
+        &tools,
+        self.printer,
+        self.approvals,
+        self.chat_request,
+        // Built from the lock the turn actually runs against, so it cannot
+        // name one conversation while the events land in another.
+        InvocationContext {
+            workspace_id: self.workspace_id.into_string(),
+            conversation_id: lock.id().to_string(),
+        },
+        self.pending_trim,
+    )
+    .await
+}
 }
 
 /// Wait for background MCP server startups to complete.
