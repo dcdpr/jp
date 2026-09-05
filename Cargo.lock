@@ -2597,12 +2597,12 @@ name = "jp_printer"
 version = "0.1.0"
 dependencies = [
  "crossterm",
+ "jp_pty",
  "jp_term",
  "parking_lot",
  "serde_json",
  "strip-ansi-escapes",
  "tracing",
- "vt100",
  "vte 0.14.1",
 ]
 
