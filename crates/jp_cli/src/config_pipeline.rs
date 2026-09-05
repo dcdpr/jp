@@ -15,7 +15,7 @@ use std::path::Path;
 
 use camino::Utf8PathBuf;
 use jp_config::{
-    PartialAppConfig,
+    FillDefaults as _, PartialAppConfig,
     assignment::{AssignKeyValue as _, KvAssignment},
     fs::{load_partial, user_global_config_dir},
     loader::PartialLoaderConfig,
@@ -247,13 +247,23 @@ impl ConfigPipeline {
     /// Build a partial with the per-conversation layer sandwiched between the
     /// base and `--cfg`, maintaining correct precedence: `files + env <
     /// conversation < --cfg`.
+    ///
+    /// The conversation layer fills from the base rather than merging into it.
+    /// It is a resolved snapshot of a configuration, not a contribution to one:
+    /// it already reflects every merge that produced it, so running those
+    /// merges a second time against the layer they came from doubles an
+    /// appending list.
+    /// Filling gives the conversation every field it carries and takes from the
+    /// base only what it does not, which is what the snapshot already meant for
+    /// every field that merges by replacement.
+    ///
+    /// `--cfg` still merges on top, where combining is what the user asked for.
     pub fn partial_with_conversation(
         &self,
         conversation: PartialAppConfig,
     ) -> Result<PartialAppConfig> {
-        let mut partial = load_partial(self.base.clone(), conversation)?;
-        partial = apply_cfg_args(partial, &self.cfg_args)?;
-        Ok(partial)
+        let partial = conversation.fill_from(self.base.clone());
+        apply_cfg_args(partial, &self.cfg_args)
     }
 
     /// The effective reset point of this invocation, if any.

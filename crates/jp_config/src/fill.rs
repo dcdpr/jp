@@ -7,18 +7,38 @@
 //! only fills gaps.
 //!
 //! This is the correct operation for applying schematic defaults to a partial,
-//! where the intent is gap-filling, not layer-merging.
+//! and for applying a resolved snapshot over the configuration it was resolved
+//! from: in both cases the intent is gap-filling, not layer-merging.
+
+use indexmap::IndexMap;
 
 /// Fill `None` fields from defaults without applying merge strategies.
 ///
 /// For `Option<T>` fields, this is `self.or(defaults)`.
 /// For nested partial structs, this recurses.
-/// For collections (`Vec`, `IndexMap`), the existing value is kept as-is
-/// (collections have no `None` state to fill).
+/// For lists, the existing value is kept as-is: a list has no `None` state to
+/// fill.
+/// For maps, see [`fill_map`] — a missing key is a gap.
 pub trait FillDefaults {
     /// Fill `None` fields from `defaults`, keeping all `Some` values.
     #[must_use]
     fn fill_from(self, defaults: Self) -> Self;
+}
+
+/// Fill a map from defaults, key by key.
+///
+/// A key only `defaults` holds is added, keeping the order it arrived in.
+/// A key both hold keeps its value from `map` whole, since a value that is
+/// already there is not a gap.
+pub fn fill_map<V>(
+    mut map: IndexMap<String, V>,
+    defaults: IndexMap<String, V>,
+) -> IndexMap<String, V> {
+    for (key, default) in defaults {
+        map.entry(key).or_insert(default);
+    }
+
+    map
 }
 
 /// Fill an optional nested partial from defaults.

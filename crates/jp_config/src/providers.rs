@@ -9,7 +9,7 @@ use schematic::Config;
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::{PartialConfigDelta, delta_map},
-    fill::FillDefaults,
+    fill::{FillDefaults, fill_map},
     partial::ToPartial,
     providers::{
         llm::{LlmProviderConfig, PartialLlmProviderConfig},
@@ -64,7 +64,7 @@ impl FillDefaults for PartialProviderConfig {
     fn fill_from(self, defaults: Self) -> Self {
         Self {
             llm: self.llm.fill_from(defaults.llm),
-            mcp: self.mcp,
+            mcp: fill_map(self.mcp, defaults.mcp),
         }
     }
 }

@@ -13,6 +13,7 @@ use crate::{
     FillDefaults,
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::PartialConfigDelta,
+    fill::fill_map,
     partial::ToPartial,
     plugins::command::CommandPluginConfig,
     util::merge_nested_indexmap,
@@ -86,7 +87,7 @@ impl FillDefaults for PartialPluginsConfig {
             shutdown_timeout_secs: self
                 .shutdown_timeout_secs
                 .or(defaults.shutdown_timeout_secs),
-            command: self.command,
+            command: fill_map(self.command, defaults.command),
         }
     }
 }

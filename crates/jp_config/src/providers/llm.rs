@@ -15,7 +15,7 @@ use schematic::Config;
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::PartialConfigDelta,
-    fill::FillDefaults,
+    fill::{FillDefaults, fill_map},
     model::id::{ModelIdConfig, ModelIdConfigError, ModelIdOrAliasConfig, resolve_alias_chain},
     partial::ToPartial,
     providers::llm::{
@@ -139,7 +139,7 @@ impl PartialConfigDelta for PartialLlmProviderConfig {
 impl FillDefaults for PartialLlmProviderConfig {
     fn fill_from(self, defaults: Self) -> Self {
         Self {
-            aliases: self.aliases,
+            aliases: fill_map(self.aliases, defaults.aliases),
             anthropic: self.anthropic.fill_from(defaults.anthropic),
             cerebras: self.cerebras.fill_from(defaults.cerebras),
             deepseek: self.deepseek.fill_from(defaults.deepseek),

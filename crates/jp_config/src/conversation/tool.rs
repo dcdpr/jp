@@ -18,7 +18,7 @@ use crate::{
         style::{DisplayStyleConfig, PartialDisplayStyleConfig},
     },
     delta::{PartialConfigDelta, delta_map, delta_opt, delta_opt_partial, delta_vec},
-    fill::FillDefaults,
+    fill::{FillDefaults, fill_map},
     partial::{ToPartial, partial_opt, partial_opt_config, partial_opts},
     types::json_value::JsonValue,
     util::merge_nested_indexmap,
@@ -90,7 +90,7 @@ impl FillDefaults for PartialToolsConfig {
 
         Self {
             defaults: tool_defaults,
-            tools,
+            tools: fill_map(tools, defaults.tools),
         }
     }
 }
