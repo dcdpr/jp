@@ -1,5 +1,6 @@
 #![allow(clippy::print_stdout, clippy::print_stderr)]
 
+mod bash;
 mod cargo;
 mod debug_app;
 mod debug_jp;
@@ -36,6 +37,7 @@ pub async fn run(ctx: Context, t: Tool) -> util::ToolResult {
         s if s.starts_with("markdown_") => markdown::run(ctx, t),
         s if s.starts_with("unix_") => unix::run(ctx, t),
         s if s.starts_with("ticket_") => ticket::run(ctx, t),
+        "bash" => bash::run(ctx, t),
         "plan" => plan::run(ctx, t),
         _ => util::unknown_tool(t),
     }
