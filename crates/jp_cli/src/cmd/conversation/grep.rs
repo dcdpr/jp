@@ -312,8 +312,7 @@ impl Grep {
         wanted: &HashSet<ConcreteScope>,
         ctx: &Ctx,
     ) -> Vec<ConversationHits> {
-        // Any scope other than `Title` is sourced from the event stream.
-        // Skipping the event pass entirely when it can't contribute avoids a
+        // Skipping the event pass when no wanted scope can contribute avoids a
         // sequential disk read per conversation.
         let needs_events = needs_events_for(wanted);
 
