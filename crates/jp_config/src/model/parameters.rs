@@ -3,7 +3,7 @@
 use std::{fmt, str::FromStr};
 
 use indexmap::IndexMap;
-use schematic::{Config, ConfigEnum};
+use schematic::{Config, ConfigEnum, PartialConfig as _};
 use serde::{Deserialize, Deserializer, Serialize, de::Error as DeError};
 
 use crate::{
@@ -260,8 +260,8 @@ pub enum ReasoningConfig {
 
 impl AssignKeyValue for PartialReasoningConfig {
     fn assign(&mut self, kv: KvAssignment) -> AssignResult {
-        #[expect(clippy::single_match_else)]
         match kv.key_string().as_str() {
+            "" if kv.is_json_null() => *self = Self::empty(),
             "" => *self = kv.try_object_or_from_str()?,
             _ => {
                 let mut custom = PartialCustomReasoningConfig::default();
