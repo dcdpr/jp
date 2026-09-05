@@ -27,7 +27,7 @@ use jp_llm::tool::InvocationContext;
 use jp_printer::{ErrChannel, Printer};
 use tracing::warn;
 
-use super::{ToolRenderer, TurnView, metadata::get_rendered_arguments};
+use super::{RenderFlow, ToolRenderer, TurnView, metadata::get_rendered_arguments};
 
 /// Controls where the renderer sources its configuration from.
 #[derive(Debug, Clone)]
@@ -124,7 +124,13 @@ impl TurnRenderer {
             overlay.apply(&mut style, &mut tools_config);
         }
 
-        let mut view = TurnView::new(printer.clone(), style.clone(), assistant_name, model_id);
+        let mut view = TurnView::new(
+            printer.clone(),
+            style.clone(),
+            assistant_name,
+            model_id,
+            RenderFlow::Replay,
+        );
         let tool_chrome_shown = style.tool_call.show;
         let tool = ToolRenderer::new(
             ErrChannel::new(printer.clone()),

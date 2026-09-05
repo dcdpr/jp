@@ -10,7 +10,7 @@ pub(crate) mod tool;
 pub(crate) mod turn;
 pub(crate) mod turn_view;
 
-pub(crate) use chat::ChatRenderer;
+pub(crate) use chat::{ChatRenderer, RenderFlow};
 pub(crate) use structured::StructuredRenderer;
 pub(crate) use tool::ToolRenderer;
 pub(crate) use turn::{ConfigSource, StyleOverlay, TurnRenderer};

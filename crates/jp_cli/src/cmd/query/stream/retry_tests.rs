@@ -424,9 +424,7 @@ async fn fatal_error_after_reasoning_leaves_the_gap_unshaded() {
     printer.flush();
     assert_eq!(
         out.lock().clone(),
-        "\n── \u{1b}[1mjp\u{1b}[0m \
-         ──────────────────────────────────────────────────────────────────────────\n\n\u{1b}[48;\
-         5;236mThinking.\u{1b}[48;5;236m\u{1b}[K\u{1b}[0m\n\n"
+        "\u{1b}[48;5;236mThinking.\u{1b}[48;5;236m\u{1b}[K\u{1b}[0m\n\n"
     );
 }
 

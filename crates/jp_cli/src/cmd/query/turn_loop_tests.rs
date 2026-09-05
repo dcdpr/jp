@@ -6608,7 +6608,8 @@ async fn test_live_header_uses_configured_model_id_not_provider_returned() {
             "anthropic/test"
         );
 
-        let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+        // The live role header is chrome, so it lands on the error stream.
+        let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
         let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
@@ -6637,7 +6638,7 @@ async fn test_live_header_uses_configured_model_id_not_provider_returned() {
         .unwrap();
 
         printer.flush();
-        let output = strip_ansi_escapes::strip(&*out.lock());
+        let output = strip_ansi_escapes::strip(&*err.lock());
         let output = String::from_utf8(output).unwrap();
 
         assert!(

@@ -136,7 +136,7 @@ use crate::{
     error::{Error, Result},
     output::print_json,
     parser::AttachmentUrlOrPath,
-    render::TurnView,
+    render::{RenderFlow, TurnView},
     signals::SignalRouter,
     timer::spawn_line_timer,
 };
@@ -535,6 +535,7 @@ impl Query {
                 cfg.style.clone(),
                 cfg.assistant.name.clone(),
                 Some(cfg.assistant.model.id.resolved().to_string()),
+                RenderFlow::Live,
             );
             echo.render_user_request(&chat_request);
         }
