@@ -14,7 +14,7 @@ use schematic::Config;
 
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
-    delta::PartialConfigDelta,
+    delta::{PartialConfigDelta, delta_map, path},
     fill::{FillDefaults, fill_map},
     model::id::{ModelIdConfig, ModelIdConfigError, ModelIdOrAliasConfig, resolve_alias_chain},
     partial::ToPartial,
@@ -105,7 +105,24 @@ impl AssignKeyValue for PartialLlmProviderConfig {
 }
 
 impl PartialConfigDelta for PartialLlmProviderConfig {
+    // Not written in terms of `delta_with_unsets`: that method reports a value
+    // whose correctness depends on the field being cleared first, so a caller
+    // that drops the paths would merge a list onto the one already there.
     fn delta(&self, next: Self) -> Self {
+        Self {
+            aliases: delta_map(&self.aliases, next.aliases),
+            anthropic: self.anthropic.delta(next.anthropic),
+            cerebras: self.cerebras.delta(next.cerebras),
+            deepseek: self.deepseek.delta(next.deepseek),
+            google: self.google.delta(next.google),
+            llamacpp: self.llamacpp.delta(next.llamacpp),
+            ollama: self.ollama.delta(next.ollama),
+            openai: self.openai.delta(next.openai),
+            openrouter: self.openrouter.delta(next.openrouter),
+        }
+    }
+
+    fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
         Self {
             aliases: next
                 .aliases
@@ -124,7 +141,11 @@ impl PartialConfigDelta for PartialLlmProviderConfig {
                     Some((k, next))
                 })
                 .collect(),
-            anthropic: self.anthropic.delta(next.anthropic),
+            anthropic: self.anthropic.delta_with_unsets(
+                next.anthropic,
+                &path(prefix, "anthropic"),
+                unsets,
+            ),
             cerebras: self.cerebras.delta(next.cerebras),
             deepseek: self.deepseek.delta(next.deepseek),
             google: self.google.delta(next.google),

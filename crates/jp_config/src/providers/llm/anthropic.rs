@@ -4,7 +4,7 @@ use schematic::Config;
 
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
-    delta::{PartialConfigDelta, delta_opt, delta_opt_vec},
+    delta::{PartialConfigDelta, delta_opt, delta_opt_vec, delta_opt_vec_at, path},
     fill::FillDefaults,
     internal::merge::append_vec_dedup,
     partial::{ToPartial, partial_opt},
@@ -67,6 +67,23 @@ impl PartialConfigDelta for PartialAnthropicConfig {
                 next.chain_on_max_tokens,
             ),
             beta_headers: delta_opt_vec(self.beta_headers.as_ref(), next.beta_headers),
+        }
+    }
+
+    fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
+        Self {
+            api_key_env: delta_opt(self.api_key_env.as_ref(), next.api_key_env),
+            base_url: delta_opt(self.base_url.as_ref(), next.base_url),
+            chain_on_max_tokens: delta_opt(
+                self.chain_on_max_tokens.as_ref(),
+                next.chain_on_max_tokens,
+            ),
+            beta_headers: delta_opt_vec_at(
+                &path(prefix, "beta_headers"),
+                self.beta_headers.as_ref(),
+                next.beta_headers,
+                unsets,
+            ),
         }
     }
 }

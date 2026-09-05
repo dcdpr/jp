@@ -127,6 +127,29 @@ fn a_reordered_argument_list_reports_its_path() {
     );
 }
 
+/// The report reaches a field nested several levels below the root.
+#[test]
+fn a_dropped_beta_header_reports_its_full_path() {
+    let headers = |values: &[&str]| {
+        let mut partial = crate::PartialAppConfig::empty();
+        partial.providers.llm.anthropic.beta_headers =
+            Some(values.iter().map(|v| (*v).to_owned()).collect());
+        partial
+    };
+
+    let prev = headers(&["one", "two"]);
+    let next = headers(&["one"]);
+
+    let mut unsets = Vec::new();
+    let delta = prev.delta_with_unsets(next, "", &mut unsets);
+
+    assert_eq!(unsets, ["providers.llm.anthropic.beta_headers"]);
+    assert_eq!(
+        delta.providers.llm.anthropic.beta_headers,
+        Some(vec!["one".to_owned()])
+    );
+}
+
 #[test]
 fn map_delta_keeps_an_entry_only_next_has() {
     let prev = IndexMap::new();
