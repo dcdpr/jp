@@ -19,6 +19,35 @@ fn create_renderer() -> (ChatRenderer, SharedBuffer, SharedBuffer) {
     create_renderer_with_config(AppConfig::new_test())
 }
 
+// The gap that spaces a tool call's chrome from the content after it is chrome
+// itself: the chrome is on the error stream, so a stdout captured on its own
+// must not carry a blank line standing in for something that never landed
+// there.
+#[test]
+fn the_gap_around_tool_chrome_is_not_left_on_stdout() {
+    let (printer, out, _err) = Printer::memory(OutputFormat::Text);
+    let mut renderer = ChatRenderer::new(
+        Arc::new(printer.clone()),
+        AppConfig::new_test().style,
+        RenderFlow::Live,
+    );
+
+    renderer.render_response(&ChatResponse::Message {
+        message: "Let me check the README title.".into(),
+    });
+    renderer.enter_tool_call();
+    renderer.render_response(&ChatResponse::Message {
+        message: "`# Jean-Pierre`".into(),
+    });
+    renderer.flush();
+    printer.flush();
+
+    assert_eq!(
+        *out.lock(),
+        "Let me check the README title.\n\n`# Jean-Pierre`\n\n"
+    );
+}
+
 #[test]
 fn wrap_width_is_capped_by_the_available_columns() {
     // Prose wrapped wider than the output area leaves the host to wrap again on
@@ -1056,7 +1085,7 @@ fn test_no_separator_for_consecutive_messages() {
 
 #[test]
 fn test_blank_line_after_tool_calls_before_message() {
-    let (mut renderer, out, _err) = create_renderer();
+    let (mut renderer, out, err) = create_renderer();
 
     renderer.render_response(&ChatResponse::Message {
         message: "Before tools\n\n".into(),
@@ -1073,8 +1102,10 @@ fn test_blank_line_after_tool_calls_before_message() {
     });
     renderer.printer.flush();
 
-    let output = out.lock().clone();
-    assert_eq!(output, "Before tools\n\n\nAfter tools\n\n");
+    // The gap goes out with the chrome it spaces from, leaving the two message
+    // blocks separated by the first one's own trailing blank line.
+    assert_eq!(*err.lock(), "\n");
+    assert_eq!(*out.lock(), "Before tools\n\nAfter tools\n\n");
 }
 
 #[test]

@@ -301,12 +301,17 @@ impl ChatRenderer {
     /// up before whatever renders next and its shading has to follow that
     /// content.
     /// Otherwise the region ends at the tool call and the gap is a plain blank
-    /// line.
+    /// line on the chrome channel, where the chrome it spaces from lives.
+    /// The content above the tool call has already ended with a blank line of
+    /// its own, so a reader taking stdout alone gets one blank line between the
+    /// two blocks rather than two with nothing between them.
+    /// A deferred gap goes out with the content instead: the reasoning it ends
+    /// up in front of is on stdout, and so is the reasoning above it.
     fn blank_line_after_tool_call(&mut self, next: ContentKind) {
         if next == ContentKind::Reasoning && self.reasoning_region_continues() {
             self.pending_separator = Some(SeparatorOrigin::ToolCall);
         } else {
-            self.printer.println("");
+            self.printer.eprintln("");
         }
     }
 
