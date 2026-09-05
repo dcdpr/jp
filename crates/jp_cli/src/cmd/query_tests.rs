@@ -2632,6 +2632,72 @@ fn resolve_query_missing_at_path_errors() {
 }
 
 #[test]
+fn tool_flag_splits_comma_separated_names() {
+    let query = parse_query(&["-tfoo,bar,baz"]).unwrap();
+
+    assert_eq!(*query.tool_directives, [
+        ToolDirective::Enable("foo".into()),
+        ToolDirective::Enable("bar".into()),
+        ToolDirective::Enable("baz".into()),
+    ]);
+}
+
+#[test]
+fn no_tool_flag_splits_comma_separated_names() {
+    let query = parse_query(&["--no-tool=foo,bar"]).unwrap();
+
+    assert_eq!(*query.tool_directives, [
+        ToolDirective::Disable("foo".into()),
+        ToolDirective::Disable("bar".into()),
+    ]);
+}
+
+// Splitting happens before the directives are ordered, so the names of one
+// flag stay together and in the order they were written.
+#[test]
+fn comma_separated_names_keep_their_place_in_the_directive_order() {
+    let query = parse_query(&["-Tfoo,bar", "-tbaz", "-Tqux"]).unwrap();
+
+    assert_eq!(*query.tool_directives, [
+        ToolDirective::Disable("foo".into()),
+        ToolDirective::Disable("bar".into()),
+        ToolDirective::Enable("baz".into()),
+        ToolDirective::Disable("qux".into()),
+    ]);
+}
+
+#[test]
+fn tool_flag_trims_space_around_comma_separated_names() {
+    let query = parse_query(&["--tool", "foo, bar"]).unwrap();
+
+    assert_eq!(*query.tool_directives, [
+        ToolDirective::Enable("foo".into()),
+        ToolDirective::Enable("bar".into()),
+    ]);
+}
+
+// A bare `-t` still means "every tool", and must not be read as one empty name.
+#[test]
+fn bare_tool_flag_stays_a_bulk_directive() {
+    let query = parse_query(&["-t", "-T"]).unwrap();
+
+    assert_eq!(*query.tool_directives, [
+        ToolDirective::EnableAll,
+        ToolDirective::DisableAll,
+    ]);
+}
+
+#[test]
+fn empty_name_between_commas_is_rejected() {
+    let error = parse_query(&["-tfoo,,bar"]).unwrap_err();
+
+    assert!(
+        error.to_string().contains("empty tool name in 'foo,,bar'"),
+        "unexpected message: {error}"
+    );
+}
+
+#[test]
 fn read_arg_file_error_names_the_path() {
     let dir = camino_tempfile::tempdir().unwrap();
     let path = dir.path().join("missing.md");

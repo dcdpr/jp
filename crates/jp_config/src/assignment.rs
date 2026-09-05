@@ -835,7 +835,9 @@ impl KvAssignment {
     ///
     /// Three shapes reach the list: a JSON array is taken element-wise, a JSON
     /// string is one element, and a bare string is split on commas, with each
-    /// element trimmed and empty ones dropped.
+    /// element trimmed.
+    /// An empty element is an error; a value that is empty in its entirety
+    /// names no elements at all.
     /// The comma shorthand is confined to the bare form, so `key:="a,b"` names
     /// one element and `key=a,b` names two.
     pub(crate) fn try_vec<T>(
@@ -1076,6 +1078,10 @@ fn flatten_recursive(
 }
 
 /// Try to parse a comma-separated list of values, using the given parser.
+///
+/// Space around a value is ignored.
+/// An empty value between commas is an error; to name a value that contains a
+/// comma, use the JSON form of the assignment.
 fn try_parse_vec<'a, T, E>(
     key: &KvKey,
     s: &'a str,
@@ -1084,13 +1090,26 @@ fn try_parse_vec<'a, T, E>(
 where
     E: Into<BoxedError>,
 {
+    // Nothing at all is how a list is cleared, and stays distinct from a value
+    // that is missing between two commas.
+    if s.trim().is_empty() {
+        return Ok(vec![]);
+    }
+
     s.split(',')
         .map(str::trim)
-        .filter(|s| !s.is_empty())
         .enumerate()
-        .map(|(i, s)| {
-            parser(i, s)
-                .or_else(|err| assignment_error(key, Value::String(s.to_owned()), err.into()))
+        .map(|(i, value)| {
+            if value.is_empty() {
+                return assignment_error(
+                    key,
+                    Value::String(s.to_owned()),
+                    format!("empty value in '{s}'").into(),
+                );
+            }
+
+            parser(i, value)
+                .or_else(|err| assignment_error(key, Value::String(value.to_owned()), err.into()))
         })
         .collect::<std::result::Result<Vec<_>, _>>()
 }

@@ -41,7 +41,8 @@ pub struct ToolsConfig {
     /// Tool config
     ///
     /// This section configures individual tools.
-    /// The key is the tool ID.
+    /// The key is the tool ID, and cannot contain a comma: a comma separates
+    /// one tool ID from the next wherever several are named at once.
     #[setting(nested, flatten, merge = merge_nested_indexmap)]
     tools: IndexMap<String, ToolConfig>,
 }
@@ -188,8 +189,27 @@ impl ToolsConfig {
 impl Validator for ToolsConfig {
     /// Validate cross-field invariants on the tools configuration.
     fn validate(&self) -> Result<(), ConfigError> {
+        reject_comma_in_tool_names(self)?;
         reject_access_on_non_local_tools(self)
     }
+}
+
+/// Reject a tool whose name contains a comma.
+///
+/// The `--tool` and `--no-tool` flags read a comma as the separator between
+/// tool names, so such a tool could never be enabled or disabled from the
+/// command line.
+fn reject_comma_in_tool_names(tools: &ToolsConfig) -> Result<(), ConfigError> {
+    for name in tools.tools.keys() {
+        if name.contains(',') {
+            return Err(HandlerError::new(format!(
+                "conversation.tools.{name}: a tool name cannot contain a comma, because `--tool` \
+                 and `--no-tool` read it as a separator between names"
+            ))
+            .into());
+        }
+    }
+    Ok(())
 }
 
 /// Reject `access` on tools whose finalized source is `builtin` or `mcp`.
