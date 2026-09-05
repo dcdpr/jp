@@ -76,6 +76,74 @@ fn unset_of_an_absent_map_entry_is_a_no_op() {
     );
 }
 
+/// Paths that clearing does not reach, and why.
+///
+/// The first two are not settable by `--cfg` either: `extends` and `loader` are
+/// read while the file declaring them is loaded, and only their effect outlives
+/// that ([RFD 038]), so neither has a key-value arm to reach.
+///
+/// The rest parse their value as an object or a string and reject anything
+/// else, `null` included.
+/// Each merges by replacement, so a delta can always carry the new value whole
+/// and never needs to clear one of these first.
+///
+/// [RFD 038]: https://jp.computer/rfd/038
+const UNREACHABLE: &[&str] = &[
+    "extends",
+    "loader.reset",
+    "assistant.model.id",
+    "assistant.model.parameters.reasoning",
+    "conversation.inquiry.assistant.model.id",
+    "conversation.inquiry.assistant.model.parameters.reasoning",
+    "conversation.title.generate.model.id",
+    "conversation.title.generate.model.parameters.reasoning",
+    "editor.cmd",
+    "style.reasoning.summary_model.id",
+    "style.reasoning.summary_model.parameters.reasoning",
+];
+
+/// Every field the schema names is reachable by path, or listed as not.
+///
+/// The key-value dispatch spells each field's name by hand, in a `match` arm
+/// that no compiler checks against the field it assigns to.
+/// A field renamed without its arm renamed drifts silently: the config file
+/// accepts one spelling and `--cfg` another, and a path derived from the
+/// config's own shape reaches nothing.
+/// Clearing is the probe that needs no per-field value, so it can ask the
+/// question of every field at once.
+#[test]
+fn every_schema_field_is_reachable_by_path() {
+    let unreachable: Vec<_> = AppConfig::fields()
+        .into_iter()
+        .filter_map(|path| {
+            // A fresh partial per path: clearing one field must not decide
+            // whether the next one is reachable.
+            let error = PartialAppConfig::empty().unset(&path).err()?;
+            Some(format!("{path}: {error}"))
+        })
+        .filter(|entry| !UNREACHABLE.iter().any(|known| entry.starts_with(known)))
+        .collect();
+
+    assert!(
+        unreachable.is_empty(),
+        "schema fields that the key-value dispatch cannot reach: {unreachable:#?}"
+    );
+}
+
+/// A path in [`UNREACHABLE`] that became reachable is a stale exception.
+#[test]
+fn the_unreachable_list_holds_no_stale_entries() {
+    let reachable: Vec<_> = UNREACHABLE
+        .iter()
+        .filter(|path| PartialAppConfig::empty().unset(path).is_ok())
+        .collect();
+
+    assert!(
+        reachable.is_empty(),
+        "listed as unreachable but now reachable, drop them from the list: {reachable:#?}"
+    );
+}
+
 #[test]
 fn unset_reports_an_unknown_path() {
     let mut partial = PartialAppConfig::empty();

@@ -278,6 +278,11 @@ impl KvAssignment {
         // rather than descending and clearing its fields — is what distinguishes
         // "this server is gone" from "this server has no arguments".
         if self.is_json_null() {
+            if self.key.is_empty() {
+                map.clear();
+                return Ok(());
+            }
+
             match self.trim_prefix_any() {
                 Some(key) if self.key.is_empty() => {
                     map.shift_remove(&key);
@@ -481,6 +486,16 @@ impl KvAssignment {
         matches!(&self.value, KvValue::Json(Value::Null))
     }
 
+    /// Returns `true` if `null` here clears a whole collection.
+    ///
+    /// A match arm reaches its field either by consuming the key segment
+    /// (leaving nothing) or by matching the whole key literally (leaving the
+    /// field's own name); both mean the value names the collection itself.
+    /// An index means it names one element, which clearing does not handle.
+    fn clears_collection(&self) -> bool {
+        self.is_json_null() && !self.key.starts_with_index()
+    }
+
     /// Returns `true` if the value is a JSON object.
     ///
     /// Only the JSON forms (`key:={…}`, `key:+={…}`) can be objects; a plain
@@ -515,7 +530,18 @@ impl KvAssignment {
     /// wiping out fields loaded from earlier config layers (e.g. `source`).
     ///
     /// [`try_object`]: Self::try_object
-    pub(crate) fn try_merge_object<T: AssignKeyValue>(self, target: &mut T) -> AssignResult {
+    pub(crate) fn try_merge_object<T: AssignKeyValue + Default>(
+        self,
+        target: &mut T,
+    ) -> AssignResult {
+        // `null` on a block clears every field in it. Assigning the default
+        // rather than walking the fields keeps this working for a block whose
+        // own `assign` reaches its fields by a name the block does not carry.
+        if self.is_json_null() {
+            *target = T::default();
+            return Ok(());
+        }
+
         let Self {
             key,
             value,
@@ -887,9 +913,7 @@ impl KvAssignment {
         vec: &mut Vec<T>,
         parser: impl Fn(Self) -> Result<T, BoxedError>,
     ) -> Result<(), KvAssignmentError> {
-        // `null` on the list itself empties it. An index is left to the parser
-        // below, where `null` is a type error against the element type.
-        if self.is_json_null() && self.key.is_empty() {
+        if self.clears_collection() {
             vec.clear();
             return Ok(());
         }
@@ -975,7 +999,7 @@ impl KvAssignment {
         vec: &mut Option<Vec<T>>,
         parser: impl Fn(Self) -> Result<T, BoxedError>,
     ) -> Result<(), KvAssignmentError> {
-        if self.is_json_null() && self.key.is_empty() {
+        if self.clears_collection() {
             *vec = None;
             return Ok(());
         }
@@ -1009,7 +1033,7 @@ impl KvAssignment {
         // An absent list and an empty one merge differently: `None` lets a later
         // layer's value land verbatim, `Some([])` still runs the field's merge
         // strategy against it.
-        if self.is_json_null() && self.key.is_empty() {
+        if self.clears_collection() {
             *vec = None;
             return Ok(());
         }
@@ -1305,6 +1329,14 @@ impl KvKey {
         }
 
         None
+    }
+
+    /// Whether the first segment of the key is an index into a list.
+    pub(crate) fn starts_with_index(&self) -> bool {
+        self.path
+            .split(self.delim.as_str())
+            .next()
+            .is_some_and(|segment| segment.parse::<usize>().is_ok())
     }
 
     /// Similar to [`KvKey::trim_prefix`], but only trims the first segment if
