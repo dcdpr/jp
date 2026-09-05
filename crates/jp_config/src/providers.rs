@@ -52,6 +52,9 @@ impl AssignKeyValue for PartialProviderConfig {
 }
 
 impl PartialConfigDelta for PartialProviderConfig {
+    // Not written in terms of `delta_with_unsets`: that method reports a value
+    // whose correctness depends on the field being cleared first, so a caller
+    // that drops the paths would merge a list onto the one already there.
     fn delta(&self, next: Self) -> Self {
         Self {
             llm: self.llm.delta(next.llm),
@@ -61,7 +64,9 @@ impl PartialConfigDelta for PartialProviderConfig {
 
     fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
         Self {
-            llm: self.llm.delta(next.llm),
+            llm: self
+                .llm
+                .delta_with_unsets(next.llm, &path(prefix, "llm"), unsets),
             mcp: delta_map_with_unsets(&path(prefix, "mcp"), &self.mcp, next.mcp, unsets),
         }
     }
