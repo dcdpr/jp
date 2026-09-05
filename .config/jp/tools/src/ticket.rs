@@ -13,7 +13,9 @@
 
 use std::{fs, io, path::MAIN_SEPARATOR};
 
-use ::ticket::{Comment, Kind, ParseError, Status, Ticket, TicketId, parse, render, store};
+use ::ticket::{
+    Comment, Kind, Label, NewTicket, ParseError, Status, Ticket, TicketId, parse, render, store,
+};
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{Local, SecondsFormat, Utc};
 use comfort::{
@@ -53,6 +55,10 @@ pub fn run(ctx: Context, t: Tool) -> ToolResult {
             if title.trim().is_empty() {
                 return error("`title` must not be empty.");
             }
+            let labels = match resolve_labels(root, t.opt::<Vec<String>>("labels")?.as_deref())? {
+                Ok(labels) => labels,
+                Err(refusal) => return error(refusal),
+            };
 
             if ctx.action.is_format_arguments() {
                 let date = Local::now().format("%Y-%m-%d").to_string();
@@ -60,13 +66,26 @@ pub fn run(ctx: Context, t: Tool) -> ToolResult {
                     kind,
                     &title,
                     implements.as_deref(),
+                    &labels,
                     body.as_deref(),
                     &date,
                 )
                 .into());
             }
 
-            create(root, kind, &title, implements.as_deref(), body)
+            create(root, kind, &title, implements.as_deref(), &labels, body)
+        }
+
+        "label" => {
+            let id = match id_arg(&t.req("id")?) {
+                Ok(id) => id,
+                Err(message) => return error(message),
+            };
+            label(
+                root,
+                id,
+                &t.opt::<Vec<String>>("labels")?.unwrap_or_default(),
+            )
         }
 
         "comment" => {
@@ -112,7 +131,8 @@ pub fn run(ctx: Context, t: Tool) -> ToolResult {
                 Some(Ok(kind)) => Some(kind),
                 None => None,
             };
-            list(root, status, kind)
+            let labels = t.opt::<Vec<String>>("labels")?.unwrap_or_default();
+            list(root, status, kind, &labels)
         }
 
         _ => unknown_tool(t),
@@ -124,18 +144,19 @@ fn create(
     kind: Kind,
     title: &str,
     implements: Option<&str>,
+    labels: &[Label],
     body: Option<String>,
 ) -> ToolResult {
     let date = Local::now().format("%Y-%m-%d").to_string();
-    let (id, path) = store::create(
-        &dir(root),
+    let (id, path) = store::create(&dir(root), &NewTicket {
         kind,
-        title.trim(),
-        HANDLE,
-        &date,
+        title: title.trim(),
+        authors: HANDLE,
+        date: &date,
         implements,
-        &body.unwrap_or_default(),
-    )?;
+        labels,
+        description: &body.unwrap_or_default(),
+    })?;
     reflow(&path)?;
 
     Ok(format!("Created {id} at {}", relative(root, &path)).into())
@@ -149,17 +170,56 @@ fn preview_create(
     kind: Kind,
     title: &str,
     implements: Option<&str>,
+    labels: &[Label],
     body: Option<&str>,
     date: &str,
 ) -> String {
-    preview(&render::ticket(
-        title.trim(),
+    preview(&render::ticket(&NewTicket {
         kind,
-        HANDLE,
+        title: title.trim(),
+        authors: HANDLE,
         date,
         implements,
-        body.unwrap_or_default(),
-    ))
+        labels,
+        description: body.unwrap_or_default(),
+    }))
+}
+
+/// Check labels against the board's vocabulary.
+///
+/// The outer error is the vocabulary file being unreadable, which is the
+/// board's problem; the inner one is a label the board doesn't define, which is
+/// the caller's and comes back as a tool error naming the known set.
+fn resolve_labels(
+    root: &Utf8Path,
+    requested: Option<&[String]>,
+) -> crate::Result<Result<Vec<Label>, String>> {
+    // A call that names no labels doesn't read the vocabulary at all, so a
+    // board with a broken `.labels.json` can still file unlabelled tickets.
+    let Some(requested) = requested else {
+        return Ok(Ok(vec![]));
+    };
+
+    Ok(store::vocabulary(&dir(root))?
+        .resolve(requested)
+        .map_err(|refusal| refusal.to_string()))
+}
+
+/// Replace a ticket's labels.
+///
+/// Checked against the ticket rather than against the vocabulary alone, so a
+/// retired label the ticket already carries can be listed again and kept.
+fn label(root: &Utf8Path, id: TicketId, requested: &[String]) -> ToolResult {
+    let tickets = dir(root);
+    let vocabulary = store::vocabulary(&tickets)?;
+
+    match store::set_labels(&tickets, id, &vocabulary, requested) {
+        Ok((_, applied)) if applied.is_empty() => Ok(format!("Cleared the labels on {id}.").into()),
+        Ok((_, applied)) => Ok(format!("{id}: {}", ::ticket::labels::join(&applied)).into()),
+        Err(store::Error::NoSuchTicket(_)) => error(format!("No {id}.")),
+        Err(store::Error::Rejected(refusal)) => error(refusal.to_string()),
+        Err(other) => Err(other.into()),
+    }
 }
 
 fn comment(root: &Utf8Path, id: TicketId, re: Option<usize>, body: &str) -> ToolResult {
@@ -256,7 +316,17 @@ fn show(root: &Utf8Path, id: TicketId) -> ToolResult {
     }
 }
 
-fn list(root: &Utf8Path, status: Option<Status>, kind: Option<Kind>) -> ToolResult {
+/// List the board, filtered by whatever the caller named.
+///
+/// Labels are matched as written on the ticket rather than through the
+/// vocabulary, so a ticket carrying a label the board has since dropped can
+/// still be found.
+fn list(
+    root: &Utf8Path,
+    status: Option<Status>,
+    kind: Option<Kind>,
+    labels: &[String],
+) -> ToolResult {
     let entries = store::list(&dir(root))?;
 
     let mut tickets = vec![];
@@ -270,9 +340,24 @@ fn list(root: &Utf8Path, status: Option<Status>, kind: Option<Kind>) -> ToolResu
     tickets.retain(|(_, ticket)| {
         status.is_none_or(|status| status == ticket.metadata.status)
             && kind.is_none_or(|kind| kind == ticket.metadata.kind)
+            && carries_every_label(ticket, labels)
     });
 
     Ok(render_list(&tickets, &unreadable).into())
+}
+
+/// Whether a ticket carries every one of `wanted`.
+///
+/// Requiring all of them rather than any composes with the other filters: each
+/// argument narrows the listing.
+fn carries_every_label(ticket: &Ticket, wanted: &[String]) -> bool {
+    wanted.iter().all(|wanted| {
+        ticket
+            .metadata
+            .labels
+            .iter()
+            .any(|label| label.eq_ignore_ascii_case(wanted.trim()))
+    })
 }
 
 /// The ticket directory inside the workspace.
@@ -334,9 +419,13 @@ fn render_list(tickets: &[(TicketId, &Ticket)], unreadable: &[String]) -> String
             .blocked_by
             .as_deref()
             .map_or_else(String::new, |by| format!(" [blocked by {by}]"));
+        let labels = match ticket.metadata.labels.as_slice() {
+            [] => String::new(),
+            labels => format!(" [{}]", labels.join(", ")),
+        };
 
         out.push_str(&format!(
-            "{id:<9} {status:<12} {kind:<8} {}{blocked}{comments}\n",
+            "{id:<9} {status:<12} {kind:<8} {}{labels}{blocked}{comments}\n",
             ticket.title
         ));
     }
@@ -361,6 +450,9 @@ fn render_ticket(id: TicketId, ticket: &Ticket, path: &str) -> String {
     out.push_str(&format!("- **Path**: {path}\n"));
     out.push_str(&format!("- **Status**: {}\n", metadata.status));
     out.push_str(&format!("- **Kind**: {}\n", metadata.kind));
+    if !metadata.labels.is_empty() {
+        out.push_str(&format!("- **Labels**: {}\n", metadata.labels.join(", ")));
+    }
     out.push_str(&format!("- **Authors**: {}\n", metadata.authors));
     out.push_str(&format!("- **Date**: {}\n", metadata.date));
     for (label, value) in [

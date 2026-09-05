@@ -17,10 +17,10 @@ use std::{
 use camino::{Utf8Path, Utf8PathBuf};
 
 use crate::{
-    Comment, Kind, ParseError, Status, Ticket, TicketId,
+    Comment, Label, NewTicket, ParseError, Status, Ticket, TicketId, Vocabulary,
     id::{MAX_BUCKET, TAIL_SPACE},
     import::{Import, escaped},
-    parse, render,
+    labels, parse, render,
 };
 
 /// Directory holding the ticket files, relative to the workspace root.
@@ -62,6 +62,10 @@ pub enum Error {
     /// Allocation refuses rather than wrapping, which would reuse old time
     /// prefixes, or widening, which would break the fixed-width form.
     Exhausted,
+    /// The board's label vocabulary can't be read.
+    Labels(labels::Error),
+    /// A write named labels the board won't accept.
+    Rejected(labels::Rejected),
     /// The filesystem said no.
     Io(io::Error),
 }
@@ -94,6 +98,8 @@ impl fmt::Display for Error {
             Self::Exhausted => f.write_str(
                 "The ticket id format has no time buckets left; it needs a wider time component.",
             ),
+            Self::Labels(error) => error.fmt(f),
+            Self::Rejected(error) => error.fmt(f),
             Self::Io(error) => error.fmt(f),
         }
     }
@@ -103,6 +109,8 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Parse(error) => Some(error),
+            Self::Labels(error) => Some(error),
+            Self::Rejected(error) => Some(error),
             Self::Io(error) => Some(error),
             _ => None,
         }
@@ -112,6 +120,18 @@ impl std::error::Error for Error {
 impl From<ParseError> for Error {
     fn from(error: ParseError) -> Self {
         Self::Parse(error)
+    }
+}
+
+impl From<labels::Error> for Error {
+    fn from(error: labels::Error) -> Self {
+        Self::Labels(error)
+    }
+}
+
+impl From<labels::Rejected> for Error {
+    fn from(error: labels::Rejected) -> Self {
+        Self::Rejected(error)
     }
 }
 
@@ -141,21 +161,11 @@ const CLAIM_ATTEMPTS: usize = 16;
 
 /// Create a ticket at `Todo`, returning its id and path.
 ///
-/// `implements` names the RFD this work comes from, if any.
-///
 /// Creating the file exclusively is what claims the id: two processes drawing
 /// in the same bucket can land on one tail, and the loser finds out here rather
 /// than overwriting the winner's ticket.
-pub fn create(
-    dir: &Utf8Path,
-    kind: Kind,
-    title: &str,
-    authors: &str,
-    date: &str,
-    implements: Option<&str>,
-    description: &str,
-) -> Result<(TicketId, Utf8PathBuf)> {
-    let slug = slug(title);
+pub fn create(dir: &Utf8Path, new: &NewTicket<'_>) -> Result<(TicketId, Utf8PathBuf)> {
+    let slug = slug(new.title);
 
     for _ in 0..CLAIM_ATTEMPTS {
         let id = allocate_id(dir)?;
@@ -167,8 +177,7 @@ pub fn create(
             .open(&path)
         {
             Ok(mut file) => {
-                let document = render::ticket(title, kind, authors, date, implements, description);
-                file.write_all(document.as_bytes())?;
+                file.write_all(render::ticket(new).as_bytes())?;
 
                 return Ok((id, path));
             }
@@ -236,6 +245,55 @@ pub fn set_field(dir: &Utf8Path, id: TicketId, key: &str, value: &str) -> Result
     fs::write(&path, updated)?;
 
     Ok(path)
+}
+
+/// Read the board's label vocabulary.
+///
+/// A board with no `.labels.json` defines no labels, which is a board that
+/// hasn't started using them rather than an error — reading a ticket must not
+/// depend on the file being there.
+/// A file that is present but unreadable *is* an error: silently treating it as
+/// empty would reject every label a caller asks for and blame the caller.
+pub fn vocabulary(dir: &Utf8Path) -> Result<Vocabulary> {
+    match fs::read_to_string(dir.join(labels::FILE)) {
+        Ok(source) => Ok(Vocabulary::parse(&source)?),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Vocabulary::default()),
+        Err(error) => Err(error.into()),
+    }
+}
+
+/// Replace a ticket's labels, returning its path and what it now carries.
+///
+/// The whole set is written, so this is the only write labels need: an empty
+/// list drops the field.
+/// Replacing rather than merging keeps a retried call from landing twice.
+///
+/// `requested` is checked against the ticket's current labels, not just against
+/// the vocabulary, so a retired label the ticket already carries can be listed
+/// again and kept.
+/// The check happens here rather than in the caller because the current labels
+/// come from the same read this write is about to replace.
+pub fn set_labels(
+    dir: &Utf8Path,
+    id: TicketId,
+    vocabulary: &Vocabulary,
+    requested: &[String],
+) -> Result<(Utf8PathBuf, Vec<Label>)> {
+    let path = locate(dir, id)?;
+    let source = fs::read_to_string(&path)?;
+
+    let current = parse::labels(&source);
+    let applied = vocabulary.resolve_against(requested, &current)?;
+
+    let updated = if applied.is_empty() {
+        render::remove_metadata(&source, "Labels")
+    } else {
+        render::set_metadata(&source, "Labels", &labels::join(&applied))
+    }
+    .ok_or(ParseError::MissingMetadata)?;
+    fs::write(&path, updated)?;
+
+    Ok((path, applied))
 }
 
 /// Delete a ticket, returning the path that held it.
@@ -317,15 +375,17 @@ pub fn import(dir: &Utf8Path, upstream: &Import<'_>) -> Result<Imported> {
     let (id, path, created) = if let Some(entry) = existing {
         (entry.id, entry.path, false)
     } else {
-        let (id, path) = create(
-            dir,
-            upstream.kind,
-            &title,
-            upstream.authors,
-            upstream.date,
-            None,
-            "",
-        )?;
+        // No labels: the repository owns the metadata block, so an imported
+        // issue is labelled here by whoever triages it, not from upstream.
+        let (id, path) = create(dir, &NewTicket {
+            kind: upstream.kind,
+            title: &title,
+            authors: upstream.authors,
+            date: upstream.date,
+            implements: None,
+            labels: &[],
+            description: "",
+        })?;
 
         // Record the link before writing content, so a failure halfway leaves a
         // ticket the next import will find rather than duplicate.

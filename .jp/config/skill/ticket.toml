@@ -6,13 +6,19 @@ You have been given the ticket skill. Tickets are work items — bugs, features,
 chores — tracked as markdown files under `docs/ticket/`, alongside the RFDs. \
 The following tools help you with this:
 
-- ticket_list: List tickets by id, with status, kind, and comment count. Filter \
-by status or kind.
+- ticket_list: List tickets by id, with status, kind, labels, and comment \
+count. Filter by status, kind, or label.
 - ticket_show: Read one ticket in full, with its comments numbered for replies.
 - ticket_create: File a new ticket, at status Todo.
 - ticket_comment: Append a comment to a ticket's discussion, optionally \
 replying to an earlier one.
+- ticket_label: Replace the labels on an existing ticket.
 - ticket_close: Mark a ticket Done.
+
+Labels group tickets by area of the system, orthogonally to kind. The set is \
+closed and lives in `docs/ticket/.labels.json`; the tools advertise it, and a \
+label outside it is refused. `ticket_label` writes the whole set, so read the \
+ticket first when you mean to keep the labels it already carries.
 
 Write a ticket when the work is clear enough to start, and an RFD when it needs \
 a design first. The signal is whether there is a decision to argue about, not \
@@ -34,3 +40,4 @@ ticket_show = { enable = true, run = "unattended", result = "unattended", style.
 ticket_create = { enable = true, result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
 ticket_comment = { enable = true, result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
 ticket_close = { enable = true, result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
+ticket_label = { enable = true, result = "unattended", style.inline_results = "full", style.results_file_link = "off" }

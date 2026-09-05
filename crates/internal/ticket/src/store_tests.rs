@@ -1,37 +1,59 @@
 use camino_tempfile::Utf8TempDir;
 
 use super::*;
+use crate::Kind;
 
 const DATE: &str = "2026-08-05";
 const STAMP: &str = "2026-08-05T14:03:11Z";
 
-fn new_ticket(dir: &Utf8TempDir, title: &str) -> TicketId {
-    create(
-        dir.path(),
-        Kind::Bug,
+/// A ticket with everything but the title fixed, so a test only spells out what
+/// it cares about.
+fn draft<'a>(title: &'a str, labels: &'a [Label]) -> NewTicket<'a> {
+    NewTicket {
+        kind: Kind::Bug,
         title,
-        "john",
-        DATE,
-        None,
-        "Description.",
+        authors: "john",
+        date: DATE,
+        implements: None,
+        labels,
+        description: "Description.",
+    }
+}
+
+fn new_ticket(dir: &Utf8TempDir, title: &str) -> TicketId {
+    create(dir.path(), &draft(title, &[])).unwrap().0
+}
+
+/// A vocabulary written into a board, so label writes have something to check
+/// against.
+fn write_vocabulary(dir: &Utf8TempDir) {
+    fs::write(
+        dir.path().join(labels::FILE),
+        r#"{
+            "active": {"app/macos": "The macOS app.", "config": "Configuration."},
+            "retired": {"legacy-ui": "The old UI."}
+        }"#,
     )
-    .unwrap()
-    .0
+    .unwrap();
+}
+
+fn owned(labels: &[&str]) -> Vec<String> {
+    labels.iter().map(|label| (*label).to_owned()).collect()
 }
 
 #[test]
 fn create_writes_a_file_named_for_its_id() {
     let dir = Utf8TempDir::new().unwrap();
 
-    let (id, path) = create(
-        dir.path(),
-        Kind::Bug,
-        "Tool call header misaligned",
-        "John Doe",
-        DATE,
-        None,
-        "The header renders one column left of the body.",
-    )
+    let (id, path) = create(dir.path(), &NewTicket {
+        kind: Kind::Bug,
+        title: "Tool call header misaligned",
+        authors: "John Doe",
+        date: DATE,
+        implements: None,
+        labels: &[],
+        description: "The header renders one column left of the body.",
+    })
     .unwrap();
 
     assert_eq!(
@@ -97,7 +119,7 @@ fn an_id_in_a_future_bucket_is_ignored() {
     fs::write(
         dir.path()
             .join(format!("{}future.md", future.file_prefix())),
-        render::ticket("Future", Kind::Bug, "john", DATE, None, ""),
+        render::ticket(&draft("Future", &[])),
     )
     .unwrap();
 
@@ -116,7 +138,7 @@ fn list_rejects_a_duplicated_id() {
 
     fs::write(
         dir.path().join(format!("{}second.md", id.file_prefix())),
-        render::ticket("Second", Kind::Bug, "john", DATE, None, ""),
+        render::ticket(&draft("Second", &[])),
     )
     .unwrap();
 
@@ -376,7 +398,7 @@ fn a_write_by_a_duplicated_id_is_refused() {
 
     fs::write(
         dir.path().join(format!("{}second.md", id.file_prefix())),
-        render::ticket("Second", Kind::Bug, "john", DATE, None, ""),
+        render::ticket(&draft("Second", &[])),
     )
     .unwrap();
 
@@ -483,6 +505,166 @@ fn stripping_ids_converts_the_heading_and_its_own_replies() {
         render::strip_ids(document, "T0005"),
         "# Old ticket\n\n- **Status**: Todo\n\n-----\n\n- **From**: jp\n- **Re**: #1\n\nBody.\n"
     );
+}
+
+/// A board that hasn't started using labels reads fine; it just defines none.
+#[test]
+fn a_board_without_a_vocabulary_file_defines_no_labels() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    assert!(vocabulary(dir.path()).unwrap().is_empty());
+}
+
+/// A vocabulary that is present but broken must not read as "no labels": every
+/// write would then be refused with the caller blamed for the typo.
+#[test]
+fn a_malformed_vocabulary_file_is_an_error() {
+    let dir = Utf8TempDir::new().unwrap();
+    fs::write(dir.path().join(labels::FILE), "not json").unwrap();
+
+    assert!(matches!(
+        vocabulary(dir.path()),
+        Err(Error::Labels(labels::Error::Malformed(_)))
+    ));
+}
+
+#[test]
+fn create_writes_the_labels_it_was_given() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_vocabulary(&dir);
+
+    let resolved = vocabulary(dir.path())
+        .unwrap()
+        .resolve(&owned(&["config", "app/macos"]))
+        .unwrap();
+    let (_, path) = create(dir.path(), &draft("Labelled", &resolved)).unwrap();
+
+    let source = fs::read_to_string(&path).unwrap();
+    assert!(
+        source.contains("- **Labels**: app/macos, config\n"),
+        "{source}"
+    );
+    assert_eq!(parse::document(&source).unwrap().metadata.labels, [
+        "app/macos",
+        "config"
+    ]);
+}
+
+#[test]
+fn set_labels_replaces_the_whole_set() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_vocabulary(&dir);
+    let vocabulary = vocabulary(dir.path()).unwrap();
+
+    let resolved = vocabulary
+        .resolve(&owned(&["config", "app/macos"]))
+        .unwrap();
+    let (id, _) = create(dir.path(), &draft("Labelled", &resolved)).unwrap();
+
+    let (path, applied) = set_labels(dir.path(), id, &vocabulary, &owned(&["config"])).unwrap();
+
+    assert_eq!(labels::join(&applied), "config");
+    let ticket = parse::document(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(ticket.metadata.labels, ["config"]);
+}
+
+/// Clearing drops the field rather than leaving an empty one behind, so a
+/// ticket with no labels looks like one that never had any.
+#[test]
+fn set_labels_with_nothing_drops_the_field() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_vocabulary(&dir);
+    let vocabulary = vocabulary(dir.path()).unwrap();
+
+    let resolved = vocabulary.resolve(&owned(&["config"])).unwrap();
+    let (id, _) = create(dir.path(), &draft("Labelled", &resolved)).unwrap();
+
+    let (path, applied) = set_labels(dir.path(), id, &vocabulary, &[]).unwrap();
+
+    assert!(applied.is_empty());
+    let source = fs::read_to_string(&path).unwrap();
+    assert!(!source.contains("Labels"), "{source}");
+    assert!(parse::document(&source).unwrap().metadata.labels.is_empty());
+}
+
+/// Labelling a ticket that was filed without labels adds the field.
+#[test]
+fn set_labels_adds_the_field_to_a_ticket_without_one() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_vocabulary(&dir);
+    let vocabulary = vocabulary(dir.path()).unwrap();
+    let id = new_ticket(&dir, "Unlabelled");
+
+    let (path, _) = set_labels(dir.path(), id, &vocabulary, &owned(&["app/macos"])).unwrap();
+
+    let ticket = parse::document(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(ticket.metadata.labels, ["app/macos"]);
+    assert_eq!(ticket.description, "Description.");
+}
+
+/// The case the active/retired split exists for: an old ticket carries a label
+/// the board has since retired, and adding a new one must not force the retired
+/// one off first.
+#[test]
+fn a_retired_label_already_on_a_ticket_survives_a_relabel() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_vocabulary(&dir);
+    let vocabulary = vocabulary(dir.path()).unwrap();
+
+    // Written by hand: `legacy-ui` can no longer be applied through the API,
+    // which is exactly the situation an old ticket is in.
+    let id = new_ticket(&dir, "Old ticket");
+    let path = locate(dir.path(), id).unwrap();
+    let source = fs::read_to_string(&path).unwrap();
+    fs::write(
+        &path,
+        render::set_metadata(&source, "Labels", "legacy-ui").unwrap(),
+    )
+    .unwrap();
+
+    let (path, applied) = set_labels(
+        dir.path(),
+        id,
+        &vocabulary,
+        &owned(&["legacy-ui", "config"]),
+    )
+    .unwrap();
+
+    assert_eq!(labels::join(&applied), "config, legacy-ui");
+    let ticket = parse::document(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(ticket.metadata.labels, ["config", "legacy-ui"]);
+}
+
+#[test]
+fn a_retired_label_cannot_be_added_to_a_ticket_without_it() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_vocabulary(&dir);
+    let vocabulary = vocabulary(dir.path()).unwrap();
+    let id = new_ticket(&dir, "Fresh");
+
+    let error = set_labels(dir.path(), id, &vocabulary, &owned(&["legacy-ui"])).unwrap_err();
+
+    assert!(
+        matches!(&error, Error::Rejected(rejected) if rejected.retired == ["legacy-ui"]),
+        "{error}"
+    );
+}
+
+/// A rejected write leaves the ticket exactly as it was, so a typo in one label
+/// doesn't drop the others.
+#[test]
+fn a_rejected_relabel_writes_nothing() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_vocabulary(&dir);
+    let vocabulary = vocabulary(dir.path()).unwrap();
+
+    let resolved = vocabulary.resolve(&owned(&["config"])).unwrap();
+    let (id, path) = create(dir.path(), &draft("Labelled", &resolved)).unwrap();
+    let before = fs::read_to_string(&path).unwrap();
+
+    set_labels(dir.path(), id, &vocabulary, &owned(&["app/macos", "nope"])).unwrap_err();
+
+    assert_eq!(fs::read_to_string(&path).unwrap(), before);
 }
 
 #[test]
