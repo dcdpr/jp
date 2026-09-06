@@ -1,7 +1,7 @@
 use chrono::TimeZone as _;
 use jp_config::{
     PartialConfig as _,
-    conversation::tool::{PartialToolConfig, RunMode},
+    conversation::tool::{PartialToolConfig, RunMode, ToolSource, access::FsRuleConfig},
     model::id::{ModelIdConfig, PartialModelIdConfig, PartialModelIdOrAliasConfig, ProviderId},
 };
 use serde_json::{Map, Value};
@@ -1398,6 +1398,52 @@ fn test_from_parts_tolerates_legacy_compaction_bounds_in_base_config() {
     assert!(
         config.conversation.compaction.rules.is_empty(),
         "the `@7` rule is dropped whole rather than run over a substituted range"
+    );
+}
+
+#[test]
+fn test_from_parts_survives_a_field_a_newer_jp_added_under_a_tool() {
+    // What a user hits after downgrading, or after two machines run different
+    // versions against the same workspace: `base_config.json` carries a key
+    // under a tool that this binary has no type for. The conversation has to
+    // keep loading, with everything the binary can still read.
+    let stream = ConversationStream::new_test();
+    let (mut base_config, events) = stream.to_parts().unwrap();
+
+    base_config["conversation"]["tools"]["bash"] = serde_json::json!({
+        "source": "local",
+        "access": {
+            "fs": [{ "path": ".", "read": true }],
+            "from_a_newer_jp": [{ "host": "example.com" }]
+        }
+    });
+
+    let config = ConversationStream::from_parts(base_config, events)
+        .unwrap()
+        .config()
+        .unwrap();
+
+    assert_eq!(
+        config.assistant.model.id.resolved().to_string(),
+        "anthropic/test",
+        "the model id has no default, so losing the stored config loses the conversation"
+    );
+
+    let tool = config.conversation.tools.get("bash").unwrap();
+    assert_eq!(tool.source(), &ToolSource::Local { tool: None });
+    assert_eq!(
+        tool.access().unwrap().fs,
+        vec![FsRuleConfig {
+            path: ".".to_owned(),
+            external: None,
+            read: Some(true),
+            write: None,
+            create: None,
+            update: None,
+            delete: None,
+            execute: None,
+        }],
+        "the grants beside the unreadable one must survive"
     );
 }
 
