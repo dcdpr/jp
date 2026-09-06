@@ -425,6 +425,61 @@ fn strip_resolves_a_reference_at_every_depth_it_recurses() {
 }
 
 #[test]
+fn strip_descends_into_the_one_union_variant_that_fits() {
+    // `enable` accepts a bool, a legacy string, or a `{ state, allow_toggle }`
+    // table. A table can only be the third, and unlike the untagged unions
+    // beside it, its hand-written `Deserialize` rejects unknown keys.
+    let schema = AppConfig::schema();
+    let mut value = json!({
+        "conversation": {
+            "tools": {
+                "bash": {
+                    "enable": { "state": true, "from_a_newer_jp": 1 },
+                    "command": { "program": "bash", "from_a_newer_jp": 2 }
+                }
+            }
+        }
+    });
+
+    let stripped = strip_unknown_fields(&mut value, &schema);
+    assert_eq!(stripped, 2);
+    assert_eq!(
+        value,
+        json!({
+            "conversation": {
+                "tools": {
+                    "bash": {
+                        "enable": { "state": true },
+                        "command": { "program": "bash" }
+                    }
+                }
+            }
+        })
+    );
+}
+
+#[test]
+fn strip_leaves_a_union_alone_when_two_variants_fit() {
+    use jp_config::schema::UnionType;
+
+    let one = Schema::structure(StructType::new([(
+        "a".to_owned(),
+        Schema::boolean(BooleanType::default()),
+    )]));
+    let other = Schema::structure(StructType::new([(
+        "b".to_owned(),
+        Schema::boolean(BooleanType::default()),
+    )]));
+    let schema = Schema::union(UnionType::new_any([one, other]));
+
+    let mut value = json!({ "a": true, "b": false });
+    let stripped = strip_unknown_fields(&mut value, &schema);
+
+    assert_eq!(stripped, 0, "neither variant may claim the value");
+    assert_eq!(value, json!({ "a": true, "b": false }));
+}
+
+#[test]
 fn strip_leaves_free_form_tool_options_alone() {
     // `options` is a free-form JSON map whose contents this binary cannot
     // describe, so nothing in it is "unknown".

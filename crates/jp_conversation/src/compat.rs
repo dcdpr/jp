@@ -154,12 +154,9 @@ fn migrate_legacy_rule_bounds(value: &mut Value) {
 /// typed [`SchemaType::Unknown`], such as a tool's free-form `options`) are
 /// left untouched.
 ///
-/// A union of one type and null is an `Option`, and is walked as that type.
-/// A union with several real variants is not walked at all: an object could
-/// belong to any of them, and stripping it against the wrong one deletes valid
-/// data.
-/// `conversation.tools.<name>.enable` and `.command` are the two that reach
-/// disk in that shape.
+/// A union is walked as the one variant that could hold the value in hand.
+/// When two variants could, the union is left alone: the value could belong to
+/// either, and stripping it against the wrong one deletes valid data.
 ///
 /// Returns the number of keys removed.
 fn strip_unknown_fields(value: &mut Value, schema: &Schema) -> usize {
@@ -202,7 +199,7 @@ fn strip_schema_type<'a>(
         SchemaType::Object(object_type) => {
             strip_map_values(value, &object_type.value_type, enclosing)
         }
-        SchemaType::Union(union_type) => sole_non_null_variant(union_type)
+        SchemaType::Union(union_type) => sole_matching_variant(union_type, value)
             .map_or(0, |inner| strip_schema(value, inner, enclosing)),
         // A recursive type (`conversation.tools.<name>.parameters.<name>` is
         // the one that reaches disk, through `items` and `properties`) is
@@ -229,21 +226,59 @@ fn resolve<'a>(reference: &ReferenceType, enclosing: &Enclosing<'a>) -> Option<&
         .map(|&(_, schema)| &schema.ty)
 }
 
-/// The one variant of a union that isn't null, if there is exactly one.
+/// The one variant of a union whose shape can hold `value`, if there is exactly
+/// one.
 ///
 /// Every `Option<T>` field arrives here as a two-variant union of `T` and null,
-/// which is the common case by a wide margin.
-fn sole_non_null_variant(union_type: &UnionType) -> Option<&Schema> {
+/// so a non-null value selects `T`.
+/// The same rule separates the variants of the hand-written unions: a table
+/// written at `conversation.tools.<name>.enable` can only be the `{ state,
+/// allow_toggle }` struct, never the bool or the legacy strings beside it.
+///
+/// Ambiguity yields `None` rather than a guess, so a union of two tables is
+/// left untouched.
+fn sole_matching_variant<'a>(union_type: &'a UnionType, value: &Value) -> Option<&'a Schema> {
     let mut variants = union_type
         .variants_types
         .iter()
         .map(Box::as_ref)
-        .filter(|variant| !variant.is_null());
+        .filter(|variant| accepts(&variant.ty, value));
 
     match (variants.next(), variants.next()) {
         (Some(variant), None) => Some(variant),
         _ => None,
     }
+}
+
+/// Whether a schema could describe a JSON value of this shape.
+///
+/// Shape only: a string schema accepts every string, whatever its constraints.
+/// A union, a reference, and an unknown could each hold anything, so they
+/// accept everything — which makes them count as candidates and so pushes the
+/// enclosing union towards being left alone.
+const fn accepts(ty: &SchemaType, value: &Value) -> bool {
+    matches!(
+        (ty, value),
+        (SchemaType::Null, Value::Null)
+            | (SchemaType::Boolean(_), Value::Bool(_))
+            | (
+                SchemaType::Integer(_) | SchemaType::Float(_),
+                Value::Number(_)
+            )
+            | (
+                SchemaType::String(_) | SchemaType::Enum(_) | SchemaType::Literal(_),
+                Value::String(_),
+            )
+            | (SchemaType::Array(_) | SchemaType::Tuple(_), Value::Array(_))
+            | (
+                SchemaType::Struct(_) | SchemaType::Object(_),
+                Value::Object(_)
+            )
+            | (
+                SchemaType::Union(_) | SchemaType::Reference(_) | SchemaType::Unknown,
+                _
+            )
+    )
 }
 
 /// Strip an object against a struct schema, then recurse into what remains.
