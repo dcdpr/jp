@@ -11,7 +11,10 @@
 //! If deserialization still fails after stripping (e.g. a field's type
 //! changed), we fall back to an empty config.
 
-use jp_config::{AppConfig, PartialAppConfig, Schema, SchemaType};
+use jp_config::{
+    AppConfig, PartialAppConfig, Schema, SchemaType,
+    schema::{SchemaField, StructType, UnionType},
+};
 use serde_json::{Value, json};
 use tracing::warn;
 
@@ -143,26 +146,63 @@ fn migrate_legacy_rule_bounds(value: &mut Value) {
 
 /// Recursively strip JSON object keys that don't exist in the schema.
 ///
-/// At each [`SchemaType::Struct`] level, retains only keys present in the
-/// schema's field map and recurses into nested struct fields.
-/// Non-struct values (leaves, arrays, enums) are left untouched.
+/// Walks structs, arrays, and maps, removing object keys that the matching
+/// [`SchemaType::Struct`] has no field for.
+/// Values the schema does not describe as one of those three shapes (leaves,
+/// enums, and anything typed [`SchemaType::Unknown`], such as a tool's
+/// free-form `options`) are left untouched.
 ///
-/// Structs with any [`flatten`]ed field are skipped for stripping, because the
-/// flattened field's entries appear as sibling keys that aren't in the schema's
-/// explicit field map (e.g. per-tool overrides in `ToolsConfig`).
+/// A union of one type and null is an `Option`, and is walked as that type.
+/// A union with several real variants is not walked at all: an object could
+/// belong to any of them, and stripping it against the wrong one deletes valid
+/// data.
+/// `conversation.tools.<name>.enable` and `.command` are the two that reach
+/// disk in that shape.
 ///
-/// Returns the number of fields stripped.
+/// Returns the number of keys removed.
+fn strip_unknown_fields(value: &mut Value, schema: &Schema) -> usize {
+    match &schema.ty {
+        SchemaType::Struct(struct_type) => strip_struct(value, struct_type),
+        SchemaType::Array(array_type) => strip_items(value, &array_type.items_type),
+        SchemaType::Object(object_type) => strip_map_values(value, &object_type.value_type),
+        SchemaType::Union(union_type) => {
+            sole_non_null_variant(union_type).map_or(0, |inner| strip_unknown_fields(value, inner))
+        }
+        _ => 0,
+    }
+}
+
+/// The one variant of a union that isn't null, if there is exactly one.
+///
+/// Every `Option<T>` field arrives here as a two-variant union of `T` and null,
+/// which is the common case by a wide margin.
+fn sole_non_null_variant(union_type: &UnionType) -> Option<&Schema> {
+    let mut variants = union_type
+        .variants_types
+        .iter()
+        .map(Box::as_ref)
+        .filter(|variant| !variant.is_null());
+
+    match (variants.next(), variants.next()) {
+        (Some(variant), None) => Some(variant),
+        _ => None,
+    }
+}
+
+/// Strip an object against a struct schema, then recurse into what remains.
+///
+/// A struct with a [`flatten`]ed map field absorbs every key its explicit field
+/// map doesn't claim (per-tool overrides in `ToolsConfig` are the case in
+/// point), so at that level nothing is unknown and the leftover keys are walked
+/// against the map's value schema instead.
 ///
 /// [`flatten`]: jp_config::schema::SchemaField::flatten
-fn strip_unknown_fields(value: &mut Value, schema: &Schema) -> usize {
-    let SchemaType::Struct(struct_type) = &schema.ty else {
-        return 0;
-    };
-
+fn strip_struct(value: &mut Value, struct_type: &StructType) -> usize {
     let Some(obj) = value.as_object_mut() else {
         return 0;
     };
 
+    let entry_schema = flattened_entry_schema(struct_type);
     let has_flatten = struct_type.fields.values().any(|f| f.flatten);
 
     let mut stripped = if has_flatten {
@@ -173,20 +213,79 @@ fn strip_unknown_fields(value: &mut Value, schema: &Schema) -> usize {
         before - obj.len()
     };
 
-    // Recurse into known (non-flattened) struct fields.
-    for (key, field) in &struct_type.fields {
-        if field.flatten {
-            continue;
+    for (key, child) in obj.iter_mut() {
+        match struct_type.fields.get(key) {
+            // The flattened field's own name is not a key in the serialized
+            // form, so a key matching it is a coincidence, not that field.
+            Some(field) if !field.flatten => stripped += strip_unknown_fields(child, &field.schema),
+            Some(_) => {}
+            None => {
+                if let Some(entry_schema) = entry_schema {
+                    stripped += strip_unknown_fields(child, entry_schema);
+                }
+            }
         }
-
-        let Some(child) = obj.get_mut(key) else {
-            continue;
-        };
-
-        stripped += strip_unknown_fields(child, &field.schema);
     }
 
     stripped
+}
+
+/// The value schema of a struct's single flattened map field, if it has one.
+///
+/// `None` for a struct that flattens nothing, flattens more than one field, or
+/// flattens something other than a map — in each of those cases the shape of a
+/// leftover key is not knowable, and walking it against the wrong schema would
+/// delete valid data.
+fn flattened_entry_schema(struct_type: &StructType) -> Option<&Schema> {
+    let mut flattened = struct_type
+        .fields
+        .values()
+        .filter(|field| field.flatten)
+        .map(Box::as_ref);
+
+    match (flattened.next(), flattened.next()) {
+        (Some(SchemaField { schema, .. }), None) => match &schema.ty {
+            SchemaType::Object(object_type) => Some(&object_type.value_type),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+/// Walk each element of an array against the item schema.
+///
+/// A vector field declared with `partial_via = MergeableVec` reaches disk
+/// either as a bare array or as `{ "value": [...], "strategy": ... }`; both
+/// carry the same items.
+/// The wrapper's own keys are not part of the field's schema and are left
+/// alone.
+fn strip_items(value: &mut Value, items_schema: &Schema) -> usize {
+    let items = match value {
+        Value::Array(items) => items,
+        Value::Object(obj) => match obj.get_mut("value") {
+            Some(Value::Array(items)) => items,
+            _ => return 0,
+        },
+        _ => return 0,
+    };
+
+    items
+        .iter_mut()
+        .map(|item| strip_unknown_fields(item, items_schema))
+        .sum()
+}
+
+/// Walk each value of a map against the map's value schema.
+///
+/// Keys are entries, not fields, so none of them are stripped.
+fn strip_map_values(value: &mut Value, value_schema: &Schema) -> usize {
+    let Some(obj) = value.as_object_mut() else {
+        return 0;
+    };
+
+    obj.values_mut()
+        .map(|child| strip_unknown_fields(child, value_schema))
+        .sum()
 }
 
 #[cfg(test)]
