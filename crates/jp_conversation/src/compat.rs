@@ -165,8 +165,9 @@ fn strip_unknown_fields(value: &mut Value, schema: &Schema) -> usize {
         SchemaType::Struct(struct_type) => strip_struct(value, struct_type),
         SchemaType::Array(array_type) => strip_items(value, &array_type.items_type),
         SchemaType::Object(object_type) => strip_map_values(value, &object_type.value_type),
-        SchemaType::Union(union_type) => sole_non_null_variant(union_type)
-            .map_or(0, |inner| strip_unknown_fields(value, inner)),
+        SchemaType::Union(union_type) => {
+            sole_non_null_variant(union_type).map_or(0, |inner| strip_unknown_fields(value, inner))
+        }
         _ => 0,
     }
 }
