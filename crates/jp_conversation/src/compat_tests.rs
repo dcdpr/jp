@@ -744,20 +744,74 @@ fn partial_config_strips_unknown_preserves_known() {
 }
 
 #[test]
-fn partial_config_falls_back_on_type_mismatch() {
-    // `color` expects a bool, but we give it an array. After stripping
-    // (which won't help since `color` is a known field with a wrong type),
-    // deserialization should fail and we get an empty config.
+fn a_type_change_drops_only_the_field_that_changed() {
+    // `color` expects a bool. Stripping cannot help — the key is known, it is
+    // the value that this binary has no type for — so the field is dropped by
+    // path and everything around it is kept.
     let value = json!({
+        "assistant": { "model": { "id": "anthropic/claude-sonnet-4" } },
         "style": {
             "code": {
-                "color": [1, 2, 3]
+                "color": [1, 2, 3],
+                "line_numbers": true
             }
         }
     });
 
     let config = deserialize_partial_config(value);
     assert!(config.style.code.color.is_none());
+    assert_eq!(config.style.code.line_numbers, Some(true));
+    assert_eq!(
+        config.assistant.model.id.to_string(),
+        "anthropic/claude-sonnet-4"
+    );
+}
+
+#[test]
+fn a_type_change_inside_an_array_drops_only_that_element_field() {
+    let value = json!({
+        "assistant": {
+            "model": { "id": "anthropic/claude-sonnet-4" },
+            "instructions": [{ "title": "kept", "position": { "was": "a number" } }]
+        }
+    });
+
+    let config = deserialize_partial_config(value);
+    assert_eq!(
+        config.assistant.model.id.to_string(),
+        "anthropic/claude-sonnet-4"
+    );
+    assert_eq!(config.assistant.instructions.len(), 1);
+    assert_eq!(
+        config.assistant.instructions[0].title,
+        Some("kept".to_owned())
+    );
+}
+
+#[test]
+fn a_type_change_under_the_flattened_tool_map_drops_the_whole_subtree() {
+    // `serde`'s `flatten` buffers the map it absorbs, and path tracking does
+    // not survive that buffer: every failure under `conversation.tools`
+    // reports the container. The subtree goes, and the rest of the config
+    // stays — which the strip pass above already handles for the far more
+    // common unknown-field case.
+    let value = json!({
+        "assistant": { "model": { "id": "anthropic/claude-sonnet-4" } },
+        "style": { "code": { "color": true } },
+        "conversation": {
+            "tools": {
+                "bash": { "source": "local", "summary": { "was": "a string" } }
+            }
+        }
+    });
+
+    let config = deserialize_partial_config(value);
+    assert_eq!(
+        config.assistant.model.id.to_string(),
+        "anthropic/claude-sonnet-4"
+    );
+    assert_eq!(config.style.code.color, Some(true));
+    assert!(config.conversation.tools.tools.is_empty());
 }
 
 #[test]
