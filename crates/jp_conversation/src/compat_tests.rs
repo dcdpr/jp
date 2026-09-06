@@ -152,6 +152,203 @@ fn strip_with_minimal_synthetic_schema() {
 }
 
 #[test]
+fn strip_descends_into_flattened_map_entries() {
+    let schema = AppConfig::schema();
+    let mut value = json!({
+        "conversation": {
+            "tools": {
+                "bash": {
+                    "source": "local",
+                    "access": {
+                        "fs": [{ "path": ".", "read": true }],
+                        "from_a_newer_jp": [{ "host": "example.com" }]
+                    }
+                }
+            }
+        }
+    });
+
+    let stripped = strip_unknown_fields(&mut value, &schema);
+    assert_eq!(stripped, 1);
+    assert_eq!(
+        value,
+        json!({
+            "conversation": {
+                "tools": {
+                    "bash": {
+                        "source": "local",
+                        "access": {
+                            "fs": [{ "path": ".", "read": true }]
+                        }
+                    }
+                }
+            }
+        })
+    );
+}
+
+#[test]
+fn strip_keeps_tool_names_at_the_flattened_level() {
+    // Every key under `conversation.tools` other than `*` is a tool name, not a
+    // field, so none of them may be treated as unknown.
+    let schema = AppConfig::schema();
+    let mut value = json!({
+        "conversation": {
+            "tools": {
+                "*": { "run": "ask" },
+                "a_tool_this_binary_never_heard_of": { "source": "local" }
+            }
+        }
+    });
+
+    let stripped = strip_unknown_fields(&mut value, &schema);
+    assert_eq!(stripped, 0);
+    assert_eq!(
+        value,
+        json!({
+            "conversation": {
+                "tools": {
+                    "*": { "run": "ask" },
+                    "a_tool_this_binary_never_heard_of": { "source": "local" }
+                }
+            }
+        })
+    );
+}
+
+#[test]
+fn strip_descends_into_array_items() {
+    let schema = AppConfig::schema();
+    let mut value = json!({
+        "assistant": {
+            "instructions": [{ "title": "t", "from_a_newer_jp": 1 }]
+        }
+    });
+
+    let stripped = strip_unknown_fields(&mut value, &schema);
+    assert_eq!(stripped, 1);
+    assert_eq!(
+        value,
+        json!({ "assistant": { "instructions": [{ "title": "t" }] } })
+    );
+}
+
+#[test]
+fn strip_descends_into_mergeable_vec_items() {
+    // A vector field declared with `partial_via = MergeableVec` also reaches
+    // disk as `{ "value": [...], "strategy": ... }`, which is the shape
+    // `ConversationStream::to_parts` writes.
+    let schema = AppConfig::schema();
+    let mut value = json!({
+        "assistant": {
+            "instructions": {
+                "value": [{ "title": "t", "from_a_newer_jp": 1 }],
+                "strategy": "replace"
+            }
+        }
+    });
+
+    let stripped = strip_unknown_fields(&mut value, &schema);
+    assert_eq!(stripped, 1);
+    assert_eq!(
+        value,
+        json!({
+            "assistant": {
+                "instructions": {
+                    "value": [{ "title": "t" }],
+                    "strategy": "replace"
+                }
+            }
+        })
+    );
+}
+
+#[test]
+fn strip_descends_into_nested_maps() {
+    let schema = AppConfig::schema();
+    let mut value = json!({
+        "conversation": {
+            "tools": {
+                "bash": {
+                    "parameters": {
+                        "cmd": { "type": "string", "from_a_newer_jp": 1 }
+                    }
+                }
+            }
+        }
+    });
+
+    let stripped = strip_unknown_fields(&mut value, &schema);
+    assert_eq!(stripped, 1);
+    assert_eq!(
+        value,
+        json!({
+            "conversation": {
+                "tools": {
+                    "bash": { "parameters": { "cmd": { "type": "string" } } }
+                }
+            }
+        })
+    );
+}
+
+#[test]
+fn strip_leaves_free_form_tool_options_alone() {
+    // `options` is a free-form JSON map whose contents this binary cannot
+    // describe, so nothing in it is "unknown".
+    let schema = AppConfig::schema();
+    let mut value = json!({
+        "conversation": {
+            "tools": {
+                "bash": { "options": { "anything": { "nested": [1, 2, 3] } } }
+            }
+        }
+    });
+
+    let stripped = strip_unknown_fields(&mut value, &schema);
+    assert_eq!(stripped, 0);
+    assert_eq!(
+        value,
+        json!({
+            "conversation": {
+                "tools": {
+                    "bash": { "options": { "anything": { "nested": [1, 2, 3] } } }
+                }
+            }
+        })
+    );
+}
+
+#[test]
+fn a_field_added_under_a_tool_does_not_wipe_the_stored_config() {
+    // The shape that a newer JP writes and an older one has to survive: a field
+    // it has no type for, nested under the flattened per-tool map. Losing the
+    // whole config here costs the model id, which no schematic default
+    // supplies, and the conversation stops loading altogether.
+    let value = json!({
+        "assistant": { "model": { "id": "anthropic/claude-sonnet-4" } },
+        "conversation": {
+            "tools": {
+                "bash": {
+                    "source": "local",
+                    "access": { "from_a_newer_jp": [{ "host": "example.com" }] }
+                }
+            }
+        }
+    });
+
+    let config = deserialize_partial_config(value);
+    assert_eq!(
+        config.assistant.model.id.to_string(),
+        "anthropic/claude-sonnet-4"
+    );
+    assert_eq!(
+        config.conversation.tools.tools["bash"].source,
+        Some(jp_config::conversation::tool::ToolSource::Local { tool: None })
+    );
+}
+
+#[test]
 fn schema_top_level_is_struct_with_style() {
     let schema = AppConfig::schema();
     let jp_config::SchemaType::Struct(ref s) = schema.ty else {
