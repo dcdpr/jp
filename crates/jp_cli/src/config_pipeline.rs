@@ -236,6 +236,16 @@ impl ConfigPipeline {
         Ok(Self { base, cfg_args })
     }
 
+    /// The files + inheritance + env layer, without `--cfg` or any
+    /// per-conversation overlay.
+    ///
+    /// This is the state `--cfg=WORKSPACE` resets to: what the workspace is
+    /// configured to do, independent of how any one command was invoked.
+    /// Empty when `--cfg=NONE` suppressed implicit loading.
+    pub const fn base(&self) -> &PartialAppConfig {
+        &self.base
+    }
+
     /// Build a partial with `--cfg` applied on top of the base.
     ///
     /// No per-conversation layer.

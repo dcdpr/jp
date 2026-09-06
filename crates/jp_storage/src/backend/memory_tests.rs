@@ -24,7 +24,9 @@ fn persist_write_and_load() {
     let loaded_meta = backend.load_conversation_metadata(&id).unwrap();
     assert_eq!(loaded_meta.title, meta.title);
 
-    let loaded_events = backend.load_conversation_stream(&id).unwrap();
+    let loaded_events = backend
+        .load_conversation_stream(&id, &PartialAppConfig::empty())
+        .unwrap();
     assert!(loaded_events.is_empty());
 }
 
@@ -107,7 +109,9 @@ fn load_missing_stream_errors() {
     let backend = InMemoryStorageBackend::new();
     let id = test_id(1_000_000);
 
-    let err = backend.load_conversation_stream(&id).unwrap_err();
+    let err = backend
+        .load_conversation_stream(&id, &PartialAppConfig::empty())
+        .unwrap_err();
     assert!(err.kind().is_missing());
 }
 

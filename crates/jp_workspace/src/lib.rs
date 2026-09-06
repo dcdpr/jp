@@ -36,7 +36,7 @@ pub use error::Error;
 use error::Result;
 pub use handle::ConversationHandle;
 pub use id::Id;
-use jp_config::AppConfig;
+use jp_config::{AppConfig, PartialAppConfig};
 use jp_conversation::{Conversation, ConversationId, ConversationStream};
 use jp_storage::{
     backend::{
@@ -82,6 +82,13 @@ pub struct Workspace {
 
     /// Backend for reading conversation data and indexes.
     loader: Arc<dyn LoadBackend>,
+
+    /// Values used to repair a stored conversation config that cannot be
+    /// finalized on its own.
+    ///
+    /// Empty unless a caller supplies one, in which case every stored config
+    /// has to stand alone.
+    fallback_config: Arc<PartialAppConfig>,
 
     /// Backend for conversation-level locking.
     locker: Arc<dyn LockBackend>,
@@ -151,6 +158,7 @@ impl Workspace {
             id,
             persist: backend.clone(),
             loader: backend.clone(),
+            fallback_config: Arc::default(),
             locker: backend.clone(),
             sessions: backend,
             fs: None,
@@ -272,6 +280,18 @@ impl Workspace {
     pub fn with_loader(mut self, loader: Arc<dyn LoadBackend>) -> Self {
         self.loader = loader;
         self
+    }
+
+    /// Set the values used to repair a stored conversation config that cannot
+    /// be finalized on its own.
+    ///
+    /// A conversation's config overrides the workspace rather than inheriting
+    /// from it, so this is read only when the stored config has a hole that
+    /// would otherwise keep the conversation from loading at all, and the
+    /// filled value is written back on the next save.
+    /// Set it before any conversation is read.
+    pub fn set_fallback_config(&mut self, fallback: Arc<PartialAppConfig>) {
+        self.fallback_config = fallback;
     }
 
     /// Set the lock backend.
@@ -463,7 +483,9 @@ impl Workspace {
         if let Some(cell) = self.state.events.get(id)
             && cell.get().is_none()
         {
-            let stream = self.loader.load_conversation_stream(id)?;
+            let stream = self
+                .loader
+                .load_conversation_stream(id, &self.fallback_config)?;
             let _err = cell.set(Arc::new(RwLock::new(stream)));
         }
 
@@ -794,7 +816,7 @@ impl Workspace {
             .events
             .get(id)
             .and_then(|cell| {
-                maybe_init_events(&*self.loader, (id, cell));
+                maybe_init_events(&*self.loader, &self.fallback_config, (id, cell));
                 cell.get()
             })
             .ok_or_else(|| Error::not_found("Conversation events", id))?;
@@ -930,7 +952,7 @@ impl Workspace {
         let meta_cell = &self.state.conversations[id];
         let events_cell = &self.state.events[id];
         maybe_init_conversation(&*self.loader, (id, meta_cell));
-        maybe_init_events(&*self.loader, (id, events_cell));
+        maybe_init_events(&*self.loader, &self.fallback_config, (id, events_cell));
 
         if let (Some(meta_arc), Some(events_arc)) = (meta_cell.get(), events_cell.get()) {
             meta_arc.write().archived_at = None;
@@ -1027,8 +1049,11 @@ impl Workspace {
 
         if let Some(cell) = self.state.events.get(id) {
             match cell.get() {
-                None => maybe_init_events(&*self.loader, (id, cell)),
-                Some(arc) => match self.loader.load_conversation_stream(id) {
+                None => maybe_init_events(&*self.loader, &self.fallback_config, (id, cell)),
+                Some(arc) => match self
+                    .loader
+                    .load_conversation_stream(id, &self.fallback_config)
+                {
                     Ok(stream) => *arc.write() = stream,
                     Err(error) if error.kind().is_missing() => {}
                     Err(error) => return Err(error.into()),
@@ -1085,7 +1110,7 @@ impl Workspace {
             maybe_init_conversation(&*self.loader, (&id, cell));
         }
         if let Some(cell) = self.state.events.get(&id) {
-            maybe_init_events(&*self.loader, (&id, cell));
+            maybe_init_events(&*self.loader, &self.fallback_config, (&id, cell));
         }
 
         let metadata = self
@@ -1141,13 +1166,14 @@ fn maybe_init_conversation(
 
 fn maybe_init_events(
     loader: &dyn LoadBackend,
+    fallback: &PartialAppConfig,
     (id, cell): (&ConversationId, &OnceLock<Arc<RwLock<ConversationStream>>>),
 ) {
     if cell.get().is_some() {
         return;
     }
 
-    let stream = match loader.load_conversation_stream(id) {
+    let stream = match loader.load_conversation_stream(id, fallback) {
         Ok(stream) => stream,
         Err(error) => {
             warn!(%id, %error, cause = %error.kind(), "Failed to load conversation events. Skipping.");

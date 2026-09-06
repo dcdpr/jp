@@ -1,5 +1,6 @@
 use chrono::{DateTime, TimeDelta, Utc};
 use datetime_literal::datetime;
+use jp_config::PartialAppConfig;
 use jp_conversation::{
     ConversationEvent,
     event::{ChatRequest, ChatResponse, ToolCallRequest, TurnStart},
@@ -37,7 +38,7 @@ fn events(events: Vec<ConversationEvent>) -> ConversationStream {
         .map(|event| serde_json::to_value(event).unwrap())
         .collect();
 
-    ConversationStream::from_parts(config, events).unwrap()
+    ConversationStream::from_parts(config, events, &PartialAppConfig::empty()).unwrap()
 }
 
 #[test]

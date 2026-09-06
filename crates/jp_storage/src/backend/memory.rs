@@ -11,6 +11,7 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
+use jp_config::PartialAppConfig;
 use jp_conversation::{Conversation, ConversationId, ConversationStream};
 use serde_json::Value;
 
@@ -138,9 +139,12 @@ impl LoadBackend for InMemoryStorageBackend {
         ))
     }
 
+    /// The stored streams are already-built [`ConversationStream`]s, so there
+    /// is no stored config to recover and `_fallback` has nothing to repair.
     fn load_conversation_stream(
         &self,
         id: &ConversationId,
+        _fallback: &PartialAppConfig,
     ) -> std::result::Result<ConversationStream, LoadError> {
         let convs = self.conversations.lock().expect("poisoned");
         if let Some((_, events, _)) = convs.get(id) {

@@ -4,6 +4,7 @@ use std::{
 };
 
 use camino_tempfile::tempdir;
+use jp_config::PartialAppConfig;
 use jp_conversation::{Conversation, ConversationId, ConversationStream};
 use test_log::test;
 
@@ -230,7 +231,9 @@ fn valid_base_config_edit_survives_load_and_persist() {
     // Loading picks up the edited base_config (its mtime is newest); persisting
     // writes the resolved in-memory value back. The valid edit survives; only
     // formatting and unparseable fields are not preserved, which is acceptable.
-    let stream = storage.load_conversation_stream(&id).unwrap();
+    let stream = storage
+        .load_conversation_stream(&id, &PartialAppConfig::empty())
+        .unwrap();
     storage
         .persist_conversation(
             &id,
@@ -967,7 +970,7 @@ fn stream_loads_from_newer_root() {
     fs::write(ws_conv.join(EVENTS_FILE), "not valid json").unwrap();
     set_mtime(&ws_conv.join(EVENTS_FILE), 1_000);
 
-    let stream = storage.load_conversation_stream(&id);
+    let stream = storage.load_conversation_stream(&id, &PartialAppConfig::empty());
     assert!(
         stream.is_ok(),
         "the newer user-local stream is selected over the stale workspace copy"
@@ -1014,7 +1017,9 @@ fn legacy_stream_created_at_comes_from_conversation_id() {
     write_meta(&ws_conv, None, 1_000);
     write_legacy_stream_without_timestamp(&ws_conv);
 
-    let stream = storage.load_conversation_stream(&id).unwrap();
+    let stream = storage
+        .load_conversation_stream(&id, &PartialAppConfig::empty())
+        .unwrap();
     assert_eq!(stream.created_at, id.timestamp());
 }
 
