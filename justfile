@@ -3360,20 +3360,41 @@ _rfd-resolve NNN:
     #!/usr/bin/env sh
     set -eu
 
+    # Two files sharing an id is a repository fault, not a choice to make on
+    # the caller's behalf. Picking one and proceeding is how a rename ends up
+    # rewriting the other document's heading to the new id, so refuse instead.
+    reject_ambiguous() {
+        echo "Ambiguous: ${2} files share ID ${1}:" >&2
+        printf '%s\n' "$3" | sed 's/^/  /' >&2
+        echo "Renumber or remove one before continuing; a rewrite keyed on" >&2
+        echo "${1} would corrupt the others." >&2
+        exit 1
+    }
+
     arg="{{NNN}}"
     if echo "$arg" | grep -qiE '^D[0-9]+$'; then
         rfd_id=$(echo "$arg" | tr '[:lower:]' '[:upper:]')
-        file=$(ls docs/rfd/drafts/${rfd_id}-*.md 2>/dev/null | head -1)
-        if [ -z "$file" ]; then
+        found=$(ls docs/rfd/drafts/${rfd_id}-*.md 2>/dev/null || true)
+        count=$(printf '%s' "$found" | grep -c . || true)
+        if [ "$count" -eq 0 ]; then
             echo "No draft RFD found with ID ${rfd_id}." >&2; exit 1
         fi
+        if [ "$count" -gt 1 ]; then
+            reject_ambiguous "$rfd_id" "$count" "$found"
+        fi
+        file="$found"
     elif echo "$arg" | grep -qE '^[0-9]+$'; then
         n=$(echo "$arg" | sed 's/^0*//')
         rfd_id=$(printf "%03d" "${n:-0}")
-        file=$(ls docs/rfd/${rfd_id}-*.md 2>/dev/null | head -1)
-        if [ -z "$file" ]; then
+        found=$(ls docs/rfd/${rfd_id}-*.md 2>/dev/null || true)
+        count=$(printf '%s' "$found" | grep -c . || true)
+        if [ "$count" -eq 0 ]; then
             echo "No RFD found with number ${rfd_id}." >&2; exit 1
         fi
+        if [ "$count" -gt 1 ]; then
+            reject_ambiguous "$rfd_id" "$count" "$found"
+        fi
+        file="$found"
     else
         echo "Invalid argument '${arg}'. Use a number (41) or draft ID (D01)." >&2; exit 1
     fi
