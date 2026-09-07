@@ -1,0 +1,784 @@
+---
+source: crates/jp_config/src/lib_tests.rs
+expression: "crate::schema_shape::render(&AppConfig::schema())"
+---
+assistant: AssistantConfig
+  instructions?: MergeableVec
+    |:
+      []: InstructionsConfig
+        description: string | null
+        examples:
+          []: ExampleConfig
+            |: string
+            |: ContrastConfig
+              bad: string
+              good: string
+              reason: string | null
+        items: [string]
+        position?: int
+        title: string | null
+    |: MergedVec
+      dedup?: "inherit" | "true" | "false" | bool | null
+      discard_when_merged?: bool
+      strategy?: "append" | "prepend" | "replace" | null
+      value?:
+        []: InstructionsConfig
+          description: string | null
+          examples:
+            []: ExampleConfig
+              |: string
+              |: ContrastConfig
+                bad: string
+                good: string
+                reason: string | null
+          items: [string]
+          position?: int
+          title: string | null
+  model: ModelConfig
+    id: ModelIdOrAliasConfig
+      |: ModelIdConfig
+        name: string
+        provider: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "xai"
+      |: string
+    parameters: ParametersConfig
+      max_tokens: int | null
+      other?:
+        *: unknown
+      reasoning:
+        |: ReasoningConfig
+          |: "off"
+          |: "auto"
+          |: CustomReasoningConfig
+            effort?: "none" | "auto" | "max" | "xhigh" | "high" | "medium" | "low" | "xlow" | string
+            exclude?: bool
+        |: null
+      stop_words?: [string]
+      temperature: float | null
+      top_k: int | null
+      top_p: float | null
+  name: string | null
+  request: RequestConfig
+    base_backoff_ms?: int
+    cache?: bool | "off" | "short" | "long" | string
+    max_backoff_secs?: int
+    max_response_bytes?: int | "disabled" | "off" | bool
+    max_retries?: int
+    stream_idle_timeout_secs?: int
+  system_prompt?: MergeableString
+    |: string
+    |: MergedString
+      dedup: bool | "inherit" | "off" | "exact" | "block" | "contains" | null
+      discard_when_merged?: bool
+      separator?: "none" | "space" | "line" | "paragraph"
+      strategy?: "append" | "prepend" | "replace"
+      value?: string
+  system_prompt_sections?: MergeableVec
+    |:
+      []: SectionConfig
+        content: string
+        position?: int
+        tag: string | null
+        title: string | null
+    |: MergedVec
+      dedup?: "inherit" | "true" | "false" | bool | null
+      discard_when_merged?: bool
+      strategy?: "append" | "prepend" | "replace" | null
+      value?:
+        []: SectionConfig
+          content: string
+          position?: int
+          tag: string | null
+          title: string | null
+  tool_choice?: "auto" | "none" | "required" | string
+config_load_paths: [string]
+conversation: ConversationConfig
+  attachments?: MergeableVec
+    |:
+      []: AttachmentConfig
+        |: string
+        |: AttachmentObjectConfig
+          params:
+            *: unknown
+          path: string
+          type: string
+    |: MergedVec
+      dedup?: "inherit" | "true" | "false" | bool | null
+      discard_when_merged?: bool
+      strategy?: "append" | "prepend" | "replace" | null
+      value?:
+        []: AttachmentConfig
+          |: string
+          |: AttachmentObjectConfig
+            params:
+              *: unknown
+            path: string
+            type: string
+  compaction: CompactionConfig
+    rules?: MergeableVec
+      |:
+        []: CompactionRuleConfig
+          keep_first?: int | string
+          keep_last?: int | string
+          reasoning:
+            |:
+              |: "strip"
+              |:
+                over: int | string
+                policy: "strip"
+            |: null
+          summary:
+            |: SummaryConfig
+              context: string | null
+              instructions: string | null
+              model:
+                |: ModelConfig
+                  id: ModelIdOrAliasConfig
+                    |: ModelIdConfig
+                      name: string
+                      provider: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "xai"
+                    |: string
+                  parameters: ParametersConfig
+                    max_tokens: int | null
+                    other?:
+                      *: unknown
+                    reasoning:
+                      |: ReasoningConfig
+                        |: "off"
+                        |: "auto"
+                        |: CustomReasoningConfig
+                          effort?: "none" | "auto" | "max" | "xhigh" | "high" | "medium" | "low" | "xlow" | string
+                          exclude?: bool
+                      |: null
+                    stop_words?: [string]
+                    temperature: float | null
+                    top_k: int | null
+                    top_p: float | null
+                |: null
+              text: string | null
+            |: null
+          tool_calls:
+            |:
+              |: "strip" (aka s) | "strip-responses" (aka strip_responses, sres) | "strip-requests" (aka strip_requests, sreq) | "omit" (aka o)
+              |:
+                over: int | string
+                policy: "strip" (aka s) | "strip-responses" (aka strip_responses, sres) | "strip-requests" (aka strip_requests, sreq) | "omit" (aka o)
+            |: null
+      |: MergedVec
+        dedup?: "inherit" | "true" | "false" | bool | null
+        discard_when_merged?: bool
+        strategy?: "append" | "prepend" | "replace" | null
+        value?:
+          []: CompactionRuleConfig
+            keep_first?: int | string
+            keep_last?: int | string
+            reasoning:
+              |:
+                |: "strip"
+                |:
+                  over: int | string
+                  policy: "strip"
+              |: null
+            summary:
+              |: SummaryConfig
+                context: string | null
+                instructions: string | null
+                model:
+                  |: ModelConfig
+                    id: ModelIdOrAliasConfig
+                      |: ModelIdConfig
+                        name: string
+                        provider: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "xai"
+                      |: string
+                    parameters: ParametersConfig
+                      max_tokens: int | null
+                      other?:
+                        *: unknown
+                      reasoning:
+                        |: ReasoningConfig
+                          |: "off"
+                          |: "auto"
+                          |: CustomReasoningConfig
+                            effort?: "none" | "auto" | "max" | "xhigh" | "high" | "medium" | "low" | "xlow" | string
+                            exclude?: bool
+                        |: null
+                      stop_words?: [string]
+                      temperature: float | null
+                      top_k: int | null
+                      top_p: float | null
+                  |: null
+                text: string | null
+              |: null
+            tool_calls:
+              |:
+                |: "strip" (aka s) | "strip-responses" (aka strip_responses, sres) | "strip-requests" (aka strip_requests, sreq) | "omit" (aka o)
+                |:
+                  over: int | string
+                  policy: "strip" (aka s) | "strip-responses" (aka strip_responses, sres) | "strip-requests" (aka strip_requests, sreq) | "omit" (aka o)
+              |: null
+  default_id: "ask" | "last-activated" (aka last, last_activated) | "last-created" (aka last_created) | "previous" (aka prev) | string | null
+  inquiry: InquiryConfig
+    assistant: AssistantConfig
+      instructions?: MergeableVec
+        |:
+          []: InstructionsConfig
+            description: string | null
+            examples:
+              []: ExampleConfig
+                |: string
+                |: ContrastConfig
+                  bad: string
+                  good: string
+                  reason: string | null
+            items: [string]
+            position?: int
+            title: string | null
+        |: MergedVec
+          dedup?: "inherit" | "true" | "false" | bool | null
+          discard_when_merged?: bool
+          strategy?: "append" | "prepend" | "replace" | null
+          value?:
+            []: InstructionsConfig
+              description: string | null
+              examples:
+                []: ExampleConfig
+                  |: string
+                  |: ContrastConfig
+                    bad: string
+                    good: string
+                    reason: string | null
+              items: [string]
+              position?: int
+              title: string | null
+      model: ModelConfig
+        id: ModelIdOrAliasConfig
+          |: ModelIdConfig
+            name: string
+            provider: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "xai"
+          |: string
+        parameters: ParametersConfig
+          max_tokens: int | null
+          other?:
+            *: unknown
+          reasoning:
+            |: ReasoningConfig
+              |: "off"
+              |: "auto"
+              |: CustomReasoningConfig
+                effort?: "none" | "auto" | "max" | "xhigh" | "high" | "medium" | "low" | "xlow" | string
+                exclude?: bool
+            |: null
+          stop_words?: [string]
+          temperature: float | null
+          top_k: int | null
+          top_p: float | null
+      name: string | null
+      request: RequestConfig
+        base_backoff_ms?: int
+        cache?: bool | "off" | "short" | "long" | string
+        max_backoff_secs?: int
+        max_response_bytes?: int | "disabled" | "off" | bool
+        max_retries?: int
+        stream_idle_timeout_secs?: int
+      system_prompt?: MergeableString
+        |: string
+        |: MergedString
+          dedup: bool | "inherit" | "off" | "exact" | "block" | "contains" | null
+          discard_when_merged?: bool
+          separator?: "none" | "space" | "line" | "paragraph"
+          strategy?: "append" | "prepend" | "replace"
+          value?: string
+      system_prompt_sections?: MergeableVec
+        |:
+          []: SectionConfig
+            content: string
+            position?: int
+            tag: string | null
+            title: string | null
+        |: MergedVec
+          dedup?: "inherit" | "true" | "false" | bool | null
+          discard_when_merged?: bool
+          strategy?: "append" | "prepend" | "replace" | null
+          value?:
+            []: SectionConfig
+              content: string
+              position?: int
+              tag: string | null
+              title: string | null
+      tool_choice?: "auto" | "none" | "required" | string
+  labels: MergeableMap
+    |:
+      *: LabelConfig
+        |: string
+        |: [string]
+        |: LabelObject
+          apply_on?: ApplyOn
+            fork?: bool
+            new?: bool
+          optional?: bool
+          run?: "ask" | "unattended" | "deny"
+          value?: LabelValue
+            |: string
+            |: [string]
+            |: LabelCommand
+              cmd: CommandConfigOrString
+                |: string
+                | (expanded): CommandConfig
+                  args?: [string]
+                  program: string
+                  shell?: bool
+    |: MergedMap
+      discard_when_merged?: bool
+      strategy?: "deep_merge" | "merge" | "keep" | "replace" | null
+      value?:
+        *: LabelConfig
+          |: string
+          |: [string]
+          |: LabelObject
+            apply_on?: ApplyOn
+              fork?: bool
+              new?: bool
+            optional?: bool
+            run?: "ask" | "unattended" | "deny"
+            value?: LabelValue
+              |: string
+              |: [string]
+              |: LabelCommand
+                cmd: CommandConfigOrString
+                  |: string
+                  | (expanded): CommandConfig
+                    args?: [string]
+                    program: string
+                    shell?: bool
+  start_local?: bool
+  title: TitleConfig
+    from_heading?: bool
+    generate: GenerateConfig
+      auto?: bool
+      model:
+        |: ModelConfig
+          id: ModelIdOrAliasConfig
+            |: ModelIdConfig
+              name: string
+              provider: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "xai"
+            |: string
+          parameters: ParametersConfig
+            max_tokens: int | null
+            other?:
+              *: unknown
+            reasoning:
+              |: ReasoningConfig
+                |: "off"
+                |: "auto"
+                |: CustomReasoningConfig
+                  effort?: "none" | "auto" | "max" | "xhigh" | "high" | "medium" | "low" | "xlow" | string
+                  exclude?: bool
+              |: null
+            stop_words?: [string]
+            temperature: float | null
+            top_k: int | null
+            top_p: float | null
+        |: null
+  tools: ToolsConfig
+    *: ToolsDefaultsConfig
+      cancellation_response?: string
+      enable:
+        |:
+          |: bool
+          |: "on" | "off" | "always" | "explicit"
+          | (expanded): EnableConfig
+            allow_toggle: "any" | "never" | "if_named" | "if_named_or_group" | null
+            state: bool | null
+        |: null
+      format: "ask" | "unattended" | null
+      result?: "unattended" | "ask" | "edit" | "skip"
+      run: "ask" | "unattended" | "edit" | "skip"
+      style: DisplayStyleConfig
+        error: ErrorStyleConfig
+          inline_results: "off" | "full" | string | null
+          results_file_link: "full" | "osc8" | "off" | null
+        hidden?: bool
+        inline_results?: "off" | "full" | string
+        parameters?: ParametersStyle
+          |: "json"
+          |: "function_call"
+          |: "off"
+          |: CommandConfigOrString
+            |: string
+            | (expanded): CommandConfig
+              args?: [string]
+              program: string
+              shell?: bool
+        results_file_link?: "full" | "osc8" | "off"
+    tools (flattened):
+      *: ToolConfig
+        access:
+          |: AccessConfig
+            env: MergeableVec
+              |:
+                []: EnvRuleConfig
+                  name: string
+                  read: bool | null
+              |: MergedVec
+                dedup?: "inherit" | "true" | "false" | bool | null
+                discard_when_merged?: bool
+                strategy?: "append" | "prepend" | "replace" | null
+                value?:
+                  []: EnvRuleConfig
+                    name: string
+                    read: bool | null
+            fs: MergeableVec
+              |:
+                []: FsRuleConfig
+                  create: bool | null
+                  delete: bool | null
+                  execute: bool | null
+                  external: bool | null
+                  path: string
+                  read: bool | null
+                  update: bool | null
+                  write: bool | null
+              |: MergedVec
+                dedup?: "inherit" | "true" | "false" | bool | null
+                discard_when_merged?: bool
+                strategy?: "append" | "prepend" | "replace" | null
+                value?:
+                  []: FsRuleConfig
+                    create: bool | null
+                    delete: bool | null
+                    execute: bool | null
+                    external: bool | null
+                    path: string
+                    read: bool | null
+                    update: bool | null
+                    write: bool | null
+          |: null
+        cancellation_response: string | null
+        command:
+          |: CommandConfigOrString
+            |: string
+            | (expanded): CommandConfig
+              args?: [string]
+              program: string
+              shell?: bool
+          |: null
+        description: string | null
+        enable:
+          |:
+            |: bool
+            |: "on" | "off" | "always" | "explicit"
+            | (expanded): EnableConfig
+              allow_toggle: "any" | "never" | "if_named" | "if_named_or_group" | null
+              state: bool | null
+          |: null
+        examples: string | null
+        format: "ask" | "unattended" | null
+        options:
+          *: unknown
+        parameters:
+          *: ToolParameterConfig
+            default?: unknown | null
+            description?: string | null
+            enum?: [unknown] | null
+            examples?: string | null
+            items?: @ToolParameterConfig | null
+            properties?:
+              *: @ToolParameterConfig
+            required?: bool | null
+            summary?: string | null
+            type?: string | [string] | null
+        questions:
+          *: QuestionConfig
+            answer: unknown | null
+            target: QuestionTarget
+              |: "user" | "assistant"
+              |: PartialAssistantConfig
+                instructions?:
+                  |: PartialMergeableVec
+                    |:
+                      []: InstructionsConfig
+                        description: string | null
+                        examples:
+                          []: PartialExampleConfig
+                            |: string
+                            |: PartialContrastConfig
+                              bad?: string | null
+                              good?: string | null
+                              reason?: string | null
+                        items: [string]
+                        position?: int
+                        title: string | null
+                    |: PartialMergedVec
+                      dedup?: "inherit" | "true" | "false" | bool | null | null
+                      discard_when_merged?: bool | null
+                      strategy?: "append" | "prepend" | "replace" | null
+                      value?:
+                        |:
+                          []: InstructionsConfig
+                            description: string | null
+                            examples:
+                              []: PartialExampleConfig
+                                |: string
+                                |: PartialContrastConfig
+                                  bad?: string | null
+                                  good?: string | null
+                                  reason?: string | null
+                            items: [string]
+                            position?: int
+                            title: string | null
+                        |: null
+                  |: null
+                model?:
+                  |: PartialModelConfig
+                    id?:
+                      |: PartialModelIdOrAliasConfig
+                        |: PartialModelIdConfig
+                          name?: string | null
+                          provider?: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "xai" | null
+                        |: string
+                      |: null
+                    parameters?:
+                      |: PartialParametersConfig
+                        max_tokens?: int | null
+                        other?:
+                          |:
+                            *: unknown
+                          |: null
+                        reasoning?:
+                          |: PartialReasoningConfig
+                            |: "off"
+                            |: "auto"
+                            |: PartialCustomReasoningConfig
+                              effort?: "none" | "auto" | "max" | "xhigh" | "high" | "medium" | "low" | "xlow" | string | null
+                              exclude?: bool | null
+                          |: null
+                        stop_words?: [string] | null
+                        temperature?: float | null
+                        top_k?: int | null
+                        top_p?: float | null
+                      |: null
+                  |: null
+                name?: string | null
+                request?:
+                  |: PartialRequestConfig
+                    base_backoff_ms?: int | null
+                    cache?: bool | "off" | "short" | "long" | string | null
+                    max_backoff_secs?: int | null
+                    max_response_bytes?: int | "disabled" | "off" | bool | null
+                    max_retries?: int | null
+                    stream_idle_timeout_secs?: int | null
+                  |: null
+                system_prompt?:
+                  |: PartialMergeableString
+                    |: string
+                    |: PartialMergedString
+                      dedup?: bool | "inherit" | "off" | "exact" | "block" | "contains" | null | null
+                      discard_when_merged?: bool | null
+                      separator?: "none" | "space" | "line" | "paragraph" | null
+                      strategy?: "append" | "prepend" | "replace" | null
+                      value?: string | null
+                  |: null
+                system_prompt_sections?:
+                  |: PartialMergeableVec
+                    |:
+                      []: SectionConfig
+                        content: string
+                        position?: int
+                        tag: string | null
+                        title: string | null
+                    |: PartialMergedVec
+                      dedup?: "inherit" | "true" | "false" | bool | null | null
+                      discard_when_merged?: bool | null
+                      strategy?: "append" | "prepend" | "replace" | null
+                      value?:
+                        |:
+                          []: SectionConfig
+                            content: string
+                            position?: int
+                            tag: string | null
+                            title: string | null
+                        |: null
+                  |: null
+                tool_choice?: "auto" | "none" | "required" | string | null
+        result: "unattended" | "ask" | "edit" | "skip" | null
+        run: "ask" | "unattended" | "edit" | "skip" | null
+        source: string
+        style:
+          |: DisplayStyleConfig
+            error: ErrorStyleConfig
+              inline_results: "off" | "full" | string | null
+              results_file_link: "full" | "osc8" | "off" | null
+            hidden?: bool
+            inline_results?: "off" | "full" | string
+            parameters?: ParametersStyle
+              |: "json"
+              |: "function_call"
+              |: "off"
+              |: CommandConfigOrString
+                |: string
+                | (expanded): CommandConfig
+                  args?: [string]
+                  program: string
+                  shell?: bool
+            results_file_link?: "full" | "osc8" | "off"
+          |: null
+        summary: string | null
+editor: EditorConfig
+  cmd:
+    |: CommandConfigOrString
+      |: string
+      | (expanded): CommandConfig
+        args?: [string]
+        program: string
+        shell?: bool
+    |: null
+  envs?: [string]
+  inline: InlineEditorConfig
+    edit_mode?: "emacs" | "vi"
+extends?:
+  []: ExtendingRelativePath
+    |: string
+    |: RelativePathWithStrategy
+      path: string
+      strategy?: "before" | "after"
+inherit: bool
+interrupt: InterruptConfig
+  escalation_cooldown_secs?: int
+  streaming: StreamingInterruptConfig
+    action?: "prompt" | "continue" | "stop" | "abort" | "reply"
+    compose_in_editor?: bool | "always" | "never"
+  tool_call: ToolInterruptConfig
+    action?: "prompt" | "continue" | "restart" | "respond" | "stop"
+    compose_in_editor?: bool | "always" | "never"
+loader: LoaderConfig
+  reset: "none" | null
+plugins: PluginsConfig
+  auto_install?: bool
+  command:
+    *: CommandPluginConfig
+      checksum:
+        |: ChecksumConfig
+          algorithm?: "sha256" | "sha1"
+          value: string
+        |: null
+      install: bool | null
+      options: unknown | null
+      run: "ask" | "unattended" | "deny" | null
+  shutdown_timeout_secs?: int
+providers: ProviderConfig
+  llm: LlmProviderConfig
+    aliases:
+      *: ModelIdOrAliasConfig
+        |: ModelIdConfig
+          name: string
+          provider: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "xai"
+        |: string
+    anthropic: AnthropicConfig
+      api_key_env?: string
+      base_url?: string
+      beta_headers?: [string]
+      chain_on_max_tokens?: bool
+    cerebras: CerebrasConfig
+      api_key_env?: string
+      base_url?: string
+    deepseek: DeepseekConfig
+      api_key_env?: string
+      base_url?: string
+    google: GoogleConfig
+      api_key_env?: string
+      base_url?: string
+      service_tier: "flex" | "priority" | "standard" | null
+    llamacpp: LlamacppConfig
+      base_url?: string
+    ollama: OllamaConfig
+      base_url?: string
+    openai: OpenaiConfig
+      api_key_env?: string
+      base_url?: string
+      base_url_env?: string
+    openrouter: OpenrouterConfig
+      api_key_env?: string
+      app_name?: string
+      app_referrer: string | null
+      base_url?: string
+  mcp:
+    *: McpProviderConfig
+      |: StdioConfig
+        arguments?: [string]
+        checksum:
+          |: ChecksumConfig
+            algorithm?: "sha256" | "sha1"
+            value: string
+          |: null
+        command: string
+        optional?: bool
+        startup_timeout_secs?: int
+        type: "stdio"
+        variables?: [string]
+style: StyleConfig
+  code: CodeConfig
+    color?: bool
+    copy_link?: "off" | "full" | "osc8"
+    file_link?: "off" | "full" | "osc8"
+    line_numbers?: bool
+  inline_code: InlineCodeConfig
+    background: int | string | null
+  lock_wait: LockWaitConfig
+    delay_secs?: int
+    interval_ms?: int
+    show?: bool
+    timeout_secs?: int
+  markdown: MarkdownConfig
+    hr_style?: "markdown" | "line"
+    table_continuation_edge?: bool
+    table_max_column_width?: int
+    theme?: string | null
+    wrap_width?: int
+  mcp_startup: McpStartupConfig
+    delay_secs?: int
+    interval_ms?: int
+    show?: bool
+  reasoning: ReasoningConfig
+    background?: int | string | null
+    display?: "hidden" | "summary" | "static" | "progress" | "timer" | "full" | string
+    extend_across_tool_calls?: bool
+    summary_model:
+      |: ModelConfig
+        id: ModelIdOrAliasConfig
+          |: ModelIdConfig
+            name: string
+            provider: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "xai"
+          |: string
+        parameters: ParametersConfig
+          max_tokens: int | null
+          other?:
+            *: unknown
+          reasoning: @ReasoningConfig | null
+          stop_words?: [string]
+          temperature: float | null
+          top_k: int | null
+          top_p: float | null
+      |: null
+  streaming: StreamingConfig
+    progress: ProgressConfig
+      delay_secs?: int
+      interval_ms?: int
+      show?: bool
+  tool_call: ToolCallConfig
+    preparing: PreparingConfig
+      delay_secs?: int
+      interval_ms?: int
+      show?: bool
+    progress: ProgressConfig
+      delay_secs?: int
+      interval_ms?: int
+      show?: bool
+    show?: bool
+  typewriter: TypewriterConfig
+    code_delay?: string
+    max_latency?: string
+    text_delay?: string
+template: TemplateConfig
+  values:
+    *: unknown
+user: UserConfig
+  name: string | null
