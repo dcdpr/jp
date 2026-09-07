@@ -420,7 +420,7 @@
     "summary": "Allocate collision-free conversation IDs by scanning for occupancy and claiming the first unoccupied slot under a stable lock."
   },
   "105-mid-conversation-operator-directives.md": {
-    "hash": "2e11f98223e513d62ecf8243ab456d01cc7c1509b5cbf5e44edf0bc750d9d946",
+    "hash": "0ac17903569c11f2c6e09ccfc1a349aa708c2762fe815d1cf195a56fbd240726",
     "summary": "Mid-conversation system and tool changes anchored in message stream preserve Anthropic's prompt cache via positional directives."
   }
 }
