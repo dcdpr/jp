@@ -1394,7 +1394,7 @@ async fn test_tool_interrupt_menu_cancel_escalates() {
                 result: None,
                 style: None,
                 questions: IndexMap::new().into(),
-                options: IndexMap::default(),
+                options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
             });
@@ -1543,7 +1543,7 @@ async fn test_tool_stop_on_interrupt_commits_responses_without_follow_up() {
                 result: None,
                 style: None,
                 questions: IndexMap::new().into(),
-                options: IndexMap::default(),
+                options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: Some(CUSTOM_CANCELLATION_RESPONSE.to_string()),
             });
@@ -1687,7 +1687,7 @@ async fn test_interrupt_during_tool_prompt_completes_turn_early() {
                     answer: None,
                 })])
                 .into(),
-                options: IndexMap::default(),
+                options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
             });
@@ -2026,7 +2026,7 @@ async fn test_tool_restart_on_interrupt() {
                 result: None,
                 style: None,
                 questions: IndexMap::new().into(),
-                options: IndexMap::default(),
+                options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
             });
@@ -2182,7 +2182,7 @@ async fn test_merged_stream_exits_after_tool_response() {
                 result: None,
                 style: None,
                 questions: IndexMap::new().into(),
-                options: IndexMap::default(),
+                options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
             });
@@ -2295,7 +2295,7 @@ async fn test_tool_call_with_run_mode_ask_approves() {
                 result: None,
                 style: None,
                 questions: IndexMap::new().into(),
-                options: IndexMap::default(),
+                options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
             });
@@ -2439,7 +2439,7 @@ async fn test_tool_call_with_run_mode_ask_skips() {
                 result: None,
                 style: None,
                 questions: IndexMap::new().into(),
-                options: IndexMap::default(),
+                options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
             });
@@ -2594,7 +2594,7 @@ async fn test_permission_prompt_follows_interactive_not_is_tty() {
                 result: None,
                 style: None,
                 questions: IndexMap::new().into(),
-                options: IndexMap::default(),
+                options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
             });
@@ -2721,7 +2721,7 @@ async fn test_tool_call_with_run_mode_unattended() {
                 result: None,
                 style: None,
                 questions: IndexMap::new().into(),
-                options: IndexMap::default(),
+                options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
             });
@@ -2860,7 +2860,7 @@ async fn test_tool_call_with_run_mode_skip() {
                 result: None,
                 style: None,
                 questions: IndexMap::new().into(),
-                options: IndexMap::default(),
+                options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
             });
@@ -3015,7 +3015,7 @@ async fn test_multiple_tools_with_different_run_modes() {
                 result: None,
                 style: None,
                 questions: IndexMap::new().into(),
-                options: IndexMap::default(),
+                options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
             });
@@ -3036,7 +3036,7 @@ async fn test_multiple_tools_with_different_run_modes() {
                 result: None,
                 style: None,
                 questions: IndexMap::new().into(),
-                options: IndexMap::default(),
+                options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
             });
@@ -3224,7 +3224,7 @@ async fn test_tool_call_returns_error() {
                 result: None,
                 style: None,
                 questions: IndexMap::new().into(),
-                options: IndexMap::default(),
+                options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
             });
@@ -4531,7 +4531,7 @@ async fn test_parallel_tool_calls_rendered_atomically() {
                 result: None,
                 style: fn_call_style.clone(),
                 questions: IndexMap::new().into(),
-                options: IndexMap::default(),
+                options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
             });
@@ -4551,7 +4551,7 @@ async fn test_parallel_tool_calls_rendered_atomically() {
                 result: None,
                 style: fn_call_style,
                 questions: IndexMap::new().into(),
-                options: IndexMap::default(),
+                options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
             });
@@ -4724,7 +4724,7 @@ async fn test_single_tool_call_rendered_with_args() {
                 result: None,
                 style: None,
                 questions: IndexMap::new().into(),
-                options: IndexMap::default(),
+                options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
             });
@@ -6004,7 +6004,7 @@ fn inquiry_tool_config(questions: &[&str]) -> ToolConfig {
             })
             .collect::<IndexMap<_, _>>()
             .into(),
-        options: IndexMap::default(),
+        options: IndexMap::default().into(),
         access: None,
         cancellation_response: None,
     }
@@ -7114,7 +7114,7 @@ async fn test_parallel_tools_one_with_inquiry() {
                 result: None,
                 style: None,
                 questions: IndexMap::new().into(),
-                options: IndexMap::default(),
+                options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
             });
@@ -7549,7 +7549,7 @@ async fn test_unavailable_tool_before_approved_does_not_panic() {
                 result: None,
                 style: None,
                 questions: IndexMap::new().into(),
-                options: IndexMap::default(),
+                options: IndexMap::default().into(),
                 access: None,
                 cancellation_response: None,
             });
@@ -7981,7 +7981,7 @@ async fn reasoning_before_a_tool_call_shades_the_tool_chrome() {
             result: None,
             style: None,
             questions: IndexMap::new().into(),
-            options: IndexMap::default(),
+            options: IndexMap::default().into(),
             access: None,
             cancellation_response: None,
         });
