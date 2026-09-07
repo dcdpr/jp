@@ -178,7 +178,6 @@ pub fn map_bool_field_quote(name: &str, value: bool) -> Option<proc_macro2::Toke
     }
 }
 
-#[cfg(feature = "schema")]
 pub fn map_vec_field_quote(name: &str, value: &[String]) -> Option<proc_macro2::TokenStream> {
     if value.is_empty() {
         None

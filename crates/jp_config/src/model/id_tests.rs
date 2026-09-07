@@ -2,6 +2,30 @@ use serde_json::{Value, json};
 
 use super::*;
 
+/// `jp init` offers `variants()` to the user, so a provider serde refuses to
+/// read back must not appear there.
+#[test]
+fn the_variant_list_leaves_out_the_test_provider() {
+    use schematic::ConfigEnum as _;
+
+    let names: Vec<_> = ProviderId::variants()
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+
+    assert_eq!(names, [
+        "anthropic",
+        "cerebras",
+        "deepseek",
+        "google",
+        "llamacpp",
+        "ollama",
+        "openai",
+        "openrouter",
+        "xai"
+    ]);
+}
+
 #[test]
 fn test_model_id_config_deserialize() {
     struct TestCase {

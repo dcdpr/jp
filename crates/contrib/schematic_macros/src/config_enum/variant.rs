@@ -17,12 +17,25 @@ use crate::{
 pub struct VariantArgs {
     pub fallback: bool,
     pub value: Option<String>,
+
+    /// Extra spellings `FromStr` accepts for this variant.
+    ///
+    /// Written as `#[variant(aliases("strip_responses", "sres"))]`.
+    /// The schema keeps the canonical value as the variant's literal and lists
+    /// these beside it, so a consumer can offer one and still accept all.
+    pub aliases: Vec<syn::LitStr>,
 }
 
 pub struct Variant<'l> {
     pub args: VariantArgs,
     #[cfg_attr(not(feature = "schema"), allow(dead_code))]
     pub default: bool,
+    /// Whether serde leaves this variant out of the wire vocabulary.
+    ///
+    /// `FromStr` and `Display` still handle it, so a variant reserved for
+    /// internal use stays constructible from a string in Rust while never being
+    /// offered to, or accepted from, a user.
+    pub skipped: bool,
     pub serde_args: FieldSerdeArgs,
     pub attrs: Vec<&'l Attribute>,
     pub name: &'l Ident,
@@ -71,12 +84,26 @@ impl Variant<'_> {
             default: attrs
                 .iter()
                 .any(|v| get_meta_path(&v.meta).is_ident("default")),
+            skipped: serde_args.skip,
             attrs,
             name: &variant.ident,
             value,
             args,
             serde_args,
         }
+    }
+
+    /// Every spelling other than the canonical one that `FromStr` accepts.
+    pub fn aliases(&self) -> Vec<String> {
+        let mut aliases: Vec<String> = self.args.aliases.iter().map(syn::LitStr::value).collect();
+
+        if let Some(alias) = &self.serde_args.alias
+            && !aliases.contains(alias)
+        {
+            aliases.push(alias.clone());
+        }
+
+        aliases
     }
 
     pub fn get_display_fmt(&self) -> TokenStream {
@@ -99,21 +126,19 @@ impl Variant<'_> {
         let value = &self.value;
 
         if self.args.fallback {
-            quote! {
+            return quote! {
                 fallback => Self::#name(
                     fallback.try_into().map_err(|_| {
                         schematic::ConfigError::EnumInvalidFallback(fallback.to_string())
                     })?
                 ),
-            }
-        } else if let Some(alias) = &self.serde_args.alias {
-            quote! {
-                #value | #alias => Self::#name,
-            }
-        } else {
-            quote! {
-                #value => Self::#name,
-            }
+            };
+        }
+
+        let spellings = self.aliases();
+
+        quote! {
+            #value #(| #spellings)* => Self::#name,
         }
     }
 
@@ -121,6 +146,7 @@ impl Variant<'_> {
         let name = self.name.to_string();
         let comment = map_option_field_quote("comment", extract_comment(&self.attrs));
         let deprecated = map_option_field_quote("deprecated", extract_deprecated(&self.attrs));
+        let aliases = crate::utils::map_vec_field_quote("aliases", &self.aliases());
 
         let inner_schema = if self.args.fallback {
             quote! {
@@ -134,7 +160,7 @@ impl Variant<'_> {
             }
         };
 
-        if comment.is_none() && deprecated.is_none() {
+        if comment.is_none() && deprecated.is_none() && aliases.is_none() {
             quote! {
                 (#name.into(), SchemaField::new(#inner_schema))
             }
@@ -144,6 +170,7 @@ impl Variant<'_> {
                     let mut field = SchemaField::new(#inner_schema);
                     #comment
                     #deprecated
+                    #aliases
                     field
                 })
             }
