@@ -5,7 +5,7 @@ use schematic::Config;
 
 use crate::{
     assignment::{AssignKeyValue, KvAssignment, missing_key},
-    delta::PartialConfigDelta,
+    delta::{PartialConfigDelta, delta_value_map, delta_value_map_with_unsets, path},
     fill::FillDefaults,
     partial::ToPartial,
     types::json_value::JsonValue,
@@ -36,16 +36,18 @@ impl AssignKeyValue for PartialTemplateConfig {
 impl PartialConfigDelta for PartialTemplateConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
-            values: next
-                .values
-                .into_iter()
-                .filter_map(|(name, next)| {
-                    if self.values.get(&name).is_some_and(|prev| prev == &next) {
-                        return None;
-                    }
-                    Some((name, next))
-                })
-                .collect(),
+            values: delta_value_map(&self.values, next.values),
+        }
+    }
+
+    fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
+        Self {
+            values: delta_value_map_with_unsets(
+                &path(prefix, "values"),
+                &self.values,
+                next.values,
+                unsets,
+            ),
         }
     }
 }
