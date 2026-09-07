@@ -37,7 +37,7 @@ use crate::{
 #[derive(Debug, clap::Args)]
 pub(crate) struct Archive {
     #[command(flatten)]
-    target: PositionalIds<false, true>,
+    target: PositionalIds<true, true>,
 
     /// Archive all conversations created in a `[--created-since,
     /// --created-before)` range.

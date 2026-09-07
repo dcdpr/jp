@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use chrono::{DateTime, TimeZone as _, Utc};
+use clap::Parser as _;
 use jp_config::{AppConfig, conversation::DefaultConversationId};
 use jp_conversation::{Conversation, ConversationId};
 use jp_workspace::{
@@ -39,6 +40,14 @@ fn workspace_with_active_conversation(id: ConversationId) -> (Workspace, Session
     (ws, session)
 }
 
+/// Wraps `Archive` so its arguments can be parsed from a command line.
+#[derive(Debug, clap::Parser)]
+#[command(name = "archive")]
+struct TestArchive {
+    #[command(flatten)]
+    archive: Archive,
+}
+
 /// Default constructor for tests — no targets, no filters, default confirm.
 fn empty_archive() -> Archive {
     Archive {
@@ -74,6 +83,46 @@ fn no_target_resolves_to_session_active_conversation() {
 
     assert_eq!(handles.len(), 1);
     assert_eq!(handles[0].id(), id);
+}
+
+/// `+s` archives every conversation the session has activated.
+#[test]
+fn session_keyword_targets_every_session_conversation() {
+    let first = make_id(1000);
+    let second = make_id(2000);
+    let (mut ws, session) = workspace_with_active_conversation(first);
+    ws.create_conversation_with_id(
+        second,
+        Conversation::default(),
+        Arc::new(AppConfig::new_test()),
+    );
+    ws.record_session_activation(
+        &session,
+        second,
+        Utc.with_ymd_and_hms(2025, 1, 2, 0, 0, 0).unwrap(),
+    )
+    .unwrap();
+
+    let cmd = TestArchive::try_parse_from(["archive", "+s"])
+        .expect("+s is a valid archive target")
+        .archive;
+
+    let mut ids: Vec<_> = resolve_request(
+        &cmd.conversation_load_request(),
+        &ws,
+        Some(&session),
+        DefaultConversationId::Ask,
+        false,
+        false,
+    )
+    .unwrap()
+    .handles
+    .iter()
+    .map(jp_workspace::ConversationHandle::id)
+    .collect();
+    ids.sort();
+
+    assert_eq!(ids, vec![first, second]);
 }
 
 /// Explicit ID still routes through the explicit target path.
