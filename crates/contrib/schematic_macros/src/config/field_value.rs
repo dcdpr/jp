@@ -52,7 +52,7 @@ impl FieldValue {
             Self::Value { value, .. } => (quote!(#value), false),
         };
 
-        match args.default.as_ref() {
+        match args.default.expr() {
             Some(expr) => match expr {
                 Expr::Array(_) | Expr::Call(_) | Expr::Macro(_) | Expr::Tuple(_) => {
                     quote! { Some(#expr) }

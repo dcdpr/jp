@@ -39,17 +39,47 @@ pub fn preserve_str_literal(meta: &Meta) -> darling::Result<Expr> {
     }
 }
 
+/// What a field's `#[setting(default)]` attribute declared, if anything.
+///
+/// The bare and absent forms produce the same value at runtime — both fall
+/// back to the type's `Default` impl — but only the bare form is a statement
+/// by the author that the field has a default, which is what a schema reader
+/// needs to know to report the field as optional.
+#[derive(Debug, Default)]
+pub enum DefaultAttr {
+    /// No `default` argument on the field.
+    #[default]
+    Absent,
+
+    /// `#[setting(default)]`, falling back to the type's `Default` impl.
+    Bare,
+
+    /// `#[setting(default = <expr>)]`.
+    Expr(Expr),
+}
+
+impl DefaultAttr {
+    /// The declared default expression, for the two forms that have one.
+    pub const fn expr(&self) -> Option<&Expr> {
+        match self {
+            Self::Expr(expr) => Some(expr),
+            Self::Absent | Self::Bare => None,
+        }
+    }
+
+    /// Whether the field declares a default at all, in either form.
+    pub const fn is_declared(&self) -> bool {
+        !matches!(self, Self::Absent)
+    }
+}
+
 /// Parse a `default` argument, which accepts both `default` and `default =
 /// <expr>`.
-///
-/// The bare form states that the field falls back to its type's `Default` impl,
-/// which is what the generated code emits when no default expression is
-/// present, so it parses to `None`.
-pub fn parse_default(meta: &Meta) -> darling::Result<Option<Expr>> {
+pub fn parse_default(meta: &Meta) -> darling::Result<DefaultAttr> {
     match meta {
-        Meta::Path(_) => Ok(None),
+        Meta::Path(_) => Ok(DefaultAttr::Bare),
         Meta::List(_) => Err(darling::Error::unsupported_format("list").with_span(meta)),
-        Meta::NameValue(nv) => Ok(Some(nv.value.clone())),
+        Meta::NameValue(nv) => Ok(DefaultAttr::Expr(nv.value.clone())),
     }
 }
 

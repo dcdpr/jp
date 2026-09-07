@@ -7,7 +7,7 @@ use syn::{Attribute, Expr, ExprPath, Field as NativeField, Type};
 
 use crate::{
     common::{FieldValue, PartialAttr, TypeInfo, extract_inner_type, macros::ContainerSerdeArgs},
-    utils::{extract_common_attrs, format_case, parse_default},
+    utils::{DefaultAttr, extract_common_attrs, format_case, parse_default},
 };
 
 // #[serde()]
@@ -43,7 +43,7 @@ pub struct FieldArgs {
 
     // config
     #[darling(with = parse_default)]
-    pub default: Option<Expr>,
+    pub default: DefaultAttr,
     #[cfg(feature = "env")]
     pub env: Option<String>,
     pub merge: Option<ExprPath>,
@@ -180,7 +180,7 @@ impl Field<'_> {
 
     #[cfg(feature = "schema")]
     pub fn is_optional(&self) -> bool {
-        self.serde_args.default || self.args.default.is_some()
+        self.serde_args.default || self.args.default.is_declared()
     }
 
     pub fn is_required(&self) -> bool {
@@ -364,7 +364,7 @@ impl Field<'_> {
             quote! { schema.infer::<#value>() }
         };
 
-        if let Some(Expr::Lit(lit)) = &self.args.default {
+        if let Some(Expr::Lit(lit)) = self.args.default.expr() {
             let lit_value = match &lit.lit {
                 Lit::Str(v) => quote! { LiteralValue::String(#v.into()) },
                 Lit::Int(v) => {
