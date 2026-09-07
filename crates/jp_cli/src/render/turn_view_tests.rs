@@ -19,7 +19,7 @@ fn view_owing_separator(display: ReasoningDisplayConfig) -> (TurnView, Arc<Atomi
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
     let mut style = AppConfig::new_test().style;
     style.reasoning.display = display;
-    let mut view = TurnView::new(Arc::new(printer), style, None, None);
+    let mut view = TurnView::new(Arc::new(printer), style, None, None, RenderFlow::Replay);
     let flag = Arc::new(AtomicBool::new(true));
     view.set_tool_separator(Arc::clone(&flag));
     (view, flag)
@@ -141,7 +141,7 @@ fn invisible_tool_call_is_transparent_to_the_reasoning_region() {
     let mut style = AppConfig::new_test().style;
     style.reasoning.display = ReasoningDisplayConfig::Full;
     style.reasoning.background = Some(Color::Ansi256(236));
-    let mut view = TurnView::new(Arc::new(printer), style, None, None);
+    let mut view = TurnView::new(Arc::new(printer), style, None, None, RenderFlow::Replay);
 
     view.render_chat_response(&ChatResponse::reasoning("Thinking\n\n"));
 

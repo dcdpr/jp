@@ -23,7 +23,7 @@ use jp_conversation::event::{ChatRequest, ChatResponse};
 use jp_md::format::DefaultBackground;
 use jp_printer::Printer;
 
-use super::{ChatRenderer, StructuredRenderer};
+use super::{ChatRenderer, RenderFlow, StructuredRenderer};
 
 /// Fallback label used when no [`assistant.name`][an] is configured.
 ///
@@ -62,6 +62,9 @@ pub(crate) struct TurnView {
     /// live query path.
     pending_turn_detail: Option<String>,
 
+    /// Which flow this view renders for, deciding where a turn's framing goes.
+    flow: RenderFlow,
+
     /// Shared with the [`ToolRenderer`] (wired via
     /// [`Self::set_tool_separator`]): the flag a tool result or custom argument
     /// block raises to owe a blank-line separator before the next tool call.
@@ -77,12 +80,14 @@ impl TurnView {
         style: StyleConfig,
         assistant_name: Option<String>,
         model_id: Option<String>,
+        flow: RenderFlow,
     ) -> Self {
         Self {
-            chat: ChatRenderer::new(printer.clone(), style),
+            chat: ChatRenderer::new(printer.clone(), style, flow),
             structured: StructuredRenderer::new(printer),
             assistant_name,
             model_id,
+            flow,
             assistant_header_rendered: false,
             pending_turn_detail: None,
             tool_separator: Arc::new(AtomicBool::new(false)),
@@ -311,7 +316,7 @@ impl TurnView {
         model_id: Option<String>,
     ) {
         self.flush();
-        self.chat = ChatRenderer::new(printer.clone(), style);
+        self.chat = ChatRenderer::new(printer.clone(), style, self.flow);
         self.structured = StructuredRenderer::new(printer);
         self.assistant_name = assistant_name;
         self.model_id = model_id;

@@ -769,7 +769,7 @@ fn test_structured_not_routed_to_chat_renderer() {
 #[test]
 fn interrupt_continue_before_first_chunk_emits_assistant_header_on_resume() {
     let mut stream = ConversationStream::new_test();
-    let (printer, out, _) = Printer::memory(OutputFormat::Text);
+    let (printer, out, err) = Printer::memory(OutputFormat::Text);
     let printer = Arc::new(printer);
     let mut coordinator = TurnCoordinator::new(
         Arc::clone(&printer),
@@ -790,11 +790,14 @@ fn interrupt_continue_before_first_chunk_emits_assistant_header_on_resume() {
     coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
 
     printer.flush();
-    let output = strip_ansi(&out.lock());
+    let chrome = strip_ansi(&err.lock());
     assert!(
-        output.contains("\u{2500}\u{2500} jp "),
-        "resumed assistant content must be preceded by a `── jp` header, got: {output:?}"
+        chrome.contains("\u{2500}\u{2500} jp "),
+        "resumed assistant content must be preceded by a `── jp` header, got: {chrome:?}"
     );
+
+    // The header is framing, so stdout carries the answer and nothing else.
+    assert_eq!(*out.lock(), "hi there\n\n");
 }
 
 /// Regression: an editor-composed Reply interrupt inserts a new `ChatRequest`
@@ -804,7 +807,7 @@ fn interrupt_continue_before_first_chunk_emits_assistant_header_on_resume() {
 #[test]
 fn interrupt_reply_from_editor_renders_user_header_for_new_request() {
     let mut stream = ConversationStream::new_test();
-    let (printer, out, _) = Printer::memory(OutputFormat::Text);
+    let (printer, _out, err) = Printer::memory(OutputFormat::Text);
     let printer = Arc::new(printer);
     let mut coordinator = TurnCoordinator::new(
         Arc::clone(&printer),
@@ -834,19 +837,19 @@ fn interrupt_reply_from_editor_renders_user_header_for_new_request() {
     coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
 
     printer.flush();
-    let output = strip_ansi(&out.lock());
+    let chrome = strip_ansi(&err.lock());
 
     // The labeled user header for the Reply must show up between the
     // partial answer and the resumed assistant content.
-    let alice_idx = output
+    let alice_idx = chrome
         .find("\u{2500}\u{2500} alice ")
-        .unwrap_or_else(|| panic!("expected a `── alice` header for the Reply, got: {output:?}"));
+        .unwrap_or_else(|| panic!("expected a `── alice` header for the Reply, got: {chrome:?}"));
 
     // And a fresh assistant header must follow the user boundary.
-    let after_alice = &output[alice_idx..];
+    let after_alice = &chrome[alice_idx..];
     assert!(
         after_alice.contains("\u{2500}\u{2500} jp "),
-        "expected a fresh `── jp` header after the Reply, got: {output:?}"
+        "expected a fresh `── jp` header after the Reply, got: {chrome:?}"
     );
 }
 
@@ -856,7 +859,7 @@ fn interrupt_reply_from_editor_renders_user_header_for_new_request() {
 #[test]
 fn interrupt_reply_inline_skips_user_header_but_resets_assistant_header() {
     let mut stream = ConversationStream::new_test();
-    let (printer, out, _) = Printer::memory(OutputFormat::Text);
+    let (printer, _out, err) = Printer::memory(OutputFormat::Text);
     let printer = Arc::new(printer);
     let mut coordinator = TurnCoordinator::new(
         Arc::clone(&printer),
@@ -886,12 +889,12 @@ fn interrupt_reply_inline_skips_user_header_but_resets_assistant_header() {
     coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
 
     printer.flush();
-    let output = strip_ansi(&out.lock());
+    let chrome = strip_ansi(&err.lock());
 
     // No echoed user header: the widget's own line is the live rendering.
     assert!(
-        !output.contains("\u{2500}\u{2500} alice "),
-        "expected no `── alice` header for an inline reply, got: {output:?}"
+        !chrome.contains("\u{2500}\u{2500} alice "),
+        "expected no `── alice` header for an inline reply, got: {chrome:?}"
     );
 
     // The reply still lands in the stream as a `ChatRequest`.
@@ -906,9 +909,9 @@ fn interrupt_reply_inline_skips_user_header_but_resets_assistant_header() {
     // And the resumed assistant content opens with a fresh `── jp` header:
     // one for the partial answer, a second after the inline reply.
     assert_eq!(
-        output.matches("\u{2500}\u{2500} jp ").count(),
+        chrome.matches("\u{2500}\u{2500} jp ").count(),
         2,
-        "expected two `── jp` headers (partial answer + resumed content), got: {output:?}"
+        "expected two `── jp` headers (partial answer + resumed content), got: {chrome:?}"
     );
 }
 

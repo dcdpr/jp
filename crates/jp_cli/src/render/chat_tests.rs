@@ -11,12 +11,41 @@ fn strip_ansi(s: &str) -> String {
 
 fn create_renderer_with_config(config: AppConfig) -> (ChatRenderer, SharedBuffer, SharedBuffer) {
     let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
-    let renderer = ChatRenderer::new(Arc::new(printer), config.style);
+    let renderer = ChatRenderer::new(Arc::new(printer), config.style, RenderFlow::Replay);
     (renderer, out, err)
 }
 
 fn create_renderer() -> (ChatRenderer, SharedBuffer, SharedBuffer) {
     create_renderer_with_config(AppConfig::new_test())
+}
+
+// The gap that spaces a tool call's chrome from the content after it is chrome
+// itself: the chrome is on the error stream, so a stdout captured on its own
+// must not carry a blank line standing in for something that never landed
+// there.
+#[test]
+fn the_gap_around_tool_chrome_is_not_left_on_stdout() {
+    let (printer, out, _err) = Printer::memory(OutputFormat::Text);
+    let mut renderer = ChatRenderer::new(
+        Arc::new(printer.clone()),
+        AppConfig::new_test().style,
+        RenderFlow::Live,
+    );
+
+    renderer.render_response(&ChatResponse::Message {
+        message: "Let me check the README title.".into(),
+    });
+    renderer.enter_tool_call();
+    renderer.render_response(&ChatResponse::Message {
+        message: "`# Jean-Pierre`".into(),
+    });
+    renderer.flush();
+    printer.flush();
+
+    assert_eq!(
+        *out.lock(),
+        "Let me check the README title.\n\n`# Jean-Pierre`\n\n"
+    );
 }
 
 #[test]
@@ -53,6 +82,7 @@ fn reasoning_fill_defers_to_the_terminal_for_a_measured_width() {
     let renderer = ChatRenderer::new(
         Arc::new(printer.with_output_width(OutputWidth::Terminal(40))),
         config.style,
+        RenderFlow::Replay,
     );
 
     assert_eq!(
@@ -72,6 +102,7 @@ fn reasoning_fill_pads_with_spaces_for_a_declared_width() {
     let renderer = ChatRenderer::new(
         Arc::new(printer.with_output_width(OutputWidth::Declared(40))),
         config.style,
+        RenderFlow::Replay,
     );
 
     assert_eq!(
@@ -93,6 +124,7 @@ fn reasoning_code_block_in_a_list_stays_within_the_declared_width() {
     let mut renderer = ChatRenderer::new(
         Arc::new(printer.with_output_width(OutputWidth::Declared(40))),
         config.style,
+        RenderFlow::Replay,
     );
 
     renderer.render_response(&ChatResponse::Reasoning {
@@ -139,6 +171,7 @@ fn test_table_is_fitted_to_the_printers_terminal_width() {
     let mut renderer = ChatRenderer::new(
         Arc::new(printer.with_output_width(OutputWidth::Terminal(30))),
         config.style,
+        RenderFlow::Replay,
     );
 
     renderer.render_response(&ChatResponse::Message {
@@ -178,6 +211,7 @@ fn test_table_continuation_edge_follows_the_config() {
     let mut renderer = ChatRenderer::new(
         Arc::new(printer.with_output_width(OutputWidth::Terminal(30))),
         config.style,
+        RenderFlow::Replay,
     );
 
     renderer.render_response(&ChatResponse::Message {
@@ -1051,7 +1085,7 @@ fn test_no_separator_for_consecutive_messages() {
 
 #[test]
 fn test_blank_line_after_tool_calls_before_message() {
-    let (mut renderer, out, _err) = create_renderer();
+    let (mut renderer, out, err) = create_renderer();
 
     renderer.render_response(&ChatResponse::Message {
         message: "Before tools\n\n".into(),
@@ -1068,8 +1102,10 @@ fn test_blank_line_after_tool_calls_before_message() {
     });
     renderer.printer.flush();
 
-    let output = out.lock().clone();
-    assert_eq!(output, "Before tools\n\n\nAfter tools\n\n");
+    // The gap goes out with the chrome it spaces from, leaving the two message
+    // blocks separated by the first one's own trailing blank line.
+    assert_eq!(*err.lock(), "\n");
+    assert_eq!(*out.lock(), "Before tools\n\nAfter tools\n\n");
 }
 
 #[test]

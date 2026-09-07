@@ -51,6 +51,22 @@ impl OutputWidth {
     }
 }
 
+/// Whether chrome reaches the error stream.
+///
+/// Chrome is the run's commentary on itself: progress indicators, status lines,
+/// tool call headers.
+/// Silencing it leaves stdout untouched, so a command still emits its data and
+/// the assistant still emits its response.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Chrome {
+    /// Chrome is written to the error stream.
+    #[default]
+    Shown,
+
+    /// Chrome is discarded.
+    Silenced,
+}
+
 /// A centralized printer that handles output to out/err/tty via a background
 /// thread.
 #[derive(Debug)]
@@ -63,6 +79,9 @@ pub struct Printer {
 
     /// Whether a TTY writer is available for interactive prompts.
     has_tty: bool,
+
+    /// Whether chrome reaches the error stream.
+    chrome: Chrome,
 
     /// The width output is laid out against, when it is known.
     ///
@@ -87,6 +106,7 @@ impl Clone for Printer {
             tx: self.tx.clone(),
             format: self.format,
             has_tty: self.has_tty,
+            chrome: self.chrome,
             output_width: self.output_width,
             worker_handle: self.worker_handle.clone(),
             delay_control: self.delay_control.clone(),
@@ -134,6 +154,7 @@ impl Printer {
             tx,
             format,
             has_tty,
+            chrome: Chrome::Shown,
             output_width: OutputWidth::Unknown,
             worker_handle: Arc::new(Mutex::new(Some(handle))),
             delay_control,
@@ -158,6 +179,35 @@ impl Printer {
     #[must_use]
     pub const fn output_width(&self) -> OutputWidth {
         self.output_width
+    }
+
+    /// Set whether chrome reaches the error stream.
+    ///
+    /// [`Chrome::Silenced`] discards everything written to that stream —
+    /// [`Self::eprint`], [`Self::eprintln`], [`Self::erase_line`], and
+    /// [`Self::err_writer`] — and leaves stdout and the prompt stream alone.
+    ///
+    /// Call before the printer is shared; clones inherit the value.
+    #[must_use]
+    pub const fn with_chrome(mut self, chrome: Chrome) -> Self {
+        self.chrome = chrome;
+        self
+    }
+
+    /// Whether chrome that repaints a line in place has any effect.
+    ///
+    /// False when the chrome channel is silenced, and false under a JSON
+    /// format, where a cursor escape is neither a record nor part of one.
+    /// Callers use it to skip the work behind a repaint: a status line nobody
+    /// receives is a timer ticking for nothing.
+    #[must_use]
+    pub const fn chrome_repaints(&self) -> bool {
+        matches!(self.chrome, Chrome::Shown) && !self.format.is_json()
+    }
+
+    /// Whether a task aimed at `target` reaches it.
+    const fn accepts(&self, target: PrintTarget) -> bool {
+        !matches!((self.chrome, target), (Chrome::Silenced, PrintTarget::Err))
     }
 
     /// Create a new printer that writes to the terminal (stdout/stderr).
@@ -286,11 +336,11 @@ impl Printer {
     ///
     /// For chrome that repaints in place — status lines, progress counters,
     /// the retry notice.
-    /// A no-op in JSON modes: `\r\x1b[K` is neither a record nor part of one,
-    /// so emitting it would break `2>&1 | jq` to redraw something a JSON
-    /// consumer cannot see.
+    /// A no-op whenever [`Self::chrome_repaints`] is false: under a JSON format
+    /// `\r\x1b[K` is neither a record nor part of one, and would break `2>&1 |
+    /// jq` to redraw something a JSON consumer cannot see.
     pub fn erase_line(&self) {
-        if self.format.is_json() {
+        if !self.chrome_repaints() {
             return;
         }
 
@@ -335,6 +385,19 @@ impl Printer {
         }
     }
 
+    /// The stream interactive prompts render on.
+    ///
+    /// The TTY (`/dev/tty`) when one is available, so a prompt reaches the user
+    /// through any redirection, falling back to `out` so it always renders
+    /// somewhere visible.
+    const fn prompt_target(&self) -> PrintTarget {
+        if self.has_tty {
+            PrintTarget::Tty
+        } else {
+            PrintTarget::Out
+        }
+    }
+
     /// Get a writer for interactive prompt output.
     ///
     /// Prefers the TTY (`/dev/tty`) if available, falling back to `out`.
@@ -343,12 +406,26 @@ impl Printer {
     pub const fn prompt_writer(&self) -> PrinterWriter<'_> {
         PrinterWriter {
             printer: self,
-            target: if self.has_tty {
-                PrintTarget::Tty
-            } else {
-                PrintTarget::Out
-            },
+            target: self.prompt_target(),
         }
+    }
+
+    /// Print a line on the prompt stream.
+    ///
+    /// For the context a question needs to be answerable — the identity of a
+    /// binary awaiting approval, the details of a conversation about to be
+    /// removed.
+    /// Such a line travels with its question rather than as chrome, so
+    /// silencing chrome cannot leave a run blocking on a question whose subject
+    /// it withheld.
+    ///
+    /// The content is written as-is under every output format: a prompt is not
+    /// data, so it is never wrapped in a JSON envelope.
+    pub fn prompt_println<P: Printable>(&self, p: P) {
+        let mut task = p.into_task();
+        task.content.push('\n');
+        task.target = self.prompt_target();
+        self.send(Command::Print(task));
     }
 
     /// Get an **owned** writer for interactive prompt output.
@@ -365,11 +442,7 @@ impl Printer {
     pub fn owned_prompt_writer(&self) -> Box<dyn io::Write + Send> {
         Box::new(OwnedPrinterWriter {
             tx: self.tx.clone(),
-            target: if self.has_tty {
-                PrintTarget::Tty
-            } else {
-                PrintTarget::Out
-            },
+            target: self.prompt_target(),
         })
     }
 
@@ -478,6 +551,10 @@ impl Printer {
     /// it needs.
     fn send(&self, command: Command) {
         if let Command::Print(task) = &command {
+            if !self.accepts(task.target) {
+                return;
+            }
+
             self.track_pending(task);
         }
 
@@ -537,6 +614,13 @@ pub struct PrinterWriter<'a> {
 
 impl fmt::Write for PrinterWriter<'_> {
     fn write_str(&mut self, s: &str) -> fmt::Result {
+        // Writes reach the worker without passing `Printer::send`, so the
+        // chrome policy is applied here too. Discarding reports success, as
+        // writing to `io::sink()` does.
+        if !self.printer.accepts(self.target) {
+            return Ok(());
+        }
+
         let task = PrintTask {
             content: s.to_owned(),
             mode: PrintMode::Instant,

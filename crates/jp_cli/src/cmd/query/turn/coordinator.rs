@@ -12,7 +12,10 @@ use jp_llm::{
 use jp_md::format::DefaultBackground;
 use jp_printer::Printer;
 
-use crate::cmd::query::{interrupt::InterruptAction, stream::TurnView};
+use crate::{
+    cmd::query::{interrupt::InterruptAction, stream::TurnView},
+    render::RenderFlow,
+};
 
 /// Phase of the turn state machine.
 ///
@@ -188,7 +191,13 @@ impl TurnCoordinator {
             (None, printer.clone())
         };
 
-        let view = TurnView::new(printer.clone(), style, assistant_name, model_id);
+        let view = TurnView::new(
+            printer.clone(),
+            style,
+            assistant_name,
+            model_id,
+            RenderFlow::Live,
+        );
 
         Self {
             state: TurnPhase::Idle,
