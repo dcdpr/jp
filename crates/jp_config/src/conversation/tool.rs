@@ -395,6 +395,12 @@ impl PartialConfigDelta for PartialToolsDefaultsConfig {
             style: self
                 .style
                 .delta_with_unsets(next.style, &path(prefix, "style"), unsets),
+            access: delta_opt_partial_at(
+                &path(prefix, "access"),
+                self.access.as_ref(),
+                next.access,
+                unsets,
+            ),
         }
     }
 }

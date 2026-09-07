@@ -247,7 +247,9 @@ PartialAppConfig {
                 base_url: None,
             },
         },
-        mcp: {},
+        mcp: Map(
+            {},
+        ),
     },
     plugins: PartialPluginsConfig {
         auto_install: None,

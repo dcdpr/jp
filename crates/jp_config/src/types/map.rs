@@ -182,6 +182,23 @@ pub fn map_to_mergeable_partial<'a, T: ToPartial + 'a>(
     })
 }
 
+/// Convert a resolved map to a `MergeableMap<T::Partial>` that merges per key.
+///
+/// Used by `ToPartial` impls for a map that should still take an entry a later
+/// layer adds, which a `replace` strategy would drop.
+/// Re-merging the result over the layer it came from reproduces it rather than
+/// combining with it, because each entry's own fields state their strategies.
+pub fn map_to_partial_per_key<'a, T: ToPartial + 'a>(
+    entries: impl IntoIterator<Item = (&'a String, &'a T)>,
+) -> MergeableMap<T::Partial> {
+    MergeableMap::Map(
+        entries
+            .into_iter()
+            .map(|(k, v)| (k.clone(), v.to_partial()))
+            .collect(),
+    )
+}
+
 impl<T> From<IndexMap<String, T>> for MergeableMap<T> {
     fn from(value: IndexMap<String, T>) -> Self {
         Self::Map(value)

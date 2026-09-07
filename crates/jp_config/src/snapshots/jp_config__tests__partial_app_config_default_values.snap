@@ -507,7 +507,9 @@ Ok(
                         ),
                     },
                 },
-                mcp: {},
+                mcp: Map(
+                    {},
+                ),
             },
             plugins: PartialPluginsConfig {
                 auto_install: Some(

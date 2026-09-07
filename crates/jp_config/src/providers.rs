@@ -3,19 +3,19 @@
 pub mod llm;
 pub mod mcp;
 
-use indexmap::IndexMap;
 use schematic::Config;
 
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
-    delta::{PartialConfigDelta, delta_map, delta_map_with_unsets, path},
+    delta::{PartialConfigDelta, delta_mergeable_map, path},
     fill::{FillDefaults, fill_map},
+    internal::merge::map_with_strategy,
     partial::ToPartial,
     providers::{
         llm::{LlmProviderConfig, PartialLlmProviderConfig},
         mcp::McpProviderConfig,
     },
-    util::merge_nested_indexmap,
+    types::map::{MergeableMap, map_to_partial_per_key},
 };
 
 /// Provider configuration.
@@ -43,8 +43,10 @@ pub struct ProviderConfig {
     ///
     /// Entries merge by key, so a server added to a later layer joins the ones
     /// an earlier layer configured rather than replacing them.
-    #[setting(nested, merge = merge_nested_indexmap)]
-    pub mcp: IndexMap<String, McpProviderConfig>,
+    /// Declare the map as `{ value = { … }, strategy = "replace" }` to drop
+    /// them instead.
+    #[setting(nested, merge = map_with_strategy)]
+    pub mcp: MergeableMap<McpProviderConfig>,
 }
 
 impl AssignKeyValue for PartialProviderConfig {
@@ -68,7 +70,7 @@ impl PartialConfigDelta for PartialProviderConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
             llm: self.llm.delta(next.llm),
-            mcp: delta_map(&self.mcp, next.mcp),
+            mcp: delta_mergeable_map(&self.mcp, next.mcp),
         }
     }
 
@@ -77,7 +79,9 @@ impl PartialConfigDelta for PartialProviderConfig {
             llm: self
                 .llm
                 .delta_with_unsets(next.llm, &path(prefix, "llm"), unsets),
-            mcp: delta_map_with_unsets(&path(prefix, "mcp"), &self.mcp, next.mcp, unsets),
+            // The map states its own strategy, so a removed server travels in
+            // the value as a `replace` and needs no path reported.
+            mcp: delta_mergeable_map(&self.mcp, next.mcp),
         }
     }
 }
@@ -86,7 +90,16 @@ impl FillDefaults for PartialProviderConfig {
     fn fill_from(self, defaults: Self) -> Self {
         Self {
             llm: self.llm.fill_from(defaults.llm),
-            mcp: fill_map(self.mcp, defaults.mcp),
+            // Key by key, so a server only the defaults declare is added
+            // while one this layer already has keeps its own value. A map
+            // that states a strategy is left alone: its owner said how it
+            // combines, and filling gaps into it would answer differently.
+            mcp: match self.mcp {
+                merged @ MergeableMap::Merged(_) => merged,
+                MergeableMap::Map(entries) => {
+                    fill_map(entries, defaults.mcp.into_map()).into()
+                }
+            },
         }
     }
 }
@@ -95,11 +108,9 @@ impl ToPartial for ProviderConfig {
     fn to_partial(&self) -> Self::Partial {
         Self::Partial {
             llm: self.llm.to_partial(),
-            mcp: self
-                .mcp
-                .iter()
-                .map(|(k, v)| (k.clone(), v.to_partial()))
-                .collect(),
+            // Per key rather than `replace`: a server the workspace config
+            // gained after this conversation was created still reaches it.
+            mcp: map_to_partial_per_key(self.mcp.iter()),
         }
     }
 }
