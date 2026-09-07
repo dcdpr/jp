@@ -104,7 +104,7 @@ use jp_llm::{
     },
 };
 use jp_mcp::{StartupSet, id::McpServerId};
-use jp_printer::{LineSink, Printer, RegionStyle, StatusRegion};
+use jp_printer::{LineSink, PrintableExt as _, Printer, RegionStyle, StatusRegion};
 use jp_storage::backend::Projection;
 use jp_task::task::TitleGeneratorTask;
 use jp_term::width::{display_width, truncate_to_width};
@@ -1323,14 +1323,17 @@ async fn await_mcp_servers(
 /// Those keys gate progress display; gating a failure report behind them would
 /// reproduce the silence this closes.
 ///
-/// One persistent chrome line per server, so `--format json` turns it into the
-/// same `{"message": …}` record every other chrome line becomes.
-/// A record with its own named fields would read better on its own, and worse
-/// in the stream it belongs to: `2>&1 | jq` should meet one record shape, not
-/// two.
+/// `--format json` gets the parts rather than a sentence about them: a program
+/// deciding what to do about a missing server reads `server` and `tools`, and
+/// can render its own prose from them if it wants any.
 fn report_skipped_servers(printer: &Printer, config: &AppConfig, skipped: &[McpServerId]) {
     for id in skipped {
         let tools = tools_backed_by(config, id);
+
+        if printer.format().is_json() {
+            printer.println_raw(skipped_server_record(printer, id, &tools).to_err());
+            continue;
+        }
 
         let mut line = format!("Optional MCP server '{id}' did not start");
         if !tools.is_empty() {
@@ -1340,6 +1343,22 @@ fn report_skipped_servers(printer: &Printer, config: &AppConfig, skipped: &[McpS
 
         printer.eprintln(line.yellow().to_string());
     }
+}
+
+/// Serialize one skipped-server report, indented when the format asks for it.
+fn skipped_server_record(printer: &Printer, id: &McpServerId, tools: &[String]) -> String {
+    let record = serde_json::json!({
+        "event": "mcp_server_unavailable",
+        "server": id.as_str(),
+        "tools": tools,
+    });
+
+    if printer.format().is_json_pretty() {
+        serde_json::to_string_pretty(&record)
+    } else {
+        serde_json::to_string(&record)
+    }
+    .unwrap_or_else(|_| record.to_string())
 }
 
 /// Names of the enabled tools sourced from `server`.

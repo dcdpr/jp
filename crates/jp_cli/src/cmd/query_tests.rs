@@ -2475,23 +2475,13 @@ fn skipped_server_report_is_ndjson_under_json_format() {
     )]);
     printer.flush();
 
-    // One `{"message": …}` record, the shape every chrome line takes under
-    // `--format json`, rather than a bespoke one with its own fields.
     let chrome = err.lock().clone();
     let parsed: serde_json::Value =
         serde_json::from_str(chrome.trim()).expect("chrome is one NDJSON record");
-    let message = parsed["message"]
-        .as_str()
-        .unwrap_or_else(|| panic!("a message record, got: {parsed}"));
 
-    assert!(
-        message.contains("Optional MCP server 'bookworm' did not start"),
-        "the record must name the server: {message}"
-    );
-    assert!(
-        message.contains("unavailable tools: search"),
-        "the record must name the tools that went with it: {message}"
-    );
+    assert_eq!(parsed["event"], "mcp_server_unavailable");
+    assert_eq!(parsed["server"], "bookworm");
+    assert_eq!(parsed["tools"][0], "search");
 }
 
 #[test]
