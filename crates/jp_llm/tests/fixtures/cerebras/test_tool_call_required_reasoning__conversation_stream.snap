@@ -84,11 +84,6 @@ expression: v
         "strategy": "replace",
         "discard_when_merged": false
       },
-      "labels": {
-        "value": {},
-        "strategy": "replace",
-        "discard_when_merged": false
-      },
       "start_local": false
     },
     "style": {
