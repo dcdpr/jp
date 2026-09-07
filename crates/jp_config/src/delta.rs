@@ -42,6 +42,18 @@ pub trait PartialConfigDelta: PartialConfig {
     }
 }
 
+/// Fields a delta never stores.
+///
+/// Each is read while the config file declaring it is loaded, and only its
+/// effect outlives that: `extends` has already been merged in by the time a
+/// partial exists, `inherit` has already stopped the merge chain, and `loader`
+/// steered how its own entry was loaded ([RFD 038]).
+/// Carrying any of them into a conversation would re-apply a decision that was
+/// made once, so [`PartialConfigDelta::delta`] zeroes all three.
+///
+/// [RFD 038]: https://jp.computer/rfd/038
+pub const LOAD_TIME_ONLY: &[&str] = &["extends", "inherit", "loader"];
+
 /// Join a field name onto its parent's dotted path.
 #[must_use]
 pub fn path(prefix: &str, name: &str) -> String {

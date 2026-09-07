@@ -78,11 +78,10 @@ fn unset_of_an_absent_map_entry_is_a_no_op() {
 
 /// Paths that clearing does not reach, and why.
 ///
-/// Neither is settable by `--cfg` either: `extends` and `loader` are read while
-/// the file declaring them is loaded, and only their effect outlives that ([RFD
-/// 038]), so neither has a key-value arm to reach.
-///
-/// [RFD 038]: https://jp.computer/rfd/038
+/// Both are load-time fields (see [`crate::delta::LOAD_TIME_ONLY`]) with no
+/// key-value arm at all, so there is nothing to reach rather than something
+/// that refuses.
+/// `inherit` is the third of that set and *is* settable, so it is absent here.
 const UNREACHABLE: &[&str] = &["extends", "loader.reset"];
 
 /// Every field the schema names is reachable by path, or listed as not.
