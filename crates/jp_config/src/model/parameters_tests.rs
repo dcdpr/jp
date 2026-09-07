@@ -72,6 +72,25 @@ fn known_keys_match_the_schema() {
     assert_eq!(fields, known);
 }
 
+/// The collector stays in the schema, because a stored config writes the
+/// parameters under it and the compat layer strips whatever the schema does not
+/// name.
+#[test]
+fn other_survives_a_stored_config_round_trip() {
+    let mut p = PartialParametersConfig::default();
+    p.assign(KvAssignment::try_from_cli("seed", "42").unwrap())
+        .unwrap();
+
+    let json = serde_json::to_value(&p).unwrap();
+    let back: PartialParametersConfig = serde_json::from_value(json).unwrap();
+
+    assert_eq!(
+        back.other.as_ref().map(IndexMap::len),
+        Some(1),
+        "a provider parameter survives being written and read back"
+    );
+}
+
 /// Deserialize a `[parameters]` block through the production path: the
 /// collector is wired up on `ModelConfig::parameters`, not on the parameter
 /// config itself.
