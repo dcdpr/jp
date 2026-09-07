@@ -104,6 +104,8 @@ expression: "AppConfig::fields()"
     "conversation.tools.*.style.error.results_file_link",
     "conversation.tools.*.enable.allow_toggle",
     "conversation.tools.*.enable.state",
+    "conversation.tools.*.access.env",
+    "conversation.tools.*.access.fs",
     "conversation.title.from_heading",
     "conversation.title.generate.auto",
     "conversation.title.generate.model.id",

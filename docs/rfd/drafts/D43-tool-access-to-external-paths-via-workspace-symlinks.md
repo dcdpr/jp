@@ -447,20 +447,26 @@ Intermediate directories are created as needed.
 
 #### Tool-scope expansion
 
-The per-tool `access.fs` model in [RFD 076] does not currently support wildcard
-grants — `conversation.tools.*` is `ToolsDefaultsConfig`, which has no `access`
-field.
 A `--mount` invocation without a `TOOL:` prefix expands at CLI time: the CLI
 enumerates enabled local tools in the current conversation's resolved config and
 writes one rule per tool.
 MCP and builtin tools are excluded (consistent with [RFD 076]'s validation that
-rejects `access` on those sources).
+rejects `access` declared on those sources).
+
+The grant is not written to `[conversation.tools.'*'.access]` even though that
+scope exists, because a `'*'` rule would reach tools the invocation never named
+and the scope applies whole rather than merging (see [RFD 076]).
+Writing one rule per tool keeps the mount scoped to the tools in play.
+
+A tool that declared no rules of its own has its block seeded before the mount
+rule is appended — with the `'*'` rules when they exist, otherwise with a
+workspace-wide rule — so the mount does not change what the tool could already
+reach.
 
 Tools added to the configuration after the `--mount` invocation do not inherit
 the grant.
 Users who add new tools and want them to share the mount re-run `--mount`
 (idempotent on the symlink; appends the new tool's rule).
-A follow-up RFD can add group-level access defaults if this becomes painful.
 
 #### Pipeline stages
 
@@ -500,12 +506,17 @@ restrict the affected tool's access to *only* the mounted path.
 The CLI prevents this by checking the post-merge state of `access.fs` for each
 tool before writing:
 
-| Initial state for tool `T`                             | What `--mount` writes                                                                                     |
-| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------- |
-| `T`'s `access.fs` is empty (no rule from any layer)    | The mount rule **plus** `path = "."` with read/write to preserve `T`'s previous implicit workspace access |
-| `T`'s `access.fs` is non-empty (any layer declared it) | Just the mount rule; the user has already opted into default-deny                                         |
+| Initial state for tool `T`                                         | What `--mount` writes                                                                            |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| `T` declared rules of its own (any layer)                          | Just the mount rule; the user has already opted into default-deny                                |
+| `T` declared none, but `[conversation.tools.'*'.access]` has rules | The mount rule **plus** a copy of the `'*'` rules, which `T` was inheriting until now            |
+| No rule anywhere                                                   | The mount rule **plus** `path = "."` with read/write, preserving `T`'s implicit workspace access |
 
 The user does not need to think about this; the CLI handles it.
+The middle row matters because scope resolution is replace, not merge: writing
+into `T`'s own block detaches it from `'*'`, so the inherited rules have to come
+along or the mount would silently widen `T` back to whatever it had before the
+`'*'` block existed.
 
 #### Effects of `--mount`
 

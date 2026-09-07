@@ -304,7 +304,7 @@
     "summary": "Mandatory OS-level sandboxing for tool subprocesses using platform-native mechanisms, extending access policy with subprocess and environment controls."
   },
   "076-tool-access-grants.md": {
-    "hash": "5a2eec3871a5231d8d7b086e022be8f702ec814014e5946d898a0ab25f2715d1",
+    "hash": "247e36e8d6f1aaa6624f51229a192bdd0d7f94a16b46cb10da4d0d2683badeda",
     "summary": "Adds typed access policy grants for tools to declare and enforce what workspace resources they can access."
   },
   "077-plugin-configuration-and-trust-policy.md": {
