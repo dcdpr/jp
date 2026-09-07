@@ -22,7 +22,7 @@ use crate::{
         title::{PartialTitleConfig, TitleConfig},
         tool::{PartialToolsConfig, ToolsConfig},
     },
-    delta::{PartialConfigDelta, delta_mergeable_vec, delta_opt, path},
+    delta::{PartialConfigDelta, delta_mergeable_vec, delta_opt, delta_opt_at, path},
     fill::FillDefaults,
     internal::merge::{map_with_strategy, vec_with_strategy},
     partial::{ToPartial, partial_opt},
@@ -197,7 +197,12 @@ impl PartialConfigDelta for PartialConversationConfig {
                 .inquiry
                 .delta_with_unsets(next.inquiry, &path(prefix, "inquiry"), unsets),
             start_local: delta_opt(self.start_local.as_ref(), next.start_local),
-            default_id: delta_opt(self.default_id.as_ref(), next.default_id),
+            default_id: delta_opt_at(
+                &path(prefix, "default_id"),
+                self.default_id.as_ref(),
+                next.default_id,
+                unsets,
+            ),
             labels: self.labels_delta(next.labels),
         }
     }

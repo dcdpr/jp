@@ -11,7 +11,8 @@ use crate::types::command::shell_command_line;
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::{
-        PartialConfigDelta, delta_opt, delta_opt_partial, delta_opt_vec, delta_opt_vec_at, path,
+        PartialConfigDelta, delta_opt, delta_opt_partial, delta_opt_partial_at, delta_opt_vec,
+        delta_opt_vec_at, path,
     },
     fill::FillDefaults,
     partial::{ToPartial, partial_opt, partial_opt_config},
@@ -129,7 +130,7 @@ impl PartialConfigDelta for PartialEditorConfig {
 
     fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
         Self {
-            cmd: delta_opt_partial(self.cmd.as_ref(), next.cmd),
+            cmd: delta_opt_partial_at(&path(prefix, "cmd"), self.cmd.as_ref(), next.cmd, unsets),
             envs: delta_opt_vec_at(&path(prefix, "envs"), self.envs.as_ref(), next.envs, unsets),
             inline: self.inline.delta(next.inline),
         }
