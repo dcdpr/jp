@@ -6,7 +6,7 @@ use jp_config::{
     assistant::tool_choice::ToolChoice,
     model::{
         id::{ModelIdConfig, Name, ProviderId},
-        parameters::{ReasoningConfig, ReasoningEffort},
+        parameters::{ReasoningConfig, ReasoningEffort, ServiceTier},
     },
     providers::llm::cerebras::CerebrasConfig,
 };
@@ -507,6 +507,17 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Value, bool
 
     if let Some(max_tokens) = parameters.max_tokens {
         body["max_completion_tokens"] = json!(max_tokens);
+    }
+
+    // Service tiers are only served by dedicated endpoints; a shared endpoint
+    // rejects the field, which is why it is sent only when asked for.
+    if let Some(tier) = parameters.service_tier {
+        body["service_tier"] = json!(match tier {
+            ServiceTier::Auto => "auto",
+            ServiceTier::Flex => "flex",
+            ServiceTier::Standard => "default",
+            ServiceTier::Priority => "priority",
+        });
     }
 
     // Reasoning effort for gpt-oss-120b and zai-glm-4.7.

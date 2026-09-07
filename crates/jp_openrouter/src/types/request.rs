@@ -58,6 +58,27 @@ pub struct ChatCompletion {
     /// Response format for structured output.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub response_format: Option<ResponseFormat>,
+
+    /// Capacity tier to route the request to.
+    ///
+    /// Omitted unless asked for: a request that names no tier is never routed
+    /// to a non-default one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub service_tier: Option<ServiceTier>,
+}
+
+/// Capacity tier to route a chat completion to.
+///
+/// `Flex` restricts routing to flex endpoints and surfaces a capacity error
+/// rather than falling back to a pricier one.
+/// `Priority` tries priority endpoints first and falls back.
+/// Billing follows the endpoint that actually served the request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ServiceTier {
+    Default,
+    Flex,
+    Priority,
 }
 
 /// Response format for structured output in the chat completions API.

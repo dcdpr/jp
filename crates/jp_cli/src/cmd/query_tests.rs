@@ -1265,6 +1265,81 @@ fn query_model_override_is_persisted_as_config_delta() {
 }
 
 #[test]
+fn tier_flag_parses_every_rung() {
+    for (arg, expected) in [
+        ("auto", ServiceTier::Auto),
+        ("flex", ServiceTier::Flex),
+        ("standard", ServiceTier::Standard),
+        ("priority", ServiceTier::Priority),
+    ] {
+        let query = parse_query(&["--tier", arg]).unwrap();
+        assert_eq!(query.service_tier, Some(expected));
+    }
+
+    // `scale` is an OpenAI-only rung JP does not model; accepting it here would
+    // hand an unmappable value to every other provider.
+    assert!(parse_query(&["--tier", "scale"]).is_err());
+}
+
+#[test]
+fn tier_flag_reaches_the_model_parameters() {
+    let query = parse_query(&["--tier", "flex"]).unwrap();
+
+    let partial = query
+        .apply_cli_config(None, PartialAppConfig::empty(), None)
+        .unwrap();
+
+    assert_eq!(
+        partial.assistant.model.parameters.service_tier,
+        Some(ServiceTier::Flex)
+    );
+}
+
+#[test]
+fn tier_flag_is_persisted_as_config_delta() {
+    // Each tier is served from separate provider capacity, so a tier that
+    // reverted after one turn would throw the prompt cache away twice: once on
+    // the way in and once on the way back out. `--tier` is durable for that
+    // reason, unlike the invocation-scoped `-u`/`-U`.
+    let base_config = Arc::new(config_with_model(ProviderId::Anthropic, "base-model"));
+    let conversation_id = make_id(1100);
+
+    let mut workspace = Workspace::in_memory("/tmp/test");
+    workspace.create_conversation_with_id(
+        conversation_id,
+        Conversation::default(),
+        Arc::clone(&base_config),
+    );
+
+    let handle = workspace.acquire_conversation(&conversation_id).unwrap();
+    let lock = workspace.test_lock(handle);
+
+    let query = Query {
+        service_tier: Some(ServiceTier::Flex),
+        ..Default::default()
+    };
+
+    let partial = query
+        .apply_cli_config(None, base_config.to_partial(), None)
+        .unwrap();
+    let runtime_config = build(partial).unwrap();
+
+    let delta = get_config_delta_from_cli(&runtime_config, &lock)
+        .unwrap()
+        .expect("expected --tier to produce a config delta");
+
+    lock.as_mut()
+        .update_events(|events| events.add_config_delta(delta));
+
+    let merged = lock.events().config().unwrap();
+    assert_eq!(
+        merged.assistant.model.parameters.service_tier,
+        Some(ServiceTier::Flex),
+        "the tier must still apply on the next turn, without the flag"
+    );
+}
+
+#[test]
 fn query_cfg_sourced_compaction_persists_as_config_delta() {
     // Compaction config that arrives through the config layers (e.g. `-c
     // compaction/heavy` or `--cfg conversation.compaction.rules=...`) is

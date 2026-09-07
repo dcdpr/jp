@@ -54,6 +54,54 @@ fn reasoning_query(reasoning: jp_config::model::parameters::PartialReasoningConf
     }
 }
 
+/// Build a query whose only config is an explicit service tier.
+fn tier_query(tier: Option<ServiceTier>) -> ChatQuery {
+    let mut events = jp_conversation::ConversationStream::new_test().with_turn("test");
+    let mut delta = jp_config::PartialAppConfig::empty();
+    delta.assistant.model.parameters.service_tier = tier;
+    events.add_config_delta(delta);
+
+    ChatQuery {
+        thread: jp_conversation::thread::Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+    }
+}
+
+fn request_tier(tier: Option<ServiceTier>) -> Option<Value> {
+    let model = ModelDetails::empty((PROVIDER, "gpt-oss-120b").try_into().unwrap());
+    let (body, _) = create_request(&model, tier_query(tier)).unwrap();
+
+    body.get("service_tier").cloned()
+}
+
+/// A shared Cerebras endpoint rejects `service_tier` outright, so a request
+/// that asked for no tier must not carry the field at all.
+#[test]
+fn request_omits_the_tier_when_unset() {
+    assert_eq!(request_tier(None), None);
+}
+
+#[test]
+fn request_serializes_every_tier() {
+    assert_eq!(request_tier(Some(ServiceTier::Auto)), Some(json!("auto")));
+    assert_eq!(request_tier(Some(ServiceTier::Flex)), Some(json!("flex")));
+    // Cerebras spells the base rung `default`, not `standard`.
+    assert_eq!(
+        request_tier(Some(ServiceTier::Standard)),
+        Some(json!("default"))
+    );
+    assert_eq!(
+        request_tier(Some(ServiceTier::Priority)),
+        Some(json!("priority"))
+    );
+}
+
 /// An explicit `off` is honoured for a model whose reasoning support is
 /// unknown.
 /// Discarding it would silently ignore the caller, and a model absent from the

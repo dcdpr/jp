@@ -74,6 +74,7 @@ Ok(
                     parameters: PartialParametersConfig {
                         max_tokens: None,
                         reasoning: None,
+                        service_tier: None,
                         temperature: None,
                         top_p: None,
                         top_k: None,
@@ -238,6 +239,7 @@ Ok(
                             parameters: PartialParametersConfig {
                                 max_tokens: None,
                                 reasoning: None,
+                                service_tier: None,
                                 temperature: None,
                                 top_p: None,
                                 top_k: None,
@@ -467,7 +469,6 @@ Ok(
                         base_url: Some(
                             "https://generativelanguage.googleapis.com/v1beta",
                         ),
-                        service_tier: None,
                     },
                     llamacpp: PartialLlamacppConfig {
                         base_url: Some(

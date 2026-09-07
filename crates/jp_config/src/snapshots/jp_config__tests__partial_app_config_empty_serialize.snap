@@ -29,6 +29,7 @@ PartialAppConfig {
             parameters: PartialParametersConfig {
                 max_tokens: None,
                 reasoning: None,
+                service_tier: None,
                 temperature: None,
                 top_p: None,
                 top_k: None,
@@ -106,6 +107,7 @@ PartialAppConfig {
                     parameters: PartialParametersConfig {
                         max_tokens: None,
                         reasoning: None,
+                        service_tier: None,
                         temperature: None,
                         top_p: None,
                         top_k: None,
@@ -227,7 +229,6 @@ PartialAppConfig {
             google: PartialGoogleConfig {
                 api_key_env: None,
                 base_url: None,
-                service_tier: None,
             },
             llamacpp: PartialLlamacppConfig {
                 base_url: None,

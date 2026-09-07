@@ -95,6 +95,61 @@ async fn test_anthropic_opus_5_parallel_tool_round_trip() -> Result {
     run_test(function_name!(), requests).await
 }
 
+/// Build a query whose only config is an explicit service tier.
+fn tier_query(tier: Option<ServiceTier>) -> ChatQuery {
+    let mut events = jp_conversation::ConversationStream::new_test().with_turn("test");
+    let mut delta = jp_config::PartialAppConfig::empty();
+    delta.assistant.model.parameters.service_tier = tier;
+    events.add_config_delta(delta);
+
+    ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+    }
+}
+
+fn request_tier(tier: Option<ServiceTier>) -> Option<serde_json::Value> {
+    let model = ModelDetails::empty("openrouter/openai/gpt-5".parse().unwrap());
+    let (request, ..) = create_request(&model, tier_query(tier)).unwrap();
+    let request = serde_json::to_value(request).unwrap();
+
+    request.get("service_tier").cloned()
+}
+
+/// A request naming no tier is never routed to a non-default one, so the field
+/// has to be absent rather than spelled out as `default`.
+#[test]
+fn request_omits_the_tier_when_unset() {
+    assert_eq!(request_tier(None), None);
+}
+
+#[test]
+fn request_omits_the_tier_for_auto() {
+    // OpenRouter has no `auto`; leaving the field off is what hands the choice
+    // back to its own endpoint ranking.
+    assert_eq!(request_tier(Some(ServiceTier::Auto)), None);
+}
+
+#[test]
+fn request_serializes_each_supported_tier() {
+    assert_eq!(request_tier(Some(ServiceTier::Flex)), Some(json!("flex")));
+    // OpenRouter spells the base rung `default`, not `standard`.
+    assert_eq!(
+        request_tier(Some(ServiceTier::Standard)),
+        Some(json!("default"))
+    );
+    assert_eq!(
+        request_tier(Some(ServiceTier::Priority)),
+        Some(json!("priority"))
+    );
+}
+
 #[test]
 fn request_preserves_integer_tool_parameter_type() -> Result {
     let request = TestRequest::chat(ProviderId::Openrouter)

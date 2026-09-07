@@ -19,7 +19,7 @@ use jp_config::{
     assistant::{request::CachePolicy, tool_choice::ToolChoice},
     model::{
         id::{Name, ProviderId},
-        parameters::{ReasoningConfig, ReasoningEffort},
+        parameters::{ReasoningConfig, ReasoningEffort, ServiceTier},
     },
     providers::llm::anthropic::AnthropicConfig,
 };
@@ -1106,6 +1106,60 @@ impl BetaFeatures {
     }
 }
 
+/// The beta feature that admits `speed: "fast"`.
+///
+/// Requested per request rather than configured on the client: it gates a
+/// research preview an account can lack access to, so it rides along only with
+/// the requests that need it.
+///
+/// See: <https://platform.claude.com/docs/en/build-with-claude/fast-mode>
+const FAST_MODE_BETA: &str = "fast-mode-2026-02-01";
+
+/// Apply a requested service tier to the request under construction.
+///
+/// Anthropic splits the concept across two fields: `service_tier` chooses
+/// whether a Priority Tier capacity commitment may serve the request, and
+/// `speed` opts into fast mode.
+/// Each tier therefore sets one field or the other, never both, which is also
+/// what keeps the request out of the combination Anthropic rejects (fast mode
+/// is unavailable under a commitment).
+///
+/// # Errors
+///
+/// Returns [`Error::UnsupportedServiceTier`] for `flex`, which Anthropic sells
+/// no equivalent of.
+fn apply_service_tier(
+    builder: &mut types::CreateMessagesRequestBuilder,
+    tier: ServiceTier,
+) -> Result<()> {
+    match tier {
+        ServiceTier::Auto => {
+            builder.service_tier(types::ServiceTier::Auto);
+        }
+        ServiceTier::Standard => {
+            builder.service_tier(types::ServiceTier::StandardOnly);
+        }
+
+        // Nothing else sets request-scoped betas, so this can set the list
+        // wholesale rather than appending to it.
+        ServiceTier::Priority => {
+            builder.speed(types::Speed::Fast);
+            builder.betas(vec![FAST_MODE_BETA.to_owned()]);
+        }
+
+        // The Batch API is the nearest thing Anthropic offers and is not
+        // reachable through a request parameter, so there is nothing to map to.
+        ServiceTier::Flex => {
+            return Err(Error::UnsupportedServiceTier {
+                provider: PROVIDER,
+                tier,
+            });
+        }
+    }
+
+    Ok(())
+}
+
 /// Map the configured cache policy to an Anthropic cache-control annotation.
 ///
 /// Returns `None` when caching is disabled, in which case every breakpoint site
@@ -1355,6 +1409,11 @@ fn create_request(
     }
 
     let parameters = &config.assistant.model.parameters;
+
+    if let Some(tier) = parameters.service_tier {
+        apply_service_tier(&mut builder, tier)?;
+    }
+
     let max_tokens = parameters
         .max_tokens
         .or(model.max_output_tokens)

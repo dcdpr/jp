@@ -800,6 +800,12 @@ impl From<jp_llm::Error> for Error {
             ]
             .into(),
             UnknownModel(model) => [("message", "Unknown model".into()), ("model", model)].into(),
+            UnsupportedServiceTier { provider, tier } => [
+                ("message", "Unsupported service tier".into()),
+                ("provider", provider.to_string()),
+                ("tier", tier.to_string()),
+            ]
+            .into(),
             Stream(stream_error) => [
                 ("message", "Stream error".into()),
                 ("error", stream_error.to_string()),

@@ -52,6 +52,27 @@ pub struct ParametersConfig {
     #[setting(nested)]
     pub reasoning: Option<ReasoningConfig>,
 
+    /// Capacity tier to request from the provider.
+    ///
+    /// If unset, no tier is sent and the provider's own default applies.
+    ///
+    /// - `flex`: Cheaper and slower, with best-effort availability.
+    /// - `standard`: Regular priority and regular pricing.
+    /// - `priority`: Faster and more expensive, served from prioritized
+    ///   capacity.
+    /// - `auto`: Use the highest tier the account can reach, falling back to
+    ///   `standard`.
+    ///
+    /// Which tiers are available depends on the provider, the model, and the
+    /// account.
+    /// A provider that sells no equivalent of the requested tier refuses the
+    /// query and says so, rather than quietly falling back to a rung that costs
+    /// something else: `anthropic` has no `flex`, for instance.
+    ///
+    /// Providers serve each tier from separate capacity, so changing this value
+    /// discards the prompt cache built up by earlier turns.
+    pub service_tier: Option<ServiceTier>,
+
     /// Temperature of the model.
     ///
     /// Controls the randomness of the output.
@@ -112,6 +133,7 @@ pub struct ParametersConfig {
 pub(crate) const KNOWN_KEYS: &[&str] = &[
     "max_tokens",
     "reasoning",
+    "service_tier",
     "temperature",
     "top_p",
     "top_k",
@@ -179,6 +201,7 @@ impl AssignKeyValue for PartialParametersConfig {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
             "max_tokens" => self.max_tokens = kv.try_some_u32()?,
+            "service_tier" => self.service_tier = kv.try_some_from_str()?,
             "temperature" => self.temperature = kv.try_some_f32()?,
             "top_p" => self.top_p = kv.try_some_f32()?,
             "top_k" => self.top_k = kv.try_some_u32()?,
@@ -196,6 +219,7 @@ impl PartialConfigDelta for PartialParametersConfig {
         Self {
             max_tokens: delta_opt(self.max_tokens.as_ref(), next.max_tokens),
             reasoning: delta_opt_partial(self.reasoning.as_ref(), next.reasoning),
+            service_tier: delta_opt(self.service_tier.as_ref(), next.service_tier),
             temperature: delta_opt(self.temperature.as_ref(), next.temperature),
             top_p: delta_opt(self.top_p.as_ref(), next.top_p),
             top_k: delta_opt(self.top_k.as_ref(), next.top_k),
@@ -208,6 +232,7 @@ impl PartialConfigDelta for PartialParametersConfig {
         Self {
             max_tokens: delta_opt(self.max_tokens.as_ref(), next.max_tokens),
             reasoning: delta_opt_partial(self.reasoning.as_ref(), next.reasoning),
+            service_tier: delta_opt(self.service_tier.as_ref(), next.service_tier),
             temperature: delta_opt(self.temperature.as_ref(), next.temperature),
             top_p: delta_opt(self.top_p.as_ref(), next.top_p),
             top_k: delta_opt(self.top_k.as_ref(), next.top_k),
@@ -227,6 +252,7 @@ impl FillDefaults for PartialParametersConfig {
         Self {
             max_tokens: self.max_tokens.or(defaults.max_tokens),
             reasoning: fill_opt(self.reasoning, defaults.reasoning),
+            service_tier: self.service_tier.or(defaults.service_tier),
             temperature: self.temperature.or(defaults.temperature),
             top_p: self.top_p.or(defaults.top_p),
             top_k: self.top_k.or(defaults.top_k),
@@ -241,6 +267,7 @@ impl ToPartial for ParametersConfig {
         Self::Partial {
             max_tokens: partial_opts(self.max_tokens.as_ref(), None),
             reasoning: partial_opt_config(self.reasoning.as_ref(), None),
+            service_tier: partial_opts(self.service_tier.as_ref(), None),
             temperature: partial_opts(self.temperature.as_ref(), None),
             top_p: partial_opts(self.top_p.as_ref(), None),
             top_k: partial_opts(self.top_k.as_ref(), None),
@@ -248,6 +275,29 @@ impl ToPartial for ParametersConfig {
             other: partial_opt(&self.other, None),
         }
     }
+}
+
+/// Capacity tier to request from the provider.
+///
+/// Providers sell more than one grade of capacity for the same model, trading
+/// price against latency and availability.
+/// The variants name the rungs JP understands; each provider maps them onto its
+/// own wire vocabulary, and refuses the request when it sells no equivalent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ConfigEnum)]
+#[serde(rename_all = "lowercase")]
+pub enum ServiceTier {
+    /// Use the highest tier the account can reach, falling back to standard
+    /// capacity when none is available.
+    Auto,
+
+    /// Cheaper and slower, with best-effort availability.
+    Flex,
+
+    /// Regular priority and regular pricing.
+    Standard,
+
+    /// Faster and more expensive, served from prioritized capacity.
+    Priority,
 }
 
 /// Define the name to serialize and deserialize for a unit variant.

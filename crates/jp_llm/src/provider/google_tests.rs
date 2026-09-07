@@ -55,7 +55,7 @@ fn test_unknown_model_requests_thoughts() {
         tool_choice: ToolChoice::Auto,
     };
 
-    let (request, _) = create_request(&model, query, None).unwrap();
+    let (request, _) = create_request(&model, query).unwrap();
 
     let thinking = request
         .generation_config
@@ -190,7 +190,7 @@ fn test_off_on_unknown_model_attempts_disable() {
         tool_choice: ToolChoice::Auto,
     };
 
-    let (request, _) = create_request(&model, query, None).unwrap();
+    let (request, _) = create_request(&model, query).unwrap();
 
     let thinking = request
         .generation_config
@@ -229,7 +229,7 @@ fn test_off_on_always_on_leveled_model_uses_lowest_level() {
         tool_choice: ToolChoice::Auto,
     };
 
-    let (request, _) = create_request(&model, query, None).unwrap();
+    let (request, _) = create_request(&model, query).unwrap();
 
     let thinking = request
         .generation_config
@@ -1260,8 +1260,7 @@ mod stream_error_classification {
 
 mod service_tier_configuration {
     use jp_config::{
-        PartialAppConfig,
-        providers::llm::google::{GoogleConfig, ServiceTier},
+        PartialAppConfig, model::parameters::ServiceTier, providers::llm::google::GoogleConfig,
         types::json_value::JsonValue,
     };
     use jp_conversation::{ConversationStream, thread::Thread};
@@ -1282,18 +1281,18 @@ mod service_tier_configuration {
         if cfg!(windows) { "USERNAME" } else { "USER" }.to_owned()
     }
 
-    fn test_query_with_parameters(other_params: Vec<(&str, &str)>) -> ChatQuery {
+    fn google() -> Google {
+        Google::try_from(&GoogleConfig {
+            api_key_env: api_key_env(),
+            base_url: "https://generativelanguage.googleapis.com/v1beta".into(),
+        })
+        .unwrap()
+    }
+
+    fn query_with_tier(tier: Option<ServiceTier>) -> ChatQuery {
         let mut events = ConversationStream::new_test().with_turn("test");
         let mut delta = PartialAppConfig::empty();
-        let other = delta
-            .assistant
-            .model
-            .parameters
-            .other
-            .get_or_insert_default();
-        for (k, v) in other_params {
-            other.insert(k.to_owned(), JsonValue(json!(v)));
-        }
+        delta.assistant.model.parameters.service_tier = tier;
         events.add_config_delta(delta);
 
         ChatQuery {
@@ -1308,100 +1307,74 @@ mod service_tier_configuration {
         }
     }
 
+    fn request_tier(tier: Option<ServiceTier>) -> Option<serde_json::Value> {
+        let model = ModelDetails::empty((PROVIDER, "gemini-2.5-flash").try_into().unwrap());
+        let val = google()
+            .request_value(&model, query_with_tier(tier))
+            .unwrap();
+
+        // The wire field is camelCase; a snake_case key would mean the request
+        // type changed underneath us and the tier is silently not being sent.
+        assert!(val.get("service_tier").is_none());
+
+        val.get("serviceTier").cloned()
+    }
+
     #[test]
-    fn request_omits_service_tier_when_unset() {
-        let google = Google::try_from(&GoogleConfig {
-            api_key_env: api_key_env(),
-            base_url: "https://generativelanguage.googleapis.com/v1beta".into(),
-            service_tier: None,
-        })
-        .unwrap();
+    fn request_omits_the_tier_when_unset() {
+        assert_eq!(request_tier(None), None);
+    }
+
+    #[test]
+    fn request_omits_the_tier_for_auto() {
+        // Gemini has no `auto`, so the choice is left to the provider by saying
+        // nothing rather than by picking a rung.
+        assert_eq!(request_tier(Some(ServiceTier::Auto)), None);
+    }
+
+    #[test]
+    fn request_serializes_each_supported_tier() {
+        assert_eq!(request_tier(Some(ServiceTier::Flex)), Some(json!("flex")));
+        assert_eq!(
+            request_tier(Some(ServiceTier::Standard)),
+            Some(json!("standard"))
+        );
+        assert_eq!(
+            request_tier(Some(ServiceTier::Priority)),
+            Some(json!("priority"))
+        );
+    }
+
+    #[test]
+    fn a_raw_other_parameter_no_longer_sets_the_tier() {
+        // `service_tier` is a modelled parameter, so the catch-all map is not a
+        // second way to reach it.
+        let mut events = ConversationStream::new_test().with_turn("test");
+        let mut delta = PartialAppConfig::empty();
+        delta
+            .assistant
+            .model
+            .parameters
+            .other
+            .get_or_insert_default()
+            .insert("service_tier".to_owned(), JsonValue(json!("flex")));
+        events.add_config_delta(delta);
+
+        let query = ChatQuery {
+            thread: Thread {
+                system_prompt: None,
+                sections: vec![],
+                attachments: vec![],
+                events,
+            },
+            tools: vec![],
+            tool_choice: jp_config::assistant::tool_choice::ToolChoice::Auto,
+        };
 
         let model = ModelDetails::empty((PROVIDER, "gemini-2.5-flash").try_into().unwrap());
-        let query = test_query_with_parameters(vec![]);
-        let val = google.request_value(&model, query).unwrap();
+        let val = google().request_value(&model, query).unwrap();
 
         assert!(val.get("serviceTier").is_none());
         assert!(val.get("service_tier").is_none());
-    }
-
-    #[test]
-    fn request_serializes_flex_tier_from_provider_config() {
-        let google = Google::try_from(&GoogleConfig {
-            api_key_env: api_key_env(),
-            base_url: "https://generativelanguage.googleapis.com/v1beta".into(),
-            service_tier: Some(ServiceTier::Flex),
-        })
-        .unwrap();
-
-        let model = ModelDetails::empty((PROVIDER, "gemini-2.5-flash").try_into().unwrap());
-        let query = test_query_with_parameters(vec![]);
-        let val = google.request_value(&model, query).unwrap();
-
-        assert_eq!(val["serviceTier"], "flex");
-    }
-
-    #[test]
-    fn request_serializes_priority_tier_from_provider_config() {
-        let google = Google::try_from(&GoogleConfig {
-            api_key_env: api_key_env(),
-            base_url: "https://generativelanguage.googleapis.com/v1beta".into(),
-            service_tier: Some(ServiceTier::Priority),
-        })
-        .unwrap();
-
-        let model = ModelDetails::empty((PROVIDER, "gemini-2.5-flash").try_into().unwrap());
-        let query = test_query_with_parameters(vec![]);
-        let val = google.request_value(&model, query).unwrap();
-
-        assert_eq!(val["serviceTier"], "priority");
-    }
-
-    #[test]
-    fn request_serializes_standard_tier_from_provider_config() {
-        let google = Google::try_from(&GoogleConfig {
-            api_key_env: api_key_env(),
-            base_url: "https://generativelanguage.googleapis.com/v1beta".into(),
-            service_tier: Some(ServiceTier::Standard),
-        })
-        .unwrap();
-
-        let model = ModelDetails::empty((PROVIDER, "gemini-2.5-flash").try_into().unwrap());
-        let query = test_query_with_parameters(vec![]);
-        let val = google.request_value(&model, query).unwrap();
-
-        assert_eq!(val["serviceTier"], "standard");
-    }
-
-    #[test]
-    fn parameter_override_takes_precedence_over_provider_config() {
-        let google = Google::try_from(&GoogleConfig {
-            api_key_env: api_key_env(),
-            base_url: "https://generativelanguage.googleapis.com/v1beta".into(),
-            service_tier: Some(ServiceTier::Standard),
-        })
-        .unwrap();
-
-        let model = ModelDetails::empty((PROVIDER, "gemini-2.5-flash").try_into().unwrap());
-        let query = test_query_with_parameters(vec![("service_tier", "flex")]);
-        let val = google.request_value(&model, query).unwrap();
-
-        assert_eq!(val["serviceTier"], "flex");
-    }
-
-    #[test]
-    fn parameter_override_camel_case_takes_precedence() {
-        let google = Google::try_from(&GoogleConfig {
-            api_key_env: api_key_env(),
-            base_url: "https://generativelanguage.googleapis.com/v1beta".into(),
-            service_tier: None,
-        })
-        .unwrap();
-
-        let model = ModelDetails::empty((PROVIDER, "gemini-2.5-flash").try_into().unwrap());
-        let query = test_query_with_parameters(vec![("serviceTier", "priority")]);
-        let val = google.request_value(&model, query).unwrap();
-
-        assert_eq!(val["serviceTier"], "priority");
     }
 }

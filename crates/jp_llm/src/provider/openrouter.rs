@@ -10,7 +10,7 @@ use jp_config::{
     assistant::tool_choice::ToolChoice,
     model::{
         id::{ModelIdConfig, Name, ProviderId},
-        parameters::ReasoningEffort,
+        parameters::{ReasoningEffort, ServiceTier},
     },
     providers::llm::openrouter::OpenrouterConfig,
 };
@@ -847,11 +847,26 @@ fn create_request(
             tools,
             tool_choice,
             response_format,
+            service_tier: parameters.service_tier.and_then(convert_service_tier),
             ..Default::default()
         },
         is_structured,
         forced_tool_fallback,
     ))
+}
+
+/// Map a requested tier onto OpenRouter's `service_tier` parameter.
+///
+/// Returns `None` for `auto`: OpenRouter has no such value, and omitting the
+/// field leaves routing to its own endpoint ranking, which is what asking the
+/// provider to choose means here.
+fn convert_service_tier(tier: ServiceTier) -> Option<request::ServiceTier> {
+    match tier {
+        ServiceTier::Auto => None,
+        ServiceTier::Flex => Some(request::ServiceTier::Flex),
+        ServiceTier::Standard => Some(request::ServiceTier::Default),
+        ServiceTier::Priority => Some(request::ServiceTier::Priority),
+    }
 }
 
 /// Map catalog entries to [`ModelDetails`], skipping entries that cannot be

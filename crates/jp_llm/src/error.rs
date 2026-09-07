@@ -4,6 +4,7 @@ use std::{
 };
 
 use async_anthropic::errors::AnthropicError;
+use jp_config::model::{id::ProviderId, parameters::ServiceTier};
 use reqwest::header::{HeaderMap, RETRY_AFTER};
 use serde_json::Value;
 
@@ -431,6 +432,16 @@ pub enum Error {
 
     #[error("Unknown model: {0}")]
     UnknownModel(String),
+
+    /// A configured service tier the provider sells no equivalent of.
+    ///
+    /// Refused rather than dropped: the tier decides what the request costs, so
+    /// substituting the nearest one silently changes the bill.
+    #[error("The `{provider}` provider has no `{tier}` service tier")]
+    UnsupportedServiceTier {
+        provider: ProviderId,
+        tier: ServiceTier,
+    },
 
     #[error("Invalid JSON: {0}")]
     Json(#[from] serde_json::Error),

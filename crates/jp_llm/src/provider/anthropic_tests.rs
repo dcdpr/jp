@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use assert_matches::assert_matches;
 use indexmap::IndexMap;
 use jp_config::model::{
     id::ModelIdConfig,
@@ -822,6 +823,105 @@ fn test_unknown_reasoning_infers_adaptive_thinking() {
         })
     );
     assert_eq!(request.output_config.unwrap().effort, Some(Effort::High));
+}
+
+/// Build a request carrying `tier`.
+///
+/// Spelled out rather than using the crate's `Result` alias, which `jp_test`
+/// shadows in this file.
+fn tier_request(
+    tier: Option<ServiceTier>,
+) -> std::result::Result<types::CreateMessagesRequest, Error> {
+    let model = ModelDetails::empty((PROVIDER, "claude-opus-5").try_into().unwrap());
+
+    let mut events = ConversationStream::new_test().with_turn("test");
+    let mut delta = jp_config::PartialAppConfig::empty();
+    delta.assistant.model.parameters.service_tier = tier;
+    events.add_config_delta(delta);
+
+    let query = ChatQuery {
+        thread: Thread {
+            system_prompt: None,
+            sections: vec![],
+            attachments: vec![],
+            events,
+        },
+        tools: vec![],
+        tool_choice: ToolChoice::Auto,
+    };
+
+    create_request(&model, query, true, &BetaFeatures(vec![])).map(|(request, ..)| request)
+}
+
+/// The two fields Anthropic splits the concept across.
+///
+/// Returned together because the invariant worth pinning is that each tier sets
+/// one of them and leaves the other alone: fast mode is unavailable under a
+/// Priority Tier commitment, so a request naming both is one Anthropic rejects.
+fn tier_fields(tier: Option<ServiceTier>) -> (Option<types::ServiceTier>, Option<types::Speed>) {
+    let request = tier_request(tier).unwrap();
+    (request.service_tier, request.speed)
+}
+
+#[test]
+fn request_omits_both_tier_fields_when_unset() {
+    assert_eq!(tier_fields(None), (None, None));
+}
+
+#[test]
+fn request_maps_auto_and_standard_to_the_commitment_field() {
+    assert_eq!(
+        tier_fields(Some(ServiceTier::Auto)),
+        (Some(types::ServiceTier::Auto), None)
+    );
+    assert_eq!(
+        tier_fields(Some(ServiceTier::Standard)),
+        (Some(types::ServiceTier::StandardOnly), None)
+    );
+}
+
+/// `priority` carries the beta that admits `speed` along with the request, so
+/// it needs nothing configured by the caller.
+#[test]
+fn request_maps_priority_to_fast_mode_and_carries_its_own_beta() {
+    let request = tier_request(Some(ServiceTier::Priority)).unwrap();
+
+    assert_eq!(request.speed, Some(types::Speed::Fast));
+    assert_eq!(request.service_tier, None);
+    assert_eq!(request.betas, vec![FAST_MODE_BETA.to_owned()]);
+}
+
+/// Only a fast-mode request asks for the beta.
+///
+/// It gates a research preview an account can lack access to, so requesting it
+/// on traffic that does not need it risks refusals on that traffic.
+#[test]
+fn no_other_tier_asks_for_the_fast_mode_beta() {
+    for tier in [None, Some(ServiceTier::Auto), Some(ServiceTier::Standard)] {
+        let request = tier_request(tier).unwrap();
+        assert!(
+            request.betas.is_empty(),
+            "{tier:?} must not request a beta, got {:?}",
+            request.betas
+        );
+    }
+}
+
+/// Anthropic sells no discounted latency-tolerant tier.
+/// Substituting the neighbouring rung would quietly bill standard rates for a
+/// request that asked to be cheap, so the turn is refused instead.
+#[test]
+fn request_refuses_flex() {
+    let error = tier_request(Some(ServiceTier::Flex)).expect_err("flex has no Anthropic mapping");
+
+    assert_matches!(error, Error::UnsupportedServiceTier {
+        provider: ProviderId::Anthropic,
+        tier: ServiceTier::Flex,
+    });
+    assert_eq!(
+        error.to_string(),
+        "The `anthropic` provider has no `flex` service tier"
+    );
 }
 
 /// An explicit `off` on a model whose support is unknown sends `thinking:
