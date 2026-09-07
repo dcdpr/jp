@@ -12,6 +12,11 @@ pub struct DetailsFmt {
     /// The ID of the conversation.
     pub id: ConversationId,
 
+    /// A line rendered above the rows, naming the action they belong to.
+    ///
+    /// `None` renders the rows on their own.
+    pub heading: Option<String>,
+
     /// The name of the assistant, if any.
     pub assistant_name: Option<String>,
 
@@ -32,8 +37,11 @@ pub struct DetailsFmt {
     /// If `None`, the details are not shown.
     pub local: Option<bool>,
 
-    /// Mark the active conversation.
-    pub active_conversation: Option<ConversationId>,
+    /// Whether this is the session's active conversation.
+    ///
+    /// `None` leaves it unqueried, which omits the `Last Activated` row and the
+    /// `active` JSON key.
+    pub active: Option<bool>,
 
     /// Display the timestamp of the last message in the conversation.
     pub last_message_at: Option<DateTime<Utc>>,
@@ -62,13 +70,14 @@ impl DetailsFmt {
     pub fn new(id: ConversationId) -> Self {
         Self {
             id,
+            heading: None,
             assistant_name: None,
             title: None,
             message_count: 0,
             turn_count: 0,
             pinned: None,
             local: None,
-            active_conversation: None,
+            active: None,
             last_message_at: None,
             last_activated_at: None,
             expires_at: None,
@@ -133,6 +142,13 @@ impl DetailsFmt {
         self
     }
 
+    /// Set the line rendered above the rows.
+    #[must_use]
+    pub fn with_heading(mut self, heading: impl Into<String>) -> Self {
+        self.heading = Some(heading.into());
+        self
+    }
+
     #[must_use]
     pub fn with_pinned_flag(self, pinned: bool) -> Self {
         Self {
@@ -149,11 +165,16 @@ impl DetailsFmt {
         }
     }
 
-    /// Mark the active conversation.
+    /// Record whether this conversation is the session's active one.
+    ///
+    /// `active_conversation` is the conversation the session has activated, or
+    /// `None` when there is no session or it has activated nothing.
+    /// The comparison against this conversation's ID happens here, so a caller
+    /// passes the session's answer through unchanged.
     #[must_use]
-    pub fn with_active_conversation(self, active_conversation: ConversationId) -> Self {
+    pub fn with_active_conversation(self, active_conversation: Option<ConversationId>) -> Self {
         Self {
-            active_conversation: Some(active_conversation),
+            active: Some(active_conversation == Some(self.id)),
             ..self
         }
     }
@@ -164,10 +185,10 @@ impl DetailsFmt {
         Self { pretty, ..self }
     }
 
-    /// Return the title of the conversation.
+    /// The line rendered above the rows, if any.
     #[must_use]
-    pub fn title(&self) -> Option<&str> {
-        self.title.as_deref()
+    pub fn heading(&self) -> Option<&str> {
+        self.heading.as_deref()
     }
 
     /// The stable machine-readable payload for `jp c show`.
@@ -186,7 +207,7 @@ impl DetailsFmt {
             "id": self.id.to_string(),
             "title": self.title,
             "assistant": self.assistant_name,
-            "active": self.active_conversation.map(|active| active == self.id),
+            "active": self.active,
             "pinned": self.pinned,
             "local": self.local,
             "events": self.message_count,
@@ -220,6 +241,11 @@ impl DetailsFmt {
         let mut rows = vec![];
 
         rows.push(self.scalar("ID", self.id.to_string()));
+
+        if let Some(title) = self.title.clone() {
+            rows.push(self.scalar("Title", title));
+        }
+
         if let Some(name) = self.assistant_name.clone() {
             rows.push(self.scalar("Assistant", name));
         }
@@ -239,10 +265,10 @@ impl DetailsFmt {
             ));
         }
 
-        if let Some(active) = self.active_conversation {
-            let value = if active == self.id && self.pretty {
+        if let Some(active) = self.active {
+            let value = if active && self.pretty {
                 "Currently Active".green().bold().to_string()
-            } else if active == self.id {
+            } else if active {
                 "Currently Active".to_owned()
             } else if let Some(last_activated_at) = self.last_activated_at {
                 DateTimeFmt::new(last_activated_at).to_string()
@@ -262,19 +288,23 @@ impl DetailsFmt {
         }
 
         if let Some(pinned) = self.pinned {
-            let value = if pinned {
+            let value = if pinned && self.pretty {
                 "Yes".bold().blue().to_string()
+            } else if pinned {
+                "Yes".to_owned()
             } else {
-                "No".to_string()
+                "No".to_owned()
             };
             rows.push(self.scalar("Pinned", value));
         }
 
         if let Some(local) = self.local {
-            let value = if local {
+            let value = if local && self.pretty {
                 "Yes".bold().yellow().to_string()
+            } else if local {
+                "Yes".to_owned()
             } else {
-                "No".to_string()
+                "No".to_owned()
             };
             rows.push(self.scalar("Local", value));
         }
@@ -319,6 +349,6 @@ impl DetailsFmt {
 
 impl fmt::Display for DetailsFmt {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", details(self.title(), self.rows()))
+        write!(f, "{}", details(self.heading(), self.rows()))
     }
 }

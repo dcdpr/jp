@@ -1,9 +1,4 @@
-use std::fmt::Write as _;
-
-use crossterm::style::Stylize as _;
-use inquire::Confirm;
 use jp_conversation::ConversationId;
-use jp_storage::backend::Projection;
 use jp_workspace::{ConversationHandle, Workspace};
 
 use crate::{
@@ -14,8 +9,7 @@ use crate::{
         time::CreationRange,
     },
     ctx::Ctx,
-    format::conversation::DetailsFmt,
-    shared::confirm::ConfirmFlag,
+    shared::confirm::{ConfirmFlag, ConversationAction, confirm_conversation_action},
 };
 
 #[derive(Debug, clap::Args)]
@@ -94,73 +88,31 @@ impl Rm {
     }
 }
 
+/// Remove one conversation, asking first unless `force` says the caller already
+/// decided.
+///
+/// The lock is taken before the question is asked and held until it is
+/// answered, so the conversation cannot gain events between the details the
+/// user read and the removal they approved.
 async fn remove(
     ctx: &mut Ctx,
     handle: ConversationHandle,
     active_id: Option<ConversationId>,
     force: bool,
 ) -> Output {
-    let id = handle.id();
     let lock = match acquire_lock(LockRequest::from_ctx(handle, ctx)).await? {
         LockOutcome::Acquired(lock) => lock,
         LockOutcome::NewConversation => unreachable!("new conversation not allowed"),
         LockOutcome::ForkConversation(_) => unreachable!("fork not allowed"),
     };
 
-    confirm_and_remove(ctx, id, &lock, active_id, force)?;
+    // A decline ends the run rather than moving to the next conversation: the
+    // exit code is how a script learns the removal did not happen.
+    if !force && !confirm_conversation_action(ctx, ConversationAction::Remove, &lock, active_id)? {
+        return Err(1.into());
+    }
+
     ctx.workspace.remove_conversation_with_lock(lock.into_mut());
-    Ok(())
-}
-
-/// Confirm the removal of `id`, unless `force` says the caller already decided.
-///
-/// Errors when the confirmation is required and no user is available to give
-/// it: a removal cannot be undone, so there is no outcome to assume.
-fn confirm_and_remove(
-    ctx: &mut Ctx,
-    id: ConversationId,
-    lock: &jp_workspace::ConversationLock,
-    active_id: Option<ConversationId>,
-    force: bool,
-) -> Output {
-    if !force && !ctx.term.interactive {
-        return Err(format!(
-            "removing conversation {id} needs a confirmation and nobody is available to give one; \
-             pass --no-confirm to remove it without asking"
-        )
-        .into());
-    }
-
-    let conversation = lock.metadata();
-    let events = lock.events();
-    let mut details = DetailsFmt::new(id)
-        .with_last_message_at(events.last().map(|v| v.event.timestamp))
-        .with_event_count(events.len())
-        .with_title(conversation.title.as_ref())
-        .with_last_activated_at(Some(conversation.last_activated_at))
-        .with_local_flag(matches!(lock.projection(), Projection::LocalOnly))
-        .with_active_conversation(active_id.unwrap_or(id))
-        .with_pretty_printing(ctx.printer.pretty_printing_enabled());
-
-    if !force {
-        details.title = Some(format!(
-            "Removing conversation {}",
-            id.to_string().bold().yellow()
-        ));
-
-        writeln!(ctx.printer.prompt_writer(), "{details}\n")?;
-
-        let confirm = Confirm::new("Are you sure?")
-            .with_default(false)
-            .with_confirm_on_input(true)
-            .with_help_message("this action cannot be undone");
-
-        match confirm.prompt_with_writer(&mut ctx.printer.prompt_writer()) {
-            Ok(true) => {}
-            Ok(false) | Err(_) => return Err(1.into()),
-        }
-    }
-
     Ok(())
 }
 

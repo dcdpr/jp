@@ -4,7 +4,7 @@ use chrono::{DateTime, Utc};
 use jp_config::AppConfig;
 use jp_conversation::{Conversation, ConversationId};
 use jp_printer::{OutputFormat, Printer};
-use jp_workspace::{LockResult, Workspace};
+use jp_workspace::Workspace;
 use tokio::runtime::Runtime;
 
 use super::*;
@@ -170,33 +170,25 @@ fn resolve_filtered_until_only_excludes_until_exclusive() {
     assert_eq!(ids, vec![before]);
 }
 
-/// The removal prompt reads the controlling terminal, not stdin, so a run with
-/// nobody watching would stop there and wait for a keystroke that never comes.
-/// Removal is also the one thing that cannot be undone, so there is no outcome
-/// to assume on the user's behalf either.
+/// `--no-confirm` is the caller having answered in advance, so the removal runs
+/// without a user present.
+/// The prompt's own refusal to proceed unasked is covered in `shared::confirm`.
 #[test]
-fn removing_without_a_user_fails_unless_confirmation_is_waived() {
+fn a_waived_confirmation_removes_without_a_user() {
     let id = make_id(1000);
     let mut ctx = test_ctx(&[id]);
     ctx.term.interactive = false;
 
     let handle = ctx.workspace.acquire_conversation(&id).unwrap();
-    let LockResult::Acquired(lock) = ctx.workspace.lock_conversation(handle, None).unwrap() else {
-        panic!("nothing else holds this conversation");
-    };
+    Runtime::new()
+        .unwrap()
+        .block_on(remove(&mut ctx, handle, None, true))
+        .expect("nothing left to ask");
 
-    let error = confirm_and_remove(&mut ctx, id, &lock, None, false)
-        .expect_err("a removal nobody can confirm must not proceed");
-    assert_eq!(
-        error.message.as_deref(),
-        Some(
-            "removing conversation jp-c10000 needs a confirmation and nobody is available to give \
-             one; pass --no-confirm to remove it without asking"
-        )
+    assert!(
+        ctx.workspace.acquire_conversation(&id).is_err(),
+        "the conversation is gone"
     );
-
-    // `--no-confirm` is the caller having answered in advance.
-    confirm_and_remove(&mut ctx, id, &lock, None, true).expect("nothing left to ask");
 }
 
 #[test]
