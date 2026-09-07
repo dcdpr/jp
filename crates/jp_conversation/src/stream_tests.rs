@@ -16,6 +16,163 @@ use crate::{
     resolve_range,
 };
 
+/// A fixed timestamp for config delta events.
+fn delta_timestamp() -> DateTime<Utc> {
+    Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap()
+}
+
+/// A stream whose base config declares one MCP server with `arguments`.
+fn stream_with_server(arguments: &[&str]) -> ConversationStream {
+    use jp_config::providers::mcp::{McpProviderConfig, StdioConfig};
+
+    let mut config = jp_config::AppConfig::new_test();
+    config.providers.mcp.insert(
+        "bookworm".to_owned(),
+        McpProviderConfig::Stdio(StdioConfig {
+            command: "just".into(),
+            arguments: arguments.iter().map(|a| (*a).to_owned()).collect(),
+            variables: vec![],
+            checksum: None,
+            optional: false,
+            startup_timeout_secs: 60,
+        }),
+    );
+
+    ConversationStream::new(std::sync::Arc::new(config))
+}
+
+/// A partial setting the `bookworm` server's arguments and nothing else.
+fn server_arguments_partial(arguments: &[&str]) -> jp_config::PartialAppConfig {
+    use jp_config::providers::mcp::{PartialMcpProviderConfig, PartialStdioConfig};
+
+    let mut partial = jp_config::PartialAppConfig::empty();
+    partial.providers.mcp.insert(
+        "bookworm".to_owned(),
+        PartialMcpProviderConfig::Stdio(PartialStdioConfig {
+            arguments: Some(arguments.iter().map(|a| (*a).to_owned()).collect()),
+            ..PartialStdioConfig::default()
+        }),
+    );
+    partial
+}
+
+/// The resolved `arguments` of the `bookworm` server.
+fn resolved_arguments(stream: &ConversationStream) -> Vec<String> {
+    use jp_config::providers::mcp::McpProviderConfig;
+
+    let config = stream.config().expect("the stream resolves");
+    let McpProviderConfig::Stdio(stdio) = &config.providers.mcp["bookworm"];
+    stdio.arguments.clone()
+}
+
+/// Clearing a field lets the delta's value land whole.
+///
+/// `arguments` merges by appending, so the delta's list would otherwise be
+/// added to the one already there.
+#[test]
+fn an_unset_clears_a_field_before_the_delta_merges() {
+    let mut stream = stream_with_server(&["serve", "--verbose"]);
+
+    stream.add_config_delta(ApplyDelta::with_unsets(
+        delta_timestamp(),
+        server_arguments_partial(&["serve"]),
+        vec!["providers.mcp.bookworm.arguments".to_owned()],
+    ));
+
+    assert_eq!(resolved_arguments(&stream), ["serve"]);
+}
+
+/// Without the clear, the same change cannot be recorded at all.
+///
+/// No list the delta could carry produces `["serve"]` by appending to
+/// `["serve", "--verbose"]`, so the diff comes out empty and no event is
+/// written — the conversation keeps the argument the user dropped.
+#[test]
+fn without_an_unset_a_dropped_argument_is_not_recorded() {
+    let mut stream = stream_with_server(&["serve", "--verbose"]);
+
+    stream.add_config_delta(ApplyDelta::new(
+        delta_timestamp(),
+        server_arguments_partial(&["serve"]),
+    ));
+
+    assert_eq!(resolved_arguments(&stream), ["serve", "--verbose"]);
+    assert!(
+        !stream
+            .events
+            .iter()
+            .any(|event| matches!(event, InternalEvent::ConfigDelta(_))),
+        "an empty diff writes no event"
+    );
+}
+
+/// A delta that only clears carries no diff, and is still worth recording.
+#[test]
+fn a_delta_that_only_clears_is_recorded() {
+    let mut stream = stream_with_server(&["serve"]);
+
+    stream.add_config_delta(ApplyDelta::with_unsets(
+        delta_timestamp(),
+        jp_config::PartialAppConfig::empty(),
+        vec!["providers.mcp.bookworm.arguments".to_owned()],
+    ));
+
+    assert!(resolved_arguments(&stream).is_empty());
+}
+
+#[test]
+fn a_delta_carries_its_unsets_through_a_round_trip() {
+    let delta = ConfigDelta::Apply(ApplyDelta::with_unsets(
+        delta_timestamp(),
+        jp_config::PartialAppConfig::empty(),
+        vec!["editor.envs".to_owned()],
+    ));
+
+    let json = serde_json::to_value(&delta).unwrap();
+    assert_eq!(json["unsets"], serde_json::json!(["editor.envs"]));
+
+    assert_eq!(deserialize_config_delta(&json).unwrap(), delta);
+}
+
+/// A delta written before clearing existed loads with nothing to clear.
+#[test]
+fn a_delta_without_unsets_loads_with_none() {
+    let json = serde_json::json!({
+        "type": "config_delta",
+        "timestamp": "2020-01-01 00:00:00.0",
+        "delta": { "style": { "code": { "color": false } } },
+    });
+
+    let ConfigDelta::Apply(apply) = deserialize_config_delta(&json).unwrap() else {
+        panic!("expected an apply");
+    };
+
+    assert!(apply.unsets.is_empty());
+    assert_eq!(apply.delta.style.code.color, Some(false));
+}
+
+/// A path naming no field is skipped, and the rest of the delta still applies.
+///
+/// A field can be renamed or removed between versions, and a stream written by
+/// a newer version still has to replay.
+#[test]
+fn an_unset_naming_no_field_does_not_stop_the_replay() {
+    let mut stream = ConversationStream::new_test();
+
+    let mut partial = jp_config::PartialAppConfig::empty();
+    partial.style.code.color = Some(false);
+
+    stream
+        .events
+        .push(InternalEvent::ConfigDelta(ConfigDelta::Apply(
+            ApplyDelta::with_unsets(delta_timestamp(), partial, vec![
+                "style.code.no_such_field".to_owned(),
+            ]),
+        )));
+
+    assert!(!stream.config().unwrap().style.code.color);
+}
+
 #[test]
 fn test_sanitize_orphaned_tool_calls_injects_directly_after_request() {
     let mut stream = ConversationStream::new_test();
@@ -1066,10 +1223,10 @@ fn test_internal_event_config_delta_apply_shape_has_no_op_field() {
     let mut partial = jp_config::PartialAppConfig::empty();
     partial.style.code.color = Some(false);
 
-    let event = InternalEvent::ConfigDelta(ConfigDelta::Apply(ApplyDelta {
-        timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
-        delta: Box::new(partial),
-    }));
+    let event = InternalEvent::ConfigDelta(ConfigDelta::Apply(ApplyDelta::new(
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+        partial,
+    )));
 
     let json = serde_json::to_value(&event).unwrap();
     let mut keys: Vec<_> = json.as_object().unwrap().keys().cloned().collect();
@@ -1168,14 +1325,11 @@ fn test_add_config_reset_appends_reset_then_nonempty_layers() {
         },
         [
             // Empty layers are skipped: they would resolve to a no-op `Apply`.
-            ApplyDelta {
-                timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
-                delta: Box::new(jp_config::PartialAppConfig::empty()),
-            },
-            ApplyDelta {
-                timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
-                delta: Box::new(layer),
-            },
+            ApplyDelta::new(
+                Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+                jp_config::PartialAppConfig::empty(),
+            ),
+            ApplyDelta::new(Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(), layer),
         ],
     );
 
@@ -1223,17 +1377,17 @@ fn test_config_fold_reset_discards_accumulated_state() {
     .into();
 
     for delta in [
-        ConfigDelta::Apply(ApplyDelta {
-            timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
-            delta: Box::new(dev),
-        }),
+        ConfigDelta::Apply(ApplyDelta::new(
+            Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+            dev,
+        )),
         ConfigDelta::Reset(ResetDelta {
             timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 1).unwrap(),
         }),
-        ConfigDelta::Apply(ApplyDelta {
-            timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 2).unwrap(),
-            delta: Box::new(fresh),
-        }),
+        ConfigDelta::Apply(ApplyDelta::new(
+            Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 2).unwrap(),
+            fresh,
+        )),
     ] {
         stream.events.push(InternalEvent::ConfigDelta(delta));
     }
@@ -1259,10 +1413,9 @@ fn test_iter_config_reflects_reset() {
     let mut stream = ConversationStream::new_test();
     stream
         .events
-        .push(InternalEvent::ConfigDelta(ConfigDelta::Apply(ApplyDelta {
-            timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
-            delta: Box::new(dev),
-        })));
+        .push(InternalEvent::ConfigDelta(ConfigDelta::Apply(
+            ApplyDelta::new(Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(), dev),
+        )));
     stream.push(ConversationEvent::new(
         ChatRequest::from("before reset"),
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 1).unwrap(),
@@ -1274,10 +1427,9 @@ fn test_iter_config_reflects_reset() {
         })));
     stream
         .events
-        .push(InternalEvent::ConfigDelta(ConfigDelta::Apply(ApplyDelta {
-            timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 3).unwrap(),
-            delta: Box::new(fresh),
-        })));
+        .push(InternalEvent::ConfigDelta(ConfigDelta::Apply(
+            ApplyDelta::new(Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 3).unwrap(), fresh),
+        )));
     stream.push(ConversationEvent::new(
         ChatRequest::from("after reset"),
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 4).unwrap(),
@@ -2311,10 +2463,10 @@ fn extend_into_empty_preserves_observed_iter_and_serialized_shape() {
 
     // Build a source stream with two turns and a config delta before each.
     let mut source = ConversationStream::new_test();
-    source.add_config_delta(ApplyDelta {
-        delta: Box::new(partial1),
-        timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
-    });
+    source.add_config_delta(ApplyDelta::new(
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
+        partial1,
+    ));
     source.push(ConversationEvent::new(
         TurnStart,
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
@@ -2327,10 +2479,10 @@ fn extend_into_empty_preserves_observed_iter_and_serialized_shape() {
         ChatResponse::message("A1"),
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 2).unwrap(),
     ));
-    source.add_config_delta(ApplyDelta {
-        delta: Box::new(partial2),
-        timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 3).unwrap(),
-    });
+    source.add_config_delta(ApplyDelta::new(
+        Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 3).unwrap(),
+        partial2,
+    ));
     source.push(ConversationEvent::new(
         TurnStart,
         Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 3).unwrap(),
