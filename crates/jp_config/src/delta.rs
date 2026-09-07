@@ -64,34 +64,6 @@ pub fn path(prefix: &str, name: &str) -> String {
     }
 }
 
-/// Delta for an appending list, reporting when appending cannot reach `next`.
-///
-/// Returns the elements `next` adds while appending suffices.
-/// Otherwise pushes `path` to `unsets` and returns the whole of `next`, which
-/// is what the caller merges after clearing the field.
-pub fn delta_opt_vec_at<T: PartialEq + Clone>(
-    path: &str,
-    prev: Option<&Vec<T>>,
-    next: Option<Vec<T>>,
-    unsets: &mut Vec<String>,
-) -> Option<Vec<T>> {
-    let next = next?;
-    let Some(prev) = prev else {
-        return Some(next);
-    };
-
-    // Appending reaches `next` exactly when `next` starts with `prev`; the
-    // delta is then the tail. Anything else — a dropped element, a reorder, an
-    // insertion in the middle — needs the field cleared first.
-    if next.starts_with(prev) {
-        let added = next[prev.len()..].to_vec();
-        return (!added.is_empty()).then_some(added);
-    }
-
-    unsets.push(path.to_owned());
-    Some(next)
-}
-
 /// Calculate the delta between two strategy-carrying lists.
 ///
 /// Appending reaches `next` exactly when `next` starts with `prev`, and the
@@ -237,28 +209,6 @@ pub fn delta_opt_partial<T: PartialConfigDelta + PartialEq>(
         (None, next) => next,
         _ => None,
     }
-}
-
-/// Calculate the delta between two optional vectors that merge by appending.
-///
-/// The delta holds the elements `next` adds to `prev`, since that is what an
-/// appending merge needs to reach `next` from `prev`.
-///
-/// Returns `None` when `next` adds nothing.
-/// An element dropped from `prev` cannot be expressed by appending, so a
-/// removal also yields `None` rather than a delta that fails to remove
-/// anything.
-///
-/// Use [`delta_opt`] instead for a vector field that merges by replacement:
-/// there the whole of `next` is the delta.
-pub fn delta_opt_vec<T: PartialEq>(prev: Option<&Vec<T>>, next: Option<Vec<T>>) -> Option<Vec<T>> {
-    let next = next?;
-    let Some(prev) = prev else {
-        return Some(next);
-    };
-
-    let added = delta_vec(prev, next);
-    (!added.is_empty()).then_some(added)
 }
 
 /// Calculate the delta between two maps of partial configurations.

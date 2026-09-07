@@ -694,7 +694,10 @@ fn test_partial_app_config_assign() {
 
     let kv = KvAssignment::try_from_cli("config_load_paths", "foo,bar").unwrap();
     p.assign(kv).unwrap();
-    assert_eq!(p.config_load_paths, Some(vec!["foo".into(), "bar".into()]));
+    assert_eq!(
+        p.config_load_paths,
+        Some(vec![RelativePathBuf::from("foo"), "bar".into()].into())
+    );
 
     let kv = KvAssignment::try_from_cli("assistant.name", "foo").unwrap();
     p.assign(kv).unwrap();
@@ -727,10 +730,12 @@ fn config_load_paths_append_across_layers() {
     // matters downstream: `--cfg <name>` resolution walks the list and takes
     // the first directory that holds a matching file.
     let mut base = PartialAppConfig::empty();
-    base.config_load_paths = Some(vec![".jp/global".into(), ".jp/shared".into()]);
+    base.config_load_paths =
+        Some(vec![RelativePathBuf::from(".jp/global"), ".jp/shared".into()].into());
 
     let mut overlay = PartialAppConfig::empty();
-    overlay.config_load_paths = Some(vec![".jp/shared".into(), ".jp/workspace".into()]);
+    overlay.config_load_paths =
+        Some(vec![RelativePathBuf::from(".jp/shared"), ".jp/workspace".into()].into());
 
     base.merge(&(), overlay).unwrap();
 
@@ -739,7 +744,7 @@ fn config_load_paths_append_across_layers() {
         ".jp/shared".into(),
         ".jp/workspace".into(),
     ];
-    assert_eq!(base.config_load_paths, Some(want));
+    assert_eq!(base.config_load_paths, Some(want.into()));
 }
 
 #[test]
