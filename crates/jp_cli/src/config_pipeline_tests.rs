@@ -114,6 +114,7 @@ fn an_override_restating_an_existing_rule_records_nothing() {
 
 /// A list that merges by appending, restated at a value it already holds.
 ///
+/// MCP arguments preserve repetition.
 /// Appending without deduplicating is not idempotent: asking for `FOO` twice
 /// leaves the list holding it twice, which is a different config and so a real
 /// change to record.
@@ -123,7 +124,10 @@ fn an_override_repeating_an_appending_list_is_recorded() {
     let current = base_partial();
 
     let mut overrides = PartialAppConfig::empty();
-    overrides.editor.envs = Some(vec!["FOO".to_owned()]);
+    overrides
+        .providers
+        .mcp
+        .insert("bookworm".to_owned(), mcp_server("FOO"));
 
     assert!(
         override_to_record(&current, overrides.clone())
@@ -228,7 +232,7 @@ fn conversation_layer_overrides_base() {
 fn mcp_server(argument: &str) -> PartialMcpProviderConfig {
     PartialMcpProviderConfig::Stdio(PartialStdioConfig {
         command: Some("just".into()),
-        arguments: Some(vec![argument.to_owned()]),
+        arguments: Some(vec![argument.to_owned()].into()),
         ..PartialStdioConfig::default()
     })
 }
@@ -236,7 +240,7 @@ fn mcp_server(argument: &str) -> PartialMcpProviderConfig {
 /// The `arguments` of a server in a resolved partial.
 fn mcp_arguments(partial: &PartialAppConfig, server: &str) -> Option<Vec<String>> {
     let PartialMcpProviderConfig::Stdio(config) = partial.providers.mcp.get(server)?;
-    config.arguments.clone()
+    config.arguments.as_deref().cloned()
 }
 
 /// The per-conversation layer is a resolved snapshot, not a contribution.
