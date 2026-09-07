@@ -9,8 +9,7 @@ use std::{
 
 use camino::Utf8Path;
 use glob::glob;
-use indexmap::IndexMap;
-use schematic::{ConfigLoader, MergeError, MergeResult, PartialConfig};
+use schematic::{ConfigLoader, PartialConfig as _};
 use tracing::{debug, error, info, trace, warn};
 
 use crate::{
@@ -613,36 +612,6 @@ fn dedup_keep_last(entries: Vec<ExtendsEntry>) -> Vec<ExtendsEntry> {
             None
         })
         .collect()
-}
-
-/// Merge [`IndexMap`]s of nested [`PartialConfig`]s.
-///
-/// # Errors
-///
-/// Returns an error if merging the partials fails, which returns a
-/// [`schematic::MergeError`].
-pub fn merge_nested_indexmap<V, C>(
-    prev: IndexMap<String, V>,
-    mut next: IndexMap<String, V>,
-    c: &C,
-) -> MergeResult<IndexMap<String, V>>
-where
-    V: PartialConfig<Context = C>,
-    C: Default,
-{
-    let mut prev = prev
-        .into_iter()
-        .map(|(name, mut prev)| {
-            if let Some(next) = next.shift_remove(&name) {
-                prev.merge(c, next).map_err(MergeError::new)?;
-            }
-
-            Ok((name, prev))
-        })
-        .collect::<Result<IndexMap<_, _>, _>>()?;
-
-    prev.append(&mut next);
-    Ok(Some(prev))
 }
 
 /// Define the name to serialize and deserialize for a unit variant.
