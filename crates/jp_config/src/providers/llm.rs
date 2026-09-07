@@ -14,7 +14,7 @@ use schematic::Config;
 
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
-    delta::{PartialConfigDelta, delta_map, path},
+    delta::{PartialConfigDelta, delta_map, delta_map_with_unsets, path},
     fill::{FillDefaults, fill_map},
     model::id::{ModelIdConfig, ModelIdConfigError, ModelIdOrAliasConfig, resolve_alias_chain},
     partial::ToPartial,
@@ -124,7 +124,12 @@ impl PartialConfigDelta for PartialLlmProviderConfig {
 
     fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
         Self {
-            aliases: delta_map(&self.aliases, next.aliases),
+            aliases: delta_map_with_unsets(
+                &path(prefix, "aliases"),
+                &self.aliases,
+                next.aliases,
+                unsets,
+            ),
             anthropic: self.anthropic.delta_with_unsets(
                 next.anthropic,
                 &path(prefix, "anthropic"),

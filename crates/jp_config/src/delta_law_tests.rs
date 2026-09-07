@@ -94,21 +94,12 @@ fn assert_law(before: &[&str], after: &[&str]) {
 /// itself, and clearing removes an entry that was never there.
 /// Reaching the whole field needs a path vocabulary that can say "this map"
 /// where the map is also the fallback.
-///
-/// `conversation.tools.*` addresses the tool defaults block, whose types have
-/// no path-reporting delta yet.
-/// Mechanical to add, and left for the pass that does the tool config as a
-/// whole.
 const CLEAR_NOT_RECORDED: &[&str] = &[
     "conversation.compaction.rules",
     "assistant.model.parameters.other",
     "style.reasoning.summary_model.parameters.other",
     "conversation.inquiry.assistant.model.parameters.other",
     "conversation.title.generate.model.parameters.other",
-    "conversation.tools.*.enable",
-    "conversation.tools.*.enable.state",
-    "conversation.tools.*.enable.allow_toggle",
-    "conversation.tools.*.style.error.inline_results",
 ];
 
 /// Set `path` to whichever of a few generic values it accepts.

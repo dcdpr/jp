@@ -311,13 +311,21 @@ impl PartialConfigDelta for PartialAppConfig {
                 &delta_path(prefix, "editor"),
                 unsets,
             ),
-            template: self.template.delta(next.template),
+            template: self.template.delta_with_unsets(
+                next.template,
+                &delta_path(prefix, "template"),
+                unsets,
+            ),
             providers: self.providers.delta_with_unsets(
                 next.providers,
                 &delta_path(prefix, "providers"),
                 unsets,
             ),
-            plugins: self.plugins.delta(next.plugins),
+            plugins: self.plugins.delta_with_unsets(
+                next.plugins,
+                &delta_path(prefix, "plugins"),
+                unsets,
+            ),
             user: self
                 .user
                 .delta_with_unsets(next.user, &delta_path(prefix, "user"), unsets),

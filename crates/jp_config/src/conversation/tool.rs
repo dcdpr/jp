@@ -17,7 +17,11 @@ use crate::{
         access::{AccessConfig, PartialAccessConfig},
         style::{DisplayStyleConfig, PartialDisplayStyleConfig},
     },
-    delta::{PartialConfigDelta, delta_map, delta_opt, delta_opt_partial, delta_vec},
+    delta::{
+        PartialConfigDelta, delta_map, delta_map_with_unsets, delta_opt, delta_opt_at,
+        delta_opt_partial, delta_opt_partial_at, delta_value_map, delta_value_map_with_unsets,
+        delta_vec, path,
+    },
     fill::{FillDefaults, fill_map},
     partial::{ToPartial, partial_opt, partial_opt_config, partial_opts},
     types::json_value::JsonValue,
@@ -64,6 +68,15 @@ impl PartialConfigDelta for PartialToolsConfig {
         Self {
             defaults: self.defaults.delta(next.defaults),
             tools: delta_map(&self.tools, next.tools),
+        }
+    }
+
+    fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
+        Self {
+            defaults: self
+                .defaults
+                .delta_with_unsets(next.defaults, &path(prefix, "*"), unsets),
+            tools: delta_map_with_unsets(prefix, &self.tools, next.tools, unsets),
         }
     }
 }
@@ -363,6 +376,27 @@ impl PartialConfigDelta for PartialToolsDefaultsConfig {
             access: delta_opt_partial(self.access.as_ref(), next.access),
         }
     }
+
+    fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
+        Self {
+            enable: delta_opt_partial_at(
+                &path(prefix, "enable"),
+                self.enable.as_ref(),
+                next.enable,
+                unsets,
+            ),
+            run: delta_opt(self.run.as_ref(), next.run),
+            format: delta_opt(self.format.as_ref(), next.format),
+            result: delta_opt(self.result.as_ref(), next.result),
+            cancellation_response: delta_opt(
+                self.cancellation_response.as_ref(),
+                next.cancellation_response,
+            ),
+            style: self
+                .style
+                .delta_with_unsets(next.style, &path(prefix, "style"), unsets),
+        }
+    }
 }
 
 impl FillDefaults for PartialToolsDefaultsConfig {
@@ -586,17 +620,66 @@ impl PartialConfigDelta for PartialToolConfig {
             ),
             style: delta_opt_partial(self.style.as_ref(), next.style),
             questions: delta_map(&self.questions, next.questions),
-            options: next
-                .options
-                .into_iter()
-                .filter_map(|(name, next)| {
-                    if self.options.get(&name).is_some_and(|prev| prev == &next) {
-                        return None;
-                    }
-                    Some((name, next))
-                })
-                .collect(),
+            options: delta_value_map(&self.options, next.options),
             access: delta_opt_partial(self.access.as_ref(), next.access),
+        }
+    }
+
+    fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
+        Self {
+            source: delta_opt(self.source.as_ref(), next.source),
+            enable: delta_opt_partial_at(
+                &path(prefix, "enable"),
+                self.enable.as_ref(),
+                next.enable,
+                unsets,
+            ),
+            command: delta_opt_partial_at(
+                &path(prefix, "command"),
+                self.command.as_ref(),
+                next.command,
+                unsets,
+            ),
+            summary: delta_opt(self.summary.as_ref(), next.summary),
+            description: delta_opt(self.description.as_ref(), next.description),
+            examples: delta_opt(self.examples.as_ref(), next.examples),
+            parameters: delta_map_with_unsets(
+                &path(prefix, "parameters"),
+                &self.parameters,
+                next.parameters,
+                unsets,
+            ),
+            run: delta_opt(self.run.as_ref(), next.run),
+            format: delta_opt(self.format.as_ref(), next.format),
+            result: delta_opt(self.result.as_ref(), next.result),
+            cancellation_response: delta_opt(
+                self.cancellation_response.as_ref(),
+                next.cancellation_response,
+            ),
+            style: delta_opt_partial_at(
+                &path(prefix, "style"),
+                self.style.as_ref(),
+                next.style,
+                unsets,
+            ),
+            questions: delta_map_with_unsets(
+                &path(prefix, "questions"),
+                &self.questions,
+                next.questions,
+                unsets,
+            ),
+            options: delta_value_map_with_unsets(
+                &path(prefix, "options"),
+                &self.options,
+                next.options,
+                unsets,
+            ),
+            access: delta_opt_partial_at(
+                &path(prefix, "access"),
+                self.access.as_ref(),
+                next.access,
+                unsets,
+            ),
         }
     }
 }
@@ -738,6 +821,25 @@ impl PartialConfigDelta for PartialToolParameterConfig {
             enumeration: delta_opt(self.enumeration.as_ref(), next.enumeration),
             items: delta_opt(self.items.as_ref(), next.items),
             properties: delta_map(&self.properties, next.properties),
+        }
+    }
+
+    fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
+        Self {
+            kind: delta_opt_partial(self.kind.as_ref(), next.kind),
+            default: delta_opt(self.default.as_ref(), next.default),
+            required: delta_opt(self.required.as_ref(), next.required),
+            summary: delta_opt(self.summary.as_ref(), next.summary),
+            description: delta_opt(self.description.as_ref(), next.description),
+            examples: delta_opt(self.examples.as_ref(), next.examples),
+            enumeration: delta_opt(self.enumeration.as_ref(), next.enumeration),
+            items: delta_opt(self.items.as_ref(), next.items),
+            properties: delta_map_with_unsets(
+                &path(prefix, "properties"),
+                &self.properties,
+                next.properties,
+                unsets,
+            ),
         }
     }
 }
@@ -1651,6 +1753,23 @@ impl PartialConfigDelta for PartialEnableConfig {
         Self {
             state: delta_opt(self.state.as_ref(), next.state),
             allow_toggle: delta_opt(self.allow_toggle.as_ref(), next.allow_toggle),
+        }
+    }
+
+    fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
+        Self {
+            state: delta_opt_at(
+                &path(prefix, "state"),
+                self.state.as_ref(),
+                next.state,
+                unsets,
+            ),
+            allow_toggle: delta_opt_at(
+                &path(prefix, "allow_toggle"),
+                self.allow_toggle.as_ref(),
+                next.allow_toggle,
+                unsets,
+            ),
         }
     }
 }

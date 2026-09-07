@@ -181,10 +181,15 @@ pub fn delta_opt_partial_at<T: PartialConfigDelta + PartialEq>(
     }
 }
 
-/// Calculate the delta between two maps, reporting each entry's unsets.
+/// Calculate the delta between two maps, reporting removed entries and each
+/// entry's own unsets.
 ///
-/// Mirrors [`delta_map`], descending into each entry with the entry's own
-/// dotted path so a field inside it reports where it lives.
+/// Entries merge by key, so an entry `next` no longer has cannot be expressed
+/// by merging: the key would survive from the previous layer.
+/// Its path joins `unsets` so the fold removes the entry before merging.
+///
+/// Descends into an entry both maps have with that entry's own dotted path, so
+/// a field inside it reports where it lives.
 pub fn delta_map_with_unsets<V>(
     prefix: &str,
     prev: &IndexMap<String, V>,
@@ -194,6 +199,12 @@ pub fn delta_map_with_unsets<V>(
 where
     V: PartialConfigDelta + PartialEq,
 {
+    for key in prev.keys() {
+        if !next.contains_key(key) {
+            unsets.push(path(prefix, key));
+        }
+    }
+
     next.into_iter()
         .filter_map(|(key, next)| {
             let Some(prev) = prev.get(&key) else {
@@ -212,6 +223,41 @@ where
             (cleared || !delta.is_empty()).then_some((key, delta))
         })
         .collect()
+}
+
+/// Calculate the delta between two maps of plain values.
+///
+/// An entry is kept when `next` holds a value for it that differs from
+/// `prev`'s.
+/// A map of nested partials wants [`delta_map`] instead, which records only the
+/// changed fields of an entry both maps hold.
+pub fn delta_value_map<V: PartialEq>(
+    prev: &IndexMap<String, V>,
+    next: IndexMap<String, V>,
+) -> IndexMap<String, V> {
+    next.into_iter()
+        .filter(|(key, next)| !prev.get(key).is_some_and(|prev| prev == next))
+        .collect()
+}
+
+/// Calculate the delta between two maps of plain values, reporting removed
+/// entries.
+///
+/// Mirrors [`delta_map_with_unsets`] for a map whose values carry no partial of
+/// their own.
+pub fn delta_value_map_with_unsets<V: PartialEq>(
+    prefix: &str,
+    prev: &IndexMap<String, V>,
+    next: IndexMap<String, V>,
+    unsets: &mut Vec<String>,
+) -> IndexMap<String, V> {
+    for key in prev.keys() {
+        if !next.contains_key(key) {
+            unsets.push(path(prefix, key));
+        }
+    }
+
+    delta_value_map(prev, next)
 }
 
 /// Calculate the delta between two optional values, reporting a cleared field.

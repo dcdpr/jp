@@ -12,8 +12,8 @@ use schematic::Config;
 use crate::{
     FillDefaults,
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
-    delta::PartialConfigDelta,
     fill::fill_map,
+    delta::{PartialConfigDelta, delta_map, delta_map_with_unsets, delta_opt, path},
     partial::ToPartial,
     plugins::command::CommandPluginConfig,
     util::merge_nested_indexmap,
@@ -56,26 +56,29 @@ impl AssignKeyValue for PartialPluginsConfig {
 
 impl PartialConfigDelta for PartialPluginsConfig {
     fn delta(&self, next: Self) -> Self {
-        use crate::delta::delta_opt;
-
         Self {
             auto_install: delta_opt(self.auto_install.as_ref(), next.auto_install),
             shutdown_timeout_secs: delta_opt(
                 self.shutdown_timeout_secs.as_ref(),
                 next.shutdown_timeout_secs,
             ),
-            command: next
-                .command
-                .into_iter()
-                .filter_map(|(name, next)| {
-                    let next = match self.command.get(&name) {
-                        Some(prev) if prev == &next => return None,
-                        Some(prev) => prev.delta(next),
-                        None => next,
-                    };
-                    Some((name, next))
-                })
-                .collect(),
+            command: delta_map(&self.command, next.command),
+        }
+    }
+
+    fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
+        Self {
+            auto_install: delta_opt(self.auto_install.as_ref(), next.auto_install),
+            shutdown_timeout_secs: delta_opt(
+                self.shutdown_timeout_secs.as_ref(),
+                next.shutdown_timeout_secs,
+            ),
+            command: delta_map_with_unsets(
+                &path(prefix, "command"),
+                &self.command,
+                next.command,
+                unsets,
+            ),
         }
     }
 }

@@ -157,7 +157,9 @@ impl PartialConfigDelta for PartialConversationConfig {
             title: self
                 .title
                 .delta_with_unsets(next.title, &path(prefix, "title"), unsets),
-            tools: self.tools.delta(next.tools),
+            tools: self
+                .tools
+                .delta_with_unsets(next.tools, &path(prefix, "tools"), unsets),
             compaction: self.compaction.delta(next.compaction),
             attachments: delta_mergeable_vec(&self.attachments, next.attachments),
             inquiry: self

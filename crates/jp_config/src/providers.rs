@@ -33,6 +33,16 @@ pub struct ProviderConfig {
     ///
     /// Configuration for Model Context Protocol (MCP) servers.
     /// The key is the server ID.
+    ///
+    /// ```toml
+    /// [providers.mcp.bookworm]
+    /// type = "stdio"
+    /// command = "just"
+    /// arguments = ["serve-bookworm"]
+    /// ```
+    ///
+    /// Entries merge by key, so a server added to a later layer joins the ones
+    /// an earlier layer configured rather than replacing them.
     #[setting(nested, merge = merge_nested_indexmap)]
     pub mcp: IndexMap<String, McpProviderConfig>,
 }

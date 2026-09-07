@@ -575,6 +575,57 @@ fn a_dropped_mcp_argument_is_recorded() {
     );
 }
 
+/// A server the user removed is recorded, so the conversation stops starting
+/// it.
+///
+/// Entries merge by key, so no value a delta carries can take one away: the key
+/// survives from the previous layer.
+/// The entry's path is reported instead, and the fold removes it before
+/// merging.
+#[test]
+fn a_removed_mcp_server_is_recorded() {
+    use crate::providers::mcp::{McpProviderConfig, StdioConfig};
+
+    let mut prev = AppConfig::new_test();
+    prev.providers.mcp.insert(
+        "bookworm".to_owned(),
+        McpProviderConfig::Stdio(StdioConfig {
+            command: "just".into(),
+            arguments: vec!["serve".to_owned()],
+            variables: vec![],
+            checksum: None,
+            optional: false,
+            startup_timeout_secs: 60,
+        }),
+    );
+
+    let mut next = prev.clone();
+    next.providers.mcp.shift_remove("bookworm");
+
+    let mut unsets = Vec::new();
+    let delta = prev
+        .to_partial()
+        .delta_with_unsets(next.to_partial(), "", &mut unsets);
+
+    assert_eq!(unsets, ["providers.mcp.bookworm"]);
+
+    // Applying the report and then the delta reaches the config the user has.
+    let mut folded = prev.to_partial();
+    folded
+        .unset("providers.mcp.bookworm")
+        .expect("a real field");
+    folded.merge(&(), delta).expect("folding cannot fail");
+
+    assert!(
+        !crate::util::build(folded)
+            .expect("valid config")
+            .providers
+            .mcp
+            .contains_key("bookworm"),
+        "the server is gone after the fold"
+    );
+}
+
 /// A union that names an expanded form contributes both the shorthand path and
 /// the expanded keys; a union of distinct values contributes only its path.
 ///
