@@ -4,6 +4,9 @@
 - **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-08-21
+- **Label**: domain=llm
+- **Label**: package=jp\_llm
+- **Label**: type=task
 
 `TestRequest::tool_call_response` creates a fresh `ChatQuery` with no tools.
 Production keeps the full tool list on every streaming cycle and resets a forced

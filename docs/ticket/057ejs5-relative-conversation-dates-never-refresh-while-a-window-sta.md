@@ -4,6 +4,8 @@
 - **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-20
+- **Label**: client=macos
+- **Label**: type=bug
 
 A row in the macOS app's conversation list dates itself against
 `WorkspaceWindow.listingReadAt`, which is set once when the workspace is read

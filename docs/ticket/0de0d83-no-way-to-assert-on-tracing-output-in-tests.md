@@ -4,6 +4,8 @@
 - **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-09-04
+- **Label**: domain=tooling
+- **Label**: type=task
 
 Nothing in the workspace can assert that a `tracing` event fired.
 Grepping `tracing_subscriber|with_default|logs_contain` across `jp_llm` and

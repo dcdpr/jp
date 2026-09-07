@@ -4,6 +4,9 @@
 - **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-21
+- **Label**: domain=llm
+- **Label**: package=jp\_llm
+- **Label**: type=bug
 
 `EventBuilder` converts malformed tool-call argument JSON into an empty map and
 emits a normal `ToolCallRequest` (`crates/jp_llm/src/event_builder.rs`).

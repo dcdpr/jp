@@ -4,6 +4,8 @@
 - **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-18
+- **Label**: domain=tooling
+- **Label**: type=bug
 
 `jp-tools` reads per-tool settings from a free-form `options` map and drops
 anything it does not recognise.

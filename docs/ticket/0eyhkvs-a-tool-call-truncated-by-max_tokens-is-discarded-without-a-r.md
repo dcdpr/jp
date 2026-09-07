@@ -4,6 +4,9 @@
 - **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-07
+- **Label**: domain=llm
+- **Label**: package=jp\_llm
+- **Label**: type=bug
 
 When a response runs out of output tokens while the model is still assembling a
 tool call, the partial call is dropped and nothing durable records that it

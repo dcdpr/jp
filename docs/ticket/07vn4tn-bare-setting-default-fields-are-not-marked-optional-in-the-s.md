@@ -4,6 +4,8 @@
 - **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-24
+- **Label**: package=schematic
+- **Label**: type=bug
 
 `FieldArgs::default` is an `Option<Expr>`, and `parse_default`
 (`crates/contrib/schematic_macros/src/utils.rs`) maps the bare

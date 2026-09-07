@@ -48,4 +48,4 @@ ticket_create = { enable = true, result = "unattended", style.inline_results = "
 ticket_comment = { enable = true, result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
 ticket_rename = { enable = true, result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
 ticket_close = { enable = true, result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
-ticket_label = { enable = true, result = "unattended", style.inline_results = "full", style.results_file_link = "off" }
+ticket_label = { enable = true, result = "unattended", style.inline_results = "off", style.error.inline_results = "full", style.results_file_link = "off" }

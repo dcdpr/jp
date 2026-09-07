@@ -5,6 +5,8 @@
 - **Authors**: jp
 - **Date**: 2026-09-05
 - **Implements**: 076
+- **Label**: package=jp\_tool
+- **Label**: type=question
 
 `EnvRule::matches` is case-sensitive on every platform.
 That keeps a rule set meaning the same thing wherever it is read, but it does

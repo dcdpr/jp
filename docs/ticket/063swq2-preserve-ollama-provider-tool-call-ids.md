@@ -4,6 +4,10 @@
 - **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-21
+- **Label**: domain=llm
+- **Label**: llm-provider=ollama
+- **Label**: package=jp\_llm
+- **Label**: type=bug
 
 Recorded Ollama responses contain provider-generated call IDs such as
 `call_77bh2121`, but JP discards them and persists synthetic IDs such as

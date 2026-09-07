@@ -4,6 +4,10 @@
 - **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-05
+- **Label**: client=cli
+- **Label**: domain=conversation
+- **Label**: package=jp\_cli
+- **Label**: type=bug
 
 `jp conversation use` advertises `?a` as composable with `--grep`
 (`use_.rs:38`), but the combination never matches anything:

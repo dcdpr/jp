@@ -4,6 +4,9 @@
 - **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-15
+- **Label**: client=cli
+- **Label**: package=jp\_cli
+- **Label**: type=bug
 
 Most commands report what they did with `Printer::println`, which wraps its
 argument in an NDJSON envelope when the output format is JSON

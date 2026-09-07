@@ -4,6 +4,10 @@
 - **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-31
+- **Label**: domain=conversation
+- **Label**: package=jp\_cli
+- **Label**: package=jp\_config
+- **Label**: type=bug
 
 ## What happens
 

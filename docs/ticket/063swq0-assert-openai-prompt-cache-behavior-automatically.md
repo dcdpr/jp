@@ -4,6 +4,10 @@
 - **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-08-21
+- **Label**: domain=llm
+- **Label**: llm-provider=openai
+- **Label**: package=jp\_llm
+- **Label**: type=task
 
 `test_gpt_5_6_prompt_cache_read_after_write` asks the person re-recording
 fixtures to inspect usage fields manually.

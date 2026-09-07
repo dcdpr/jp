@@ -4,6 +4,9 @@
 - **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-21
+- **Label**: domain=llm
+- **Label**: package=jp\_llm
+- **Label**: type=bug
 
 Tool-call validation checks missing and unknown names, but does not enforce
 parameter types, enums, array item schemas, or nested value constraints.

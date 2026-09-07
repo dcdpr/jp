@@ -4,6 +4,8 @@
 - **Kind**: Chore
 - **Authors**: Jean Mertz
 - **Date**: 2026-08-12
+- **Label**: package=jp\_workspace
+- **Label**: type=task
 
 Opening a workspace mutates it.
 `load_workspace` in `jp_cli` currently performs, on every command that touches a

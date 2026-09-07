@@ -4,6 +4,8 @@
 - **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-08-24
+- **Label**: package=schematic
+- **Label**: type=enhancement
 
 `Field::from` (`crates/contrib/schematic_macros/src/common/field.rs`) treats an
 invalid `#[setting]` / `#[schema]` attribute as fatal:

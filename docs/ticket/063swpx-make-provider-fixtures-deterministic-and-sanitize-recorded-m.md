@@ -4,6 +4,9 @@
 - **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-08-21
+- **Label**: domain=llm
+- **Label**: package=jp\_llm
+- **Label**: type=task
 
 Several fixtures contain avoidable nondeterminism or local machine data:
 

@@ -5,6 +5,8 @@
 - **Authors**: jp
 - **Date**: 2026-09-04
 - **Implements**: 076
+- **Label**: package=jp\_tool
+- **Label**: type=follow-up
 
 `AccessPolicy::is_restricted()` reports on `fs` alone — it is
 `!self.fs.is_empty()` — but its name reads as a statement about the whole
