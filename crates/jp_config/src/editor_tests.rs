@@ -45,37 +45,53 @@ fn test_editor_config_cmd() {
 
 #[test]
 fn test_editor_config_envs() {
+    let envs = |names: &[&str]| -> Option<MergeableVec<String>> {
+        Some(names.iter().map(|n| (*n).to_owned()).collect())
+    };
+
     let mut p = PartialEditorConfig::default();
 
     let kv = KvAssignment::try_from_cli("envs", "EDITOR,VISUAL").unwrap();
     p.assign(kv).unwrap();
-    assert_eq!(p.envs, Some(vec!["EDITOR".into(), "VISUAL".into()]));
+    assert_eq!(p.envs, envs(&["EDITOR", "VISUAL"]));
 
     let kv = KvAssignment::try_from_cli("envs:", r#"["EDITOR","VISUAL"]"#).unwrap();
     p.assign(kv).unwrap();
-    assert_eq!(p.envs, Some(vec!["EDITOR".into(), "VISUAL".into()]));
+    assert_eq!(p.envs, envs(&["EDITOR", "VISUAL"]));
 
     let kv = KvAssignment::try_from_cli("envs.0", "EDIT").unwrap();
     p.assign(kv).unwrap();
-    assert_eq!(p.envs, Some(vec!["EDIT".into(), "VISUAL".into()]));
+    assert_eq!(p.envs, envs(&["EDIT", "VISUAL"]));
 
     let kv = KvAssignment::try_from_cli("envs+:", r#"["OTHER"]"#).unwrap();
     p.assign(kv).unwrap();
-    assert_eq!(
-        p.envs,
-        Some(vec!["EDIT".into(), "VISUAL".into(), "OTHER".into()])
-    );
+    assert_eq!(p.envs, envs(&["EDIT", "VISUAL", "OTHER"]));
 
     let kv = KvAssignment::try_from_cli("envs+", "LAST").unwrap();
     p.assign(kv).unwrap();
+    assert_eq!(p.envs, envs(&["EDIT", "VISUAL", "OTHER", "LAST"]));
+}
+
+/// The field accepts a strategy alongside its value, which is what carrying a
+/// wrapper in the partial buys.
+#[test]
+fn envs_accepts_a_declared_strategy() {
+    use crate::types::vec::{MergedVec, MergedVecStrategy};
+
+    let mut p = PartialEditorConfig::default();
+
+    let kv =
+        KvAssignment::try_from_cli("envs:", r#"{"value":["ONLY"],"strategy":"replace"}"#).unwrap();
+    p.assign(kv).unwrap();
+
     assert_eq!(
         p.envs,
-        Some(vec![
-            "EDIT".into(),
-            "VISUAL".into(),
-            "OTHER".into(),
-            "LAST".into()
-        ])
+        Some(MergeableVec::Merged(MergedVec {
+            value: vec!["ONLY".to_owned()],
+            strategy: Some(MergedVecStrategy::Replace),
+            dedup: None,
+            discard_when_merged: false,
+        }))
     );
 }
 

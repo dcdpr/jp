@@ -425,11 +425,13 @@ Ok(
             editor: PartialEditorConfig {
                 cmd: None,
                 envs: Some(
-                    [
-                        "JP_EDITOR",
-                        "VISUAL",
-                        "EDITOR",
-                    ],
+                    Vec(
+                        [
+                            "JP_EDITOR",
+                            "VISUAL",
+                            "EDITOR",
+                        ],
+                    ),
                 ),
                 inline: PartialInlineEditorConfig {
                     edit_mode: None,
