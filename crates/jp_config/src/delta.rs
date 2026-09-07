@@ -123,6 +123,24 @@ pub fn delta_mergeable_vec<T: Clone + PartialEq>(
     })
 }
 
+/// Calculate the delta between two optional strategy-carrying lists.
+///
+/// Wraps [`delta_mergeable_vec`] for a field whose partial is
+/// `Option<MergeableVec<T>>`: an absent list on either side is no change, and
+/// an empty delta is reported as absent so it does not read as one.
+pub fn delta_opt_mergeable_vec<T: Clone + PartialEq>(
+    prev: Option<&MergeableVec<T>>,
+    next: Option<MergeableVec<T>>,
+) -> Option<MergeableVec<T>> {
+    let next = next?;
+    let Some(prev) = prev else {
+        return Some(next);
+    };
+
+    let delta = delta_mergeable_vec(prev, next);
+    (!delta.is_empty()).then_some(delta)
+}
+
 /// Delta for an optional nested partial, reporting the fields it cannot reach.
 ///
 /// Mirrors [`delta_opt_partial`], descending with `path` as the nested value's
