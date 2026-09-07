@@ -25,6 +25,16 @@ fn test_app_config_fields() {
     insta::assert_debug_snapshot!(AppConfig::fields());
 }
 
+/// The shape every config key accepts, as the schema describes it.
+///
+/// A schema consumer validating a user's config file sees exactly this, so a
+/// diff here is a change to what JP tells the outside world it accepts.
+/// Read it against the parser before accepting one.
+#[test]
+fn test_app_config_schema_shape() {
+    insta::assert_snapshot!(crate::schema_shape::render(&AppConfig::schema()));
+}
+
 /// A reference has to name a type the partial schema still contains.
 ///
 /// Partializing renames each named struct to `Partial*`.

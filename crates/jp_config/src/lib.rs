@@ -47,6 +47,10 @@ pub mod model;
 mod partial;
 pub mod plugins;
 pub mod providers;
+#[cfg(test)]
+mod schema_probe;
+#[cfg(test)]
+mod schema_shape;
 pub mod style;
 pub mod template;
 pub mod types;
