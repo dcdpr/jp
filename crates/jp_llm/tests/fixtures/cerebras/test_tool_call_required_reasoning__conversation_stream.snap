@@ -62,7 +62,8 @@ expression: v
               }
             },
             "results_file_link": "full",
-            "parameters": "json"
+            "parameters": "json",
+            "print_stderr": true
           }
         }
       },
@@ -110,7 +111,7 @@ expression: v
         "show": true,
         "delay_secs": 4,
         "interval_ms": 100,
-        "print_stderr": "auto"
+        "stderr_rows": "auto"
       },
       "reasoning": {
         "display": "full",
@@ -136,7 +137,7 @@ expression: v
           "show": true,
           "delay_secs": 3,
           "interval_ms": 100,
-          "print_stderr": "off"
+          "stderr_rows": "auto"
         },
         "preparing": {
           "show": true,

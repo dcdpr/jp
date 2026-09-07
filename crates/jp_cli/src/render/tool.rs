@@ -18,7 +18,7 @@ use jp_config::{
         CommandConfig,
         style::{InlineResults, LinkStyle, ParametersStyle, TruncateLines},
     },
-    style::{StyleConfig, print_stderr::PrintStderr},
+    style::{StyleConfig, stderr_rows::StderrRows},
 };
 use jp_conversation::event::ToolCallResponse;
 use jp_llm::{CommandResult, run_tool_command, tool::InvocationContext};
@@ -32,16 +32,16 @@ use serde_json::{Map, Value};
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
-/// Map the `print_stderr` config key onto the printer's window budget.
+/// Map the `stderr_rows` config key onto the printer's window budget.
 ///
 /// The two enums are deliberately separate: `jp_printer` knows nothing about
 /// JP's config tree, and the config key is a user-facing contract that outlives
 /// any one renderer.
-pub(crate) const fn output_lines(print_stderr: PrintStderr) -> OutputLines {
-    match print_stderr {
-        PrintStderr::Off => OutputLines::Off,
-        PrintStderr::Auto => OutputLines::Auto,
-        PrintStderr::Rows(rows) => OutputLines::Rows(rows.rows),
+pub(crate) const fn output_lines(stderr_rows: StderrRows) -> OutputLines {
+    match stderr_rows {
+        StderrRows::Off => OutputLines::Off,
+        StderrRows::Auto => OutputLines::Auto,
+        StderrRows::Fixed(count) => OutputLines::Rows(count.rows),
     }
 }
 
@@ -369,7 +369,7 @@ impl ToolRenderer {
                     Duration::from_millis(u64::from(config.interval_ms)),
                     |secs, _| format!("⏱ Running… {secs:.1}s"),
                 )
-                .with_output(output_lines(config.print_stderr)),
+                .with_output(output_lines(config.stderr_rows)),
             )
         } else {
             StatusRegion::inert()
@@ -386,13 +386,17 @@ impl ToolRenderer {
     /// A sink feeding one tool's stderr into the progress window.
     ///
     /// Labelled with the tool's name, so two running in parallel stay apart.
-    /// `None` when `style.tool_call.progress.print_stderr` is off, so a tool
-    /// that floods costs nothing when nobody asked to watch it.
+    /// `None` when there is no window to feed, so a tool that floods costs
+    /// nothing when nobody asked to watch it.
+    ///
+    /// This answers only whether a window exists; whether a particular tool
+    /// belongs in it is the caller's, from
+    /// `conversation.tools.<name>.style.print_stderr`.
     pub fn progress_source(&self, tool: &str) -> Option<LineSink> {
         self.config
             .tool_call
             .progress
-            .print_stderr
+            .stderr_rows
             .is_enabled()
             .then(|| self.progress.source(tool))
     }

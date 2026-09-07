@@ -7,7 +7,7 @@ use crate::{
     delta::{PartialConfigDelta, delta_opt},
     fill::FillDefaults,
     partial::{ToPartial, partial_opt},
-    style::print_stderr::PrintStderr,
+    style::stderr_rows::StderrRows,
 };
 
 /// Progress indicator shown while MCP servers are starting.
@@ -19,7 +19,7 @@ use crate::{
 /// ```toml
 /// [style.mcp_startup]
 /// delay_secs = 4
-/// print_stderr = true
+/// stderr_rows = true
 /// ```
 #[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
@@ -57,12 +57,15 @@ pub struct McpStartupConfig {
     /// own progress can.
     /// The lines are erased with the timer and never reach the transcript.
     ///
+    /// One window is shared by every server starting at once, each line
+    /// labelled with the server that wrote it.
+    ///
     /// Set to `false` if a startup wrapper echoes anything you would rather not
     /// have on screen during a screen share — a resolved token, say.
     /// The rows are the child's own output and nothing inspects them for
     /// secrets.
     #[setting(default = "auto")]
-    pub print_stderr: PrintStderr,
+    pub stderr_rows: StderrRows,
 }
 
 impl AssignKeyValue for PartialMcpStartupConfig {
@@ -72,7 +75,7 @@ impl AssignKeyValue for PartialMcpStartupConfig {
             "show" => self.show = kv.try_some_bool()?,
             "delay_secs" => self.delay_secs = kv.try_some_u32()?,
             "interval_ms" => self.interval_ms = kv.try_some_u32()?,
-            "print_stderr" => self.print_stderr = kv.try_some_bool_number_or_from_str()?,
+            "stderr_rows" => self.stderr_rows = kv.try_some_bool_number_or_from_str()?,
             _ => return missing_key(&kv),
         }
 
@@ -86,7 +89,7 @@ impl PartialConfigDelta for PartialMcpStartupConfig {
             show: delta_opt(self.show.as_ref(), next.show),
             delay_secs: delta_opt(self.delay_secs.as_ref(), next.delay_secs),
             interval_ms: delta_opt(self.interval_ms.as_ref(), next.interval_ms),
-            print_stderr: delta_opt(self.print_stderr.as_ref(), next.print_stderr),
+            stderr_rows: delta_opt(self.stderr_rows.as_ref(), next.stderr_rows),
         }
     }
 }
@@ -97,7 +100,7 @@ impl FillDefaults for PartialMcpStartupConfig {
             show: self.show.or(defaults.show),
             delay_secs: self.delay_secs.or(defaults.delay_secs),
             interval_ms: self.interval_ms.or(defaults.interval_ms),
-            print_stderr: self.print_stderr.or(defaults.print_stderr),
+            stderr_rows: self.stderr_rows.or(defaults.stderr_rows),
         }
     }
 }
@@ -110,7 +113,7 @@ impl ToPartial for McpStartupConfig {
             show: partial_opt(&self.show, defaults.show),
             delay_secs: partial_opt(&self.delay_secs, defaults.delay_secs),
             interval_ms: partial_opt(&self.interval_ms, defaults.interval_ms),
-            print_stderr: partial_opt(&self.print_stderr, defaults.print_stderr),
+            stderr_rows: partial_opt(&self.stderr_rows, defaults.stderr_rows),
         }
     }
 }

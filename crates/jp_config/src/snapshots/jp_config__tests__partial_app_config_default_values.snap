@@ -130,6 +130,9 @@ Ok(
                             inline_results: None,
                             results_file_link: None,
                             parameters: None,
+                            print_stderr: Some(
+                                true,
+                            ),
                             error: PartialErrorStyleConfig {
                                 inline_results: None,
                                 results_file_link: None,
@@ -313,7 +316,7 @@ Ok(
                     interval_ms: Some(
                         100,
                     ),
-                    print_stderr: Some(
+                    stderr_rows: Some(
                         Auto,
                     ),
                 },
@@ -370,8 +373,8 @@ Ok(
                         interval_ms: Some(
                             100,
                         ),
-                        print_stderr: Some(
-                            Off,
+                        stderr_rows: Some(
+                            Auto,
                         ),
                     },
                     preparing: PartialPreparingConfig {

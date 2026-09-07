@@ -4,7 +4,7 @@ use camino_tempfile::Utf8TempDir;
 use jp_config::{
     AppConfig,
     conversation::tool::{CommandConfigOrString, style::ParametersStyle},
-    style::print_stderr::{PrintStderr, StderrRows},
+    style::stderr_rows::{RowCount, StderrRows},
 };
 use jp_conversation::event::ToolCallResponse;
 use jp_md::format::{BackgroundFill, DefaultBackground};
@@ -110,7 +110,7 @@ fn create_renderer_with_show(show: bool) -> (ToolRenderer, SharedBuffer) {
     config.tool_call.progress.show = true;
     config.tool_call.progress.delay_secs = 0;
     config.tool_call.progress.interval_ms = 10;
-    config.tool_call.progress.print_stderr = PrintStderr::Rows(StderrRows { rows: 2 });
+    config.tool_call.progress.stderr_rows = StderrRows::Fixed(RowCount { rows: 2 });
     let printer =
         printer.with_terminal(TerminalCapability::interactive(Some(80)).with_rows(Some(24)));
     let renderer = ToolRenderer::new(
@@ -404,7 +404,7 @@ fn progress_window_is_off_without_print_stderr() {
     // nothing at all when nobody asked to watch it.
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
     let mut config = AppConfig::new_test().style;
-    config.tool_call.progress.print_stderr = PrintStderr::Off;
+    config.tool_call.progress.stderr_rows = StderrRows::Off;
     let renderer = ToolRenderer::new(
         ErrChannel::new(Arc::new(printer)),
         config,

@@ -234,12 +234,28 @@ impl ExecutionOutcome {
     }
 }
 
-/// Route a tool's stderr into the progress window, when one is showing.
+/// Route a tool's stderr into the progress window, when one is showing and this
+/// tool belongs in it.
+///
+/// Two levels gate the window and both must allow it: `style.tool_call.progress
+/// .stderr_rows` decides whether a window exists and how tall it is, and
+/// `conversation.tools.<name>.style.print_stderr` decides whether this tool
+/// feeds it.
+/// Rows are screen space, shared by every tool running at once, so only
+/// membership can be answered per-tool.
 ///
 /// The closure runs on the forwarder's read loop, so it must not block:
 /// `LineSink::push` writes into a bounded shared buffer and returns, which is
 /// what keeps the child off a full pipe while the terminal catches up.
-fn stderr_sink(renderer: &ToolRenderer, tool_name: &str) -> Option<StderrSink> {
+fn stderr_sink(
+    renderer: &ToolRenderer,
+    tools_config: &ToolsConfig,
+    tool_name: &str,
+) -> Option<StderrSink> {
+    if !tools_config.get(tool_name)?.style().print_stderr {
+        return None;
+    }
+
     let sink = renderer.progress_source(tool_name)?;
 
     Some(Arc::new(move |line: &str| sink.push(line)))
@@ -983,7 +999,7 @@ impl ToolCoordinator {
 
             let executor: Arc<dyn Executor> = Arc::from(executor);
 
-            let stderr = stderr_sink(tool_renderer, &tool_name);
+            let stderr = stderr_sink(tool_renderer, &self.tools_config, &tool_name);
 
             executing_tools.insert(index, ExecutingTool {
                 executor: Arc::clone(&executor),

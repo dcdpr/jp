@@ -617,6 +617,63 @@ fn stdout_writes_erase_the_region_and_redraw_after_it() {
 }
 
 #[test]
+fn a_row_is_not_painted_over_an_unfinished_line() {
+    // `write!` sends one task per `write_str`, so `writeln!(w, "see: {}", path)`
+    // arrives as three. A row painted after the first would start with
+    // `\r\x1b[K` and erase the text it was meant to sit below.
+    let (printer, _out, err) = region_printer();
+
+    let _region = printer.status_region(waiting_style());
+    printer.flush();
+    err.lock().clear();
+
+    let mut writer = printer.err_writer();
+    write!(writer, "see: ").unwrap();
+    printer.flush();
+    assert_eq!(
+        *err.lock(),
+        "\r\x1b[Ksee: ",
+        "the row is erased for the write and not redrawn over it"
+    );
+
+    write!(writer, "/tmp/result.txt").unwrap();
+    printer.flush();
+    assert_eq!(*err.lock(), "\r\x1b[Ksee: /tmp/result.txt");
+
+    // The newline finishes the line, so the row is free to come back.
+    writeln!(writer).unwrap();
+    printer.flush();
+    assert_eq!(*err.lock(), "\r\x1b[Ksee: /tmp/result.txt\n\r\x1b[Kwaiting");
+}
+
+#[test]
+fn an_unfinished_line_stops_the_region_ticking() {
+    // Waking on the interval to paint nothing is work for no one; the worker
+    // blocks until a later write finishes the line.
+    let (printer, _out, err) = region_printer();
+
+    let _region = printer.status_region(RegionStyle::new(
+        Duration::ZERO,
+        Duration::from_millis(10),
+        |secs, _| format!("{secs:.1}s"),
+    ));
+    printer.flush();
+
+    write!(printer.err_writer(), "mid-line").unwrap();
+    printer.flush();
+    err.lock().clear();
+
+    thread::sleep(Duration::from_millis(150));
+    printer.flush();
+
+    assert!(
+        err.lock().is_empty(),
+        "no frame may land while the cursor sits mid-row: {:?}",
+        *err.lock()
+    );
+}
+
+#[test]
 fn an_empty_print_leaves_the_region_alone() {
     let (printer, _out, err) = region_printer();
 

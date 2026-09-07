@@ -4,7 +4,7 @@ use std::{
     io::Write,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     time::Duration,
 };
@@ -23,10 +23,14 @@ use jp_config::{
     },
     conversation::tool::{
         CommandConfigOrString, QuestionConfig, QuestionTarget, RunMode, ToolConfig, ToolSource,
-        style::{DisplayStyleConfig, ErrorStyleConfig, InlineResults, LinkStyle, ParametersStyle},
+        style::{
+            DisplayStyleConfig, ErrorStyleConfig, InlineResults, LinkStyle, ParametersStyle,
+            TruncateLines,
+        },
     },
     interrupt::ToolInterruptAction,
     model::id::{self, ProviderId},
+    style::stderr_rows::{RowCount, StderrRows},
 };
 use jp_conversation::{
     Conversation, ConversationEvent,
@@ -4299,6 +4303,7 @@ async fn test_parallel_tool_calls_rendered_atomically() {
             inline_results: InlineResults::Off,
             results_file_link: LinkStyle::Off,
             parameters: ParametersStyle::FunctionCall,
+            print_stderr: false,
             error: ErrorStyleConfig {
                 inline_results: None,
                 results_file_link: None,
@@ -4622,6 +4627,1030 @@ async fn test_single_tool_call_rendered_with_args() {
     .await;
 
     assert!(test_result.is_ok(), "Test timed out");
+}
+
+/// An executor that writes to the stderr sink the coordinator hands it, then
+/// completes.
+///
+/// Stands in for a local tool whose child process talks while it runs: what
+/// reaches the sink is what `jp_llm::tool::forward_stderr` would forward.
+struct TalkingExecutor {
+    /// The tool call this executor answers.
+    tool_id: String,
+
+    /// The tool's name, which is also the window label its lines carry.
+    tool_name: String,
+
+    /// Arguments, unused beyond satisfying the trait.
+    arguments: Map<String, Value>,
+
+    /// Lines pushed through the sink before completing.
+    lines: Vec<String>,
+
+    /// Whether a sink arrived at all, so a test can tell "pushed nowhere" from
+    /// "never given a sink".
+    got_sink: Arc<AtomicBool>,
+}
+
+impl TalkingExecutor {
+    /// An executor that pushes `lines`, recording whether it received a sink.
+    fn new(tool_id: &str, tool_name: &str, lines: &[&str], got_sink: Arc<AtomicBool>) -> Self {
+        Self {
+            tool_id: tool_id.to_owned(),
+            tool_name: tool_name.to_owned(),
+            arguments: Map::new(),
+            lines: lines.iter().map(|l| (*l).to_owned()).collect(),
+            got_sink,
+        }
+    }
+}
+
+#[async_trait]
+impl Executor for TalkingExecutor {
+    fn tool_id(&self) -> &str {
+        &self.tool_id
+    }
+
+    fn tool_name(&self) -> &str {
+        &self.tool_name
+    }
+
+    fn arguments(&self) -> &Map<String, Value> {
+        &self.arguments
+    }
+
+    fn permission_info(&self) -> Option<PermissionInfo> {
+        None
+    }
+
+    fn set_arguments(&mut self, _args: Value) {}
+
+    async fn execute(
+        &self,
+        _answers: &IndexMap<String, Value>,
+        _mcp_client: &jp_mcp::Client,
+        _root: &Utf8Path,
+        _cancellation_token: CancellationToken,
+        stderr: Option<jp_llm::tool::StderrSink>,
+    ) -> ExecutorResult {
+        if let Some(sink) = stderr {
+            self.got_sink.store(true, Ordering::Relaxed);
+            for line in &self.lines {
+                sink(line);
+            }
+        }
+
+        ExecutorResult::Completed(ToolCallResponse {
+            id: self.tool_id.clone(),
+            result: Ok("done".to_owned()),
+        })
+    }
+}
+
+/// A config whose named tools run unattended and show a two-row progress
+/// window.
+///
+/// `delay_secs = 0` so the row is up from the first frame rather than after the
+/// default three seconds, which no test wants to wait out.
+fn talking_tool_config(names: &[&str]) -> AppConfig {
+    let mut config = AppConfig::new_test();
+    config.style.tool_call.show = true;
+    config.style.tool_call.progress.show = true;
+    config.style.tool_call.progress.delay_secs = 0;
+    config.style.tool_call.progress.interval_ms = 10;
+    config.style.tool_call.progress.stderr_rows = StderrRows::Fixed(RowCount { rows: 2 });
+    config.conversation.tools.defaults.run = RunMode::Unattended;
+
+    for name in names {
+        config
+            .conversation
+            .tools
+            .insert((*name).to_owned(), ToolConfig {
+                source: ToolSource::Local { tool: None },
+                command: None,
+                run: Some(RunMode::Unattended),
+                format: None,
+                enable: None,
+                summary: None,
+                description: None,
+                examples: None,
+                parameters: IndexMap::new(),
+                result: None,
+                style: None,
+                questions: IndexMap::new(),
+                options: IndexMap::default(),
+                access: None,
+                cancellation_response: None,
+            });
+    }
+
+    config
+}
+
+/// A provider that requests `calls` in one cycle, then answers with a message.
+fn tool_calling_provider(calls: &[(&str, &str)]) -> Arc<dyn Provider> {
+    let mut events = Vec::new();
+    for (index, (id, name)) in calls.iter().enumerate() {
+        events.push(Event::tool_call_start(
+            index,
+            (*id).to_owned(),
+            (*name).to_owned(),
+        ));
+        events.push(Event::tool_call_args(index, "{}".to_owned()));
+        events.push(Event::flush(index));
+    }
+    events.push(Event::Finished(FinishReason::Completed));
+
+    Arc::new(SequentialMockProvider {
+        responses: vec![events, vec![
+            Event::message(0, "Done.\n\n"),
+            Event::flush(0),
+            Event::Finished(FinishReason::Completed),
+        ]],
+        call_index: AtomicUsize::new(0),
+        model: ModelDetails::empty(id::ModelIdConfig {
+            provider: ProviderId::Test,
+            name: "talking-tool-mock".parse().expect("valid name"),
+        }),
+    })
+}
+
+/// A running tool's stderr reaches the progress window.
+///
+/// The sink is built inside the coordinator's spawn loop, and
+/// `StatusRegion::source` copies the region it is asked of — so a progress row
+/// claimed *after* that loop yields sinks that can never deliver, however the
+/// renderer is reassigned later.
+/// Nothing in the renderer's own tests catches that, because they claim the row
+/// before asking for a sink.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_running_tools_stderr_reaches_the_progress_window() {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let config = talking_tool_config(&["build_tool"]);
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+
+        let provider = tool_calling_provider(&[("call_1", "build_tool")]);
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        // The window renders only against a terminal with a known height.
+        let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(
+            printer.with_terminal(TerminalCapability::interactive(Some(80)).with_rows(Some(24))),
+        );
+        let mcp_client = jp_mcp::Client::default();
+        let router = detached_router();
+
+        let got_sink = Arc::new(AtomicBool::new(false));
+        let executor_source = TestExecutorSource::new().with_executor("build_tool", {
+            let got_sink = Arc::clone(&got_sink);
+            move |req| {
+                Box::new(TalkingExecutor::new(
+                    &req.id,
+                    &req.name,
+                    &["   Compiling serde v1.0.219"],
+                    Arc::clone(&got_sink),
+                ))
+            }
+        });
+        let tool_defs = executor_source.tool_definitions();
+
+        run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &router,
+            &mcp_client,
+            root,
+            false, // interactive
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &tool_defs,
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
+            ChatRequest::from("Build it"),
+            InvocationContext::default(),
+            PendingStreamTrim::default(),
+        )
+        .await
+        .unwrap();
+
+        printer.flush();
+
+        assert!(
+            got_sink.load(Ordering::Relaxed),
+            "the coordinator must hand the executor a sink when print_stderr is on"
+        );
+
+        let chrome = err.lock().clone();
+        assert!(
+            chrome.contains("Compiling serde v1.0.219"),
+            "the pushed line must reach the window.\nChrome:\n{chrome}"
+        );
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out");
+}
+
+/// Two tools running at once share one window, and every row names its tool.
+///
+/// Interleaved unlabelled rows misattribute progress, so the label is what
+/// makes a parallel window readable at all.
+#[tokio::test(flavor = "multi_thread")]
+async fn parallel_tools_label_their_window_rows() {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let config = talking_tool_config(&["alpha_tool", "beta_tool"]);
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+
+        let provider = tool_calling_provider(&[("call_1", "alpha_tool"), ("call_2", "beta_tool")]);
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(
+            printer.with_terminal(TerminalCapability::interactive(Some(80)).with_rows(Some(24))),
+        );
+        let mcp_client = jp_mcp::Client::default();
+        let router = detached_router();
+
+        let seen = Arc::new(AtomicBool::new(false));
+        let executor_source = TestExecutorSource::new()
+            .with_executor("alpha_tool", {
+                let seen = Arc::clone(&seen);
+                move |req| {
+                    Box::new(TalkingExecutor::new(
+                        &req.id,
+                        &req.name,
+                        &["alpha is working"],
+                        Arc::clone(&seen),
+                    ))
+                }
+            })
+            .with_executor("beta_tool", {
+                let seen = Arc::clone(&seen);
+                move |req| {
+                    Box::new(TalkingExecutor::new(
+                        &req.id,
+                        &req.name,
+                        &["beta is working"],
+                        Arc::clone(&seen),
+                    ))
+                }
+            });
+        let tool_defs = executor_source.tool_definitions();
+
+        run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &router,
+            &mcp_client,
+            root,
+            false, // interactive
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &tool_defs,
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
+            ChatRequest::from("Run both"),
+            InvocationContext::default(),
+            PendingStreamTrim::default(),
+        )
+        .await
+        .unwrap();
+
+        printer.flush();
+        let chrome = err.lock().clone();
+
+        // Padded to the widest label so the two columns line up, and the
+        // label's colour closes before the tool's own text starts.
+        assert!(
+            chrome.contains("[alpha_tool]\x1b[39m alpha is working"),
+            "alpha's row must carry its label.\nChrome:\n{chrome}"
+        );
+        assert!(
+            chrome.contains("[beta_tool ]\x1b[39m beta is working"),
+            "beta's row must carry its label, padded to match.\nChrome:\n{chrome}"
+        );
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out");
+}
+
+/// A tool result rendered while another tool's window is live must survive
+/// whole, with no region frame cutting into it.
+///
+/// The result is persistent chrome and the window is ephemeral, so the printer
+/// has to erase the rows, let the result land, and repaint below it.
+/// Getting this wrong eats the result rather than the region, which is the
+/// direction that loses data the user came for.
+///
+/// Note what this can and cannot see: `SharedBuffer` accumulates every byte
+/// written, so text a later `\r\x1b[K` would have wiped on a real terminal is
+/// still in it.
+/// The assertion that discriminates is therefore about *ordering* — whether a
+/// region frame lands inside the link's line — not about the text being
+/// present at all.
+#[tokio::test(flavor = "multi_thread")]
+#[expect(clippy::too_many_lines)]
+async fn a_tool_result_survives_a_live_window() {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        // `Full` is the default link style, and it is the fragmented write:
+        // `writeln!(w, "see: {}", path)` reaches the printer as several tasks.
+        // A one-line inline budget forces the result to a file, so the link is
+        // rendered at all.
+        let mut config = talking_tool_config(&["slow_tool", "quick_tool"]);
+        config.conversation.tools.defaults.style = DisplayStyleConfig {
+            hidden: false,
+            inline_results: InlineResults::Truncate(TruncateLines { lines: 1 }),
+            results_file_link: LinkStyle::Full,
+            parameters: ParametersStyle::Off,
+            print_stderr: true,
+            error: ErrorStyleConfig {
+                inline_results: None,
+                results_file_link: None,
+            },
+        };
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+
+        let provider = tool_calling_provider(&[("call_1", "slow_tool"), ("call_2", "quick_tool")]);
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(
+            printer.with_terminal(TerminalCapability::interactive(Some(80)).with_rows(Some(24))),
+        );
+        let mcp_client = jp_mcp::Client::default();
+        let router = detached_router();
+
+        let seen = Arc::new(AtomicBool::new(false));
+        let executor_source = TestExecutorSource::new()
+            .with_executor("slow_tool", {
+                let seen = Arc::clone(&seen);
+                move |req| {
+                    Box::new(TalkingExecutor::new(
+                        &req.id,
+                        &req.name,
+                        &["still going"],
+                        Arc::clone(&seen),
+                    ))
+                }
+            })
+            .with_executor("quick_tool", |req| {
+                Box::new(MockExecutor::completed(
+                    &req.id,
+                    &req.name,
+                    "THE-RESULT-BODY",
+                ))
+            });
+        let tool_defs = executor_source.tool_definitions();
+
+        run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &router,
+            &mcp_client,
+            root,
+            false, // interactive
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &tool_defs,
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
+            ChatRequest::from("Run both"),
+            InvocationContext::default(),
+            PendingStreamTrim::default(),
+        )
+        .await
+        .unwrap();
+
+        printer.flush();
+        let chrome = err.lock().clone();
+
+        // The result body and its file link are persistent output; a region
+        // repainted over an unfinished line would take either with it.
+        assert!(
+            chrome.contains("THE-RESULT-BODY"),
+            "the result body must survive the window.\nChrome:\n{chrome}"
+        );
+        assert!(
+            chrome.contains("see: "),
+            "the file-link prefix must survive; it arrives as its own task.\nChrome:\n{chrome}"
+        );
+
+        // The path follows its prefix with nothing between them. A region
+        // frame here is what erased the prefix on screen: the link arrives as
+        // several tasks unless `write_chrome` batches them, and a redraw
+        // between two of them starts with `\r\x1b[K`.
+        let link = chrome
+            .split("see: ")
+            .nth(1)
+            .expect("a link was rendered")
+            .lines()
+            .next()
+            .expect("the link has a line");
+        assert!(
+            link.contains("tool_call"),
+            "the link's path must follow its prefix, got {link:?}"
+        );
+        assert!(
+            !link.contains('\r'),
+            "no region frame may land inside the link's line, got {link:?}"
+        );
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out");
+}
+
+/// Answering a tool's question re-spawns it, and its stderr must keep flowing.
+///
+/// The coordinator builds one sink per tool and stashes it on `ExecutingTool`,
+/// precisely so the re-spawn an answer triggers keeps feeding the same window
+/// row rather than going quiet halfway through the tool's life.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_sink_survives_the_re_spawn_an_answer_triggers() {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        // The question targets the assistant, so the answer arrives as a
+        // structured provider response and no user is in the loop.
+        let mut config = talking_tool_config(&[]);
+        config
+            .conversation
+            .tools
+            .insert("asking_tool".to_owned(), inquiry_tool_config(&["which"]));
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+
+        // Tool call, then the assistant's answer to the question, then a final
+        // message.
+        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+            responses: vec![
+                single_tool_call_events("call_ask", "asking_tool"),
+                structured_inquiry_events("call_ask.which", &json!(true)),
+                final_message_events("Done."),
+            ],
+            call_index: AtomicUsize::new(0),
+            model: inquiry_mock_model(),
+        });
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(
+            printer.with_terminal(TerminalCapability::interactive(Some(80)).with_rows(Some(24))),
+        );
+        let mcp_client = jp_mcp::Client::default();
+        let router = detached_router();
+
+        let executor_source = TestExecutorSource::new().with_executor("asking_tool", |req| {
+            Box::new(AskingTalkingExecutor::new(&req.id, &req.name))
+        });
+        let tool_defs = executor_source.tool_definitions();
+
+        run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &router,
+            &mcp_client,
+            root,
+            false, // interactive
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &tool_defs,
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
+            ChatRequest::from("Ask then work"),
+            InvocationContext::default(),
+            PendingStreamTrim::default(),
+        )
+        .await
+        .unwrap();
+
+        printer.flush();
+        let chrome = err.lock().clone();
+
+        assert!(
+            chrome.contains("before the question"),
+            "the first spawn's line must reach the window.\nChrome:\n{chrome}"
+        );
+        assert!(
+            chrome.contains("after the answer"),
+            "the re-spawn must inherit a live sink.\nChrome:\n{chrome}"
+        );
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out");
+}
+
+/// One tool opts out of the window; the other keeps feeding it.
+///
+/// Rows are screen space, so the window's size is global.
+/// Membership is not: `conversation.tools.<name>.style.print_stderr` keeps one
+/// noisy tool out without shrinking the window for everything else.
+#[tokio::test(flavor = "multi_thread")]
+#[expect(clippy::too_many_lines)]
+async fn a_tool_can_opt_out_of_the_progress_window() {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let mut config = talking_tool_config(&["loud_tool"]);
+        // Everything about the window is unchanged; only this tool's
+        // membership in it.
+        config
+            .conversation
+            .tools
+            .insert("quiet_tool".to_owned(), ToolConfig {
+                source: ToolSource::Local { tool: None },
+                command: None,
+                run: Some(RunMode::Unattended),
+                format: None,
+                enable: None,
+                summary: None,
+                description: None,
+                examples: None,
+                parameters: IndexMap::new(),
+                result: None,
+                style: Some(DisplayStyleConfig {
+                    hidden: false,
+                    inline_results: InlineResults::Off,
+                    results_file_link: LinkStyle::Off,
+                    parameters: ParametersStyle::Off,
+                    print_stderr: false,
+                    error: ErrorStyleConfig {
+                        inline_results: None,
+                        results_file_link: None,
+                    },
+                }),
+                questions: IndexMap::new(),
+                options: IndexMap::default(),
+                access: None,
+                cancellation_response: None,
+            });
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+
+        let provider =
+            tool_calling_provider(&[("call_loud", "loud_tool"), ("call_quiet", "quiet_tool")]);
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(
+            printer.with_terminal(TerminalCapability::interactive(Some(80)).with_rows(Some(24))),
+        );
+        let mcp_client = jp_mcp::Client::default();
+        let router = detached_router();
+
+        let loud_got_sink = Arc::new(AtomicBool::new(false));
+        let quiet_got_sink = Arc::new(AtomicBool::new(false));
+        let executor_source = TestExecutorSource::new()
+            .with_executor("loud_tool", {
+                let got_sink = Arc::clone(&loud_got_sink);
+                move |req| {
+                    Box::new(TalkingExecutor::new(
+                        &req.id,
+                        &req.name,
+                        &["loud is working"],
+                        Arc::clone(&got_sink),
+                    ))
+                }
+            })
+            .with_executor("quiet_tool", {
+                let got_sink = Arc::clone(&quiet_got_sink);
+                move |req| {
+                    Box::new(TalkingExecutor::new(
+                        &req.id,
+                        &req.name,
+                        &["quiet is working"],
+                        Arc::clone(&got_sink),
+                    ))
+                }
+            });
+        let tool_defs = executor_source.tool_definitions();
+
+        run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &router,
+            &mcp_client,
+            root,
+            false, // interactive
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &tool_defs,
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
+            ChatRequest::from("Run both"),
+            InvocationContext::default(),
+            PendingStreamTrim::default(),
+        )
+        .await
+        .unwrap();
+
+        printer.flush();
+
+        assert!(
+            loud_got_sink.load(Ordering::Relaxed),
+            "the opted-in tool must still be handed a sink"
+        );
+        assert!(
+            !quiet_got_sink.load(Ordering::Relaxed),
+            "a tool with print_stderr = false must not be handed a sink at all, so it costs \
+             nothing rather than pushing into a window that drops it"
+        );
+
+        let chrome = err.lock().clone();
+        assert!(
+            chrome.contains("loud is working"),
+            "the opted-in tool still reaches the window.\nChrome:\n{chrome}"
+        );
+        assert!(
+            !chrome.contains("quiet is working"),
+            "the opted-out tool must not reach the window.\nChrome:\n{chrome}"
+        );
+        assert!(
+            chrome.contains("⏱ Running…"),
+            "the window itself is unaffected by one tool opting out.\nChrome:\n{chrome}"
+        );
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out");
+}
+
+/// A prompt backend that snapshots the chrome buffer at the moment the widget
+/// is handed the terminal.
+///
+/// The same trick as the editor guard's `ObservingEditor`: a prompt session is
+/// a run of small writes with the widget owning the cursor in between, so the
+/// only way to prove the rows are gone *while* it runs is to look from inside
+/// it.
+struct ObservingPromptBackend {
+    /// Answers the prompt once the snapshot is taken.
+    inner: MockPromptBackend,
+
+    /// Flushed before each snapshot, so the observation is of the applied
+    /// state.
+    printer: Arc<Printer>,
+
+    /// The printer's chrome (stderr) buffer.
+    chrome: jp_printer::SharedBuffer,
+
+    /// What the chrome buffer held when the prompt opened.
+    seen: jp_printer::SharedBuffer,
+}
+
+impl ObservingPromptBackend {
+    /// A backend that records the chrome buffer, then answers `answer`.
+    fn new(printer: Arc<Printer>, chrome: jp_printer::SharedBuffer, answer: char) -> Self {
+        Self {
+            inner: MockPromptBackend::new().with_inline_responses([answer]),
+            printer,
+            chrome,
+            seen: jp_printer::SharedBuffer::default(),
+        }
+    }
+
+    /// Record the chrome buffer once the worker has caught up.
+    ///
+    /// A prompt writer takes its suspension by enqueueing it rather than
+    /// blocking: the widget's own writes are `Tty` tasks behind it in the same
+    /// queue, so the worker erases before anything the prompt draws can land.
+    /// The flush waits for that point instead of racing the worker to it —
+    /// without it this reads whichever side won, and the region frame drawn
+    /// before the claim is still the newest thing in the buffer.
+    fn observe(&self) {
+        self.printer.flush();
+        let snapshot = self.chrome.lock().clone();
+        self.seen.lock().push_str(&snapshot);
+    }
+}
+
+impl PromptBackend for ObservingPromptBackend {
+    fn inline_select(
+        &self,
+        message: &str,
+        options: Vec<InlineOption>,
+        default: Option<char>,
+        writer: &mut dyn Write,
+    ) -> Result<char, InquireError> {
+        self.observe();
+        self.inner.inline_select(message, options, default, writer)
+    }
+
+    fn inline_reply(
+        &self,
+        message: &str,
+        initial_text: &str,
+        edit_mode: ReplyEditMode,
+        editor_escape: bool,
+        help: Option<&str>,
+        output: Box<dyn Write + Send>,
+    ) -> Result<ReplyOutcome, InquireError> {
+        self.observe();
+        self.inner.inline_reply(
+            message,
+            initial_text,
+            edit_mode,
+            editor_escape,
+            help,
+            output,
+        )
+    }
+
+    fn text(
+        &self,
+        message: &str,
+        default: Option<&str>,
+        writer: &mut dyn Write,
+    ) -> Result<String, InquireError> {
+        self.observe();
+        self.inner.text(message, default, writer)
+    }
+
+    fn select(
+        &self,
+        message: &str,
+        options: Vec<String>,
+        default: Option<usize>,
+        writer: &mut dyn Write,
+    ) -> Result<String, InquireError> {
+        self.observe();
+        self.inner.select(message, options, default, writer)
+    }
+
+    fn password(&self, message: &str, writer: &mut dyn Write) -> Result<String, InquireError> {
+        self.observe();
+        self.inner.password(message, writer)
+    }
+}
+
+/// A tool question hides the window while the prompt is up, and brings it back
+/// after.
+///
+/// A prompt widget owns the cursor between its own writes, so a redraw landing
+/// mid-session corrupts it.
+/// Acquiring a prompt writer suspends the region for its lifetime, which is
+/// what makes every prompt site correct without any of them knowing about
+/// regions.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_tool_prompt_hides_the_window_and_restores_it() {
+    let test_result = Box::pin(timeout(Duration::from_secs(5), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let mut config = talking_tool_config(&[]);
+        let mut tool_config = inquiry_tool_config(&[]);
+        tool_config
+            .questions
+            .insert("confirm".to_owned(), QuestionConfig {
+                target: QuestionTarget::User,
+                answer: None,
+            });
+        config
+            .conversation
+            .tools
+            .insert("asking_tool".to_owned(), tool_config);
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+
+        let provider: Arc<dyn Provider> = Arc::new(SequentialMockProvider {
+            responses: vec![
+                single_tool_call_events("call_ask", "asking_tool"),
+                final_message_events("Done."),
+            ],
+            call_index: AtomicUsize::new(0),
+            model: inquiry_mock_model(),
+        });
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(
+            printer.with_terminal(TerminalCapability::interactive(Some(80)).with_rows(Some(24))),
+        );
+        let mcp_client = jp_mcp::Client::default();
+        let router = detached_router();
+
+        let prompts = Arc::new(ObservingPromptBackend::new(
+            Arc::clone(&printer),
+            Arc::clone(&err),
+            'y',
+        ));
+        let executor_source = TestExecutorSource::new().with_executor("asking_tool", |req| {
+            Box::new(AskingTalkingExecutor::new(&req.id, &req.name))
+        });
+        let tool_defs = executor_source.tool_definitions();
+
+        run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &router,
+            &mcp_client,
+            root,
+            true, // interactive: a user-targeted question needs a user
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &tool_defs,
+            printer.clone(),
+            Arc::clone(&prompts) as Arc<dyn PromptBackend>,
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(executor_source)),
+            ChatRequest::from("Ask me"),
+            InvocationContext::default(),
+            PendingStreamTrim::default(),
+        )
+        .await
+        .unwrap();
+
+        printer.flush();
+
+        // The prompt ran at all — an empty snapshot would make the rest
+        // vacuous.
+        let seen = prompts.seen.lock().clone();
+        assert!(
+            !seen.is_empty(),
+            "the prompt must have opened for this test to mean anything"
+        );
+
+        // The last thing on the wire when the widget took over is an erase,
+        // not a region frame: the rows are gone before it draws.
+        assert!(
+            seen.ends_with("\r\x1b[K"),
+            "the window must be erased before the prompt draws, got {:?}",
+            seen.rsplit('\n').next().unwrap_or(&seen)
+        );
+
+        // And it comes back afterwards, still carrying the tool's output.
+        let chrome = err.lock().clone();
+        let after = chrome
+            .strip_prefix(seen.as_str())
+            .expect("the snapshot is a prefix of the final chrome");
+        assert!(
+            after.contains("⏱ Running…"),
+            "the row must return once the prompt closes.\nAfter:\n{after}"
+        );
+        assert!(
+            after.contains("after the answer"),
+            "the window keeps taking the tool's stderr afterwards.\nAfter:\n{after}"
+        );
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out");
+}
+
+/// An executor that pushes, asks one question, then pushes again once answered.
+///
+/// The two pushes straddle the re-spawn, so a sink that only worked on the
+/// first attempt shows up as the second line missing.
+struct AskingTalkingExecutor {
+    /// The tool call this executor answers.
+    tool_id: String,
+
+    /// The tool's name.
+    tool_name: String,
+
+    /// Arguments, unused beyond satisfying the trait.
+    arguments: Map<String, Value>,
+}
+
+impl AskingTalkingExecutor {
+    /// An executor that talks either side of one question.
+    fn new(tool_id: &str, tool_name: &str) -> Self {
+        Self {
+            tool_id: tool_id.to_owned(),
+            tool_name: tool_name.to_owned(),
+            arguments: Map::new(),
+        }
+    }
+}
+
+#[async_trait]
+impl Executor for AskingTalkingExecutor {
+    fn tool_id(&self) -> &str {
+        &self.tool_id
+    }
+
+    fn tool_name(&self) -> &str {
+        &self.tool_name
+    }
+
+    fn arguments(&self) -> &Map<String, Value> {
+        &self.arguments
+    }
+
+    fn permission_info(&self) -> Option<PermissionInfo> {
+        None
+    }
+
+    fn set_arguments(&mut self, _args: Value) {}
+
+    async fn execute(
+        &self,
+        answers: &IndexMap<String, Value>,
+        _mcp_client: &jp_mcp::Client,
+        _root: &Utf8Path,
+        _cancellation_token: CancellationToken,
+        stderr: Option<jp_llm::tool::StderrSink>,
+    ) -> ExecutorResult {
+        if answers.contains_key("which") {
+            if let Some(sink) = stderr {
+                sink("after the answer");
+            }
+
+            return ExecutorResult::Completed(ToolCallResponse {
+                id: self.tool_id.clone(),
+                result: Ok("done".to_owned()),
+            });
+        }
+
+        if let Some(sink) = stderr {
+            sink("before the question");
+        }
+
+        ExecutorResult::NeedsInput {
+            tool_id: self.tool_id.clone(),
+            tool_name: self.tool_name.clone(),
+            question: Question::boolean("which", "Which one?").expect("valid question id"),
+            source: InquirySource::tool(self.tool_name.clone()),
+            accumulated_answers: answers.clone(),
+        }
+    }
 }
 
 /// Mock executor that checks accumulated answers and returns `NeedsInput` for

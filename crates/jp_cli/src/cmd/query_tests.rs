@@ -12,7 +12,7 @@ use jp_config::{
         ResultMode, RunMode, access::PartialEnvRuleConfig,
     },
     model::id::{ModelIdConfig, PartialModelIdConfig, ProviderId},
-    style::print_stderr::{PrintStderr, StderrRows},
+    style::stderr_rows::{RowCount, StderrRows},
     util::build,
 };
 use jp_conversation::{
@@ -2321,7 +2321,7 @@ fn immediate_mcp_startup_config() -> McpStartupConfig {
         interval_ms: 10,
         // Most of these cases assert on the status row alone; the ones that
         // exercise the window override this.
-        print_stderr: PrintStderr::Off,
+        stderr_rows: StderrRows::Off,
     }
 }
 
@@ -2506,7 +2506,7 @@ fn skipped_server_report_skips_disabled_tools() {
 /// A startup wait that shows two window rows above the status row.
 fn windowed_mcp_startup_config() -> McpStartupConfig {
     McpStartupConfig {
-        print_stderr: PrintStderr::Rows(StderrRows { rows: 2 }),
+        stderr_rows: StderrRows::Fixed(RowCount { rows: 2 }),
         ..immediate_mcp_startup_config()
     }
 }

@@ -1,4 +1,4 @@
-//! Whether a progress indicator shows the child process's output.
+//! How many rows of a child process's output a progress indicator shows.
 //!
 //! Waits that spawn a child process — an MCP server starting, a tool running
 //! — can show the last few lines that child wrote to stderr above the timer,
@@ -7,8 +7,13 @@
 //!
 //! ```toml
 //! [style.mcp_startup]
-//! print_stderr = true   # false | true | N
+//! stderr_rows = "auto"   # false | true | N
 //! ```
+//!
+//! This is the size of the window, which is screen space and therefore shared:
+//! there is one window per wait, however many sources feed it.
+//! Whether an individual source contributes is a separate question, asked
+//! per-tool by `conversation.tools.<name>.style.print_stderr`.
 
 use std::{fmt, num::ParseIntError};
 
@@ -22,13 +27,13 @@ use serde::{Deserialize, Serialize};
 /// - `N`: show exactly `N` rows.
 ///
 /// The count is shared across every source feeding the indicator rather than
-/// being one window each: `print_stderr = 1` is a single row that each source
+/// being one window each: `stderr_rows = 1` is a single row that each source
 /// replaces with its latest line.
 /// A terminal whose height cannot be determined shows no output whatever the
 /// value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, ConfigEnum)]
 #[serde(rename_all = "snake_case")]
-pub enum PrintStderr {
+pub enum StderrRows {
     /// Show no output; the indicator is the timer alone.
     #[default]
     #[serde(alias = "false")]
@@ -40,10 +45,10 @@ pub enum PrintStderr {
 
     /// Show exactly this many rows.
     #[variant(fallback)]
-    Rows(StderrRows),
+    Fixed(RowCount),
 }
 
-impl PrintStderr {
+impl StderrRows {
     /// Whether any output rows are shown.
     #[must_use]
     pub const fn is_enabled(self) -> bool {
@@ -51,7 +56,7 @@ impl PrintStderr {
     }
 }
 
-impl From<bool> for PrintStderr {
+impl From<bool> for StderrRows {
     /// `false` shows the timer alone; `true` sizes the window from the
     /// terminal.
     fn from(v: bool) -> Self {
@@ -61,12 +66,12 @@ impl From<bool> for PrintStderr {
 
 /// A fixed number of output rows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct StderrRows {
+pub struct RowCount {
     /// Rows to show.
     pub rows: u16,
 }
 
-impl TryFrom<&str> for StderrRows {
+impl TryFrom<&str> for RowCount {
     type Error = ParseIntError;
 
     fn try_from(s: &str) -> Result<Self, Self::Error> {
@@ -74,21 +79,21 @@ impl TryFrom<&str> for StderrRows {
     }
 }
 
-impl fmt::Display for StderrRows {
+impl fmt::Display for RowCount {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.rows)
     }
 }
 
-impl<'de> Deserialize<'de> for PrintStderr {
+impl<'de> Deserialize<'de> for StderrRows {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        struct PrintStderrVisitor;
+        struct StderrRowsVisitor;
 
-        impl<'de> serde::de::Visitor<'de> for PrintStderrVisitor {
-            type Value = PrintStderr;
+        impl<'de> serde::de::Visitor<'de> for StderrRowsVisitor {
+            type Value = StderrRows;
 
             fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
                 formatter.write_str("a boolean, a string (\"off\", \"auto\"), or a row count")
@@ -98,11 +103,7 @@ impl<'de> Deserialize<'de> for PrintStderr {
             where
                 E: serde::de::Error,
             {
-                Ok(if v {
-                    PrintStderr::Auto
-                } else {
-                    PrintStderr::Off
-                })
+                Ok(StderrRows::from(v))
             }
 
             fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
@@ -110,9 +111,9 @@ impl<'de> Deserialize<'de> for PrintStderr {
                 E: serde::de::Error,
             {
                 match v {
-                    "off" => Ok(PrintStderr::Off),
-                    "auto" => Ok(PrintStderr::Auto),
-                    s => s.parse::<u16>().map(rows).map_err(|_| {
+                    "off" | "false" => Ok(StderrRows::Off),
+                    "auto" | "true" => Ok(StderrRows::Auto),
+                    s => s.parse::<u16>().map(fixed).map_err(|_| {
                         serde::de::Error::unknown_variant(v, &["off", "auto", "a number"])
                     }),
                 }
@@ -122,7 +123,7 @@ impl<'de> Deserialize<'de> for PrintStderr {
             where
                 E: serde::de::Error,
             {
-                u16::try_from(v).map(rows).map_err(|_| {
+                u16::try_from(v).map(fixed).map_err(|_| {
                     serde::de::Error::invalid_value(serde::de::Unexpected::Unsigned(v), &"a number")
                 })
             }
@@ -132,7 +133,7 @@ impl<'de> Deserialize<'de> for PrintStderr {
             where
                 E: serde::de::Error,
             {
-                u16::try_from(v).map(rows).map_err(|_| {
+                u16::try_from(v).map(fixed).map_err(|_| {
                     serde::de::Error::invalid_value(serde::de::Unexpected::Signed(v), &"a number")
                 })
             }
@@ -148,36 +149,36 @@ impl<'de> Deserialize<'de> for PrintStderr {
                 enum Helper {
                     Off,
                     Auto,
-                    Rows(StderrRows),
+                    Fixed(RowCount),
                 }
 
                 let helper =
                     Helper::deserialize(serde::de::value::MapAccessDeserializer::new(map))?;
 
                 Ok(match helper {
-                    Helper::Off => PrintStderr::Off,
-                    Helper::Auto => PrintStderr::Auto,
-                    Helper::Rows(rows) => PrintStderr::Rows(rows),
+                    Helper::Off => StderrRows::Off,
+                    Helper::Auto => StderrRows::Auto,
+                    Helper::Fixed(rows) => StderrRows::Fixed(rows),
                 })
             }
         }
 
-        deserializer.deserialize_any(PrintStderrVisitor)
+        deserializer.deserialize_any(StderrRowsVisitor)
     }
 }
 
-/// A row count as a [`PrintStderr`], collapsing `0` to [`PrintStderr::Off`].
+/// A row count as a [`StderrRows`], collapsing `0` to [`StderrRows::Off`].
 ///
 /// `0` and `false` are the same request, and a zero-row window is something
 /// nothing can render into.
-const fn rows(rows: u16) -> PrintStderr {
+const fn fixed(rows: u16) -> StderrRows {
     if rows == 0 {
-        PrintStderr::Off
+        StderrRows::Off
     } else {
-        PrintStderr::Rows(StderrRows { rows })
+        StderrRows::Fixed(RowCount { rows })
     }
 }
 
 #[cfg(test)]
-#[path = "print_stderr_tests.rs"]
+#[path = "stderr_rows_tests.rs"]
 mod tests;

@@ -1316,7 +1316,7 @@ async fn await_mcp_servers(
 /// quietly loses tools: the `warn!` explaining why goes to the trace log, which
 /// is discarded unless the run itself fails.
 ///
-/// Emitted whatever `style.mcp_startup.show` and `print_stderr` say.
+/// Emitted whatever `style.mcp_startup.show` and `stderr_rows` say.
 /// Those keys gate progress display; gating a failure report behind them would
 /// reproduce the silence this closes.
 ///
@@ -1398,7 +1398,7 @@ fn claim_mcp_startup_region(printer: &Printer, config: &McpStartupConfig) -> Sta
             Duration::from_millis(config.interval_ms.into()),
             move |secs, detail| mcp_startup_line(secs, detail, columns),
         )
-        .with_output(output_lines(config.print_stderr)),
+        .with_output(output_lines(config.stderr_rows)),
     )
 }
 

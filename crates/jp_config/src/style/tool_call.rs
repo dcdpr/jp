@@ -7,7 +7,7 @@ use crate::{
     delta::{PartialConfigDelta, delta_opt},
     fill::FillDefaults,
     partial::{ToPartial, partial_opt},
-    style::print_stderr::PrintStderr,
+    style::stderr_rows::StderrRows,
 };
 
 /// Tool call content style configuration.
@@ -45,7 +45,7 @@ pub struct ToolCallConfig {
 /// ```toml
 /// [style.tool_call.progress]
 /// delay_secs = 3
-/// print_stderr = false
+/// stderr_rows = true
 /// ```
 #[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
@@ -70,20 +70,27 @@ pub struct ToolProgressConfig {
     #[setting(default = 100)]
     pub interval_ms: u32,
 
-    /// Rows of the tool's stderr to show above the timer.
+    /// Rows of tool stderr to show above the timer.
     ///
     /// - `false` or `0`: show the timer alone.
-    ///   This is the default.
     /// - `true`: size the window from the terminal height.
+    ///   This is the default.
     /// - `N`: show exactly `N` rows.
     ///
-    /// Defaults to `false`, unlike `style.mcp_startup.print_stderr`: a tool's
-    /// progress can be on screen while the assistant's answer is streaming
-    /// beneath it, where extra rows cost the most.
+    /// A tool that outlives `delay_secs` — a build, a test run, a deploy — is
+    /// the one whose output you want, and `delay_secs` is what keeps quick
+    /// tools from showing anything at all.
     /// The lines are erased with the timer and never reach the transcript; the
     /// tool's full output still goes to the assistant either way.
-    #[setting(default = "off")]
-    pub print_stderr: PrintStderr,
+    ///
+    /// This is the size of the window, which is screen space and therefore
+    /// shared: one window holds every tool running at once, each line labelled
+    /// with the tool that wrote it.
+    /// To keep one noisy tool out of it, set
+    /// `conversation.tools.<name>.style.print_stderr = false` rather than
+    /// shrinking the window for everything.
+    #[setting(default = "auto")]
+    pub stderr_rows: StderrRows,
 }
 
 /// Configuration for the "(receiving arguments…)" indicator shown while tool
@@ -133,7 +140,7 @@ impl AssignKeyValue for PartialToolProgressConfig {
             "show" => self.show = kv.try_some_bool()?,
             "delay_secs" => self.delay_secs = kv.try_some_u32()?,
             "interval_ms" => self.interval_ms = kv.try_some_u32()?,
-            "print_stderr" => self.print_stderr = kv.try_some_bool_number_or_from_str()?,
+            "stderr_rows" => self.stderr_rows = kv.try_some_bool_number_or_from_str()?,
             _ => return missing_key(&kv),
         }
 
@@ -171,7 +178,7 @@ impl PartialConfigDelta for PartialToolProgressConfig {
             show: delta_opt(self.show.as_ref(), next.show),
             delay_secs: delta_opt(self.delay_secs.as_ref(), next.delay_secs),
             interval_ms: delta_opt(self.interval_ms.as_ref(), next.interval_ms),
-            print_stderr: delta_opt(self.print_stderr.as_ref(), next.print_stderr),
+            stderr_rows: delta_opt(self.stderr_rows.as_ref(), next.stderr_rows),
         }
     }
 }
@@ -202,7 +209,7 @@ impl FillDefaults for PartialToolProgressConfig {
             show: self.show.or(defaults.show),
             delay_secs: self.delay_secs.or(defaults.delay_secs),
             interval_ms: self.interval_ms.or(defaults.interval_ms),
-            print_stderr: self.print_stderr.or(defaults.print_stderr),
+            stderr_rows: self.stderr_rows.or(defaults.stderr_rows),
         }
     }
 }
@@ -237,7 +244,7 @@ impl ToPartial for ToolProgressConfig {
             show: partial_opt(&self.show, defaults.show),
             delay_secs: partial_opt(&self.delay_secs, defaults.delay_secs),
             interval_ms: partial_opt(&self.interval_ms, defaults.interval_ms),
-            print_stderr: partial_opt(&self.print_stderr, defaults.print_stderr),
+            stderr_rows: partial_opt(&self.stderr_rows, defaults.stderr_rows),
         }
     }
 }

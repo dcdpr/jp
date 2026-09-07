@@ -676,7 +676,7 @@ The two blocks whose subject is a child process gain one key:
 ```toml
 [style.mcp_startup]
 delay_secs = 4
-print_stderr = true   # false | true | N
+stderr_rows = true   # false | true | N
 ```
 
 - `false` or `0` — no output window.
@@ -686,8 +686,8 @@ print_stderr = true   # false | true | N
   to spare above the status row.
 - `N` — window of exactly `N` rows, capped by the same height budget.
 
-The count is total, not per source: `print_stderr = 1` is a single row that
-every source swaps for its latest line.
+The count is total, not per source: `stderr_rows = 1` is a single row that every
+source swaps for its latest line.
 An unknown terminal height falls back to a bare status row whatever the value
 is, per the enabling predicate.
 
@@ -698,17 +698,55 @@ bool accepted as a synonym for the outer two), including the hand-written
 Following it keeps one idiom for "off, automatic, or a count" across the config
 tree, and gives both keys the same accepted values by construction.
 
-The defaults differ by block, because the two waits differ:
+Both default to `true`, for the same reason: `delay_secs` has already decided
+the wait is long enough to be worth explaining, and the only thing left to say
+about it is what the child is doing.
 
-| Key                                     | Default | Why                                                                                                                      |
-| --------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `style.mcp_startup.print_stderr`        | `true`  | The wait owns the screen: nothing else is streaming, and a silent five-minute build is the case that motivates this RFD. |
-| `style.tool_call.progress.print_stderr` | `false` | A tool region can be live while assistant output streams, where extra rows cost the most and flicker scales with them.   |
+| Key                                    | Default | Why                                                                                                                      |
+| -------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `style.mcp_startup.stderr_rows`        | `true`  | The wait owns the screen: nothing else is streaming, and a silent five-minute build is the case that motivates this RFD. |
+| `style.tool_call.progress.stderr_rows` | `true`  | A tool that outlives `delay_secs` is exactly the one whose output the user wants; the delay is the filter.               |
 
-Defaulting `style.mcp_startup.print_stderr` to `true` is a deliberate
-compatibility change: a user with no config sees a build preview where a one-row
-timer stood.
-Setting it to `false` restores the one-row timer.
+**Rows are screen space; membership is not.** `stderr_rows` sizes one window
+shared by every source feeding it, so it cannot answer "show tool A but not tool
+B" — a per-tool row count would mean one tool rendering five lines into a
+ten-row window another tool asked for.
+So the window has two gates, and both must allow a line through:
+
+```toml
+[style.tool_call.progress]
+stderr_rows = "auto"        # is there a window, and how tall
+
+[conversation.tools.'*'.style]
+print_stderr = true         # does this tool feed it
+
+[conversation.tools.cargo_test.style]
+print_stderr = false        # … this one does not
+```
+
+This is the shape `style.tool_call.show` and
+`conversation.tools.<name>.style.hidden` already use for tool chrome: a global
+switch and a per-tool exemption, ANDed.
+The per-tool key inherits field-by-field from the `'*'` block like every other
+`style` field, and a tool that opts out is handed no sink at all, so a tool that
+floods costs nothing rather than pushing into a window that discards it.
+
+MCP startup has no equivalent per-server key: every server starting at once is
+part of the same wait, which is the case the window exists for.
+
+**A tool region never coexists with streaming assistant output.** The turn loop
+runs streaming and executing as separate phases: the provider stream is drained
+and closed before any tool is spawned, and the next request is not made until
+every tool has answered.
+What a tool region does share the screen with is *other tool chrome* — a second
+tool's result rendering while the first still runs.
+That is a coexistence the primitive has to handle correctly rather than a reason
+to keep the window off: a default that exists to avoid a rendering defect hides
+the defect instead of fixing it.
+
+Defaulting both to `true` is a deliberate compatibility change: a user with no
+config sees a preview where a one-row timer stood.
+Setting either to `false` restores the one-row timer for that wait.
 
 The key belongs only on the two blocks that have a child process.
 `style.lock_wait` waits on a file lock and `style.streaming.progress` waits on
@@ -716,7 +754,7 @@ an HTTP response; neither has a stderr to show.
 That matters because `ProgressConfig` is currently shared — `style.streaming`
 imports it from `style::tool_call` — so `style.tool_call.progress` needs its
 own type to carry the key without leaking a meaningless
-`style.streaming.progress.print_stderr` into the schema.
+`style.streaming.progress.stderr_rows` into the schema.
 The two blocks were identical by coincidence, not by design, and this is where
 they diverge.
 
@@ -789,7 +827,7 @@ all four are the region's or the client's job.
   It keeps them ignorant of rendering, but the plumbing exists for a display
   concern, and a crate that previously only logged now also feeds a UI.
 - **Child output reaches the screen without the user asking for it.** With
-  `style.mcp_startup.print_stderr` defaulting to `true`, a startup wrapper that
+  `style.mcp_startup.stderr_rows` defaulting to `true`, a startup wrapper that
   echoes a resolved token or an expanded environment variable puts it on the
   terminal and in scrollback — during a screen share, a recording, or a
   captured support session.
@@ -798,7 +836,7 @@ all four are the region's or the client's job.
   The same bytes already reach the terminal on the failure path, where
   `render_stderr_tail` embeds up to 100 lines of child stderr in
   `InitializeError`, so this widens an existing surface rather than opening one.
-  Users running sensitive startup wrappers set `print_stderr = false`.
+  Users running sensitive startup wrappers set `stderr_rows = false`.
 
 ## Alternatives
 
@@ -881,18 +919,20 @@ all four are the region's or the client's job.
   The known refinement, if it matters in practice, is yielding redraws between
   typewriter batches inside the worker loop.
 
-- **Flicker scales with row count.** Erase-redraw around every write during
-  heavy streaming could flicker on slow terminals, and an N-row region is N
-  times the bytes of a status line.
-  Tool execution is the exposed case, since a region can be active while
-  assistant output streams.
+- **Flicker scales with row count.** Erase-redraw around every write could
+  flicker on slow terminals, and an N-row region is N times the bytes of a
+  status line.
+  Tool execution is the exposed case, not because assistant output streams
+  alongside it — it does not — but because a batch of parallel tools renders
+  each result as the tool answers, while the others keep running.
   Mitigation if observed: skip the redraw when another write is already queued,
   coalescing to one redraw per batch.
 
 - **Window sizing is a guess.** `height / 10` is chosen to stay unobtrusive
-  while assistant output streams beneath a tool's region.
-  Whether the same divisor suits MCP startup — which runs before any streaming
-  and could afford more rows — is worth revisiting once both clients exist.
+  beneath the tool results that render while a region is up.
+  Whether the same divisor suits MCP startup — which runs before any tool
+  chrome and could afford more rows — is worth revisiting once both clients
+  exist.
 
 - **Windows console.** `\r\x1b[K` handling, relative cursor movement across N
   rows, and the worker's `recv_timeout` resolution (~15.6ms scheduler tick) need
@@ -961,8 +1001,8 @@ contracts commits to.
 4. **Output window.** Add the bounded line buffer and its coalesced redraw,
    source registration and labelling, the SGR filter, ANSI-aware truncation,
    terminal height as a capability input, multi-row draw and erase with relative
-   row accounting, and the `print_stderr` config shape (including splitting
-   `ProgressConfig`).
+   row accounting, and the `stderr_rows` config shape (including splitting
+   `ProgressConfig`), plus the per-tool `print_stderr` gate.
 
    Opens with a spike against a real terminal, because that is the only place
    scrolling, deferred wrap, and resize exist — `Printer::memory` records
@@ -993,7 +1033,7 @@ contracts commits to.
    reachable through `-v` (`mcp::stderr`) rather than dumped inline.
    It is persistent stderr chrome and follows [RFD 048]'s format rules like any
    other chrome, including the NDJSON form under `--format json`.
-   It is emitted regardless of `show` and `print_stderr`: those gate progress
+   It is emitted regardless of `show` and `stderr_rows`: those gate progress
    display, and gating a failure report behind them would reproduce the silent
    failure this closes.
 
