@@ -72,7 +72,9 @@ PartialAppConfig {
                 },
                 access: None,
             },
-            tools: {},
+            tools: Map(
+                {},
+            ),
         },
         compaction: PartialCompactionConfig {
             rules: Vec(

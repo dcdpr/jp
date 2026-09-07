@@ -800,18 +800,21 @@ fn test_tools_config() {
 
     assert_eq!(
         p.tools,
-        IndexMap::<_, _>::from_iter(vec![("cargo_check".to_owned(), PartialToolConfig {
-            enable: Some(PartialEnableConfig::ON),
-            source: Some(ToolSource::Local { tool: None }),
-            ..Default::default()
-        })])
+        MergeableMap::from(IndexMap::<_, _>::from_iter(vec![(
+            "cargo_check".to_owned(),
+            PartialToolConfig {
+                enable: Some(PartialEnableConfig::ON),
+                source: Some(ToolSource::Local { tool: None }),
+                ..Default::default()
+            }
+        )]))
     );
 
     let kv = KvAssignment::try_from_cli("foo:", r#"{"source":"builtin"}"#).unwrap();
     p.assign(kv).unwrap();
     assert_eq!(
         p.tools,
-        IndexMap::<_, _>::from_iter(vec![
+        MergeableMap::from(IndexMap::<_, _>::from_iter(vec![
             ("cargo_check".to_owned(), PartialToolConfig {
                 enable: Some(PartialEnableConfig::ON),
                 source: Some(ToolSource::Local { tool: None }),
@@ -821,7 +824,52 @@ fn test_tools_config() {
                 source: Some(ToolSource::Builtin { tool: None }),
                 ..Default::default()
             })
-        ])
+        ]))
+    );
+}
+
+/// The tools map takes a strategy, even though its entries are flattened to sit
+/// directly under `conversation.tools`.
+#[test]
+fn tools_map_accepts_a_replace_strategy() {
+    let config: PartialToolsConfig = toml::from_str(
+        r#"
+        strategy = "replace"
+
+        [value.my_tool]
+        source = "builtin"
+        "#,
+    )
+    .expect("a strategy-carrying tools map parses");
+
+    assert!(
+        matches!(&config.tools, MergeableMap::Merged(merged)
+            if merged.strategy == Some(crate::types::map::MergedMapStrategy::Replace)),
+        "expected the declared strategy to survive the flatten: {:?}",
+        config.tools
+    );
+    assert!(config.tools.contains_key("my_tool"));
+}
+
+/// A plain tools map keeps merging per key, and a tool may be named `value`.
+#[test]
+fn tools_map_without_a_strategy_merges_per_key() {
+    let config: PartialToolsConfig = toml::from_str(
+        r#"
+        [value]
+        source = "builtin"
+        "#,
+    )
+    .expect("a plain tools map parses");
+
+    assert!(
+        matches!(&config.tools, MergeableMap::Map(_)),
+        "expected a plain map: {:?}",
+        config.tools
+    );
+    assert!(
+        config.tools.contains_key("value"),
+        "`value` alone names a tool, since a strategy needs both keys"
     );
 }
 

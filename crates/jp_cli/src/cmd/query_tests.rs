@@ -45,7 +45,7 @@ use crate::{
 
 fn make_partial_with_tools() -> PartialAppConfig {
     let mut partial = PartialAppConfig::default();
-    partial.conversation.tools.tools = IndexMap::from_iter([
+    *partial.conversation.tools.tools = IndexMap::from_iter([
         ("implicitly_enabled_tool".into(), PartialToolConfig {
             enable: None,
             ..Default::default()
@@ -1118,7 +1118,7 @@ fn test_builtin_config_preserves_tool_order() {
     // Tool order is the order tools are presented to the provider, so merging
     // a builtin block must not move an existing entry to the end.
     let mut partial = PartialAppConfig::default();
-    partial.conversation.tools.tools = IndexMap::from_iter([
+    *partial.conversation.tools.tools = IndexMap::from_iter([
         ("describe_tools".into(), PartialToolConfig {
             result: Some(ResultMode::Ask),
             ..Default::default()

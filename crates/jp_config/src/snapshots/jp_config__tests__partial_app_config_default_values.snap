@@ -137,7 +137,9 @@ Ok(
                         },
                         access: None,
                     },
-                    tools: {},
+                    tools: Map(
+                        {},
+                    ),
                 },
                 compaction: PartialCompactionConfig {
                     rules: Merged(
