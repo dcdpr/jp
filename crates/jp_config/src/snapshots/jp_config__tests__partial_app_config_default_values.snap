@@ -454,7 +454,9 @@ Ok(
                             true,
                         ),
                         beta_headers: Some(
-                            [],
+                            Vec(
+                                [],
+                            ),
                         ),
                     },
                     cerebras: PartialCerebrasConfig {
