@@ -24,8 +24,8 @@ use jp_plugin::message::{
 use serde::Serialize;
 use serde_json::Value;
 use ticket::{
-    Comment, Kind, Label, Metadata, NewTicket, Status, Ticket, TicketId, Vocabulary,
-    import::Import, labels, render, store,
+    Comment, Kind, LABELS_FILE, Labels, Metadata, NewTicket, Selector, Status, Ticket, TicketId,
+    Vocabulary, import::Import, render, store,
 };
 
 #[derive(Debug, Parser)]
@@ -64,7 +64,7 @@ enum Command {
         #[arg(long)]
         implements: Option<String>,
 
-        /// A label from the board's vocabulary.
+        /// A `key=value` label from the board's vocabulary.
         /// Repeat for more than one.
         #[arg(long = "label")]
         labels: Vec<String>,
@@ -99,7 +99,7 @@ enum Command {
         /// Omit it to choose.
         id: Option<TicketId>,
 
-        /// A label from the board's vocabulary.
+        /// A `key=value` label from the board's vocabulary.
         /// Repeat for more than one.
         #[arg(long = "label")]
         labels: Vec<String>,
@@ -220,7 +220,7 @@ enum Command {
         #[arg(long)]
         kind: Option<Kind>,
 
-        /// Only tickets carrying this label.
+        /// Only tickets carrying this label, as `key` or `key=value`.
         /// Repeat to require several.
         #[arg(long = "label")]
         labels: Vec<String>,
@@ -433,6 +433,7 @@ fn compose_missing(
             author,
             body,
             implements,
+            labels,
         } if kind.is_none() || title.is_none() => {
             // Kind first: it frames what you're about to write. The title is
             // read out of the composed text, or asked for last.
@@ -456,6 +457,7 @@ fn compose_missing(
                 author,
                 body,
                 implements,
+                labels,
             })
         }
 
@@ -1409,15 +1411,16 @@ fn add(
 /// Replace a ticket's labels with the set the caller named.
 ///
 /// Checked against the ticket rather than against the vocabulary alone, so a
-/// retired label the ticket already carries can be listed again and kept.
+/// retired value the ticket already carries can be listed again and kept.
 fn relabel(dir: &Utf8Path, id: TicketId, requested: &[String]) -> Result<Output, String> {
     let vocabulary = read_vocabulary(dir)?;
     let (path, applied) =
         store::set_labels(dir, id, &vocabulary, requested).map_err(|error| error.to_string())?;
 
-    Ok(match applied.as_slice() {
-        [] => format!("{path}: labels cleared\n"),
-        applied => format!("{path}: {}\n", labels::join(applied)),
+    Ok(if applied.is_empty() {
+        format!("{path}: labels cleared\n")
+    } else {
+        format!("{path}: {applied}\n")
     }
     .into())
 }
@@ -1426,7 +1429,7 @@ fn relabel(dir: &Utf8Path, id: TicketId, requested: &[String]) -> Result<Output,
 ///
 /// Both the refusal and the vocabulary's own error carry enough to act on, so
 /// they are handed to the user as they are.
-fn resolve_labels(dir: &Utf8Path, requested: &[String]) -> Result<Vec<Label>, String> {
+fn resolve_labels(dir: &Utf8Path, requested: &[String]) -> Result<Labels, String> {
     read_vocabulary(dir)?
         .resolve(requested)
         .map_err(|error| error.to_string())
@@ -1442,34 +1445,25 @@ fn vocabulary_listing(dir: &Utf8Path) -> Result<Output, String> {
     if vocabulary.is_empty() {
         return Ok(format!(
             "This board defines no labels. Add them to {}.\n",
-            dir.join(labels::FILE)
+            dir.join(LABELS_FILE)
         )
         .into());
     }
 
-    // One width across both lists, so the descriptions line up down the whole
-    // listing rather than restarting at the retired section.
-    let width = vocabulary
-        .names()
-        .chain(vocabulary.retired_names())
-        .map(str::len)
-        .max()
-        .unwrap_or_default();
-    let describe = |name: &str| {
-        let description = vocabulary.description(name).unwrap_or_default();
-        format!("{name:<width$}  {description}\n")
-    };
-
     let mut out = String::new();
-    for name in vocabulary.names() {
-        out.push_str(&describe(name));
+    for (key, facet) in vocabulary.facets() {
+        out.push_str(&format!("{key}  {}\n", facet.description()));
+        for value in facet.values() {
+            out.push_str(&format!("  {key}={value}\n"));
+        }
+        for value in facet.retired() {
+            out.push_str(&format!("  {key}={value}  (retired)\n"));
+        }
+        out.push('\n');
     }
 
-    if vocabulary.retired_names().count() > 0 {
-        out.push_str("\nRetired (kept where already applied, not addable):\n");
-        for name in vocabulary.retired_names() {
-            out.push_str(&describe(name));
-        }
+    if vocabulary.facets().any(|(_, f)| f.retired().count() > 0) {
+        out.push_str("A retired label stays on a ticket that carries it, but can't be added.\n");
     }
 
     Ok(out.into())
@@ -1544,11 +1538,8 @@ fn show(dir: &Utf8Path, id: TicketId, json: bool) -> Result<Output, String> {
     out.push_str(&format!("- **Path**: {}\n", entry.path));
     out.push_str(&format!("- **Status**: {}\n", ticket.metadata.status));
     out.push_str(&format!("- **Kind**: {}\n", ticket.metadata.kind));
-    if !ticket.metadata.labels.is_empty() {
-        out.push_str(&format!(
-            "- **Labels**: {}\n",
-            ticket.metadata.labels.join(", ")
-        ));
+    for token in ticket.metadata.labels.to_tokens() {
+        out.push_str(&format!("- **Label**: {token}\n"));
     }
     if !ticket.description.is_empty() {
         out.push_str(&format!("\n{}\n", ticket.description));
@@ -1589,10 +1580,11 @@ fn list(
             Err(error) => warnings.push(format!("{}: {error}", entry.path)),
         }
     }
+    let selectors = Selector::parse_all(labels).map_err(|error| error.to_string())?;
     tickets.retain(|(_, ticket, _)| {
         status.is_none_or(|status| status == ticket.metadata.status)
             && kind.is_none_or(|kind| kind == ticket.metadata.kind)
-            && carries_every_label(ticket, labels)
+            && ticket.metadata.labels.matches(&selectors)
     });
 
     let text = if json {
@@ -1621,20 +1613,6 @@ fn list(
     Ok(Output { text, warnings })
 }
 
-/// Whether a ticket carries every one of `wanted`.
-///
-/// Requiring all of them rather than any composes with the other filters: each
-/// flag narrows the listing.
-fn carries_every_label(ticket: &Ticket, wanted: &[String]) -> bool {
-    wanted.iter().all(|wanted| {
-        ticket
-            .metadata
-            .labels
-            .iter()
-            .any(|label| label.eq_ignore_ascii_case(wanted.trim()))
-    })
-}
-
 /// One line of the human-readable listing.
 fn row(id: TicketId, ticket: &Ticket) -> String {
     let id = id.to_string();
@@ -1645,9 +1623,10 @@ fn row(id: TicketId, ticket: &Ticket) -> String {
         .blocked_by
         .as_deref()
         .map_or_else(String::new, |by| format!(" (blocked by {by})"));
-    let labels = match ticket.metadata.labels.as_slice() {
-        [] => String::new(),
-        labels => format!(" [{}]", labels.join(", ")),
+    let labels = if ticket.metadata.labels.is_empty() {
+        String::new()
+    } else {
+        format!(" [{}]", ticket.metadata.labels)
     };
 
     format!(

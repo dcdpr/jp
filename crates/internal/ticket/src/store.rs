@@ -15,12 +15,14 @@ use std::{
 };
 
 use camino::{Utf8Path, Utf8PathBuf};
+use jp_label::vocabulary;
 
 use crate::{
-    Comment, Label, NewTicket, ParseError, Status, Ticket, TicketId, Vocabulary,
+    Comment, LABEL_KEY, LABELS_FILE, Labels, NewTicket, ParseError, Status, Ticket, TicketId,
+    Vocabulary,
     id::{MAX_BUCKET, TAIL_SPACE},
     import::{Import, escaped},
-    labels, parse, render,
+    parse, render,
 };
 
 /// Directory holding the ticket files, relative to the workspace root.
@@ -63,9 +65,9 @@ pub enum Error {
     /// prefixes, or widening, which would break the fixed-width form.
     Exhausted,
     /// The board's label vocabulary can't be read.
-    Labels(labels::Error),
+    Labels(vocabulary::Error),
     /// A write named labels the board won't accept.
-    Rejected(labels::Rejected),
+    Rejected(jp_label::Rejected),
     /// The filesystem said no.
     Io(io::Error),
 }
@@ -123,14 +125,14 @@ impl From<ParseError> for Error {
     }
 }
 
-impl From<labels::Error> for Error {
-    fn from(error: labels::Error) -> Self {
+impl From<vocabulary::Error> for Error {
+    fn from(error: vocabulary::Error) -> Self {
         Self::Labels(error)
     }
 }
 
-impl From<labels::Rejected> for Error {
-    fn from(error: labels::Rejected) -> Self {
+impl From<jp_label::Rejected> for Error {
+    fn from(error: jp_label::Rejected) -> Self {
         Self::Rejected(error)
     }
 }
@@ -287,7 +289,7 @@ pub fn set_field(dir: &Utf8Path, id: TicketId, key: &str, value: &str) -> Result
 /// A file that is present but unreadable *is* an error: silently treating it as
 /// empty would reject every label a caller asks for and blame the caller.
 pub fn vocabulary(dir: &Utf8Path) -> Result<Vocabulary> {
-    match fs::read_to_string(dir.join(labels::FILE)) {
+    match fs::read_to_string(dir.join(LABELS_FILE)) {
         Ok(source) => Ok(Vocabulary::parse(&source)?),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Vocabulary::default()),
         Err(error) => Err(error.into()),
@@ -310,19 +312,15 @@ pub fn set_labels(
     id: TicketId,
     vocabulary: &Vocabulary,
     requested: &[String],
-) -> Result<(Utf8PathBuf, Vec<Label>)> {
+) -> Result<(Utf8PathBuf, Labels)> {
     let path = locate(dir, id)?;
     let source = fs::read_to_string(&path)?;
 
     let current = parse::labels(&source);
     let applied = vocabulary.resolve_against(requested, &current)?;
 
-    let updated = if applied.is_empty() {
-        render::remove_metadata(&source, "Labels")
-    } else {
-        render::set_metadata(&source, "Labels", &labels::join(&applied))
-    }
-    .ok_or(ParseError::MissingMetadata)?;
+    let updated = render::set_repeated_metadata(&source, LABEL_KEY, &applied.to_tokens())
+        .ok_or(ParseError::MissingMetadata)?;
     fs::write(&path, updated)?;
 
     Ok((path, applied))
@@ -415,7 +413,7 @@ pub fn import(dir: &Utf8Path, upstream: &Import<'_>) -> Result<Imported> {
             authors: upstream.authors,
             date: upstream.date,
             implements: None,
-            labels: &[],
+            labels: &Labels::default(),
             description: "",
         })?;
 

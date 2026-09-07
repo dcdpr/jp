@@ -10,7 +10,7 @@
 //! A ticket is read far more often than it is written, and by hand as often as
 //! by tooling, so the file is never round-tripped through the parser.
 
-use crate::{Comment, NewTicket, Status, labels, parse};
+use crate::{Comment, LABEL_KEY, NewTicket, Status, parse};
 
 /// Render a new ticket, opened at `Todo`.
 ///
@@ -27,8 +27,8 @@ pub fn ticket(new: &NewTicket<'_>) -> String {
     if let Some(rfd) = new.implements {
         out.push_str(&format!("- **Implements**: {rfd}\n"));
     }
-    if !new.labels.is_empty() {
-        out.push_str(&format!("- **Labels**: {}\n", labels::join(new.labels)));
+    for token in new.labels.to_tokens() {
+        out.push_str(&format!("- **{LABEL_KEY}**: {token}\n"));
     }
 
     let description = new.description.trim();
@@ -198,6 +198,7 @@ pub fn set_metadata(document: &str, key: &str, value: &str) -> Option<String> {
 
 /// Drop a field from the ticket's metadata block, returning the new document.
 ///
+/// Every occurrence of the field goes, so this also clears a repeated one.
 /// Returns `None` when the document has no metadata block; a document that
 /// doesn't carry the field comes back unchanged.
 ///
@@ -205,18 +206,47 @@ pub fn set_metadata(document: &str, key: &str, value: &str) -> Option<String> {
 /// alone.
 #[must_use]
 pub fn remove_metadata(document: &str, key: &str) -> Option<String> {
+    set_repeated_metadata(document, key, &[])
+}
+
+/// Replace every occurrence of a repeated metadata field with `values`, one
+/// line each.
+///
+/// A field written once per value keeps each line short regardless of how many
+/// values there are, which is what lets the block survive a markdown formatter
+/// that wraps at a fixed width.
+///
+/// The new lines land where the first existing one was, so a field keeps its
+/// place in the block; a field the ticket doesn't carry yet joins the end.
+/// Returns `None` when the document has no metadata block at all.
+#[must_use]
+pub fn set_repeated_metadata(document: &str, key: &str, values: &[String]) -> Option<String> {
     let header = parse::metadata_range(document)?;
-    let mut lines: Vec<String> = document.lines().map(ToOwned::to_owned).collect();
+    let lines: Vec<&str> = document.lines().collect();
 
-    let existing = header.clone().find(|&i| {
-        parse::meta_line(&lines[i]).is_some_and(|(found, _)| found.eq_ignore_ascii_case(key))
-    });
-    let Some(index) = existing else {
-        return Some(document.to_owned());
+    let matching = |line: &str| {
+        parse::meta_line(line).is_some_and(|(found, _)| found.eq_ignore_ascii_case(key))
     };
-    lines.remove(index);
+    let at = header.clone().find(|&i| matching(lines[i]));
+    let insert_at = at.unwrap_or(header.end);
 
-    let mut out = lines.join("\n");
+    let mut out: Vec<String> = vec![];
+    for (index, line) in lines.iter().enumerate() {
+        if index == insert_at {
+            out.extend(values.iter().map(|value| format!("- **{key}**: {value}")));
+        }
+        if header.contains(&index) && matching(line) {
+            continue;
+        }
+        out.push((*line).to_owned());
+    }
+    // A field appended to a block that runs to the end of the document has no
+    // following line to trigger the insert above.
+    if insert_at >= lines.len() {
+        out.extend(values.iter().map(|value| format!("- **{key}**: {value}")));
+    }
+
+    let mut out = out.join("\n");
     if document.ends_with('\n') {
         out.push('\n');
     }

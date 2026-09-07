@@ -199,8 +199,12 @@ const ticketBoardWriter = {
                     status: field('Status'),
                     kind: field('Kind'),
                     blockedBy: field('Blocked by'),
-                    labels: (field('Labels') ?? '')
-                        .split(',').map(label => label.trim()).filter(Boolean),
+                    // Repeated once per pair; a formatter escapes what would
+                    // otherwise be emphasis, so reading undoes that.
+                    labels: [...content.matchAll(/^- \*\*Label\*\*:\s*(.+)$/gim)]
+                        .map(m => m[1].replace(/\\([!-/:-@[-`{-~])/g, '$1').trim())
+                        .filter(Boolean)
+                        .sort(),
                     implements: field('Implements'),
                     path: `/ticket/${name.replace(/\.md$/, '')}`,
                 })

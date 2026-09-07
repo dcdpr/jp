@@ -24,6 +24,7 @@ jp_editor = { path = "crates/jp_editor" }
 jp_github = { path = "crates/jp_github" }
 jp_id = { path = "crates/jp_id" }
 jp_inquire = { path = "crates/jp_inquire" }
+jp_label = { path = "crates/jp_label" }
 jp_llm = { path = "crates/jp_llm" }
 jp_macro = { path = "crates/jp_macro" }
 jp_mcp = { path = "crates/jp_mcp" }

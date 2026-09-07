@@ -13,7 +13,7 @@
 
 use std::ops::Range;
 
-use crate::{Comment, Metadata, ParseError, Ticket, labels};
+use crate::{Comment, LABEL_KEY, Labels, Metadata, ParseError, Ticket};
 
 /// Read a ticket document.
 pub fn document(source: &str) -> Result<Ticket, ParseError> {
@@ -73,17 +73,51 @@ pub fn title(source: &str) -> Option<String> {
 /// concern, and a listing that hid a label the file carries would disagree with
 /// the file.
 #[must_use]
-pub fn labels(source: &str) -> Vec<String> {
+pub fn labels(source: &str) -> Labels {
     let doc = Doc::new(source);
     let Some(header) = doc.metadata_range() else {
-        return vec![];
+        return Labels::default();
     };
 
-    header
+    let tokens = header
         .filter_map(|i| meta_line(doc.lines[i]))
-        .find(|(key, _)| key.eq_ignore_ascii_case("labels"))
-        .map(|(_, value)| labels::split(value))
-        .unwrap_or_default()
+        .filter(|(key, _)| key.eq_ignore_ascii_case(LABEL_KEY))
+        .map(|(_, value)| unescaped(value));
+
+    Labels::from_tokens_lossy(tokens).0
+}
+
+/// Undo the escaping a markdown formatter applies inside a metadata value.
+///
+/// The block is a markdown list, so a formatter escapes what would otherwise be
+/// emphasis or a heading: `package=jp_config` is written `package=jp\_config`.
+/// Reading has to undo it, or a value round-trips into something else.
+fn unescaped(value: &str) -> String {
+    if !value.contains('\\') {
+        return value.to_owned();
+    }
+
+    let mut out = String::with_capacity(value.len());
+    let mut chars = value.chars();
+    while let Some(char_) = chars.next() {
+        if char_ != '\\' {
+            out.push(char_);
+            continue;
+        }
+
+        // A backslash escapes ASCII punctuation and nothing else, so one before
+        // anything is itself.
+        match chars.next() {
+            Some(next) if next.is_ascii_punctuation() => out.push(next),
+            Some(next) => {
+                out.push('\\');
+                out.push(next);
+            }
+            None => out.push('\\'),
+        }
+    }
+
+    out
 }
 
 /// The line range of the metadata block that follows the title heading.
@@ -239,7 +273,7 @@ fn without_comments_heading(text: String) -> String {
 fn metadata<'a>(pairs: impl Iterator<Item = (&'a str, &'a str)>) -> Result<Metadata, ParseError> {
     let mut status = None;
     let mut kind = None;
-    let mut label_names = vec![];
+    let mut label_tokens = vec![];
     let mut authors = None;
     let mut date = None;
     let mut blocked_by = None;
@@ -251,7 +285,9 @@ fn metadata<'a>(pairs: impl Iterator<Item = (&'a str, &'a str)>) -> Result<Metad
         match key.to_ascii_lowercase().as_str() {
             "status" => status = Some(value.parse()?),
             "kind" => kind = Some(value.parse()?),
-            "labels" => label_names = labels::split(value),
+            // Repeated once per pair, so every occurrence contributes rather
+            // than the last one winning.
+            "label" => label_tokens.push(unescaped(value)),
             "authors" => authors = Some(value.to_owned()),
             "date" => date = Some(value.to_owned()),
             "blocked by" => blocked_by = Some(value.to_owned()),
@@ -265,7 +301,7 @@ fn metadata<'a>(pairs: impl Iterator<Item = (&'a str, &'a str)>) -> Result<Metad
     Ok(Metadata {
         status: status.ok_or(ParseError::MissingField("Status"))?,
         kind: kind.ok_or(ParseError::MissingField("Kind"))?,
-        labels: label_names,
+        labels: Labels::from_tokens_lossy(label_tokens).0,
         authors: authors.ok_or(ParseError::MissingField("Authors"))?,
         date: date.ok_or(ParseError::MissingField("Date"))?,
         blocked_by,

@@ -14,7 +14,8 @@
 use std::{fs, io, path::MAIN_SEPARATOR};
 
 use ::ticket::{
-    Comment, Kind, Label, NewTicket, ParseError, Status, Ticket, TicketId, parse, render, store,
+    Comment, Kind, Labels, NewTicket, ParseError, Selector, Status, Ticket, TicketId, parse,
+    render, store,
 };
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{Local, SecondsFormat, Utc};
@@ -158,7 +159,7 @@ fn create(
     kind: Kind,
     title: &str,
     implements: Option<&str>,
-    labels: &[Label],
+    labels: &Labels,
     body: Option<String>,
 ) -> ToolResult {
     let date = Local::now().format("%Y-%m-%d").to_string();
@@ -184,7 +185,7 @@ fn preview_create(
     kind: Kind,
     title: &str,
     implements: Option<&str>,
-    labels: &[Label],
+    labels: &Labels,
     body: Option<&str>,
     date: &str,
 ) -> String {
@@ -207,11 +208,11 @@ fn preview_create(
 fn resolve_labels(
     root: &Utf8Path,
     requested: Option<&[String]>,
-) -> crate::Result<Result<Vec<Label>, String>> {
+) -> crate::Result<Result<Labels, String>> {
     // A call that names no labels doesn't read the vocabulary at all, so a
     // board with a broken `.labels.json` can still file unlabelled tickets.
     let Some(requested) = requested else {
-        return Ok(Ok(vec![]));
+        return Ok(Ok(Labels::default()));
     };
 
     Ok(store::vocabulary(&dir(root))?
@@ -229,7 +230,7 @@ fn label(root: &Utf8Path, id: TicketId, requested: &[String]) -> ToolResult {
 
     match store::set_labels(&tickets, id, &vocabulary, requested) {
         Ok((_, applied)) if applied.is_empty() => Ok(format!("Cleared the labels on {id}.").into()),
-        Ok((_, applied)) => Ok(format!("{id}: {}", ::ticket::labels::join(&applied)).into()),
+        Ok((_, applied)) => Ok(format!("{id}: {applied}").into()),
         Err(store::Error::NoSuchTicket(_)) => error(format!("No {id}.")),
         Err(store::Error::Rejected(refusal)) => error(refusal.to_string()),
         Err(other) => Err(other.into()),
@@ -367,27 +368,17 @@ fn list(
             Err(problem) => unreadable.push(format!("{}: {problem}", relative(root, &entry.path))),
         }
     }
+    let selectors = match Selector::parse_all(labels) {
+        Ok(selectors) => selectors,
+        Err(problem) => return error(problem.to_string()),
+    };
     tickets.retain(|(_, ticket)| {
         status.is_none_or(|status| status == ticket.metadata.status)
             && kind.is_none_or(|kind| kind == ticket.metadata.kind)
-            && carries_every_label(ticket, labels)
+            && ticket.metadata.labels.matches(&selectors)
     });
 
     Ok(render_list(&tickets, &unreadable).into())
-}
-
-/// Whether a ticket carries every one of `wanted`.
-///
-/// Requiring all of them rather than any composes with the other filters: each
-/// argument narrows the listing.
-fn carries_every_label(ticket: &Ticket, wanted: &[String]) -> bool {
-    wanted.iter().all(|wanted| {
-        ticket
-            .metadata
-            .labels
-            .iter()
-            .any(|label| label.eq_ignore_ascii_case(wanted.trim()))
-    })
 }
 
 /// The ticket directory inside the workspace.
@@ -449,9 +440,10 @@ fn render_list(tickets: &[(TicketId, &Ticket)], unreadable: &[String]) -> String
             .blocked_by
             .as_deref()
             .map_or_else(String::new, |by| format!(" [blocked by {by}]"));
-        let labels = match ticket.metadata.labels.as_slice() {
-            [] => String::new(),
-            labels => format!(" [{}]", labels.join(", ")),
+        let labels = if ticket.metadata.labels.is_empty() {
+            String::new()
+        } else {
+            format!(" [{}]", ticket.metadata.labels)
         };
 
         out.push_str(&format!(
@@ -480,8 +472,8 @@ fn render_ticket(id: TicketId, ticket: &Ticket, path: &str) -> String {
     out.push_str(&format!("- **Path**: {path}\n"));
     out.push_str(&format!("- **Status**: {}\n", metadata.status));
     out.push_str(&format!("- **Kind**: {}\n", metadata.kind));
-    if !metadata.labels.is_empty() {
-        out.push_str(&format!("- **Labels**: {}\n", metadata.labels.join(", ")));
+    for token in metadata.labels.to_tokens() {
+        out.push_str(&format!("- **Label**: {token}\n"));
     }
     out.push_str(&format!("- **Authors**: {}\n", metadata.authors));
     out.push_str(&format!("- **Date**: {}\n", metadata.date));

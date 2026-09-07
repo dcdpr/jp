@@ -38,7 +38,7 @@ export function parseTicket(content, filename) {
         authors: field(content, 'Authors'),
         date: field(content, 'Date'),
         blockedBy: field(content, 'Blocked by'),
-        labels: splitLabels(field(content, 'Labels')),
+        labels: readLabels(content),
         implements: field(content, 'Implements'),
         promotedTo: field(content, 'Promoted to'),
         github: field(content, 'GitHub'),
@@ -49,19 +49,30 @@ export function parseTicket(content, filename) {
     }
 }
 
-// Split a `Labels` metadata value into its labels.
+// Every `- **Label**: key=value` line in a ticket's metadata block, in order.
+//
+// The field repeats once per pair rather than joining them onto one line, so no
+// line grows with the number of labels and the block survives `comfort`'s width
+// wrapping. A formatter escapes what would otherwise be emphasis (`jp_config`
+// becomes `jp\_config`), so reading undoes that.
 //
 // Read as written rather than checked against the vocabulary: a listing that
-// hid a label the file carries would disagree with the file. `findUnknownLabels`
-// below is what catches one the board doesn't define.
-export function splitLabels(value) {
-    if (!value) return []
+// hid a label the file carries would disagree with the file.
+// `findUnknownLabels` below is what catches one the board doesn't define.
+export function readLabels(content) {
+    const block = content.match(/^# .+\n\n((?:- \*\*[^*]+\*\*:.*\n)+)/m)?.[1]
+    if (!block) return []
 
-    return value.split(',').map(label => label.trim()).filter(Boolean)
+    return block
+        .split('\n')
+        .map(line => line.match(/^- \*\*Label\*\*:\s*(.*)$/i)?.[1])
+        .filter(value => value !== undefined)
+        .map(value => value.replace(/\\([!-/:-@[-`{-~])/g, '$1').trim())
+        .filter(Boolean)
+        .sort()
 }
 
-// The labels the board defines: `{ active, retired }`, each a map of label to
-// description.
+// The labels the board defines, as a map of key to `{ values, retired }`.
 //
 // A board with no `.labels.json` defines none, which is a board that hasn't
 // started using them.
@@ -72,40 +83,45 @@ export function loadVocabulary() {
     try {
         raw = readFileSync(path, 'utf-8')
     } catch {
-        return { active: {}, retired: {} }
+        return {}
     }
 
-    if (raw.trim() === '') return { active: {}, retired: {} }
+    if (raw.trim() === '') return {}
 
     const parsed = JSON.parse(raw)
     const isMap = v => v !== undefined && v !== null
         && typeof v === 'object' && !Array.isArray(v)
     if (!isMap(parsed)) {
-        throw new Error(`${path} is not a JSON object.`)
+        throw new Error(`${path} is not a JSON object of label key to entry.`)
     }
 
-    const active = parsed.active ?? {}
-    const retired = parsed.retired ?? {}
-    if (!isMap(active) || !isMap(retired)) {
-        throw new Error(
-            `${path} must have \`active\` and \`retired\` maps of label to description.`
-        )
+    return parsed
+}
+
+// Every `key=value` token the vocabulary accepts, retired ones included.
+//
+// Retired values count as defined: retiring one keeps existing tickets valid,
+// which is the whole difference between retiring and deleting.
+function knownTokens(vocabulary) {
+    const known = new Set()
+    for (const [key, entry] of Object.entries(vocabulary)) {
+        const values = [...(entry?.values ?? []), ...(entry?.retired ?? [])]
+        if (values.length === 0) {
+            known.add(key)
+            continue
+        }
+        for (const value of values) known.add(`${key}=${value}`)
     }
 
-    return { active, retired }
+    return known
 }
 
 // Labels used on a ticket that the vocabulary doesn't define.
 //
-// Retired labels count as defined: retiring one keeps existing tickets valid,
-// which is the whole difference between retiring and deleting. A typo in a
-// hand-edited ticket would otherwise sit there silently, grouping with nothing
-// and showing up as its own one-ticket category.
+// A typo in a hand-edited ticket would otherwise sit there silently, grouping
+// with nothing and showing up as its own one-ticket category.
 export function findUnknownLabels(tickets, vocabulary) {
-    const known = new Set([
-        ...Object.keys(vocabulary.active ?? {}),
-        ...Object.keys(vocabulary.retired ?? {}),
-    ])
+    const known = knownTokens(vocabulary)
     const offenders = tickets
         .map(ticket => [ticket.id, ticket.labels.filter(label => !known.has(label))])
         .filter(([, unknown]) => unknown.length > 0)
@@ -116,8 +132,8 @@ export function findUnknownLabels(tickets, vocabulary) {
         .map(([id, unknown]) => `  ${id}: ${unknown.join(', ')}`)
         .join('\n')
     return `Tickets carry labels the vocabulary doesn't define:\n${report}\n\n` +
-        `Add them to the \`active\` or \`retired\` map in docs/ticket/.labels.json, ` +
-        `or fix the tickets (\`jp ticket label <id> --label ...\`).`
+        `Add them to docs/ticket/.labels.json, or fix the tickets ` +
+        `(\`jp ticket label <id> --label key=value\`).`
 }
 
 // Count the comments in a ticket.

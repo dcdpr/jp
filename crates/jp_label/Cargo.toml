@@ -1,6 +1,6 @@
 [package]
-description = "The in-repo ticket format: parsing, rendering, and file operations."
-name = "ticket"
+description = "Labels: `key=value` annotations, and the vocabularies that constrain them."
+name = "jp_label"
 
 authors.workspace = true
 documentation.workspace = true
@@ -13,14 +13,12 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
-camino = { workspace = true }
-jp_label = { workspace = true }
+indexmap = { workspace = true, features = ["serde", "std"] }
 serde = { workspace = true, features = ["std", "derive"] }
+serde_json = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
-camino-tempfile = { workspace = true }
 indoc = { workspace = true }
-serde_json = { workspace = true, features = ["std"] }
 
 [lints]
 workspace = true

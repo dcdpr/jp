@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use camino_tempfile::Utf8TempDir;
 use jp_tool::{Action, Outcome};
@@ -107,7 +107,7 @@ fn create_ticket(dir: &Utf8TempDir, title: &str) -> String {
 }
 
 /// A ticket with everything but the title fixed.
-fn draft<'a>(title: &'a str, labels: &'a [Label]) -> NewTicket<'a> {
+fn draft<'a>(title: &'a str, labels: &'a Labels) -> NewTicket<'a> {
     NewTicket {
         kind: Kind::Bug,
         title,
@@ -127,7 +127,7 @@ fn write_ticket(dir: &Utf8TempDir, title: &str) -> TicketId {
     std::fs::create_dir_all(&tickets).unwrap();
     std::fs::write(
         tickets.join(format!("{}slug.md", id.file_prefix())),
-        render::ticket(&draft(title, &[])),
+        render::ticket(&draft(title, &Labels::default())),
     )
     .unwrap();
 
@@ -139,10 +139,14 @@ fn write_vocabulary(dir: &Utf8TempDir) {
     let tickets = dir.path().join(store::DEFAULT_DIR);
     std::fs::create_dir_all(&tickets).unwrap();
     std::fs::write(
-        tickets.join(::ticket::labels::FILE),
+        tickets.join(::ticket::LABELS_FILE),
         r#"{
-            "active": {"cli": "The command line.", "config": "Configuration."},
-            "retired": {"legacy-ui": "The old UI."}
+            "client": {"description": "The client.", "values": ["cli", "macos"]},
+            "package": {
+                "description": "The crate.",
+                "values": ["jp_cli", "jp_config"],
+                "retired": ["jp_legacy"]
+            }
         }"#,
     )
     .unwrap();
@@ -178,7 +182,7 @@ fn create_preview_renders_the_file_that_will_be_written() {
         Kind::Bug,
         "Tool call header misaligned",
         Some("045"),
-        &[],
+        &Labels::default(),
         Some("The header renders one column left of the body."),
         DATE,
     ));
@@ -307,7 +311,7 @@ fn comment_preview_reports_a_duplicated_id() {
         dir.path()
             .join(store::DEFAULT_DIR)
             .join(format!("{}other.md", id.file_prefix())),
-        render::ticket(&draft("Other", &[])),
+        render::ticket(&draft("Other", &Labels::default())),
     )
     .unwrap();
 
@@ -880,7 +884,7 @@ fn create_writes_labels_and_list_shows_them() {
         json!({
             "kind": "bug",
             "title": "Flag parsing drops the last value",
-            "labels": ["config", "cli"]
+            "labels": ["package=jp_config", "client=cli"]
         }),
     ));
 
@@ -889,7 +893,10 @@ fn create_writes_labels_and_list_shows_them() {
 
     assert_eq!(
         listed,
-        format!("{id} Todo         Bug      Flag parsing drops the last value [cli, config]\n")
+        format!(
+            "{id} Todo         Bug      Flag parsing drops the last value [client=cli, \
+             package=jp_config]\n"
+        )
     );
 }
 
@@ -899,8 +906,8 @@ fn list_narrows_to_tickets_carrying_every_label() {
     write_vocabulary(&dir);
 
     for (title, labels) in [
-        ("Both", json!(["cli", "config"])),
-        ("One", json!(["cli"])),
+        ("Both", json!(["client=cli", "package=jp_cli"])),
+        ("One", json!(["client=cli"])),
         ("None", json!([])),
     ] {
         content(run_tool(
@@ -913,11 +920,14 @@ fn list_narrows_to_tickets_carrying_every_label() {
     let listed = content(run_tool(
         &dir,
         "ticket_list",
-        json!({ "labels": ["config", "cli"] }),
+        json!({ "labels": ["package=jp_cli", "client=cli"] }),
     ));
 
     assert_eq!(listed.lines().count(), 1, "{listed}");
-    assert!(listed.contains("Both [cli, config]"), "{listed}");
+    assert!(
+        listed.contains("Both [client=cli, package=jp_cli]"),
+        "{listed}"
+    );
 }
 
 /// The whole set is written, so a retried call lands the same way twice and a
@@ -931,16 +941,16 @@ fn label_replaces_the_whole_set() {
     let out = content(run_tool(
         &dir,
         "ticket_label",
-        json!({ "id": FIXED_ID, "labels": ["config", "cli"] }),
+        json!({ "id": FIXED_ID, "labels": ["package=jp_config", "client=cli"] }),
     ));
-    assert_eq!(out, format!("{id}: cli, config"));
+    assert_eq!(out, format!("{id}: client=cli, package=jp_config"));
 
     let out = content(run_tool(
         &dir,
         "ticket_label",
-        json!({ "id": FIXED_ID, "labels": ["cli"] }),
+        json!({ "id": FIXED_ID, "labels": ["client=cli"] }),
     ));
-    assert_eq!(out, format!("{id}: cli"));
+    assert_eq!(out, format!("{id}: client=cli"));
 
     let out = content(run_tool(
         &dir,
@@ -963,12 +973,13 @@ fn an_unknown_label_is_refused_with_the_known_set() {
     let message = error_message(run_tool(
         &dir,
         "ticket_create",
-        json!({ "kind": "bug", "title": "Typo", "labels": ["clii"] }),
+        json!({ "kind": "bug", "title": "Typo", "labels": ["client=clii"] }),
     ));
 
     assert_eq!(
         message,
-        "`clii` is not a known label. Labels you can add: cli, config."
+        "`client=clii` is not a known label. Labels you can add: client=cli, client=macos, \
+         package=jp_cli, package=jp_config."
     );
     assert!(ids(&dir).is_empty(), "a ticket was filed anyway");
 }
@@ -988,17 +999,17 @@ fn a_retired_label_already_on_a_ticket_can_be_kept() {
     let source = std::fs::read_to_string(&path).unwrap();
     std::fs::write(
         &path,
-        render::set_metadata(&source, "Labels", "legacy-ui").unwrap(),
+        render::set_repeated_metadata(&source, "Label", &["package=jp_legacy".to_owned()]).unwrap(),
     )
     .unwrap();
 
     let out = content(run_tool(
         &dir,
         "ticket_label",
-        json!({ "id": FIXED_ID, "labels": ["legacy-ui", "cli"] }),
+        json!({ "id": FIXED_ID, "labels": ["package=jp_legacy", "client=cli"] }),
     ));
 
-    assert_eq!(out, format!("{id}: cli, legacy-ui"));
+    assert_eq!(out, format!("{id}: client=cli, package=jp_legacy"));
 }
 
 #[test]
@@ -1010,13 +1021,13 @@ fn a_retired_label_cannot_be_added_fresh() {
     let message = error_message(run_tool(
         &dir,
         "ticket_label",
-        json!({ "id": FIXED_ID, "labels": ["legacy-ui"] }),
+        json!({ "id": FIXED_ID, "labels": ["package=jp_legacy"] }),
     ));
 
     assert_eq!(
         message,
-        "`legacy-ui` is retired and can only stay on a ticket that already carries it. Labels you \
-         can add: cli, config."
+        "`package=jp_legacy` is retired and can only stay on an item that already carries it. \
+         Labels you can add: client=cli, client=macos, package=jp_cli, package=jp_config."
     );
 }
 
@@ -1031,12 +1042,13 @@ fn an_unknown_label_is_refused_before_the_preview() {
     let message = error_message(preview_tool(
         &dir,
         "ticket_create",
-        json!({ "kind": "bug", "title": "Typo", "labels": ["clii"] }),
+        json!({ "kind": "bug", "title": "Typo", "labels": ["client=clii"] }),
     ));
 
     assert_eq!(
         message,
-        "`clii` is not a known label. Labels you can add: cli, config."
+        "`client=clii` is not a known label. Labels you can add: client=cli, client=macos, \
+         package=jp_cli, package=jp_config."
     );
 }
 
@@ -1048,7 +1060,7 @@ fn labelling_a_missing_ticket_says_so() {
     let message = error_message(run_tool(
         &dir,
         "ticket_label",
-        json!({ "id": FIXED_ID, "labels": ["cli"] }),
+        json!({ "id": FIXED_ID, "labels": ["client=cli"] }),
     ));
 
     assert_eq!(message, format!("No {FIXED_ID}."));
@@ -1063,7 +1075,7 @@ fn labelling_a_missing_ticket_says_so() {
 fn the_board_vocabulary_parses() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../../docs/ticket")
-        .join(::ticket::labels::FILE);
+        .join(::ticket::LABELS_FILE);
     let source = std::fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
 

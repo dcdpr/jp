@@ -16,7 +16,9 @@ replying to an earlier one.
 - ticket_label: Replace the labels on an existing ticket.
 - ticket_close: Mark a ticket Done.
 
-Labels group tickets by area of the system, orthogonally to kind. The set is \
+Labels group tickets by area of the system, orthogonally to kind. Each one is a \
+`key=value` pair (`client=cli`, `package=jp_config`), and a key may be named \
+more than once, which is how a ticket spanning two crates says so. The set is \
 closed and lives in `docs/ticket/.labels.json`; the tools advertise it, and a \
 label outside it is refused. `ticket_label` writes the whole set, so read the \
 ticket first when you mean to keep the labels it already carries.

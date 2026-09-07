@@ -30,9 +30,14 @@ Only open bugs:
 {"status": "todo", "kind": "bug"}
 ```
 
-Only tickets touching both the CLI and config:
+Only tickets touching the CLI client and the config crate:
 ```json
-{"labels": ["cli", "config"]}
+{"labels": ["client=cli", "package=jp_config"]}
+```
+
+Every ticket carrying any `package` label:
+```json
+{"labels": ["package"]}
 ```
 """
 
@@ -57,6 +62,13 @@ summary = "Only tickets of this kind."
 type = "array"
 required = false
 summary = "Only tickets carrying every one of these labels."
+description = """
+Each entry is a `key=value` pair, or a bare `key` to match any value under it.
+Every entry has to match, so each one narrows the listing further.
+
+Retired values are accepted here, which is how you find the tickets still
+carrying one.
+"""
 
 # The accepted values live in `labels.toml`, generated from
 # `docs/ticket/.labels.json` by `just ticket-labels-sync`.

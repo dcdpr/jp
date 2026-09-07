@@ -31,8 +31,12 @@
 //!
 //! [`id`] defines the identifier, [`parse`] reads a document, [`render`] writes
 //! one, [`store`] holds the file operations (id allocation, create, comment,
-//! close, list, import), [`labels`] holds the board's label vocabulary, and
-//! [`import`] carries the rules for content that comes from upstream.
+//! close, list, import), and [`import`] carries the rules for content that
+//! comes from upstream.
+//!
+//! Labels are `key=value` annotations from [`jp_label`]; the board's vocabulary
+//! lives in `.labels.json` next to the ticket files and is read by
+//! [`store::vocabulary`].
 //!
 //! The id is in the filename and nowhere else, so renaming a ticket is a rename
 //! and there is no second copy to keep in step.
@@ -45,13 +49,21 @@ use serde::Serialize;
 
 pub mod id;
 pub mod import;
-pub mod labels;
 pub mod parse;
 pub mod render;
 pub mod store;
 
 pub use id::TicketId;
-pub use labels::{Label, Vocabulary};
+pub use jp_label::{Labels, Selector, Vocabulary};
+
+/// The vocabulary file, inside the ticket directory.
+pub const LABELS_FILE: &str = ".labels.json";
+
+/// The metadata key one label is written under.
+///
+/// Singular, and repeated once per `key=value` pair, so no line grows with the
+/// number of labels a ticket carries.
+pub const LABEL_KEY: &str = "Label";
 
 /// Where a ticket sits on the board.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -137,10 +149,10 @@ pub struct Metadata {
     pub kind: Kind,
     /// The labels the ticket carries.
     ///
-    /// Plain strings, not [`Label`]s: a hand-edited ticket can name a label the
-    /// vocabulary doesn't define, and dropping it here would make the listing
-    /// disagree with the file.
-    pub labels: Vec<String>,
+    /// Read as written, without checking them against the vocabulary: a
+    /// hand-edited ticket can name a label the vocabulary doesn't define, and
+    /// dropping it here would make the listing disagree with the file.
+    pub labels: Labels,
     pub authors: String,
     pub date: String,
     pub blocked_by: Option<String>,
@@ -160,7 +172,7 @@ pub struct NewTicket<'a> {
     pub date: &'a str,
     /// The RFD this work comes from, if any.
     pub implements: Option<&'a str>,
-    pub labels: &'a [Label],
+    pub labels: &'a Labels,
     pub description: &'a str,
 }
 

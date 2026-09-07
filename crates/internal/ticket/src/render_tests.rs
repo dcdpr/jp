@@ -1,14 +1,14 @@
 use indoc::indoc;
 
 use super::*;
-use crate::{Kind, Label, Vocabulary, parse};
+use crate::{Kind, Labels, Vocabulary, parse};
 
 /// A ticket with everything but the parts under test fixed.
 fn draft<'a>(
     title: &'a str,
     kind: Kind,
     authors: &'a str,
-    labels: &'a [Label],
+    labels: &'a Labels,
     description: &'a str,
 ) -> NewTicket<'a> {
     NewTicket {
@@ -37,7 +37,7 @@ fn renders_a_new_ticket() {
         "Tool call header misaligned",
         Kind::Bug,
         "John Doe",
-        &[],
+        &Labels::default(),
         "The header renders one column left of the body.",
     ));
 
@@ -59,7 +59,7 @@ fn renders_a_new_ticket_without_a_description() {
         "Bump the deny list",
         Kind::Chore,
         "john",
-        &[],
+        &Labels::default(),
         "   ",
     ));
 
@@ -79,7 +79,7 @@ fn first_comment_opens_the_comments_section() {
         "Tool call header misaligned",
         Kind::Bug,
         "John Doe",
-        &[],
+        &Labels::default(),
         "The header renders one column left of the body.",
     ));
 
@@ -136,7 +136,7 @@ fn later_comments_are_a_pure_append() {
             "Tool call header misaligned",
             Kind::Bug,
             "John Doe",
-            &[],
+            &Labels::default(),
             "Description.",
         )),
         &new_comment("john", "Reproduced at 72 columns.", None),
@@ -168,7 +168,7 @@ fn appended_comments_parse_back() {
                 "Round trip",
                 Kind::Feature,
                 "john",
-                &[],
+                &Labels::default(),
                 "Description.",
             )),
             &new_comment("john", "First.", None),
@@ -267,11 +267,11 @@ fn adds_a_field_the_ticket_lacks() {
 #[test]
 fn reports_a_document_with_no_metadata_block() {
     assert_eq!(set_metadata("# Bare\n\nProse.\n", "Status", "Done"), None);
-    assert_eq!(remove_metadata("# Bare\n\nProse.\n", "Labels"), None);
+    assert_eq!(remove_metadata("# Bare\n\nProse.\n", "Label"), None);
 }
 
 #[test]
-fn removes_a_metadata_field() {
+fn removing_a_repeated_field_drops_every_line() {
     let document = indoc! {"
         # Tool call header misaligned
 
@@ -279,12 +279,13 @@ fn removes_a_metadata_field() {
         - **Kind**: Bug
         - **Authors**: john
         - **Date**: 2026-08-05
-        - **Labels**: config
+        - **Label**: client=cli
+        - **Label**: package=jp_cli
 
         Description.
     "};
 
-    let out = remove_metadata(document, "Labels").unwrap();
+    let out = remove_metadata(document, "Label").unwrap();
 
     assert_eq!(out, indoc! {"
             # Tool call header misaligned
@@ -313,18 +314,51 @@ fn removing_a_field_the_ticket_lacks_changes_nothing() {
         Description.
     "};
 
-    assert_eq!(remove_metadata(document, "Labels").unwrap(), document);
+    assert_eq!(remove_metadata(document, "Label").unwrap(), document);
 }
 
-/// Labels are written after the fields every ticket carries, which is where
-/// `set_metadata` puts them too — so a ticket filed with labels and one
-/// labelled later look the same.
+/// The replacement lands where the old run was, so relabelling doesn't shuffle
+/// the block.
 #[test]
-fn renders_labels_after_the_required_fields() {
-    let vocabulary =
-        Vocabulary::parse(r#"{"active": {"app/macos": "The app.", "config": "Config."}}"#).unwrap();
+fn replaces_a_repeated_field_in_place() {
+    let document = indoc! {"
+        # Labelled
+
+        - **Status**: Todo
+        - **Label**: client=cli
+        - **Label**: package=jp_cli
+        - **Authors**: john
+
+        Description.
+    "};
+
+    let out = set_repeated_metadata(document, "Label", &["client=web".to_owned()]).unwrap();
+
+    assert_eq!(out, indoc! {"
+            # Labelled
+
+            - **Status**: Todo
+            - **Label**: client=web
+            - **Authors**: john
+
+            Description.
+        "});
+}
+
+/// One line per pair, so the block survives a formatter that wraps at a fixed
+/// width no matter how many labels a ticket carries.
+#[test]
+fn renders_one_line_per_label() {
+    let vocabulary = Vocabulary::parse(
+        r#"{"package": {"values": ["jp_cli", "jp_config"]}, "client": {"values": ["cli"]}}"#,
+    )
+    .unwrap();
     let labels = vocabulary
-        .resolve(&["config".to_owned(), "app/macos".to_owned()])
+        .resolve(&[
+            "package=jp_config".to_owned(),
+            "client=cli".to_owned(),
+            "package=jp_cli".to_owned(),
+        ])
         .unwrap();
 
     let out = ticket(&draft(
@@ -342,7 +376,9 @@ fn renders_labels_after_the_required_fields() {
             - **Kind**: Bug
             - **Authors**: john
             - **Date**: 2026-08-05
-            - **Labels**: app/macos, config
+            - **Label**: client=cli
+            - **Label**: package=jp_cli
+            - **Label**: package=jp_config
 
             Description.
         "});

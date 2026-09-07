@@ -1,4 +1,5 @@
 use super::*;
+use crate::Selector;
 
 /// The values held under `key`, for readable assertions.
 fn values<'a>(labels: &'a Labels, key: &str) -> Vec<&'a str> {
@@ -6,6 +7,107 @@ fn values<'a>(labels: &'a Labels, key: &str) -> Vec<&'a str> {
         .get(key)
         .map(|values| values.iter().map(String::as_str).collect())
         .unwrap_or_default()
+}
+
+// Token rendering, token reading, and selector matching: the surface tickets
+// use, layered on the same invariants the conversation side relies on.
+
+#[test]
+fn tokens_render_a_pair_per_value_and_a_bare_key_alone() {
+    let labels = Labels::from_iter([("crate", vec!["jp_cli", "jp_config"]), ("draft", vec![""])]);
+
+    assert_eq!(labels.to_tokens(), [
+        "crate=jp_cli",
+        "crate=jp_config",
+        "draft"
+    ]);
+    assert_eq!(labels.count(), 3);
+    assert_eq!(labels.to_string(), "crate=jp_cli, crate=jp_config, draft");
+}
+
+#[test]
+fn tokens_round_trip() {
+    let tokens = ["crate=jp_cli", "crate=jp_config", "draft"];
+
+    assert_eq!(Labels::from_tokens(tokens).unwrap().to_tokens(), tokens);
+}
+
+/// Only the first `=` splits, so a value may contain more of them.
+#[test]
+fn a_value_may_contain_an_equals_sign() {
+    let labels = Labels::from_tokens(["expr=a=b"]).unwrap();
+
+    assert_eq!(values(&labels, "expr"), ["a=b"]);
+}
+
+/// One label per line downstream means no separator for a comma to collide
+/// with.
+#[test]
+fn a_value_may_contain_a_comma() {
+    let labels = Labels::from_tokens(["branch=feat,exp"]).unwrap();
+
+    assert_eq!(values(&labels, "branch"), ["feat,exp"]);
+}
+
+#[test]
+fn surrounding_whitespace_is_dropped_from_a_token() {
+    let labels = Labels::from_tokens(["  crate = jp_cli  "]).unwrap();
+
+    assert_eq!(labels.to_tokens(), ["crate=jp_cli"]);
+}
+
+#[test]
+fn reading_tokens_rejects_a_malformed_key() {
+    assert!(Labels::from_tokens(["1bad=x"]).is_err());
+}
+
+/// A hand-edited file gets to keep what parses rather than failing whole.
+#[test]
+fn lossy_reading_keeps_the_well_formed_tokens() {
+    let (labels, rejected) = Labels::from_tokens_lossy(["crate=jp_cli", "1bad=x", "draft"]);
+
+    assert_eq!(labels.to_tokens(), ["crate=jp_cli", "draft"]);
+    assert_eq!(rejected, ["1bad=x"]);
+}
+
+#[test]
+fn a_bare_selector_matches_any_value() {
+    let labels = Labels::from_iter([("crate", ["jp_cli"])]);
+
+    assert!(labels.matches(&Selector::parse_all(["crate"]).unwrap()));
+    assert!(!labels.matches(&Selector::parse_all(["branch"]).unwrap()));
+}
+
+#[test]
+fn a_pair_selector_matches_exactly() {
+    let labels = Labels::from_iter([("crate", ["jp_cli"])]);
+
+    assert!(labels.matches(&Selector::parse_all(["crate=jp_cli"]).unwrap()));
+    assert!(!labels.matches(&Selector::parse_all(["crate=jp_config"]).unwrap()));
+}
+
+/// A bare selector finds a bare label, which stores its key with the presence
+/// marker rather than a value.
+#[test]
+fn a_bare_selector_matches_a_bare_label() {
+    let labels = Labels::from_iter([("draft", [""])]);
+
+    assert!(labels.matches(&Selector::parse_all(["draft"]).unwrap()));
+}
+
+/// Every selector has to match, so each one narrows the result.
+#[test]
+fn selectors_compose_with_and() {
+    let labels = Labels::from_iter([("crate", vec!["jp_cli"]), ("branch", vec!["main"])]);
+
+    assert!(labels.matches(&Selector::parse_all(["crate=jp_cli", "branch"]).unwrap()));
+    assert!(!labels.matches(&Selector::parse_all(["crate=jp_cli", "branch=next"]).unwrap()));
+}
+
+#[test]
+fn no_selectors_matches_everything() {
+    assert!(Labels::default().matches(&[]));
+    assert!(Labels::from_iter([("crate", ["jp_cli"])]).matches(&[]));
 }
 
 #[test]

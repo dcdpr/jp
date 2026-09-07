@@ -74,8 +74,9 @@ fn reads_optional_metadata_fields() {
 
 /// Labels are read as written, without checking them against the vocabulary: a
 /// listing that hid a label the file carries would disagree with the file.
+/// The field repeats once per pair, so every line contributes.
 #[test]
-fn reads_labels_as_written() {
+fn reads_every_label_line() {
     let source = indoc! {"
         # Labelled
 
@@ -83,23 +84,26 @@ fn reads_labels_as_written() {
         - **Kind**: Bug
         - **Authors**: john
         - **Date**: 2026-08-05
-        - **Labels**: app/macos,  config , retired/label
+        - **Label**: package=jp_config
+        - **Label**:  client = cli
+        - **Label**: package=jp_retired
 
         Description.
     "};
 
     let ticket = document(source).unwrap();
 
-    assert_eq!(ticket.metadata.labels, [
-        "app/macos",
-        "config",
-        "retired/label"
+    assert_eq!(ticket.metadata.labels.to_tokens(), [
+        "client=cli",
+        "package=jp_config",
+        "package=jp_retired"
     ]);
+    assert_eq!(ticket.description, "Description.");
 }
 
-/// An empty label line is no labels rather than one blank one.
+/// An empty label line is no label rather than a blank one.
 #[test]
-fn reads_an_empty_label_line_as_no_labels() {
+fn reads_an_empty_label_line_as_no_label() {
     let source = indoc! {"
         # Labelled
 
@@ -107,12 +111,56 @@ fn reads_an_empty_label_line_as_no_labels() {
         - **Kind**: Bug
         - **Authors**: john
         - **Date**: 2026-08-05
-        - **Labels**:
+        - **Label**:
 
         Description.
     "};
 
     assert!(document(source).unwrap().metadata.labels.is_empty());
+}
+
+/// The block is a markdown list, so the formatter escapes what would otherwise
+/// be emphasis.
+/// Reading has to undo it or `jp_config` comes back as `jp\_config` and matches
+/// nothing.
+#[test]
+fn reads_a_label_the_formatter_escaped() {
+    let source = indoc! {r"
+        # Labelled
+
+        - **Status**: Todo
+        - **Kind**: Bug
+        - **Authors**: john
+        - **Date**: 2026-08-05
+        - **Label**: package=jp\_config
+
+        Description.
+    "};
+
+    assert_eq!(document(source).unwrap().metadata.labels.to_tokens(), [
+        "package=jp_config"
+    ]);
+}
+
+/// A hand-edited ticket keeps the labels that parse rather than losing the lot.
+#[test]
+fn a_malformed_label_line_does_not_take_the_others_with_it() {
+    let source = indoc! {"
+        # Labelled
+
+        - **Status**: Todo
+        - **Kind**: Bug
+        - **Authors**: john
+        - **Date**: 2026-08-05
+        - **Label**: client=cli
+        - **Label**: 1nope=x
+
+        Description.
+    "};
+
+    assert_eq!(document(source).unwrap().metadata.labels.to_tokens(), [
+        "client=cli"
+    ]);
 }
 
 #[test]

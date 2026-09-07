@@ -28,10 +28,14 @@ fn run_command(dir: &Utf8TempDir, command: Command) -> Result<Output, String> {
 fn write_vocabulary(dir: &Utf8TempDir) {
     std::fs::create_dir_all(dir.path()).unwrap();
     std::fs::write(
-        dir.path().join(ticket::labels::FILE),
+        dir.path().join(LABELS_FILE),
         r#"{
-            "active": {"app/macos": "The native macOS app.", "config": "Configuration."},
-            "retired": {"legacy-ui": "The pre-rewrite terminal UI."}
+            "client": {"description": "The client.", "values": ["cli", "macos"]},
+            "package": {
+                "description": "The crate.",
+                "values": ["jp_cli", "jp_config"],
+                "retired": ["jp_legacy"]
+            }
         }"#,
     )
     .unwrap();
@@ -489,6 +493,7 @@ fn editing_the_title_renames_the_file() {
         author: Some("John Doe".to_owned()),
         body: None,
         implements: None,
+        labels: vec![],
     })
     .unwrap();
     let id = store::list(dir.path()).unwrap()[0].id;
@@ -1160,7 +1165,10 @@ fn labels_survive_the_round_trip_and_show_in_the_listing() {
     let dir = Utf8TempDir::new().unwrap();
     write_vocabulary(&dir);
 
-    let id = add_labelled(&dir, "Window title truncates", &["config", "app/macos"]);
+    let id = add_labelled(&dir, "Window title truncates", &[
+        "package=jp_config",
+        "client=macos",
+    ]);
 
     let listed = run_command(&dir, Command::List {
         status: None,
@@ -1172,7 +1180,9 @@ fn labels_survive_the_round_trip_and_show_in_the_listing() {
 
     assert_eq!(
         listed.text,
-        format!("{id} Todo         Bug      Window title truncates [app/macos, config]\n")
+        format!(
+            "{id} Todo         Bug      Window title truncates [client=macos, package=jp_config]\n"
+        )
     );
 }
 
@@ -1181,22 +1191,44 @@ fn listing_narrows_to_tickets_carrying_every_label() {
     let dir = Utf8TempDir::new().unwrap();
     write_vocabulary(&dir);
 
-    let both = add_labelled(&dir, "Both", &["app/macos", "config"]);
-    add_labelled(&dir, "One", &["config"]);
+    let both = add_labelled(&dir, "Both", &["client=macos", "package=jp_cli"]);
+    add_labelled(&dir, "One", &["package=jp_cli"]);
     add_labelled(&dir, "None", &[]);
 
     let listed = run_command(&dir, Command::List {
         status: None,
         kind: None,
-        labels: vec!["config".to_owned(), "app/macos".to_owned()],
+        labels: vec!["package=jp_cli".to_owned(), "client=macos".to_owned()],
         json: false,
     })
     .unwrap();
 
     assert_eq!(
         listed.text,
-        format!("{both} Todo         Bug      Both [app/macos, config]\n")
+        format!("{both} Todo         Bug      Both [client=macos, package=jp_cli]\n")
     );
+}
+
+/// A bare key filters on "carries this key at all", which is how you find
+/// everything touching one facet.
+#[test]
+fn listing_narrows_on_a_bare_key() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_vocabulary(&dir);
+
+    add_labelled(&dir, "Client work", &["client=cli"]);
+    add_labelled(&dir, "Crate work", &["package=jp_cli"]);
+
+    let listed = run_command(&dir, Command::List {
+        status: None,
+        kind: None,
+        labels: vec!["client".to_owned()],
+        json: false,
+    })
+    .unwrap();
+
+    assert_eq!(listed.text.lines().count(), 1, "{}", listed.text);
+    assert!(listed.text.contains("Client work"), "{}", listed.text);
 }
 
 /// The whole set is written, so labelling is idempotent and a label left off
@@ -1205,14 +1237,14 @@ fn listing_narrows_to_tickets_carrying_every_label() {
 fn labelling_replaces_the_whole_set() {
     let dir = Utf8TempDir::new().unwrap();
     write_vocabulary(&dir);
-    let id = add_labelled(&dir, "Replace me", &["app/macos", "config"]);
+    let id = add_labelled(&dir, "Replace me", &["client=macos", "package=jp_cli"]);
 
     let out = run_command(&dir, Command::Label {
         id: Some(id),
-        labels: vec!["config".to_owned()],
+        labels: vec!["package=jp_cli".to_owned()],
     })
     .unwrap();
-    assert!(out.text.ends_with(": config\n"), "{}", out.text);
+    assert!(out.text.ends_with(": package=jp_cli\n"), "{}", out.text);
 
     let cleared = run_command(&dir, Command::Label {
         id: Some(id),
@@ -1227,7 +1259,7 @@ fn labelling_replaces_the_whole_set() {
 
     let path = store::locate_ticket(dir.path(), id).unwrap();
     let source = std::fs::read_to_string(path).unwrap();
-    assert!(!source.contains("Labels"), "{source}");
+    assert!(!source.contains("- **Label**"), "{source}");
 }
 
 /// A typo names the vocabulary rather than landing a label nothing groups by.
@@ -1242,13 +1274,14 @@ fn an_unknown_label_is_refused_with_the_known_set() {
         author: Some("john".to_owned()),
         body: None,
         implements: None,
-        labels: vec!["app/mcaos".to_owned()],
+        labels: vec!["client=mcaos".to_owned()],
     })
     .unwrap_err();
 
     assert_eq!(
         error,
-        "`app/mcaos` is not a known label. Labels you can add: app/macos, config."
+        "`client=mcaos` is not a known label. Labels you can add: client=cli, client=macos, \
+         package=jp_cli, package=jp_config."
     );
     assert!(
         store::list(dir.path()).unwrap().is_empty(),
@@ -1265,8 +1298,9 @@ fn the_vocabulary_listing_names_each_label_and_what_it_covers() {
 
     assert_eq!(
         out.text,
-        "app/macos  The native macOS app.\nconfig     Configuration.\n\nRetired (kept where \
-         already applied, not addable):\nlegacy-ui  The pre-rewrite terminal UI.\n"
+        "client  The client.\n  client=cli\n  client=macos\n\npackage  The crate.\n  \
+         package=jp_cli\n  package=jp_config\n  package=jp_legacy  (retired)\n\nA retired label \
+         stays on a ticket that carries it, but can't be added.\n"
     );
 }
 
@@ -1285,17 +1319,22 @@ fn a_retired_label_already_on_a_ticket_can_be_kept() {
     let source = std::fs::read_to_string(&path).unwrap();
     std::fs::write(
         &path,
-        ticket::render::set_metadata(&source, "Labels", "legacy-ui").unwrap(),
+        ticket::render::set_repeated_metadata(&source, "Label", &["package=jp_legacy".to_owned()])
+            .unwrap(),
     )
     .unwrap();
 
     let out = run_command(&dir, Command::Label {
         id: Some(id),
-        labels: vec!["legacy-ui".to_owned(), "config".to_owned()],
+        labels: vec!["package=jp_legacy".to_owned(), "client=cli".to_owned()],
     })
     .unwrap();
 
-    assert!(out.text.ends_with(": config, legacy-ui\n"), "{}", out.text);
+    assert!(
+        out.text.ends_with(": client=cli, package=jp_legacy\n"),
+        "{}",
+        out.text
+    );
 }
 
 #[test]
@@ -1306,14 +1345,14 @@ fn a_retired_label_cannot_be_added_fresh() {
 
     let error = run_command(&dir, Command::Label {
         id: Some(id),
-        labels: vec!["legacy-ui".to_owned()],
+        labels: vec!["package=jp_legacy".to_owned()],
     })
     .unwrap_err();
 
     assert_eq!(
         error,
-        "`legacy-ui` is retired and can only stay on a ticket that already carries it. Labels you \
-         can add: app/macos, config."
+        "`package=jp_legacy` is retired and can only stay on an item that already carries it. \
+         Labels you can add: client=cli, client=macos, package=jp_cli, package=jp_config."
     );
 }
 
