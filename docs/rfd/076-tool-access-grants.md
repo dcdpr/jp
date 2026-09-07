@@ -997,13 +997,15 @@ grant no longer trips the builtin/mcp rejection.
 
 `--mount` needs one adjustment.
 It writes rules into a tool's own scope, which under replace detaches that tool
-from `*`.
-When the tool declared nothing of its own, the injected block is therefore
-seeded with whatever the tool was inheriting: the `*` rules when they exist, and
-otherwise the workspace-default rule that [Default-deny preservation][D43-deny]
-already specifies.
-Without the seed, mounting into a tool covered by a restrictive `*` block would
-silently widen it back to full workspace access.
+from `*`, and a rule in one resource list switches only that list to
+default-deny.
+The injected block therefore carries the tool's prior reach across both edges: a
+copy of the `*` block when the tool declared nothing of its own, plus a
+workspace-wide `fs` rule whenever the scope that applied granted no `fs` rules,
+since the mount rule would otherwise be the tool's entire filesystem policy.
+Without that, mounting into a tool covered by a restrictive `*` block would
+silently widen it back to full workspace access, and mounting into one covered
+by an `env`-only block would revoke the workspace access it had.
 
 Depends on Phase 2.
 Independent of Phases 3 and 4.
@@ -1025,7 +1027,6 @@ Independent of Phases 3 and 4.
 - [Deno security model] — Inspiration for the grant-based, default-deny
   permission model.
 
-[D43-deny]: drafts/D43-tool-access-to-external-paths-via-workspace-symlinks.md#default-deny-preservation
 [Deno security model]: https://docs.deno.com/runtime/fundamentals/security/
 [RFD 016]: 016-wasm-plugin-architecture.md
 [RFD 042]: 042-tool-options.md
