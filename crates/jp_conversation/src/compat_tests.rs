@@ -459,6 +459,72 @@ fn strip_descends_into_the_one_union_variant_that_fits() {
 }
 
 #[test]
+fn strip_descends_into_a_per_question_instructions_wrapper() {
+    // `questions.<id>.target` is the one place a *partial* type's schema enters
+    // the tree, and every field of a partial is nullified, so `instructions` is
+    // a union of its array and null rather than a bare array. The stored value
+    // is an object, which matches neither, so nothing below it can be reached
+    // unless the union is unwrapped first.
+    let schema = AppConfig::schema();
+    let mut value = json!({
+        "conversation": {
+            "tools": {
+                "fs_modify_file": {
+                    "questions": {
+                        "apply_changes": {
+                            "target": {
+                                "instructions": {
+                                    "value": [{ "title": "Review", "from_a_newer_jp": 1 }],
+                                    "strategy": "replace"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    let stripped = strip_unknown_fields(&mut value, &schema);
+    assert_eq!(stripped, 1);
+    assert_eq!(
+        value["conversation"]["tools"]["fs_modify_file"]["questions"]["apply_changes"]["target"]
+            ["instructions"]["value"][0],
+        json!({ "title": "Review" })
+    );
+}
+
+#[test]
+fn a_field_added_to_a_per_question_instruction_does_not_wipe_the_config() {
+    let value = json!({
+        "style": { "code": { "color": false } },
+        "conversation": {
+            "tools": {
+                "fs_modify_file": {
+                    "questions": {
+                        "apply_changes": {
+                            "target": {
+                                "instructions": {
+                                    "value": [{ "title": "Review", "from_a_newer_jp": 1 }],
+                                    "strategy": "replace"
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    });
+
+    let config = deserialize_partial_config(value);
+    assert_eq!(
+        config.style.code.color,
+        Some(false),
+        "a setting elsewhere in the config must survive the unreadable instruction field"
+    );
+}
+
+#[test]
 fn strip_leaves_a_union_alone_when_two_variants_fit() {
     use jp_config::schema::UnionType;
 

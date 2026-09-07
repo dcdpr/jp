@@ -226,24 +226,29 @@ fn resolve<'a>(reference: &ReferenceType, enclosing: &Enclosing<'a>) -> Option<&
         .map(|&(_, schema)| &schema.ty)
 }
 
-/// The one variant of a union whose shape can hold `value`, if there is exactly
-/// one.
+/// The one variant of a union to walk `value` against, if there is one.
 ///
-/// Every `Option<T>` field arrives here as a two-variant union of `T` and null,
-/// so a non-null value selects `T`.
-/// The same rule separates the variants of the hand-written unions: a table
-/// written at `conversation.tools.<name>.enable` can only be the `{ state,
-/// allow_toggle }` struct, never the bool or the legacy strings beside it.
+/// A union of one type and null is an `Option`, and the value selects that type
+/// by being present at all, whatever shape it arrived in.
+/// That matters for a field declared with `partial_via = MergeableVec`: its
+/// schema says array while the value can be the `{ "value": [...] }` object,
+/// and [`strip_items`] is what knows how to reconcile the two.
 ///
-/// Ambiguity yields `None` rather than a guess, so a union of two tables is
-/// left untouched.
+/// A union with several real variants is separated by shape instead.
+/// A table written at `conversation.tools.<name>.enable` can only be the `{
+/// state, allow_toggle }` struct, never the bool or the legacy strings beside
+/// it.
+/// Ambiguity there yields `None` rather than a guess, so a union of two tables
+/// is left untouched.
 fn sole_matching_variant<'a>(union_type: &'a UnionType, value: &Value) -> Option<&'a Schema> {
-    let mut variants = union_type
-        .variants_types
-        .iter()
-        .map(Box::as_ref)
-        .filter(|variant| accepts(&variant.ty, value));
+    let variants = || union_type.variants_types.iter().map(Box::as_ref);
 
+    sole(variants().filter(|variant| !variant.is_null()))
+        .or_else(|| sole(variants().filter(|variant| accepts(&variant.ty, value))))
+}
+
+/// The only item an iterator yields, if it yields exactly one.
+fn sole<'a>(mut variants: impl Iterator<Item = &'a Schema>) -> Option<&'a Schema> {
     match (variants.next(), variants.next()) {
         (Some(variant), None) => Some(variant),
         _ => None,
@@ -251,6 +256,10 @@ fn sole_matching_variant<'a>(union_type: &'a UnionType, value: &Value) -> Option
 }
 
 /// Whether a schema could describe a JSON value of this shape.
+///
+/// Only consulted for a union with more than one variant that isn't null, so a
+/// value whose shape matches nothing leaves that union alone rather than
+/// selecting badly.
 ///
 /// Shape only: a string schema accepts every string, whatever its constraints.
 /// A union and an unknown could hold anything, so they accept everything, which
