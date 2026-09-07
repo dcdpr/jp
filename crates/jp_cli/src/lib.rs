@@ -1011,6 +1011,14 @@ pub(crate) fn resolve_config(
 )> {
     let pipeline = ConfigPipeline::new(cfg_overrides, Some(workspace), fs, load_base)?;
 
+    // Repair values for a stored conversation config that lost a required
+    // field to schema drift. The files + env layer rather than
+    // `partial_without_conversation`, so the repair does not depend on which
+    // `--cfg` flags this invocation happened to carry: a transient override
+    // would be written back into the conversation on its next save and stay
+    // there. Set before anything reads a conversation.
+    workspace.set_fallback_config(Arc::new(pipeline.base().clone()));
+
     // The effective reset point of this invocation, if any ([RFD 038]).
     let config_reset = pipeline.config_reset();
 

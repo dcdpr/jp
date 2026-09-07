@@ -3,6 +3,7 @@
 use std::fmt::Debug;
 
 use chrono::{DateTime, Utc};
+use jp_config::PartialAppConfig;
 use jp_conversation::{Conversation, ConversationId, ConversationStream};
 
 use crate::{LoadError, validate::ValidationError};
@@ -84,9 +85,16 @@ pub trait LoadBackend: Send + Sync + Debug {
     }
 
     /// Load a single conversation's event stream.
+    ///
+    /// A stored config that cannot be finalized on its own — a required field
+    /// was among the ones recovery had to drop as unreadable — takes the
+    /// missing values from `fallback`.
+    /// Pass [`PartialAppConfig::empty()`] to hold the stored config to standing
+    /// alone.
     fn load_conversation_stream(
         &self,
         id: &ConversationId,
+        fallback: &PartialAppConfig,
     ) -> std::result::Result<ConversationStream, LoadError>;
 
     /// Return conversation IDs whose `expires_at` timestamp is in the past.

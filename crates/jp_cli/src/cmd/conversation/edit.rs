@@ -4,6 +4,7 @@ use camino::Utf8PathBuf;
 use chrono::Utc;
 use crossterm::style::Stylize as _;
 use inquire::Confirm;
+use jp_config::PartialAppConfig;
 use jp_conversation::ConversationId;
 use jp_editor::{EditOutcome, EditRequest};
 use jp_storage::{
@@ -210,7 +211,10 @@ impl Edit {
     ) -> Result<(), LoadError> {
         for id in ids {
             if self.events || self.base_config {
-                fs.load_conversation_stream(id)?;
+                // No fallback: a file the user just edited has to stand on its
+                // own, rather than pass validation on values borrowed from the
+                // workspace config.
+                fs.load_conversation_stream(id, &PartialAppConfig::empty())?;
             }
             if self.metadata {
                 fs.load_conversation_metadata(id)?;

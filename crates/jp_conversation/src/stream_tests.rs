@@ -1,8 +1,10 @@
 use chrono::TimeZone as _;
 use jp_config::{
-    PartialConfig as _,
+    PartialAppConfig, PartialConfig as _,
     conversation::tool::{PartialToolConfig, RunMode, ToolSource, access::FsRuleConfig},
-    model::id::{ModelIdConfig, PartialModelIdConfig, PartialModelIdOrAliasConfig, ProviderId},
+    model::id::{
+        ModelIdConfig, Name, PartialModelIdConfig, PartialModelIdOrAliasConfig, ProviderId,
+    },
 };
 use serde_json::{Map, Value};
 
@@ -489,7 +491,7 @@ fn test_to_parts_from_parts_roundtrip() {
     // Empty stream roundtrips.
     let (base_config, events) = stream.to_parts().unwrap();
     assert!(events.is_empty());
-    let stream2 = ConversationStream::from_parts(base_config, events)
+    let stream2 = ConversationStream::from_parts(base_config, events, &PartialAppConfig::empty())
         .unwrap()
         .with_created_at(stream.created_at);
     assert_eq!(stream, stream2);
@@ -511,7 +513,7 @@ fn test_to_parts_from_parts_roundtrip() {
 
     let (base_config, events) = stream.to_parts().unwrap();
     assert_eq!(events.len(), 2);
-    let stream3 = ConversationStream::from_parts(base_config, events)
+    let stream3 = ConversationStream::from_parts(base_config, events, &PartialAppConfig::empty())
         .unwrap()
         .with_created_at(stream.created_at);
     assert_eq!(stream, stream3);
@@ -528,7 +530,7 @@ fn test_from_parts_strips_unknown_base_config_fields() {
     obj.insert("removed_field".into(), Value::String("stale".into()));
 
     // from_parts should strip the unknown field and load successfully.
-    let result = ConversationStream::from_parts(base_config, events);
+    let result = ConversationStream::from_parts(base_config, events, &PartialAppConfig::empty());
     assert!(
         result.is_ok(),
         "from_parts should tolerate unknown fields in base config"
@@ -569,7 +571,8 @@ fn test_to_parts_base64_encodes_tool_call_fields() {
 
     // Roundtrip via from_parts should recover the original values.
     let base_config = serde_json::to_value(stream.base_config().to_partial()).unwrap();
-    let stream2 = ConversationStream::from_parts(base_config, events).unwrap();
+    let stream2 =
+        ConversationStream::from_parts(base_config, events, &PartialAppConfig::empty()).unwrap();
 
     let req = stream2
         .iter()
@@ -1505,7 +1508,7 @@ fn test_from_parts_tolerates_unknown_fields_in_config_deltas() {
         }
     }
 
-    let result = ConversationStream::from_parts(base_config, events)
+    let result = ConversationStream::from_parts(base_config, events, &PartialAppConfig::empty())
         .unwrap()
         .with_created_at(stream.created_at);
 
@@ -1539,7 +1542,8 @@ fn test_from_parts_tolerates_legacy_compaction_bounds_in_base_config() {
         "strategy": "replace"
     });
 
-    let result = ConversationStream::from_parts(base_config, events).unwrap();
+    let result =
+        ConversationStream::from_parts(base_config, events, &PartialAppConfig::empty()).unwrap();
 
     let config = result.config().unwrap();
     assert!(
@@ -1570,7 +1574,7 @@ fn test_from_parts_survives_a_field_a_newer_jp_added_under_a_tool() {
         }
     });
 
-    let config = ConversationStream::from_parts(base_config, events)
+    let config = ConversationStream::from_parts(base_config, events, &PartialAppConfig::empty())
         .unwrap()
         .config()
         .unwrap();
@@ -1600,6 +1604,53 @@ fn test_from_parts_survives_a_field_a_newer_jp_added_under_a_tool() {
 }
 
 #[test]
+fn test_from_parts_repairs_only_what_recovery_had_to_drop() {
+    // A tool block this binary cannot read costs the whole `conversation.tools`
+    // subtree, because `serde`'s `flatten` hides the offending field's path,
+    // and the required `conversation.tools.'*'.run` goes with it. The
+    // conversation still has to load: on the workspace's value for the field
+    // it lost, and on its own for everything it kept.
+    let stream = ConversationStream::new_test();
+    let (mut base_config, events) = stream.to_parts().unwrap();
+    base_config["conversation"]["tools"]["bash"] =
+        serde_json::json!({ "source": "local", "summary": { "was": "a string" } });
+
+    assert!(
+        ConversationStream::from_parts(
+            base_config.clone(),
+            events.clone(),
+            &PartialAppConfig::empty()
+        )
+        .is_err(),
+        "with nothing to repair from, the hole is fatal"
+    );
+
+    let mut fallback = PartialAppConfig::empty();
+    fallback.conversation.tools.defaults.run = Some(RunMode::Unattended);
+    fallback.assistant.model.id = PartialModelIdConfig {
+        provider: Some(ProviderId::Anthropic),
+        name: Some(Name("from-the-workspace".to_owned())),
+    }
+    .into();
+
+    let config = ConversationStream::from_parts(base_config, events, &fallback)
+        .unwrap()
+        .config()
+        .unwrap();
+
+    assert_eq!(
+        config.conversation.tools.defaults.run,
+        RunMode::Unattended,
+        "the field recovery removed takes the workspace value"
+    );
+    assert_eq!(
+        config.assistant.model.id.resolved().to_string(),
+        "anthropic/test",
+        "a field the stored config still holds outranks the workspace"
+    );
+}
+
+#[test]
 fn test_from_parts_tolerates_config_deltas_with_only_unknown_fields() {
     let mut stream = ConversationStream::new_test();
     stream.start_turn(ChatRequest::from("hello"));
@@ -1613,7 +1664,8 @@ fn test_from_parts_tolerates_config_deltas_with_only_unknown_fields() {
         "delta": { "removed_section": { "a": 1 } }
     }));
 
-    let result = ConversationStream::from_parts(base_config, events).unwrap();
+    let result =
+        ConversationStream::from_parts(base_config, events, &PartialAppConfig::empty()).unwrap();
     assert_eq!(result.len(), 2); // TurnStart + ChatRequest
 }
 
@@ -1646,7 +1698,7 @@ fn test_from_legacy_events_reads_base_config_nested_under_delta() {
         }),
     ];
 
-    let stream = ConversationStream::from_legacy_events(events)
+    let stream = ConversationStream::from_legacy_events(events, &PartialAppConfig::empty())
         .expect("legacy stream loads")
         .expect("first event is a config delta");
 
@@ -1672,7 +1724,7 @@ fn test_from_legacy_events_reads_base_config_inline_alongside_type() {
         }),
     ];
 
-    let stream = ConversationStream::from_legacy_events(events)
+    let stream = ConversationStream::from_legacy_events(events, &PartialAppConfig::empty())
         .expect("legacy stream loads")
         .expect("first event is a config delta");
 
@@ -1700,7 +1752,7 @@ fn test_from_legacy_events_reads_base_config_inline_without_timestamp() {
         }),
     ];
 
-    let stream = ConversationStream::from_legacy_events(events)
+    let stream = ConversationStream::from_legacy_events(events, &PartialAppConfig::empty())
         .expect("legacy stream loads")
         .expect("first event is a config delta");
 
@@ -2019,7 +2071,7 @@ fn test_compaction_roundtrip_via_to_parts_from_parts() {
     assert_eq!(compaction_count, 1);
 
     // Roundtrip.
-    let restored = ConversationStream::from_parts(base_config, events)
+    let restored = ConversationStream::from_parts(base_config, events, &PartialAppConfig::empty())
         .unwrap()
         .with_created_at(stream.created_at);
 
@@ -2481,7 +2533,8 @@ fn test_from_parts_tolerates_unknown_event_kind() {
     });
     events.push(unknown.clone());
 
-    let result = ConversationStream::from_parts(base_config, events).unwrap();
+    let result =
+        ConversationStream::from_parts(base_config, events, &PartialAppConfig::empty()).unwrap();
 
     // The unknown event is invisible to event iteration ...
     assert_eq!(result.len(), 2); // TurnStart + ChatRequest

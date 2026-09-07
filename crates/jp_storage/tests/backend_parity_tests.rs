@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use camino_tempfile::tempdir;
 use chrono::{TimeZone as _, Utc};
+use jp_config::PartialAppConfig;
 use jp_conversation::{Conversation, ConversationId, ConversationStream};
 use jp_storage::backend::{
     ConversationFilter, FsStorageBackend, InMemoryStorageBackend, LoadBackend, LockBackend,
@@ -70,7 +71,9 @@ with_backends!(write_then_load_stream, |b| {
 
     b.write(&id, &meta, &events, Projection::Projected).unwrap();
 
-    let loaded = b.load_conversation_stream(&id).unwrap();
+    let loaded = b
+        .load_conversation_stream(&id, &PartialAppConfig::empty())
+        .unwrap();
     assert!(loaded.is_empty());
 });
 
@@ -87,7 +90,10 @@ with_backends!(remove_then_load_fails, |b| {
     b.remove(&id).unwrap();
 
     assert!(b.load_conversation_metadata(&id).is_err());
-    assert!(b.load_conversation_stream(&id).is_err());
+    assert!(
+        b.load_conversation_stream(&id, &PartialAppConfig::empty())
+            .is_err()
+    );
 });
 
 with_backends!(remove_nonexistent_is_ok, |b| {
@@ -102,7 +108,10 @@ with_backends!(load_missing_metadata_errors, |b| {
 
 with_backends!(load_missing_stream_errors, |b| {
     let id = test_id(1_000_000);
-    assert!(b.load_conversation_stream(&id).is_err());
+    assert!(
+        b.load_conversation_stream(&id, &PartialAppConfig::empty())
+            .is_err()
+    );
 });
 
 with_backends!(load_ids_empty, |b| {

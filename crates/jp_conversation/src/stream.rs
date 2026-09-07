@@ -3,7 +3,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use chrono::{DateTime, Utc};
-use jp_config::{AppConfig, ConfigError, PartialAppConfig, PartialConfig as _};
+use jp_config::{AppConfig, ConfigError, FillDefaults as _, PartialAppConfig, PartialConfig as _};
 use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{Map, Value};
 use tracing::{error, warn};
@@ -1954,16 +1954,26 @@ impl ConversationStream {
     /// All deserialization, including schema-aware stripping of unknown fields
     /// from the base config, stays inside `jp_conversation`.
     ///
+    /// `fallback` supplies values for fields the stored config cannot provide,
+    /// and is read only when the stored config on its own cannot be finalized.
+    /// Pass [`PartialAppConfig::empty()`] to hold the stored config to standing
+    /// alone.
+    ///
     /// The returned stream has `created_at` set to [`Utc::now()`].
     /// The caller should chain [`.with_created_at()`] to set the correct
     /// creation time from the conversation ID.
     ///
     /// # Errors
     ///
-    /// Returns an error if event deserialization or config conversion fails.
+    /// Returns an error if event deserialization fails, or if the config cannot
+    /// be finalized even after `fallback` is applied.
     ///
     /// [`.with_created_at()`]: Self::with_created_at
-    pub fn from_parts(base_config: Value, events: Vec<Value>) -> Result<Self, StreamError> {
+    pub fn from_parts(
+        base_config: Value,
+        events: Vec<Value>,
+        fallback: &PartialAppConfig,
+    ) -> Result<Self, StreamError> {
         let base_config = crate::compat::deserialize_partial_config(base_config);
 
         let events = events
@@ -1972,7 +1982,7 @@ impl ConversationStream {
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(Self {
-            base_config: jp_config::util::build(base_config)?.into(),
+            base_config: finalize_recovered_config(base_config, fallback)?,
             events,
             created_at: Utc::now(),
         })
@@ -2015,7 +2025,10 @@ impl ConversationStream {
     /// Returns an error if event deserialization or config conversion fails.
     ///
     /// [`.with_created_at()`]: Self::with_created_at
-    pub fn from_legacy_events(events: Vec<Value>) -> Result<Option<Self>, StreamError> {
+    pub fn from_legacy_events(
+        events: Vec<Value>,
+        fallback: &PartialAppConfig,
+    ) -> Result<Option<Self>, StreamError> {
         if events.is_empty() {
             return Ok(None);
         }
@@ -2036,8 +2049,41 @@ impl ConversationStream {
         // Remaining elements are events. from_parts handles compat stripping.
         let events = events.into_iter().skip(1).collect();
 
-        Ok(Some(Self::from_parts(base_config, events)?))
+        Ok(Some(Self::from_parts(base_config, events, fallback)?))
     }
+}
+
+/// Finalize a recovered stored config, repairing it from `fallback` only if
+/// what was stored cannot stand on its own.
+///
+/// A conversation's config is complete by construction: it is written from a
+/// resolved [`AppConfig`], and it overrides the workspace rather than
+/// inheriting from it.
+/// Recovering an unreadable stored config can break that, because a field
+/// required to finalize may be among the ones dropped, and the value replacing
+/// it has to come from somewhere.
+/// `fallback` is that somewhere, read only on the path where the alternative is
+/// a conversation that will not load at all.
+fn finalize_recovered_config(
+    partial: PartialAppConfig,
+    fallback: &PartialAppConfig,
+) -> Result<Arc<AppConfig>, StreamError> {
+    if fallback.is_empty() {
+        return Ok(jp_config::util::build(partial)?.into());
+    }
+
+    let error = match jp_config::util::build(partial.clone()) {
+        Ok(config) => return Ok(config.into()),
+        Err(error) => error,
+    };
+
+    warn!(
+        %error,
+        "Stored conversation config cannot be finalized; filling the gap from the workspace \
+         config. The filled value is written back the next time the conversation is saved.",
+    );
+
+    Ok(jp_config::util::build(partial.fill_from(fallback.clone()))?.into())
 }
 
 /// Error type for the [`ConversationStream`] type and its methods.

@@ -6,6 +6,7 @@ use std::{
 
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
+use jp_config::PartialAppConfig;
 use jp_conversation::{Conversation, ConversationId, ConversationStream, StreamError};
 use rayon::iter::{IntoParallelRefIterator as _, ParallelIterator as _};
 use serde::{
@@ -173,7 +174,13 @@ fn scan_conversation_ids(path: &Utf8Path) -> Vec<ConversationId> {
 }
 
 impl Storage {
-    pub fn load_conversation_stream(&self, id: &ConversationId) -> Result<ConversationStream> {
+    /// Load a conversation's stream, reading `fallback` only if the stored
+    /// config cannot be finalized on its own.
+    pub fn load_conversation_stream(
+        &self,
+        id: &ConversationId,
+        fallback: &PartialAppConfig,
+    ) -> Result<ConversationStream> {
         let workspace_dir = find_conversation_dir_path(&self.root, id);
         let user_dir = self
             .user
@@ -206,7 +213,7 @@ impl Storage {
             let base_config = load_json(&base_config_path)?;
             let events = load_json(&events_path)?;
 
-            return ConversationStream::from_parts(base_config, events)
+            return ConversationStream::from_parts(base_config, events, fallback)
                 .map(|stream| stream.with_created_at(id.timestamp()))
                 .map_err(|error| {
                     LoadError::new(conv_dir.to_owned(), LoadErrorInner::Stream(error))
@@ -215,7 +222,7 @@ impl Storage {
 
         // Legacy format: base config packed as first element in events.json.
         let events = load_json(&events_path)?;
-        match ConversationStream::from_legacy_events(events) {
+        match ConversationStream::from_legacy_events(events, fallback) {
             Ok(Some(stream)) => Ok(stream.with_created_at(id.timestamp())),
             Ok(None) => Err(LoadError::new(
                 conv_dir.to_owned(),
