@@ -5,7 +5,7 @@ use jp_tool::{AccessPolicy, Capability, Outcome, Question};
 use serde_json::{Map, Value};
 
 use super::utils::{
-    EntryKind, ResolvedPath, authorize, entry_kind, is_file_dirty, resolve_workspace_entry,
+    EntryKind, ResolvedPath, authorize, authorize_entry, is_file_dirty, resolve_workspace_entry,
 };
 use crate::util::{ToolResult, error};
 
@@ -20,11 +20,11 @@ pub(crate) async fn fs_delete_file(
         Err(msg) => return error(msg),
     };
 
-    if let Err(msg) = authorize(access, Capability::Delete, &resolved.relative) {
+    if let Err(msg) = authorize(access, Capability::Delete, &resolved) {
         return error(msg);
     }
 
-    match entry_kind(&resolved.absolute)? {
+    match resolved.kind {
         None => return error("Path points to non-existing entry"),
         Some(EntryKind::Dir) => {
             return error(
@@ -65,7 +65,7 @@ pub(crate) async fn fs_delete_file(
     fs::remove_file(&resolved.absolute)?;
     let mut msg = "File deleted.".to_owned();
 
-    if let Some(parent) = empty_parent_to_remove(&resolved)? {
+    if let Some(parent) = empty_parent_to_remove(&resolved, access)? {
         fs::remove_dir(parent)?;
         msg.push_str(" Removed empty parent directory.");
     }
@@ -83,7 +83,12 @@ pub(crate) async fn fs_delete_file(
 /// the top level — in that case `resolved.absolute.parent()` is the canonical
 /// workspace root, and removing it would either error (CWD/EBUSY) or, worse,
 /// succeed.
-fn empty_parent_to_remove(resolved: &ResolvedPath) -> Result<Option<&Utf8Path>, std::io::Error> {
+///
+/// The parent needs its own grant, and is left in place without one.
+fn empty_parent_to_remove<'a>(
+    resolved: &'a ResolvedPath,
+    access: Option<&AccessPolicy>,
+) -> Result<Option<&'a Utf8Path>, std::io::Error> {
     let Some(rel_parent) = resolved.relative.parent() else {
         return Ok(None);
     };
@@ -96,6 +101,20 @@ fn empty_parent_to_remove(resolved: &ResolvedPath) -> Result<Option<&Utf8Path>, 
     if parent.read_dir()?.next().is_some() {
         return Ok(None);
     }
+
+    // Removing the directory is a second deletion, of a path the tool call
+    // never named, so it is authorized separately: a policy may hand out
+    // `delete` on the files in a tree and still refuse the tree itself. The
+    // parent is a directory, hence the subtree question — which an empty
+    // directory only fails when a rule below it denies.
+    //
+    // A refusal skips the tidy-up rather than failing the call: the file the
+    // caller asked about is already gone, and reporting an error for the
+    // leftover directory would read as if the delete had not happened.
+    if authorize_entry(access, Capability::Delete, rel_parent, true).is_err() {
+        return Ok(None);
+    }
+
     Ok(Some(parent))
 }
 

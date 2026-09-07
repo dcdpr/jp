@@ -15,7 +15,7 @@ pub(crate) async fn fs_read_file(
         Ok(r) => r,
         Err(msg) => return error(msg),
     };
-    if let Err(msg) = authorize(ctx.access.as_ref(), Capability::Read, &resolved.relative) {
+    if let Err(msg) = authorize(ctx.access.as_ref(), Capability::Read, &resolved) {
         return error(msg);
     }
     // Matched on both forms: the canonical one so a symlink cannot dodge a

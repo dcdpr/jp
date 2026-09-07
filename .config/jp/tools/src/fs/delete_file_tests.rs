@@ -218,6 +218,44 @@ async fn refuses_to_delete_a_path_a_deny_rule_closes() {
     assert!(root.join(".git/HEAD").exists(), "file was deleted anyway");
 }
 
+/// Removing the emptied parent is a second deletion, of a path the call never
+/// named, so it needs a grant of its own: this policy hands out `delete` on the
+/// one file and refuses the directory holding it.
+#[tokio::test]
+async fn leaves_an_emptied_parent_directory_a_deny_rule_closes() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("docs/ticket")).unwrap();
+    std::fs::write(root.join("docs/ticket/only.md"), "x").unwrap();
+
+    let policy = AccessPolicy {
+        fs: vec![
+            FsRule::new("").with_read(true).with_write(true),
+            FsRule::new("docs/ticket").with_read(true).with_write(false),
+            FsRule::new("docs/ticket/only.md")
+                .with_read(true)
+                .with_write(true),
+        ],
+        ..AccessPolicy::default()
+    };
+
+    let result = fs_delete_file(
+        root,
+        Some(&policy),
+        &no_answers(),
+        "docs/ticket/only.md".to_owned(),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(unwrap_success(result), "File deleted.");
+    assert!(!root.join("docs/ticket/only.md").exists());
+    assert!(
+        root.join("docs/ticket").exists(),
+        "the closed directory was removed as a tidy-up"
+    );
+}
+
 #[tokio::test]
 async fn deleting_missing_path_errors() {
     let dir = tempdir().unwrap();

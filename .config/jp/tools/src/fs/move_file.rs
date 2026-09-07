@@ -5,8 +5,8 @@ use jp_tool::{AccessPolicy, Capability, Outcome, Question};
 use serde_json::{Map, Value};
 
 use super::utils::{
-    EntryKind, ResolvedPath, authorize, count_dirty_paths_impl, entry_kind, is_file_dirty_impl,
-    resolve_workspace_entry,
+    EntryKind, ResolvedPath, authorize, authorize_entry, count_dirty_paths_impl,
+    is_file_dirty_impl, resolve_workspace_entry,
 };
 use crate::{
     Error,
@@ -55,8 +55,9 @@ fn fs_move_file_impl<R: ProcessRunner>(
         Err(msg) => return error(msg),
     };
 
-    // The source entry is removed and the target written.
-    if let Err(msg) = authorize(access, Capability::Delete, &src.relative) {
+    // The source entry is removed. A directory source takes its whole subtree
+    // along, which `authorize` reads off the resolved entry.
+    if let Err(msg) = authorize(access, Capability::Delete, &src) {
         return error(msg);
     }
 
@@ -66,7 +67,7 @@ fn fs_move_file_impl<R: ProcessRunner>(
         ));
     }
 
-    let src_kind = match classify_source(&src.absolute, source)? {
+    let src_kind = match classify_source(src.kind, source) {
         Some(Ok(kind)) => kind,
         Some(Err(message)) => return error(message),
         None => return error(format!("Source path '{source}' does not exist.")),
@@ -87,12 +88,12 @@ fn fs_move_file_impl<R: ProcessRunner>(
     // existing overwrite-with-confirmation behavior; for directories the
     // target must not exist at all (no implicit "move into" semantics).
     //
-    // Use `entry_kind` (i.e. `symlink_metadata`) instead of
+    // The kind comes from `symlink_metadata` rather than
     // `is_dir`/`is_file`/`exists`: those follow symlinks and lie about a
     // dangling final-position link, which would let `fs::rename` silently
     // replace the link without triggering the overwrite prompt and bypass
     // the directory "must not exist" rule.
-    let dst_kind = entry_kind(&dst.absolute)?;
+    let dst_kind = dst.kind;
 
     // Overwriting an existing target needs `update`; a fresh target needs
     // `create`.
@@ -101,7 +102,13 @@ fn fs_move_file_impl<R: ProcessRunner>(
     } else {
         Capability::Create
     };
-    if let Err(msg) = authorize(access, target_capability, &dst.relative) {
+
+    // How far the write at the destination reaches is the *source's* shape, not
+    // the destination's: moving a directory lands every path under it below
+    // `dst`, whether or not anything sits there yet. `authorize` would read the
+    // destination's own kind, which for a fresh target is no kind at all.
+    let writes_a_subtree = src_kind == SourceKind::Dir;
+    if let Err(msg) = authorize_entry(access, target_capability, &dst.relative, writes_a_subtree) {
         return error(msg);
     }
 
@@ -157,7 +164,7 @@ fn fs_move_file_impl<R: ProcessRunner>(
     // have nothing left. Gated on the *relative* parent being non-empty so
     // we never try to remove the workspace root itself when the source
     // lived at the top level.
-    if let Some(parent) = empty_parent_to_remove(&src)? {
+    if let Some(parent) = empty_parent_to_remove(&src, access)? {
         fs::remove_dir(parent)?;
         msg.push_str(" Removed empty parent directory.");
     }
@@ -170,8 +177,11 @@ fn fs_move_file_impl<R: ProcessRunner>(
 ///
 /// Mirrors `delete_file::empty_parent_to_remove`: gated on the relative parent
 /// being non-empty, so removing a top-level entry never tries to remove the
-/// workspace root.
-fn empty_parent_to_remove(resolved: &ResolvedPath) -> Result<Option<&Utf8Path>, std::io::Error> {
+/// workspace root, and left in place without a grant of its own.
+fn empty_parent_to_remove<'a>(
+    resolved: &'a ResolvedPath,
+    access: Option<&AccessPolicy>,
+) -> Result<Option<&'a Utf8Path>, std::io::Error> {
     let Some(rel_parent) = resolved.relative.parent() else {
         return Ok(None);
     };
@@ -190,35 +200,33 @@ fn empty_parent_to_remove(resolved: &ResolvedPath) -> Result<Option<&Utf8Path>, 
     if parent.read_dir()?.next().is_some() {
         return Ok(None);
     }
+
+    // The same second deletion `delete_file` guards: a path the tool call never
+    // named needs its own grant, and a refusal leaves the directory rather than
+    // failing a move that already happened.
+    if authorize_entry(access, Capability::Delete, rel_parent, true).is_err() {
+        return Ok(None);
+    }
+
     Ok(Some(parent))
 }
 
-/// Classify the source entry by inspecting its file type.
+/// Classify the resolved source entry for the move.
 ///
-/// Returns `Ok(None)` when the source does not exist, `Ok(Some(Ok(kind)))` when
-/// it can be moved, and `Ok(Some(Err(message)))` for unsupported entry types
-/// (block device, fifo, socket, ...).
-/// The outer `Result` propagates I/O errors that aren't `NotFound`.
-fn classify_source(
-    absolute: &Utf8Path,
-    source: &str,
-) -> Result<Option<Result<SourceKind, String>>, Error> {
-    let Some(kind) = entry_kind(absolute)? else {
-        return Ok(None);
-    };
-
+/// Returns `None` when the source does not exist, `Some(Ok(kind))` when it can
+/// be moved, and `Some(Err(message))` for unsupported entry types (block
+/// device, fifo, socket, ...).
+fn classify_source(kind: Option<EntryKind>, source: &str) -> Option<Result<SourceKind, String>> {
     // `resolve_workspace_entry` leaves the final component alone, so the
     // observed entry kind is what the user named. Symlinks are bundled
     // with `File`: `fs::rename` will rename the link itself.
-    let result = match kind {
+    Some(match kind? {
         EntryKind::Symlink | EntryKind::File => Ok(SourceKind::File),
         EntryKind::Dir => Ok(SourceKind::Dir),
         EntryKind::Other => Err(format!(
             "Source '{source}' is neither a regular file, symlink, nor a directory."
         )),
-    };
-
-    Ok(Some(result))
+    })
 }
 
 fn confirm_overwrite_file(

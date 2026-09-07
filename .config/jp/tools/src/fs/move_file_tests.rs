@@ -119,6 +119,91 @@ fn moves_directory_with_contents() {
     );
 }
 
+/// Moving a directory deletes every path under it, so a grant on the directory
+/// cannot stand in for one on its contents: `docs` is writable, `docs/ticket`
+/// is not, and moving `docs` would take the closed tree with it.
+#[test]
+fn refuses_to_move_a_directory_over_a_deny_rule_inside_it() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("docs/ticket")).unwrap();
+    std::fs::write(root.join("docs/ticket/keep.md"), "x").unwrap();
+
+    let result = fs_move_file_impl(
+        root,
+        Some(&workspace_except("docs/ticket")),
+        &no_answers(),
+        "docs",
+        "documents",
+        &never_git_runner(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        unwrap_error(result).replace('\\', "/"),
+        "Access denied: cannot delete 'docs'. Paths granting delete: [.]. If required, ask the \
+         user for explicit access."
+    );
+    assert!(root.join("docs/ticket/keep.md").exists());
+    assert!(!root.join("documents").exists());
+}
+
+/// The subtree question only refuses what a rule actually closes: a directory
+/// with nothing denied under it still moves.
+#[test]
+fn moves_a_directory_a_deny_rule_does_not_reach() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("docs/ticket")).unwrap();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(root.join("src/a.txt"), "1").unwrap();
+
+    let result = fs_move_file_impl(
+        root,
+        Some(&workspace_except("docs/ticket")),
+        &no_answers(),
+        "src",
+        "lib",
+        &clean_git_runner(),
+    )
+    .unwrap();
+
+    assert!(unwrap_success(result).contains("Moved directory"));
+    assert_eq!(
+        std::fs::read_to_string(root.join("lib/a.txt")).unwrap(),
+        "1"
+    );
+}
+
+/// The destination's reach is the source's shape, not the destination's.
+/// A fresh `docs` is one entry to create, but a directory landing there brings
+/// `docs/ticket` with it, which is closed.
+#[test]
+fn refuses_to_move_a_directory_onto_a_fresh_path_a_deny_rule_reaches_under() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("staging/ticket")).unwrap();
+    std::fs::write(root.join("staging/ticket/smuggled.md"), "x").unwrap();
+
+    let result = fs_move_file_impl(
+        root,
+        Some(&workspace_except("docs/ticket")),
+        &no_answers(),
+        "staging",
+        "docs",
+        &never_git_runner(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        unwrap_error(result).replace('\\', "/"),
+        "Access denied: cannot create 'docs'. Paths granting create: [.]. If required, ask the \
+         user for explicit access."
+    );
+    assert!(!root.join("docs").exists());
+    assert!(root.join("staging/ticket/smuggled.md").exists());
+}
+
 #[test]
 fn moves_directory_creates_target_parents() {
     let dir = tempdir().unwrap();
