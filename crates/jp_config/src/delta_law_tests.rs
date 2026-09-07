@@ -79,31 +79,6 @@ fn assert_law(before: &[&str], after: &[&str]) {
     );
 }
 
-/// Fields whose clear is known not to survive a fold, and why.
-///
-/// `conversation.compaction.rules` keeps its rules in a bare `MergeableVec`, so
-/// an empty one cannot say whether the user asked for no rules or said nothing
-/// about them.
-/// A delta that replaced on any difference would record zero rules from any
-/// sparse partial that reached it, which is how it was found: routing it
-/// through [`delta_mergeable_vec`] wrote `replace` with an empty list into 37
-/// snapshots and appended an event that should not exist.
-/// Reaching it needs the partial to be an `Option<MergeableVec<_>>`, as every
-/// converted list field has.
-///
-/// `model.parameters.other` is the catch-all arm of its own key-value dispatch,
-/// so `parameters.other` names a key *inside* the map rather than the map
-/// itself, and clearing removes an entry that was never there.
-/// Reaching the whole field needs a path vocabulary that can say "this map"
-/// where the map is also the fallback.
-const CLEAR_NOT_RECORDED: &[&str] = &[
-    "conversation.compaction.rules",
-    "assistant.model.parameters.other",
-    "style.reasoning.summary_model.parameters.other",
-    "conversation.inquiry.assistant.model.parameters.other",
-    "conversation.title.generate.model.parameters.other",
-];
-
 /// Set `path` to whichever of a few generic values it accepts.
 ///
 /// A field has to hold something before clearing it proves anything, and there
@@ -229,9 +204,7 @@ fn clearing_any_field_survives_a_fold() {
         }
         folded.merge(&(), delta).expect("folding cannot fail");
 
-        if crate::util::build(folded).ok().as_ref() != Some(&expected)
-            && !CLEAR_NOT_RECORDED.contains(&path.as_str())
-        {
+        if crate::util::build(folded).ok().as_ref() != Some(&expected) {
             lost.push(path);
         }
     }
