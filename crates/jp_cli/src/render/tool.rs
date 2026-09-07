@@ -1,6 +1,8 @@
 use std::{
     collections::HashMap,
-    env, fmt, fs,
+    env, fmt,
+    fmt::Write as _,
+    fs,
     sync::{
         Arc,
         atomic::{AtomicBool, Ordering},
@@ -207,18 +209,27 @@ impl ToolRenderer {
     /// straight to the channel unchanged.
     /// Write errors on the chrome channel are swallowed, matching the
     /// renderer's other best-effort writes.
+    ///
+    /// `write` renders into a buffer that reaches the channel as one print
+    /// task.
+    /// A `write!` with an interpolated argument is several `write_str` calls,
+    /// and `ShadedWriter` splits a line further still into background, text,
+    /// fill and reset — each of which would otherwise be its own task for the
+    /// printer to erase a status region around, mid-line.
     fn write_chrome<F>(&self, region: Option<&DefaultBackground>, write: F)
     where
         F: FnOnce(&mut dyn fmt::Write) -> fmt::Result,
     {
-        let mut channel = self.channel.writer();
+        let mut buffer = String::new();
         if let Some(bg) = region {
-            let mut shaded = ShadedWriter::new(&mut channel, bg);
+            let mut shaded = ShadedWriter::new(&mut buffer, bg);
             let _ = write(&mut shaded);
             let _ = shaded.finish();
         } else {
-            let _ = write(&mut channel);
+            let _ = write(&mut buffer);
         }
+
+        let _ = self.channel.writer().write_str(&buffer);
     }
 
     /// Emit the blank-line separator owed by a preceding tool result or custom

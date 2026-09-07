@@ -73,6 +73,9 @@ const LABEL_COLOURS: [u8; 10] = [36, 35, 32, 33, 34, 96, 95, 92, 93, 94];
 /// styling cannot bleed into the region's own rows.
 const SGR_RESET: &str = "\x1b[0m";
 
+/// SGR conceal, which hides text from the reader and has no place in a preview.
+const CONCEAL: &str = "8";
+
 /// Lines a region's window buffer holds before evicting its oldest.
 ///
 /// An upper bound rather than the window's height: the height is re-resolved on
@@ -809,6 +812,16 @@ pub struct RegionStack {
 
     /// Nesting depth of active suspensions.
     suspensions: usize,
+
+    /// Whether persistent output owns the cursor's row.
+    ///
+    /// A row drawn there is drawn over that output: the region starts every row
+    /// with `\r\x1b[K`, which returns to column 0 and clears what is already on
+    /// it.
+    /// `write!` and `ShadedWriter` both emit one visual line as several print
+    /// tasks, so a line only half-written is the common case rather than an
+    /// edge one.
+    content_open: bool,
 }
 
 impl RegionStack {
@@ -818,15 +831,27 @@ impl RegionStack {
             entries: Vec::new(),
             drawn_rows: 0,
             suspensions: 0,
+            content_open: false,
         }
+    }
+
+    /// Record whether the persistent write that just landed left the cursor
+    /// part-way along a row.
+    ///
+    /// While it did, nothing is painted: the region would erase that text
+    /// rather than sit below it.
+    pub const fn set_content_open(&mut self, open: bool) {
+        self.content_open = open;
     }
 
     /// How long the worker may block before the top region needs a redraw.
     ///
-    /// `None` when nothing is claimed or rendering is suspended, in which case
-    /// the worker blocks until the next command arrives.
+    /// `None` when nothing is claimed, when rendering is suspended, or while
+    /// persistent output owns the cursor's row — in each case the worker
+    /// blocks until the next command arrives, since ticking would paint
+    /// nothing.
     pub fn tick_after(&self) -> Option<Duration> {
-        if self.suspensions > 0 {
+        if self.suspensions > 0 || self.content_open {
             return None;
         }
 
@@ -1032,7 +1057,7 @@ impl RegionStack {
 
     /// Paint the top claim, or erase when nothing belongs on screen.
     pub fn redraw(&mut self, writer: &mut dyn io::Write) {
-        if self.suspensions > 0 {
+        if self.suspensions > 0 || self.content_open {
             self.erase(writer);
             return;
         }
@@ -1049,6 +1074,20 @@ impl RegionStack {
 
         let rows = entry.rows();
         let background = entry.background.clone();
+
+        // The rows the block still occupies on screen, which is not what it
+        // occupied when it was drawn: a terminal that shrank has already lost
+        // its top rows to scrollback, and a rewind counted from the old total
+        // walks past the top of the viewport, clamps there, and leaves every
+        // row after it one place low.
+        let footprint = entry
+            .terminal
+            .live_size()
+            .1
+            .map_or(self.drawn_rows, |height| {
+                self.drawn_rows.min(usize::from(height))
+            });
+
         let mut frame = String::new();
 
         // The cursor sits on the last row the region owns, and owns at least
@@ -1058,7 +1097,7 @@ impl RegionStack {
         // block's first row. Only the rows *below* the cursor's own need
         // reserving, which is what keeps the block flush against the bottom of
         // the screen instead of one row short of it.
-        let anchored = self.drawn_rows.max(1);
+        let anchored = footprint.max(1);
         let grown = rows.len().saturating_sub(anchored);
         for _ in 0..grown {
             frame.push('\n');
@@ -1081,7 +1120,7 @@ impl RegionStack {
         // A window that shrank leaves rows below the new block that nothing
         // will overwrite, so they are cleared explicitly and the cursor walks
         // back to the last painted row.
-        let surplus = self.drawn_rows.saturating_sub(rows.len());
+        let surplus = footprint.saturating_sub(rows.len());
         for _ in 0..surplus {
             frame.push('\n');
             push_erase(&mut frame, background.as_deref());
@@ -1173,8 +1212,13 @@ fn filter_line(line: &str) -> String {
     out
 }
 
-/// The SGR sequence `escape` carries with conceal removed, or `None` when it is
-/// not an SGR sequence or has nothing left to say.
+/// The SGR sequence `escape` carries with a standalone conceal removed, or
+/// `None` when it is not an SGR sequence or has nothing left to say.
+///
+/// Parameters are walked rather than filtered, because `38`, `48` and `58`
+/// carry an operand group after them — `5;n` for an indexed colour, `2;r;g;b`
+/// for an RGB one — and a component that happens to be `8` is a colour value,
+/// not the conceal attribute.
 fn visible_sgr(escape: &str) -> Option<String> {
     let body = escape.strip_prefix("\x1b[")?.strip_suffix('m')?;
 
@@ -1183,7 +1227,35 @@ fn visible_sgr(escape: &str) -> Option<String> {
         return Some(escape.to_owned());
     }
 
-    let kept: Vec<&str> = body.split(';').filter(|param| *param != "8").collect();
+    let mut kept: Vec<&str> = Vec::new();
+    let mut params = body.split(';');
+
+    while let Some(param) = params.next() {
+        if matches!(param, "38" | "48" | "58") {
+            kept.push(param);
+
+            // How many operands follow is fixed by the colour space named next.
+            let Some(space) = params.next() else { continue };
+            kept.push(space);
+            let operands = match space {
+                "5" => 1,
+                "2" => 3,
+                _ => 0,
+            };
+
+            for _ in 0..operands {
+                let Some(operand) = params.next() else { break };
+                kept.push(operand);
+            }
+
+            continue;
+        }
+
+        if param != CONCEAL {
+            kept.push(param);
+        }
+    }
+
     if kept.is_empty() {
         return None;
     }

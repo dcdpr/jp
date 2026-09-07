@@ -72,7 +72,7 @@ impl AssignKeyValue for PartialMcpStartupConfig {
             "show" => self.show = kv.try_some_bool()?,
             "delay_secs" => self.delay_secs = kv.try_some_u32()?,
             "interval_ms" => self.interval_ms = kv.try_some_u32()?,
-            "print_stderr" => self.print_stderr = kv.try_some_from_str()?,
+            "print_stderr" => self.print_stderr = kv.try_some_bool_number_or_from_str()?,
             _ => return missing_key(&kv),
         }
 

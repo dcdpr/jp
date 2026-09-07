@@ -969,18 +969,23 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
         }
 
         self.regions.erase(&mut self.err);
-        self.write_task_instant(task);
+        if self.write_task_instant(task) {
+            self.regions.set_content_open(!task.content.ends_with('\n'));
+        }
         self.regions.redraw(&mut self.err);
     }
 
     /// Write a print task's content in one shot.
-    fn write_task_instant(&mut self, task: &PrintTask) {
+    ///
+    /// Returns whether the content reached a stream, which is what decides
+    /// where the cursor now sits.
+    fn write_task_instant(&mut self, task: &PrintTask) -> bool {
         let writer: &mut dyn io::Write = match task.target {
             PrintTarget::Out => &mut self.out,
             PrintTarget::Err => &mut self.err,
             PrintTarget::Tty => match self.tty.as_mut() {
                 Some(w) => w.as_mut(),
-                None => return,
+                None => return false,
             },
         };
 
@@ -995,6 +1000,8 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
             let count = visible_char_count(&task.content);
             release_pending(&self.delay_control, count);
         }
+
+        true
     }
 
     /// Process a single print task.
@@ -1002,18 +1009,26 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
     /// Any drawn region is erased before the content lands and redrawn once it
     /// has, so a stale row can never sit above output.
     /// Empty-content tasks write nothing and leave the region alone.
+    ///
+    /// Content that stops part-way along a row holds the redraw off until a
+    /// later task finishes the line: a region painted there would erase it.
     fn process_task(&mut self, task: &PrintTask) {
         if task.content.is_empty() {
             return;
         }
 
         self.regions.erase(&mut self.err);
-        self.write_task(task);
+        if self.write_task(task) {
+            self.regions.set_content_open(!task.content.ends_with('\n'));
+        }
         self.regions.redraw(&mut self.err);
     }
 
     /// Write a print task's content, honoring its typewriter pacing.
-    fn write_task(&mut self, task: &PrintTask) {
+    ///
+    /// Returns whether the content reached a stream, which is what decides
+    /// where the cursor now sits.
+    fn write_task(&mut self, task: &PrintTask) -> bool {
         let PrintTask {
             content,
             mode,
@@ -1025,7 +1040,7 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
             PrintTarget::Err => &mut self.err,
             PrintTarget::Tty => match self.tty.as_mut() {
                 Some(w) => w.as_mut(),
-                None => return,
+                None => return false,
             },
         };
 
@@ -1042,7 +1057,7 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
                     // its visible-char share from the pending counter.
                     let count = visible_char_count(content);
                     release_pending(&self.delay_control, count);
-                    return;
+                    return true;
                 }
 
                 // Accumulate per-character delays into batches before
@@ -1080,6 +1095,8 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
                 }
             }
         }
+
+        true
     }
 }
 

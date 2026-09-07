@@ -959,6 +959,20 @@ impl ToolCoordinator {
         let mut pending_prompts: VecDeque<PendingPrompt> = VecDeque::new();
         let mut prompt_active = false;
 
+        // Claimed before the sinks below, not after: `StatusRegion::source`
+        // copies the region it is asked of, so a sink taken from the inert
+        // handle stays inert however the renderer is reassigned afterwards.
+        //
+        // The row ticks itself and is erased around every write the printer
+        // makes, so it stays claimed for the whole execution rather than being
+        // torn down and rebuilt around each event. A prompt suspends it for the
+        // widget's lifetime without the coordinator arranging it.
+        //
+        // Progress is a terminal affordance, not a prompt, so nothing here
+        // consults `interactive`: a `--no-interactive` run on a terminal still
+        // shows how long a tool has been going.
+        tool_renderer.start_progress();
+
         for (index, executor) in executors.into_iter().enumerate() {
             let tool_id = executor.tool_id().to_string();
             let tool_name = executor.tool_name().to_string();
@@ -1008,16 +1022,6 @@ impl ToolCoordinator {
                 }
             }
         });
-
-        // The elapsed-time row ticks itself and is erased around every write
-        // the printer makes, so it stays claimed for the whole execution rather
-        // than being torn down and rebuilt around each event. A prompt suspends
-        // it for the widget's lifetime without the coordinator arranging it.
-        //
-        // Progress is a terminal affordance, not a prompt, so nothing here
-        // consults `interactive`: a `--no-interactive` run on a terminal still
-        // shows how long a tool has been going.
-        tool_renderer.start_progress();
 
         let mut outcome = ExecutionOutcome::Completed;
         let mut tools_cancelled = false;

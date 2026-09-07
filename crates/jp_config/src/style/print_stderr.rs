@@ -31,9 +31,11 @@ use serde::{Deserialize, Serialize};
 pub enum PrintStderr {
     /// Show no output; the indicator is the timer alone.
     #[default]
+    #[serde(alias = "false")]
     Off,
 
     /// Size the window from the terminal's height.
+    #[serde(alias = "true")]
     Auto,
 
     /// Show exactly this many rows.
@@ -46,6 +48,14 @@ impl PrintStderr {
     #[must_use]
     pub const fn is_enabled(self) -> bool {
         !matches!(self, Self::Off)
+    }
+}
+
+impl From<bool> for PrintStderr {
+    /// `false` shows the timer alone; `true` sizes the window from the
+    /// terminal.
+    fn from(v: bool) -> Self {
+        if v { Self::Auto } else { Self::Off }
     }
 }
 
