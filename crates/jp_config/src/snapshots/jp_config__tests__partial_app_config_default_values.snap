@@ -427,7 +427,9 @@ Ok(
                 },
             },
             template: PartialTemplateConfig {
-                values: {},
+                values: Map(
+                    {},
+                ),
             },
             providers: PartialProviderConfig {
                 llm: PartialLlmProviderConfig {

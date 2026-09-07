@@ -225,39 +225,27 @@ where
         .collect()
 }
 
-/// Calculate the delta between two maps of plain values.
+/// Calculate the delta between two strategy-carrying maps of plain values.
 ///
-/// An entry is kept when `next` holds a value for it that differs from
-/// `prev`'s.
-/// A map of nested partials wants [`delta_map`] instead, which records only the
-/// changed fields of an entry both maps hold.
-pub fn delta_value_map<V: PartialEq>(
-    prev: &IndexMap<String, V>,
-    next: IndexMap<String, V>,
-) -> IndexMap<String, V> {
+/// Mirrors [`delta_mergeable_map`] for a map whose values carry no partial of
+/// their own, so an entry is compared and carried whole rather than diffed.
+pub fn delta_mergeable_value_map<T: Clone + PartialEq>(
+    prev: &MergeableMap<T>,
+    next: MergeableMap<T>,
+) -> MergeableMap<T> {
+    if prev.keys().any(|key| !next.contains_key(key)) {
+        // Stated rather than inherited from `next`'s shape: a plain map
+        // deep-merges on the fold and brings the dropped key back.
+        return MergeableMap::Merged(MergedMap {
+            value: next.into_map(),
+            strategy: Some(MergedMapStrategy::Replace),
+            discard_when_merged: false,
+        });
+    }
+
     next.into_iter()
         .filter(|(key, next)| !prev.get(key).is_some_and(|prev| prev == next))
         .collect()
-}
-
-/// Calculate the delta between two maps of plain values, reporting removed
-/// entries.
-///
-/// Mirrors [`delta_map_with_unsets`] for a map whose values carry no partial of
-/// their own.
-pub fn delta_value_map_with_unsets<V: PartialEq>(
-    prefix: &str,
-    prev: &IndexMap<String, V>,
-    next: IndexMap<String, V>,
-    unsets: &mut Vec<String>,
-) -> IndexMap<String, V> {
-    for key in prev.keys() {
-        if !next.contains_key(key) {
-            unsets.push(path(prefix, key));
-        }
-    }
-
-    delta_value_map(prev, next)
 }
 
 /// Calculate the delta between two optional values, reporting a cleared field.

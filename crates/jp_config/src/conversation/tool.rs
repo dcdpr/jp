@@ -18,9 +18,9 @@ use crate::{
         style::{DisplayStyleConfig, PartialDisplayStyleConfig},
     },
     delta::{
-        PartialConfigDelta, delta_map, delta_map_with_unsets, delta_mergeable_map, delta_opt,
-        delta_opt_at, delta_opt_partial, delta_opt_partial_at, delta_value_map,
-        delta_value_map_with_unsets, delta_vec, path,
+        PartialConfigDelta, delta_map, delta_map_with_unsets, delta_mergeable_map,
+        delta_mergeable_value_map, delta_opt, delta_opt_at, delta_opt_partial,
+        delta_opt_partial_at, delta_vec, path,
     },
     fill::{FillDefaults, fill_map},
     internal::merge::map_with_strategy,
@@ -579,8 +579,13 @@ pub struct ToolConfig {
     /// A free-form map of key-value pairs that configure tool behavior.
     /// Each tool defines its own supported options and defaults.
     /// Unknown options are silently forwarded.
-    #[setting(nested, merge = merge_nested_indexmap)]
-    pub options: IndexMap<String, JsonValue>,
+    ///
+    /// Entries merge by key, so an option set in a later layer joins the ones
+    /// an earlier layer set.
+    /// Declare the map as `{ value = { … }, strategy = "replace" }` to drop
+    /// them instead.
+    #[setting(nested, merge = map_with_strategy)]
+    pub options: MergeableMap<JsonValue>,
 
     /// Resource access grants for the tool.
     ///
@@ -640,7 +645,7 @@ impl PartialConfigDelta for PartialToolConfig {
             ),
             style: delta_opt_partial(self.style.as_ref(), next.style),
             questions: delta_mergeable_map(&self.questions, next.questions),
-            options: delta_value_map(&self.options, next.options),
+            options: delta_mergeable_value_map(&self.options, next.options),
             access: delta_opt_partial(self.access.as_ref(), next.access),
         }
     }
@@ -680,12 +685,7 @@ impl PartialConfigDelta for PartialToolConfig {
                 unsets,
             ),
             questions: delta_mergeable_map(&self.questions, next.questions),
-            options: delta_value_map_with_unsets(
-                &path(prefix, "options"),
-                &self.options,
-                next.options,
-                unsets,
-            ),
+            options: delta_mergeable_value_map(&self.options, next.options),
             access: delta_opt_partial_at(
                 &path(prefix, "access"),
                 self.access.as_ref(),
@@ -719,11 +719,12 @@ impl ToPartial for ToolConfig {
             ),
             style: partial_opt_config(self.style.as_ref(), defaults.style),
             questions: map_to_partial_per_key(self.questions.iter()),
-            options: self
-                .options
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect(),
+            options: MergeableMap::Map(
+                self.options
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect(),
+            ),
             access: partial_opt_config(self.access.as_ref(), defaults.access),
         }
     }
@@ -1301,7 +1302,7 @@ impl ToolConfigWithDefaults {
 
     /// Return the per-tool options map.
     #[must_use]
-    pub const fn options(&self) -> &IndexMap<String, JsonValue> {
+    pub fn options(&self) -> &IndexMap<String, JsonValue> {
         &self.tool.options
     }
 
