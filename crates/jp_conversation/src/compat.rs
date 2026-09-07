@@ -325,7 +325,54 @@ fn sole_matching_variant<'a>(union_type: &'a UnionType, value: &Value) -> Option
     let variants = || union_type.variants_types.iter().map(Box::as_ref);
 
     sole(variants().filter(|variant| !variant.is_null()))
+        .or_else(|| strategy_carrying_variant(union_type, value))
         .or_else(|| sole(variants().filter(|variant| accepts(&variant.ty, value))))
+}
+
+/// The variant of a collection that can state its own merge strategy.
+///
+/// A `MergeableMap` is the plain map beside a wrapper struct holding it under
+/// `value` next to the strategy.
+/// Both are objects on the wire, so shape alone leaves the union ambiguous, and
+/// every key inside a tool, server, alias or plugin would go unwalked: a stale
+/// one would then survive to fail typed deserialization, which discards the
+/// whole stored config rather than the key.
+///
+/// Told apart the way the wrapper's own deserializer does it: an object
+/// carrying both `value` and `strategy` is the wrapper, anything else is the
+/// map.
+/// An entry named `value` needs the sibling `strategy` before it reads as the
+/// wrapper, which is what keeps a tool called `value` addressable.
+fn strategy_carrying_variant<'a>(union_type: &'a UnionType, value: &Value) -> Option<&'a Schema> {
+    let mut variants = union_type
+        .variants_types
+        .iter()
+        .map(Box::as_ref)
+        .filter(|variant| !variant.is_null());
+
+    let (first, second) = (variants.next()?, variants.next()?);
+    if variants.next().is_some() {
+        return None;
+    }
+
+    let is_wrapper = |schema: &Schema| {
+        matches!(&schema.ty, SchemaType::Struct(wrapper)
+            if wrapper.fields.contains_key("value") && wrapper.fields.contains_key("strategy"))
+    };
+
+    let (wrapper, collection) = if is_wrapper(first) {
+        (first, second)
+    } else if is_wrapper(second) {
+        (second, first)
+    } else {
+        return None;
+    };
+
+    let stated = value
+        .as_object()
+        .is_some_and(|obj| obj.contains_key("value") && obj.contains_key("strategy"));
+
+    Some(if stated { wrapper } else { collection })
 }
 
 /// The only item an iterator yields, if it yields exactly one.

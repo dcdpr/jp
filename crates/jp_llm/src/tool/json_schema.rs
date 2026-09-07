@@ -745,7 +745,7 @@ fn apply_config_fields(
             .cloned()
             .unwrap_or_default();
 
-        for (name, property) in &config.properties {
+        for (name, property) in config.properties.iter() {
             let path = format!("{path}.properties.{name}");
             let merged = match properties.get(name) {
                 Some(source) => node_with_override(&path, source, root, property)?,
