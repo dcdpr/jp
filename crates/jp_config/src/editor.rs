@@ -11,12 +11,16 @@ use crate::types::command::shell_command_line;
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::{
-        PartialConfigDelta, delta_opt, delta_opt_partial, delta_opt_partial_at, delta_opt_vec,
-        delta_opt_vec_at, path,
+        PartialConfigDelta, delta_opt, delta_opt_mergeable_vec, delta_opt_partial,
+        delta_opt_partial_at, path,
     },
     fill::FillDefaults,
+    internal::merge::vec_with_strategy,
     partial::{ToPartial, partial_opt, partial_opt_config},
-    types::command::{CommandConfigOrString, PartialCommandConfigOrString},
+    types::{
+        command::{CommandConfigOrString, PartialCommandConfigOrString},
+        vec::MergeableVec,
+    },
 };
 
 /// Editor configuration.
@@ -62,8 +66,13 @@ pub struct EditorConfig {
     /// Values with unbalanced quoting are skipped (the next env var in the list
     /// is tried).
     #[setting(
-        default = vec!["JP_EDITOR".into(), "VISUAL".into(), "EDITOR".into()],
-        merge = schematic::merge::append_vec,
+        default = MergeableVec::from(vec![
+            "JP_EDITOR".to_owned(),
+            "VISUAL".to_owned(),
+            "EDITOR".to_owned(),
+        ]),
+        partial_via = MergeableVec::<String>,
+        merge = vec_with_strategy,
     )]
     pub envs: Vec<String>,
 
@@ -110,7 +119,7 @@ impl AssignKeyValue for PartialEditorConfig {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
             _ if kv.p("cmd") => self.cmd.assign(kv)?,
-            _ if kv.p("envs") => kv.try_some_vec_of_strings(&mut self.envs)?,
+            _ if kv.p("envs") => kv.try_some_mergeable_strings(&mut self.envs)?,
             _ if kv.p("inline") => self.inline.assign(kv)?,
             _ => return missing_key(&kv),
         }
@@ -123,7 +132,7 @@ impl PartialConfigDelta for PartialEditorConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
             cmd: delta_opt_partial(self.cmd.as_ref(), next.cmd),
-            envs: delta_opt_vec(self.envs.as_ref(), next.envs),
+            envs: delta_opt_mergeable_vec(self.envs.as_ref(), next.envs),
             inline: self.inline.delta(next.inline),
         }
     }
@@ -131,7 +140,7 @@ impl PartialConfigDelta for PartialEditorConfig {
     fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
         Self {
             cmd: delta_opt_partial_at(&path(prefix, "cmd"), self.cmd.as_ref(), next.cmd, unsets),
-            envs: delta_opt_vec_at(&path(prefix, "envs"), self.envs.as_ref(), next.envs, unsets),
+            envs: delta_opt_mergeable_vec(self.envs.as_ref(), next.envs),
             inline: self.inline.delta(next.inline),
         }
     }
@@ -153,7 +162,7 @@ impl ToPartial for EditorConfig {
 
         Self::Partial {
             cmd: partial_opt_config(self.cmd.as_ref(), defaults.cmd),
-            envs: partial_opt(&self.envs, defaults.envs),
+            envs: partial_opt(&MergeableVec::from(self.envs.clone()), defaults.envs),
             inline: self.inline.to_partial(),
         }
     }
