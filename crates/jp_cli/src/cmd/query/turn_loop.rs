@@ -176,12 +176,6 @@ pub(super) async fn run_turn_loop(
     signals: &SignalRouter,
     mcp_client: &jp_mcp::Client,
     root: &Utf8Path,
-    // Stdout's tty-ness, which nothing in this path reads any more: the chrome
-    // that used to gate on it now asks the printer whether its own channel can
-    // carry a status region, and prompts gate on `interactive`. Kept because
-    // RFD 104 is deciding which terminal signal belongs here, and it is not
-    // this one.
-    _is_tty: bool,
     interactive: bool,
     attachments: &[Attachment],
     lock: &ConversationLock,

@@ -313,7 +313,6 @@ async fn run_mock_turn(
         &router,
         &mcp_client,
         root,
-        false,
         false, // interactive
         &[],
         lock,

@@ -380,7 +380,6 @@ async fn test_interrupt_stop_during_streaming_persists_content() {
             &router,
             &mcp_client,
             root,
-            false, // is_tty
             false, // interactive
             &[],   // attachments
             &lock,
@@ -483,7 +482,6 @@ async fn test_streaming_interrupt_menu_cancel_escalates() {
             &router,
             &mcp_client,
             root,
-            false, // is_tty
             false, // interactive
             &[],   // attachments
             &lock,
@@ -567,7 +565,6 @@ async fn test_normal_completion_persists_content() {
         &router,
         &mcp_client,
         root,
-        false,
         false, // interactive
         &[],
         &lock,
@@ -653,7 +650,6 @@ async fn premature_stream_end_without_finished_returns_error() {
             &router,
             &mcp_client,
             root,
-            false,
             false, // interactive
             &[],
             &lock,
@@ -717,7 +713,6 @@ async fn premature_stream_end_exhausts_retry_budget() {
             &router,
             &mcp_client,
             root,
-            false,
             false, // interactive
             &[],
             &lock,
@@ -797,7 +792,6 @@ async fn output_ceiling_ends_turn_without_re_requesting() {
             &router,
             &mcp_client,
             root,
-            false,
             false, // interactive
             &[],
             &lock,
@@ -902,7 +896,6 @@ async fn orphan_tool_call_is_sanitized_before_provider_request() {
         &router,
         &mcp_client,
         root,
-        false,
         false, // interactive
         &[],
         &lock,
@@ -987,7 +980,6 @@ async fn test_tool_call_cycle_completes_with_followup() {
         &router,
         &mcp_client,
         root,
-        false,
         false, // interactive
         &[],
         &lock,
@@ -1285,7 +1277,6 @@ async fn test_tool_interrupt_menu_cancel_escalates() {
             &router,
             &mcp_client,
             root,
-            false,
             false, // interactive
             &[],
             &lock,
@@ -1434,7 +1425,6 @@ async fn test_tool_stop_on_interrupt_commits_responses_without_follow_up() {
             &router,
             &mcp_client,
             root,
-            false,
             false, // interactive
             &[],
             &lock,
@@ -1578,7 +1568,6 @@ async fn test_interrupt_during_tool_prompt_completes_turn_early() {
             &router,
             &mcp_client,
             root,
-            true, // is_tty
             true, // interactive: user-targeted question prompts need a user
             &[],
             &lock,
@@ -1690,7 +1679,6 @@ async fn test_multiple_tool_calls_in_sequence() {
         &router,
         &mcp_client,
         root,
-        false,
         false, // interactive
         &[],
         &lock,
@@ -1781,7 +1769,6 @@ async fn test_empty_tool_response_continues_cycle() {
         &router,
         &mcp_client,
         root,
-        false,
         false, // interactive
         &[],
         &lock,
@@ -1927,7 +1914,6 @@ async fn test_tool_restart_on_interrupt() {
             &router,
             &mcp_client,
             root,
-            false,
             false, // interactive
             &[],
             &lock,
@@ -2049,7 +2035,6 @@ async fn test_merged_stream_exits_after_tool_response() {
             &router,
             &mcp_client,
             root,
-            false,
             false, // interactive
             &[],
             &lock,
@@ -2177,7 +2162,6 @@ async fn test_tool_call_with_run_mode_ask_approves() {
             &router,
             &mcp_client,
             root,
-            true, // is_tty
             true, // interactive = true to enable prompts
             &[],
             &lock,
@@ -2320,7 +2304,6 @@ async fn test_tool_call_with_run_mode_ask_skips() {
             &router,
             &mcp_client,
             root,
-            true,
             true, // interactive
             &[],
             &lock,
@@ -2474,8 +2457,7 @@ async fn test_permission_prompt_follows_interactive_not_is_tty() {
             &router,
             &mcp_client,
             root,
-            false, // is_tty: stdout is redirected
-            true,  // interactive: the user is still at the terminal
+            true, // interactive: the user is still at the terminal
             &[],
             &lock,
             ToolChoice::Auto,
@@ -2598,7 +2580,6 @@ async fn test_tool_call_with_run_mode_unattended() {
             &router,
             &mcp_client,
             root,
-            true, // is_tty
             true, // interactive doesn't matter for Unattended
             &[],
             &lock,
@@ -2746,7 +2727,6 @@ async fn test_tool_call_with_run_mode_skip() {
             &router,
             &mcp_client,
             root,
-            true,
             true, // interactive
             &[],
             &lock,
@@ -2950,7 +2930,6 @@ async fn test_multiple_tools_with_different_run_modes() {
             &router,
             &mcp_client,
             root,
-            true,
             true, // interactive
             &[],
             &lock,
@@ -3099,7 +3078,6 @@ async fn test_tool_call_returns_error() {
             &router,
             &mcp_client,
             root,
-            true,
             true, // interactive
             &[],
             &lock,
@@ -3335,7 +3313,6 @@ async fn test_waiting_indicator_shows_during_delay() {
             &router,
             &mcp_client,
             root,
-            true,  // is_tty = true to enable the indicator
             false, // interactive
             &[],
             &lock,
@@ -3436,7 +3413,6 @@ async fn test_waiting_indicator_survives_keep_alive_and_shows_status() {
             &router,
             &mcp_client,
             root,
-            true, // is_tty = true to enable the indicator
             true, // interactive
             &[],
             &lock,
@@ -3551,7 +3527,6 @@ async fn test_waiting_indicator_cleared_before_retry_notice() {
             &router,
             &mcp_client,
             root,
-            true, // is_tty
             true, // interactive
             &[],
             &lock,
@@ -3639,7 +3614,6 @@ async fn test_waiting_indicator_not_shown_when_disabled() {
             &router,
             &mcp_client,
             root,
-            true, // is_tty
             true, // interactive
             &[],
             &lock,
@@ -3719,8 +3693,7 @@ async fn test_waiting_indicator_not_shown_for_non_tty() {
             &router,
             &mcp_client,
             root,
-            false, // is_tty = false
-            true,  // interactive
+            true, // interactive
             &[],
             &lock,
             ToolChoice::Auto,
@@ -3800,7 +3773,6 @@ async fn test_waiting_indicator_follows_stderr_not_stdout() {
             &router,
             &mcp_client,
             root,
-            true, // is_tty: stdout *is* a terminal
             true, // interactive
             &[],
             &lock,
@@ -3986,7 +3958,6 @@ async fn test_multi_part_tool_call_shows_preparing_spinner() {
             &router,
             &mcp_client,
             root,
-            true, // is_tty = true to enable the indicator
             true, // interactive
             &[],
             &lock,
@@ -4074,7 +4045,6 @@ async fn test_turn_start_event_is_emitted() {
         &router,
         &mcp_client,
         root,
-        false,
         false, // interactive
         &[],
         &lock,
@@ -4138,7 +4108,6 @@ async fn test_turn_start_index_increments_across_turns() {
         &router,
         &mcp_client,
         root,
-        false,
         false, // interactive
         &[],
         &lock,
@@ -4174,7 +4143,6 @@ async fn test_turn_start_index_increments_across_turns() {
         &router,
         &mcp_client,
         root,
-        false,
         false, // interactive
         &[],
         &lock,
@@ -4270,8 +4238,6 @@ async fn test_markdown_flushed_before_tool_header() {
             &router,
             &mcp_client,
             root,
-            // The streaming "Calling tool" indicator is a TTY affordance.
-            true,
             true, // interactive
             &[],
             &lock,
@@ -4456,7 +4422,6 @@ async fn test_parallel_tool_calls_rendered_atomically() {
             &router,
             &mcp_client,
             root,
-            false, // is_tty = false (no timer, keeps output deterministic)
             false, // interactive
             &[],
             &lock,
@@ -4616,7 +4581,6 @@ async fn test_single_tool_call_rendered_with_args() {
             &router,
             &mcp_client,
             root,
-            false,
             false, // interactive
             &[],
             &lock,
@@ -5024,7 +4988,6 @@ async fn test_tool_with_single_inquiry() {
             &router,
             &mcp_client,
             root,
-            false,
             false, // interactive
             &[],
             &lock,
@@ -5153,7 +5116,6 @@ async fn test_secret_question_without_tty_fails_tool() {
             &router,
             &mcp_client,
             root,
-            false,
             false, // interactive
             &[],
             &lock,
@@ -5263,7 +5225,6 @@ async fn test_secret_question_with_assistant_target_fails_tool() {
             &router,
             &mcp_client,
             root,
-            false,
             false, // interactive
             &[],
             &lock,
@@ -5366,7 +5327,6 @@ async fn test_secret_prompter_answer_is_redacted() {
             &router,
             &mcp_client,
             root,
-            true,
             true, // interactive
             &[],
             &lock,
@@ -5473,7 +5433,6 @@ async fn test_secret_static_answer_is_redacted() {
             &router,
             &mcp_client,
             root,
-            false,
             false, // interactive
             &[],
             &lock,
@@ -5581,7 +5540,6 @@ async fn test_static_answer_records_answered_inquiry() {
             &router,
             &mcp_client,
             root,
-            false,
             false, // interactive
             &[],
             &lock,
@@ -5697,7 +5655,6 @@ async fn test_remembered_answer_cache_hit_records_new_inquiry_pair() {
             &router,
             &mcp_client,
             root,
-            true,
             true, // interactive
             &[],
             &lock,
@@ -5820,7 +5777,6 @@ async fn test_tool_with_multiple_inquiries() {
             &router,
             &mcp_client,
             root,
-            false,
             false, // interactive
             &[],
             &lock,
@@ -5973,7 +5929,6 @@ async fn test_parallel_tools_one_with_inquiry() {
             &router,
             &mcp_client,
             root,
-            false,
             false, // interactive
             &[],
             &lock,
@@ -6112,7 +6067,6 @@ async fn test_parallel_tools_both_with_inquiries() {
             &router,
             &mcp_client,
             root,
-            false,
             false, // interactive
             &[],
             &lock,
@@ -6263,7 +6217,6 @@ async fn test_retry_counter_resets_on_successful_event() {
             &router,
             &mcp_client,
             root,
-            false,
             false, // interactive
             &[],
             &lock,
@@ -6403,7 +6356,6 @@ async fn test_unavailable_tool_before_approved_does_not_panic() {
             &router,
             &mcp_client,
             root,
-            false,
             false, // interactive
             &[],
             &lock,
@@ -6514,7 +6466,6 @@ async fn test_inquiry_failure_marks_tool_as_error() {
             &router,
             &mcp_client,
             root,
-            false,
             false, // interactive
             &[],
             &lock,
@@ -6709,7 +6660,6 @@ async fn test_live_header_uses_configured_model_id_not_provider_returned() {
             &router,
             &mcp_client,
             root,
-            false,
             false, // interactive
             &[],
             &lock,
@@ -6825,7 +6775,6 @@ async fn reasoning_before_a_tool_call_shades_the_tool_chrome() {
         &router,
         &mcp_client,
         root,
-        false,
         false, // interactive
         &[],
         &lock,
@@ -6954,7 +6903,6 @@ async fn test_rebuild_cap_stops_a_provider_that_keeps_requesting_rebuilds() {
         &router,
         &mcp_client,
         root,
-        false,
         false, // interactive
         &[],
         &lock,
@@ -7046,7 +6994,6 @@ async fn test_refused_rebuild_clears_the_retry_line() {
             &router,
             &mcp_client,
             root,
-            true, // is_tty
             true, // interactive
             &[],
             &lock,
@@ -7131,7 +7078,6 @@ async fn test_refused_rebuild_persists_streamed_content() {
         &router,
         &mcp_client,
         root,
-        false,
         false, // interactive
         &[],
         &lock,
