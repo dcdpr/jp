@@ -10,12 +10,13 @@ use crate::{
     BoxedError,
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::{
-        PartialConfigDelta, delta_opt, delta_opt_at, delta_opt_partial, delta_opt_partial_at,
-        delta_opt_vec, delta_opt_vec_at, path,
+        PartialConfigDelta, delta_opt, delta_opt_at, delta_opt_mergeable_vec, delta_opt_partial,
+        delta_opt_partial_at, path,
     },
     fill::{FillDefaults, fill_opt},
+    internal::merge::vec_with_strategy,
     partial::{ToPartial, partial_opt, partial_opt_config, partial_opts},
-    types::json_value::JsonValue,
+    types::{json_value::JsonValue, vec::MergeableVec},
 };
 
 /// Assistant-specific configuration.
@@ -83,7 +84,11 @@ pub struct ParametersConfig {
     /// The `stop_words` parameter can be set to specific sequences, such as a
     /// period or specific word, to stop the model from generating text when it
     /// encounters these sequences.
-    #[setting(default, merge = schematic::merge::append_vec)]
+    #[setting(
+        default,
+        partial_via = MergeableVec::<String>,
+        merge = vec_with_strategy,
+    )]
     pub stop_words: Vec<String>,
 
     /// Other non-typed parameters that some models might support.
@@ -183,7 +188,7 @@ impl AssignKeyValue for PartialParametersConfig {
             "temperature" => self.temperature = kv.try_some_f32()?,
             "top_p" => self.top_p = kv.try_some_f32()?,
             "top_k" => self.top_k = kv.try_some_u32()?,
-            _ if kv.p("stop_words") => kv.try_some_vec_of_strings(&mut self.stop_words)?,
+            _ if kv.p("stop_words") => kv.try_some_mergeable_strings(&mut self.stop_words)?,
             _ if kv.p("reasoning") => self.reasoning.assign(kv)?,
             _ => kv.assign_to_entry(self.other.get_or_insert_default())?,
         }
@@ -200,7 +205,7 @@ impl PartialConfigDelta for PartialParametersConfig {
             temperature: delta_opt(self.temperature.as_ref(), next.temperature),
             top_p: delta_opt(self.top_p.as_ref(), next.top_p),
             top_k: delta_opt(self.top_k.as_ref(), next.top_k),
-            stop_words: delta_opt_vec(self.stop_words.as_ref(), next.stop_words),
+            stop_words: delta_opt_mergeable_vec(self.stop_words.as_ref(), next.stop_words),
             other: delta_opt(self.other.as_ref(), next.other),
         }
     }
@@ -237,12 +242,7 @@ impl PartialConfigDelta for PartialParametersConfig {
                 next.top_k,
                 unsets,
             ),
-            stop_words: delta_opt_vec_at(
-                &path(prefix, "stop_words"),
-                self.stop_words.as_ref(),
-                next.stop_words,
-                unsets,
-            ),
+            stop_words: delta_opt_mergeable_vec(self.stop_words.as_ref(), next.stop_words),
             other: delta_opt_at(
                 &path(prefix, "other"),
                 self.other.as_ref(),
@@ -275,7 +275,7 @@ impl ToPartial for ParametersConfig {
             temperature: partial_opts(self.temperature.as_ref(), None),
             top_p: partial_opts(self.top_p.as_ref(), None),
             top_k: partial_opts(self.top_k.as_ref(), None),
-            stop_words: partial_opt(&self.stop_words, None),
+            stop_words: partial_opt(&MergeableVec::from(self.stop_words.clone()), None),
             other: partial_opt(&self.other, None),
         }
     }
