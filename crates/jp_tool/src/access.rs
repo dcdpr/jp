@@ -79,6 +79,17 @@ impl Capability {
             Self::Execute => "execute",
         }
     }
+
+    /// Whether the capability changes the filesystem.
+    ///
+    /// Exercised on a directory, a mutating capability reaches every path
+    /// beneath it: renaming or removing a directory takes its contents along.
+    /// `Read` lists the named directory and `Execute` runs the named file, so
+    /// neither reaches past the entry.
+    #[must_use]
+    pub const fn mutates(self) -> bool {
+        matches!(self, Self::Create | Self::Update | Self::Delete)
+    }
 }
 
 impl AccessPolicy {
@@ -121,6 +132,50 @@ impl AccessPolicy {
                 Capability::Execute => rule.execute(),
             },
             None => false,
+        }
+    }
+
+    /// Whether the policy permits `capability` on a workspace-relative path and
+    /// on every path beneath it.
+    ///
+    /// A deeper rule that denies the capability refuses the whole request: an
+    /// operation reaching a subtree cannot be granted by a rule that only
+    /// covers the subtree's root.
+    ///
+    /// Each deeper rule is re-evaluated through [`permits`] at its own path, so
+    /// a rule another layer has overridden does not deny on its own.
+    ///
+    /// [`permits`]: AccessPolicy::permits
+    #[must_use]
+    pub fn permits_subtree(&self, capability: Capability, relative: &Utf8Path) -> bool {
+        if !self.permits(capability, relative) {
+            return false;
+        }
+
+        !self.fs.iter().any(|rule| {
+            is_strict_descendant(rule.lexical_path(), relative)
+                && !self.permits(capability, rule.lexical_path())
+        })
+    }
+
+    /// Whether the policy permits `capability` on a target, accounting for how
+    /// far the operation reaches.
+    ///
+    /// `is_dir` states whether the target is a directory.
+    /// A mutating capability on a directory is answered for the whole subtree;
+    /// every other combination is answered for the named path alone.
+    ///
+    /// This is the decision both the cooperative [`Context`] checks and the
+    /// in-tree `fs_*` tools go through, so the two cannot disagree about what
+    /// an operation reaches.
+    ///
+    /// [`Context`]: crate::Context
+    #[must_use]
+    pub fn permits_entry(&self, capability: Capability, relative: &Utf8Path, is_dir: bool) -> bool {
+        if is_dir && capability.mutates() {
+            self.permits_subtree(capability, relative)
+        } else {
+            self.permits(capability, relative)
         }
     }
 
@@ -556,13 +611,17 @@ impl crate::Context {
         }
 
         // Grant decision via the single matcher shared with the in-tree fs
-        // tools (`AccessPolicy::permits`), so the rule-matching and capability
-        // logic can't drift between the two call sites. An absent (or
-        // unrestricted) policy permits everything.
+        // tools (`AccessPolicy::permits_entry`), so the rule-matching and
+        // capability logic can't drift between the two call sites. An absent
+        // (or unrestricted) policy permits everything.
+        //
+        // A path that does not exist yet is not a directory, so a fresh target
+        // is asked about as the single entry it is.
+        let is_dir = canonical.is_dir();
         let granted = self
             .access
             .as_ref()
-            .is_none_or(|policy| policy.permits(capability, &match_key));
+            .is_none_or(|policy| policy.permits_entry(capability, &match_key, is_dir));
         if granted {
             Ok(canonical)
         } else {
@@ -700,6 +759,15 @@ fn find_matching_rule<'a>(rules: &'a [FsRule], target: &Utf8Path) -> Option<&'a 
         }
     }
     best.map(|(_, index)| &rules[index])
+}
+
+/// Whether `candidate` lies strictly below `ancestor`.
+///
+/// A path is not its own descendant, so a rule sitting exactly on the target
+/// answers through the ordinary longest-prefix match instead.
+fn is_strict_descendant(candidate: &Utf8Path, ancestor: &Utf8Path) -> bool {
+    path_segments(candidate).len() > path_segments(ancestor).len()
+        && prefix_specificity(ancestor, candidate).is_some()
 }
 
 /// If `rule_path` is a component-wise prefix of `target`, return its component
@@ -925,6 +993,98 @@ mod tests {
         let policy = env_policy(&[("CI", true), ("CI", false)]);
 
         assert!(!policy.matching_env_rule("CI").unwrap().read);
+    }
+
+    fn subtree_policy() -> AccessPolicy {
+        AccessPolicy {
+            fs: vec![
+                FsRule::new("").with_read(true).with_write(true),
+                FsRule::new("docs/ticket").with_read(true).with_write(false),
+            ],
+            ..AccessPolicy::default()
+        }
+    }
+
+    /// The whole point: a grant on a directory cannot cover a subtree one of
+    /// its own rules closes, or moving the parent walks straight past the deny.
+    #[test]
+    fn a_subtree_grant_is_refused_by_a_deeper_deny() {
+        let policy = subtree_policy();
+
+        assert!(policy.permits(Capability::Delete, Utf8Path::new("docs")));
+        assert!(!policy.permits_subtree(Capability::Delete, Utf8Path::new("docs")));
+
+        // The sibling subtree is untouched by the deny.
+        assert!(policy.permits_subtree(Capability::Delete, Utf8Path::new("docs/rfd")));
+    }
+
+    /// A deny only speaks for the capability it denies.
+    #[test]
+    fn a_deeper_deny_leaves_other_capabilities_alone() {
+        let policy = subtree_policy();
+
+        assert!(policy.permits_subtree(Capability::Read, Utf8Path::new("docs")));
+        assert!(!policy.permits_subtree(Capability::Create, Utf8Path::new("docs")));
+    }
+
+    /// The rule on the target itself is not a descendant of it, so it decides
+    /// through the ordinary longest-prefix match rather than as a subtree deny.
+    #[test]
+    fn the_rule_on_the_target_itself_is_not_a_subtree_deny() {
+        let policy = AccessPolicy {
+            fs: vec![
+                FsRule::new("").with_write(false),
+                FsRule::new("build").with_write(true),
+            ],
+            ..AccessPolicy::default()
+        };
+
+        assert!(policy.permits_subtree(Capability::Delete, Utf8Path::new("build")));
+    }
+
+    /// An append-merged layer that restores a grant leaves nothing to deny: the
+    /// deeper path is re-evaluated, not read rule by rule.
+    #[test]
+    fn a_deeper_deny_a_later_layer_overrides_does_not_refuse() {
+        let policy = AccessPolicy {
+            fs: vec![
+                FsRule::new("").with_write(true),
+                FsRule::new("docs/ticket").with_write(false),
+                FsRule::new("docs/ticket").with_write(true),
+            ],
+            ..AccessPolicy::default()
+        };
+
+        assert!(policy.permits_subtree(Capability::Delete, Utf8Path::new("docs")));
+    }
+
+    /// An unrestricted policy answers every question with yes, subtree or not.
+    #[test]
+    fn an_unrestricted_policy_permits_a_subtree() {
+        let policy = AccessPolicy::default();
+
+        assert!(policy.permits_subtree(Capability::Delete, Utf8Path::new("docs")));
+    }
+
+    /// Only a mutating capability on a directory asks the subtree question.
+    /// A file target has no subtree, and a listing does not reach into one.
+    #[test]
+    fn permits_entry_asks_the_subtree_question_only_for_a_directory_write() {
+        let policy = subtree_policy();
+        let docs = Utf8Path::new("docs");
+
+        assert!(!policy.permits_entry(Capability::Delete, docs, true));
+        assert!(policy.permits_entry(Capability::Delete, docs, false));
+        assert!(policy.permits_entry(Capability::Read, docs, true));
+    }
+
+    #[test]
+    fn only_create_update_and_delete_mutate() {
+        assert!(Capability::Create.mutates());
+        assert!(Capability::Update.mutates());
+        assert!(Capability::Delete.mutates());
+        assert!(!Capability::Read.mutates());
+        assert!(!Capability::Execute.mutates());
     }
 
     #[test]

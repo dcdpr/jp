@@ -112,8 +112,7 @@ fn fs_modify_file_impl<R: ProcessRunner>(
                 Ok(r) => r,
                 Err(msg) => return error(msg),
             };
-            if let Err(msg) = authorize(ctx.access.as_ref(), Capability::Update, &resolved.relative)
-            {
+            if let Err(msg) = authorize(ctx.access.as_ref(), Capability::Update, &resolved) {
                 return error(msg);
             }
 

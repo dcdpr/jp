@@ -128,7 +128,7 @@ pub fn resolve_root(
     // tools have always run, so demanding grants for it here would revoke
     // access this option never handed out.
     for capability in capabilities {
-        authorize(access, *capability, &resolved.relative)?;
+        authorize(access, *capability, &resolved)?;
     }
 
     Ok(resolved.absolute)

@@ -319,6 +319,12 @@ expansion.
 | `fs_move_file`   | `delete` on source; `create` (new) or `update` |
 |                  | (existing) on target                           |
 
+A directory target widens these checks to the whole subtree, and the parent
+directory that `fs_delete_file` and `fs_move_file` clean up is checked on its
+own.
+Both are covered by [Operations that reach a
+subtree](#operations-that-reach-a-subtree).
+
 #### Evaluation: longest prefix match
 
 When multiple rules match a target path, the most specific rule wins.
@@ -355,6 +361,66 @@ Rules are self-contained — each rule is readable in isolation.
 The cost is some repetition (Rule B must re-state `read = true`), but this
 avoids subtle bugs from implicit inheritance where a less specific rule silently
 grants capabilities that a more specific rule intended to restrict.
+
+#### Operations that reach a subtree
+
+Longest-prefix match answers a question about one path.
+Some operations act on more than the path they name: renaming or removing a
+directory takes everything beneath it, so a grant on the directory alone would
+step straight past a deeper rule that closes part of the tree.
+
+For those, evaluation asks the same question of the subtree.
+The capability is permitted only when the winning rule at the target grants it
+**and** no rule below the target denies it.
+Each deeper rule is re-evaluated at its own path rather than read on its own, so
+a rule a later config layer has overridden does not deny.
+
+```toml
+[[access.fs]]
+path = "."
+read = true
+write = true
+
+[[access.fs]]
+path = "docs/ticket"
+read = true
+write = false
+```
+
+- `docs/notes.md` → `delete` granted: the root rule wins, and nothing below the
+  target denies.
+- `docs/ticket/T-02wt0kx-fix-the-header.md` → `delete` denied: the
+  `docs/ticket` rule wins.
+- `docs`, as a directory → `delete` denied: the root rule grants it, but
+  `docs/ticket` denies below the target and removing `docs` would take that tree
+  with it.
+
+The subtree question applies to `create`, `update`, and `delete` on a directory
+target.
+`read` on a directory lists that directory and discloses nothing beneath it, and
+`execute` names one file, so both stay single-path questions.
+A target that does not exist yet is not a directory, and is asked about as the
+single entry it is.
+
+Two consequences for tools:
+
+- **A move's destination is shaped by its source.** Moving a directory onto a
+  path that does not exist yet lands every path under the source below the
+  destination.
+  The destination is therefore a subtree question whenever the source is a
+  directory, whatever sits at the destination.
+- **A path the call never named still needs a grant.** `fs_delete_file` and
+  `fs_move_file` remove the source's parent directory when the operation leaves
+  it empty.
+  That is a second deletion, of a directory the caller did not mention, and a
+  policy may grant `delete` on the files in a tree while refusing the tree
+  itself.
+  Without a grant the directory stays and the call still reports the deletion it
+  was asked for.
+
+The distinction is between what a rule *says* and what an operation *reaches*.
+Rules stay non-inheriting and readable in isolation; the reach of the operation
+decides how many of them are consulted.
 
 #### Rule path canonicalization
 
@@ -394,7 +460,9 @@ For any target path `input`, an implementation must:
    The missing components are not resolved — they cannot contain symlinks that
    haven't been created yet.
 4. Strip the `ctx.root` prefix to produce the workspace-relative canonical form.
-5. Evaluate against `AccessPolicy` using longest-prefix match on that form.
+5. Evaluate against `AccessPolicy` using longest-prefix match on that form,
+   extended to the subtree for an operation that reaches one (see [Operations
+   that reach a subtree](#operations-that-reach-a-subtree)).
 
 The `action` field on `Context` (`Run` vs `FormatArguments`) does not gate these
 checks at the host layer.
@@ -410,7 +478,9 @@ This canonical form is the **authoritative shape** of a filesystem rule.
 rulesets) against resolved absolute paths — the same paths step 3 produces
 before stripping the workspace prefix.
 The cooperative layer (this RFD) and the OS layer see the same rule mean the
-same thing.
+same thing, which includes the subtree reach: a sandbox that grants a directory
+whose subtree carries a deny would permit through the kernel exactly what the
+cooperative check refuses.
 
 JP's in-tree Rust tools link against the `jp_tool` crate, which provides
 `Context::check_read` and friends (see [Runtime types](#runtime-types)) as a
@@ -656,11 +726,19 @@ pub enum FsAccessError {
 impl AccessPolicy {
     /// Evaluate a capability on a canonicalized, workspace-relative path.
     /// Callers must canonicalize first; see `Context::check_*`.
-    pub fn can_read(&self, canonical: &Utf8Path) -> bool { /* ... */ }
-    pub fn can_create(&self, canonical: &Utf8Path) -> bool { /* ... */ }
-    pub fn can_update(&self, canonical: &Utf8Path) -> bool { /* ... */ }
-    pub fn can_delete(&self, canonical: &Utf8Path) -> bool { /* ... */ }
-    pub fn can_execute(&self, canonical: &Utf8Path) -> bool { /* ... */ }
+    pub fn permits(&self, capability: Capability, canonical: &Utf8Path) -> bool { /* ... */ }
+
+    /// The same question asked of the path and everything beneath it.
+    pub fn permits_subtree(&self, capability: Capability, canonical: &Utf8Path) -> bool { /* ... */ }
+
+    /// The decision every consumer goes through: a mutating capability on a
+    /// directory is answered for the subtree, everything else for the path.
+    pub fn permits_entry(
+        &self,
+        capability: Capability,
+        canonical: &Utf8Path,
+        is_dir: bool,
+    ) -> bool { /* ... */ }
 }
 ```
 

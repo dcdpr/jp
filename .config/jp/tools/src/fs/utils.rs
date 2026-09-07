@@ -81,15 +81,13 @@ pub fn suppressed_note(path: &str) -> String {
     )
 }
 
-/// Enforce an access-policy capability on a resolved workspace-relative path.
+/// Enforce an access-policy capability on a resolved target.
 ///
-/// `relative` must be the resolver's output (`ResolvedPath::relative`), not the
-/// raw tool input: for in-workspace paths that form has its symlinked ancestors
-/// canonicalized, so a path reached via an in-workspace symlink is matched
-/// against the rule for its real location rather than the rule for the link
-/// name.
-/// External (approved-mount) paths keep their lexical mount-relative form,
-/// which is what external rules match on.
+/// The target arrives as the resolver produced it, so the path the policy sees
+/// has its symlinked ancestors canonicalized and the reach of the operation is
+/// read from the entry the resolver found: a mutating capability on a directory
+/// is answered for everything beneath it, since renaming or removing a
+/// directory takes its contents along.
 ///
 /// A `None` policy (or an unrestricted one) permits everything.
 /// A restricted policy permits only what a matching rule grants; on denial the
@@ -102,12 +100,37 @@ pub fn suppressed_note(path: &str) -> String {
 pub fn authorize(
     access: Option<&AccessPolicy>,
     capability: Capability,
+    target: &ResolvedPath,
+) -> Result<(), String> {
+    authorize_entry(access, capability, &target.relative, target.is_dir())
+}
+
+/// Enforce a capability on a path the caller derived rather than resolved.
+///
+/// [`authorize`] is the way in for a path that came from a tool argument, and
+/// reads `is_dir` off the resolved entry.
+/// Use this only where there is no [`ResolvedPath`] to read it from — the
+/// parent directory a delete leaves empty, or a destination whose reach the
+/// source decides — and say at the call site why the value passed is the right
+/// one.
+///
+/// `relative` must be a resolver output (`ResolvedPath::relative`) or a path
+/// derived from one, never the raw tool input: for in-workspace paths that form
+/// has its symlinked ancestors canonicalized, so a path reached via an
+/// in-workspace symlink is matched against the rule for its real location
+/// rather than the rule for the link name.
+/// External (approved-mount) paths keep their lexical mount-relative form,
+/// which is what external rules match on.
+pub fn authorize_entry(
+    access: Option<&AccessPolicy>,
+    capability: Capability,
     relative: &Utf8Path,
+    is_dir: bool,
 ) -> Result<(), String> {
     let Some(policy) = access else {
         return Ok(());
     };
-    if policy.permits(capability, relative) {
+    if policy.permits_entry(capability, relative, is_dir) {
         return Ok(());
     }
     let granting: Vec<&str> = policy
@@ -280,6 +303,26 @@ pub struct ResolvedPath {
     /// Rules match on `relative`; this exists for checks that should also honor
     /// the name the caller used.
     pub lexical: Utf8PathBuf,
+
+    /// What sits at `absolute`, or `None` when nothing does yet.
+    ///
+    /// Which resolver produced the path decides what a final-position symlink
+    /// reports: [`resolve_workspace_entry`] leaves the link intact and reports
+    /// `Symlink`, while [`resolve_workspace_path`] followed it and reports the
+    /// target's kind.
+    pub kind: Option<EntryKind>,
+}
+
+impl ResolvedPath {
+    /// Whether a directory sits at the resolved path.
+    ///
+    /// This is what decides how far a mutating operation on the path reaches,
+    /// so a symlink to a directory is not one: renaming or removing the link
+    /// leaves the directory it points at alone.
+    #[must_use]
+    pub fn is_dir(&self) -> bool {
+        self.kind == Some(EntryKind::Dir)
+    }
 }
 
 /// Resolve a user-supplied path against the workspace root, following symlinks
@@ -324,11 +367,13 @@ pub fn resolve_workspace_path(
     };
 
     let relative = workspace_relative(&absolute, &canonical_root, &cleaned);
+    let kind = stat_kind(&absolute)?;
 
     Ok(ResolvedPath {
         absolute,
         relative,
         lexical: cleaned,
+        kind,
     })
 }
 
@@ -381,12 +426,22 @@ pub fn resolve_workspace_entry(
     };
 
     let relative = workspace_relative(&absolute, &canonical_root, &cleaned);
+    let kind = stat_kind(&absolute)?;
 
     Ok(ResolvedPath {
         absolute,
         relative,
         lexical: cleaned,
+        kind,
     })
+}
+
+/// Stat a resolved path for [`ResolvedPath::kind`], reporting a failure the
+/// caller cannot act on as a message rather than swallowing it.
+///
+/// A missing entry is not a failure: half the write tools exist to create one.
+fn stat_kind(absolute: &Utf8Path) -> Result<Option<EntryKind>, String> {
+    entry_kind(absolute).map_err(|error| format!("Failed to inspect path '{absolute}': {error}"))
 }
 
 /// Output of [`validate_workspace_input`]: the cleaned form plus the

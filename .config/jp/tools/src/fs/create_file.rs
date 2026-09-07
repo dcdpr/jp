@@ -8,7 +8,7 @@ use jp_md::format::Formatter;
 use jp_tool::{Capability, Outcome, Question};
 use serde_json::{Map, Value};
 
-use super::utils::{EntryKind, authorize, entry_kind, resolve_workspace_entry};
+use super::utils::{EntryKind, authorize, resolve_workspace_entry};
 use crate::{
     Context,
     util::{ToolResult, error, fail},
@@ -41,8 +41,7 @@ pub(crate) async fn fs_create_file(
         return Ok(response.into());
     }
 
-    let absolute_path = resolved.absolute;
-    let kind = entry_kind(&absolute_path)?;
+    let kind = resolved.kind;
 
     // Writing a new file needs `create`; overwriting an existing one needs
     // `update`. (Dir/symlink/other are rejected below regardless.)
@@ -50,9 +49,11 @@ pub(crate) async fn fs_create_file(
         Some(EntryKind::File) => Capability::Update,
         _ => Capability::Create,
     };
-    if let Err(msg) = authorize(ctx.access.as_ref(), capability, &resolved.relative) {
+    if let Err(msg) = authorize(ctx.access.as_ref(), capability, &resolved) {
         return error(msg);
     }
+
+    let absolute_path = resolved.absolute;
 
     match kind {
         Some(EntryKind::Dir) => return error("Path is an existing directory."),
