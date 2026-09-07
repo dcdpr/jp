@@ -365,7 +365,11 @@ impl Field<'_> {
         let deprecated = map_option_field_quote("deprecated", extract_deprecated(&self.attrs));
         let env_var = map_option_field_quote("env_var", self.get_env_var());
 
-        let value = self.value;
+        // A `partial_via` field is written in the shape of its via type, not of
+        // the type it resolves to: `attachments` holds a `Vec<AttachmentConfig>`
+        // once resolved, but a document writes either a bare list or the merge
+        // wrapper carrying one, and the via type is what describes both.
+        let value = self.partial_via_ty.as_ref().unwrap_or(self.value);
         let mut inner_schema = if self.is_nested() {
             quote! { schema.infer_as_nested::<#value>() }
         } else {
