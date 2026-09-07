@@ -34,7 +34,7 @@
 
 use std::{fmt, str::FromStr};
 
-use schematic::Config;
+use schematic::{Config, PartialConfig as _};
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -75,6 +75,7 @@ impl fmt::Display for CommandConfigOrString {
 impl AssignKeyValue for PartialCommandConfigOrString {
     fn assign(&mut self, kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
+            "" if kv.is_json_null() => *self = Self::empty(),
             "" => *self = kv.try_object_or_from_str()?,
 
             // A key addressing the table's fields expands the shorthand first,
