@@ -417,7 +417,7 @@ pub fn log_load_diagnostics(partial: &PartialAppConfig) {
         "Configuration details."
     );
 
-    for (name, tool) in &partial.conversation.tools.tools {
+    for (name, tool) in partial.conversation.tools.tools.iter() {
         if tool.source.is_none() {
             error!(
                 tool = %name,

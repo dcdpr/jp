@@ -18,9 +18,8 @@ use crate::{
         style::{DisplayStyleConfig, PartialDisplayStyleConfig},
     },
     delta::{
-        PartialConfigDelta, delta_map, delta_map_with_unsets, delta_mergeable_map,
-        delta_mergeable_value_map, delta_opt, delta_opt_at, delta_opt_partial,
-        delta_opt_partial_at, delta_vec, path,
+        PartialConfigDelta, delta_mergeable_map, delta_mergeable_value_map, delta_opt,
+        delta_opt_at, delta_opt_partial, delta_opt_partial_at, delta_vec, path,
     },
     fill::{FillDefaults, fill_map},
     internal::merge::map_with_strategy,
@@ -29,7 +28,6 @@ use crate::{
         json_value::JsonValue,
         map::{MergeableMap, map_to_partial_per_key},
     },
-    util::merge_nested_indexmap,
     validate::Validator,
 };
 
@@ -51,8 +49,8 @@ pub struct ToolsConfig {
     /// This section configures individual tools.
     /// The key is the tool ID, and cannot contain a comma: a comma separates
     /// one tool ID from the next wherever several are named at once.
-    #[setting(nested, flatten, merge = merge_nested_indexmap)]
-    tools: IndexMap<String, ToolConfig>,
+    #[setting(nested, flatten, merge = map_with_strategy)]
+    tools: MergeableMap<ToolConfig>,
 }
 
 impl AssignKeyValue for PartialToolsConfig {
@@ -71,7 +69,7 @@ impl PartialConfigDelta for PartialToolsConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
             defaults: self.defaults.delta(next.defaults),
-            tools: delta_map(&self.tools, next.tools),
+            tools: delta_mergeable_map(&self.tools, next.tools),
         }
     }
 
@@ -80,7 +78,9 @@ impl PartialConfigDelta for PartialToolsConfig {
             defaults: self
                 .defaults
                 .delta_with_unsets(next.defaults, &path(prefix, "*"), unsets),
-            tools: delta_map_with_unsets(prefix, &self.tools, next.tools, unsets),
+            // The map states its own strategy, so a removed tool travels in
+            // the value as a `replace` and needs no path reported.
+            tools: delta_mergeable_map(&self.tools, next.tools),
         }
     }
 }
@@ -109,7 +109,8 @@ impl FillDefaults for PartialToolsConfig {
 
                 (name, tool)
             })
-            .collect();
+            .collect::<IndexMap<_, _>>()
+            .into();
 
         Self {
             defaults: tool_defaults,
@@ -144,7 +145,8 @@ impl ToPartial for ToolsConfig {
 
                 (name.clone(), tool)
             })
-            .collect();
+            .collect::<IndexMap<_, _>>()
+            .into();
 
         Self::Partial { defaults, tools }
     }
