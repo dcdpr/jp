@@ -10,7 +10,8 @@ use crate::{
     BoxedError,
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::{
-        PartialConfigDelta, delta_opt, delta_opt_partial, delta_opt_vec, delta_opt_vec_at, path,
+        PartialConfigDelta, delta_opt, delta_opt_at, delta_opt_partial, delta_opt_vec,
+        delta_opt_vec_at, path,
     },
     fill::{FillDefaults, fill_opt},
     partial::{ToPartial, partial_opt, partial_opt_config, partial_opts},
@@ -71,6 +72,10 @@ pub struct ParametersConfig {
     ///
     /// Providers serve each tier from separate capacity, so changing this value
     /// discards the prompt cache built up by earlier turns.
+    ///
+    /// Leaving this unset is not the same as setting `standard`: `standard`
+    /// names a rung and is sent as one, while unset sends no tier and leaves
+    /// the choice to the provider's own default.
     pub service_tier: Option<ServiceTier>,
 
     /// Temperature of the model.
@@ -232,7 +237,14 @@ impl PartialConfigDelta for PartialParametersConfig {
         Self {
             max_tokens: delta_opt(self.max_tokens.as_ref(), next.max_tokens),
             reasoning: delta_opt_partial(self.reasoning.as_ref(), next.reasoning),
-            service_tier: delta_opt(self.service_tier.as_ref(), next.service_tier),
+            // Clearable from the CLI (`jp q --no-tier`), so a removal has to be
+            // reportable; replacement alone would leave the old tier standing.
+            service_tier: delta_opt_at(
+                &path(prefix, "service_tier"),
+                self.service_tier.as_ref(),
+                next.service_tier,
+                unsets,
+            ),
             temperature: delta_opt(self.temperature.as_ref(), next.temperature),
             top_p: delta_opt(self.top_p.as_ref(), next.top_p),
             top_k: delta_opt(self.top_k.as_ref(), next.top_k),

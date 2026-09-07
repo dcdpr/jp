@@ -111,6 +111,61 @@ fn a_dropped_argument_reports_its_path_and_carries_the_whole_list() {
     );
 }
 
+/// A config carrying nothing but a service tier.
+fn config_with_tier(
+    tier: Option<crate::model::parameters::ServiceTier>,
+) -> crate::PartialAppConfig {
+    let mut partial = crate::PartialAppConfig::empty();
+    partial.assistant.model.parameters.service_tier = tier;
+    partial
+}
+
+/// Clearing an optional scalar reports its path.
+///
+/// A delta that merely omits the field leaves the earlier layer's tier
+/// standing, so `jp q --no-tier` would appear to do nothing on the next turn.
+#[test]
+fn a_cleared_service_tier_reports_its_path() {
+    use crate::model::parameters::ServiceTier;
+
+    let prev = config_with_tier(Some(ServiceTier::Priority));
+    let next = config_with_tier(None);
+
+    let mut unsets = Vec::new();
+    let delta = prev.delta_with_unsets(next, "", &mut unsets);
+
+    assert_eq!(unsets, ["assistant.model.parameters.service_tier"]);
+    assert_eq!(delta.assistant.model.parameters.service_tier, None);
+}
+
+/// Replacing one tier with another needs no clear: replacement reaches it.
+#[test]
+fn a_replaced_service_tier_reports_no_path() {
+    use crate::model::parameters::ServiceTier;
+
+    let prev = config_with_tier(Some(ServiceTier::Priority));
+    let next = config_with_tier(Some(ServiceTier::Flex));
+
+    let mut unsets = Vec::new();
+    let delta = prev.delta_with_unsets(next, "", &mut unsets);
+
+    assert!(unsets.is_empty());
+    assert_eq!(
+        delta.assistant.model.parameters.service_tier,
+        Some(ServiceTier::Flex)
+    );
+}
+
+/// A tier absent from both sides is not a clear.
+#[test]
+fn an_absent_service_tier_reports_no_path() {
+    let mut unsets = Vec::new();
+    let delta = config_with_tier(None).delta_with_unsets(config_with_tier(None), "", &mut unsets);
+
+    assert!(unsets.is_empty());
+    assert_eq!(delta.assistant.model.parameters.service_tier, None);
+}
+
 /// Reordering is not an extension either, so it clears too.
 #[test]
 fn a_reordered_argument_list_reports_its_path() {

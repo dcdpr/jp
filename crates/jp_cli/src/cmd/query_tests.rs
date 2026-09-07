@@ -1340,6 +1340,83 @@ fn tier_flag_is_persisted_as_config_delta() {
 }
 
 #[test]
+fn tier_and_no_tier_flags_conflict() {
+    assert!(parse_query(&["--tier", "flex", "--no-tier"]).is_err());
+}
+
+/// `--no-tier` clears a tier the conversation carries, and the clear survives
+/// into later turns.
+///
+/// It travels as an `unsets` entry rather than as an absent field: a delta that
+/// merely omits the tier leaves the earlier layer's value standing, so the
+/// clear would silently do nothing on the next turn.
+#[test]
+fn no_tier_flag_clears_a_persisted_tier() {
+    let base_config = Arc::new(config_with_model(ProviderId::Anthropic, "base-model"));
+    let conversation_id = make_id(1200);
+
+    let mut workspace = Workspace::in_memory("/tmp/test");
+    workspace.create_conversation_with_id(
+        conversation_id,
+        Conversation::default(),
+        Arc::clone(&base_config),
+    );
+
+    let handle = workspace.acquire_conversation(&conversation_id).unwrap();
+    let lock = workspace.test_lock(handle);
+
+    // Put a tier on the conversation, the way an earlier `--tier priority` did.
+    let mut seeded = PartialAppConfig::empty();
+    seeded.assistant.model.parameters.service_tier = Some(ServiceTier::Priority);
+    lock.as_mut()
+        .update_events(|events| events.add_config_delta(ApplyDelta::new(Utc::now(), seeded)));
+
+    let stored = lock.events().config().unwrap();
+    assert_eq!(
+        stored.assistant.model.parameters.service_tier,
+        Some(ServiceTier::Priority),
+        "the fixture must start with a tier to clear"
+    );
+
+    // The pipeline hands `apply_cli_config` the already-merged partial, so the
+    // field the flag clears is the one the conversation contributed.
+    let query = Query {
+        no_service_tier: true,
+        ..Default::default()
+    };
+    let partial = query
+        .apply_cli_config(None, stored.to_partial(), None)
+        .unwrap();
+    let runtime_config = build(partial).unwrap();
+
+    assert_eq!(
+        runtime_config.assistant.model.parameters.service_tier, None,
+        "--no-tier must resolve this query with no tier"
+    );
+
+    let delta = get_config_delta_from_cli(&runtime_config, &lock)
+        .unwrap()
+        .expect("clearing the tier must produce a config delta");
+
+    assert_eq!(delta.unsets, ["assistant.model.parameters.service_tier"]);
+
+    lock.as_mut()
+        .update_events(|events| events.add_config_delta(delta));
+
+    assert_eq!(
+        lock.events()
+            .config()
+            .unwrap()
+            .assistant
+            .model
+            .parameters
+            .service_tier,
+        None,
+        "the clear must still apply on the next turn, without the flag"
+    );
+}
+
+#[test]
 fn query_cfg_sourced_compaction_persists_as_config_delta() {
     // Compaction config that arrives through the config layers (e.g. `-c
     // compaction/heavy` or `--cfg conversation.compaction.rules=...`) is
