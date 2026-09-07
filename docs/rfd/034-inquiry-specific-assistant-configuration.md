@@ -34,7 +34,7 @@ reasons:
    Anthropic to inject an additional system prompt.
    From the [Anthropic docs][structured-docs]:
 
-   > Changing the output\_config.format parameter will invalidate any prompt
+   > Changing the output_config.format parameter will invalidate any prompt
    > cache for that conversation thread.
 
    Even with matching tools, the system-level cache misses because the injected

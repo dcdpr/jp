@@ -1,4 +1,4 @@
-# RFD 083: Built-in ask\_user tool for assistant-initiated inquiries
+# RFD 083: Built-in ask_user tool for assistant-initiated inquiries
 
 - **Status**: Discussion
 - **Category**: Design

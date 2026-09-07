@@ -164,13 +164,13 @@ For non-interactive mode this is a non-issue (automatic repairs + fallbacks run
 instantly), but an interactive session with several corrupt conversations could
 be tedious.
 
-**Automatic base\_config rebuild may not match original.** If the workspace
+**Automatic base_config rebuild may not match original.** If the workspace
 config has changed since the conversation was created, the rebuilt
 `base_config.json` reflects the current state, not the original.
 The `ConfigDelta` events in `events.json` still apply on top, so the impact is
 limited to fields that only the workspace config set.
 
-**Clap re-parsing for init\_config recovery is fragile.** The user's input is
+**Clap re-parsing for init_config recovery is fragile.** The user's input is
 parsed as if appended to `jp query`, but the clap argument structure may have
 changed between the version that created the conversation and the current
 version.

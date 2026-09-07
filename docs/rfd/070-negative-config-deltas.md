@@ -844,7 +844,7 @@ not in `events.json`.
   from Phase 1 for deltas.
 - **`from_parts()` / `to_parts()`**: the `base_config` JSON component now has
   the `{ base, init }` shape.
-  The signatures keep two JSON components on the outside (base\_config JSON
+  The signatures keep two JSON components on the outside (base_config JSON
   value, events JSON vec) — the inner structure of `base_config.json` changes.
 - **Per-event iterators** (`Iter`, `IterMut`, `IntoIter`) fold `base` and each
   `init` delta before walking events, so per-event config views stay consistent
@@ -1757,9 +1757,9 @@ deltas alongside the workspace snapshot.
   Phase 1 for deltas.
 - Update `Iter`, `IterMut`, and `IntoIter` to fold `base` and each `init` delta
   before walking events, so per-event views match `config()`.
-- `from_parts()` / `to_parts()` keep their two-component signatures
-  (base\_config JSON value, events JSON vec); the JSON shape of the base\_config
-  component changes to `{ base, init }`.
+- `from_parts()` / `to_parts()` keep their two-component signatures (base_config
+  JSON value, events JSON vec); the JSON shape of the base_config component
+  changes to `{ base, init }`.
 
 **Storage layer** (`jp_storage`):
 

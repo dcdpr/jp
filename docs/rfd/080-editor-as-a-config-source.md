@@ -366,8 +366,8 @@ construction and seed-content logic moves into `Query::editor_input`; the
 
 The early-return paths in today's `Query::edit_message` (no-edit + replay,
 query-as-argv, missing editor) translate to `EditorRequest::Skip` (with the
-chat\_request built from argv/stdin/replay) or propagate as errors (e.g.,
-`MissingEditor` when no editor is configured and no chat\_request is available).
+chat_request built from argv/stdin/replay) or propagate as errors (e.g.,
+`MissingEditor` when no editor is configured and no chat_request is available).
 `EditorRequest::Abort` is reserved for hypothetical future commands and is not
 produced by `Query` today.
 

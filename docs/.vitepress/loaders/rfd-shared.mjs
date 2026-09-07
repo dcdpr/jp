@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-import { field, unescapeTitle } from './metadata.mjs'
+import { field } from './metadata.mjs'
 import {
     checkMilestones,
     normalizePriority,
@@ -29,8 +29,7 @@ import { inDevelopmentRfds, loadTickets } from './ticket-shared.mjs'
 // small custom parser. Handles both permanent (`NNN`) and draft (`DNN`) ids.
 export function parseMeta(content, filename) {
     const num = filename.match(/^(\d{3}|D\d{2})/)?.[1] ?? '000'
-    const rawTitle = content.match(/^# RFD (?:\d+|D\d+):\s*(.+)/m)?.[1]?.trim() ?? filename
-    const title = unescapeTitle(rawTitle)
+    const title = content.match(/^# RFD (?:\d+|D\d+):\s*(.+)/m)?.[1]?.trim() ?? filename
 
     return {
         num,

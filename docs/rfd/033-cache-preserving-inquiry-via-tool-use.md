@@ -48,7 +48,7 @@ From the [Anthropic docs][cache-docs]:
 
 > When using structured outputs, Claude automatically receives an additional
 > system prompt explaining the expected output format.
-> Changing the output\_config.format parameter will invalidate any prompt cache
+> Changing the output_config.format parameter will invalidate any prompt cache
 > for that conversation thread.
 
 Even with matching tool definitions, the inquiry request gets a system-level

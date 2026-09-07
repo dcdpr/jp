@@ -458,7 +458,7 @@ strings); we deliberately do not pull `tinted-builder` (GPL-3.0) or
   palette, syntect }`).
 - This is a breaking change to `style`; the load path maps the known old keys
   and documents the new shape.
-  The full scope taxonomy beyond markdown + tool\_call is deferred to follow-on
+  The full scope taxonomy beyond markdown + tool_call is deferred to follow-on
   RFDs.
   Depends on Phase 2.
 

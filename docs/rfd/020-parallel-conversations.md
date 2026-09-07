@@ -474,7 +474,7 @@ by remaining conversations sorted by last activation time.
 This follows the same pattern as the bare `--cfg` interactive browser described
 in [RFD 061].
 
-In clap, `--id` uses `num_args = 0..=1` with \`default\_missing\_value = "".
+In clap, `--id` uses `num_args = 0..=1` with \`default_missing_value = "".
 The empty string triggers the interactive picker; recognized keywords trigger
 their respective resolution; any other value is treated as a conversation ID.
 

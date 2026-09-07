@@ -368,7 +368,7 @@ still adequate:
 
 The prompt includes:
 
-> The conversation currently has the title: "{current\_title}".
+> The conversation currently has the title: "{current_title}".
 > If this title still accurately describes the conversation, set
 > `retain_current` to `true`.
 > Only generate new titles if the conversation has meaningfully changed

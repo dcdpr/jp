@@ -340,7 +340,7 @@ pub trait Provider: Debug + Send + Sync {
 
 **Problems:**
 
-- Trait cannot be mocked easily (async\_trait)
+- Trait cannot be mocked easily (async_trait)
 - Provider selection is global (`get_provider(id, config)`)
 - Error types are provider-specific but wrapped generically
 - Reasoning extraction is post-hoc (parsed from stream)

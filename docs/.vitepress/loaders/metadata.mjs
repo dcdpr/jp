@@ -13,11 +13,3 @@
 export function field(content, key) {
     return content.match(new RegExp(`^- \\*\\*${key}\\*\\*:\\s*(.+)`, 'm'))?.[1]?.trim() ?? null
 }
-
-// Undo markdown escaping in a heading.
-//
-// Titles are consumed as plain text (CLI lists, boards, indexes, tooltips), but
-// the markdown source escapes punctuation like `ask\_user` to avoid emphasis.
-export function unescapeTitle(raw) {
-    return raw.replace(/\\([^A-Za-z0-9])/g, '$1')
-}

@@ -204,7 +204,7 @@ All config files that reference it are updated:
 
 The skill description in `edit-files.toml` is updated:
 
-> - fs\_create\_file: Create a new file.
+> - fs_create_file: Create a new file.
 >   Content is provided via a follow-up prompt, not inline.
 
 ### Format arguments mode

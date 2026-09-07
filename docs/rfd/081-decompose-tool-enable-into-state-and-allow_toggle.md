@@ -1,4 +1,4 @@
-# RFD 081: Decompose tool enable into state and allow\_toggle
+# RFD 081: Decompose tool enable into state and allow_toggle
 
 - **Status**: Implemented
 - **Category**: Design
@@ -187,16 +187,16 @@ The table below describes the form a TOML input produces when deserialized into
 `PartialEnableConfig` and then passed through the resolver with no defaults
 layer (so any `None` field falls through to the hardcoded fallback):
 
-| Input                               | Resolver output, no defaults layer        |
-| ----------------------------------- | ----------------------------------------- |
-| `true`                              | `{ state: true, allow_toggle: Always }`   |
-| `false`                             | `{ state: false, allow_toggle: Always }`  |
-| `"on"`                              | `{ state: true, allow_toggle: Always }`   |
-| `"off"`                             | `{ state: false, allow_toggle: Always }`  |
-| `"always"`                          | `{ state: true, allow_toggle: Never }`    |
-| `"explicit"`                        | `{ state: false, allow_toggle: IfNamed }` |
-| `{ state, allow_toggle }`           | as written                                |
-| `{ state }` (allow\_toggle omitted) | `allow_toggle` fills to `Always`          |
+| Input                              | Resolver output, no defaults layer        |
+| ---------------------------------- | ----------------------------------------- |
+| `true`                             | `{ state: true, allow_toggle: Always }`   |
+| `false`                            | `{ state: false, allow_toggle: Always }`  |
+| `"on"`                             | `{ state: true, allow_toggle: Always }`   |
+| `"off"`                            | `{ state: false, allow_toggle: Always }`  |
+| `"always"`                         | `{ state: true, allow_toggle: Never }`    |
+| `"explicit"`                       | `{ state: false, allow_toggle: IfNamed }` |
+| `{ state, allow_toggle }`          | as written                                |
+| `{ state }` (allow_toggle omitted) | `allow_toggle` fills to `Always`          |
 
 In `PartialEnableConfig`, the same `{ state }` map leaves `allow_toggle` as
 `None`, preserving any value inherited from a defaults layer.

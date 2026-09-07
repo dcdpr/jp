@@ -313,7 +313,7 @@ The existing `handle_flush` behavior is unchanged — it returns the final
 The aggregator ensures arguments parsed incrementally are already present in the
 request by flush time.
 
-### Return type for handle\_part
+### Return type for handle_part
 
 `EventBuilder::handle_part` currently returns nothing — it just accumulates.
 With this RFD, it returns `Vec<ToolCallArgumentProgress>` (empty for

@@ -1,4 +1,4 @@
-# RFD 094: Built-in tell\_user Tool for Mid-Turn User-Addressed Messages
+# RFD 094: Built-in tell_user Tool for Mid-Turn User-Addressed Messages
 
 - **Status**: Discussion
 - **Category**: Design

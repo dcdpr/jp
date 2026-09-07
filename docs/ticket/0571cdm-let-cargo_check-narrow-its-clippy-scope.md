@@ -1,4 +1,4 @@
-# Let cargo\_check narrow its clippy scope
+# Let cargo_check narrow its clippy scope
 
 - **Status**: Todo
 - **Kind**: Feature

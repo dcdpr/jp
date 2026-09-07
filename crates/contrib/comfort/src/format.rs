@@ -1539,6 +1539,16 @@ fn is_reference_form_link(slice: &str) -> bool {
 /// Our downstream sembr pass then handles width-wrapping, so the lost soft
 /// breaks are immediately replaced with sentence-per-line layout.
 ///
+/// `experimental_minimize_commonmark` clears out the rest of the defensive
+/// escaping.
+/// Comrak escapes markdown punctuation — `_`, `*`, `#`, `[`, `` ` `` and
+/// friends — wherever it writes text, whether or not the character could be
+/// read as markup in that position, so `jp_cli` comes back as `jp\_cli`.
+/// Minimisation drops each backslash whose removal leaves the document
+/// canonicalising to the exact same bytes, which means a surviving escape is
+/// one the document's rendering depends on.
+/// It costs a parse and a re-render per backslash in the output.
+///
 /// The other choices match `jp_md`'s existing conventions.
 fn canonical_render_options() -> Options<'static> {
     let mut options = comrak_options();
@@ -1546,6 +1556,7 @@ fn canonical_render_options() -> Options<'static> {
         width: usize::MAX,
         list_style: ListStyleType::Dash,
         prefer_fenced: true,
+        experimental_minimize_commonmark: true,
         ..Default::default()
     };
     options

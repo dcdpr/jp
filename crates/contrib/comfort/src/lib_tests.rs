@@ -835,6 +835,99 @@ fn canonical_mode_does_not_escape_digit_period_in_continuation_lines() {
 }
 
 #[test]
+fn canonical_mode_does_not_escape_punctuation_that_reads_as_prose() {
+    // comrak's writer escapes markdown punctuation wherever it emits text,
+    // whether or not the character could be read as markup in that position.
+    // None of these can, so none of them come back with a backslash.
+    let body = indoc! {"
+        - **Label**: package=jp_cli
+        - **Glob**: the '*' default
+        - **Tracking**: #950
+        - **Shell**: run it as user@host
+    "};
+    let out = format_markdown_canonical(body, 80);
+    assert_eq!(out, body);
+}
+
+#[test]
+fn canonical_mode_drops_redundant_escapes_it_finds_in_the_source() {
+    // Escapes an earlier formatter left behind are noise by the same rule, so
+    // a reformat clears them out rather than carrying them forever.
+    let body = indoc! {"
+        Trace jp\\_llm internals, quoting the '\\*' default and issue \\#950.
+    "};
+    let out = format_markdown_canonical(body, 80);
+    assert_eq!(
+        out,
+        "Trace jp_llm internals, quoting the '*' default and issue #950.\n"
+    );
+}
+
+#[test]
+fn canonical_mode_keeps_an_escape_its_rendering_depends_on() {
+    // Dropping either backslash changes what the document is: the first line
+    // becomes a heading, the second an ordered list.
+    let body = indoc! {"
+        \\# not a heading
+
+        \\1. not a list item
+    "};
+    let out = format_markdown_canonical(body, 80);
+    assert_eq!(out, body);
+}
+
+#[test]
+fn canonical_mode_keeps_a_heading_escape_its_rendering_depends_on() {
+    // A heading is prose like any other, so the same rule applies: the closing
+    // star keeps its backslash because dropping it turns the pair into
+    // emphasis, while the opening one goes because on its own it renders as
+    // itself.
+    let body = "# Use \\*stars\\* here\n";
+    let out = format_markdown_canonical(body, 80);
+    assert_eq!(out, "# Use *stars\\* here\n");
+}
+
+#[test]
+fn canonical_mode_leaves_literal_backslashes_in_code_alone() {
+    // Inside a code span or a fenced block a backslash is content, not an
+    // escape. Both spellings have to come out the way they went in.
+    let body = indoc! {"
+        Match `a\\_b` in the pattern.
+
+        ```text
+        a\\_b
+        a_b
+        \\*not emphasis\\*
+        ```
+    "};
+    let out = format_markdown_canonical(body, 80);
+    assert_eq!(out, body);
+}
+
+#[test]
+fn canonical_mode_escape_removal_preserves_rendering() {
+    // Removing an escape rewrites bytes the parser reads, so the contract
+    // worth pinning is that the rendered document doesn't move.
+    let body = indoc! {"
+        _Emphasis_ beside jp_cli, foo__bar, and a trailing_ underscore.
+
+        Also `a_b` in code, __strong__ text, \\*escaped stars\\*, a [bracket]
+        that resolves to nothing, and 2 \\* 3 arithmetic.
+
+        [bracket]: https://example.com
+    "};
+    let out = format_markdown_canonical(body, 80);
+
+    // Reflow moves soft breaks around, which reaches the HTML as whitespace
+    // between words. Collapse it so the comparison is about the markup.
+    let render = |md: &str| {
+        let html = comrak::markdown_to_html(md, &comrak::Options::default());
+        html.split_whitespace().collect::<Vec<_>>().join(" ")
+    };
+    assert_eq!(render(&out), render(body));
+}
+
+#[test]
 fn canonical_mode_preserves_rust_intra_doc_shortcut_references() {
     // Regression: `[`format_source`]` and similar shortcut references
     // (no `[label]: url` definition in the body) used to be escaped as

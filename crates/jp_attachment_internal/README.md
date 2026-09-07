@@ -1,4 +1,4 @@
-# jp\_attachment\_internal
+# jp_attachment_internal
 
 Attachment handler for JP-internal resources, accessed via the `jp://` scheme.
 

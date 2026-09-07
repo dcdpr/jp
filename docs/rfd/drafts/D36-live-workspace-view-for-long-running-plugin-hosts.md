@@ -419,7 +419,7 @@ The hazard is exactly the bug class this RFD aims to eliminate.
 
 - **Race: conversation deleted between refresh and lock.**
   `LiveWorkspace::lock_conversation`'s sequence (refresh → acquire → flock →
-  force\_reload) can fail at step 4 if another process removes the conversation
+  force_reload) can fail at step 4 if another process removes the conversation
   directory between steps 1 and 4.
   The error propagates as `not_found`.
   Caller handles it.

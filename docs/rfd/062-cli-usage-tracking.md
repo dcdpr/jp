@@ -583,7 +583,7 @@ Not worth the complexity for counter data.
 5. Unit tests for load/save roundtrip, corrupt file handling, missing file
    handling.
 
-### Phase 2: Integration into Ctx and run\_inner
+### Phase 2: Integration into Ctx and run_inner
 
 1. Add `usage: CliUsage` field to `Ctx`.
 2. Load usage in `run_inner()` after workspace initialization.
