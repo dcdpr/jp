@@ -230,7 +230,8 @@ pub struct MergedString {
     /// the previous merge, falling back to `block`.
     #[setting(
         skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_string_dedup"
+        deserialize_with = "deserialize_string_dedup",
+        schema_union_with = string_dedup_input_shapes
     )]
     pub dedup: Option<StringDedup>,
 }
@@ -391,6 +392,22 @@ impl FromStr for StringDedupSetting {
     }
 }
 
+/// The non-mode shapes `style.*.dedup` accepts, for the schema.
+///
+/// The mode names are described by the field's own type; these are the boolean
+/// shorthand and `"inherit"` that [`deserialize_string_dedup`] also takes,
+/// which the field type cannot express.
+fn string_dedup_input_shapes(schema: &schematic::SchemaBuilder) -> Vec<schematic::Schema> {
+    use schematic::schema::{BooleanType, EnumType, LiteralValue};
+
+    vec![
+        schema.nest().boolean(BooleanType::default()),
+        schema
+            .nest()
+            .enumerable(EnumType::new([LiteralValue::String("inherit".into())])),
+    ]
+}
+
 /// Deserialize a `dedup` field from a mode name, a boolean, or `"inherit"`.
 ///
 /// `"inherit"` and an absent field both produce `None`, which the merge
@@ -460,3 +477,7 @@ impl MergedStringSeparator {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "string_tests.rs"]
+mod tests;

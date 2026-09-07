@@ -7,7 +7,10 @@ use serde::{Deserialize, Deserializer, Serialize, de::DeserializeOwned};
 use serde_untagged::UntaggedEnumVisitor;
 
 use crate::{
-    delta::PartialConfigDelta, fill::FillDefaults, partial::ToPartial, types::deserialize_dedup,
+    delta::PartialConfigDelta,
+    fill::FillDefaults,
+    partial::ToPartial,
+    types::{dedup_input_shapes, deserialize_dedup},
 };
 
 /// Vec of `T`'s, either defaulting to a merge strategy of `replace`, or
@@ -320,7 +323,11 @@ pub struct MergedVec<T> {
     ///
     /// `"inherit"` (or omitting the field) means "no opinion" — inherit from
     /// the previous merge, falling back to the per-strategy default above.
-    #[setting(default, skip_serializing_if = "Option::is_none")]
+    #[setting(
+        default,
+        skip_serializing_if = "Option::is_none",
+        schema_union_with = dedup_input_shapes
+    )]
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -372,3 +379,7 @@ pub enum MergedVecStrategy {
     /// Replace the previous value with the new value.
     Replace,
 }
+
+#[cfg(test)]
+#[path = "vec_tests.rs"]
+mod tests;

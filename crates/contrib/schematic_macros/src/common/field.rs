@@ -56,6 +56,14 @@ pub struct FieldArgs {
     pub is_empty: Option<ExprPath>,
     pub partial_via: Option<ExprPath>,
 
+    // Declare input shapes the field's type does not describe, for a field
+    // whose `deserialize_with` accepts more than the type alone would.
+    //
+    // Names a `fn(&SchemaBuilder) -> Vec<Schema>`. The inferred schema is
+    // unioned with the returned variants and marked as the expanded form, so
+    // the field's own keys stay addressable alongside the extra shapes.
+    pub schema_union_with: Option<ExprPath>,
+
     // serde
     pub alias: Option<String>,
     pub deserialize_with: Option<String>,
@@ -364,6 +372,10 @@ impl Field<'_> {
             quote! { schema.infer::<#value>() }
         };
 
+        if let Some(path) = &self.args.schema_union_with {
+            inner_schema = union_with_declared_shapes(path, &inner_schema);
+        }
+
         if let Some(Expr::Lit(lit)) = self.args.default.expr() {
             let lit_value = match &lit.lit {
                 Lit::Str(v) => quote! { LiteralValue::String(#v.into()) },
@@ -438,6 +450,27 @@ impl Field<'_> {
                     }
                 }
             }
+        }
+    }
+}
+
+/// Union a field's inferred schema with shapes its type cannot describe.
+///
+/// The inferred schema goes last and is marked as the expanded form: the
+/// declared variants are shorthand spellings of it, so a consumer resolving
+/// keys follows the inferred fields.
+#[cfg(feature = "schema")]
+fn union_with_declared_shapes(path: &ExprPath, inner_schema: &TokenStream) -> TokenStream {
+    quote! {
+        {
+            let described = #inner_schema;
+            let mut variants = #path(&schema);
+
+            let expanded = variants.len();
+            variants.push(described);
+
+            let mut nested = schema.nest();
+            nested.union(UnionType::new_any(variants).with_expanded_index(expanded))
         }
     }
 }
