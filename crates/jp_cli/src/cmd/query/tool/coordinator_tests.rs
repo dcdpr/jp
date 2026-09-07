@@ -190,7 +190,8 @@ fn test_question_target_with_configured_question() {
                     target: Some(QuestionTarget::Assistant(Box::default())),
                     answer: None,
                 }
-            },
+            }
+            .into(),
             ..Default::default()
         },
         vec![],
@@ -247,7 +248,8 @@ fn test_static_answer_with_configured_answer() {
                     target: Some(QuestionTarget::User),
                     answer: None,
                 }
-            },
+            }
+            .into(),
             ..Default::default()
         },
         vec![],
