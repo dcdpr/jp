@@ -157,11 +157,11 @@ fn stop_words_append_across_layers() {
     use schematic::PartialConfig as _;
 
     let mut base = PartialParametersConfig {
-        stop_words: Some(vec!["STOP".to_owned()]),
+        stop_words: Some(vec!["STOP".to_owned()].into()),
         ..Default::default()
     };
     let overlay = PartialParametersConfig {
-        stop_words: Some(vec!["HALT".to_owned()]),
+        stop_words: Some(vec!["HALT".to_owned()].into()),
         ..Default::default()
     };
 
@@ -169,7 +169,7 @@ fn stop_words_append_across_layers() {
 
     assert_eq!(
         base.stop_words,
-        Some(vec!["STOP".to_owned(), "HALT".to_owned()])
+        Some(vec!["STOP".to_owned(), "HALT".to_owned()].into())
     );
 }
 

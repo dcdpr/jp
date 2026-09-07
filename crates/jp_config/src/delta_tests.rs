@@ -2,7 +2,10 @@ use indexmap::IndexMap;
 use test_log::test;
 
 use super::*;
-use crate::providers::mcp::{PartialMcpProviderConfig, PartialStdioConfig};
+use crate::{
+    providers::mcp::{PartialMcpProviderConfig, PartialStdioConfig},
+    types::vec::{MergeableVec, MergedVec, MergedVecStrategy},
+};
 
 /// A server entry with `arguments` set and every other field unset.
 fn server(arguments: &[&str]) -> PartialMcpProviderConfig {
@@ -166,10 +169,15 @@ fn a_dropped_beta_header_is_recorded_as_a_replacement() {
     );
 }
 
-/// `stop_words` is reached through four separate paths; each reports its own.
+/// A dropped stop word is recorded wherever the parameters are reached from.
+///
+/// The list carries its own strategy, so each site records a replacement and
+/// none needs a path reported.
 #[test]
-fn a_dropped_stop_word_reports_the_path_it_was_reached_by() {
-    let words = |values: &[&str]| Some(values.iter().map(|v| (*v).to_owned()).collect::<Vec<_>>());
+fn a_dropped_stop_word_is_recorded_at_every_site() {
+    let words = |values: &[&str]| -> Option<MergeableVec<String>> {
+        Some(values.iter().map(|v| (*v).to_owned()).collect())
+    };
 
     let mut prev = crate::PartialAppConfig::empty();
     prev.assistant.model.parameters.stop_words = words(&["halt", "stop"]);
@@ -190,14 +198,29 @@ fn a_dropped_stop_word_reports_the_path_it_was_reached_by() {
     let mut unsets = Vec::new();
     let delta = prev.delta_with_unsets(next, "", &mut unsets);
 
-    unsets.sort();
-    assert_eq!(unsets, [
-        "assistant.model.parameters.stop_words",
-        "style.reasoning.summary_model.parameters.stop_words",
-    ]);
+    let replaced_with = |values: &[&str]| {
+        Some(MergeableVec::Merged(MergedVec {
+            value: values.iter().map(|v| (*v).to_owned()).collect(),
+            strategy: Some(MergedVecStrategy::Replace),
+            dedup: None,
+            discard_when_merged: false,
+        }))
+    };
+
+    assert!(unsets.is_empty(), "nothing to clear: {unsets:?}");
     assert_eq!(
         delta.assistant.model.parameters.stop_words,
-        Some(vec!["halt".to_owned()])
+        replaced_with(&["halt"])
+    );
+    assert_eq!(
+        delta
+            .style
+            .reasoning
+            .summary_model
+            .as_ref()
+            .map(|model| model.parameters.stop_words.clone()),
+        Some(replaced_with(&["halt"])),
+        "the second site records its own replacement"
     );
 }
 
