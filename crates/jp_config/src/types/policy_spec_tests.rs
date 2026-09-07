@@ -140,10 +140,9 @@ fn reports_the_policy_error_for_an_unreadable_value() {
         .unwrap_err()
         .to_string();
 
-    assert!(
-        err.contains("unknown tool_calls mode"),
-        "unexpected error: {err}"
-    );
+    // The policy's own error surfaces, rather than a generic "did not match any
+    // variant" from the union around it.
+    assert_eq!(err, "Unknown enum variant nonsense.");
 }
 
 // ---------------------------------------------------------------------------

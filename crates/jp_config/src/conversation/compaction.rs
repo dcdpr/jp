@@ -576,66 +576,29 @@ pub enum ReasoningMode {
 
 /// How to handle tool calls during compaction.
 ///
-/// Parses from strings for config ergonomics, with short aliases:
-///
-/// - `"strip"` / `"s"` → strip both request arguments and response content
-/// - `"strip-responses"` / `"sres"` → strip response content only
-/// - `"strip-requests"` / `"sreq"` → strip request arguments only
-/// - `"omit"` / `"o"` → remove tool call pairs entirely
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// - `strip` / `s`: strip both request arguments and response content
+/// - `strip-responses` / `strip_responses` / `sres`: strip response content
+///   only
+/// - `strip-requests` / `strip_requests` / `sreq`: strip request arguments only
+/// - `omit` / `o`: remove tool call pairs entirely
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ConfigEnum)]
+#[config(serde_as_string)]
 pub enum ToolCallsMode {
     /// Strip both request arguments and response content.
+    #[variant(aliases("s"))]
     Strip,
+
     /// Strip response content only, keep request arguments.
+    #[variant(aliases("strip_responses", "sres"))]
     StripResponses,
+
     /// Strip request arguments only, keep response content.
+    #[variant(aliases("strip_requests", "sreq"))]
     StripRequests,
+
     /// Remove tool call pairs entirely.
+    #[variant(aliases("o"))]
     Omit,
-}
-
-impl FromStr for ToolCallsMode {
-    type Err = BoxedError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "strip" | "s" => Ok(Self::Strip),
-            "strip-responses" | "strip_responses" | "sres" => Ok(Self::StripResponses),
-            "strip-requests" | "strip_requests" | "sreq" => Ok(Self::StripRequests),
-            "omit" | "o" => Ok(Self::Omit),
-            _ => Err(format!("unknown tool_calls mode: `{s}`").into()),
-        }
-    }
-}
-
-impl fmt::Display for ToolCallsMode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Strip => write!(f, "strip"),
-            Self::StripResponses => write!(f, "strip-responses"),
-            Self::StripRequests => write!(f, "strip-requests"),
-            Self::Omit => write!(f, "omit"),
-        }
-    }
-}
-
-impl serde::Serialize for ToolCallsMode {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.to_string())
-    }
-}
-
-impl<'de> serde::Deserialize<'de> for ToolCallsMode {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let s = String::deserialize(deserializer)?;
-        s.parse().map_err(serde::de::Error::custom)
-    }
-}
-
-impl schematic::Schematic for ToolCallsMode {
-    fn build_schema(mut schema: schematic::SchemaBuilder) -> schematic::Schema {
-        schema.string_default()
-    }
 }
 
 #[cfg(test)]
