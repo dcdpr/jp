@@ -18,13 +18,17 @@ use crate::{
         style::{DisplayStyleConfig, PartialDisplayStyleConfig},
     },
     delta::{
-        PartialConfigDelta, delta_map, delta_map_with_unsets, delta_opt, delta_opt_at,
-        delta_opt_partial, delta_opt_partial_at, delta_value_map, delta_value_map_with_unsets,
-        delta_vec, path,
+        PartialConfigDelta, delta_map, delta_map_with_unsets, delta_mergeable_map, delta_opt,
+        delta_opt_at, delta_opt_partial, delta_opt_partial_at, delta_value_map,
+        delta_value_map_with_unsets, delta_vec, path,
     },
     fill::{FillDefaults, fill_map},
+    internal::merge::map_with_strategy,
     partial::{ToPartial, partial_opt, partial_opt_config, partial_opts},
-    types::json_value::JsonValue,
+    types::{
+        json_value::JsonValue,
+        map::{MergeableMap, map_to_partial_per_key},
+    },
     util::merge_nested_indexmap,
     validate::Validator,
 };
@@ -510,8 +514,13 @@ pub struct ToolConfig {
     /// values, or forcing a specific value by setting a single enum value.
     /// You CANNOT change the type of the argument, its name, or any other
     /// properties that would break the tool's original argument expectations.
-    #[setting(nested, merge = merge_nested_indexmap)]
-    pub parameters: IndexMap<String, ToolParameterConfig>,
+    ///
+    /// Entries merge by key, so a parameter narrowed in a later layer joins the
+    /// ones an earlier layer set.
+    /// Declare the map as `{ value = { … }, strategy = "replace" }` to drop
+    /// them instead.
+    #[setting(nested, merge = map_with_strategy)]
+    pub parameters: MergeableMap<ToolParameterConfig>,
 
     /// How to run the tool.
     ///
@@ -557,8 +566,13 @@ pub struct ToolConfig {
     /// documented by the tool.
     /// For example, `fs_create_file` uses `overwrite_file` when a file already
     /// exists.
-    #[setting(nested, merge = merge_nested_indexmap)]
-    pub questions: IndexMap<String, QuestionConfig>,
+    ///
+    /// Entries merge by key, so a question configured in a later layer joins
+    /// the ones an earlier layer set.
+    /// Declare the map as `{ value = { … }, strategy = "replace" }` to drop
+    /// them instead.
+    #[setting(nested, merge = map_with_strategy)]
+    pub questions: MergeableMap<QuestionConfig>,
 
     /// Per-tool options passed to the tool at runtime.
     ///
@@ -616,7 +630,7 @@ impl PartialConfigDelta for PartialToolConfig {
             summary: delta_opt(self.summary.as_ref(), next.summary),
             description: delta_opt(self.description.as_ref(), next.description),
             examples: delta_opt(self.examples.as_ref(), next.examples),
-            parameters: delta_map(&self.parameters, next.parameters),
+            parameters: delta_mergeable_map(&self.parameters, next.parameters),
             run: delta_opt(self.run.as_ref(), next.run),
             format: delta_opt(self.format.as_ref(), next.format),
             result: delta_opt(self.result.as_ref(), next.result),
@@ -625,7 +639,7 @@ impl PartialConfigDelta for PartialToolConfig {
                 next.cancellation_response,
             ),
             style: delta_opt_partial(self.style.as_ref(), next.style),
-            questions: delta_map(&self.questions, next.questions),
+            questions: delta_mergeable_map(&self.questions, next.questions),
             options: delta_value_map(&self.options, next.options),
             access: delta_opt_partial(self.access.as_ref(), next.access),
         }
@@ -649,12 +663,9 @@ impl PartialConfigDelta for PartialToolConfig {
             summary: delta_opt(self.summary.as_ref(), next.summary),
             description: delta_opt(self.description.as_ref(), next.description),
             examples: delta_opt(self.examples.as_ref(), next.examples),
-            parameters: delta_map_with_unsets(
-                &path(prefix, "parameters"),
-                &self.parameters,
-                next.parameters,
-                unsets,
-            ),
+            // Each map states its own strategy, so a removed entry travels in
+            // the value as a `replace` and needs no path reported.
+            parameters: delta_mergeable_map(&self.parameters, next.parameters),
             run: delta_opt(self.run.as_ref(), next.run),
             format: delta_opt(self.format.as_ref(), next.format),
             result: delta_opt(self.result.as_ref(), next.result),
@@ -668,12 +679,7 @@ impl PartialConfigDelta for PartialToolConfig {
                 next.style,
                 unsets,
             ),
-            questions: delta_map_with_unsets(
-                &path(prefix, "questions"),
-                &self.questions,
-                next.questions,
-                unsets,
-            ),
+            questions: delta_mergeable_map(&self.questions, next.questions),
             options: delta_value_map_with_unsets(
                 &path(prefix, "options"),
                 &self.options,
@@ -701,11 +707,9 @@ impl ToPartial for ToolConfig {
             summary: partial_opts(self.summary.as_ref(), defaults.summary),
             description: partial_opts(self.description.as_ref(), defaults.description),
             examples: partial_opts(self.examples.as_ref(), defaults.examples),
-            parameters: self
-                .parameters
-                .iter()
-                .map(|(k, v)| (k.clone(), v.to_partial()))
-                .collect(),
+            // Per key rather than `replace`: an entry a later layer adds still
+            // reaches a conversation created before it existed.
+            parameters: map_to_partial_per_key(self.parameters.iter()),
             run: partial_opts(self.run.as_ref(), defaults.run),
             format: partial_opts(self.format.as_ref(), defaults.format),
             result: partial_opts(self.result.as_ref(), defaults.result),
@@ -714,11 +718,7 @@ impl ToPartial for ToolConfig {
                 defaults.cancellation_response,
             ),
             style: partial_opt_config(self.style.as_ref(), defaults.style),
-            questions: self
-                .questions
-                .iter()
-                .map(|(k, v)| (k.clone(), v.to_partial()))
-                .collect(),
+            questions: map_to_partial_per_key(self.questions.iter()),
             options: self
                 .options
                 .iter()
@@ -807,10 +807,15 @@ pub struct ToolParameterConfig {
     /// MCP properties are merged by name.
     /// Entries here may narrow nested fields or add fields to local and
     /// built-in object parameters.
-    #[setting(nested, merge = merge_nested_indexmap)]
-    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    ///
+    /// Entries merge by key, so a property narrowed in a later layer joins the
+    /// ones an earlier layer set.
+    /// Declare the map as `{ value = { … }, strategy = "replace" }` to drop
+    /// them instead.
+    #[setting(nested, merge = map_with_strategy)]
+    #[serde(default, skip_serializing_if = "MergeableMap::is_empty")]
     #[expect(clippy::use_self, reason = "macro can't resolve `Self`")]
-    pub properties: IndexMap<String, ToolParameterConfig>,
+    pub properties: MergeableMap<ToolParameterConfig>,
 }
 
 impl PartialConfigDelta for PartialToolParameterConfig {
@@ -826,26 +831,7 @@ impl PartialConfigDelta for PartialToolParameterConfig {
             // any element has to record the whole list.
             enumeration: delta_opt(self.enumeration.as_ref(), next.enumeration),
             items: delta_opt(self.items.as_ref(), next.items),
-            properties: delta_map(&self.properties, next.properties),
-        }
-    }
-
-    fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
-        Self {
-            kind: delta_opt_partial(self.kind.as_ref(), next.kind),
-            default: delta_opt(self.default.as_ref(), next.default),
-            required: delta_opt(self.required.as_ref(), next.required),
-            summary: delta_opt(self.summary.as_ref(), next.summary),
-            description: delta_opt(self.description.as_ref(), next.description),
-            examples: delta_opt(self.examples.as_ref(), next.examples),
-            enumeration: delta_opt(self.enumeration.as_ref(), next.enumeration),
-            items: delta_opt(self.items.as_ref(), next.items),
-            properties: delta_map_with_unsets(
-                &path(prefix, "properties"),
-                &self.properties,
-                next.properties,
-                unsets,
-            ),
+            properties: delta_mergeable_map(&self.properties, next.properties),
         }
     }
 }
@@ -863,11 +849,7 @@ impl ToPartial for ToolParameterConfig {
             examples: partial_opts(self.examples.as_ref(), defaults.examples),
             enumeration: self.enumeration.clone(),
             items: self.items.as_ref().map(|v| Box::new(v.to_partial())),
-            properties: self
-                .properties
-                .iter()
-                .map(|(k, v)| (k.clone(), v.to_partial()))
-                .collect(),
+            properties: map_to_partial_per_key(self.properties.iter()),
         }
     }
 }
@@ -1230,7 +1212,7 @@ impl ToolConfigWithDefaults {
 
     /// Return the parameters of the tool.
     #[must_use]
-    pub const fn parameters(&self) -> &IndexMap<String, ToolParameterConfig> {
+    pub fn parameters(&self) -> &IndexMap<String, ToolParameterConfig> {
         &self.tool.parameters
     }
 
@@ -1313,7 +1295,7 @@ impl ToolConfigWithDefaults {
 
     /// Return the questions configuration of the tool.
     #[must_use]
-    pub const fn questions(&self) -> &IndexMap<String, QuestionConfig> {
+    pub fn questions(&self) -> &IndexMap<String, QuestionConfig> {
         &self.tool.questions
     }
 

@@ -209,7 +209,9 @@ PartialAppConfig {
     },
     providers: PartialProviderConfig {
         llm: PartialLlmProviderConfig {
-            aliases: {},
+            aliases: Map(
+                {},
+            ),
             anthropic: PartialAnthropicConfig {
                 api_key_env: None,
                 base_url: None,
@@ -254,7 +256,9 @@ PartialAppConfig {
     plugins: PartialPluginsConfig {
         auto_install: None,
         shutdown_timeout_secs: None,
-        command: {},
+        command: Map(
+            {},
+        ),
     },
     user: PartialUserConfig {
         name: None,

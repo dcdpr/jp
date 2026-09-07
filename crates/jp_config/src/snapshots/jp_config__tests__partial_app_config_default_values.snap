@@ -431,7 +431,9 @@ Ok(
             },
             providers: PartialProviderConfig {
                 llm: PartialLlmProviderConfig {
-                    aliases: {},
+                    aliases: Map(
+                        {},
+                    ),
                     anthropic: PartialAnthropicConfig {
                         api_key_env: Some(
                             "ANTHROPIC_API_KEY",
@@ -518,7 +520,9 @@ Ok(
                 shutdown_timeout_secs: Some(
                     5,
                 ),
-                command: {},
+                command: Map(
+                    {},
+                ),
             },
             user: PartialUserConfig {
                 name: None,

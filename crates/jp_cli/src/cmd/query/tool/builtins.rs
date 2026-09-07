@@ -30,7 +30,8 @@ pub fn describe_tools() -> PartialToolConfig {
                 ..Default::default()
             })),
             ..Default::default()
-        })]),
+        })])
+        .into(),
         run: Some(RunMode::Unattended),
         style: Some(PartialDisplayStyleConfig {
             hidden: Some(true),
