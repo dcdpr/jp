@@ -14,6 +14,7 @@ markdown_format = { enable = true }
 rfd_draft = { enable = true, run = "unattended" }
 rfd_promote = { enable = true, run = "unattended" }
 rfd_renumber = { enable = true, run = "unattended" }
+rfd_rename = { enable = true, run = "unattended" }
 rfd_supersede = { enable = true, run = "unattended" }
 rfd_abandon = { enable = true, run = "unattended" }
 rfd_extend = { enable = true, run = "unattended" }
@@ -63,6 +64,11 @@ promoting to Accepted, it creates a GitHub tracking issue.
 file name, heading, cross-references, and priority-board entry. The target id \
 stays in the same id-space; when omitted, the next available id is used (pass \
 it explicitly when a number is taken on another branch).
+
+`rfd_rename` retitles an RFD, rewriting its heading and renaming its file to \
+match. The id is kept. Use it whenever a title changes: the `fs_*` tools \
+refuse to create, delete, or move files under `docs/rfd/`, so a filename left \
+disagreeing with its heading has no other way back.
 
 `rfd_extend` records design-lineage relationships between RFDs \
 (adds Extends/Extended by metadata to both documents). Use this when \
