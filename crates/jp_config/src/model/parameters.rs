@@ -91,22 +91,26 @@ pub struct ParametersConfig {
     )]
     pub stop_words: Vec<String>,
 
-    /// Other non-typed parameters that some models might support.
+    /// Where the parameters JP does not model are collected.
     ///
-    /// Any key in the parameter block that JP does not recognize lands here and
-    /// is forwarded to the provider as written:
+    /// Not a key to write.
+    /// A parameter JP does not recognize is written in the block itself and
+    /// forwarded to the provider as given:
     ///
     /// ```toml
     /// [assistant.model.parameters]
     /// presence_penalty = 0.5
     /// ```
     ///
-    /// The equivalent explicit form is also accepted:
+    /// The name is reserved rather than offered: a stored conversation config
+    /// writes the collected parameters under it, so reading one back has to
+    /// find them there.
+    /// A provider parameter that is itself called `other` goes one level in, as
+    /// `other.other`.
     ///
-    /// ```toml
-    /// [assistant.model.parameters.other]
-    /// presence_penalty = 0.5
-    /// ```
+    /// Still reachable as a key, because a field absent from the schema is
+    /// stripped from every stored config on load, which would discard the
+    /// parameters a conversation was created with.
     #[setting(default, merge = schematic::merge::merge_iter)]
     pub other: IndexMap<String, JsonValue>,
 }
