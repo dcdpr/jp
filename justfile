@@ -1767,6 +1767,11 @@ _rfd-link SOURCE TARGET FORWARD INVERSE:
 # the Implementation Plan into a ticket carrying `Implements: NNN` (prompting on
 # TTY, defaulting to yes in non-interactive runs).
 #
+# Renaming a draft rewrites references to its old id across every RFD and every
+# ticket under `docs/ticket/`. Ticket link targets move from
+# `../rfd/drafts/DNN-slug.md` to `../rfd/NNN-slug.md`, following the promoted
+# file out of `drafts/`.
+#
 # Accepts: a permanent number (41, 041) or a draft ID (D01).
 [group('rfd')]
 rfd-promote NNN: _install-jp _install-comfort _install-ticket
@@ -1919,24 +1924,41 @@ rfd-promote NNN: _install-jp _install-comfort _install-ticket
         # the leading boundary character of each match — back-to-back
         # mentions like "D27 D27" need a second pass for the second
         # one to be recognised.
+        # Link targets match on the stem with `.md` optional, because the docs
+        # site resolves extensionless links and `docs/ticket/index.md` writes
+        # them that way.
+        stem_f="${basename_f%.md}"
+        new_stem="${new_basename%.md}"
         updated=0
-        for other in docs/rfd/*.md docs/rfd/drafts/*.md; do
+        for other in docs/rfd/*.md docs/rfd/drafts/*.md docs/ticket/*.md; do
             [ -f "$other" ] || continue
             if ! grep -qE \
                     -e "RFD ${old_draft_id}" \
-                    -e "${basename_f}" \
+                    -e "${stem_f}" \
                     -e "(^|[^A-Za-z0-9_])${old_draft_id}([^A-Za-z0-9_]|\$)" \
                     "$other"; then
                 continue
             fi
-            if [ "$(dirname "$other")" = "docs/rfd/drafts" ]; then
-                link_replacement="../${new_basename}"
-            else
-                link_replacement="${new_basename}"
-            fi
+            # Tickets sit in a sibling directory and address RFDs through
+            # `../rfd/`, so their link targets need that prefix rather than the
+            # bare basename an RFD-to-RFD link uses.
+            case "$(dirname "$other")" in
+                docs/rfd/drafts) link_replacement="../${new_basename}" ;;
+                docs/ticket)     link_replacement="../rfd/${new_basename}" ;;
+                *)               link_replacement="${new_basename}" ;;
+            esac
+            # The `drafts/` segment disappears when the file is promoted, so a
+            # link carrying it is rewritten whole; substituting only the
+            # basename would leave `../rfd/drafts/NNN-slug.md`, which points at
+            # nothing. A repo-root-relative path keeps its `docs/` prefix
+            # instead of picking up the `../` a ticket link needs, so it is
+            # matched first and more specifically.
+            link_stem="${link_replacement%.md}"
             sed -E \
                 -e "s|RFD ${old_draft_id}|RFD ${num}|g" \
-                -e "s|${basename_f}|${link_replacement}|g" \
+                -e "s|docs/rfd/drafts/${stem_f}(\.md)?|docs/rfd/${new_stem}\1|g" \
+                -e "s|(\.\./)?rfd/drafts/${stem_f}(\.md)?|${link_stem}\2|g" \
+                -e "s|${stem_f}(\.md)?|${link_stem}\1|g" \
                 -e "s#(^|[^A-Za-z0-9_])${old_draft_id}([^A-Za-z0-9_]|\$)#\1${num}\2#g" \
                 -e "s#(^|[^A-Za-z0-9_])${old_draft_id}([^A-Za-z0-9_]|\$)#\1${num}\2#g" \
                 "$other" > "${other}.tmp"
@@ -2044,7 +2066,7 @@ rfd-promote NNN: _install-jp _install-comfort _install-ticket
 
         echo "${new_file}: Draft -> Discussion (assigned ${num})"
         if [ "$updated" -gt 0 ]; then
-            echo "Updated ${updated} cross-reference(s) in RFD files."
+            echo "Updated ${updated} cross-reference(s) in RFDs and tickets."
         fi
 
     # --- Discussion -> Accepted: offer to seed phase tickets ---
@@ -2214,11 +2236,12 @@ rfd-promote NNN: _install-jp _install-comfort _install-ticket
 #
 # Rewrites the file name, the document heading, `RFD <old>` mentions and
 # `<old>-slug.md` link targets across all RFDs (including the renumbered file
-# itself), bare `DNN` tokens for draft-space renumbers, and the id in
-# `priority.json`. The file stays in its directory, so existing link prefixes
-# (`../`, `./`) remain correct and only the basename is substituted.
-# References outside `docs/rfd/` (code comments, other docs) are reported but
-# not rewritten.
+# itself) and all tickets under `docs/ticket/`, bare `DNN` tokens for
+# draft-space renumbers, and the id in `priority.json`. The file stays in its
+# directory, so existing link prefixes (`../`, `./`) remain correct and only
+# the basename is substituted.
+# References outside `docs/rfd/` and `docs/ticket/` (code comments, other docs)
+# are reported but not rewritten.
 #
 # Renumbering a published RFD changes its site URL and invalidates its
 # summary-cache entry; run `just rfd-summaries` afterwards.
@@ -2300,20 +2323,25 @@ rfd-renumber NNN MMM="":
     # token, a bare `095` is not. The bare-token rule runs twice because
     # sed's `g` flag consumes the leading boundary character of a match,
     # hiding the second of two back-to-back mentions.
+    # Link targets match on the stem with `.md` optional, because the docs site
+    # resolves extensionless links and `docs/ticket/index.md` writes them that
+    # way. The file keeps its directory, so the surrounding path is untouched.
+    old_stem="${old_basename%.md}"
+    new_stem="${new_basename%.md}"
     updated=0
-    for other in docs/rfd/*.md docs/rfd/drafts/*.md; do
+    for other in docs/rfd/*.md docs/rfd/drafts/*.md docs/ticket/*.md; do
         [ -f "$other" ] || continue
         if [ "$is_draft" = true ]; then
             sed -E \
                 -e "s#RFD ${old_id}([^0-9]|\$)#RFD ${new_id}\1#g" \
-                -e "s|${old_basename}|${new_basename}|g" \
+                -e "s|${old_stem}(\.md)?|${new_stem}\1|g" \
                 -e "s#(^|[^A-Za-z0-9_])${old_id}([^A-Za-z0-9_]|\$)#\1${new_id}\2#g" \
                 -e "s#(^|[^A-Za-z0-9_])${old_id}([^A-Za-z0-9_]|\$)#\1${new_id}\2#g" \
                 "$other" > "${other}.tmp"
         else
             sed -E \
                 -e "s#RFD ${old_id}([^0-9]|\$)#RFD ${new_id}\1#g" \
-                -e "s|${old_basename}|${new_basename}|g" \
+                -e "s|${old_stem}(\.md)?|${new_stem}\1|g" \
                 "$other" > "${other}.tmp"
         fi
         if cmp -s "$other" "${other}.tmp"; then
@@ -2332,10 +2360,10 @@ rfd-renumber NNN MMM="":
 
     # --- Report references the rewrite does not touch ---
     leftovers=$(rg -l -e "RFD ${old_id}\b" -e "${old_basename}" \
-        --glob '!docs/rfd/**' . 2>/dev/null || true)
+        --glob '!docs/rfd/**' --glob '!docs/ticket/**' . 2>/dev/null || true)
     if [ -n "$leftovers" ]; then
         echo "" >&2
-        echo "Warning: references outside docs/rfd/ still mention ${old_id}:" >&2
+        echo "Warning: references outside docs/rfd/ and docs/ticket/ still mention ${old_id}:" >&2
         echo "$leftovers" | sed 's/^/  /' >&2
     fi
 
@@ -3426,20 +3454,41 @@ _rfd-resolve NNN:
     #!/usr/bin/env sh
     set -eu
 
+    # Two files sharing an id is a repository fault, not a choice to make on
+    # the caller's behalf. Picking one and proceeding is how a rename ends up
+    # rewriting the other document's heading to the new id, so refuse instead.
+    reject_ambiguous() {
+        echo "Ambiguous: ${2} files share ID ${1}:" >&2
+        printf '%s\n' "$3" | sed 's/^/  /' >&2
+        echo "Renumber or remove one before continuing; a rewrite keyed on" >&2
+        echo "${1} would corrupt the others." >&2
+        exit 1
+    }
+
     arg="{{NNN}}"
     if echo "$arg" | grep -qiE '^D[0-9]+$'; then
         rfd_id=$(echo "$arg" | tr '[:lower:]' '[:upper:]')
-        file=$(ls docs/rfd/drafts/${rfd_id}-*.md 2>/dev/null | head -1)
-        if [ -z "$file" ]; then
+        found=$(ls docs/rfd/drafts/${rfd_id}-*.md 2>/dev/null || true)
+        count=$(printf '%s' "$found" | grep -c . || true)
+        if [ "$count" -eq 0 ]; then
             echo "No draft RFD found with ID ${rfd_id}." >&2; exit 1
         fi
+        if [ "$count" -gt 1 ]; then
+            reject_ambiguous "$rfd_id" "$count" "$found"
+        fi
+        file="$found"
     elif echo "$arg" | grep -qE '^[0-9]+$'; then
         n=$(echo "$arg" | sed 's/^0*//')
         rfd_id=$(printf "%03d" "${n:-0}")
-        file=$(ls docs/rfd/${rfd_id}-*.md 2>/dev/null | head -1)
-        if [ -z "$file" ]; then
+        found=$(ls docs/rfd/${rfd_id}-*.md 2>/dev/null || true)
+        count=$(printf '%s' "$found" | grep -c . || true)
+        if [ "$count" -eq 0 ]; then
             echo "No RFD found with number ${rfd_id}." >&2; exit 1
         fi
+        if [ "$count" -gt 1 ]; then
+            reject_ambiguous "$rfd_id" "$count" "$found"
+        fi
+        file="$found"
     else
         echo "Invalid argument '${arg}'. Use a number (41) or draft ID (D01)." >&2; exit 1
     fi
