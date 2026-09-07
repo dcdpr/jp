@@ -23,72 +23,43 @@ fn assign_unknown_nested_key_delegates_to_other() {
     assert_eq!(other["custom"], JsonValue(json!({"depth": "3"})));
 }
 
-/// `--cfg` reaches an `other` entry through the explicit table, the same
-/// spelling a config file uses.
+/// A provider parameter is cleared by its own name, with no wrapper in the
+/// path.
 #[test]
-fn assign_reaches_other_through_the_explicit_table() {
-    let mut p = PartialParametersConfig::default();
-    let kv = KvAssignment::try_from_cli("other.presence_penalty", "0.5").unwrap();
-    p.assign(kv).unwrap();
-
-    let other = p.other.as_ref().unwrap();
-    assert_eq!(other["presence_penalty"], JsonValue(json!("0.5")));
-    assert_eq!(other.len(), 1, "`other` is the table, not an entry in it");
-}
-
-/// Clearing the explicit table empties it, rather than removing an entry that
-/// happens to be named `other`.
-#[test]
-fn assign_clears_the_whole_other_table() {
+fn assign_clears_a_collected_parameter() {
     let mut p = PartialParametersConfig::default();
     p.assign(KvAssignment::try_from_cli("seed", "42").unwrap())
         .unwrap();
-    p.assign(KvAssignment::unset("other")).unwrap();
+    p.assign(KvAssignment::unset("seed")).unwrap();
 
     assert!(
         p.other.as_ref().is_none_or(IndexMap::is_empty),
-        "expected an empty table, got: {:?}",
+        "expected the parameter gone, got: {:?}",
         p.other
     );
 }
 
+/// The collector is flattened, so a provider parameter is written and read back
+/// under its own name with no wrapper key in between.
 #[test]
-fn known_keys_match_the_schema() {
-    use schematic::{SchemaBuilder, SchemaType, Schematic as _};
-
-    // `deserialize_collecting_other` splits the parameter block using this
-    // list. A field added to the struct but missed here would be rerouted into
-    // `other` and forwarded to the provider as a raw parameter instead.
-    let schema = ParametersConfig::build_schema(SchemaBuilder::default());
-    let SchemaType::Struct(struct_type) = &schema.ty else {
-        panic!("expected a struct schema");
-    };
-
-    let mut fields: Vec<&str> = struct_type.fields.keys().map(String::as_str).collect();
-    let mut known = KNOWN_KEYS.to_vec();
-    fields.sort_unstable();
-    known.sort_unstable();
-
-    assert_eq!(fields, known);
-}
-
-/// The collector stays in the schema, because a stored config writes the
-/// parameters under it and the compat layer strips whatever the schema does not
-/// name.
-#[test]
-fn other_survives_a_stored_config_round_trip() {
+fn other_is_flattened_on_the_wire() {
     let mut p = PartialParametersConfig::default();
     p.assign(KvAssignment::try_from_cli("seed", "42").unwrap())
         .unwrap();
 
     let json = serde_json::to_value(&p).unwrap();
-    let back: PartialParametersConfig = serde_json::from_value(json).unwrap();
-
     assert_eq!(
-        back.other.as_ref().map(IndexMap::len),
-        Some(1),
-        "a provider parameter survives being written and read back"
+        json.get("seed"),
+        Some(&json!("42")),
+        "the parameter sits in the block: {json}"
     );
+    assert!(
+        json.get("other").is_none(),
+        "no wrapper key reaches the wire: {json}"
+    );
+
+    let back: PartialParametersConfig = serde_json::from_value(json).unwrap();
+    assert_eq!(back.other.as_ref().map(IndexMap::len), Some(1));
 }
 
 /// Deserialize a `[parameters]` block through the production path: the
@@ -121,10 +92,10 @@ fn deserialize_collects_unknown_keys_into_other() {
     assert_eq!(other.len(), 2, "known keys must not leak into `other`");
 }
 
+/// A stored config or user file written before `other` was flattened nested its
+/// parameters under it, and those still land as parameters.
 #[test]
-fn deserialize_accepts_an_explicit_other_table() {
-    // The nested form is what every stored conversation config and existing
-    // user file writes, so it has to keep working.
+fn deserialize_hoists_a_legacy_other_table() {
     let p = parameters_from_toml(indoc::indoc!(
         r"
             temperature = 0.7
@@ -159,11 +130,15 @@ fn deserialize_prefers_the_explicit_other_entry_on_collision() {
 }
 
 #[test]
-fn deserialize_leaves_other_unset_when_every_key_is_known() {
+fn deserialize_collects_nothing_when_every_key_is_known() {
     let p = parameters_from_toml("top_k = 40");
 
     assert_eq!(p.top_k, Some(40));
-    assert_eq!(p.other, None);
+    assert!(
+        p.other.as_ref().is_none_or(IndexMap::is_empty),
+        "expected no collected parameters, got: {:?}",
+        p.other
+    );
 }
 
 #[test]
@@ -192,12 +167,25 @@ fn deserialize_preserves_the_untagged_reasoning_field() {
 }
 
 #[test]
-fn deserialize_keeps_an_explicit_empty_other() {
-    // Serialization emits `other = {}` for a present-but-empty map, so dropping
-    // it here would make a stored config lossy on round-trip.
+fn deserialize_hoists_an_empty_legacy_other_table() {
     let p = parameters_from_toml("other = {}");
 
-    assert_eq!(p.other, Some(IndexMap::new()));
+    assert!(
+        p.other.as_ref().is_none_or(IndexMap::is_empty),
+        "an empty legacy table leaves no parameter behind, got: {:?}",
+        p.other
+    );
+}
+
+/// A provider parameter that is itself called `other` is written like any
+/// other, now that the name is not a wrapper.
+#[test]
+fn a_parameter_named_other_is_not_a_wrapper() {
+    let mut p = PartialParametersConfig::default();
+    p.assign(KvAssignment::try_from_cli("other", "5").unwrap())
+        .unwrap();
+
+    assert_eq!(p.other.as_ref().unwrap()["other"], JsonValue(json!("5")));
 }
 
 #[test]
