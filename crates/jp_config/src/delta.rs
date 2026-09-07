@@ -3,6 +3,8 @@
 use indexmap::IndexMap;
 use schematic::PartialConfig;
 
+use crate::types::vec::{MergeableVec, MergedVec, MergedVecStrategy};
+
 /// Calculate the delta between two partial configurations.
 ///
 /// It takes `self`, and should check for any value in `next` that differs from
@@ -76,6 +78,37 @@ pub fn delta_opt_vec_at<T: PartialEq + Clone>(
 
     unsets.push(path.to_owned());
     Some(next)
+}
+
+/// Calculate the delta between two strategy-carrying lists.
+///
+/// Appending reaches `next` exactly when `next` starts with `prev`, and the
+/// delta is then the tail, carried as a plain list so the fold appends it.
+/// Every other difference — an element removed, reordered, or inserted before
+/// the last one — carries the whole of `next` with `replace`.
+///
+/// Order is part of the answer, not a detail.
+/// A delta that reproduced the set of elements while appending them in a
+/// different order changes the meaning of any list whose order matters, and
+/// says nothing at all about a list that only lost an element.
+///
+/// A [`MergeableVec`] can express `replace` on the wire, which is why this
+/// needs no separate path report.
+/// A plain `Vec` cannot; see [`delta_opt_vec_at`].
+pub fn delta_mergeable_vec<T: Clone + PartialEq>(
+    prev: &MergeableVec<T>,
+    next: MergeableVec<T>,
+) -> MergeableVec<T> {
+    if next.starts_with(prev) {
+        return next.iter().skip(prev.len()).cloned().collect();
+    }
+
+    MergeableVec::Merged(MergedVec {
+        value: next.into_vec(),
+        strategy: Some(MergedVecStrategy::Replace),
+        dedup: None,
+        discard_when_merged: false,
+    })
 }
 
 /// Delta for an optional nested partial, reporting the fields it cannot reach.

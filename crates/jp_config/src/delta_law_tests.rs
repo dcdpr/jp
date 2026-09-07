@@ -77,6 +77,95 @@ fn assert_law(before: &[&str], after: &[&str]) {
     );
 }
 
+/// Fields whose clear is known not to survive a fold, and why.
+///
+/// `conversation.compaction.rules` has built-in defaults carrying
+/// `discard_when_merged`, so a resolved empty list and the resolved defaults
+/// compare unequal while resolving alike.
+/// A delta helper that judged them by their elements would write a
+/// replace-with-empty for no change at all, which is how it was found: adopting
+/// [`delta_mergeable_vec`] here turned 39 tests red with exactly that noise.
+///
+/// Recording the clear needs the discard flag accounted for, which is worth
+/// doing with the collection conversion rather than around it.
+const CLEAR_NOT_RECORDED: &[&str] = &["conversation.compaction.rules"];
+
+/// Every field, asked whether clearing it survives a fold.
+///
+/// Shaped like the producer: a `--cfg foo=null` clears the field from the
+/// partial, the invocation resolves it, and the delta is taken between two
+/// resolved configs.
+/// A field with a `#[setting(default)]` therefore comes back holding that
+/// default rather than arriving cleared, and only a field whose resolved type
+/// is `Option<T>` reaches the delta as an absence.
+///
+/// The law is checked on the resolved configs, since that is what a later turn
+/// runs with.
+///
+/// Paths the fixture leaves unset cannot change when cleared, so they prove
+/// nothing; the count is reported so the test says how much it actually
+/// covered.
+#[test]
+fn clearing_any_field_survives_a_fold() {
+    let prev = crate::AppConfig::new_test().to_partial();
+
+    let mut vacuous = Vec::new();
+    let mut lost = Vec::new();
+
+    for path in crate::AppConfig::fields() {
+        let mut next = prev.clone();
+        if next.unset(&path).is_err() {
+            continue;
+        }
+
+        if next == prev {
+            vacuous.push(path);
+            continue;
+        }
+
+        // A clear that leaves the config invalid is not a case the producer has
+        // to reproduce; the invocation that typed it fails instead.
+        let Ok(expected) = crate::util::build(next) else {
+            continue;
+        };
+
+        // The producer diffs two *resolved* configs, so `next` arrives through
+        // this round trip. A field with a default comes back holding it, which
+        // is why only a field whose resolved type is optional can arrive
+        // cleared.
+        let next = expected.to_partial();
+
+        let mut unsets = Vec::new();
+        let delta = prev.delta_with_unsets(next, "", &mut unsets);
+
+        let mut folded = prev.clone();
+        for cleared in &unsets {
+            folded.unset(cleared).expect("a reported path is a field");
+        }
+        folded.merge(&(), delta).expect("folding cannot fail");
+
+        if crate::util::build(folded).ok().as_ref() != Some(&expected)
+            && !CLEAR_NOT_RECORDED.contains(&path.as_str())
+        {
+            lost.push(path);
+        }
+    }
+
+    assert!(
+        lost.is_empty(),
+        "clearing these fields does not survive a fold: {lost:#?}"
+    );
+
+    // Reported rather than asserted on: the fixture is what it is, and a path it
+    // leaves unset cannot change when cleared. Shrinking this list is how the
+    // sweep's reach grows.
+    eprintln!(
+        "{} of {} paths were already unset in the fixture and proved nothing",
+        vacuous.len(),
+        crate::AppConfig::fields().len(),
+    );
+}
+
 #[test]
 fn law_holds_for_an_unchanged_list() {
     assert_law(&["A"], &["A"]);
