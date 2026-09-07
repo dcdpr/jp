@@ -118,60 +118,60 @@ pub(crate) struct Term {
 impl Ctx {
     /// Create a new context with the given workspace
     pub(crate) fn new(
-        exec: ExecutionContext,
-        workspace: Workspace,
-        fs_backend: Option<Arc<FsStorageBackend>>,
-        runtime: Runtime,
-        args: Globals,
-        config: impl Into<Arc<AppConfig>>,
-        session: Option<Session>,
-        printer: Printer,
-    ) -> Self {
-        let config = config.into();
-        let escalation_cooldown =
-            Duration::from_secs(config.interrupt.escalation_cooldown_secs.into());
-        let mcp_client = jp_mcp::Client::new(config.providers.mcp.clone())
-            .with_child_cwd(exec.child_cwd().map(|cwd| cwd.as_std_path().to_path_buf()));
+    exec: ExecutionContext,
+    workspace: Workspace,
+    fs_backend: Option<Arc<FsStorageBackend>>,
+    runtime: Runtime,
+    args: Globals,
+    config: impl Into<Arc<AppConfig>>,
+    session: Option<Session>,
+    printer: Printer,
+) -> Self {
+    let config = config.into();
+    let escalation_cooldown =
+        Duration::from_secs(config.interrupt.escalation_cooldown_secs.into());
+    let mcp_client = jp_mcp::Client::new(config.providers.mcp.clone().into_map())
+        .with_child_cwd(exec.child_cwd().map(|cwd| cwd.as_std_path().to_path_buf()));
 
-        let is_tty = io::stdout().is_terminal();
-        let width = printer.output_width().columns();
+    let is_tty = io::stdout().is_terminal();
+    let width = printer.output_width().columns();
 
-        let interactive = crate::interactive(args.no_interactive, is_tty);
+    let interactive = crate::interactive(args.no_interactive, is_tty);
 
-        Self {
-            exec,
-            workspace,
-            fs_backend,
-            config,
-            term: Term {
-                args,
-                is_tty,
-                interactive,
-                width,
-            },
-            session,
-            printer: Arc::new(printer),
-            mcp_client,
-            task_handler: TaskHandler::default(),
-            signals: SignalRouter::new(&runtime, escalation_cooldown),
-            config_reset: None,
-            runtime,
+    Self {
+        exec,
+        workspace,
+        fs_backend,
+        config,
+        term: Term {
+            args,
+            is_tty,
+            interactive,
+            width,
+        },
+        session,
+        printer: Arc::new(printer),
+        mcp_client,
+        task_handler: TaskHandler::default(),
+        signals: SignalRouter::new(&runtime, escalation_cooldown),
+        config_reset: None,
+        runtime,
 
-            #[cfg(test)]
-            stubbed_now: DateTime::<Utc>::UNIX_EPOCH,
-        }
+        #[cfg(test)]
+        stubbed_now: DateTime::<Utc>::UNIX_EPOCH,
     }
+}
 
     #[cfg(not(test))]
     #[expect(clippy::unused_self)]
     pub(crate) fn now(&self) -> DateTime<Utc> {
         Utc::now()
     }
-
-    #[cfg(test)]
     pub(crate) fn now(&self) -> DateTime<Utc> {
         self.stubbed_now
     }
+
+    #[cfg(test)]
 
     #[cfg(test)]
     pub(crate) fn set_now(&mut self, now: DateTime<Utc>) {
@@ -180,17 +180,17 @@ impl Ctx {
 
     /// Returns the storage path, if filesystem storage is configured.
     pub(crate) fn storage_path(&self) -> Option<&Utf8Path> {
-        self.fs_backend
-            .as_deref()
-            .map(FsStorageBackend::storage_path)
-    }
+    self.fs_backend
+        .as_deref()
+        .map(FsStorageBackend::storage_path)
+}
 
     /// Returns the user storage path, if filesystem storage is configured.
     pub(crate) fn user_storage_path(&self) -> Option<&Utf8Path> {
-        self.fs_backend
-            .as_deref()
-            .and_then(FsStorageBackend::user_storage_path)
-    }
+    self.fs_backend
+        .as_deref()
+        .and_then(FsStorageBackend::user_storage_path)
+}
 
     /// Get immutable access to the configuration.
     ///
@@ -203,8 +203,8 @@ impl Ctx {
     /// configuration" API in [`jp_config`] *before* constructing the final
     /// [`AppConfig`] object.
     pub(crate) fn config(&self) -> Arc<AppConfig> {
-        self.config.clone()
-    }
+    self.config.clone()
+}
 
     /// Install a resolved config for one scoped run, returning the previous
     /// one.
@@ -220,13 +220,13 @@ impl Ctx {
     /// rather than a mutation: assembling a config is still the partial API's
     /// job.
     pub(crate) fn swap_config(&mut self, config: Arc<AppConfig>) -> Arc<AppConfig> {
-        std::mem::replace(&mut self.config, config)
-    }
+    std::mem::replace(&mut self.config, config)
+}
 
     /// Get a runtime handle.
     pub(crate) fn handle(&self) -> &Handle {
-        self.runtime.handle()
-    }
+    self.runtime.handle()
+}
 
     /// Activate and deactivate MCP servers based on the active conversation
     /// context.
@@ -237,31 +237,31 @@ impl Ctx {
     /// or `tool_definitions` drops the tool again as unreachable and the forced
     /// choice cannot be satisfied.
     pub(crate) async fn configure_active_mcp_servers(
-        &mut self,
-        forced_tool: Option<&str>,
-        scope: McpServerScope,
-    ) -> Result<StartupSet> {
-        let mut server_ids = HashSet::new();
+    &mut self,
+    forced_tool: Option<&str>,
+    scope: McpServerScope,
+) -> Result<StartupSet> {
+    let mut server_ids = HashSet::new();
 
-        for (name, cfg) in self.config.conversation.tools.iter() {
-            if !cfg.is_enabled() && forced_tool != Some(name) {
-                continue;
-            }
-
-            let ToolSource::Mcp { server, .. } = &cfg.source() else {
-                continue;
-            };
-
-            server_ids.insert(McpServerId::new(server));
+    for (name, cfg) in self.config.conversation.tools.iter() {
+        if !cfg.is_enabled() && forced_tool != Some(name) {
+            continue;
         }
 
-        let handle = self.handle().clone();
-        match scope {
-            McpServerScope::Exclusive => self.mcp_client.run_services(server_ids, handle).await,
-            McpServerScope::Shared => self.mcp_client.start_services(server_ids, handle).await,
-        }
-        .map_err(Into::into)
+        let ToolSource::Mcp { server, .. } = &cfg.source() else {
+            continue;
+        };
+
+        server_ids.insert(McpServerId::new(server));
     }
+
+    let handle = self.handle().clone();
+    match scope {
+        McpServerScope::Exclusive => self.mcp_client.run_services(server_ids, handle).await,
+        McpServerScope::Shared => self.mcp_client.start_services(server_ids, handle).await,
+    }
+    .map_err(Into::into)
+}
 }
 
 /// Whether a turn has the MCP client to itself.
