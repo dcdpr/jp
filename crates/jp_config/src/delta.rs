@@ -212,3 +212,7 @@ pub fn delta_vec<T: PartialEq>(prev: &[T], next: Vec<T>) -> Vec<T> {
 #[cfg(test)]
 #[path = "delta_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "delta_law_tests.rs"]
+mod law_tests;

@@ -127,11 +127,14 @@ impl PartialConfigDelta for PartialAccessConfig {
 
 /// Diff two rule lists into a delta that replays to `next`.
 ///
-/// An append-shaped delta can only add, so a rule that disappeared between
-/// `prev` and `next` would come back when the delta is folded over `prev`
-/// again.
-/// When anything is missing from `next`, the delta therefore carries the whole
-/// list with `replace`; otherwise it carries just the new rules and appends.
+/// An append-shaped delta can only add to the end, so it reaches `next` exactly
+/// when `next` starts with `prev`, and the delta is then the tail.
+/// Every other difference (a rule removed, reordered, or inserted before the
+/// last one) has the delta carry the whole list with `replace`.
+///
+/// Order is part of the answer, not a detail: rules of equal specificity break
+/// toward the one declared last, so a delta that reproduced the set of rules
+/// while appending them in a different order would invert which one wins.
 ///
 /// `next` comes from a fully resolved config, so it is the complete rule set
 /// and replacing with it loses nothing.
@@ -139,11 +142,8 @@ fn rule_delta<T: Clone + PartialEq>(
     prev: &MergeableVec<T>,
     next: MergeableVec<T>,
 ) -> MergeableVec<T> {
-    if prev.iter().all(|rule| next.contains(rule)) {
-        return next
-            .into_iter()
-            .filter(|rule| !prev.contains(rule))
-            .collect();
+    if next.starts_with(prev) {
+        return next.iter().skip(prev.len()).cloned().collect();
     }
 
     MergeableVec::Merged(MergedVec {
