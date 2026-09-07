@@ -1120,9 +1120,9 @@ const FAST_MODE_BETA: &str = "fast-mode-2026-02-01";
 /// Anthropic splits the concept across two fields: `service_tier` chooses
 /// whether a Priority Tier capacity commitment may serve the request, and
 /// `speed` opts into fast mode.
-/// Each tier therefore sets one field or the other, never both, which is also
-/// what keeps the request out of the combination Anthropic rejects (fast mode
-/// is unavailable under a commitment).
+/// Each tier sets at most one of them, never both, which is also what keeps the
+/// request out of the combination Anthropic rejects (fast mode is unavailable
+/// under a commitment).
 ///
 /// # Errors
 ///
@@ -1133,9 +1133,10 @@ fn apply_service_tier(
     tier: ServiceTier,
 ) -> Result<()> {
     match tier {
-        ServiceTier::Auto => {
-            builder.service_tier(types::ServiceTier::Auto);
-        }
+        // Sending neither field is how the account's own default decides, which
+        // for Anthropic means `service_tier: "auto"` and standard speed.
+        ServiceTier::Off => {}
+
         ServiceTier::Standard => {
             builder.service_tier(types::ServiceTier::StandardOnly);
         }

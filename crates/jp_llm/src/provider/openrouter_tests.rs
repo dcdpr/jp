@@ -130,10 +130,10 @@ fn request_omits_the_tier_when_unset() {
 }
 
 #[test]
-fn request_omits_the_tier_for_auto() {
-    // OpenRouter has no `auto`; leaving the field off is what hands the choice
-    // back to its own endpoint ranking.
-    assert_eq!(request_tier(Some(ServiceTier::Auto)), None);
+fn request_omits_the_tier_for_off() {
+    // Leaving the field off hands the choice back to OpenRouter's own endpoint
+    // ranking, which never reaches a non-default tier unasked.
+    assert_eq!(request_tier(Some(ServiceTier::Off)), None);
 }
 
 #[test]

@@ -191,7 +191,7 @@ fn assign_service_tier_parses_every_rung() {
     let mut p = PartialParametersConfig::default();
 
     for (input, expected) in [
-        ("auto", ServiceTier::Auto),
+        ("off", ServiceTier::Off),
         ("flex", ServiceTier::Flex),
         ("standard", ServiceTier::Standard),
         ("priority", ServiceTier::Priority),
@@ -210,8 +210,12 @@ fn assign_service_tier_parses_every_rung() {
 fn assign_rejects_an_unknown_service_tier() {
     let mut p = PartialParametersConfig::default();
 
-    let kv = KvAssignment::try_from_cli("service_tier", "scale").unwrap();
-    assert!(p.assign(kv).is_err());
+    // `auto` and `scale` are rungs individual providers offer that JP does not
+    // model; accepting either would hand an unmappable value to the rest.
+    for input in ["auto", "scale"] {
+        let kv = KvAssignment::try_from_cli("service_tier", input).unwrap();
+        assert!(p.assign(kv).is_err(), "`{input}` must not parse");
+    }
 }
 
 #[test]

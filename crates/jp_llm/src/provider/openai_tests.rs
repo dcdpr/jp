@@ -40,9 +40,14 @@ mod service_tier {
         assert_eq!(request_tier(None), None);
     }
 
+    /// `off` sends no field, leaving the project's own default in force.
+    #[test]
+    fn request_omits_the_tier_for_off() {
+        assert_eq!(request_tier(Some(ServiceTier::Off)), None);
+    }
+
     #[test]
     fn request_serializes_every_tier() {
-        assert_eq!(request_tier(Some(ServiceTier::Auto)), Some(json!("auto")));
         assert_eq!(request_tier(Some(ServiceTier::Flex)), Some(json!("flex")));
         // OpenAI spells the base rung `default`, not `standard`.
         assert_eq!(

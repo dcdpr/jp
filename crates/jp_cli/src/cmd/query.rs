@@ -257,8 +257,7 @@ pub(crate) struct Query {
     ///
     /// Providers sell more than one grade of capacity for the same model:
     /// `flex` is cheaper and slower, `priority` is faster and pricier,
-    /// `standard` is the regular rate, and `auto` takes the best the account
-    /// can reach.
+    /// `standard` is the regular rate, and `off` asks for no tier at all.
     ///
     /// Which tiers are available depends on the provider, the model, and the
     /// account; a provider that sells no equivalent refuses the query rather
@@ -267,19 +266,16 @@ pub(crate) struct Query {
     /// Applies to this query and every later one on the conversation, because
     /// each tier is served from separate capacity and switching discards the
     /// prompt cache.
-    /// Use `--no-tier` to stop asking for one.
     #[arg(long = "tier", value_name = "TIER", conflicts_with = "no_service_tier")]
     service_tier: Option<ServiceTier>,
 
-    /// Stop asking for a capacity tier on this conversation.
+    /// Stop asking for a capacity tier.
     ///
-    /// Clears the tier the conversation carries, so later queries fall back to
-    /// whatever the configuration files ask for, which is usually nothing at
-    /// all.
+    /// Shorthand for `--tier off`, which sends no tier and leaves the choice to
+    /// whatever the account is set up for.
     ///
-    /// This is not the same as `--tier standard`: `standard` names a rung and
-    /// is sent as one, while this sends no tier and leaves the choice to the
-    /// provider's own default.
+    /// This is not `--tier standard`: `standard` names a rung and is sent as
+    /// one.
     #[arg(long = "no-tier")]
     no_service_tier: bool,
 
@@ -1959,14 +1955,14 @@ impl IntoPartialAppConfig for Query {
         apply_mounts(&mut partial, mount, workspace, merged_config)?;
         apply_reasoning(&mut partial, reasoning.as_ref(), *no_reasoning);
 
-        // Clearing the merged partial is what reaches "no tier": this runs last
-        // in the pipeline, so the field it clears is the one the conversation
-        // layer contributed. `get_config_delta_from_cli` turns the resulting
-        // absence into an `unsets` entry so the clear persists.
-        if *no_service_tier {
-            partial.assistant.model.parameters.service_tier = None;
-        } else if let Some(tier) = service_tier {
-            partial.assistant.model.parameters.service_tier = Some(*tier);
+        // `off` rather than `None`: a partial's `None` means "no opinion", so
+        // it would leave a tier an earlier layer asked for standing, and the
+        // conversation layer is gap-filled from the file layer on later turns.
+        if let Some(tier) = no_service_tier
+            .then_some(ServiceTier::Off)
+            .or(*service_tier)
+        {
+            partial.assistant.model.parameters.service_tier = Some(tier);
         }
 
         for kv in parameters.clone() {

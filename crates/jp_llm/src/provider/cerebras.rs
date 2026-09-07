@@ -511,13 +511,8 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Value, bool
 
     // Service tiers are only served by dedicated endpoints; a shared endpoint
     // rejects the field, which is why it is sent only when asked for.
-    if let Some(tier) = parameters.service_tier {
-        body["service_tier"] = json!(match tier {
-            ServiceTier::Auto => "auto",
-            ServiceTier::Flex => "flex",
-            ServiceTier::Standard => "default",
-            ServiceTier::Priority => "priority",
-        });
+    if let Some(tier) = parameters.service_tier.and_then(convert_service_tier) {
+        body["service_tier"] = json!(tier);
     }
 
     // Reasoning effort for gpt-oss-120b and zai-glm-4.7.
@@ -575,6 +570,16 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Value, bool
     }
 
     Ok((body, is_structured))
+}
+
+/// Map a requested tier onto Cerebras's `service_tier` parameter.
+fn convert_service_tier(tier: ServiceTier) -> Option<&'static str> {
+    match tier {
+        ServiceTier::Off => None,
+        ServiceTier::Flex => Some("flex"),
+        ServiceTier::Standard => Some("default"),
+        ServiceTier::Priority => Some("priority"),
+    }
 }
 
 /// Transform a JSON schema for Cerebras's strict structured output mode.

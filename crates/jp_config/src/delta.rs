@@ -78,31 +78,6 @@ pub fn delta_opt_vec_at<T: PartialEq + Clone>(
     Some(next)
 }
 
-/// Delta for an optional scalar, reporting when the field was cleared.
-///
-/// Mirrors [`delta_opt`], except that a value `self` holds and `next` does not
-/// pushes `path` to `unsets`.
-/// Replacement cannot express a removal: a delta that merely omits the field
-/// leaves the earlier layer's value in place, so reaching "unset" needs the
-/// field cleared first.
-///
-/// Only meaningful for a field a caller can actively clear, since everywhere
-/// else `next` missing a value `self` holds is unreachable: merging layers
-/// never drops one.
-pub fn delta_opt_at<T: PartialEq>(
-    path: &str,
-    prev: Option<&T>,
-    next: Option<T>,
-    unsets: &mut Vec<String>,
-) -> Option<T> {
-    if prev.is_some() && next.is_none() {
-        unsets.push(path.to_owned());
-        return None;
-    }
-
-    delta_opt(prev, next)
-}
-
 /// Delta for an optional nested partial, reporting the fields it cannot reach.
 ///
 /// Mirrors [`delta_opt_partial`], descending with `path` as the nested value's

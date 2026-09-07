@@ -866,12 +866,9 @@ impl TryFrom<&GoogleConfig> for Google {
 }
 
 /// Map a requested tier onto Gemini's `service_tier` field.
-///
-/// Returns `None` for `auto`: Gemini has no such value, and omitting the field
-/// is what asking the provider to choose means here.
 fn convert_service_tier(tier: ServiceTier) -> Option<types::ServiceTier> {
     match tier {
-        ServiceTier::Auto => None,
+        ServiceTier::Off => None,
         ServiceTier::Flex => Some(types::ServiceTier::Flex),
         ServiceTier::Standard => Some(types::ServiceTier::Standard),
         ServiceTier::Priority => Some(types::ServiceTier::Priority),

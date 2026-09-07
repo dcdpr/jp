@@ -261,9 +261,11 @@ can yield many hits).
 
 The grade of capacity a request is served from, trading price against latency
 and availability.
-JP models four rungs (`auto`, `flex`, `standard`, `priority`) as `ServiceTier`
-in `jp_config::model::parameters`, and each [Provider](#provider) maps them onto
+JP models four rungs (`off`, `flex`, `standard`, `priority`) as `ServiceTier` in
+`jp_config::model::parameters`, and each [Provider](#provider) maps them onto
 its own wire vocabulary.
+`off` is the rung that asks for nothing, which every provider expresses by
+sending no tier at all.
 
 A provider that sells no equivalent of the requested tier refuses the query
 rather than substituting a neighbouring rung, since the substitute would cost

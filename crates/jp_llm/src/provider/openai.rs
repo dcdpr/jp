@@ -390,7 +390,7 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bo
         .and_then(|v| v.as_str())
         .and_then(|s| parse_reasoning_mode(s, model));
 
-    let service_tier = parameters.service_tier.map(convert_service_tier);
+    let service_tier = parameters.service_tier.and_then(convert_service_tier);
 
     // Build the text config from structured output schema and/or verbosity.
     // Transform the schema for OpenAI's strict structured output mode.
@@ -2002,15 +2002,16 @@ fn parse_reasoning_mode(value: &str, model: &ModelDetails) -> Option<types::Reas
 
 /// Map a requested tier onto OpenAI's `service_tier` field.
 ///
+/// `off` omits the field, which leaves the project's own default tier in force.
 /// `Fast` is OpenAI's newer spelling of the priority tier and is accepted
 /// interchangeably; requests use `Priority`, which is also what the response
 /// echoes either way.
-fn convert_service_tier(tier: ServiceTier) -> types::ServiceTier {
+fn convert_service_tier(tier: ServiceTier) -> Option<types::ServiceTier> {
     match tier {
-        ServiceTier::Auto => types::ServiceTier::Auto,
-        ServiceTier::Flex => types::ServiceTier::Flex,
-        ServiceTier::Standard => types::ServiceTier::Default,
-        ServiceTier::Priority => types::ServiceTier::Priority,
+        ServiceTier::Off => None,
+        ServiceTier::Flex => Some(types::ServiceTier::Flex),
+        ServiceTier::Standard => Some(types::ServiceTier::Default),
+        ServiceTier::Priority => Some(types::ServiceTier::Priority),
     }
 }
 

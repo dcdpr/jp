@@ -868,12 +868,15 @@ fn request_omits_both_tier_fields_when_unset() {
     assert_eq!(tier_fields(None), (None, None));
 }
 
+/// `off` sends neither field, which leaves Anthropic's own default in force:
+/// `service_tier: "auto"` and standard speed.
 #[test]
-fn request_maps_auto_and_standard_to_the_commitment_field() {
-    assert_eq!(
-        tier_fields(Some(ServiceTier::Auto)),
-        (Some(types::ServiceTier::Auto), None)
-    );
+fn request_omits_both_tier_fields_for_off() {
+    assert_eq!(tier_fields(Some(ServiceTier::Off)), (None, None));
+}
+
+#[test]
+fn request_maps_standard_to_the_commitment_field() {
     assert_eq!(
         tier_fields(Some(ServiceTier::Standard)),
         (Some(types::ServiceTier::StandardOnly), None)
@@ -897,7 +900,7 @@ fn request_maps_priority_to_fast_mode_and_carries_its_own_beta() {
 /// on traffic that does not need it risks refusals on that traffic.
 #[test]
 fn no_other_tier_asks_for_the_fast_mode_beta() {
-    for tier in [None, Some(ServiceTier::Auto), Some(ServiceTier::Standard)] {
+    for tier in [None, Some(ServiceTier::Off), Some(ServiceTier::Standard)] {
         let request = tier_request(tier).unwrap();
         assert!(
             request.betas.is_empty(),

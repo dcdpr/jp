@@ -857,12 +857,11 @@ fn create_request(
 
 /// Map a requested tier onto OpenRouter's `service_tier` parameter.
 ///
-/// Returns `None` for `auto`: OpenRouter has no such value, and omitting the
-/// field leaves routing to its own endpoint ranking, which is what asking the
-/// provider to choose means here.
+/// `off` omits the field, which leaves routing to OpenRouter's own endpoint
+/// ranking and keeps the request off every non-default tier.
 fn convert_service_tier(tier: ServiceTier) -> Option<request::ServiceTier> {
     match tier {
-        ServiceTier::Auto => None,
+        ServiceTier::Off => None,
         ServiceTier::Flex => Some(request::ServiceTier::Flex),
         ServiceTier::Standard => Some(request::ServiceTier::Default),
         ServiceTier::Priority => Some(request::ServiceTier::Priority),

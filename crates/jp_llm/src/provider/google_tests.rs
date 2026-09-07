@@ -1326,10 +1326,8 @@ mod service_tier_configuration {
     }
 
     #[test]
-    fn request_omits_the_tier_for_auto() {
-        // Gemini has no `auto`, so the choice is left to the provider by saying
-        // nothing rather than by picking a rung.
-        assert_eq!(request_tier(Some(ServiceTier::Auto)), None);
+    fn request_omits_the_tier_for_off() {
+        assert_eq!(request_tier(Some(ServiceTier::Off)), None);
     }
 
     #[test]

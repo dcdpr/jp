@@ -1267,7 +1267,7 @@ fn query_model_override_is_persisted_as_config_delta() {
 #[test]
 fn tier_flag_parses_every_rung() {
     for (arg, expected) in [
-        ("auto", ServiceTier::Auto),
+        ("off", ServiceTier::Off),
         ("flex", ServiceTier::Flex),
         ("standard", ServiceTier::Standard),
         ("priority", ServiceTier::Priority),
@@ -1276,8 +1276,9 @@ fn tier_flag_parses_every_rung() {
         assert_eq!(query.service_tier, Some(expected));
     }
 
-    // `scale` is an OpenAI-only rung JP does not model; accepting it here would
-    // hand an unmappable value to every other provider.
+    // Rungs individual providers offer that JP does not model; accepting either
+    // would hand an unmappable value to every other provider.
+    assert!(parse_query(&["--tier", "auto"]).is_err());
     assert!(parse_query(&["--tier", "scale"]).is_err());
 }
 
@@ -1344,14 +1345,14 @@ fn tier_and_no_tier_flags_conflict() {
     assert!(parse_query(&["--tier", "flex", "--no-tier"]).is_err());
 }
 
-/// `--no-tier` clears a tier the conversation carries, and the clear survives
-/// into later turns.
+/// `--no-tier` is `--tier off`, and it takes a tier off a conversation that
+/// already carries one.
 ///
-/// It travels as an `unsets` entry rather than as an absent field: a delta that
-/// merely omits the tier leaves the earlier layer's value standing, so the
-/// clear would silently do nothing on the next turn.
+/// `off` rather than an absent field: a partial's `None` means "no opinion", so
+/// it would leave the earlier layer's tier standing and the flag would appear
+/// to do nothing on the next turn.
 #[test]
-fn no_tier_flag_clears_a_persisted_tier() {
+fn no_tier_flag_replaces_a_persisted_tier_with_off() {
     let base_config = Arc::new(config_with_model(ProviderId::Anthropic, "base-model"));
     let conversation_id = make_id(1200);
 
@@ -1375,11 +1376,9 @@ fn no_tier_flag_clears_a_persisted_tier() {
     assert_eq!(
         stored.assistant.model.parameters.service_tier,
         Some(ServiceTier::Priority),
-        "the fixture must start with a tier to clear"
+        "the fixture must start with a tier to turn off"
     );
 
-    // The pipeline hands `apply_cli_config` the already-merged partial, so the
-    // field the flag clears is the one the conversation contributed.
     let query = Query {
         no_service_tier: true,
         ..Default::default()
@@ -1390,15 +1389,14 @@ fn no_tier_flag_clears_a_persisted_tier() {
     let runtime_config = build(partial).unwrap();
 
     assert_eq!(
-        runtime_config.assistant.model.parameters.service_tier, None,
-        "--no-tier must resolve this query with no tier"
+        runtime_config.assistant.model.parameters.service_tier,
+        Some(ServiceTier::Off),
+        "--no-tier must resolve this query to `off`"
     );
 
     let delta = get_config_delta_from_cli(&runtime_config, &lock)
         .unwrap()
-        .expect("clearing the tier must produce a config delta");
-
-    assert_eq!(delta.unsets, ["assistant.model.parameters.service_tier"]);
+        .expect("turning the tier off must produce a config delta");
 
     lock.as_mut()
         .update_events(|events| events.add_config_delta(delta));
@@ -1411,8 +1409,31 @@ fn no_tier_flag_clears_a_persisted_tier() {
             .model
             .parameters
             .service_tier,
-        None,
-        "the clear must still apply on the next turn, without the flag"
+        Some(ServiceTier::Off),
+        "`off` must still apply on the next turn, without the flag"
+    );
+}
+
+/// `off` survives being layered under a config file that asks for a tier.
+///
+/// The conversation layer is gap-filled from the file layer rather than merged
+/// onto it, so an absent tier would be refilled with the file's and the flag
+/// would silently stop working after one turn.
+#[test]
+fn off_is_not_refilled_from_the_file_layer() {
+    use jp_config::FillDefaults as _;
+
+    let mut pipeline_base = PartialAppConfig::default();
+    pipeline_base.assistant.model.parameters.service_tier = Some(ServiceTier::Flex);
+
+    let mut conversation = PartialAppConfig::empty();
+    conversation.assistant.model.parameters.service_tier = Some(ServiceTier::Off);
+
+    let filled = conversation.fill_from(pipeline_base);
+
+    assert_eq!(
+        filled.assistant.model.parameters.service_tier,
+        Some(ServiceTier::Off)
     );
 }
 
