@@ -26,6 +26,11 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 version = "0.7.3"
 
+[[audits.comfy-table]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "7.2.1 -> 7.2.2"
+
 [[audits.comrak]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"

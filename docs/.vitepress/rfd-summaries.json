@@ -184,7 +184,7 @@
     "summary": "Add `jp conversation edit` (opens directory in $EDITOR) and `jp conversation path` (prints conversation filesystem path)."
   },
   "048-four-channel-output-model.md": {
-    "hash": "0fde942857ca1a7f7a0dbf181f19df379b2255744eb92c8e4544f978c94b425b",
+    "hash": "15db61bc63a8b4d1648ada5b12ebd5d0de5a31a795dcbe9ebf7a21dab32c858a",
     "summary": "Separate JP output into four channels: stdout for responses, stderr for chrome, /dev/tty for prompts, log file for tracing."
   },
   "049-non-interactive-mode-and-detached-prompt-policy.md": {
@@ -360,7 +360,7 @@
     "summary": "JP gains Anthropic subscription auth with automatic fallback to API key billing when quotas exhaust."
   },
   "091-printer-owned-status-region.md": {
-    "hash": "0a9080f22b1bc652c31996dc9f8d5ead2fd2e7a12d1d22ea843e43fc6c5b6d98",
+    "hash": "bd1bf387cc0a2d4fd6f2433fd3b396242bef40e1dece5bf349e8f4d37ce7073a",
     "summary": "Consolidates nine ephemeral terminal indicators into a printer-owned status region primitive, showing live child-process output with multi-row windows and standardized chrome lifecycle."
   },
   "092-predictable-and-responsive-interrupt-escalation.md": {
