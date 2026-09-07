@@ -1,4 +1,4 @@
-use std::io::Write as _;
+use std::{io::Write as _, sync::mpsc};
 
 use super::*;
 use crate::printer::OutputFormat;
@@ -18,6 +18,65 @@ fn visible_stack(terminal: TerminalCapability) -> (RegionStack, RegionId, Vec<u8
 
     stack.claim_test(1, style, terminal, &mut out);
     (stack, 1, out)
+}
+
+#[test]
+fn a_burst_of_pushes_raises_one_refresh() {
+    // The coalescing invariant is queue depth, not frame count: however many
+    // lines a producer writes while the worker is busy elsewhere, at most one
+    // refresh sits in front of the next persistent write. Nothing drains the
+    // channel here, which is what "the worker is busy" looks like.
+    let (tx, rx) = mpsc::channel();
+    let buffer = Arc::new(Mutex::new(WindowBuffer::default()));
+    let sink = LineSink {
+        buffer: Some(Arc::clone(&buffer)),
+        refresh: Arc::new(AtomicBool::new(false)),
+        region: Some(RegionRef { id: 1, tx }),
+        label: Arc::from("build"),
+    };
+
+    for n in 1..=500 {
+        sink.push(format!("line {n}"));
+    }
+
+    let commands: Vec<_> = rx.try_iter().collect();
+    assert_eq!(
+        commands.len(),
+        1,
+        "500 pushes raised {} commands; one per line is the design this replaced",
+        commands.len()
+    );
+    assert!(matches!(
+        commands[0],
+        Command::Region(RegionCommand::Refresh { .. })
+    ));
+
+    // The lines are bounded rather than queued, so a flooding producer costs a
+    // fixed amount of memory whatever the worker is doing.
+    assert_eq!(buffer.lock().lines.len(), WINDOW_CAPACITY);
+}
+
+#[test]
+fn a_refresh_is_raised_again_once_the_worker_clears_the_flag() {
+    let (tx, rx) = mpsc::channel();
+    let refresh = Arc::new(AtomicBool::new(false));
+    let sink = LineSink {
+        buffer: Some(Arc::new(Mutex::new(WindowBuffer::default()))),
+        refresh: Arc::clone(&refresh),
+        region: Some(RegionRef { id: 1, tx }),
+        label: Arc::from("build"),
+    };
+
+    sink.push("one");
+    sink.push("two");
+    assert_eq!(rx.try_iter().count(), 1);
+
+    // What the worker does when it repaints. The next push has to reach it, or
+    // a line pushed during a paint would never be drawn.
+    refresh.store(false, Ordering::Release);
+
+    sink.push("three");
+    assert_eq!(rx.try_iter().count(), 1);
 }
 
 #[test]
