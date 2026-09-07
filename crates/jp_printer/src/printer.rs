@@ -385,6 +385,19 @@ impl Printer {
         }
     }
 
+    /// The stream interactive prompts render on.
+    ///
+    /// The TTY (`/dev/tty`) when one is available, so a prompt reaches the user
+    /// through any redirection, falling back to `out` so it always renders
+    /// somewhere visible.
+    const fn prompt_target(&self) -> PrintTarget {
+        if self.has_tty {
+            PrintTarget::Tty
+        } else {
+            PrintTarget::Out
+        }
+    }
+
     /// Get a writer for interactive prompt output.
     ///
     /// Prefers the TTY (`/dev/tty`) if available, falling back to `out`.
@@ -393,12 +406,26 @@ impl Printer {
     pub const fn prompt_writer(&self) -> PrinterWriter<'_> {
         PrinterWriter {
             printer: self,
-            target: if self.has_tty {
-                PrintTarget::Tty
-            } else {
-                PrintTarget::Out
-            },
+            target: self.prompt_target(),
         }
+    }
+
+    /// Print a line on the prompt stream.
+    ///
+    /// For the context a question needs to be answerable — the identity of a
+    /// binary awaiting approval, the details of a conversation about to be
+    /// removed.
+    /// Such a line travels with its question rather than as chrome, so
+    /// silencing chrome cannot leave a run blocking on a question whose subject
+    /// it withheld.
+    ///
+    /// The content is written as-is under every output format: a prompt is not
+    /// data, so it is never wrapped in a JSON envelope.
+    pub fn prompt_println<P: Printable>(&self, p: P) {
+        let mut task = p.into_task();
+        task.content.push('\n');
+        task.target = self.prompt_target();
+        self.send(Command::Print(task));
     }
 
     /// Get an **owned** writer for interactive prompt output.
@@ -415,11 +442,7 @@ impl Printer {
     pub fn owned_prompt_writer(&self) -> Box<dyn io::Write + Send> {
         Box::new(OwnedPrinterWriter {
             tx: self.tx.clone(),
-            target: if self.has_tty {
-                PrintTarget::Tty
-            } else {
-                PrintTarget::Out
-            },
+            target: self.prompt_target(),
         })
     }
 

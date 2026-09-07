@@ -586,6 +586,38 @@ fn silenced_chrome_leaves_the_out_writer_alone() {
     assert_eq!(*out.lock(), "data\n");
 }
 
+// A question's own context is not chrome. Silencing chrome must not leave a run
+// blocking on a question whose subject it withheld, which is what happens when
+// the identity of a binary awaiting approval travels as chrome.
+// A memory printer has no tty, so the prompt stream falls back to stdout.
+#[test]
+fn silenced_chrome_leaves_the_prompt_channel_alone() {
+    let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = printer.with_chrome(Chrome::Silenced);
+
+    printer.prompt_println("  \u{2192} Found jp-serve on $PATH (/usr/local/bin/jp-serve)");
+    printer.eprintln("a status line");
+    printer.flush();
+
+    assert_eq!(
+        *out.lock(),
+        "  \u{2192} Found jp-serve on $PATH (/usr/local/bin/jp-serve)\n"
+    );
+    assert_eq!(*err.lock(), "");
+}
+
+// A prompt is not data, so it carries no JSON envelope even when the run's
+// output format is JSON.
+#[test]
+fn a_prompt_line_is_never_wrapped_as_json() {
+    let (printer, out, _) = Printer::memory(OutputFormat::Json);
+
+    printer.prompt_println("Install it?");
+    printer.flush();
+
+    assert_eq!(*out.lock(), "Install it?\n");
+}
+
 // A repaint needs somewhere to land and someone to see it. Callers asking
 // whether to do the work behind one get both answers from one question.
 #[test]

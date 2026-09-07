@@ -1428,7 +1428,7 @@ async fn try_registry_install(
                 )));
             }
 
-            printer.eprintln(format!("  \u{2192} Plugin `{id}` found in registry."));
+            printer.prompt_println(format!("  \u{2192} Plugin `{id}` found in registry."));
             let options = vec![
                 InlineOption::new('y', "install and run"),
                 InlineOption::new('n', "cancel"),
@@ -1494,7 +1494,7 @@ fn check_run_policy(
                 return Ok(());
             }
 
-            printer.eprintln(format!(
+            printer.prompt_println(format!(
                 "  \u{2192} Found jp-{name} on $PATH ({binary_path})"
             ));
             let options = vec![

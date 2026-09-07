@@ -51,7 +51,7 @@ impl Install {
                 )));
             }
 
-            ctx.printer.eprintln(format!(
+            ctx.printer.prompt_println(format!(
                 "  \u{2192} Plugin `{}` is third-party (not official).",
                 self.name
             ));
