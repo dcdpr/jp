@@ -261,10 +261,10 @@ It handles resolution internally.
 The conversation lock is acquired before the confirmation prompt renders and
 held until the answer arrives, so the details the user reads describe the state
 their answer acts on.
-Without that ordering, a prompt left unanswered while another terminal
-continued the conversation would archive work the user never saw.
-The cost is that a bulk archive waits on the lock for each conversation in
-turn, including ones the user goes on to skip.
+Without that ordering, a prompt left unanswered while another terminal continued
+the conversation would archive work the user never saw.
+The cost is that a bulk archive waits on the lock for each conversation in turn,
+including ones the user goes on to skip.
 `jp c rm` orders the two the same way.
 
 ## Drawbacks
