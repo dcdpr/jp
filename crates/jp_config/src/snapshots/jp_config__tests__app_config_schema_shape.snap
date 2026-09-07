@@ -684,7 +684,13 @@ editor: EditorConfig
         program: string
         shell?: bool
     |: null
-  envs?: [string]
+  envs?: MergeableVec
+    |: [string]
+    |: MergedVec
+      dedup?: "inherit" | "true" | "false" | bool | null
+      discard_when_merged?: bool
+      strategy?: "append" | "prepend" | "replace" | null
+      value?: [string]
   inline: InlineEditorConfig
     edit_mode?: "emacs" | "vi"
 extends?:
@@ -729,7 +735,13 @@ providers: ProviderConfig
       api_key_env?: string
       auth?: [string]
       base_url?: string
-      beta_headers?: [string]
+      beta_headers?: MergeableVec
+        |: [string]
+        |: MergedVec
+          dedup?: "inherit" | "true" | "false" | bool | null
+          discard_when_merged?: bool
+          strategy?: "append" | "prepend" | "replace" | null
+          value?: [string]
       chain_on_max_tokens?: bool
     cerebras: CerebrasConfig
       api_key_env?: string

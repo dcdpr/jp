@@ -7,10 +7,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
-    delta::{PartialConfigDelta, delta_opt, delta_opt_vec, delta_opt_vec_at, path},
+    delta::{PartialConfigDelta, delta_opt, delta_opt_mergeable_vec},
     fill::FillDefaults,
-    internal::merge::append_vec_dedup,
+    internal::merge::vec_with_strategy,
     partial::{ToPartial, partial_opt},
+    types::vec::MergeableVec,
     validate::Validator,
 };
 
@@ -69,7 +70,11 @@ pub struct AnthropicConfig {
     ///
     /// To find out which beta headers are available, see:
     /// <https://docs.anthropic.com/en/release-notes/api>
-    #[setting(default = vec![], merge = append_vec_dedup)]
+    #[setting(
+        default = MergeableVec::default(),
+        partial_via = MergeableVec::<String>,
+        merge = vec_with_strategy,
+    )]
     pub beta_headers: Vec<String>,
 }
 
@@ -113,7 +118,7 @@ impl AssignKeyValue for PartialAnthropicConfig {
                     value => Err(format!("expected a string, got {value}").into()),
                 })?;
             }
-            _ if kv.p("beta_headers") => kv.try_some_vec_of_strings(&mut self.beta_headers)?,
+            _ if kv.p("beta_headers") => kv.try_some_mergeable_strings(&mut self.beta_headers)?,
             _ => return missing_key(&kv),
         }
 
@@ -131,29 +136,14 @@ impl PartialConfigDelta for PartialAnthropicConfig {
                 self.chain_on_max_tokens.as_ref(),
                 next.chain_on_max_tokens,
             ),
-            beta_headers: delta_opt_vec(self.beta_headers.as_ref(), next.beta_headers),
+            beta_headers: delta_opt_mergeable_vec(self.beta_headers.as_ref(), next.beta_headers),
         }
     }
 
-    fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
-        Self {
-            // `auth` merges by replacement, so merging reaches `next`
-            // without clearing the field first.
-            auth: delta_opt(self.auth.as_ref(), next.auth),
-            api_key_env: delta_opt(self.api_key_env.as_ref(), next.api_key_env),
-            base_url: delta_opt(self.base_url.as_ref(), next.base_url),
-            chain_on_max_tokens: delta_opt(
-                self.chain_on_max_tokens.as_ref(),
-                next.chain_on_max_tokens,
-            ),
-            beta_headers: delta_opt_vec_at(
-                &path(prefix, "beta_headers"),
-                self.beta_headers.as_ref(),
-                next.beta_headers,
-                unsets,
-            ),
-        }
-    }
+    // No `delta_with_unsets`: `auth` merges by replacement and `beta_headers`
+    // carries its own strategy, so every field here is reachable by merging and
+    // none needs a path reported. The default implementation, which is the plain
+    // diff, is correct.
 }
 
 impl FillDefaults for PartialAnthropicConfig {
@@ -180,7 +170,10 @@ impl ToPartial for AnthropicConfig {
                 &self.chain_on_max_tokens,
                 defaults.chain_on_max_tokens,
             ),
-            beta_headers: partial_opt(&self.beta_headers, defaults.beta_headers),
+            beta_headers: partial_opt(
+                &MergeableVec::from(self.beta_headers.clone()),
+                defaults.beta_headers,
+            ),
         }
     }
 }

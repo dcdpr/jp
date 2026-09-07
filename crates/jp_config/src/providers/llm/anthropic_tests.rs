@@ -222,6 +222,6 @@ fn test_assign_beta_headers() {
 
     assert_eq!(
         partial.beta_headers,
-        Some(vec!["context-editing-2025-06-27".to_owned()])
+        Some(vec!["context-editing-2025-06-27".to_owned()].into())
     );
 }

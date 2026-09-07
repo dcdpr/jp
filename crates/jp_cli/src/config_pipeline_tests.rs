@@ -114,6 +114,7 @@ fn an_override_restating_an_existing_rule_records_nothing() {
 
 /// A list that merges by appending, restated at a value it already holds.
 ///
+/// MCP arguments preserve repetition.
 /// Appending without deduplicating is not idempotent: asking for `FOO` twice
 /// leaves the list holding it twice, which is a different config and so a real
 /// change to record.
@@ -123,7 +124,10 @@ fn an_override_repeating_an_appending_list_is_recorded() {
     let current = base_partial();
 
     let mut overrides = PartialAppConfig::empty();
-    overrides.editor.envs = Some(vec!["FOO".to_owned()]);
+    overrides
+        .providers
+        .mcp
+        .insert("bookworm".to_owned(), mcp_server("FOO"));
 
     assert!(
         override_to_record(&current, overrides.clone())
