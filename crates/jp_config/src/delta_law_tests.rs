@@ -81,10 +81,6 @@ fn assert_law(before: &[&str], after: &[&str]) {
 
 /// Fields whose clear is known not to survive a fold, and why.
 ///
-/// `inherit` is never stored: [`PartialAppConfig`]'s delta zeroes it, because
-/// it is interpreted while config is loaded and only its effect outlives that.
-/// Clearing it is meaningless rather than unrecordable.
-///
 /// `conversation.compaction.rules` has built-in defaults carrying
 /// `discard_when_merged`, so a resolved empty list and the resolved defaults
 /// compare unequal while resolving alike.
@@ -104,7 +100,6 @@ fn assert_law(before: &[&str], after: &[&str]) {
 /// Mechanical to add, and left for the pass that does the tool config as a
 /// whole.
 const CLEAR_NOT_RECORDED: &[&str] = &[
-    "inherit",
     "conversation.compaction.rules",
     "assistant.model.parameters.other",
     "style.reasoning.summary_model.parameters.other",
@@ -203,6 +198,15 @@ fn clearing_any_field_survives_a_fold() {
     for path in crate::AppConfig::fields() {
         let mut next = prev.clone();
         if next.unset(&path).is_err() {
+            continue;
+        }
+
+        // A load-time field is never carried by a delta at all, so clearing it
+        // has nothing to survive.
+        if crate::delta::LOAD_TIME_ONLY
+            .iter()
+            .any(|field| path == *field || path.starts_with(&format!("{field}.")))
+        {
             continue;
         }
 
