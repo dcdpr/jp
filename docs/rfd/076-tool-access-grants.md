@@ -52,7 +52,10 @@ layers must agree on what each rule means.
 
 ### Configuration
 
-A new `access` field on per-tool configuration declares resource grants.
+A new `access` field on tool configuration declares resource grants.
+It is accepted in two scopes: on an individual tool, and on the
+`[conversation.tools.'*']` defaults block (see [Scope
+inheritance](#scope-inheritance)).
 Three resource types are supported: filesystem (`fs`), network (`net`), and
 environment variables (`env`).
 
@@ -113,6 +116,9 @@ security-relevant field, so it is a hard error at config load.
 If host-side semantics for builtin or MCP tools are added later (e.g., JP-side
 enforcement for builtins, MCP argument proxying), a follow-up RFD will define
 them.
+This rejection covers `access` declared on a named tool; for grants that reach a
+tool through the `*` defaults, see [Declared versus inherited
+grants](#declared-versus-inherited-grants).
 
 #### Cross-layer merging
 
@@ -151,6 +157,81 @@ value = [
 This applies the standard jp\_config merge primitives uniformly — users already
 familiar with `MergeableVec` semantics elsewhere (attachments, instructions,
 sections) don't learn new rules for `access`.
+
+#### Scope inheritance
+
+`access` is declared in one of two scopes:
+
+- **Per-tool** — `[conversation.tools.<name>.access]`.
+- **Defaults** — `[conversation.tools.'*'.access]`, which applies to every local
+  tool that declares no `access` of its own.
+
+Scope resolution is **replace**, not field-by-field fill: a tool that declares
+any `access` block ignores the `*` block entirely.
+Reading a tool's `access` block therefore tells the whole truth about what that
+tool may do.
+
+The rejected alternative is appending the `*` rules to the tool's own.
+That leaves a grant in force which is not visible at the place the reader is
+looking, and it makes narrowing impossible: with append, the only way for a tool
+to take away something `*` granted is to add a longer-prefix rule with the
+capabilities set `false` and rely on specificity resolution to shadow the
+broader grant.
+That is denial-by-prefix-arithmetic, the same class of subtlety
+[Inheritance-based evaluation](#inheritance-based-evaluation) is rejected for.
+The cost of replace is repetition — a tool that wants the defaults plus one more
+rule restates the defaults — and that is the intended trade.
+A copied rule is auditable at the tool; an inherited one is not.
+
+The two axes are independent:
+
+| Axis                             | Rule                                                     |
+| -------------------------------- | -------------------------------------------------------- |
+| Between scopes (`*` vs per-tool) | Replace — the most specific non-empty scope wins whole   |
+| Between layers within one scope  | Append (see [Cross-layer merging](#cross-layer-merging)) |
+
+So `*` and each tool are separate rule pools, each accumulated across config
+layers, and the tool's policy is its own pool when non-empty, otherwise the `*`
+pool.
+`strategy = "replace"` still resets a pool from within a layer.
+
+The unit of replacement is the whole `access` block, not one resource type.
+A scope counts as non-empty when any of `fs`, `net`, or `env` holds a rule, and
+the block that wins carries all three lists.
+So a tool declaring only `access.fs` rules also drops the `*` block's
+`access.env` rules, and reverts to unrestricted environment access unless it
+restates them.
+This follows from the same reason replace beats append — a tool's block is read
+as the complete account of what that tool may do, and per-resource-type
+inheritance would make two of the three lists invisible at the tool.
+It is the sharpest edge of the design: check every resource type when you give a
+tool rules of its own, not just the one you came to change.
+
+One consequence is worth stating plainly: a single rule under
+`[conversation.tools.'*'.access]` switches every local tool without its own
+block to default-deny at once.
+That is what the scope is for, but the blast radius is wide — a `*` block
+granting read on `.` and nothing else revokes every such tool's write access.
+
+#### Declared versus inherited grants
+
+The builtin/mcp rejection above applies to `access` **declared on a named
+tool**.
+Access reaching a tool through the `*` scope is *skipped* for builtin and MCP
+tools, not rejected.
+
+The rejection exists because a user who writes
+`[conversation.tools.some_mcp_tool.access]` has named that tool, and would
+otherwise believe the grant applies to it.
+That reasoning does not transfer to `*`, which describes "the tools that consume
+access grants" — it makes no claim about any individual tool, so there is no
+false confidence to protect against.
+Without the distinction the `*` scope would be unusable: any workspace with a
+single MCP server configured would fail to load as soon as `*.access` was set.
+
+The same rule extends to any future scope broader than one tool (tool groups,
+per RFDs 055–057): grants written at a scope the user did not name
+tool-by-tool apply to the local tools in that scope and pass over the rest.
 
 ### Rule evaluation
 
@@ -675,9 +756,13 @@ pub struct FsRuleConfig {
 // Config-derived partials so they participate in layered merging.
 ```
 
-`ToolConfig` gains an `access: Option<AccessConfig>` field with standard
-`AssignKeyValue`, `PartialConfigDelta`, and `ToPartial` impls alongside the
-existing fields like `options`.
+`ToolConfig` and `ToolsDefaultsConfig` each gain an `access:
+Option<AccessConfig>` field with standard `AssignKeyValue`,
+`PartialConfigDelta`, and `ToPartial` impls alongside the existing fields like
+`options`.
+Neither participates in `FillDefaults`: scope resolution is replace, so it
+happens in `ToolConfigWithDefaults::access()` (the shape of `run()` and
+`result()`) rather than through the field-by-field fill `style` uses.
 After merging, the finalized `AccessConfig` is converted to
 `jp_tool::AccessPolicy` at the boundary in `jp_llm::execute_local` — rule paths
 are canonicalized (see [Rule path
@@ -688,14 +773,18 @@ receives; `MergeableVec` and the partial types never cross the wire.
 
 ### Data flow
 
-1. Tool config declares `access` on `[conversation.tools.*]` entries.
-   After all config layers are merged, config load rejects `access` on tools
-   whose finalized source is `builtin` or `mcp`.
-2. Config layers merge per-subfield: `access.fs`, `access.net`, and `access.env`
-   each merge independently as `MergeableVec`.
+1. Tool config declares `access` on a named tool or on the
+   `[conversation.tools.'*']` defaults.
+   After all config layers are merged, config load rejects `access` declared on
+   a tool whose finalized source is `builtin` or `mcp`.
+2. Config layers merge per-subfield within each scope: `access.fs`,
+   `access.net`, and `access.env` each merge independently as `MergeableVec`.
    Default strategy is append; replace requires explicit `strategy = "replace"`
    (see [Cross-layer merging](#cross-layer-merging)).
-   The merged result is an `AccessConfig` with plain `Vec<_>` fields.
+   The merged result is an `AccessConfig` with plain `Vec<_>` fields per scope.
+   Scope resolution then picks one pool per tool: the tool's own when non-empty,
+   otherwise the `*` pool for a local tool and nothing for a builtin or MCP tool
+   (see [Scope inheritance](#scope-inheritance)).
 3. `jp_llm::execute_local()` converts the merged `AccessConfig` to a
    `jp_tool::AccessPolicy`: rule paths are canonicalized against `ctx.root`,
    hosts are normalized, and the resulting policy is serialized into the context
@@ -798,12 +887,15 @@ Self-contained evaluation is simpler and safer.
   establishes.
 - **MCP tool access control.** MCP tools run on external servers.
   The server's security is the server operator's responsibility.
-  Config load rejects `access` on MCP and builtin tools (see Configuration).
-- **Group-level access defaults and overrides.** `access` is per-tool in V1.
+  Config load rejects `access` declared on an MCP or builtin tool, and the `*`
+  defaults pass over them (see Configuration).
+- **Group-level access defaults and overrides.** `access` is declared per-tool
+  or on the `*` defaults; there is no per-group scope.
   The example in Motivation is intentionally repetitive.
-  If RFDs 055–057 (group defaults/overrides) land, access grants should
-  participate in the same group merge model as other tool config; defining that
-  is out of scope here.
+  If RFDs 055–057 (group defaults/overrides) land, a group becomes a third
+  scope between `*` and the tool, resolved by the same replace rule and the same
+  declared-versus-inherited rule; defining the group merge model itself is out
+  of scope here.
 
 ## Risks and Open Questions
 
@@ -893,6 +985,29 @@ responsibility via OS-level sandboxing.
 
 Depends on Phase 3.
 
+### Phase 5: `*`-scope grants
+
+Add `access: Option<AccessConfig>` to `ToolsDefaultsConfig` and resolve it in
+`ToolConfigWithDefaults::access()` under the replace rule, skipping builtin and
+MCP tools.
+The non-empty test spans every resource list, so a block holding only `env`
+rules is a policy like any other.
+Narrow the post-merge validation to `access` declared on a tool, so an inherited
+grant no longer trips the builtin/mcp rejection.
+
+`--mount` needs one adjustment.
+It writes rules into a tool's own scope, which under replace detaches that tool
+from `*`.
+When the tool declared nothing of its own, the injected block is therefore
+seeded with whatever the tool was inheriting: the `*` rules when they exist, and
+otherwise the workspace-default rule that [Default-deny
+preservation][D43-deny] already specifies.
+Without the seed, mounting into a tool covered by a restrictive `*` block would
+silently widen it back to full workspace access.
+
+Depends on Phase 2.
+Independent of Phases 3 and 4.
+
 ## References
 
 - [RFD 075] — OS-level sandboxing for subprocess tools.
@@ -910,6 +1025,8 @@ Depends on Phase 3.
 - [Deno security model] — Inspiration for the grant-based, default-deny
   permission model.
 
+[D43-deny]:
+    drafts/D43-tool-access-to-external-paths-via-workspace-symlinks.md#default-deny-preservation
 [Deno security model]: https://docs.deno.com/runtime/fundamentals/security/
 [RFD 016]: 016-wasm-plugin-architecture.md
 [RFD 042]: 042-tool-options.md
