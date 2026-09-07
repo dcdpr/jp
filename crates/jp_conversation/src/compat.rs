@@ -253,9 +253,13 @@ fn sole_matching_variant<'a>(union_type: &'a UnionType, value: &Value) -> Option
 /// Whether a schema could describe a JSON value of this shape.
 ///
 /// Shape only: a string schema accepts every string, whatever its constraints.
-/// A union, a reference, and an unknown could each hold anything, so they
-/// accept everything — which makes them count as candidates and so pushes the
-/// enclosing union towards being left alone.
+/// A union and an unknown could hold anything, so they accept everything, which
+/// makes them count as candidates and pushes the enclosing union towards being
+/// left alone.
+///
+/// A reference counts for the same reason without being resolved: the shape it
+/// names matters only once a variant has been chosen, and resolving one here
+/// would need the enclosing schemas that [`strip_schema_type`] carries.
 const fn accepts(ty: &SchemaType, value: &Value) -> bool {
     matches!(
         (ty, value),
