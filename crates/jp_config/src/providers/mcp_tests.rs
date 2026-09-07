@@ -2,7 +2,10 @@ use schematic::PartialConfig as _;
 use test_log::test;
 
 use super::*;
-use crate::assignment::KvAssignment;
+use crate::{
+    assignment::KvAssignment,
+    types::vec::{MergeableVec, MergedVec},
+};
 
 #[test]
 fn stdio_optional_defaults_to_false() {
@@ -61,29 +64,32 @@ fn assign_startup_timeout_via_cli() {
 fn arguments_and_variables_append_across_layers() {
     use schematic::PartialConfig as _;
 
-    // Both fields declare `merge = append_vec`, so a later layer adds to the
-    // earlier one rather than replacing it.
+    // Both fields append a later layer onto the earlier one, and keep
+    // duplicates while doing it, so the merged value carries `dedup = false`.
     let mut base = PartialStdioConfig {
-        arguments: Some(vec!["serve".to_owned()]),
-        variables: Some(vec!["HOME".to_owned()]),
+        arguments: Some(vec!["serve".to_owned()].into()),
+        variables: Some(vec!["HOME".to_owned()].into()),
         ..Default::default()
     };
     let overlay = PartialStdioConfig {
-        arguments: Some(vec!["--verbose".to_owned()]),
-        variables: Some(vec!["PATH".to_owned()]),
+        arguments: Some(vec!["--verbose".to_owned()].into()),
+        variables: Some(vec!["PATH".to_owned()].into()),
         ..Default::default()
     };
 
     base.merge(&(), overlay).unwrap();
 
-    assert_eq!(
-        base.arguments,
-        Some(vec!["serve".to_owned(), "--verbose".to_owned()])
-    );
-    assert_eq!(
-        base.variables,
-        Some(vec!["HOME".to_owned(), "PATH".to_owned()])
-    );
+    let ordered = |values: &[&str]| {
+        Some(MergeableVec::Merged(MergedVec {
+            value: values.iter().map(|v| (*v).to_owned()).collect(),
+            strategy: None,
+            dedup: Some(false),
+            discard_when_merged: false,
+        }))
+    };
+
+    assert_eq!(base.arguments, ordered(&["serve", "--verbose"]));
+    assert_eq!(base.variables, ordered(&["HOME", "PATH"]));
 }
 
 #[test]

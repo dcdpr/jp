@@ -8,7 +8,13 @@ use crate::providers::mcp::{PartialMcpProviderConfig, PartialStdioConfig};
 fn server(arguments: &[&str]) -> PartialMcpProviderConfig {
     PartialMcpProviderConfig::Stdio(PartialStdioConfig {
         command: Some("serve".into()),
-        arguments: Some(arguments.iter().map(|a| (*a).to_owned()).collect()),
+        arguments: Some(
+            arguments
+                .iter()
+                .map(|a| (*a).to_owned())
+                .collect::<Vec<_>>()
+                .into(),
+        ),
         ..PartialStdioConfig::default()
     })
 }
@@ -23,7 +29,7 @@ fn map(arguments: &[&str]) -> IndexMap<String, PartialMcpProviderConfig> {
 /// The `arguments` of a server entry, for asserting on a computed delta.
 fn arguments(entry: &PartialMcpProviderConfig) -> Option<&Vec<String>> {
     let PartialMcpProviderConfig::Stdio(config) = entry;
-    config.arguments.as_ref()
+    config.arguments.as_deref()
 }
 
 #[test]
@@ -92,35 +98,35 @@ fn an_appended_argument_reports_no_path() {
     );
 }
 
-/// A change appending cannot reach reports its path and carries the whole list.
+/// A change appending cannot reach carries the whole list with `replace`.
 ///
-/// The path is what the fold clears, which is what lets the list that follows
-/// land verbatim instead of being appended to the one already there.
+/// No path is reported: the field states the strategy itself, so the fold has
+/// nothing to clear first.
 #[test]
-fn a_dropped_argument_reports_its_path_and_carries_the_whole_list() {
+fn a_dropped_argument_is_recorded_as_a_replacement() {
     let prev = config_with_server(&["--a", "--b"]);
     let next = config_with_server(&["--a"]);
 
     let mut unsets = Vec::new();
     let delta = prev.delta_with_unsets(next, "", &mut unsets);
 
-    assert_eq!(unsets, ["providers.mcp.kagi.arguments"]);
+    assert!(unsets.is_empty(), "nothing to clear: {unsets:?}");
     assert_eq!(
         arguments(&delta.providers.mcp["kagi"]),
         Some(&vec!["--a".to_owned()])
     );
 }
 
-/// Reordering is not an extension either, so it clears too.
+/// Reordering is not an extension either, so it replaces too.
 #[test]
-fn a_reordered_argument_list_reports_its_path() {
+fn a_reordered_argument_list_is_recorded_as_a_replacement() {
     let prev = config_with_server(&["--a", "--b"]);
     let next = config_with_server(&["--b", "--a"]);
 
     let mut unsets = Vec::new();
     let delta = prev.delta_with_unsets(next, "", &mut unsets);
 
-    assert_eq!(unsets, ["providers.mcp.kagi.arguments"]);
+    assert!(unsets.is_empty(), "nothing to clear: {unsets:?}");
     assert_eq!(
         arguments(&delta.providers.mcp["kagi"]),
         Some(&vec!["--b".to_owned(), "--a".to_owned()])
@@ -214,14 +220,30 @@ fn map_delta_keeps_the_changed_fields_of_an_entry() {
     assert_eq!(arguments(&delta["kagi"]), Some(&vec!["--b".to_owned()]));
 }
 
-/// An entry that differs but has no expressible delta is left out entirely.
+/// An entry whose delta carries nothing is left out entirely.
 ///
 /// Keeping it would hand the caller a map with one entry holding nothing, which
 /// reads as a change to every emptiness check upstream.
+/// A stdio entry no longer reaches that state through its `arguments`, which
+/// can now say `replace`, so the case is built directly.
 #[test]
 fn map_delta_drops_an_entry_whose_delta_is_empty() {
-    let prev = map(&["--a", "--b"]);
-    let next = map(&["--a"]);
+    let entry = |command: &str| -> IndexMap<String, PartialMcpProviderConfig> {
+        let mut map = IndexMap::new();
+        map.insert(
+            "kagi".to_owned(),
+            PartialMcpProviderConfig::Stdio(PartialStdioConfig {
+                command: Some(command.into()),
+                ..PartialStdioConfig::default()
+            }),
+        );
+        map
+    };
 
-    assert!(delta_map(&prev, next).is_empty());
+    // Equal entries are dropped by the equality check ahead of the delta.
+    assert!(delta_map(&entry("serve"), entry("serve")).is_empty());
+
+    // A differing entry contributes only what changed.
+    let delta = delta_map(&entry("serve"), entry("other"));
+    assert_eq!(delta.len(), 1);
 }

@@ -13,7 +13,7 @@ fn partial_with_server() -> PartialAppConfig {
         "bookworm".to_owned(),
         PartialMcpProviderConfig::Stdio(PartialStdioConfig {
             command: Some("just".into()),
-            arguments: Some(vec!["serve".to_owned(), "--verbose".to_owned()]),
+            arguments: Some(vec!["serve".to_owned(), "--verbose".to_owned()].into()),
             ..PartialStdioConfig::default()
         }),
     );
@@ -23,7 +23,7 @@ fn partial_with_server() -> PartialAppConfig {
 /// The `arguments` of the `bookworm` server, if the entry is present.
 fn arguments(partial: &PartialAppConfig) -> Option<&Vec<String>> {
     let PartialMcpProviderConfig::Stdio(config) = partial.providers.mcp.get("bookworm")?;
-    config.arguments.as_ref()
+    config.arguments.as_deref()
 }
 
 #[test]
@@ -148,7 +148,7 @@ fn a_cleared_list_takes_the_next_layers_value_verbatim() {
     next.providers.mcp.insert(
         "bookworm".to_owned(),
         PartialMcpProviderConfig::Stdio(PartialStdioConfig {
-            arguments: Some(vec!["serve".to_owned()]),
+            arguments: Some(vec!["serve".to_owned()].into()),
             ..PartialStdioConfig::default()
         }),
     );
@@ -169,7 +169,7 @@ fn an_uncleared_list_appends_the_next_layers_value() {
     next.providers.mcp.insert(
         "bookworm".to_owned(),
         PartialMcpProviderConfig::Stdio(PartialStdioConfig {
-            arguments: Some(vec!["serve".to_owned()]),
+            arguments: Some(vec!["serve".to_owned()].into()),
             ..PartialStdioConfig::default()
         }),
     );

@@ -300,7 +300,7 @@ fn conversation_clears_allow_cfg_resets() {
 fn mcp_server(argument: &str) -> PartialMcpProviderConfig {
     PartialMcpProviderConfig::Stdio(PartialStdioConfig {
         command: Some("just".into()),
-        arguments: Some(vec![argument.to_owned()]),
+        arguments: Some(vec![argument.to_owned()].into()),
         ..PartialStdioConfig::default()
     })
 }
@@ -308,7 +308,7 @@ fn mcp_server(argument: &str) -> PartialMcpProviderConfig {
 /// The `arguments` of a server in a resolved partial.
 fn mcp_arguments(partial: &PartialAppConfig, server: &str) -> Option<Vec<String>> {
     let PartialMcpProviderConfig::Stdio(config) = partial.providers.mcp.get(server)?;
-    config.arguments.clone()
+    config.arguments.as_deref().cloned()
 }
 
 /// The per-conversation layer is a resolved snapshot, not a contribution.

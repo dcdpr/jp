@@ -7,10 +7,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
-    delta::{
-        PartialConfigDelta, delta_opt, delta_opt_partial, delta_opt_vec, delta_opt_vec_at, path,
-    },
+    delta::{PartialConfigDelta, delta_opt, delta_opt_mergeable_vec, delta_opt_partial},
+    internal::merge::ordered_vec_with_strategy,
     partial::{ToPartial, partial_opt, partial_opt_config},
+    types::vec::MergeableVec,
 };
 
 /// MCP provider configuration.
@@ -35,8 +35,8 @@ impl PartialConfigDelta for PartialMcpProviderConfig {
         match (self, next) {
             (Self::Stdio(prev), Self::Stdio(next)) => Self::Stdio(PartialStdioConfig {
                 command: delta_opt(prev.command.as_ref(), next.command),
-                arguments: delta_opt_vec(prev.arguments.as_ref(), next.arguments),
-                variables: delta_opt_vec(prev.variables.as_ref(), next.variables),
+                arguments: delta_opt_mergeable_vec(prev.arguments.as_ref(), next.arguments),
+                variables: delta_opt_mergeable_vec(prev.variables.as_ref(), next.variables),
                 checksum: delta_opt_partial(prev.checksum.as_ref(), next.checksum),
                 optional: delta_opt(prev.optional.as_ref(), next.optional),
                 startup_timeout_secs: delta_opt(
@@ -47,31 +47,8 @@ impl PartialConfigDelta for PartialMcpProviderConfig {
         }
     }
 
-    fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
-        match (self, next) {
-            (Self::Stdio(prev), Self::Stdio(next)) => Self::Stdio(PartialStdioConfig {
-                command: delta_opt(prev.command.as_ref(), next.command),
-                arguments: delta_opt_vec_at(
-                    &path(prefix, "arguments"),
-                    prev.arguments.as_ref(),
-                    next.arguments,
-                    unsets,
-                ),
-                variables: delta_opt_vec_at(
-                    &path(prefix, "variables"),
-                    prev.variables.as_ref(),
-                    next.variables,
-                    unsets,
-                ),
-                checksum: delta_opt_partial(prev.checksum.as_ref(), next.checksum),
-                optional: delta_opt(prev.optional.as_ref(), next.optional),
-                startup_timeout_secs: delta_opt(
-                    prev.startup_timeout_secs.as_ref(),
-                    next.startup_timeout_secs,
-                ),
-            }),
-        }
-    }
+    // No `delta_with_unsets`: `arguments` and `variables` state `replace`
+    // themselves now, so no field here needs a path reported.
 }
 
 impl McpProviderConfig {
@@ -105,7 +82,18 @@ pub struct StdioConfig {
     pub command: PathBuf,
 
     /// The arguments to pass to the command.
-    #[setting(default, merge = schematic::merge::append_vec)]
+    ///
+    /// Appends to the list from any earlier layer.
+    /// Set a strategy to override that:
+    ///
+    /// ```toml
+    /// arguments = { value = ["serve"], strategy = "replace" }
+    /// ```
+    #[setting(
+        default,
+        partial_via = MergeableVec::<String>,
+        merge = ordered_vec_with_strategy,
+    )]
     pub arguments: Vec<String>,
 
     /// The environment variables to expose to the command.
@@ -113,7 +101,14 @@ pub struct StdioConfig {
     /// By default, the command inherits the environment of the parent process.
     /// You can use this to add additional environment variables, or override
     /// existing ones.
-    #[setting(default, merge = schematic::merge::append_vec)]
+    ///
+    /// Appends to the list from any earlier layer, and accepts a `strategy` the
+    /// same way `arguments` does.
+    #[setting(
+        default,
+        partial_via = MergeableVec::<String>,
+        merge = ordered_vec_with_strategy,
+    )]
     pub variables: Vec<String>,
 
     /// The binary checksum for the binary.
@@ -151,8 +146,8 @@ impl AssignKeyValue for PartialStdioConfig {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
             "command" => self.command = kv.try_some_from_str()?,
-            _ if kv.p("arguments") => kv.try_some_vec_of_strings(&mut self.arguments)?,
-            _ if kv.p("variables") => kv.try_some_vec_of_strings(&mut self.variables)?,
+            _ if kv.p("arguments") => kv.try_some_mergeable_strings(&mut self.arguments)?,
+            _ if kv.p("variables") => kv.try_some_mergeable_strings(&mut self.variables)?,
             _ if kv.p("checksum") => self.checksum.assign(kv)?,
             "optional" => self.optional = kv.try_some_bool()?,
             "startup_timeout_secs" => self.startup_timeout_secs = kv.try_some_u32()?,
@@ -169,8 +164,14 @@ impl ToPartial for StdioConfig {
 
         PartialStdioConfig {
             command: partial_opt(&self.command, defaults.command),
-            arguments: partial_opt(&self.arguments, defaults.arguments),
-            variables: partial_opt(&self.variables, defaults.variables),
+            arguments: partial_opt(
+                &MergeableVec::from(self.arguments.clone()),
+                defaults.arguments,
+            ),
+            variables: partial_opt(
+                &MergeableVec::from(self.variables.clone()),
+                defaults.variables,
+            ),
             checksum: partial_opt_config(self.checksum.as_ref(), defaults.checksum),
             optional: partial_opt(&self.optional, defaults.optional),
             startup_timeout_secs: partial_opt(
