@@ -228,20 +228,21 @@ of this RFD.
 
 Deferring it has a real cost, worth naming rather than glossing.
 Twelve persona files and `knowledge/software-laws.toml` compose their identity
-through `[assistant.system_prompt]`, and four justfile recipes apply a persona to
-an *already running* conversation with `--cfg=personas/<name>`, which lands as a
-config delta.
-So until the field is gone, the single most common operator-level change JP makes
-is the one shape this RFD cannot help with, and a persona applied mid-conversation
-still costs a full cache miss.
+through `[assistant.system_prompt]`, and four justfile recipes apply a persona
+to an *already running* conversation with `--cfg=personas/<name>`, which lands
+as a config delta.
+So until the field is gone, the single most common operator-level change JP
+makes is the one shape this RFD cannot help with, and a persona applied
+mid-conversation still costs a full cache miss.
 
 ## Non-Goals
 
 - **Tool search and model-initiated discovery.** No `search_tools`, no
   `tool_reference`, no `referenced_tools` on `ToolCallResponse`.
 - **Removing `assistant.system_prompt`.** It stays for now, treated as prelude
-  content that never becomes a directive. A follow-up RFD collapses it into the
-  prompt list; see Alternatives for what that costs to defer.
+  content that never becomes a directive.
+  A follow-up RFD collapses it into the prompt list; see Alternatives for what
+  that costs to defer.
 - **A user-facing `defer` setting.** Deferral is internal.
 - **Per-position derivation of the "Tool Usage" section.** It is computed once
   from the final resolved config and lives in the prelude, as today.
