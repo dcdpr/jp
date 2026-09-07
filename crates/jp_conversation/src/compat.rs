@@ -5,17 +5,27 @@
 //! The standard serde `deny_unknown_fields` on `Partial*Config` types causes
 //! deserialization to fail entirely.
 //!
-//! This module provides schema-aware stripping: before deserializing, we walk
-//! the JSON value alongside the current `AppConfig` schema and remove any keys
-//! that don't exist in the schema.
-//! If deserialization still fails after stripping (e.g. a field's type
-//! changed), we fall back to an empty config.
+//! Recovery happens in two passes.
+//! The first is schema-aware stripping: we walk the JSON value alongside the
+//! current `AppConfig` schema and remove any keys that don't exist in the
+//! schema.
+//! The second catches what a schema walk cannot — a field whose type changed,
+//! an enum variant that was renamed, a validator that was tightened — by
+//! deserializing repeatedly and dropping the field each failure names, until
+//! the value parses.
+//!
+//! Only a value that cannot be recovered at all falls back to an empty config.
+//! That is close to useless as a recovery: `assistant.model.id.provider` and
+//! `conversation.tools.'*'.run` are required and have no default, so an empty
+//! config cannot be finalized and the conversation still fails to load.
+//! Both passes exist to keep that last resort from being reached.
 
 use jp_config::{
     AppConfig, PartialAppConfig, Schema, SchemaType,
     schema::{ReferenceType, SchemaField, StructType, UnionType},
 };
 use serde_json::{Value, json};
+use serde_path_to_error::{Path as ErrorPath, Segment};
 use tracing::warn;
 
 /// Deserialize a [`PartialAppConfig`] from a raw JSON value, tolerating schema
@@ -23,9 +33,12 @@ use tracing::warn;
 ///
 /// 1. Strips unknown fields using the current [`AppConfig`] schema.
 /// 2. Repairs field values whose accepted spelling has changed.
-/// 3. Attempts typed deserialization.
-/// 4. If that fails (e.g. a field's type changed), falls back to
-///    [`PartialAppConfig::empty()`].
+/// 3. Deserializes, dropping each field the failure names and retrying, until
+///    the value parses or nothing is left to drop.
+/// 4. Falls back to [`PartialAppConfig::empty()`] only when a failure names
+///    nothing droppable.
+///
+/// Every dropped field is reported at warn level with its path.
 ///
 /// Used for both the base config snapshot (`base_config.json`) and config delta
 /// events in the event stream.
@@ -42,15 +55,83 @@ pub fn deserialize_partial_config(mut value: Value) -> PartialAppConfig {
 
     migrate_legacy_rule_bounds(&mut value);
 
-    match serde_json::from_value::<PartialAppConfig>(value) {
-        Ok(config) => config,
-        Err(err) => {
+    // Each pass either succeeds or removes one entry from `value`, so the
+    // value shrinks until it parses or has nothing left to give.
+    loop {
+        let error = match serde_path_to_error::deserialize::<_, PartialAppConfig>(&value) {
+            Ok(config) => return config,
+            Err(error) => error,
+        };
+
+        if !remove_at_path(&mut value, error.path()) {
             warn!(
-                error = %err,
-                "Stored config incompatible with current schema, replacing with empty config.",
+                error = %error.inner(),
+                "Stored config cannot be recovered, replacing with empty config.",
             );
-            PartialAppConfig::empty()
+            return PartialAppConfig::empty();
         }
+
+        warn!(
+            path = %error.path(),
+            error = %error.inner(),
+            "Dropped an incompatible field from the stored config.",
+        );
+    }
+}
+
+/// Remove the entry a deserialization failure points at.
+///
+/// Returns `false` when the path names nothing removable — an empty path (the
+/// failure is the value itself), a path that no longer resolves, or one made
+/// only of enum and unknown segments.
+///
+/// A path that *ends* in an enum or unknown segment is truncated to its last
+/// map or sequence segment and that entry is removed instead.
+/// Dropping the enclosing field discards more than the failure named, but it
+/// keeps the rest of the config, which the alternative does not.
+fn remove_at_path(value: &mut Value, path: &ErrorPath) -> bool {
+    let segments: Vec<&Segment> = path.iter().collect();
+
+    // `Chain::Some`, `NonStringKey` and the like arrive as `Unknown`, and an
+    // enum variant is not an addressable entry either.
+    let removable = segments
+        .iter()
+        .rposition(|segment| matches!(segment, Segment::Map { .. } | Segment::Seq { .. }));
+    let Some(removable) = removable else {
+        return false;
+    };
+    let (target, parents) = segments[..=removable]
+        .split_last()
+        .expect("rposition found an index, so the slice is non-empty");
+
+    let mut current = value;
+    for segment in parents {
+        let child = match segment {
+            Segment::Map { key } => current.as_object_mut().and_then(|obj| obj.get_mut(key)),
+            Segment::Seq { index } => current
+                .as_array_mut()
+                .and_then(|items| items.get_mut(*index)),
+            Segment::Enum { .. } | Segment::Unknown => None,
+        };
+
+        let Some(child) = child else {
+            return false;
+        };
+        current = child;
+    }
+
+    match target {
+        Segment::Map { key } => current
+            .as_object_mut()
+            .is_some_and(|obj| obj.remove(key).is_some()),
+        Segment::Seq { index } => current.as_array_mut().is_some_and(|items| {
+            let in_range = *index < items.len();
+            if in_range {
+                items.remove(*index);
+            }
+            in_range
+        }),
+        Segment::Enum { .. } | Segment::Unknown => false,
     }
 }
 

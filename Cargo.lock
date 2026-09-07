@@ -2385,6 +2385,7 @@ dependencies = [
  "quick-xml",
  "serde",
  "serde_json",
+ "serde_path_to_error",
  "test-log",
  "thiserror 2.0.20",
  "tracing",
