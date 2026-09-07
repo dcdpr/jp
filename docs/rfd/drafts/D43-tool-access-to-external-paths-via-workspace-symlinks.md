@@ -506,11 +506,11 @@ restrict the affected tool's access to *only* the mounted path.
 The CLI prevents this by checking the post-merge state of `access.fs` for each
 tool before writing:
 
-| Initial state for tool `T`                              | What `--mount` writes                                                                            |
-| ------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `T` declared rules of its own (any layer)               | Just the mount rule; the user has already opted into default-deny                                |
-| `T` declared none, but `[conversation.tools.'*'.access]` has rules | The mount rule **plus** a copy of the `'*'` rules, which `T` was inheriting until now |
-| No rule anywhere                                        | The mount rule **plus** `path = "."` with read/write, preserving `T`'s implicit workspace access |
+| Initial state for tool `T`                                         | What `--mount` writes                                                                            |
+| ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| `T` declared rules of its own (any layer)                          | Just the mount rule; the user has already opted into default-deny                                |
+| `T` declared none, but `[conversation.tools.'*'.access]` has rules | The mount rule **plus** a copy of the `'*'` rules, which `T` was inheriting until now            |
+| No rule anywhere                                                   | The mount rule **plus** `path = "."` with read/write, preserving `T`'s implicit workspace access |
 
 The user does not need to think about this; the CLI handles it.
 The middle row matters because scope resolution is replace, not merge: writing

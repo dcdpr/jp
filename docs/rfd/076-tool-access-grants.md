@@ -163,8 +163,8 @@ sections) don't learn new rules for `access`.
 `access` is declared in one of two scopes:
 
 - **Per-tool** — `[conversation.tools.<name>.access]`.
-- **Defaults** — `[conversation.tools.'*'.access]`, which applies to every local
-  tool that declares no `access` of its own.
+- **Defaults** — `[conversation.tools.'*'.access]`, which applies to every
+  local tool that declares no `access` of its own.
 
 Scope resolution is **replace**, not field-by-field fill: a tool that declares
 any `access` block ignores the `*` block entirely.
@@ -179,8 +179,8 @@ capabilities set `false` and rely on specificity resolution to shadow the
 broader grant.
 That is denial-by-prefix-arithmetic, the same class of subtlety
 [Inheritance-based evaluation](#inheritance-based-evaluation) is rejected for.
-The cost of replace is repetition — a tool that wants the defaults plus one more
-rule restates the defaults — and that is the intended trade.
+The cost of replace is repetition — a tool that wants the defaults plus one
+more rule restates the defaults — and that is the intended trade.
 A copied rule is auditable at the tool; an inherited one is not.
 
 The two axes are independent:
@@ -230,8 +230,8 @@ Without the distinction the `*` scope would be unusable: any workspace with a
 single MCP server configured would fail to load as soon as `*.access` was set.
 
 The same rule extends to any future scope broader than one tool (tool groups,
-per RFDs 055–057): grants written at a scope the user did not name
-tool-by-tool apply to the local tools in that scope and pass over the rest.
+per RFDs 055–057): grants written at a scope the user did not name tool-by-tool
+apply to the local tools in that scope and pass over the rest.
 
 ### Rule evaluation
 
@@ -1000,8 +1000,8 @@ It writes rules into a tool's own scope, which under replace detaches that tool
 from `*`.
 When the tool declared nothing of its own, the injected block is therefore
 seeded with whatever the tool was inheriting: the `*` rules when they exist, and
-otherwise the workspace-default rule that [Default-deny
-preservation][D43-deny] already specifies.
+otherwise the workspace-default rule that [Default-deny preservation][D43-deny]
+already specifies.
 Without the seed, mounting into a tool covered by a restrictive `*` block would
 silently widen it back to full workspace access.
 
@@ -1025,8 +1025,7 @@ Independent of Phases 3 and 4.
 - [Deno security model] — Inspiration for the grant-based, default-deny
   permission model.
 
-[D43-deny]:
-    drafts/D43-tool-access-to-external-paths-via-workspace-symlinks.md#default-deny-preservation
+[D43-deny]: drafts/D43-tool-access-to-external-paths-via-workspace-symlinks.md#default-deny-preservation
 [Deno security model]: https://docs.deno.com/runtime/fundamentals/security/
 [RFD 016]: 016-wasm-plugin-architecture.md
 [RFD 042]: 042-tool-options.md
