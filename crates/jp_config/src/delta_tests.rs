@@ -29,6 +29,35 @@ fn map(arguments: &[&str]) -> IndexMap<String, PartialMcpProviderConfig> {
     map
 }
 
+/// A removed map entry is reported, since merging cannot take a key away.
+#[test]
+fn map_delta_reports_a_removed_entry() {
+    let prev = map(&["--a"]);
+    let next = IndexMap::new();
+    let mut unsets = Vec::new();
+
+    let delta = delta_map_with_unsets("providers.mcp", &prev, next, &mut unsets);
+
+    assert!(delta.is_empty(), "nothing to merge for a removed entry");
+    assert_eq!(unsets, ["providers.mcp.kagi"]);
+}
+
+/// An entry both maps hold is not reported, only diffed.
+#[test]
+fn map_delta_does_not_report_a_surviving_entry() {
+    let prev = map(&["--a"]);
+    let next = map(&["--a", "--b"]);
+    let mut unsets = Vec::new();
+
+    let delta = delta_map_with_unsets("providers.mcp", &prev, next, &mut unsets);
+
+    assert_eq!(delta.len(), 1);
+    assert!(
+        unsets.is_empty(),
+        "the entry survives, so nothing is cleared"
+    );
+}
+
 /// The `arguments` of a server entry, for asserting on a computed delta.
 fn arguments(entry: &PartialMcpProviderConfig) -> Option<&Vec<String>> {
     let PartialMcpProviderConfig::Stdio(config) = entry;
