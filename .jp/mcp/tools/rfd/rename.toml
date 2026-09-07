@@ -1,0 +1,28 @@
+[conversation.tools.rfd_rename]
+enable = false
+run = "ask"
+source = "local"
+command = "just rfd-rename {{tool.arguments.nnn}} {{tool.arguments.title}}"
+description = """Retitle an RFD (draft or published), rewriting its heading and \
+renaming its file to the slug the new title produces. The id is kept, so \
+`RFD <id>` mentions elsewhere stay correct; `<id>-slug.md` link targets under \
+`docs/` are rewritten, and matches outside `docs/` are reported but not \
+rewritten. This is the only way to move an RFD file's slug: `fs_move_file` \
+refuses paths under `docs/rfd/`. Retitling a published RFD changes its site URL \
+and requires `just rfd-summaries` afterwards."""
+
+[conversation.tools.rfd_rename.style]
+inline_results = "full"
+results_file_link = "off"
+parameters = "function_call"
+
+[conversation.tools.rfd_rename.parameters.nnn]
+description = "ID of the RFD to retitle. Permanent number (95, 095) or draft ID (D24)."
+required = true
+type = "string"
+
+[conversation.tools.rfd_rename.parameters.title]
+description = """The new title, without the `RFD <id>: ` prefix. Becomes the \
+document heading and the filename slug."""
+required = true
+type = "string"

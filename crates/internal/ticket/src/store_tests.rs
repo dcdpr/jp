@@ -330,9 +330,9 @@ fn editing_keeps_metadata_and_comments() {
     append_comment(dir.path(), id, "john", STAMP, None, "Still relevant.").unwrap();
     set_field(dir.path(), id, "Status", "In Progress").unwrap();
 
-    let path = edit(dir.path(), id, Some("Revised title"), Some("Revised body.")).unwrap();
+    let done = edit(dir.path(), id, Some("Revised title"), Some("Revised body.")).unwrap();
 
-    let ticket = parse::document(&fs::read_to_string(&path).unwrap()).unwrap();
+    let ticket = parse::document(&fs::read_to_string(&done.to).unwrap()).unwrap();
     assert_eq!(ticket.title, "Revised title");
     assert_eq!(ticket.description, "Revised body.");
     assert_eq!(ticket.metadata.status, Status::InProgress);
@@ -345,11 +345,99 @@ fn editing_one_part_leaves_the_other() {
     let dir = Utf8TempDir::new().unwrap();
     let id = new_ticket(&dir, "Original title");
 
-    let path = edit(dir.path(), id, Some("Revised title"), None).unwrap();
+    let done = edit(dir.path(), id, Some("Revised title"), None).unwrap();
 
-    let ticket = parse::document(&fs::read_to_string(&path).unwrap()).unwrap();
+    let ticket = parse::document(&fs::read_to_string(&done.to).unwrap()).unwrap();
     assert_eq!(ticket.title, "Revised title");
     assert_eq!(ticket.description, "Description.");
+}
+
+/// A new title moves the file to the slug it produces, so the name never
+/// disagrees with the heading.
+/// The id half is kept, so references still resolve.
+#[test]
+fn editing_the_title_moves_the_file_to_the_new_slug() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = new_ticket(&dir, "Original title");
+    append_comment(dir.path(), id, "john", STAMP, None, "Still relevant.").unwrap();
+    let before = locate(dir.path(), id).unwrap();
+
+    let done = edit(dir.path(), id, Some("Tool call header misaligned"), None).unwrap();
+
+    assert_eq!(done.from, before);
+    assert!(!before.exists());
+    assert_eq!(
+        done.to.file_name(),
+        Some(format!("{}tool-call-header-misaligned.md", id.file_prefix()).as_str())
+    );
+
+    let ticket = parse::document(&fs::read_to_string(&done.to).unwrap()).unwrap();
+    assert_eq!(ticket.title, "Tool call header misaligned");
+    assert_eq!(ticket.description, "Description.");
+    assert_eq!(ticket.comments.len(), 1);
+}
+
+/// A new title that slugs to what the file already carries leaves the file
+/// where it is, rather than renaming it onto itself.
+#[test]
+fn editing_within_one_slug_keeps_the_path() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id = new_ticket(&dir, "Header misaligned");
+
+    let done = edit(dir.path(), id, Some("Header misaligned!"), None).unwrap();
+
+    assert_eq!(done.from, done.to);
+    assert!(done.to.exists());
+
+    let ticket = parse::document(&fs::read_to_string(&done.to).unwrap()).unwrap();
+    assert_eq!(ticket.title, "Header misaligned!");
+}
+
+/// Only a new title moves the file.
+/// A body edit leaves a filename that already disagrees with the heading
+/// exactly as it found it, rather than repairing a name the caller never
+/// mentioned.
+#[test]
+fn editing_only_the_description_leaves_the_filename_alone() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id: TicketId = "T-02wt0kx".parse().unwrap();
+    let path = dir
+        .path()
+        .join(format!("{}hand-written-name.md", id.file_prefix()));
+    fs::write(
+        &path,
+        render::ticket(
+            "A quite different title",
+            Kind::Bug,
+            "john",
+            DATE,
+            None,
+            "Body.",
+        ),
+    )
+    .unwrap();
+
+    let done = edit(dir.path(), id, None, Some("Revised body.")).unwrap();
+
+    assert_eq!(done.from, path);
+    assert_eq!(done.to, path);
+
+    let ticket = parse::document(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(ticket.title, "A quite different title");
+    assert_eq!(ticket.description, "Revised body.");
+}
+
+#[test]
+fn editing_a_missing_ticket_is_refused() {
+    let dir = Utf8TempDir::new().unwrap();
+    let id: TicketId = "T-02wt0kx".parse().unwrap();
+
+    assert_eq!(
+        edit(dir.path(), id, Some("Anything"), None)
+            .unwrap_err()
+            .to_string(),
+        format!("No ticket {id}.")
+    );
 }
 
 #[test]

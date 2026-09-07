@@ -549,6 +549,99 @@ fn close_reports_the_transition_once() {
     );
 }
 
+/// A rename reports both paths: the assistant is holding the old one, and the
+/// file it names is gone.
+#[test]
+fn rename_moves_the_file_and_reports_both_paths() {
+    let dir = Utf8TempDir::new().unwrap();
+    create_ticket(&dir, "Wrapping is wrong");
+    let id = ids(&dir)[0];
+    let prefix = id.file_prefix();
+
+    let out = content(run_tool(
+        &dir,
+        "ticket_rename",
+        json!({ "id": id.to_string(), "title": "The wrap calculation is off" }),
+    ));
+
+    assert_eq!(
+        out,
+        format!(
+            "{id} renamed: docs/ticket/{prefix}wrapping-is-wrong.md -> \
+             docs/ticket/{prefix}the-wrap-calculation-is-off.md"
+        )
+    );
+    assert!(
+        !dir.path()
+            .join(format!("docs/ticket/{prefix}wrapping-is-wrong.md"))
+            .exists()
+    );
+
+    let shown = content(run_tool(
+        &dir,
+        "ticket_show",
+        json!({ "id": id.to_string() }),
+    ));
+    assert!(
+        shown.contains(&format!("# {id}: The wrap calculation is off")),
+        "{shown}"
+    );
+    assert!(shown.contains("Something is wrong."), "{shown}");
+}
+
+/// A retitle the slug does not notice still says where the ticket is, without
+/// claiming a move that did not happen.
+#[test]
+fn rename_within_one_slug_reports_the_unchanged_path() {
+    let dir = Utf8TempDir::new().unwrap();
+    create_ticket(&dir, "Wrapping is wrong");
+    let id = ids(&dir)[0];
+
+    let out = content(run_tool(
+        &dir,
+        "ticket_rename",
+        json!({ "id": id.to_string(), "title": "Wrapping is wrong!" }),
+    ));
+
+    assert_eq!(
+        out,
+        format!(
+            "{id} retitled, still at docs/ticket/{}wrapping-is-wrong.md",
+            id.file_prefix()
+        )
+    );
+}
+
+#[test]
+fn rename_rejects_an_empty_title() {
+    let dir = Utf8TempDir::new().unwrap();
+    create_ticket(&dir, "Wrapping is wrong");
+    let id = ids(&dir)[0];
+
+    assert_eq!(
+        error_message(run_tool(
+            &dir,
+            "ticket_rename",
+            json!({ "id": id.to_string(), "title": "   " })
+        )),
+        "`title` must not be empty."
+    );
+}
+
+#[test]
+fn rename_reports_a_missing_ticket() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    assert_eq!(
+        error_message(run_tool(
+            &dir,
+            "ticket_rename",
+            json!({ "id": "T-zzzzzzz", "title": "Anything" })
+        )),
+        "No T-zzzzzzz."
+    );
+}
+
 #[test]
 fn list_shows_one_line_per_ticket_and_filters() {
     let dir = Utf8TempDir::new().unwrap();
@@ -686,6 +779,7 @@ fn every_declared_tool_is_dispatched() {
         "ticket_comment",
         "ticket_create",
         "ticket_list",
+        "ticket_rename",
         "ticket_show",
     ]);
 

@@ -89,6 +89,20 @@ pub fn run(ctx: Context, t: Tool) -> ToolResult {
             comment(root, id, re, &body)
         }
 
+        "rename" => {
+            let id = match id_arg(&t.req("id")?) {
+                Ok(id) => id,
+                Err(message) => return error(message),
+            };
+            let title = t.req::<String>("title")?;
+
+            if title.trim().is_empty() {
+                return error("`title` must not be empty.");
+            }
+
+            rename(root, id, title.trim())
+        }
+
         "close" => match id_arg(&t.req("id")?) {
             Ok(id) => close(root, id),
             Err(message) => error(message),
@@ -222,6 +236,22 @@ fn preview_comment(
     };
 
     Ok(preview(&format!("{heading}\n\n{}", render::comment(&comment))).into())
+}
+
+fn rename(root: &Utf8Path, id: TicketId, title: &str) -> ToolResult {
+    match store::edit(&dir(root), id, Some(title), None) {
+        Ok(store::Edited { from, to }) if from == to => {
+            Ok(format!("{id} retitled, still at {}", relative(root, &to)).into())
+        }
+        Ok(store::Edited { from, to }) => Ok(format!(
+            "{id} renamed: {} -> {}",
+            relative(root, &from),
+            relative(root, &to)
+        )
+        .into()),
+        Err(store::Error::NoSuchTicket(id)) => error(format!("No {id}.")),
+        Err(other) => Err(other.into()),
+    }
 }
 
 fn close(root: &Utf8Path, id: TicketId) -> ToolResult {
