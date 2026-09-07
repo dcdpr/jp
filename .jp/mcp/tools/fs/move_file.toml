@@ -3,6 +3,13 @@ enable = false
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
 summary = "Move a file or directory in the project's local filesystem."
+description = """
+Tickets and RFDs cannot be moved here, in or out. Their filenames pair an
+allocated id with a slug derived from the title, and the tools that own those
+trees keep the two in step: `ticket_rename` retitles a ticket and moves its
+file, and `rfd_rename`, `rfd_renumber`, and `rfd_promote` do the equivalent for
+an RFD.
+"""
 
 examples = """
 ```json
@@ -15,6 +22,24 @@ examples = """
 inline_results = "off"
 results_file_link = "off"
 parameters = "function_call"
+
+# What this tool may move, and where. A move needs `delete` on the source and
+# `create` (or `update`, onto an existing entry) on the target, so `write` is
+# the alias that covers a move exactly. The deeper rules withhold all three,
+# which closes the tree to a move in either direction: `write = false` under
+# `docs/ticket` refuses both a ticket moved out and a file moved in to become
+# one.
+[[conversation.tools.fs_move_file.access.fs]]
+path = "."
+write = true
+
+[[conversation.tools.fs_move_file.access.fs]]
+path = "docs/ticket"
+write = false
+
+[[conversation.tools.fs_move_file.access.fs]]
+path = "docs/rfd"
+write = false
 
 [conversation.tools.fs_move_file.parameters.source]
 type = "string"

@@ -3,6 +3,13 @@ enable = false
 source = "local"
 command = "just serve-tools {{context}} {{tool}}"
 summary = "Create a new file in the project's local filesystem."
+description = """
+Tickets and RFDs cannot be created here. A ticket's filename carries an id drawn
+from an allocator that never hands the same one out twice, and an RFD's carries
+a number the draft flow assigns; a file written by hand under `docs/ticket/` or
+`docs/rfd/` gets neither. Use `ticket_create` and `rfd_draft` instead. Both
+trees stay editable once the file exists.
+"""
 
 examples = """
 Create a file with content:
@@ -20,6 +27,26 @@ Create an empty file:
 parameters = "just serve-tools {{context}} {{tool}}"
 inline_results = "off"
 results_file_link = "off"
+
+# What this tool may write, and where. The root rule is its ordinary reach; the
+# deeper rules withhold `create` in the two trees whose files are minted by
+# `ticket_create` and `rfd_draft`. Rules do not inherit, so each one restates
+# every capability it grants: `update` stays granted under both, which is what
+# keeps an existing ticket or RFD rewritable.
+[[conversation.tools.fs_create_file.access.fs]]
+path = "."
+create = true
+update = true
+
+[[conversation.tools.fs_create_file.access.fs]]
+path = "docs/ticket"
+create = false
+update = true
+
+[[conversation.tools.fs_create_file.access.fs]]
+path = "docs/rfd"
+create = false
+update = true
 
 [conversation.tools.fs_create_file.parameters.path]
 type = "string"
