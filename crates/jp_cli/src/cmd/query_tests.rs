@@ -1737,7 +1737,7 @@ async fn query_sequence_new_cfg_profile_then_model_override_persists_for_plain_q
     .unwrap();
 
     let mut base = AppConfig::new_test().to_partial();
-    base.config_load_paths = Some(vec![RelativePathBuf::from(".jp/config")]);
+    base.config_load_paths = Some(vec![RelativePathBuf::from(".jp/config")].into());
     base.providers.llm.aliases.insert(
         "gpt".to_owned(),
         ModelIdConfig {

@@ -431,7 +431,7 @@ fn resolve_cfg_args(
                     let load_paths: Vec<Utf8PathBuf> = base
                         .config_load_paths
                         .iter()
-                        .flatten()
+                        .flat_map(|paths| paths.iter())
                         .filter_map(|p| {
                             Utf8PathBuf::try_from(p.to_path(root))
                                 .inspect_err(|e| {
