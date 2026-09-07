@@ -2343,6 +2343,100 @@ rfd-renumber NNN MMM="":
         echo "Run \`just rfd-summaries\` to refresh the summary cache." >&2
     fi
 
+# Retitle an RFD, renaming its file to match.
+#
+# NNN is the RFD to retitle: a permanent number (95, 095) or a draft ID (D24).
+# TITLE is the new title, taken as the rest of the command line.
+#
+# Rewrites the document heading and moves the file to the slug the new title
+# produces. The id is kept, so `RFD <id>` mentions stay correct; `<id>-slug.md`
+# link targets under `docs/` are rewritten, and matches outside `docs/` are
+# reported but not rewritten.
+#
+# Retitling a published RFD changes its site URL and invalidates its
+# summary-cache entry; run `just rfd-summaries` afterwards.
+[group('rfd')]
+rfd-rename NNN +TITLE:
+    #!/usr/bin/env sh
+    set -eu
+
+    out=$(just _rfd-resolve "{{NNN}}") || exit 1
+    rfd_id="${out%% *}"
+    file="${out#* }"
+
+    if [ "$rfd_id" = "000" ]; then
+        echo "Refusing to rename a template." >&2; exit 1
+    fi
+
+    title="{{TITLE}}"
+    dir=$(dirname "$file")
+    old_basename=$(basename "$file")
+
+    slug=$(echo "$title" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd 'a-z0-9_-')
+    if [ -z "$slug" ]; then
+        echo "Title '${title}' produces an empty filename slug." >&2; exit 1
+    fi
+
+    new_basename="${rfd_id}-${slug}.md"
+    new_file="${dir}/${new_basename}"
+
+    # --- Rewrite the heading, then move the file ---
+    # The title travels through the environment and is printed rather than
+    # substituted, so a `&` or a `/` in it stays literal. Writing the heading
+    # before the move means an interrupted rename leaves a readable RFD with a
+    # stale filename, and running the same command again finishes it.
+    if ! title="$title" awk -v id="$rfd_id" '
+        !seen && /^# RFD /{ printf "# RFD %s: %s\n", id, ENVIRON["title"]; seen = 1; next }
+        { print }
+        END { if (!seen) exit 1 }
+    ' "$file" > "${file}.tmp"; then
+        rm -f "${file}.tmp"
+        echo "No '# RFD ${rfd_id}: ...' heading in ${file}." >&2; exit 1
+    fi
+    mv "${file}.tmp" "$file"
+
+    if [ "$new_file" != "$file" ]; then
+        if [ -e "$new_file" ]; then
+            echo "${new_file} already exists." >&2; exit 1
+        fi
+        mv "$file" "$new_file"
+    fi
+
+    # --- Link targets, which carry the basename ---
+    # Scoped to `docs/`, where the links live. The escaped dots keep `.md` from
+    # matching any character.
+    old_pattern=$(echo "$old_basename" | sed 's/\./\\./g')
+    updated=0
+    for other in $(rg -l --fixed-strings "$old_basename" docs 2>/dev/null || true); do
+        [ -f "$other" ] || continue
+        sed "s|${old_pattern}|${new_basename}|g" "$other" > "${other}.tmp"
+        if cmp -s "$other" "${other}.tmp"; then
+            rm "${other}.tmp"
+            continue
+        fi
+        mv "${other}.tmp" "$other"
+        echo "  updated link targets in ${other}"
+        updated=$((updated + 1))
+    done
+
+    echo "${old_basename} -> ${new_file}"
+    if [ "$updated" -gt 0 ]; then
+        echo "Updated ${updated} file(s) with link targets."
+    fi
+
+    # --- Report references the rewrite does not touch ---
+    leftovers=$(rg -l --fixed-strings "$old_basename" --glob '!docs/**' . 2>/dev/null || true)
+    if [ -n "$leftovers" ]; then
+        echo "" >&2
+        echo "Warning: references outside docs/ still name ${old_basename}:" >&2
+        echo "$leftovers" | sed 's/^/  /' >&2
+    fi
+
+    case "$rfd_id" in
+        D*) ;;
+        *)  echo "Run \`just rfd-summaries\` to refresh the summary cache." >&2 ;;
+    esac
+
 # Internal: print the commit author as `Name <email>`.
 #
 # Falls back to the bare name, then to $USER, so a checkout without git identity

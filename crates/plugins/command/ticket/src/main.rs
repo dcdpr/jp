@@ -1359,8 +1359,15 @@ fn edit(
 ) -> Result<Output, String> {
     let failed = |error: store::Error| error.to_string();
 
+    // A new title moves the file to the matching slug, so the report names the
+    // path the ticket left as well as the one it landed on.
+    let mut moved_from = None;
     let mut path = if title.is_some() || body.is_some() {
-        store::edit(dir, id, title, body).map_err(failed)?
+        let done = store::edit(dir, id, title, body).map_err(failed)?;
+        if done.from != done.to {
+            moved_from = Some(done.from);
+        }
+        done.to
     } else {
         store::locate_ticket(dir, id).map_err(failed)?
     };
@@ -1372,7 +1379,10 @@ fn edit(
         path = store::set_field(dir, id, "Status", &status.to_string()).map_err(failed)?;
     }
 
-    Ok(format!("Edited {path}\n").into())
+    Ok(match moved_from {
+        Some(from) => format!("Edited {path} (was {from})\n").into(),
+        None => format!("Edited {path}\n").into(),
+    })
 }
 
 /// Read one ticket, as markdown or as JSON for scripting.

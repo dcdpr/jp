@@ -1,0 +1,38 @@
+[conversation.tools.ticket_rename]
+enable = false
+source = "local"
+command = "just serve-tools {{context}} {{tool}}"
+summary = "Give a ticket a new title, moving its file to match."
+description = """
+Rewrite a ticket's heading and rename its file to the slug the new title
+produces. The id half of the filename is kept, so every reference to the ticket
+still resolves, and the metadata, description, and comments are left standing.
+
+This is the only way to move a ticket file: `fs_move_file` refuses paths under
+`docs/ticket/`, because a file whose slug disagrees with its heading is invisible
+to anyone searching for either.
+
+The result names the path the ticket left and the one it landed on. A title that
+slugs to the name the file already carries leaves the file where it is.
+"""
+
+examples = """
+```json
+{"id": "T-02wt0kx", "title": "Tool call header misaligned below 80 columns"}
+```
+"""
+
+[conversation.tools.ticket_rename.style]
+parameters = "function_call"
+inline_results = "full"
+results_file_link = "off"
+
+[conversation.tools.ticket_rename.parameters.id]
+type = "string"
+required = true
+summary = "The ticket to rename: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`."
+
+[conversation.tools.ticket_rename.parameters.title]
+type = "string"
+required = true
+summary = "The new one-line title. Becomes the heading and the filename slug."

@@ -200,17 +200,37 @@ pub fn promote(dir: &Utf8Path, id: TicketId, rfd: &str) -> Result<Utf8PathBuf> {
     Ok(path)
 }
 
+/// Where an edit left a ticket.
+#[derive(Debug)]
+pub struct Edited {
+    /// The path the ticket was read from.
+    pub from: Utf8PathBuf,
+    /// The path it now lives at, which differs from `from` when a new title
+    /// produced a different slug.
+    pub to: Utf8PathBuf,
+}
+
 /// Rewrite a ticket's title and description, keeping its metadata and comments.
 ///
 /// `None` leaves that part as it was.
+///
+/// A new title also moves the file to the slug that title produces, so the
+/// filename never disagrees with the heading.
+/// The id half of the name is kept, so references to the ticket still resolve.
+/// An edit that leaves the title alone leaves the filename alone too, whatever
+/// it says.
+///
+/// The content is written before the file moves, so an interrupted edit leaves
+/// a ticket whose heading is right and whose slug is stale, and repeating the
+/// call finishes the move.
 pub fn edit(
     dir: &Utf8Path,
     id: TicketId,
     title: Option<&str>,
     description: Option<&str>,
-) -> Result<Utf8PathBuf> {
-    let path = locate(dir, id)?;
-    let source = fs::read_to_string(&path)?;
+) -> Result<Edited> {
+    let from = locate(dir, id)?;
+    let source = fs::read_to_string(&from)?;
     let ticket = parse::document(&source)?;
 
     let updated = render::replace_content(
@@ -220,9 +240,21 @@ pub fn edit(
         &ticket.comments,
     )
     .ok_or(ParseError::MissingMetadata)?;
-    fs::write(&path, updated)?;
+    fs::write(&from, updated)?;
 
-    Ok(path)
+    let to = match title {
+        Some(title) => dir.join(format!("{}{}.md", id.file_prefix(), slug(title))),
+        None => from.clone(),
+    };
+
+    // `fs::rename` replaces whatever sits at the target, but the target carries
+    // this id's prefix and `locate` refused above if a second file claimed it,
+    // so the only file it can land on is the one being moved.
+    if to != from {
+        fs::rename(&from, &to)?;
+    }
+
+    Ok(Edited { from, to })
 }
 
 /// Set one metadata field on a ticket.

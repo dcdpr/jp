@@ -424,6 +424,45 @@ fn the_ticket_directory_follows_the_workspace_root() {
     );
 }
 
+/// A retitle moves the file with it, so a filename never disagrees with the
+/// heading it carries.
+/// Both paths are reported: the old one is what the caller was holding.
+#[test]
+fn editing_the_title_renames_the_file() {
+    let dir = Utf8TempDir::new().unwrap();
+    run_command(&dir, Command::Add {
+        kind: Some(Kind::Bug),
+        title: Some("Tool call header misaligned".to_owned()),
+        author: Some("John Doe".to_owned()),
+        body: None,
+        implements: None,
+    })
+    .unwrap();
+    let id = store::list(dir.path()).unwrap()[0].id;
+    let prefix = id.file_prefix();
+
+    // Joined rather than spelled with `/`, because the reported path carries
+    // native separators and reads `\` on Windows.
+    let before = dir
+        .path()
+        .join(format!("{prefix}tool-call-header-misaligned.md"));
+    let after = dir
+        .path()
+        .join(format!("{prefix}the-wrap-calculation-is-off.md"));
+
+    let edited = run_command(&dir, Command::Edit {
+        id: Some(id),
+        title: Some("The wrap calculation is off".to_owned()),
+        body: None,
+        kind: None,
+        status: None,
+    })
+    .unwrap();
+
+    assert_eq!(edited.text, format!("Edited {after} (was {before})\n"));
+    assert!(!before.exists());
+}
+
 #[test]
 fn commands_run_against_the_resolved_directory() {
     let dir = Utf8TempDir::new().unwrap();
