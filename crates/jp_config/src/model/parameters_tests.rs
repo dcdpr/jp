@@ -23,6 +23,35 @@ fn assign_unknown_nested_key_delegates_to_other() {
     assert_eq!(other["custom"], JsonValue(json!({"depth": "3"})));
 }
 
+/// `--cfg` reaches an `other` entry through the explicit table, the same
+/// spelling a config file uses.
+#[test]
+fn assign_reaches_other_through_the_explicit_table() {
+    let mut p = PartialParametersConfig::default();
+    let kv = KvAssignment::try_from_cli("other.presence_penalty", "0.5").unwrap();
+    p.assign(kv).unwrap();
+
+    let other = p.other.as_ref().unwrap();
+    assert_eq!(other["presence_penalty"], JsonValue(json!("0.5")));
+    assert_eq!(other.len(), 1, "`other` is the table, not an entry in it");
+}
+
+/// Clearing the explicit table empties it, rather than removing an entry that
+/// happens to be named `other`.
+#[test]
+fn assign_clears_the_whole_other_table() {
+    let mut p = PartialParametersConfig::default();
+    p.assign(KvAssignment::try_from_cli("seed", "42").unwrap())
+        .unwrap();
+    p.assign(KvAssignment::unset("other")).unwrap();
+
+    assert!(
+        p.other.as_ref().is_none_or(IndexMap::is_empty),
+        "expected an empty table, got: {:?}",
+        p.other
+    );
+}
+
 #[test]
 fn known_keys_match_the_schema() {
     use schematic::{SchemaBuilder, SchemaType, Schematic as _};

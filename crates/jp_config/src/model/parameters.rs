@@ -190,6 +190,16 @@ impl AssignKeyValue for PartialParametersConfig {
             "top_k" => self.top_k = kv.try_some_u32()?,
             _ if kv.p("stop_words") => kv.try_some_mergeable_strings(&mut self.stop_words)?,
             _ if kv.p("reasoning") => self.reasoning.assign(kv)?,
+
+            // `other` names the table, matching the config file, where
+            // `KNOWN_KEYS` reserves it for the same reason. Trimming the
+            // prefix is what lets `other.presence_penalty` reach the entry
+            // and a bare `other` clear the whole table; without it both
+            // land in the catch-all below and address an entry *named*
+            // `other`.
+            _ if kv.p("other") => kv.assign_to_entry(self.other.get_or_insert_default())?,
+
+            // Anything else is a provider parameter JP does not model.
             _ => kv.assign_to_entry(self.other.get_or_insert_default())?,
         }
 
