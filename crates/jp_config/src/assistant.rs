@@ -20,7 +20,7 @@ use crate::{
         sections::{PartialSectionConfig, SectionConfig},
         tool_choice::ToolChoice,
     },
-    delta::{PartialConfigDelta, delta_opt, delta_opt_partial, path},
+    delta::{PartialConfigDelta, delta_mergeable_vec, delta_opt, delta_opt_partial, path},
     fill::{FillDefaults, fill_opt},
     internal::merge::{string_with_strategy, vec_with_strategy},
     model::{ModelConfig, PartialModelConfig},
@@ -127,17 +127,11 @@ impl PartialConfigDelta for PartialAssistantConfig {
         Self {
             name: delta_opt(self.name.as_ref(), next.name),
             system_prompt: delta_opt_partial(self.system_prompt.as_ref(), next.system_prompt),
-            instructions: next
-                .instructions
-                .into_iter()
-                .filter(|v| !self.instructions.contains(v))
-                .collect::<Vec<_>>()
-                .into(),
-            system_prompt_sections: next
-                .system_prompt_sections
-                .into_iter()
-                .filter(|v| !self.system_prompt_sections.contains(v))
-                .collect(),
+            instructions: delta_mergeable_vec(&self.instructions, next.instructions),
+            system_prompt_sections: delta_mergeable_vec(
+                &self.system_prompt_sections,
+                next.system_prompt_sections,
+            ),
             tool_choice: delta_opt(self.tool_choice.as_ref(), next.tool_choice),
             model: self.model.delta(next.model),
             request: self.request.delta(next.request),
@@ -148,17 +142,11 @@ impl PartialConfigDelta for PartialAssistantConfig {
         Self {
             name: delta_opt(self.name.as_ref(), next.name),
             system_prompt: delta_opt_partial(self.system_prompt.as_ref(), next.system_prompt),
-            instructions: next
-                .instructions
-                .into_iter()
-                .filter(|v| !self.instructions.contains(v))
-                .collect::<Vec<_>>()
-                .into(),
-            system_prompt_sections: next
-                .system_prompt_sections
-                .into_iter()
-                .filter(|v| !self.system_prompt_sections.contains(v))
-                .collect(),
+            instructions: delta_mergeable_vec(&self.instructions, next.instructions),
+            system_prompt_sections: delta_mergeable_vec(
+                &self.system_prompt_sections,
+                next.system_prompt_sections,
+            ),
             tool_choice: delta_opt(self.tool_choice.as_ref(), next.tool_choice),
             model: self
                 .model
