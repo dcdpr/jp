@@ -2226,8 +2226,12 @@ rfd-promote NNN: _install-jp _install-comfort _install-ticket
 
 # Renumber an RFD to a new id, updating every cross-reference.
 #
-# NNN is the RFD to renumber: a permanent number (95, 095) or a draft ID
-# (D24). MMM is the target id and must live in the same id-space as NNN
+# NNN is the RFD to renumber: a permanent number (95, 095), a draft ID (D24),
+# or a file name (`DNN-slug.md` or `NNN-slug.md`, with or without a directory
+# prefix and with `.md` optional). A file name is how to pick between two
+# documents that share an id after a branch merge, which a bare id refuses to
+# resolve.
+# MMM is the target id and must live in the same id-space as NNN
 # (drafts renumber to another draft slot, published RFDs to another permanent
 # number; moving between spaces is `rfd-promote`'s job). When MMM is omitted,
 # the next available id in that space is used. The scan only sees local
@@ -2243,6 +2247,11 @@ rfd-promote NNN: _install-jp _install-comfort _install-ticket
 # References outside `docs/rfd/` and `docs/ticket/` (code comments, other docs)
 # are reported but not rewritten.
 #
+# When another file keeps NNN's old id, `RFD <old>` mentions and bare `<old>`
+# tokens in other documents could belong to either one, so they are left alone
+# and listed at the end, as is the board entry; `<old>-slug` link targets carry
+# the slug and are still rewritten.
+#
 # Renumbering a published RFD changes its site URL and invalidates its
 # summary-cache entry; run `just rfd-summaries` afterwards.
 [group('rfd')]
@@ -2250,9 +2259,29 @@ rfd-renumber NNN MMM="":
     #!/usr/bin/env sh
     set -eu
 
-    out=$(just _rfd-resolve "{{NNN}}") || exit 1
-    old_id="${out%% *}"
-    file="${out#* }"
+    arg="{{NNN}}"
+    if echo "$arg" | grep -qiE '^(D[0-9]+|[0-9]+)$'; then
+        out=$(just _rfd-resolve "$arg") || exit 1
+        old_id="${out%% *}"
+        file="${out#* }"
+    else
+        # A file name names one document even when two share an id, so it is
+        # the caller's way of saying which of them moves. Bare names are looked
+        # up in both id spaces; a path is taken as given.
+        name=$(basename "$arg")
+        case "$name" in *.md) ;; *) name="${name}.md" ;; esac
+        file=""
+        for candidate in "$arg" "docs/rfd/${name}" "docs/rfd/drafts/${name}"; do
+            if [ -f "$candidate" ]; then file="$candidate"; break; fi
+        done
+        if [ -z "$file" ]; then
+            echo "No RFD file matching '${arg}'." >&2; exit 1
+        fi
+        old_id=$(basename "$file" | sed -nE 's/^(D[0-9]{2}|[0-9]{3})-.*\.md$/\1/p')
+        if [ -z "$old_id" ]; then
+            echo "'${file}' does not start with an RFD id (DNN or NNN)." >&2; exit 1
+        fi
+    fi
 
     if [ "$old_id" = "000" ]; then
         echo "Refusing to renumber a template." >&2; exit 1
@@ -2266,6 +2295,10 @@ rfd-renumber NNN MMM="":
         D*) is_draft=true ;;
         *)  is_draft=false ;;
     esac
+
+    # Files that keep the old id once this one moves. Their existence makes
+    # every id-keyed reference in the repository unattributable.
+    siblings=$(ls "${dir}/${old_id}-"*.md 2>/dev/null | grep -v "/${old_basename}$" || true)
 
     # --- Determine and validate the target id ---
     target="{{MMM}}"
@@ -2316,7 +2349,11 @@ rfd-renumber NNN MMM="":
     rm "$file"
 
     # --- Carry the board position across renumbering ---
-    just _rfd-priority-rewrite "$old_id" "$new_id"
+    # A board entry holds an id, so with the id shared there is no telling
+    # which document ranked; leave it for the operator.
+    if [ -z "$siblings" ]; then
+        just _rfd-priority-rewrite "$old_id" "$new_id"
+    fi
 
     # --- Cross-references in every RFD, including the renumbered file ---
     # Bare-token rewriting is draft-space only: `D24` is a distinctive
@@ -2331,19 +2368,19 @@ rfd-renumber NNN MMM="":
     updated=0
     for other in docs/rfd/*.md docs/rfd/drafts/*.md docs/ticket/*.md; do
         [ -f "$other" ] || continue
-        if [ "$is_draft" = true ]; then
-            sed -E \
-                -e "s#RFD ${old_id}([^0-9]|\$)#RFD ${new_id}\1#g" \
-                -e "s|${old_stem}(\.md)?|${new_stem}\1|g" \
-                -e "s#(^|[^A-Za-z0-9_])${old_id}([^A-Za-z0-9_]|\$)#\1${new_id}\2#g" \
-                -e "s#(^|[^A-Za-z0-9_])${old_id}([^A-Za-z0-9_]|\$)#\1${new_id}\2#g" \
-                "$other" > "${other}.tmp"
-        else
-            sed -E \
-                -e "s#RFD ${old_id}([^0-9]|\$)#RFD ${new_id}\1#g" \
-                -e "s|${old_stem}(\.md)?|${new_stem}\1|g" \
-                "$other" > "${other}.tmp"
+        # The stem carries the slug, so a link target names one document even
+        # when the id is shared. Id-keyed rules only run when nothing else
+        # answers to the old id, or inside the renumbered document itself.
+        set -- -e "s|${old_stem}(\.md)?|${new_stem}\1|g"
+        if [ -z "$siblings" ] || [ "$(basename "$other")" = "$new_basename" ]; then
+            set -- "$@" -e "s#RFD ${old_id}([^0-9]|\$)#RFD ${new_id}\1#g"
+            if [ "$is_draft" = true ]; then
+                set -- "$@" \
+                    -e "s#(^|[^A-Za-z0-9_])${old_id}([^A-Za-z0-9_]|\$)#\1${new_id}\2#g" \
+                    -e "s#(^|[^A-Za-z0-9_])${old_id}([^A-Za-z0-9_]|\$)#\1${new_id}\2#g"
+            fi
         fi
+        sed -E "$@" "$other" > "${other}.tmp"
         if cmp -s "$other" "${other}.tmp"; then
             rm "${other}.tmp"
             continue
@@ -2359,6 +2396,15 @@ rfd-renumber NNN MMM="":
     fi
 
     # --- Report references the rewrite does not touch ---
+    if [ -n "$siblings" ]; then
+        echo "" >&2
+        echo "Warning: ${old_id} is still held by:" >&2
+        printf '%s\n' "$siblings" | sed 's/^/  /' >&2
+        echo "Mentions of \"RFD ${old_id}\" outside ${new_basename}, and a board" >&2
+        echo "entry for ${old_id}, were left alone: they name either document." >&2
+        echo "Check them by hand." >&2
+    fi
+
     leftovers=$(rg -l -e "RFD ${old_id}\b" -e "${old_basename}" \
         --glob '!docs/rfd/**' --glob '!docs/ticket/**' . 2>/dev/null || true)
     if [ -n "$leftovers" ]; then
@@ -3461,7 +3507,8 @@ _rfd-resolve NNN:
         echo "Ambiguous: ${2} files share ID ${1}:" >&2
         printf '%s\n' "$3" | sed 's/^/  /' >&2
         echo "Renumber or remove one before continuing; a rewrite keyed on" >&2
-        echo "${1} would corrupt the others." >&2
+        echo "${1} would corrupt the others. \`just rfd-renumber\` takes a file" >&2
+        echo "name in place of an id, to say which of them moves." >&2
         exit 1
     }
 
