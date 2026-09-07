@@ -66,6 +66,125 @@ fn removed_vec_element_has_no_delta() {
     assert_eq!(delta_opt_vec(Some(&prev), Some(next)), None);
 }
 
+/// A one-server config, keyed as `kagi`.
+fn config_with_server(arguments: &[&str]) -> crate::PartialAppConfig {
+    let mut partial = crate::PartialAppConfig::empty();
+    partial
+        .providers
+        .mcp
+        .insert("kagi".to_owned(), server(arguments));
+    partial
+}
+
+/// A change appending can reach reports no path, and the delta is the tail.
+#[test]
+fn an_appended_argument_reports_no_path() {
+    let prev = config_with_server(&["--a"]);
+    let next = config_with_server(&["--a", "--b"]);
+
+    let mut unsets = Vec::new();
+    let delta = prev.delta_with_unsets(next, "", &mut unsets);
+
+    assert!(unsets.is_empty());
+    assert_eq!(
+        arguments(&delta.providers.mcp["kagi"]),
+        Some(&vec!["--b".to_owned()])
+    );
+}
+
+/// A change appending cannot reach reports its path and carries the whole list.
+///
+/// The path is what the fold clears, which is what lets the list that follows
+/// land verbatim instead of being appended to the one already there.
+#[test]
+fn a_dropped_argument_reports_its_path_and_carries_the_whole_list() {
+    let prev = config_with_server(&["--a", "--b"]);
+    let next = config_with_server(&["--a"]);
+
+    let mut unsets = Vec::new();
+    let delta = prev.delta_with_unsets(next, "", &mut unsets);
+
+    assert_eq!(unsets, ["providers.mcp.kagi.arguments"]);
+    assert_eq!(
+        arguments(&delta.providers.mcp["kagi"]),
+        Some(&vec!["--a".to_owned()])
+    );
+}
+
+/// Reordering is not an extension either, so it clears too.
+#[test]
+fn a_reordered_argument_list_reports_its_path() {
+    let prev = config_with_server(&["--a", "--b"]);
+    let next = config_with_server(&["--b", "--a"]);
+
+    let mut unsets = Vec::new();
+    let delta = prev.delta_with_unsets(next, "", &mut unsets);
+
+    assert_eq!(unsets, ["providers.mcp.kagi.arguments"]);
+    assert_eq!(
+        arguments(&delta.providers.mcp["kagi"]),
+        Some(&vec!["--b".to_owned(), "--a".to_owned()])
+    );
+}
+
+/// The report reaches a field nested several levels below the root.
+#[test]
+fn a_dropped_beta_header_reports_its_full_path() {
+    let headers = |values: &[&str]| {
+        let mut partial = crate::PartialAppConfig::empty();
+        partial.providers.llm.anthropic.beta_headers =
+            Some(values.iter().map(|v| (*v).to_owned()).collect());
+        partial
+    };
+
+    let prev = headers(&["one", "two"]);
+    let next = headers(&["one"]);
+
+    let mut unsets = Vec::new();
+    let delta = prev.delta_with_unsets(next, "", &mut unsets);
+
+    assert_eq!(unsets, ["providers.llm.anthropic.beta_headers"]);
+    assert_eq!(
+        delta.providers.llm.anthropic.beta_headers,
+        Some(vec!["one".to_owned()])
+    );
+}
+
+/// `stop_words` is reached through four separate paths; each reports its own.
+#[test]
+fn a_dropped_stop_word_reports_the_path_it_was_reached_by() {
+    let words = |values: &[&str]| Some(values.iter().map(|v| (*v).to_owned()).collect::<Vec<_>>());
+
+    let mut prev = crate::PartialAppConfig::empty();
+    prev.assistant.model.parameters.stop_words = words(&["halt", "stop"]);
+    prev.style.reasoning.summary_model = Some(crate::model::PartialModelConfig {
+        parameters: crate::model::parameters::PartialParametersConfig {
+            stop_words: words(&["halt", "stop"]),
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+
+    let mut next = prev.clone();
+    next.assistant.model.parameters.stop_words = words(&["halt"]);
+    if let Some(model) = next.style.reasoning.summary_model.as_mut() {
+        model.parameters.stop_words = words(&["halt"]);
+    }
+
+    let mut unsets = Vec::new();
+    let delta = prev.delta_with_unsets(next, "", &mut unsets);
+
+    unsets.sort();
+    assert_eq!(unsets, [
+        "assistant.model.parameters.stop_words",
+        "style.reasoning.summary_model.parameters.stop_words",
+    ]);
+    assert_eq!(
+        delta.assistant.model.parameters.stop_words,
+        Some(vec!["halt".to_owned()])
+    );
+}
+
 #[test]
 fn map_delta_keeps_an_entry_only_next_has() {
     let prev = IndexMap::new();

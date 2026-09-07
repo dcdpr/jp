@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
-    delta::{PartialConfigDelta, delta_opt, delta_opt_partial, delta_opt_vec},
+    delta::{
+        PartialConfigDelta, delta_opt, delta_opt_partial, delta_opt_vec, delta_opt_vec_at, path,
+    },
     partial::{ToPartial, partial_opt, partial_opt_config},
 };
 
@@ -35,6 +37,32 @@ impl PartialConfigDelta for PartialMcpProviderConfig {
                 command: delta_opt(prev.command.as_ref(), next.command),
                 arguments: delta_opt_vec(prev.arguments.as_ref(), next.arguments),
                 variables: delta_opt_vec(prev.variables.as_ref(), next.variables),
+                checksum: delta_opt_partial(prev.checksum.as_ref(), next.checksum),
+                optional: delta_opt(prev.optional.as_ref(), next.optional),
+                startup_timeout_secs: delta_opt(
+                    prev.startup_timeout_secs.as_ref(),
+                    next.startup_timeout_secs,
+                ),
+            }),
+        }
+    }
+
+    fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
+        match (self, next) {
+            (Self::Stdio(prev), Self::Stdio(next)) => Self::Stdio(PartialStdioConfig {
+                command: delta_opt(prev.command.as_ref(), next.command),
+                arguments: delta_opt_vec_at(
+                    &path(prefix, "arguments"),
+                    prev.arguments.as_ref(),
+                    next.arguments,
+                    unsets,
+                ),
+                variables: delta_opt_vec_at(
+                    &path(prefix, "variables"),
+                    prev.variables.as_ref(),
+                    next.variables,
+                    unsets,
+                ),
                 checksum: delta_opt_partial(prev.checksum.as_ref(), next.checksum),
                 optional: delta_opt(prev.optional.as_ref(), next.optional),
                 startup_timeout_secs: delta_opt(
