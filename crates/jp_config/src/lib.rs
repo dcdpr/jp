@@ -327,7 +327,9 @@ impl PartialConfigDelta for PartialAppConfig {
                 unsets,
             ),
             plugins: self.plugins.delta(next.plugins),
-            user: self.user.delta(next.user),
+            user: self
+                .user
+                .delta_with_unsets(next.user, &delta_path(prefix, "user"), unsets),
         }
     }
 }

@@ -20,7 +20,9 @@ use crate::{
         sections::{PartialSectionConfig, SectionConfig},
         tool_choice::ToolChoice,
     },
-    delta::{PartialConfigDelta, delta_mergeable_vec, delta_opt, delta_opt_partial, path},
+    delta::{
+        PartialConfigDelta, delta_mergeable_vec, delta_opt, delta_opt_at, delta_opt_partial, path,
+    },
     fill::{FillDefaults, fill_opt},
     internal::merge::{string_with_strategy, vec_with_strategy},
     model::{ModelConfig, PartialModelConfig},
@@ -140,7 +142,7 @@ impl PartialConfigDelta for PartialAssistantConfig {
 
     fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
         Self {
-            name: delta_opt(self.name.as_ref(), next.name),
+            name: delta_opt_at(&path(prefix, "name"), self.name.as_ref(), next.name, unsets),
             system_prompt: delta_opt_partial(self.system_prompt.as_ref(), next.system_prompt),
             instructions: delta_mergeable_vec(&self.instructions, next.instructions),
             system_prompt_sections: delta_mergeable_vec(
@@ -151,7 +153,9 @@ impl PartialConfigDelta for PartialAssistantConfig {
             model: self
                 .model
                 .delta_with_unsets(next.model, &path(prefix, "model"), unsets),
-            request: self.request.delta(next.request),
+            request: self
+                .request
+                .delta_with_unsets(next.request, &path(prefix, "request"), unsets),
         }
     }
 }

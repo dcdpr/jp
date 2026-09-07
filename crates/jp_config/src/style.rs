@@ -134,7 +134,11 @@ impl PartialConfigDelta for PartialStyleConfig {
     fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
         Self {
             code: self.code.delta(next.code),
-            inline_code: self.inline_code.delta(next.inline_code),
+            inline_code: self.inline_code.delta_with_unsets(
+                next.inline_code,
+                &path(prefix, "inline_code"),
+                unsets,
+            ),
             markdown: self.markdown.delta(next.markdown),
             mcp_startup: self.mcp_startup.delta(next.mcp_startup),
             reasoning: self.reasoning.delta_with_unsets(

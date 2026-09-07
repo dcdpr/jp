@@ -140,6 +140,11 @@ pub fn delta_opt_partial_at<T: PartialConfigDelta + PartialEq>(
         (Some(prev), Some(next)) if prev != &next => {
             Some(prev.delta_with_unsets(next, path, unsets))
         }
+        // The whole block went away, which merging cannot say.
+        (Some(_), None) => {
+            unsets.push(path.to_owned());
+            None
+        }
         (None, next) => next,
         _ => None,
     }
@@ -176,6 +181,26 @@ where
             (cleared || !delta.is_empty()).then_some((key, delta))
         })
         .collect()
+}
+
+/// Calculate the delta between two optional values, reporting a cleared field.
+///
+/// A value that went away cannot be expressed by merging: schematic keeps the
+/// previous value when the next layer has none.
+/// The path joins `unsets` so the fold clears the field before merging, and
+/// resolution then supplies whatever the field's absence means.
+pub fn delta_opt_at<T: PartialEq>(
+    path: &str,
+    prev: Option<&T>,
+    next: Option<T>,
+    unsets: &mut Vec<String>,
+) -> Option<T> {
+    if prev.is_some() && next.is_none() {
+        unsets.push(path.to_owned());
+        return None;
+    }
+
+    delta_opt(prev, next)
 }
 
 /// Calculate the delta between two optional values.

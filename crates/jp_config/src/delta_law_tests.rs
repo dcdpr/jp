@@ -16,6 +16,8 @@ use schematic::PartialConfig as _;
 use test_log::test;
 
 use crate::{
+    PartialAppConfig,
+    assignment::{AssignKeyValue as _, KvAssignment},
     conversation::tool::access::{PartialAccessConfig, PartialEnvRuleConfig},
     delta::PartialConfigDelta as _,
     types::vec::{MergeableVec, MergedVec, MergedVecStrategy},
@@ -79,16 +81,103 @@ fn assert_law(before: &[&str], after: &[&str]) {
 
 /// Fields whose clear is known not to survive a fold, and why.
 ///
+/// `inherit` is never stored: [`PartialAppConfig`]'s delta zeroes it, because
+/// it is interpreted while config is loaded and only its effect outlives that.
+/// Clearing it is meaningless rather than unrecordable.
+///
 /// `conversation.compaction.rules` has built-in defaults carrying
 /// `discard_when_merged`, so a resolved empty list and the resolved defaults
 /// compare unequal while resolving alike.
 /// A delta helper that judged them by their elements would write a
-/// replace-with-empty for no change at all, which is how it was found: adopting
-/// [`delta_mergeable_vec`] here turned 39 tests red with exactly that noise.
+/// replace-with-empty for no change at all, which is how it was found: routing
+/// it through [`delta_mergeable_vec`] turned 39 tests red with exactly that
+/// noise.
 ///
-/// Recording the clear needs the discard flag accounted for, which is worth
-/// doing with the collection conversion rather than around it.
-const CLEAR_NOT_RECORDED: &[&str] = &["conversation.compaction.rules"];
+/// `model.parameters.other` is the catch-all arm of its own key-value dispatch,
+/// so `parameters.other` names a key *inside* the map rather than the map
+/// itself, and clearing removes an entry that was never there.
+/// Reaching the whole field needs a path vocabulary that can say "this map"
+/// where the map is also the fallback.
+///
+/// `conversation.tools.*` addresses the tool defaults block, whose types have
+/// no path-reporting delta yet.
+/// Mechanical to add, and left for the pass that does the tool config as a
+/// whole.
+const CLEAR_NOT_RECORDED: &[&str] = &[
+    "inherit",
+    "conversation.compaction.rules",
+    "assistant.model.parameters.other",
+    "style.reasoning.summary_model.parameters.other",
+    "conversation.inquiry.assistant.model.parameters.other",
+    "conversation.title.generate.model.parameters.other",
+    "conversation.tools.*.enable",
+    "conversation.tools.*.enable.state",
+    "conversation.tools.*.enable.allow_toggle",
+    "conversation.tools.*.style.error.inline_results",
+    "conversation.tools.*.style.error.results_file_link",
+];
+
+/// Set `path` to whichever of a few generic values it accepts.
+///
+/// A field has to hold something before clearing it proves anything, and there
+/// is no generic way to ask a field for a value it would accept.
+/// Trying a handful and keeping the first that parses reaches scalars and
+/// collections alike; a path that accepts none of them stays as the fixture
+/// left it.
+fn populate(partial: &PartialAppConfig, path: &str) -> Option<PartialAppConfig> {
+    for value in ["1", "true", "x", "[]", "{}", "off"] {
+        let Ok(kv) = KvAssignment::try_from_cli(path, value) else {
+            continue;
+        };
+
+        let mut candidate = partial.clone();
+        if candidate.assign(kv).is_ok() {
+            return Some(candidate);
+        }
+    }
+
+    None
+}
+
+/// A config with as many fields set as the sweep can arrange.
+///
+/// A population that leaves the config unresolvable is dropped rather than
+/// carried, so the fixture the sweep starts from is always valid.
+/// The result is round-tripped through a resolved config, since that is the
+/// shape both sides of a real delta arrive in.
+fn populated_fixture() -> PartialAppConfig {
+    let mut partial = crate::AppConfig::new_test().to_partial();
+
+    for path in crate::AppConfig::fields() {
+        let Some(candidate) = populate(&partial, &path) else {
+            continue;
+        };
+
+        if crate::util::build(candidate.clone()).is_ok() {
+            partial = candidate;
+        }
+    }
+
+    crate::util::build(partial)
+        .expect("the populated fixture resolves")
+        .to_partial()
+}
+
+/// A field that went away reports its path, since merging cannot say it.
+#[test]
+fn a_cleared_scalar_reports_its_path() {
+    let mut prev = PartialAppConfig::empty();
+    prev.assistant.name = Some("Bot".to_owned());
+
+    let mut unsets = Vec::new();
+    let delta = prev.delta_with_unsets(PartialAppConfig::empty(), "", &mut unsets);
+
+    assert_eq!(unsets, ["assistant.name"]);
+    assert_eq!(
+        delta.assistant.name, None,
+        "the value is not carried; the clear is the whole change"
+    );
+}
 
 /// Every field, asked whether clearing it survives a fold.
 ///
@@ -107,7 +196,7 @@ const CLEAR_NOT_RECORDED: &[&str] = &["conversation.compaction.rules"];
 /// covered.
 #[test]
 fn clearing_any_field_survives_a_fold() {
-    let prev = crate::AppConfig::new_test().to_partial();
+    let prev = populated_fixture();
 
     let mut vacuous = Vec::new();
     let mut lost = Vec::new();

@@ -4,7 +4,7 @@ use schematic::Config;
 
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
-    delta::{PartialConfigDelta, delta_opt},
+    delta::{PartialConfigDelta, delta_opt, delta_opt_at, path},
     fill::FillDefaults,
     partial::ToPartial,
     types::color::Color,
@@ -43,6 +43,17 @@ impl PartialConfigDelta for PartialInlineCodeConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
             background: delta_opt(self.background.as_ref(), next.background),
+        }
+    }
+
+    fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
+        Self {
+            background: delta_opt_at(
+                &path(prefix, "background"),
+                self.background.as_ref(),
+                next.background,
+                unsets,
+            ),
         }
     }
 }
