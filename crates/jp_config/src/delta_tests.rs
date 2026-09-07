@@ -35,44 +35,72 @@ fn arguments(entry: &PartialMcpProviderConfig) -> Option<&Vec<String>> {
     config.arguments.as_deref()
 }
 
+/// A list the fold appends, holding `values`.
+fn appended(values: &[&str]) -> MergeableVec<String> {
+    values.iter().map(|v| (*v).to_owned()).collect()
+}
+
+/// A list the fold replaces, holding `values`.
+fn replaced(values: &[&str]) -> MergeableVec<String> {
+    MergeableVec::Merged(MergedVec {
+        value: values.iter().map(|v| (*v).to_owned()).collect(),
+        strategy: Some(MergedVecStrategy::Replace),
+        dedup: None,
+        discard_when_merged: false,
+    })
+}
+
 #[test]
-fn vec_delta_holds_the_added_elements() {
-    let prev = vec!["--a".to_owned()];
-    let next = vec!["--a".to_owned(), "--b".to_owned()];
+fn vec_delta_appends_the_added_elements() {
+    let prev = MergeableVec::from(vec!["--a".to_owned()]);
 
     assert_eq!(
-        delta_opt_vec(Some(&prev), Some(next)),
-        Some(vec!["--b".to_owned()])
+        delta_opt_mergeable_vec(Some(&prev), Some(appended(&["--a", "--b"]))),
+        Some(appended(&["--b"]))
     );
 }
 
-/// The first element added to an empty vector is still an addition.
+/// The first element added to an empty list is still an addition.
 #[test]
-fn vec_delta_holds_the_first_added_element() {
-    let prev = vec![];
-    let next = vec!["--a".to_owned()];
+fn vec_delta_appends_the_first_added_element() {
+    let prev = MergeableVec::from(Vec::<String>::new());
 
     assert_eq!(
-        delta_opt_vec(Some(&prev), Some(next)),
-        Some(vec!["--a".to_owned()])
+        delta_opt_mergeable_vec(Some(&prev), Some(appended(&["--a"]))),
+        Some(appended(&["--a"]))
     );
 }
 
 #[test]
 fn unchanged_vec_has_no_delta() {
-    let prev = vec!["--a".to_owned()];
-    let next = vec!["--a".to_owned()];
+    let prev = MergeableVec::from(vec!["--a".to_owned()]);
 
-    assert_eq!(delta_opt_vec(Some(&prev), Some(next)), None);
+    assert_eq!(
+        delta_opt_mergeable_vec(Some(&prev), Some(appended(&["--a"]))),
+        None
+    );
 }
 
-/// Appending cannot take an element away, so a removal has no delta to record.
+/// Appending cannot take an element away, so a removal replaces the list.
 #[test]
-fn removed_vec_element_has_no_delta() {
-    let prev = vec!["--a".to_owned(), "--b".to_owned()];
-    let next = vec!["--a".to_owned()];
+fn removed_vec_element_replaces_the_list() {
+    let prev = MergeableVec::from(vec!["--a".to_owned(), "--b".to_owned()]);
 
-    assert_eq!(delta_opt_vec(Some(&prev), Some(next)), None);
+    assert_eq!(
+        delta_opt_mergeable_vec(Some(&prev), Some(appended(&["--a"]))),
+        Some(replaced(&["--a"]))
+    );
+}
+
+/// Order is part of the value, so a reorder replaces the list too.
+#[test]
+fn reordered_vec_replaces_the_list() {
+    let prev = MergeableVec::from(vec!["--a".to_owned(), "--b".to_owned()]);
+
+    assert_eq!(
+        delta_opt_mergeable_vec(Some(&prev), Some(appended(&["--b", "--a"]))),
+        Some(replaced(&["--b", "--a"]))
+    );
 }
 
 /// A one-server config, keyed as `kagi`.
