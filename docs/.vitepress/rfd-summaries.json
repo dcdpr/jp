@@ -412,7 +412,7 @@
     "summary": "Multi-valued labels replacing single-valued ones; add/set/rm verbs, set-membership filtering, config list-values, removes --label from query/fork."
   },
   "104-terminal-capability-and-promptability-signals.md": {
-    "hash": "730c2672d54c0124b7f17329b29b535cca1fd63b61e681012a653b6be82aa412",
+    "hash": "cd7a302b62466866caf39751d5ec6280c2a7bc7d0ecdfabacd6c530c23a64f8f",
     "summary": "Separate four terminal-capability questions onto different signals to fix prompts and repaints in piped and redirected runs."
   },
   "106-collision-free-conversation-id-allocation.md": {

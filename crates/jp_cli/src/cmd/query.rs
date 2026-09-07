@@ -141,7 +141,7 @@ use crate::{
     error::{Error, Result},
     output::print_json,
     parser::{AttachmentUrlOrPath, split_list},
-    render::{RenderFlow, TurnView}, render::{TurnView, tool::output_lines},
+    render::{RenderFlow, TurnView, tool::output_lines},
     signals::SignalRouter,
 };
 

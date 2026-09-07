@@ -5,7 +5,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-09-04
 - **Extends**: [RFD 048]
-- **Required by**: [RFD 049], [RFD 091]
+- **Required by**: [RFD 049]
 
 ## Summary
 
@@ -294,23 +294,44 @@ with no second caller.
 
 ### Overlap with RFD 091
 
-[RFD 091] arrives at much of this section from the other direction.
-Its enabling predicate is `can_repaint` under another name, its condition 2
-already moves the tty source for chrome from stdout to stderr, and it already
-proposes capability as a `Printer` constructor input with an override for the
-memory constructor.
+[RFD 091] arrives at much of this section from the other direction, and has
+since been implemented — so this is a migration rather than a division of
+unbuilt work.
+
+What shipped is `TerminalCapability`, a `Printer` constructor input carrying
+stderr's tty-ness and the terminal's geometry, with
+`TerminalCapability::interactive` as the test override and
+`permits_regions(format)` as the predicate.
+That predicate is `can_repaint` under another name, and it already moves the tty
+source for chrome from stdout to stderr.
 
 The two should not both own it.
-This RFD owns channel capability as a general property; RFD 091's status line
-becomes one client of `can_repaint` rather than a feature with its own
-predicate. 091 keeps what is genuinely its own: the third condition, that a
-tracing layer writing to stderr disables the line, since that is about a
-competing writer rather than about what the channel can do.
+This RFD owns channel capability as a general property; the status region
+becomes one client of `can_repaint` rather than carrying its own predicate. 091
+keeps what is genuinely its own: that a tracing layer writing to stderr disables
+the region, since that is about a competing writer rather than about what the
+channel can do.
 
-One place where 091 is deliberately not followed: it states that `--format auto`
-continues to resolve by stdout tty-ness per [RFD 048], and works around the
-consequence in its predicate.
-This RFD changes the resolution instead, which removes the workaround.
+Two things the migration has to preserve, which were not in 091 when this
+section was written:
+
+- **Geometry, not just capability.** The region's window is sized from the
+  terminal's row count and its rows are bounded to the column count, both
+  re-read on every draw rather than captured once — a block sized against a
+  stale height erases rows the viewport no longer has.
+  `ChannelCaps` as sketched carries neither, so either it grows a size or the
+  region keeps a second input alongside it.
+- **`Printer::memory_with` needs the same.** The region's screen-level tests
+  declare a terminal of a known size; a capability-only override cannot express
+  them.
+
+One place where 091 is deliberately not followed: it resolves `--format auto` by
+stdout tty-ness per [RFD 048], and its predicate turns the region off under the
+resulting non-pretty format.
+This RFD changes the resolution instead, so a terminal stderr keeps its escapes
+while stdout is piped.
+That is a behaviour change against what 091 shipped: `jp query > answer.txt`
+renders no region today and would render one after.
 
 ## Observable behaviour changes
 
@@ -519,8 +540,8 @@ the mechanical ones bisect apart.
 - [RFD 087: Session-Scoped Active Workspace][RFD 087] — its precedence ladder
   defers to "the same promptability signal JP already uses elsewhere"; this is
   that signal.
-- [RFD 091: Printer-Owned Status Line][RFD 091] — its enabling predicate is
-  this RFD's `can_repaint`, reached independently.
+- [RFD 091: Printer-Owned Status Region][RFD 091] — its enabling predicate is
+  this RFD's `can_repaint`, reached independently and already implemented.
   See [Overlap with RFD 091](#overlap-with-rfd-091).
 - [RFD 021: Printer Live Redirection][RFD 021] — swapping writers invalidates
   capability captured at construction.
@@ -533,5 +554,5 @@ the mechanical ones bisect apart.
 [RFD 048]: 048-four-channel-output-model.md
 [RFD 049]: 049-non-interactive-mode-and-detached-prompt-policy.md
 [RFD 087]: 087-session-scoped-active-workspace.md
-[RFD 091]: 091-printer-owned-status-line.md
+[RFD 091]: 091-printer-owned-status-region.md
 [\#1068]: https://github.com/dcdpr/jp/issues/1068

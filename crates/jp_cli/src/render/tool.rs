@@ -69,24 +69,22 @@ pub enum RenderOutcome {
 ///
 /// The renderer owns the full tool display lifecycle:
 ///
-/// 1. **Streaming phase** — a rewritable "temp line" shows tool names while
-///    arguments are streamed.
-///    Once arguments are complete, a permanent line is printed via
-///    [`complete`].
-///    Methods: [`register`], [`complete`], [`tick`].
+/// 1. **Streaming phase** — a status region names the tools whose arguments
+///    are still arriving, ticking its own elapsed time.
+///    Once arguments are complete, a permanent header replaces it.
+///    Methods: [`register`], [`complete`].
 ///
 /// 2. **Permission/execution phase** — arguments (if not already rendered),
 ///    Custom formatter output, progress, and results.
-///    Methods: [`render_tool_call`], [`render_approved`], [`render_progress`],
+///    Methods: [`render_tool_call`], [`render_approved`], [`start_progress`],
 ///    [`render_result`].
 ///
 /// [`complete`]: Self::complete
 /// [`register`]: Self::register
 /// [`render_approved`]: Self::render_approved
-/// [`render_progress`]: Self::render_progress
 /// [`render_result`]: Self::render_result
 /// [`render_tool_call`]: Self::render_tool_call
-/// [`tick`]: Self::tick
+/// [`start_progress`]: Self::start_progress
 pub struct ToolRenderer {
     channel: ErrChannel,
     config: StyleConfig,
