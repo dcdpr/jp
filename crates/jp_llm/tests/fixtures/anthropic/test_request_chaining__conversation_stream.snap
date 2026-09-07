@@ -34,8 +34,7 @@ expression: v
             },
             "exclude": false
           },
-          "stop_words": [],
-          "other": {}
+          "stop_words": []
         }
       },
       "request": {

@@ -29,8 +29,7 @@ expression: v
         },
         "parameters": {
           "reasoning": "off",
-          "stop_words": [],
-          "other": {}
+          "stop_words": []
         }
       },
       "request": {

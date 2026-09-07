@@ -33,9 +33,7 @@ expression: v
             "exclude": false
           },
           "stop_words": [],
-          "other": {
-            "reasoning_mode": "pro"
-          }
+          "reasoning_mode": "pro"
         }
       },
       "request": {

@@ -32,8 +32,7 @@ expression: v
             "effort": "high",
             "exclude": false
           },
-          "stop_words": [],
-          "other": {}
+          "stop_words": []
         }
       },
       "request": {
