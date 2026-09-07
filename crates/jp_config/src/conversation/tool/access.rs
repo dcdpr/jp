@@ -1,5 +1,11 @@
 //! Resource access grants for a tool.
 //!
+//! Grants are declared either on one tool or on `conversation.tools.'*'`, which
+//! covers every local tool that declares none of its own.
+//! A tool declaring any rules of its own ignores the `'*'` block entirely
+//! rather than adding to it, and the block moves as a unit: a tool declaring
+//! only `fs` rules also drops the `'*'` block's `env` rules.
+//!
 //! `access.fs` declares which paths a tool may touch and what it may do there.
 //! When the section is absent the tool keeps unrestricted (workspace-confined)
 //! access; declaring at least one rule switches the tool to default-deny.
@@ -82,6 +88,19 @@ pub struct AccessConfig {
         merge = vec_with_strategy,
     )]
     pub env: Vec<EnvRuleConfig>,
+}
+
+impl AccessConfig {
+    /// Whether the block declares no rules of any resource type.
+    ///
+    /// An empty block neither grants nor restricts anything — downstream, no
+    /// rules reads as unrestricted access — so scope resolution treats it as
+    /// absent rather than as a policy of its own.
+    /// A block holding only `env` rules is a policy like any other.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.fs.is_empty() && self.env.is_empty()
+    }
 }
 
 impl AssignKeyValue for PartialAccessConfig {

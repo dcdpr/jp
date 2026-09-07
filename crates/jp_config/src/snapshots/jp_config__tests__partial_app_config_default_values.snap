@@ -135,6 +135,7 @@ Ok(
                                 results_file_link: None,
                             },
                         },
+                        access: None,
                     },
                     tools: {},
                 },

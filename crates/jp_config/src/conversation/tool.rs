@@ -77,6 +77,11 @@ impl FillDefaults for PartialToolsConfig {
         // indistinguishable from the ones it did. Fill the gaps from the `*`
         // block here, while the partial still records what the tool asked for,
         // so a single `[conversation.tools.'*'.style]` key reaches every tool.
+        //
+        // `access` is deliberately not filled the same way, at either level: a
+        // tool's grants must be complete where they are written, so the `*`
+        // block applies whole or not at all, `fs` and `env` together (resolved
+        // in `ToolConfigWithDefaults::access`).
         let tools = self
             .tools
             .into_iter()
@@ -200,19 +205,25 @@ fn reject_comma_in_tool_names(tools: &ToolsConfig) -> Result<(), ConfigError> {
     Ok(())
 }
 
-/// Reject `access` on tools whose finalized source is `builtin` or `mcp`.
+/// Reject `access` declared on a tool whose finalized source is `builtin` or
+/// `mcp`.
 ///
 /// `access` is the local-subprocess contract: it is serialized into the
 /// `Context` that local tool binaries self-check.
 /// Builtin tools run in-process and MCP tools run on external servers, so
 /// neither consumes `access` — accepting it there would create false
 /// confidence in a security-relevant field.
+///
+/// Only grants written on the tool itself are rejected.
+/// Naming a tool and giving it rules that cannot take effect is a mistake worth
+/// reporting; the `'*'` defaults make no claim about any individual tool, so
+/// they pass over builtin and MCP tools instead of failing the whole config.
 fn reject_access_on_non_local_tools(tools: &ToolsConfig) -> Result<(), ConfigError> {
-    for (name, tool) in tools.iter() {
-        if tool.access().is_none() {
+    for (name, tool) in &tools.tools {
+        if tool.access.is_none() {
             continue;
         }
-        let kind = match tool.source() {
+        let kind = match tool.source {
             ToolSource::Local { .. } => continue,
             ToolSource::Builtin { .. } => "builtin",
             ToolSource::Mcp { .. } => "mcp",
@@ -291,6 +302,20 @@ pub struct ToolsDefaultsConfig {
     /// How to display the results of the tool in the terminal.
     #[setting(nested)]
     pub style: DisplayStyleConfig,
+
+    /// Resource access grants for every local tool that declares no `access` of
+    /// its own.
+    ///
+    /// When absent, those tools keep unrestricted (but workspace-confined)
+    /// access; declaring any rule here switches all of them to default-deny at
+    /// once, per resource type.
+    /// A tool that declares its own `conversation.tools.<name>.access` ignores
+    /// this section entirely, so a tool that wants these rules plus one more
+    /// restates them — including the resource types it isn't changing, since a
+    /// tool declaring only `fs` rules also drops the `env` rules here.
+    /// Builtin and MCP tools do not consume access grants and are unaffected.
+    #[setting(nested)]
+    pub access: Option<AccessConfig>,
 }
 
 /// Default `cancellation_response`: a canned rejection notice that asks the
@@ -315,6 +340,7 @@ impl AssignKeyValue for PartialToolsDefaultsConfig {
             "result" => self.result = kv.try_some_from_str()?,
             "cancellation_response" => self.cancellation_response = kv.try_some_string()?,
             _ if kv.p("style") => self.style.assign(kv)?,
+            _ if kv.p("access") => self.access.assign(kv)?,
             _ => return missing_key(&kv),
         }
 
@@ -334,6 +360,7 @@ impl PartialConfigDelta for PartialToolsDefaultsConfig {
                 next.cancellation_response,
             ),
             style: self.style.delta(next.style),
+            access: delta_opt_partial(self.access.as_ref(), next.access),
         }
     }
 }
@@ -349,6 +376,7 @@ impl FillDefaults for PartialToolsDefaultsConfig {
                 .cancellation_response
                 .or(defaults.cancellation_response),
             style: self.style.fill_from(defaults.style),
+            access: self.access.or(defaults.access),
         }
     }
 }
@@ -367,6 +395,7 @@ impl ToPartial for ToolsDefaultsConfig {
                 defaults.cancellation_response,
             ),
             style: self.style.to_partial(),
+            access: partial_opt_config(self.access.as_ref(), defaults.access),
         }
     }
 }
@@ -1186,10 +1215,29 @@ impl ToolConfigWithDefaults {
         &self.tool.options
     }
 
-    /// Return the resource access grants for the tool, if declared.
+    /// Return the resource access grants that apply to the tool.
+    ///
+    /// A tool declaring its own rules uses them whole; a local tool declaring
+    /// none inherits `conversation.tools.'*'.access`.
+    /// The two are never combined, and the block moves as a unit: a tool
+    /// declaring only `fs` rules also drops the `'*'` block's `env` rules.
+    ///
+    /// Builtin and MCP tools inherit nothing: access grants are the
+    /// local-subprocess contract, and a `'*'` block says nothing about tools
+    /// that cannot consume it.
+    /// Returns `None` when no scope applies, meaning unrestricted (but
+    /// workspace-confined) access.
     #[must_use]
-    pub const fn access(&self) -> Option<&AccessConfig> {
-        self.tool.access.as_ref()
+    pub fn access(&self) -> Option<&AccessConfig> {
+        if let Some(access) = self.tool.access.as_ref().filter(|v| !v.is_empty()) {
+            return Some(access);
+        }
+
+        if matches!(self.tool.source, ToolSource::Local { .. }) {
+            return self.defaults.access.as_ref().filter(|v| !v.is_empty());
+        }
+
+        None
     }
 
     /// Return the question target for the given question ID.

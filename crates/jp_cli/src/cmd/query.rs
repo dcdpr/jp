@@ -76,7 +76,8 @@ use jp_config::{
     conversation::{
         ConversationConfig,
         tool::{
-            Enable, PartialEnableConfig, PartialToolConfig, ToggleScope, ToolSource,
+            Enable, PartialEnableConfig, PartialToolConfig, PartialToolsConfig, ToggleScope,
+            ToolSource,
             access::{AccessConfig, PartialAccessConfig, PartialFsRuleConfig},
         },
     },
@@ -2299,8 +2300,8 @@ fn apply_reasoning(
 struct MountPlan {
     rule_path: String,
     write: bool,
-    /// (tool name, whether its `access.fs` is empty across all layers)
-    targets: Vec<(String, bool)>,
+    /// (tool name, grants to seed its own `access` block with)
+    targets: Vec<(String, PartialAccessConfig)>,
 }
 
 /// Inject `--mount` access grants into the partial config (stage 1).
@@ -2308,8 +2309,8 @@ struct MountPlan {
 /// Pure config mutation: one `access.fs` rule per in-scope tool.
 /// The symlink is not required to exist yet; it is created later in
 /// [`Query::run`].
-/// When a tool had no filesystem rules from any layer, a workspace-default rule
-/// is also injected so the mount doesn't silently switch the tool to deny-all.
+/// A tool that had no grants of its own is seeded first, so the mount doesn't
+/// change what else the tool can reach (see [`mount_access_seed`]).
 fn apply_mounts(
     partial: &mut PartialAppConfig,
     mounts: &[String],
@@ -2329,7 +2330,6 @@ fn apply_mounts(
     // actually enabled in the resolved config, honoring `*` defaults.
     let tools_config = merged_config.map_or(&partial.conversation.tools, |v| &v.conversation.tools);
     let default_enable = tools_config.defaults.enable.clone().unwrap_or_default();
-    let existing = &tools_config.tools;
 
     let mut plans = Vec::new();
     for spec in mounts {
@@ -2337,11 +2337,12 @@ fn apply_mounts(
         let rule_path = spec.resolve_name(&cwd, &root)?.as_str().to_owned();
 
         let targets = match &spec.tool {
-            Some(tool) => vec![(tool.clone(), tool_access_empty(existing, tool))],
-            None => existing
+            Some(tool) => vec![(tool.clone(), mount_access_seed(tools_config, tool))],
+            None => tools_config
+                .tools
                 .iter()
                 .filter(|(_, cfg)| is_enabled_local(cfg, &default_enable))
-                .map(|(name, _)| (name.clone(), tool_access_empty(existing, name)))
+                .map(|(name, _)| (name.clone(), mount_access_seed(tools_config, name)))
                 .collect(),
         };
 
@@ -2353,7 +2354,7 @@ fn apply_mounts(
     }
 
     for plan in plans {
-        for (tool, access_empty) in plan.targets {
+        for (tool, seed) in plan.targets {
             let cfg = partial.conversation.tools.tools.entry(tool).or_default();
             let access = cfg.access.get_or_insert_with(PartialAccessConfig::default);
 
@@ -2365,8 +2366,11 @@ fn apply_mounts(
                 continue;
             }
 
-            if access_empty && access.fs.is_empty() {
-                access.fs.push(workspace_default_partial_rule());
+            // Seed once per tool: a second mount for the same tool finds the
+            // block already carrying rules and just appends to it.
+            if access.fs.is_empty() && access.env.is_empty() {
+                access.fs.extend(seed.fs);
+                access.env.extend(seed.env);
             }
 
             access
@@ -2685,15 +2689,62 @@ fn current_dir_utf8() -> BoxedResult<Utf8PathBuf> {
         .map_err(|path| format!("current directory is not valid UTF-8: {}", path.display()).into())
 }
 
-/// Whether a tool's `access.fs` is empty across all merged layers.
-fn tool_access_empty(
-    tools: &IndexMap<String, jp_config::conversation::tool::PartialToolConfig>,
-    name: &str,
-) -> bool {
-    tools
+/// The grants a tool's own `access` block is seeded with before a mount rule is
+/// appended to it.
+///
+/// Writing a rule into a tool's own scope detaches that tool from
+/// `[conversation.tools.'*'.access]`, which applies whole or not at all (RFD
+/// 076), and a rule in one resource list switches only that list to
+/// default-deny.
+/// The seed carries the tool's prior reach across both of those edges:
+///
+/// - A tool that declared no grants of its own gets a copy of the `'*'` block,
+///   `env` rules included.
+///   Copying only `fs` would hand back unrestricted environment access to a
+///   tool whose `env` rules came from `'*'`.
+/// - When the scope that applied granted no `fs` rules at all, the tool had
+///   unrestricted filesystem access, and the mount rule on its own would end
+///   it.
+///   A workspace-wide rule stands in for what the tool already had.
+///
+/// A tool that declared `fs` rules of its own needs no seed and gets none:
+/// those rules are already in the config, and the mount rule appends to them.
+fn mount_access_seed(tools: &PartialToolsConfig, name: &str) -> PartialAccessConfig {
+    let own = tools
+        .tools
         .get(name)
         .and_then(|cfg| cfg.access.as_ref())
-        .is_none_or(|access| access.fs.is_empty())
+        .filter(|access| declares_rules(access));
+
+    let effective = own.or_else(|| {
+        tools
+            .defaults
+            .access
+            .as_ref()
+            .filter(|access| declares_rules(access))
+    });
+
+    // Only the `'*'` block needs carrying: a tool's own rules are already in
+    // the config, and copying them would duplicate every one of them.
+    let mut seed = match effective {
+        Some(block) if own.is_none() => block.clone(),
+        _ => PartialAccessConfig::default(),
+    };
+
+    if effective.is_none_or(|block| block.fs.is_empty()) {
+        seed.fs.push(workspace_default_partial_rule());
+    }
+
+    seed
+}
+
+/// Whether an `access` block holds a rule of any resource type.
+///
+/// Mirrors [`AccessConfig::is_empty`] on the resolved side: a block with no
+/// rules at all is not a policy, so it neither counts as the tool's own choice
+/// nor is worth seeding.
+fn declares_rules(access: &PartialAccessConfig) -> bool {
+    !access.fs.is_empty() || !access.env.is_empty()
 }
 
 /// Whether a partial tool config is an enabled local tool.

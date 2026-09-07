@@ -93,6 +93,296 @@ fn access_on_local_tool_is_accepted_by_validation() {
     assert!(build(partial).is_ok());
 }
 
+/// A `'*'` block is the policy for a local tool that declares none of its own.
+#[test]
+fn defaults_access_applies_to_a_local_tool_without_its_own() {
+    use crate::{
+        PartialAppConfig,
+        conversation::tool::access::{PartialAccessConfig, PartialFsRuleConfig},
+        util::build,
+    };
+
+    let mut partial = PartialAppConfig::new_test();
+    partial.conversation.tools.defaults.access = Some(PartialAccessConfig {
+        fs: vec![PartialFsRuleConfig {
+            path: Some("src".to_owned()),
+            read: Some(true),
+            ..Default::default()
+        }]
+        .into(),
+        ..Default::default()
+    });
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("my_local".to_owned(), PartialToolConfig {
+            source: Some(ToolSource::Local { tool: None }),
+            ..Default::default()
+        });
+
+    let config = build(partial).unwrap();
+    let access = config
+        .conversation
+        .tools
+        .get("my_local")
+        .unwrap()
+        .access()
+        .expect("inherited from the '*' block")
+        .clone();
+
+    assert_eq!(access.fs.len(), 1);
+    assert_eq!(access.fs[0].path, "src");
+    assert_eq!(access.fs[0].read, Some(true));
+}
+
+/// A tool's own rules are the whole policy: the `'*'` rules are not appended,
+/// so a tool can narrow what the defaults grant.
+#[test]
+fn tool_access_replaces_the_defaults_instead_of_appending() {
+    use crate::{
+        PartialAppConfig,
+        conversation::tool::access::{PartialAccessConfig, PartialFsRuleConfig},
+        util::build,
+    };
+
+    let mut partial = PartialAppConfig::new_test();
+    partial.conversation.tools.defaults.access = Some(PartialAccessConfig {
+        fs: vec![PartialFsRuleConfig {
+            path: Some(".".to_owned()),
+            read: Some(true),
+            write: Some(true),
+            ..Default::default()
+        }]
+        .into(),
+        ..Default::default()
+    });
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("my_local".to_owned(), PartialToolConfig {
+            source: Some(ToolSource::Local { tool: None }),
+            access: Some(PartialAccessConfig {
+                fs: vec![PartialFsRuleConfig {
+                    path: Some("src".to_owned()),
+                    read: Some(true),
+                    ..Default::default()
+                }]
+                .into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+
+    let config = build(partial).unwrap();
+    let access = config
+        .conversation
+        .tools
+        .get("my_local")
+        .unwrap()
+        .access()
+        .expect("declared on the tool")
+        .clone();
+
+    assert_eq!(access.fs.len(), 1, "the '*' rule must not be appended");
+    assert_eq!(access.fs[0].path, "src");
+    assert_eq!(access.fs[0].write, None);
+}
+
+/// A block declaring no rules is not a policy — it would read as unrestricted
+/// downstream, silently widening past the defaults — so the `'*'` block still
+/// applies.
+#[test]
+fn an_empty_tool_access_block_still_inherits_the_defaults() {
+    use crate::{
+        PartialAppConfig,
+        conversation::tool::access::{PartialAccessConfig, PartialFsRuleConfig},
+        util::build,
+    };
+
+    let mut partial = PartialAppConfig::new_test();
+    partial.conversation.tools.defaults.access = Some(PartialAccessConfig {
+        fs: vec![PartialFsRuleConfig {
+            path: Some("src".to_owned()),
+            read: Some(true),
+            ..Default::default()
+        }]
+        .into(),
+        ..Default::default()
+    });
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("my_local".to_owned(), PartialToolConfig {
+            source: Some(ToolSource::Local { tool: None }),
+            access: Some(PartialAccessConfig::default()),
+            ..Default::default()
+        });
+
+    let config = build(partial).unwrap();
+    let access = config
+        .conversation
+        .tools
+        .get("my_local")
+        .unwrap()
+        .access()
+        .expect("inherited from the '*' block")
+        .clone();
+
+    assert_eq!(access.fs.len(), 1);
+    assert_eq!(access.fs[0].path, "src");
+}
+
+/// Replacement is per block, not per resource type: a tool declaring only `fs`
+/// rules drops the `'*'` block's `env` rules along with its `fs` rules, and
+/// reverts to unrestricted environment access.
+#[test]
+fn tool_access_drops_the_defaults_env_rules_it_does_not_restate() {
+    use crate::{
+        PartialAppConfig,
+        conversation::tool::access::{
+            PartialAccessConfig, PartialEnvRuleConfig, PartialFsRuleConfig,
+        },
+        util::build,
+    };
+
+    let mut partial = PartialAppConfig::new_test();
+    partial.conversation.tools.defaults.access = Some(PartialAccessConfig {
+        env: vec![PartialEnvRuleConfig {
+            name: Some("AWS_*".to_owned()),
+            read: Some(true),
+        }]
+        .into(),
+        ..Default::default()
+    });
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("my_local".to_owned(), PartialToolConfig {
+            source: Some(ToolSource::Local { tool: None }),
+            access: Some(PartialAccessConfig {
+                fs: vec![PartialFsRuleConfig {
+                    path: Some("src".to_owned()),
+                    read: Some(true),
+                    ..Default::default()
+                }]
+                .into(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+
+    let config = build(partial).unwrap();
+    let access = config
+        .conversation
+        .tools
+        .get("my_local")
+        .unwrap()
+        .access()
+        .expect("declared on the tool")
+        .clone();
+
+    assert_eq!(access.fs.len(), 1);
+    assert!(
+        access.env.is_empty(),
+        "the '*' env rules must not survive alongside the tool's own fs rules"
+    );
+}
+
+/// A block holding only `env` rules is a policy like any other, so a local tool
+/// declaring nothing inherits it.
+#[test]
+fn defaults_access_with_only_env_rules_applies_to_a_local_tool() {
+    use crate::{
+        PartialAppConfig,
+        conversation::tool::access::{PartialAccessConfig, PartialEnvRuleConfig},
+        util::build,
+    };
+
+    let mut partial = PartialAppConfig::new_test();
+    partial.conversation.tools.defaults.access = Some(PartialAccessConfig {
+        env: vec![PartialEnvRuleConfig {
+            name: Some("AWS_*".to_owned()),
+            read: Some(true),
+        }]
+        .into(),
+        ..Default::default()
+    });
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("my_local".to_owned(), PartialToolConfig {
+            source: Some(ToolSource::Local { tool: None }),
+            ..Default::default()
+        });
+
+    let config = build(partial).unwrap();
+    let access = config
+        .conversation
+        .tools
+        .get("my_local")
+        .unwrap()
+        .access()
+        .expect("inherited from the '*' block")
+        .clone();
+
+    assert_eq!(access.env.len(), 1);
+    assert_eq!(access.env[0].name, "AWS_*");
+    assert!(access.fs.is_empty(), "the '*' block restricts no path");
+}
+
+/// The `'*'` block names no tool, so it passes over the sources that cannot
+/// consume grants rather than failing the config the way a tool-level
+/// declaration does.
+#[test]
+fn defaults_access_passes_over_builtin_and_mcp_tools() {
+    use crate::{
+        PartialAppConfig,
+        conversation::tool::access::{PartialAccessConfig, PartialFsRuleConfig},
+        util::build,
+    };
+
+    let mut partial = PartialAppConfig::new_test();
+    partial.conversation.tools.defaults.access = Some(PartialAccessConfig {
+        fs: vec![PartialFsRuleConfig {
+            path: Some("src".to_owned()),
+            read: Some(true),
+            ..Default::default()
+        }]
+        .into(),
+        ..Default::default()
+    });
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("my_mcp".to_owned(), PartialToolConfig {
+            source: Some(ToolSource::Mcp {
+                server: "server".to_owned(),
+                tool: None,
+            }),
+            ..Default::default()
+        });
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("my_builtin".to_owned(), PartialToolConfig {
+            source: Some(ToolSource::Builtin { tool: None }),
+            ..Default::default()
+        });
+
+    let config = build(partial).expect("a '*' block must not fail a config with mcp tools");
+    let tools = &config.conversation.tools;
+
+    assert!(tools.get("my_mcp").unwrap().access().is_none());
+    assert!(tools.get("my_builtin").unwrap().access().is_none());
+}
+
 #[test]
 fn tool_style_fills_unset_fields_from_the_global_defaults() {
     use crate::{

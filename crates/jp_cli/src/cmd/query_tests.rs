@@ -9,7 +9,7 @@ use jp_config::{
     AppConfig, PartialAppConfig, ToPartial,
     conversation::tool::{
         AllowToggle, Enable, PartialCommandConfigOrString, PartialEnableConfig, PartialToolConfig,
-        ResultMode, RunMode,
+        ResultMode, RunMode, access::PartialEnvRuleConfig,
     },
     model::id::{ModelIdConfig, PartialModelIdConfig, ProviderId},
     util::build,
@@ -97,6 +97,141 @@ fn inline_query(text: &str) -> QueryInput {
 /// Helper to build directives from a list.
 fn directives(ds: Vec<ToolDirective>) -> ToolDirectives {
     ToolDirectives(ds)
+}
+
+/// An `access` block granting read on one workspace path.
+fn fs_access(path: &str) -> PartialAccessConfig {
+    PartialAccessConfig {
+        fs: vec![PartialFsRuleConfig {
+            path: Some(path.to_owned()),
+            read: Some(true),
+            ..Default::default()
+        }]
+        .into(),
+        ..PartialAccessConfig::default()
+    }
+}
+
+/// An `access` block granting read on one environment variable.
+fn env_access(name: &str) -> PartialAccessConfig {
+    PartialAccessConfig {
+        env: vec![PartialEnvRuleConfig {
+            name: Some(name.to_owned()),
+            read: Some(true),
+        }]
+        .into(),
+        ..PartialAccessConfig::default()
+    }
+}
+
+/// A partial tools config with one local tool `my_tool`, carrying the given
+/// `'*'` and per-tool `access` blocks.
+fn tools_with_access(
+    defaults: Option<PartialAccessConfig>,
+    tool: Option<PartialAccessConfig>,
+) -> PartialToolsConfig {
+    let mut tools = PartialToolsConfig::default();
+    tools.defaults.access = defaults;
+    tools.tools.insert("my_tool".to_owned(), PartialToolConfig {
+        source: Some(ToolSource::Local { tool: None }),
+        access: tool,
+        ..Default::default()
+    });
+    tools
+}
+
+/// With nothing declared anywhere, the tool had unrestricted workspace access,
+/// so the seed stands in for it rather than letting the mount rule become the
+/// tool's whole policy.
+#[test]
+fn mount_seeds_the_workspace_rule_when_no_access_is_declared() {
+    let tools = tools_with_access(None, None);
+
+    let seed = mount_access_seed(&tools, "my_tool");
+
+    assert_eq!(seed.fs.len(), 1);
+    assert_eq!(seed.fs[0].path.as_deref(), Some("."));
+    assert_eq!(seed.fs[0].read, Some(true));
+    assert_eq!(seed.fs[0].write, Some(true));
+    assert!(seed.env.is_empty());
+}
+
+/// The tool was inheriting the `'*'` rules, and writing into its own scope
+/// detaches it from them, so they are copied across.
+/// Seeding the workspace-wide rule here would hand the tool back the access
+/// `'*'` took away.
+#[test]
+fn mount_seeds_the_defaults_rules_when_the_tool_declares_none() {
+    let tools = tools_with_access(Some(fs_access("src")), None);
+
+    let seed = mount_access_seed(&tools, "my_tool");
+
+    assert_eq!(seed.fs.len(), 1);
+    assert_eq!(seed.fs[0].path.as_deref(), Some("src"));
+}
+
+/// The whole `'*'` block is carried, not just its filesystem rules: the tool's
+/// `env` restrictions came from `'*'` and would otherwise be dropped, leaving
+/// it able to read every variable.
+///
+/// The `'*'` block restricts no path, so the tool also keeps the workspace-wide
+/// `fs` rule — without it the mount rule alone would switch the tool's
+/// filesystem access to default-deny.
+#[test]
+fn mount_seeds_the_defaults_env_rules_and_keeps_filesystem_reach() {
+    let tools = tools_with_access(Some(env_access("AWS_*")), None);
+
+    let seed = mount_access_seed(&tools, "my_tool");
+
+    assert_eq!(seed.env.len(), 1);
+    assert_eq!(seed.env[0].name.as_deref(), Some("AWS_*"));
+    assert_eq!(seed.fs.len(), 1);
+    assert_eq!(seed.fs[0].path.as_deref(), Some("."));
+}
+
+/// A tool with filesystem rules of its own is already detached from `'*'`; its
+/// policy is complete as written and the mount rule just appends to it.
+#[test]
+fn mount_seeds_nothing_when_the_tool_declares_its_own_access() {
+    let tools = tools_with_access(Some(fs_access("src")), Some(fs_access("vendor")));
+
+    let seed = mount_access_seed(&tools, "my_tool");
+
+    assert!(
+        seed.fs.is_empty(),
+        "the tool's own rules are already stored"
+    );
+    assert!(seed.env.is_empty());
+}
+
+/// A tool declaring only `env` rules restricts no path, so it still reaches the
+/// whole workspace.
+/// Its own rules are not copied, but the workspace-wide `fs` rule is, so the
+/// mount doesn't take that reach away.
+#[test]
+fn mount_keeps_filesystem_reach_for_a_tool_declaring_only_env_rules() {
+    let tools = tools_with_access(None, Some(env_access("GITHUB_TOKEN")));
+
+    let seed = mount_access_seed(&tools, "my_tool");
+
+    assert_eq!(seed.fs.len(), 1);
+    assert_eq!(seed.fs[0].path.as_deref(), Some("."));
+    assert!(
+        seed.env.is_empty(),
+        "the tool's own env rules are already stored"
+    );
+}
+
+/// A tool absent from the config declares nothing, so it is seeded like any
+/// other undeclared tool.
+#[test]
+fn mount_seeds_an_unconfigured_tool_from_the_defaults() {
+    let tools = tools_with_access(Some(fs_access("src")), None);
+
+    let seed = mount_access_seed(&tools, "absent_tool");
+
+    assert_eq!(seed.fs.len(), 1);
+    assert_eq!(seed.fs[0].path.as_deref(), Some("src"));
 }
 
 fn make_id(secs: u64) -> ConversationId {
