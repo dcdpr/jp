@@ -1,0 +1,121 @@
+# Manual verification fixture for RFD 091 phase 6: the tool progress window.
+#
+# Four fake tools that talk to stderr for 15-30 seconds. Ask the assistant to
+# run them and watch the window; each one exercises a different interleaving.
+#
+#     jp query --cfg @crates/jp_printer/examples/tool_window_fixture.toml \
+#         "run window_alpha and window_beta at the same time, in parallel"
+#
+# Each command is a direct `sh -c` exec rather than `shell = true`: a shell
+# command makes a tool prompt for confirmation whatever its `run` mode, which
+# would stall an unattended demo.
+#
+# Delete this alongside `region_spike.rs` once T-0994dfa can assert the same
+# things without a human watching.
+
+# Show the region from the first frame rather than waiting out the default 3s,
+# and give it four rows so eviction is visible.
+[style.tool_call.progress]
+delay_secs = 0
+interval_ms = 100
+stderr_rows = 4
+
+# Emits every 0.5s for ~20s. Lines 7, 13 and 19 are the interesting ones:
+# styled output, a hostile screen-clear, and a row far wider than any terminal.
+[conversation.tools.window_alpha]
+enable = true
+run = "unattended"
+source = "local"
+description = "A slow build that reports progress on stderr. Takes ~20 seconds."
+
+[conversation.tools.window_alpha.command]
+program = "sh"
+args = [
+  "-c",
+  '''
+i=1
+while [ $i -le 40 ]; do
+  case $i in
+    7)  printf '   \033[32mFinished\033[0m dev profile in 3.2s\n' >&2 ;;
+    13) printf '   \033[2Jthis line tried to clear your screen\n' >&2 ;;
+    19) printf '   wide-row-%s-end\n' "$(printf 'x%.0s' $(seq 1 400))" >&2 ;;
+    *)  printf '   Compiling alpha-crate-%02d v1.0.%d\n' "$i" "$i" >&2 ;;
+  esac
+  sleep 0.5
+  i=$((i + 1))
+done
+printf 'alpha done\n'
+''',
+]
+
+# Slower and longer, so it is still going after alpha finishes: that is when a
+# tool result renders while another tool's window is still live.
+[conversation.tools.window_beta]
+enable = true
+run = "unattended"
+source = "local"
+description = "A slow test run that reports progress on stderr. Takes ~30 seconds."
+
+[conversation.tools.window_beta.command]
+program = "sh"
+args = [
+  "-c",
+  '''
+i=1
+while [ $i -le 40 ]; do
+  printf '   test beta::case_%02d ... ok\n' "$i" >&2
+  sleep 0.75
+  i=$((i + 1))
+done
+printf 'beta done\n'
+''',
+]
+
+# Opted out: it talks just as much, and none of it reaches the window. Run it
+# alongside alpha to see one tool's rows while the other stays silent.
+[conversation.tools.window_quiet]
+enable = true
+run = "unattended"
+source = "local"
+description = "A noisy tool whose output is deliberately hidden. Takes ~15 seconds."
+
+[conversation.tools.window_quiet.style]
+print_stderr = false
+
+[conversation.tools.window_quiet.command]
+program = "sh"
+args = [
+  "-c",
+  '''
+i=1
+while [ $i -le 30 ]; do
+  printf '   THIS LINE MUST NOT APPEAR %02d\n' "$i" >&2
+  sleep 0.5
+  i=$((i + 1))
+done
+printf 'quiet done\n'
+''',
+]
+
+# Asks for approval before running, so the prompt goes up while the other
+# tools' window is live. Run it with alpha to see the window suspend and return.
+[conversation.tools.window_asks]
+enable = true
+run = "ask"
+source = "local"
+description = "A tool that needs approval, then works for ~15 seconds."
+
+[conversation.tools.window_asks.command]
+program = "sh"
+args = [
+  "-c",
+  '''
+i=1
+while [ $i -le 30 ]; do
+  printf '   asked-and-working %02d\n' "$i" >&2
+  sleep 0.5
+  i=$((i + 1))
+done
+printf 'asks done\n'
+''',
+]
