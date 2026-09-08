@@ -158,6 +158,69 @@ fn set_in_conversation_applies_config_delta() {
     assert!(config.conversation.start_local);
 }
 
+/// A value the conversation already resolves to records nothing.
+///
+/// `--cfg` supplies values to set rather than a diff, so whether they change
+/// anything is decided by resolving the conversation with and without them.
+#[test]
+fn set_in_conversation_skips_a_value_already_in_effect() {
+    let id = make_id(1000);
+    // `conversation.start_local` already resolves to `false`.
+    let (mut ctx, _tmp) = setup(vec![kv("conversation.start_local=false")], &[id]);
+    let rt = ctx.handle().clone();
+
+    let handle = ctx.workspace.acquire_conversation(&id).unwrap();
+    let before = ctx
+        .workspace
+        .events(&handle)
+        .unwrap()
+        .config_deltas()
+        .count();
+
+    let handle = ctx.workspace.acquire_conversation(&id).unwrap();
+    let set = Set {
+        file_target: FileTarget::default(),
+        conversation: FlagIds::default(),
+    };
+    rt.block_on(set.run(&mut ctx, vec![handle])).unwrap();
+
+    let handle = ctx.workspace.acquire_conversation(&id).unwrap();
+    let events = ctx.workspace.events(&handle).unwrap();
+
+    assert!(!events.config().unwrap().conversation.start_local);
+    assert_eq!(
+        events.config_deltas().count(),
+        before,
+        "a set that changes no resolved value records nothing"
+    );
+}
+
+/// Repeating the same `jp config set` records the change once.
+///
+/// The second invocation asks for what the first already achieved, so it has
+/// nothing to record.
+#[test]
+fn set_in_conversation_twice_records_one_delta() {
+    let id = make_id(1000);
+    let (mut ctx, _tmp) = setup(vec![kv("conversation.start_local=true")], &[id]);
+    let rt = ctx.handle().clone();
+
+    for _ in 0..2 {
+        let handle = ctx.workspace.acquire_conversation(&id).unwrap();
+        let set = Set {
+            file_target: FileTarget::default(),
+            conversation: FlagIds::default(),
+        };
+        rt.block_on(set.run(&mut ctx, vec![handle])).unwrap();
+    }
+
+    let handle = ctx.workspace.acquire_conversation(&id).unwrap();
+    let events = ctx.workspace.events(&handle).unwrap();
+
+    assert!(events.config().unwrap().conversation.start_local);
+    assert_eq!(events.config_deltas().count(), 1);
+}
+
 #[test]
 fn set_in_multiple_conversations() {
     let id1 = make_id(1000);

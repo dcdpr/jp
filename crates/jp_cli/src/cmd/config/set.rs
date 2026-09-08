@@ -54,8 +54,17 @@ impl Set {
             };
 
             let id = lock.id();
-            lock.into_mut()
-                .update_events_and_flush(|events| events.add_config_delta(config_delta.clone()))?;
+            let current = lock
+                .events()
+                .config_partial()
+                .map_err(jp_conversation::Error::from)?;
+            let delta = config_pipeline::override_to_record(&current, config_delta.clone())?;
+
+            if let Some(delta) = delta {
+                lock.into_mut()
+                    .update_events_and_flush(|events| events.add_config_delta(delta))?;
+            }
+
             ctx.printer
                 .println(format!("Set configuration in conversation {id}"));
         }

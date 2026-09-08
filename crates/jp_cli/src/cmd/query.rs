@@ -141,7 +141,7 @@ use crate::{
         label::resolve::{Resolver, Trigger},
         lock::{LockRequest, acquire_lock},
     },
-    config_pipeline::{ConfigReset, ConfigResetEvents},
+    config_pipeline::{self, ConfigReset, ConfigResetEvents},
     ctx::IntoPartialAppConfig,
     editor,
     error::{Error, Result},
@@ -600,14 +600,12 @@ impl Query {
         // (that also absorbs any `--cfg` reset keyword, per [RFD 038]).
         //
         // A conversation carrying earlier config state — continuing or forked
-        // — records a `--cfg` reset keyword as its stream events, appended
-        // directly: between the `Reset` and whichever `Apply` restores the
-        // required fields the stream does not resolve to a valid config, so
-        // the empty-diff suppression path in `add_config_delta` cannot run.
+        // — records a `--cfg` reset keyword as the reset-then-layer sequence
+        // [RFD 038] describes.
         //
         // Without a reset keyword, any divergence between the stream's config
         // and this invocation's resolved config is appended as a single
-        // suppression-checked `Apply` diff.
+        // `Apply` diff.
         //
         // [RFD 038]: https://jp.computer/rfd/038
         if let Some(reset_events) = ctx.config_reset.take() {
@@ -622,7 +620,20 @@ impl Query {
             // Resolve any model aliases before storing in the stream so
             // that per-event configs always contain concrete model IDs.
             editor_provided_config.resolve_model_aliases(&cfg.providers.llm.aliases);
-            setup.update_events(|events| events.add_config_delta(editor_provided_config));
+
+            // The editor hands back the config it was shown, so most of what
+            // comes back is what was already in effect. Only the part that
+            // changes anything is worth an event.
+            let current = setup
+                .events()
+                .config_partial()
+                .map_err(jp_conversation::Error::from)?;
+
+            if let Some(delta) =
+                config_pipeline::override_to_record(&current, editor_provided_config)?
+            {
+                setup.update_events(|events| events.add_config_delta(delta));
+            }
         }
 
         // Snapshot the stream for title generation and thread assembly. The
@@ -2233,8 +2244,8 @@ fn apply_title_override(lock: &ConversationLock, title: Option<&str>, no_title: 
 /// Persists the reset-then-layer sequence from [RFD 038]: a [`ResetDelta`]
 /// marking the reset point, then the workspace partial for `WORKSPACE` resets,
 /// then whatever state this invocation layered on top of the reset point.
-/// Empty layers are skipped by [`ConversationStream::add_config_reset`], which
-/// also documents why the sequence bypasses diff-suppression.
+/// Layers carrying nothing are skipped by
+/// [`ConversationStream::add_config_reset`].
 ///
 /// [RFD 038]: https://jp.computer/rfd/038
 fn persist_config_reset(

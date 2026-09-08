@@ -15,11 +15,11 @@ use std::path::Path;
 
 use camino::Utf8PathBuf;
 use jp_config::{
-    FillDefaults as _, PartialAppConfig,
+    FillDefaults as _, PartialAppConfig, PartialConfig as _,
     assignment::{AssignKeyValue as _, KvAssignment},
     fs::{load_partial, user_global_config_dir},
     loader::PartialLoaderConfig,
-    util::{find_file_in_load_path, load_loader_directives, load_partial_at_path},
+    util::{build, find_file_in_load_path, load_loader_directives, load_partial_at_path},
 };
 use jp_storage::backend::FsStorageBackend;
 use jp_workspace::Workspace;
@@ -28,6 +28,54 @@ use tracing::{debug, error};
 
 use super::{CfgKeyword, KeyValueOrPath};
 use crate::error::{Error, Result};
+
+/// The config override to record on a conversation, if it changes anything.
+///
+/// `overrides` holds values to set, in the shape a config layer arrives in: an
+/// appending list carries the elements to add rather than the whole list.
+/// Whether it asks for anything `current` does not already have is decided by
+/// merging the two and comparing, so an override naming a value already in
+/// effect returns `None`.
+///
+/// `current` is the conversation's accumulated partial, not its resolved
+/// config.
+/// The two resolve identically, but the partial also carries each field's merge
+/// metadata — its strategy, separator, and dedup mode — which decides what
+/// the merge below produces.
+/// Resolving the conversation first and re-deriving a partial from it discards
+/// that metadata, and the merge is then computed under defaults the
+/// conversation had already overridden.
+///
+/// The comparison is between resolved configs, so it does not rest on the
+/// shapes two partials happen to hold: merging is not shape-preserving, and
+/// whether it collapses a field stamped `replace` depends on which sibling
+/// fields the override touches.
+///
+/// An override whose merged result does not resolve is returned rather than
+/// dropped: its outcome cannot be compared, so it is not known to change
+/// nothing.
+///
+/// One change this cannot see: an override that adjusts only a field's merge
+/// metadata leaves every resolved value alone, so it compares equal and is
+/// dropped.
+/// Catching it would need the comparison to read the metadata itself, which no
+/// two partials can be compared for — merging is not shape-preserving, so
+/// equal metadata can sit in unequal shapes.
+pub(crate) fn override_to_record(
+    current: &PartialAppConfig,
+    overrides: PartialAppConfig,
+) -> Result<Option<PartialAppConfig>> {
+    let mut merged = current.clone();
+    merged
+        .merge(&(), overrides.clone())
+        .map_err(jp_config::Error::from)?;
+
+    let (Ok(before), Ok(after)) = (build(current.clone()), build(merged)) else {
+        return Ok(Some(overrides));
+    };
+
+    Ok((before != after).then_some(overrides))
+}
 
 /// A config reset point encountered in the `--cfg` directive stream.
 ///
@@ -75,10 +123,9 @@ impl ConfigReset {
 /// The `post` partial is a partial-level diff from the reset point's state to
 /// the invocation's final partial, so it captures post-keyword `--cfg`
 /// directives and command CLI overrides without pinning program defaults.
-/// It is computed directly instead of routing through the empty-diff
-/// suppression path, because that path resolves the stream's current config —
-/// which is not a valid configuration between a `Reset` and whichever `Apply`
-/// restores the required fields.
+/// It is diffed against the reset point rather than against the conversation's
+/// current config: the `Reset` discards that state, so a diff from it would
+/// leave out every field the reset is about to drop.
 ///
 /// [RFD 038]: https://jp.computer/rfd/038
 #[derive(Debug, Clone)]

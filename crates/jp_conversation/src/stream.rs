@@ -512,6 +512,29 @@ impl ConversationStream {
     ///
     /// [`Reset`]: ConfigDelta::Reset
     pub fn config(&self) -> Result<AppConfig, StreamError> {
+        // `build`, not the bare conversion: a delta can introduce a model alias
+        // that the base config never had, and reading an unresolved alias panics.
+        // `build` is also what orders instructions and prompt sections, which the
+        // rest of the system assumes has happened.
+        jp_config::util::build(self.config_partial()?).map_err(Into::into)
+    }
+
+    /// Get the accumulated config state of the stream, before resolution.
+    ///
+    /// Takes the base configuration and folds every [`ConfigDelta`] in the
+    /// stream onto it, first to last, the same way [`Self::config`] does.
+    ///
+    /// A field's merge metadata — its strategy, separator, or dedup mode —
+    /// lives here and has no counterpart in a resolved [`AppConfig`], which
+    /// holds values alone.
+    /// A caller merging a further layer onto the conversation's state therefore
+    /// starts from this, so the merge runs under the metadata the conversation
+    /// established rather than under program defaults.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a delta cannot be folded onto the accumulated state.
+    pub fn config_partial(&self) -> Result<PartialAppConfig, StreamError> {
         let mut partial = self.base_config.to_partial();
         let iter = self.events.iter().filter_map(|event| match event {
             InternalEvent::ConfigDelta(delta) => Some(delta.clone()),
@@ -525,11 +548,7 @@ impl ConversationStream {
             fold_config_delta(&mut partial, delta)?;
         }
 
-        // `build`, not the bare conversion: a delta can introduce a model alias
-        // that the base config never had, and reading an unresolved alias panics.
-        // `build` is also what orders instructions and prompt sections, which the
-        // rest of the system assumes has happened.
-        jp_config::util::build(partial).map_err(Into::into)
+        Ok(partial)
     }
 
     /// Removes all events from the end of the stream, until a [`ChatRequest`]
@@ -568,75 +587,63 @@ impl ConversationStream {
         request
     }
 
-    /// Add a config delta to the stream.
+    /// Append a config delta to the stream.
     ///
-    /// An [`Apply`] delta is reduced to its diff against the stream's current
-    /// config state; if the diff is empty, nothing is appended.
-    /// A [`Reset`] is always appended: it carries no diff to suppress, and its
-    /// presence in the stream is the point.
+    /// The delta is recorded as given.
+    /// It states which values to merge and which fields to clear first, and
+    /// folding it over the accumulated config state is what applies it.
+    ///
+    /// A delta is not a snapshot: it says how a config changes, not what the
+    /// config is.
+    /// Diffing one a second time reads its values as a complete state and
+    /// changes their meaning — an appended list element becomes the whole
+    /// list, and a field left alone becomes a field emptied.
+    /// A caller that wants the conversation to reach a particular resolved
+    /// config therefore computes that diff once, against the state it means to
+    /// diff from, and hands the result here.
+    ///
+    /// An [`Apply`] that merges nothing and clears nothing is dropped: it
+    /// leaves the config as it was, so recording it would put an event in the
+    /// conversation that changes nothing.
+    /// A [`Reset`] is always appended — it carries no values to be empty of,
+    /// and its presence in the stream is the point.
     ///
     /// [`Apply`]: ConfigDelta::Apply
     /// [`Reset`]: ConfigDelta::Reset
     pub fn add_config_delta(&mut self, delta: impl Into<ConfigDelta>) {
-        let delta = match delta.into() {
-            // An apply that clears fields is stored as given. Its values were
-            // computed against a state that has the clears applied, and
-            // re-diffing them against a state that does not would drop the very
-            // values the clears make room for.
-            ConfigDelta::Apply(apply) if !apply.unsets.is_empty() => ConfigDelta::Apply(apply),
-            ConfigDelta::Apply(ApplyDelta {
-                delta, timestamp, ..
-            }) => {
-                let delta = match self.config() {
-                    Ok(config) => config.to_partial().delta(*delta),
-                    Err(error) => {
-                        error!(%error, "Unable to get valid config from conversation stream.");
-                        return;
-                    }
-                };
+        let delta = delta.into();
 
-                if delta.is_empty() {
-                    return;
-                }
-
-                ConfigDelta::Apply(ApplyDelta::new(timestamp, delta))
-            }
-            reset @ ConfigDelta::Reset(_) => reset,
-        };
+        if let ConfigDelta::Apply(apply) = &delta
+            && apply.delta.is_empty()
+            && apply.unsets.is_empty()
+        {
+            return;
+        }
 
         self.events.push(InternalEvent::ConfigDelta(delta));
     }
 
     /// Append a config reset point followed by the state layered on top of it.
     ///
-    /// Writes the reset-then-layer sequence as-is: the [`Reset`] is always
-    /// appended, then each non-empty layer as an [`Apply`].
-    /// No diff-suppression runs — between the `Reset` and whichever layer
-    /// restores the required fields, the stream may not resolve to a valid
-    /// configuration, so the suppression path in [`Self::add_config_delta`]
-    /// (which resolves the stream's current config) cannot run.
+    /// A [`Reset`] discards the accumulated config state, so everything the
+    /// conversation still needs is restated in the layers above it.
+    /// Taking those layers alongside the reset keeps the sequence in one call,
+    /// rather than leaving a stream that resolves to program defaults between
+    /// two of them.
     ///
-    /// This is the only way to append an `Apply` without diff-suppression:
-    /// tying the verbatim writes to a preceding `Reset` keeps the
-    /// reset-then-layer invariant enforced at the API level.
+    /// Each layer is appended by [`Self::add_config_delta`], which drops the
+    /// ones carrying nothing.
     ///
-    /// [`Apply`]: ConfigDelta::Apply
     /// [`Reset`]: ConfigDelta::Reset
     pub fn add_config_reset(
         &mut self,
         reset: ResetDelta,
         layers: impl IntoIterator<Item = ApplyDelta>,
     ) {
-        self.events
-            .push(InternalEvent::ConfigDelta(ConfigDelta::Reset(reset)));
+        self.add_config_delta(reset);
 
         for layer in layers {
-            if layer.delta.is_empty() {
-                continue;
-            }
-
-            self.events
-                .push(InternalEvent::ConfigDelta(ConfigDelta::Apply(layer)));
+            self.add_config_delta(layer);
         }
     }
 
@@ -737,6 +744,14 @@ impl ConversationStream {
     pub fn compactions(&self) -> impl Iterator<Item = &Compaction> {
         self.events.iter().filter_map(|e| match e {
             InternalEvent::Compaction(c) => Some(c),
+            _ => None,
+        })
+    }
+
+    /// Returns an iterator over the [`ConfigDelta`] events in the stream.
+    pub fn config_deltas(&self) -> impl Iterator<Item = &ConfigDelta> {
+        self.events.iter().filter_map(|e| match e {
+            InternalEvent::ConfigDelta(delta) => Some(delta),
             _ => None,
         })
     }

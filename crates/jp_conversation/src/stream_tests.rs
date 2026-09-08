@@ -1,6 +1,6 @@
 use chrono::TimeZone as _;
 use jp_config::{
-    PartialAppConfig, PartialConfig as _,
+    PartialAppConfig, PartialConfig as _, PartialConfigDelta as _,
     conversation::tool::{PartialToolConfig, RunMode, ToolSource, access::FsRuleConfig},
     model::id::{
         ModelIdConfig, Name, PartialModelIdConfig, PartialModelIdOrAliasConfig, ProviderId,
@@ -84,13 +84,15 @@ fn an_unset_clears_a_field_before_the_delta_merges() {
     assert_eq!(resolved_arguments(&stream), ["serve"]);
 }
 
-/// Without the clear, the same change cannot be recorded at all.
+/// Without the clear, the same values append instead of removing anything.
 ///
-/// No list the delta could carry produces `["serve"]` by appending to
-/// `["serve", "--verbose"]`, so the diff comes out empty and no event is
-/// written — the conversation keeps the argument the user dropped.
+/// `arguments` merges by appending, so a delta naming the one argument to keep
+/// lands next to the one it meant to drop — the same result the identical
+/// value in a config file produces.
+/// Removing an argument needs the field cleared first, which is what `unsets`
+/// is for.
 #[test]
-fn without_an_unset_a_dropped_argument_is_not_recorded() {
+fn without_an_unset_a_dropped_argument_appends_instead() {
     let mut stream = stream_with_server(&["serve", "--verbose"]);
 
     stream.add_config_delta(ApplyDelta::new(
@@ -98,14 +100,26 @@ fn without_an_unset_a_dropped_argument_is_not_recorded() {
         server_arguments_partial(&["serve"]),
     ));
 
-    assert_eq!(resolved_arguments(&stream), ["serve", "--verbose"]);
-    assert!(
-        !stream
-            .events
-            .iter()
-            .any(|event| matches!(event, InternalEvent::ConfigDelta(_))),
-        "an empty diff writes no event"
+    assert_eq!(resolved_arguments(&stream), ["serve", "--verbose", "serve"]);
+    assert_eq!(
+        stream.config_deltas().count(),
+        1,
+        "the delta is recorded rather than silently dropped"
     );
+}
+
+/// A delta with no values and no clears changes nothing, so it is not recorded.
+#[test]
+fn an_apply_that_changes_nothing_is_not_recorded() {
+    let mut stream = stream_with_server(&["serve"]);
+
+    stream.add_config_delta(ApplyDelta::new(
+        delta_timestamp(),
+        jp_config::PartialAppConfig::empty(),
+    ));
+
+    assert_eq!(stream.config_deltas().count(), 0);
+    assert_eq!(resolved_arguments(&stream), ["serve"]);
 }
 
 /// A delta that only clears carries no diff, and is still worth recording.
@@ -120,6 +134,236 @@ fn a_delta_that_only_clears_is_recorded() {
     ));
 
     assert!(resolved_arguments(&stream).is_empty());
+}
+
+/// A config granting the local tool `bash` the named access rules.
+///
+/// Both rule lists carry their own merge strategy, which is what puts them on
+/// the path under test: a list that states `replace` needs no separate report
+/// that merging cannot reach its value, so nothing about it lands in `unsets`.
+fn config_with_access(fs_paths: &[&str], env_names: &[&str]) -> jp_config::AppConfig {
+    use jp_config::conversation::tool::access::{
+        PartialAccessConfig, PartialEnvRuleConfig, PartialFsRuleConfig,
+    };
+
+    let mut partial = PartialAppConfig::new_test();
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("bash".to_owned(), PartialToolConfig {
+            source: Some(ToolSource::Local { tool: None }),
+            access: Some(PartialAccessConfig {
+                fs: fs_paths
+                    .iter()
+                    .map(|path| PartialFsRuleConfig {
+                        path: Some((*path).to_owned()),
+                        read: Some(true),
+                        ..PartialFsRuleConfig::default()
+                    })
+                    .collect(),
+                env: env_names
+                    .iter()
+                    .map(|name| PartialEnvRuleConfig {
+                        name: Some((*name).to_owned()),
+                        read: Some(true),
+                    })
+                    .collect(),
+            }),
+            ..PartialToolConfig::default()
+        });
+
+    jp_config::util::build(partial).expect("valid config")
+}
+
+/// A stream whose base config grants `bash` the named access rules.
+fn stream_with_access(fs_paths: &[&str], env_names: &[&str]) -> ConversationStream {
+    ConversationStream::new(Arc::new(config_with_access(fs_paths, env_names)))
+}
+
+/// The rules `bash` resolves to, as `(fs paths, env names)`.
+///
+/// A tool with no rules of either type reads as two empty lists, which is what
+/// losing a grant looks like from here.
+fn resolved_access(stream: &ConversationStream) -> (Vec<String>, Vec<String>) {
+    let config = stream.config().expect("the stream resolves");
+    let tool = config
+        .conversation
+        .tools
+        .get("bash")
+        .expect("the tool is configured");
+
+    tool.access().map_or_else(Default::default, |access| {
+        (
+            access.fs.iter().map(|rule| rule.path.clone()).collect(),
+            access.env.iter().map(|rule| rule.name.clone()).collect(),
+        )
+    })
+}
+
+/// The delta `jp query` computes for an invocation resolving to `target`.
+///
+/// Mirrors `get_config_delta_from_cli`: diff the stream's current config
+/// against the invocation's, recording the paths merging cannot reach.
+fn query_shaped_delta(stream: &ConversationStream, target: &jp_config::AppConfig) -> ApplyDelta {
+    let current = stream.config().expect("the stream resolves").to_partial();
+
+    let mut unsets = Vec::new();
+    let delta = current.delta_with_unsets(target.to_partial(), "", &mut unsets);
+
+    ApplyDelta::with_unsets(delta_timestamp(), delta, unsets)
+}
+
+/// Granting a tool one more path keeps the paths it already had.
+///
+/// The delta for an appended rule carries just that rule, shaped to append.
+/// Read a second time as though it were a complete rule set, it says the tool
+/// now has exactly the one rule, and the fold drops the rest.
+#[test]
+fn appending_an_access_rule_keeps_the_rules_already_there() {
+    let mut stream = stream_with_access(&["src"], &[]);
+    let target = config_with_access(&["src", "docs"], &[]);
+    let delta = query_shaped_delta(&stream, &target);
+
+    // An apply carrying a clear is stored as given. This test is about the
+    // other path, so the fixture has to reach it.
+    assert!(
+        delta.unsets.is_empty(),
+        "the fixture must exercise the unset-free path"
+    );
+
+    stream.add_config_delta(delta);
+
+    assert_eq!(resolved_access(&stream).0, ["src", "docs"]);
+}
+
+/// Repeating an invocation records nothing the second time.
+///
+/// Both sides of the diff are `to_partial()` snapshots, which carry the same
+/// shape as each other.
+/// The delta already in the stream carries a different one — a bare list where
+/// a snapshot has a `replace` envelope — but it never takes part in the
+/// comparison: it is folded into the resolved config first, and the diff is
+/// taken from there.
+#[test]
+fn a_repeated_invocation_records_no_second_delta() {
+    let mut stream = stream_with_access(&["src"], &[]);
+    let target = config_with_access(&["src", "docs"], &[]);
+
+    let first = query_shaped_delta(&stream, &target);
+    stream.add_config_delta(first);
+    assert_eq!(stream.config_deltas().count(), 1);
+
+    // The same invocation over again, against a stream that now resolves to
+    // `target`. This is what the producer sees on the next `jp` run.
+    let second = query_shaped_delta(&stream, &target);
+    assert!(
+        second.delta.is_empty() && second.unsets.is_empty(),
+        "an unchanged config diffs to nothing, got {:?} / {:?}",
+        second.delta,
+        second.unsets
+    );
+
+    stream.add_config_delta(second);
+
+    assert_eq!(
+        stream.config_deltas().count(),
+        1,
+        "a repeated invocation must not append a delta that changes nothing"
+    );
+    assert_eq!(resolved_access(&stream).0, ["src", "docs"]);
+}
+
+/// Granting an environment variable leaves the filesystem rules alone.
+///
+/// An unchanged list has nothing to add, and an append-shaped delta spells that
+/// as an empty list — the same value a complete rule set of zero rules has.
+/// Resolved the second way, the tool loses every path it was granted and
+/// silently regains unrestricted (workspace-confined) reach.
+#[test]
+fn changing_env_rules_keeps_the_fs_rules() {
+    let mut stream = stream_with_access(&["src"], &[]);
+    let target = config_with_access(&["src"], &["GITHUB_TOKEN"]);
+    let delta = query_shaped_delta(&stream, &target);
+
+    assert!(
+        delta.unsets.is_empty(),
+        "the fixture must exercise the unset-free path"
+    );
+
+    stream.add_config_delta(delta);
+
+    assert_eq!(
+        resolved_access(&stream),
+        (vec!["src".to_owned()], vec!["GITHUB_TOKEN".to_owned()])
+    );
+}
+
+/// Rebuilding a stream from its events reproduces each event's config.
+///
+/// `extend` diffs one event's config against the next, which is already the
+/// change to record.
+/// Reading that diff a second time resolves the rebuilt stream to a config the
+/// source never held — and a summary request is built from exactly such a
+/// rebuild.
+#[test]
+fn extending_a_stream_reproduces_the_config_of_each_event() {
+    let mut source = stream_with_access(&["src"], &[]);
+    let target = config_with_access(&["src", "docs"], &[]);
+    let delta = query_shaped_delta(&source, &target);
+
+    source.add_config_delta(delta);
+    source.start_turn(ChatRequest {
+        content: "hello".to_owned(),
+        schema: None,
+        author: None,
+    });
+
+    let mut rebuilt = ConversationStream::new(source.base_config());
+    rebuilt.extend(source.iter().map(ConversationEventWithConfig::from));
+
+    assert_eq!(
+        resolved_access(&rebuilt),
+        (vec!["src".to_owned(), "docs".to_owned()], vec![])
+    );
+    assert_eq!(resolved_access(&rebuilt), resolved_access(&source));
+}
+
+/// A stored delta holds the change, not a copy of the config.
+///
+/// Nothing on this path may widen what is written: a snapshot here would grow
+/// the conversation file by the whole resolved config, once per turn that
+/// changes anything.
+#[test]
+fn a_stored_delta_holds_only_the_fields_that_changed() {
+    let mut stream = stream_with_access(&["src"], &[]);
+    let target = config_with_access(&["src", "docs"], &[]);
+    let delta = query_shaped_delta(&stream, &target);
+
+    stream.add_config_delta(delta);
+
+    let stored: Vec<_> = stream.config_deltas().collect();
+    let [stored] = stored.as_slice() else {
+        panic!("exactly one delta is recorded")
+    };
+
+    assert_eq!(
+        serde_json::to_value(stored).unwrap(),
+        serde_json::json!({
+            "timestamp": "2020-01-01 00:00:00.0",
+            "delta": {
+                "conversation": {
+                    "tools": {
+                        "bash": {
+                            "access": {
+                                "fs": [{ "path": "docs", "read": true }]
+                            }
+                        }
+                    }
+                }
+            }
+        })
+    );
 }
 
 #[test]
@@ -1297,22 +1541,16 @@ fn test_config_delta_with_unknown_op_fails_deserialization() {
 #[test]
 fn test_add_config_delta_reset_always_appends() {
     let mut stream = ConversationStream::new_test();
-    let delta_count = |s: &ConversationStream| {
-        s.events
-            .iter()
-            .filter(|e| matches!(e, InternalEvent::ConfigDelta(_)))
-            .count()
-    };
 
-    // An `Apply` whose diff against the current config is empty is suppressed.
+    // An `Apply` carrying no values and no clears changes nothing.
     stream.add_config_delta(jp_config::PartialAppConfig::empty());
-    assert_eq!(delta_count(&stream), 0);
+    assert_eq!(stream.config_deltas().count(), 0);
 
-    // A `Reset` always lands, even though it carries no diff.
+    // A `Reset` always lands: discarding the accumulated state is the change.
     stream.add_config_delta(ResetDelta {
         timestamp: Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap(),
     });
-    assert_eq!(delta_count(&stream), 1);
+    assert_eq!(stream.config_deltas().count(), 1);
 }
 
 #[test]
@@ -1336,17 +1574,8 @@ fn test_add_config_reset_appends_reset_then_nonempty_layers() {
         ],
     );
 
-    // The reset lands first, followed by the single non-empty layer —
-    // verbatim, without diff-suppression (the delta is written as given, not
-    // reduced against the stream's current config).
-    let deltas: Vec<_> = stream
-        .events
-        .iter()
-        .filter_map(|e| match e {
-            InternalEvent::ConfigDelta(delta) => Some(delta),
-            _ => None,
-        })
-        .collect();
+    // The reset lands first, followed by the single layer that carries a value.
+    let deltas: Vec<_> = stream.config_deltas().collect();
 
     assert_eq!(deltas.len(), 2, "expected [Reset, Apply], got {deltas:?}");
     assert!(matches!(deltas[0], ConfigDelta::Reset(_)));
