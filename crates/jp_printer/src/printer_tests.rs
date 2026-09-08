@@ -773,6 +773,57 @@ fn claims_stack_and_releasing_the_top_re_exposes_the_one_below() {
 }
 
 #[test]
+fn acquiring_a_prompt_writer_drains_the_queue_first() {
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+
+    // A per-character delay long enough that the worker is certainly still
+    // inside the task, standing in for the stream output a tool call's chrome
+    // is queued behind.
+    printer.print("queued content\n".typewriter(Duration::from_secs(10)));
+
+    // No flush: acquisition is the barrier. A widget changes the terminal mode
+    // and takes the cursor directly, neither of which travels through the
+    // printer's queue, so anything still in it would land on a terminal the
+    // widget has already reconfigured — line feeds with no carriage return,
+    // under a cursor the widget believes it owns.
+    let start = Instant::now();
+    let _prompt = printer.prompt_writer();
+    let elapsed = start.elapsed();
+
+    assert_eq!(*out.lock(), "queued content\n");
+    assert!(
+        elapsed < Duration::from_secs(1),
+        "acquisition must skip typewriter delays, took {elapsed:?}"
+    );
+}
+
+#[test]
+fn acquiring_an_owned_prompt_writer_drains_the_queue_first() {
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+
+    printer.print("queued content\n".typewriter(Duration::from_secs(10)));
+
+    let _prompt = printer.owned_prompt_writer();
+
+    assert_eq!(*out.lock(), "queued content\n");
+}
+
+#[test]
+fn a_prompt_writer_erases_the_region_before_it_returns() {
+    let (printer, _out, err) = region_printer();
+
+    let _region = printer.status_region(waiting_style());
+    printer.flush();
+    err.lock().clear();
+
+    // No flush, for the same reason `suspend_status` blocks: the rows have to
+    // be gone by the time the widget paints, and the widget does not paint
+    // through the printer.
+    let _prompt = printer.prompt_writer();
+    assert_eq!(*err.lock(), "\r\x1b[K");
+}
+
+#[test]
 fn a_prompt_writer_suspends_the_region_for_its_lifetime() {
     let (printer, _out, err) = region_printer();
 

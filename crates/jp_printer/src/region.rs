@@ -689,9 +689,12 @@ pub enum RegionCommand {
     /// Erase the drawn rows and block redraws until the matching
     /// [`Self::Resume`].
     Suspend {
-        /// Signalled once the suspension has been applied, for callers that
-        /// need the rows gone before they return.
-        ack: Option<Sender<()>>,
+        /// Signalled once the suspension has been applied.
+        ///
+        /// A suspension exists to hand the terminal to a writer outside the
+        /// printer, which cannot start painting until the rows are gone, so
+        /// every caller waits for this.
+        ack: Sender<()>,
     },
 
     /// Release one suspension.
@@ -885,9 +888,7 @@ impl RegionStack {
             RegionCommand::Release { id } => self.release(id, writer),
             RegionCommand::Suspend { ack } => {
                 self.suspend(writer);
-                if let Some(tx) = ack {
-                    let _ = tx.send(());
-                }
+                let _ = ack.send(());
             }
             RegionCommand::Resume => self.resume(writer),
         }

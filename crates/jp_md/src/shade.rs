@@ -96,6 +96,16 @@ impl<W: Write> ShadedWriter<W> {
         }
     }
 
+    /// The writer being shaded.
+    ///
+    /// A decorator has to stay transparent to whatever the wrapped writer can
+    /// do beyond [`Write`] — flushing an `io::Write`, most often.
+    /// Any escape sequence held back from a split write stays held: forwarding
+    /// a half-formed sequence is the one thing this writer exists to prevent.
+    pub const fn get_mut(&mut self) -> &mut W {
+        &mut self.output
+    }
+
     /// End the shaded region.
     ///
     /// Flushes any escape sequence still buffered from a split write, then
