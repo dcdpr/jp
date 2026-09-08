@@ -57,10 +57,11 @@ pub struct ParametersConfig {
     /// If unset, no tier is sent and the provider's own default applies.
     ///
     /// - `off`: Send no tier, taking whatever the account is set up for.
-    /// - `flex`: Cheaper and slower, with best-effort availability.
+    /// - `flex`: Slower and best-effort, priced at a discount where the
+    ///   provider offers one.
     /// - `standard`: Regular priority and regular pricing.
-    /// - `priority`: Faster and more expensive, served from prioritized
-    ///   capacity.
+    /// - `priority`: Faster and served from prioritized capacity, priced above
+    ///   the regular rate where the provider charges for it.
     ///
     /// `off` puts the same request on the wire as leaving this unset, but as a
     /// value rather than an absence, so it overrides a tier set by a
@@ -73,6 +74,13 @@ pub struct ParametersConfig {
     /// A provider that sells no equivalent of the requested tier refuses the
     /// query and says so, rather than quietly falling back to a rung that costs
     /// something else: `anthropic` has no `flex`, for instance.
+    ///
+    /// That refusal is per provider, not per model.
+    /// A provider that sells the tier but cannot serve the chosen model with it
+    /// may still serve the request from another tier and bill accordingly,
+    /// which is what `openrouter` does for a model with no flex endpoints.
+    /// Local providers (`ollama`, `llamacpp`) have no tiers at all and ignore
+    /// this setting rather than refusing.
     ///
     /// Providers serve each tier from separate capacity, so changing this value
     /// discards the prompt cache built up by earlier turns.

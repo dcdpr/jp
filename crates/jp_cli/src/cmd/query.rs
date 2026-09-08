@@ -262,6 +262,8 @@ pub(crate) struct Query {
     /// Which tiers are available depends on the provider, the model, and the
     /// account; a provider that sells no equivalent refuses the query rather
     /// than falling back to a rung that costs something else.
+    /// One that sells the tier but cannot serve this model with it may still
+    /// fall back.
     ///
     /// Applies to this query and every later one on the conversation, because
     /// each tier is served from separate capacity and switching discards the
