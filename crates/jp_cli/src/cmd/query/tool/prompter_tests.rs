@@ -1,9 +1,9 @@
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
 use jp_editor::MockEditorBackend;
 use jp_inquire::{ReplyOutcome, prompt::MockPromptBackend};
-use jp_printer::{OutputFormat, PrintableExt as _, SharedBuffer};
-use jp_term::background::BackgroundFill;
+use jp_printer::{OutputFormat, SharedBuffer};
+use jp_term::background::{BackgroundFill, DefaultBackground};
 use serde_json::json;
 
 use super::*;
@@ -32,65 +32,16 @@ fn terminal_region() -> DefaultBackground {
 }
 
 #[test]
-fn a_prompt_inside_a_reasoning_block_carries_its_background() {
-    let (prompter, out) = prompter_with_output(MockPromptBackend::new());
-    prompter.set_background(Some(terminal_region()));
-
-    {
-        let mut canvas = prompter.canvas();
-        write!(canvas, "Run local shell tool?").unwrap();
-    }
-    prompter.printer.flush();
-
-    // The background is asserted before the text and closed once the widget is
-    // done with the terminal, so the row is shaded and nothing after it is.
-    assert_eq!(*out.lock(), "\x1b[48;5;236mRun local shell tool?\x1b[49m");
-}
-
-#[test]
-fn a_prompt_outside_a_reasoning_block_is_unshaded() {
-    let (prompter, out) = prompter_with_output(MockPromptBackend::new());
-
-    {
-        let mut canvas = prompter.canvas();
-        write!(canvas, "Run local shell tool?").unwrap();
-    }
-    prompter.printer.flush();
-
-    assert_eq!(*out.lock(), "Run local shell tool?");
-}
-
-#[test]
-fn a_cancelled_prompt_still_closes_its_background() {
-    // A widget can end by `Ctrl+C` or by an error, neither of which returns
-    // through the normal path. The close lives in `Drop` so the background
-    // cannot outlive the prompt and paint whatever is printed next.
-    let (prompter, out) = prompter_with_output(MockPromptBackend::new());
-    prompter.set_background(Some(terminal_region()));
-
-    {
-        let mut canvas = prompter.canvas();
-        write!(canvas, "Deliver result?").unwrap();
-        // No further writes: the prompt is abandoned mid-session.
-    }
-    prompter.printer.flush();
-
-    let rendered = out.lock().clone();
-    assert!(
-        rendered.ends_with("\x1b[49m"),
-        "an abandoned prompt must still close its background, got {rendered:?}"
-    );
-}
-
-#[test]
-fn prompting_a_question_shades_through_the_canvas() {
-    // The tests above drive the canvas directly, so they hold even if a prompt
-    // method still reached for a bare prompt writer. This one goes through
-    // `prompt_question`, whose pre-amble is the one part of a prompt written by
-    // the prompter rather than by the widget.
+fn prompting_a_question_carries_the_reasoning_background() {
+    // `jp_printer` owns the shading and pins its escapes; what this covers is
+    // that a real prompt method reaches it, rather than building a writer of
+    // its own. The pre-amble is the one part of a prompt written by the
+    // prompter rather than by the widget.
     let (prompter, out) =
         prompter_with_output(MockPromptBackend::new().with_inline_responses(['y']));
-    prompter.set_background(Some(terminal_region()));
+    prompter
+        .printer
+        .set_prompt_background(Some(terminal_region()));
 
     let mut question = jp_tool::Question::boolean("confirm", "Proceed?").expect("valid question");
     question.pre_amble = Some("About to run a shell command".to_owned());
@@ -110,53 +61,30 @@ fn prompting_a_question_shades_through_the_canvas() {
 }
 
 #[test]
-fn flushing_a_shaded_canvas_waits_for_the_printer() {
-    // A widget flushes its writer before it reads a key, and on this path a
-    // flush is a barrier rather than a buffer drain: it is what makes the bytes
-    // have landed before the widget takes the cursor and the terminal's mode.
-    // Shading is a decoration over that writer and has no business swallowing
-    // it.
-    let (prompter, out) = prompter_with_output(MockPromptBackend::new());
-    prompter.set_background(Some(terminal_region()));
-
-    let mut canvas = prompter.canvas();
-
-    // Queued after acquisition drained the printer, and slow enough that the
-    // worker is certainly still inside it: without a real barrier the prompt's
-    // own text cannot have reached the terminal yet.
+fn the_inline_reply_widget_carries_the_reasoning_background() {
+    // `edit_result` runs the inline reply widget, which owns its output stream
+    // and so takes `owned_prompt_writer` rather than the borrowed one. It is
+    // reached by `e` from a permission prompt, inside the same block.
+    let (prompter, out) = prompter_with_output(
+        MockPromptBackend::new().with_reply_outcomes([ReplyOutcome::Submit("edited".into())]),
+    );
     prompter
         .printer
-        .print("slow".typewriter(Duration::from_millis(100)));
+        .set_prompt_background(Some(terminal_region()));
 
-    write!(canvas, "Run local shell tool?").unwrap();
-    canvas.flush().unwrap();
-
-    // Deliberately no `printer.flush()`, which is the assertion.
-    assert!(
-        out.lock().contains("Run local shell tool?"),
-        "flushing the canvas must drain the printer, got {:?}",
-        *out.lock()
-    );
-}
-
-#[test]
-fn clearing_the_background_unshades_later_prompts() {
-    let (prompter, out) = prompter_with_output(MockPromptBackend::new());
-
-    prompter.set_background(Some(terminal_region()));
-    drop(prompter.canvas());
-    prompter.set_background(None);
-
-    {
-        let mut canvas = prompter.canvas();
-        write!(canvas, "after").unwrap();
-    }
+    prompter
+        .edit_result("original")
+        .expect("the mock submits the edit");
     prompter.printer.flush();
 
+    let rendered = out.lock().clone();
     assert!(
-        out.lock().ends_with("after"),
-        "a prompt after the block closed carries no background: {:?}",
-        *out.lock()
+        rendered.starts_with("\x1b[48;5;236m"),
+        "the widget's writes must open under the background, got {rendered:?}"
+    );
+    assert!(
+        rendered.ends_with("\x1b[49m"),
+        "and close it when the widget gives the terminal back, got {rendered:?}"
     );
 }
 
