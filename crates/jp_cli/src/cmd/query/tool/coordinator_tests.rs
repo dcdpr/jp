@@ -493,7 +493,14 @@ async fn test_resolve_tool_call_decision_invalidates_prerender_on_edit() {
     let mut turn_state = TurnState::default();
 
     let decision = coordinator
-        .resolve_tool_call_decision(executor, &prompter, true, &mut turn_state, &tool_renderer)
+        .resolve_tool_call_decision(
+            executor,
+            &prompter,
+            true,
+            &mut turn_state,
+            &tool_renderer,
+            &printer,
+        )
         .await;
 
     match decision {

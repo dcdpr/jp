@@ -10,11 +10,7 @@
 //! imperative shell" principle.
 //! The `jp_llm` crate remains pure.
 
-use std::{
-    fmt::Write as _,
-    io::{self, Write as _},
-    sync::{Arc, Mutex, PoisonError},
-};
+use std::{io::Write as _, sync::Arc};
 
 use crossterm::style::Stylize as _;
 use jp_config::conversation::tool::{RunMode, ToolSource};
@@ -23,7 +19,6 @@ use jp_editor::{EditOutcome, EditorBackend};
 use jp_inquire::{InlineOption, ReplyEditMode, ReplyOutcome, prompt::PromptBackend};
 use jp_llm::tool::executor::PermissionInfo;
 use jp_printer::{Printer, PromptWriter};
-use jp_term::{background::DefaultBackground, shade::ShadedWriter};
 use jp_tool::AnswerType;
 use serde_json::Value;
 
@@ -91,63 +86,6 @@ pub struct ToolPrompter {
     edit_mode: ReplyEditMode,
 
     printer: Arc<Printer>,
-
-    /// The reasoning-region background prompts are drawn against.
-    ///
-    /// Set per tool call by the coordinator, which is the only place that knows
-    /// both this prompter and the renderer holding the region.
-    background: Mutex<Option<DefaultBackground>>,
-}
-
-/// A prompt writer carrying the reasoning background, when one is open.
-///
-/// A prompt drawn inside a reasoning block shows that block's background like
-/// every other row (RFD 095), and a widget owns its own cursor — it rewrites
-/// its line with `\r\x1b[K` on each keystroke, and that erase fills with
-/// whatever background is active.
-/// [`ShadedWriter`] is what keeps the fill right across the widget's own
-/// escapes, including the resets it emits mid-line.
-enum PromptCanvas<'a> {
-    /// No reasoning block is open; writes pass straight through.
-    Plain(PromptWriter<'a>),
-
-    /// Writes are shaded with the open block's background.
-    Shaded(Box<ShadedWriter<PromptWriter<'a>>>),
-}
-
-impl io::Write for PromptCanvas<'_> {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        match self {
-            Self::Plain(writer) => io::Write::write(writer, buf),
-            Self::Shaded(writer) => {
-                let text = str::from_utf8(buf).map_err(io::Error::other)?;
-                writer.write_str(text).map_err(io::Error::other)?;
-                Ok(buf.len())
-            }
-        }
-    }
-
-    /// A widget flushes before it reads a key, and on this path a flush is a
-    /// barrier rather than a buffer drain: it blocks until the printer's worker
-    /// has written everything queued ahead of it.
-    /// Shading decorates the writer and must not swallow that.
-    fn flush(&mut self) -> io::Result<()> {
-        match self {
-            Self::Plain(writer) => io::Write::flush(writer),
-            Self::Shaded(writer) => io::Write::flush(writer.get_mut()),
-        }
-    }
-}
-
-impl Drop for PromptCanvas<'_> {
-    /// Close the background here rather than at the end of each prompt: a
-    /// prompt can end by cancellation or by an error, and a background left
-    /// open paints everything printed after it.
-    fn drop(&mut self) {
-        if let Self::Shaded(writer) = self {
-            let _err = writer.finish();
-        }
-    }
 }
 
 impl ToolPrompter {
@@ -166,34 +104,6 @@ impl ToolPrompter {
             prompt_backend,
             edit_mode,
             printer,
-            background: Mutex::new(None),
-        }
-    }
-
-    /// Draw prompts against `background` until it is replaced.
-    ///
-    /// `None` while no reasoning block is open, which is the common case.
-    pub(crate) fn set_background(&self, background: Option<DefaultBackground>) {
-        *self
-            .background
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner) = background;
-    }
-
-    /// A prompt writer shaded with the open reasoning block, if there is one.
-    fn canvas(&self) -> PromptCanvas<'_> {
-        let writer = self.printer.prompt_writer();
-
-        match self
-            .background
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .as_ref()
-        {
-            Some(background) => {
-                PromptCanvas::Shaded(Box::new(ShadedWriter::new(writer, background)))
-            }
-            None => PromptCanvas::Plain(writer),
         }
     }
 
@@ -205,7 +115,6 @@ impl ToolPrompter {
         prompt_backend: Arc<dyn PromptBackend>,
     ) -> Self {
         Self {
-            background: Mutex::new(None),
             editor,
             prompt_backend,
             edit_mode: ReplyEditMode::Emacs,
@@ -280,7 +189,7 @@ impl ToolPrompter {
 
             let inline_options = select_options_to_inline(&Self::permission_options());
 
-            let mut writer = self.canvas();
+            let mut writer = self.printer.prompt_writer();
 
             match self
                 .prompt_backend
@@ -498,7 +407,7 @@ impl ToolPrompter {
     /// - `Ok(true)` if user confirms delivery
     /// - `Ok(false)` if user skips delivery
     pub fn prompt_result_confirmation(&self, tool_name: &str) -> Result<bool, Error> {
-        let mut writer = self.canvas();
+        let mut writer = self.printer.prompt_writer();
 
         let question = format!("Deliver {} result to assistant?", tool_name.yellow().bold());
 
@@ -539,7 +448,7 @@ impl ToolPrompter {
     /// A `QuestionResult` containing the answer and `persist_level` which
     /// indicates whether the answer should be remembered for this turn.
     pub fn prompt_question(&self, question: &jp_tool::Question) -> Result<QuestionResult, Error> {
-        let mut writer = self.canvas();
+        let mut writer = self.printer.prompt_writer();
 
         if let Some(pre_amble) = &question.pre_amble {
             writeln!(writer, "{pre_amble}")?;
@@ -600,7 +509,7 @@ impl ToolPrompter {
     fn prompt_boolean_git_style(
         &self,
         question: &jp_tool::Question,
-        writer: &mut PromptCanvas<'_>,
+        writer: &mut PromptWriter<'_>,
     ) -> Result<QuestionResult, Error> {
         let options = vec![
             InlineOption::new('y', "yes, just this once"),
