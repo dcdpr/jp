@@ -127,10 +127,11 @@ impl PartialConfigDelta for PartialAccessConfig {
 
 /// Diff two rule lists into a delta that replays to `next`.
 ///
-/// An append-shaped delta can only add to the end, so it reaches `next` exactly
-/// when `next` starts with `prev`, and the delta is then the tail.
-/// Every other difference (a rule removed, reordered, or inserted before the
-/// last one) has the delta carry the whole list with `replace`.
+/// An append-shaped delta can only add to the end, and appending deduplicates,
+/// so it reaches `next` exactly when `next` starts with `prev` and repeats no
+/// rule; the delta is then the tail.
+/// Every other difference (a rule removed, reordered, inserted before the last
+/// one, or repeated) has the delta carry the whole list with `replace`.
 ///
 /// Order is part of the answer, not a detail: rules of equal specificity break
 /// toward the one declared last, so a delta that reproduced the set of rules
@@ -142,7 +143,7 @@ fn rule_delta<T: Clone + PartialEq>(
     prev: &MergeableVec<T>,
     next: MergeableVec<T>,
 ) -> MergeableVec<T> {
-    if next.starts_with(prev) {
+    if next.starts_with(prev) && !repeats_a_rule(&next) {
         return next.iter().skip(prev.len()).cloned().collect();
     }
 
@@ -152,6 +153,19 @@ fn rule_delta<T: Clone + PartialEq>(
         dedup: None,
         discard_when_merged: false,
     })
+}
+
+/// Whether the list holds the same rule more than once.
+///
+/// An appending merge deduplicates unless a config opts out, keeping the first
+/// occurrence, so a repeated rule does not survive the fold: the list it
+/// reaches is shorter than the one asked for, and a repeat that trails a rule
+/// of equal specificity is what decides the tie.
+fn repeats_a_rule<T: PartialEq>(rules: &[T]) -> bool {
+    rules
+        .iter()
+        .enumerate()
+        .any(|(index, rule)| rules[..index].contains(rule))
 }
 
 impl ToPartial for AccessConfig {

@@ -108,6 +108,16 @@ fn law_holds_for_a_reordered_list() {
 }
 
 #[test]
+fn law_holds_for_a_repeated_rule() {
+    assert_law(&["A", "B"], &["A", "B", "A"]);
+}
+
+#[test]
+fn law_holds_for_an_append_onto_a_list_that_already_repeats() {
+    assert_law(&["A", "B", "A"], &["A", "B", "A", "C"]);
+}
+
+#[test]
 fn law_holds_for_a_wholly_replaced_list() {
     assert_law(&["A"], &["B"]);
 }
