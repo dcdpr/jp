@@ -682,6 +682,43 @@ fn a_server_added_to_the_workspace_reaches_an_existing_conversation() {
     );
 }
 
+/// A label rule only the workspace config declares reaches an existing
+/// conversation, the same way a server or a tool does.
+#[test]
+fn a_label_added_to_the_workspace_reaches_an_existing_conversation() {
+    use schematic::PartialConfig as _;
+
+    use crate::conversation::label::LabelConfig;
+
+    // The conversation was created knowing only `topic`.
+    let mut conversation = AppConfig::new_test();
+    conversation
+        .conversation
+        .labels
+        .insert("topic".to_owned(), LabelConfig::Static("rust".to_owned()));
+
+    // The workspace config has since gained `area`.
+    let mut files = PartialAppConfig::new_test();
+    files.conversation.labels.insert(
+        "area".to_owned(),
+        LabelConfig::Static("config".to_owned()).to_partial(),
+    );
+
+    files
+        .merge(&(), conversation.to_partial())
+        .expect("merging cannot fail");
+    let resolved = crate::util::build(files).expect("valid config");
+
+    assert!(
+        resolved.conversation.labels.contains_key("area"),
+        "a label only the files declare survives the conversation layer"
+    );
+    assert!(
+        resolved.conversation.labels.contains_key("topic"),
+        "the conversation's own label survives too"
+    );
+}
+
 /// A union that names an expanded form contributes both the shorthand path and
 /// the expanded keys; a union of distinct values contributes only its path.
 ///

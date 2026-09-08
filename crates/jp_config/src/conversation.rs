@@ -29,7 +29,7 @@ use crate::{
     internal::merge::{map_with_strategy, vec_with_strategy},
     partial::{ToPartial, partial_opt},
     types::{
-        map::{MergeableMap, map_to_mergeable_partial},
+        map::{MergeableMap, map_to_partial_per_key},
         vec::{MergeableVec, MergedVec, vec_to_mergeable_partial},
     },
     validate::Validator,
@@ -201,7 +201,9 @@ impl ToPartial for ConversationConfig {
             tools: self.tools.to_partial(),
             compaction: self.compaction.to_partial(),
             attachments: vec_to_mergeable_partial(&self.attachments),
-            labels: map_to_mergeable_partial(self.labels.iter()),
+            // Per key rather than `replace`: a label rule the workspace config
+            // gained after this conversation was created still reaches it.
+            labels: map_to_partial_per_key(self.labels.iter()),
             inquiry: self.inquiry.to_partial(),
             start_local: partial_opt(&self.start_local, defaults.start_local),
             default_id: self.default_id.clone(),

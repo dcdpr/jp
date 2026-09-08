@@ -164,24 +164,6 @@ impl<T> FillDefaults for MergeableMap<T> {
     }
 }
 
-/// Convert a resolved map to a `MergeableMap<T::Partial>` with replace
-/// strategy.
-///
-/// Used by `ToPartial` impls for fields whose finalized type is a plain map but
-/// whose partial is a [`MergeableMap`].
-pub fn map_to_mergeable_partial<'a, T: ToPartial + 'a>(
-    entries: impl IntoIterator<Item = (&'a String, &'a T)>,
-) -> MergeableMap<T::Partial> {
-    MergeableMap::Merged(MergedMap {
-        value: entries
-            .into_iter()
-            .map(|(k, v)| (k.clone(), v.to_partial()))
-            .collect(),
-        strategy: Some(MergedMapStrategy::Replace),
-        discard_when_merged: false,
-    })
-}
-
 /// Convert a resolved map to a `MergeableMap<T::Partial>` that merges per key.
 ///
 /// Used by `ToPartial` impls for a map that should still take an entry a later
