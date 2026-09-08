@@ -17,10 +17,12 @@ use std::{
     fmt::{self, Write},
 };
 
-use crate::{
+use jp_term::{
     ansi::{self, AnsiState, RESET, Segment},
-    format::{self, BackgroundFill, DefaultBackground},
+    background::{BackgroundFill, DefaultBackground, line_fill},
 };
+
+use crate::format;
 
 /// ANSI-aware terminal writer with word-wrapping support.
 #[expect(clippy::struct_excessive_bools)]
@@ -432,8 +434,8 @@ impl<'w> TerminalWriter<'w> {
 
     /// Extend the active background to the end of the current line.
     ///
-    /// The fill itself comes from [`format::line_fill`], the single
-    /// interpretation of [`BackgroundFill`].
+    /// The fill itself comes from [`line_fill`], the single interpretation of
+    /// [`BackgroundFill`].
     /// The background escape always precedes it so a temporary background
     /// (inline code, say) can't bleed into the fill.
     ///
@@ -444,7 +446,7 @@ impl<'w> TerminalWriter<'w> {
             return Ok(());
         };
 
-        let fill = format::line_fill(bg.fill, self.column);
+        let fill = line_fill(bg.fill, self.column);
         if fill.is_empty() {
             return Ok(());
         }

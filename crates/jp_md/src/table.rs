@@ -22,13 +22,11 @@
 use std::{cmp::min, fmt::Write as _};
 
 use comrak::nodes::{NodeValue, TableAlignment};
+use jp_term::ansi::{self, AnsiState, RESET, Segment};
 use unicode_segmentation::UnicodeSegmentation as _;
 use unicode_width::UnicodeWidthStr as _;
 
-use crate::{
-    ansi::{self, AnsiState, RESET, Segment},
-    render::{RenderOptions, TerminalFormatter},
-};
+use crate::render::{RenderOptions, TerminalFormatter};
 
 /// Type alias for comrak AST node references.
 type Node<'a> = &'a comrak::nodes::AstNode<'a>;
