@@ -600,14 +600,12 @@ impl Query {
         // (that also absorbs any `--cfg` reset keyword, per [RFD 038]).
         //
         // A conversation carrying earlier config state — continuing or forked
-        // — records a `--cfg` reset keyword as its stream events, appended
-        // directly: between the `Reset` and whichever `Apply` restores the
-        // required fields the stream does not resolve to a valid config, so
-        // the empty-diff suppression path in `add_config_delta` cannot run.
+        // — records a `--cfg` reset keyword as the reset-then-layer sequence
+        // [RFD 038] describes.
         //
         // Without a reset keyword, any divergence between the stream's config
         // and this invocation's resolved config is appended as a single
-        // suppression-checked `Apply` diff.
+        // `Apply` diff.
         //
         // [RFD 038]: https://jp.computer/rfd/038
         if let Some(reset_events) = ctx.config_reset.take() {
@@ -2246,8 +2244,8 @@ fn apply_title_override(lock: &ConversationLock, title: Option<&str>, no_title: 
 /// Persists the reset-then-layer sequence from [RFD 038]: a [`ResetDelta`]
 /// marking the reset point, then the workspace partial for `WORKSPACE` resets,
 /// then whatever state this invocation layered on top of the reset point.
-/// Empty layers are skipped by [`ConversationStream::add_config_reset`], which
-/// also documents why the sequence bypasses diff-suppression.
+/// Layers carrying nothing are skipped by
+/// [`ConversationStream::add_config_reset`].
 ///
 /// [RFD 038]: https://jp.computer/rfd/038
 fn persist_config_reset(

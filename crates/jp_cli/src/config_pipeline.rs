@@ -111,10 +111,9 @@ impl ConfigReset {
 /// The `post` partial is a partial-level diff from the reset point's state to
 /// the invocation's final partial, so it captures post-keyword `--cfg`
 /// directives and command CLI overrides without pinning program defaults.
-/// It is computed directly instead of routing through the empty-diff
-/// suppression path, because that path resolves the stream's current config —
-/// which is not a valid configuration between a `Reset` and whichever `Apply`
-/// restores the required fields.
+/// It is diffed against the reset point rather than against the conversation's
+/// current config: the `Reset` discards that state, so a diff from it would
+/// leave out every field the reset is about to drop.
 ///
 /// [RFD 038]: https://jp.computer/rfd/038
 #[derive(Debug, Clone)]

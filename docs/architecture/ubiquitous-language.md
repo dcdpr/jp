@@ -25,6 +25,7 @@ In disagreements between code and docs, the code is authoritative.
     - [Compacted View](#compacted-view)
     - [Compaction](#compaction)
     - [Compaction Rule](#compaction-rule)
+    - [Config Delta](#config-delta)
     - [Conversation](#conversation)
     - [Conversation Event](#conversation-event)
     - [EditorBackend](#editorbackend)
@@ -131,6 +132,24 @@ each rule yields exactly one Compaction when applied.
 A rule is durable configuration in relative terms ("keep the last turn"); a
 Compaction is the event it produced, pinned to absolute turn indices and stored
 in the conversation.
+
+### Config Delta
+
+A recorded change to a conversation's configuration: values to merge, and the
+paths to clear before merging them.
+Folding a conversation stream's deltas over its base config is what produces the
+conversation's resolved config.
+Implemented as `ConfigDelta` in `jp_conversation::stream`, either an
+`ApplyDelta` (values plus the paths it clears) or a `ResetDelta` (discard the
+accumulated state and restart from program defaults).
+
+A delta is computed once, against the state its author means to diff from, and
+recorded as given.
+
+**Not the same as** a config snapshot, which states every value rather than what
+changed.
+Both are carried as a `PartialAppConfig`, so diffing a delta as though it were a
+snapshot type-checks — and silently changes what its values mean.
 
 ### Conversation
 
