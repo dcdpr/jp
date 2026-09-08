@@ -543,9 +543,15 @@ fn terminal(rows: u16, columns: u16) -> (Terminal, Writer) {
 }
 
 /// Write `count` numbered content lines, standing in for earlier output.
+///
+/// One write per line: `writeln!` emits each piece of the format string
+/// separately, which puts the newline in a write of its own and lets a reader
+/// thread see the row before the cursor has left it.
 fn content(writer: &mut Writer, count: usize) {
     for n in 1..=count {
-        writeln!(writer, "content {n:02}").unwrap();
+        writer
+            .write_all(format!("content {n:02}\n").as_bytes())
+            .unwrap();
     }
 }
 
@@ -689,7 +695,17 @@ fn claiming_at_the_bottom_scrolls_content_up_rather_than_over_it() {
 fn releasing_a_block_puts_the_screen_back() {
     let (term, mut tty) = terminal(10, 40);
     content(&mut tty, 3);
-    let before = wait_for_used(&term, &["content 01", "content 02", "content 03"]);
+
+    // The cursor is part of what the release has to restore, so it is part of
+    // what this waits for: a snapshot taken before the last newline lands would
+    // record a cursor the erase is never going to reproduce.
+    let before = wait(
+        &term,
+        "three content rows with the cursor on the row below them",
+        |screen| {
+            screen.used() == ["content 01", "content 02", "content 03"] && screen.cursor() == (3, 0)
+        },
+    );
 
     let (mut stack, style, cap) = windowed(3, 40, 10);
     stack.claim_test(1, style, cap, &mut tty);
@@ -764,8 +780,15 @@ fn a_window_that_shrinks_clears_the_rows_it_gives_back() {
     stack.entries[0].buffer.lock().lines.clear();
     stack.redraw(&mut tty);
 
-    let screen = wait_for_used(&term, &["content 01", "content 02", "* status"]);
-    assert_eq!(screen.cursor().0, 2, "the cursor ends on the status row");
+    // The cursor walks back up after the rows below are cleared, so waiting on
+    // the rows alone can snapshot a frame with two writes still to come.
+    wait(
+        &term,
+        "a bare status row with the cursor back on it",
+        |screen| {
+            screen.used() == ["content 01", "content 02", "* status"] && screen.cursor().0 == 2
+        },
+    );
 }
 
 #[test]
@@ -851,15 +874,18 @@ fn a_redraw_after_a_shrink_keeps_its_row_accounting() {
 
     // A 4-row terminal leaves two window rows plus the status row, and every
     // one of them is painted whole with the newest lines.
-    let screen = wait_for_used(&term, &["line 4", "line 5", "* status"]);
-    assert_eq!(stack.drawn_rows, 3);
-
-    // It sits one row short of the bottom, because the shrink clamped the
-    // cursor and re-anchoring would need the cursor position the worker
+    //
+    // The block sits one row short of the bottom, because the shrink clamped
+    // the cursor and re-anchoring would need the cursor position the worker
     // deliberately never queries. Cosmetic, and it does not drift further: the
     // count on record matches the rows on screen, which is what later writes
     // are positioned from.
-    assert_eq!(screen.cursor().0, 2);
+    wait(
+        &term,
+        "the repainted block with the cursor on its status row",
+        |screen| screen.used() == ["line 4", "line 5", "* status"] && screen.cursor().0 == 2,
+    );
+    assert_eq!(stack.drawn_rows, 3);
 
     // That is the property worth pinning — a wrong count shows up here, as
     // eaten or duplicated content around the next persistent write. The write

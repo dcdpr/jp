@@ -38,6 +38,11 @@
 //!   `openpty` fails.
 //!   [`Terminal::backend`] reports which one it got.
 //!
+//! A test that spawns has one more question to ask, through
+//! [`spawn_is_observable`]: on a GitHub-hosted Windows runner a ConPTY child's
+//! output never reaches the output pipe, so the screen stays blank whatever the
+//! child draws.
+//!
 //! # Waiting
 //!
 //! Bytes reach a pty-backed model on a reader thread, so a screen read straight
@@ -81,4 +86,4 @@ mod terminal;
 pub use error::Error;
 pub use portable_pty::CommandBuilder;
 pub use screen::Screen;
-pub use terminal::{Backend, Child, Size, Terminal, Writer};
+pub use terminal::{Backend, Child, Size, Terminal, Writer, spawn_is_observable};

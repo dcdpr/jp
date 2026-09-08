@@ -2,6 +2,7 @@
 
 use std::{
     borrow::Cow,
+    env,
     io::{self, Read as _, Write},
     sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError},
     thread,
@@ -29,6 +30,20 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// Bytes read from the pty in one go.
 const READ_CHUNK: usize = 4096;
+
+/// How often [`Child::wait_within`] asks whether the child has exited.
+const EXIT_POLL: Duration = Duration::from_millis(10);
+
+/// Whether a child spawned into a pty can be observed on this host.
+///
+/// False on GitHub-hosted Windows runners, where a ConPTY child's output never
+/// reaches the output pipe and the screen stays blank however correct the code
+/// under test is: <https://github.com/actions/runner/issues/3168>.
+/// True everywhere else, including a Windows machine of one's own.
+#[must_use]
+pub fn spawn_is_observable() -> bool {
+    !cfg!(windows) || env::var_os("GITHUB_ACTIONS").is_none()
+}
 
 /// A terminal's row and column count.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -259,13 +274,18 @@ impl Terminal {
     ///
     /// Returns [`Error::Resize`] when the kernel refuses the new size.
     pub fn resize(&self, size: Size) -> Result<(), Error> {
+        // The lock is taken before the kernel hears about the new size: a child
+        // that repaints on `SIGWINCH` can emit a new-width frame the moment it
+        // is signalled, and the reader thread would render that frame into a
+        // model still set to the old width.
+        let mut state = self.shared.lock();
+
         if let Some(pty) = &self.pty {
             pty.manager
                 .resize(size.into())
                 .map_err(|error| Error::Resize(error.to_string()))?;
         }
 
-        let mut state = self.shared.lock();
         state.parser.screen_mut().set_size(size.rows, size.columns);
         drop(state);
         self.shared.updated.notify_all();
@@ -349,22 +369,27 @@ pub struct Child {
 }
 
 impl Child {
-    /// Whether the child has exited, without blocking.
+    /// Block until the child exits or `timeout` elapses.
+    ///
+    /// `Some(success)` once it has exited, `None` while it is still running.
+    /// Pass [`Duration::ZERO`] to ask without waiting.
     ///
     /// # Errors
     ///
-    /// Returns the error the platform reported for the check itself.
-    pub fn finished(&mut self) -> Result<bool, Error> {
-        Ok(self.child.try_wait()?.is_some())
-    }
+    /// Returns the error the platform reported for one of the checks itself.
+    pub fn wait_within(&mut self, timeout: Duration) -> Result<Option<bool>, Error> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if let Some(status) = self.child.try_wait()? {
+                return Ok(Some(status.success()));
+            }
 
-    /// Block until the child exits, and report whether it exited successfully.
-    ///
-    /// # Errors
-    ///
-    /// Returns the error the platform reported for the wait itself.
-    pub fn wait(&mut self) -> Result<bool, Error> {
-        Ok(self.child.wait()?.success())
+            if Instant::now() >= deadline {
+                return Ok(None);
+            }
+
+            thread::sleep(EXIT_POLL);
+        }
     }
 }
 

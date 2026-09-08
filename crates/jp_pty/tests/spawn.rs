@@ -5,10 +5,18 @@
 //! They match on content rather than on exact rows: what ConPTY hands back is a
 //! repaint of its own screen rather than the bytes the child wrote, so where a
 //! line lands is the console's business.
+//!
+//! Each case asks `jp_pty::spawn_is_observable` first and does nothing when the
+//! answer is no, which on a GitHub-hosted Windows runner it is.
+//!
+//! Enter is sent as a carriage return.
+//! A Windows console in cooked mode completes a line on CR and ignores a bare
+//! LF, and a unix pty's `ICRNL` turns the CR into the newline its reader is
+//! waiting for, so one byte serves both.
 
 use std::time::Duration;
 
-use jp_pty::{Child, CommandBuilder, Size, Terminal};
+use jp_pty::{Child, CommandBuilder, Size, Terminal, spawn_is_observable};
 
 /// The probe binary, built by cargo alongside this test.
 const PROBE: &str = env!("CARGO_BIN_EXE_pty_probe");
@@ -19,21 +27,30 @@ const PROBE: &str = env!("CARGO_BIN_EXE_pty_probe");
 /// whatever else CI is running at the time.
 const TIMEOUT: Duration = Duration::from_secs(20);
 
-/// A terminal of `size` with the probe running in it.
+/// A terminal of `size` with the probe running in it, or `None` where a spawned
+/// child's output cannot be seen.
 ///
 /// The child is returned rather than dropped, because dropping it kills it.
-fn spawn_probe(size: Size) -> (Terminal, Child) {
+#[expect(clippy::print_stderr, reason = "a case that does nothing has to say so")]
+fn spawn_probe(size: Size) -> Option<(Terminal, Child)> {
+    if !spawn_is_observable() {
+        eprintln!("skipped: a spawned child's output is unreachable on this host");
+        return None;
+    }
+
     let terminal = Terminal::pty(size).expect("a pty").with_timeout(TIMEOUT);
     let child = terminal
         .spawn(CommandBuilder::new(PROBE))
         .expect("the probe to start");
 
-    (terminal, child)
+    Some((terminal, child))
 }
 
 #[test]
 fn a_child_is_given_the_size_the_terminal_was_opened_with() {
-    let (terminal, mut child) = spawn_probe(Size::new(24, 80));
+    let Some((terminal, mut child)) = spawn_probe(Size::new(24, 80)) else {
+        return;
+    };
 
     // The probe measures its own tty, so this is the kernel's answer rather
     // than the harness repeating back what it was told.
@@ -43,18 +60,27 @@ fn a_child_is_given_the_size_the_terminal_was_opened_with() {
         })
         .expect("the probe to measure the size it was spawned with");
 
-    terminal.send("quit\n").expect("the keystrokes to arrive");
-    assert!(child.wait().expect("the probe to exit"));
+    terminal.send("quit\r").expect("the keystrokes to arrive");
+
+    // Bounded: a quit that never reaches the probe is a failing case rather
+    // than a test binary the runner has to time out.
+    assert_eq!(
+        child.wait_within(TIMEOUT).expect("the exit check"),
+        Some(true),
+        "the probe exits successfully once told to quit"
+    );
 }
 
 #[test]
 fn keystrokes_reach_the_child() {
-    let (terminal, _child) = spawn_probe(Size::new(24, 80));
+    let Some((terminal, _child)) = spawn_probe(Size::new(24, 80)) else {
+        return;
+    };
     terminal
         .wait_for("the probe to start", |screen| screen.contains("size "))
         .expect("the probe to report a size");
 
-    terminal.send("hello\n").expect("the keystrokes to arrive");
+    terminal.send("hello\r").expect("the keystrokes to arrive");
 
     terminal
         .wait_for("the probe to echo the line", |screen| {
@@ -67,7 +93,9 @@ fn keystrokes_reach_the_child() {
 fn a_resize_reaches_a_running_child() {
     // The case with no in-process equivalent: the new size has to travel
     // through the kernel to a process that is already running.
-    let (terminal, _child) = spawn_probe(Size::new(24, 80));
+    let Some((terminal, _child)) = spawn_probe(Size::new(24, 80)) else {
+        return;
+    };
     terminal
         .wait_for("the probe to start", |screen| screen.contains("size 24x80"))
         .expect("the probe to report a size");
@@ -75,7 +103,7 @@ fn a_resize_reaches_a_running_child() {
     terminal
         .resize(Size::new(10, 40))
         .expect("the resize to apply");
-    terminal.send("again\n").expect("the keystrokes to arrive");
+    terminal.send("again\r").expect("the keystrokes to arrive");
 
     terminal
         .wait_for("the probe to report the new size", |screen| {

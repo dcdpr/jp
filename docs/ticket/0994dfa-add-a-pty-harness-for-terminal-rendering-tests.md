@@ -164,5 +164,63 @@ at `safe-to-run`: `portable-pty`, `filedescriptor`, `nix`, `downcast-rs`,
 `cfg_aliases`.
 `cargo vet prune` will say if any are redundant against the imported audits.
 
+-----
+
+- **From**: jp
+- **Date**: 2026-09-08T12:55:46Z
+
+The Windows row of the coverage table above is wrong on GitHub's runners, and
+the correction is not something JP can code around.
+
+A ConPTY child's output never reaches the output pipe on a GitHub-hosted
+Windows runner: [actions/runner#3168] has been open since February 2024, with
+the same tests passing on a Windows machine of one's own. Every case in
+`region_pty.rs` and `spawn.rs` waited out its timeout there on a blank screen,
+while the unix runners passed. The two probes report nothing at all rather than
+leaking to the job log, because `portable-pty` spawns with
+`STARTF_USESTDHANDLES` and invalid handles so a child cannot fall back to the
+parent's stdio. Spawning by hand without that flag is what the `conpty` crate
+in the upstream report does, and its output misses the pipe too, so there is no
+version of the spawn path that works there.
+
+It is the environment rather than any one library. `expectrl` fails the same way
+on both GitHub Actions and AppVeyor ([expectrl#52], open since 2022, no
+diagnosis), through a third implementation again. `portable-pty`'s own CI is no
+help: wezterm runs `cargo nextest run --all` on `windows-2025`, but no test in
+that repository opens a pty, so the path has never run there.
+
+The one lever nobody has pulled is the sideloaded console host. `load_conpty`
+prefers a `conpty.dll` next to the binary over kernel32's, and wezterm ships
+`conpty.dll` and `OpenConsole.exe` for the app itself, copied beside the
+executable by a build script. Whether a bundled host fares better on a hosted
+runner is a guess, and it costs a Microsoft DLL and executable vendored into
+the repository or fetched during the job. Worth trying only against a runner
+that can confirm it.
+
+`jp_pty::spawn_is_observable` reports it, and each spawning case does nothing
+and says so when the answer is no. The Windows row therefore reads: covered on
+a Windows host, not on GitHub's runners, where the in-process set on the model
+backend is all that runs.
+
+From review of the PR:
+
+- `Terminal::resize` takes the screen lock before the kernel hears the new
+  size. A child that repaints on `SIGWINCH` can emit a new-width frame the
+  moment it is signalled, and the reader thread would have rendered it into a
+  model still set to the old width.
+- Enter is sent as `\r`. A Windows console in cooked mode completes a line on
+  CR and ignores a bare LF; a unix pty's `ICRNL` accepts CR too.
+- `Child::wait_within` replaces `wait` and `finished`. An unbounded wait on a
+  child that never sees its input hangs the runner rather than failing the
+  case.
+- Waits carry what the assertions after them need. A predicate satisfied by
+  part of a frame freezes a snapshot the rest of the frame has not reached, and
+  `Screen` compares its cursor, so `releasing_a_block_puts_the_screen_back` had
+  to wait for the cursor as well as the rows. `content` writes each line in one
+  call for the same reason: `writeln!` emits each piece of a format string
+  separately, putting the newline in a write of its own.
+
 [RFD 091]: https://jp.computer/rfd/091
 [issue 392]: https://github.com/dcdpr/jp/issues/392
+[actions/runner#3168]: https://github.com/actions/runner/issues/3168
+[expectrl#52]: https://github.com/zhiburt/expectrl/issues/52

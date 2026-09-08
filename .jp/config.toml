@@ -74,7 +74,7 @@ id = "haiku"
 parameters.reasoning.effort = "low"
 
 [style.code]
-copy_link = "osc8"
+copy_link = "off"
 
 [style.reasoning]
 display = "full"
