@@ -10,31 +10,28 @@
 //! A ticket is read far more often than it is written, and by hand as often as
 //! by tooling, so the file is never round-tripped through the parser.
 
-use crate::{Comment, Kind, Status, parse};
+use crate::{Comment, LABEL_KEY, NewTicket, Status, parse};
 
 /// Render a new ticket, opened at `Todo`.
 ///
-/// `implements` names the RFD the work comes from, for a ticket seeded from an
-/// RFD's implementation plan.
+/// The optional fields are written last, in the same place [`set_metadata`]
+/// would put them, so a ticket that gains one later looks like one that was
+/// filed with it.
 #[must_use]
-pub fn ticket(
-    title: &str,
-    kind: Kind,
-    authors: &str,
-    date: &str,
-    implements: Option<&str>,
-    description: &str,
-) -> String {
-    let mut out = format!("# {title}\n\n");
+pub fn ticket(new: &NewTicket<'_>) -> String {
+    let mut out = format!("# {}\n\n", new.title);
     out.push_str(&format!("- **Status**: {}\n", Status::Todo));
-    out.push_str(&format!("- **Kind**: {kind}\n"));
-    out.push_str(&format!("- **Authors**: {authors}\n"));
-    out.push_str(&format!("- **Date**: {date}\n"));
-    if let Some(rfd) = implements {
+    out.push_str(&format!("- **Kind**: {}\n", new.kind));
+    out.push_str(&format!("- **Authors**: {}\n", new.authors));
+    out.push_str(&format!("- **Date**: {}\n", new.date));
+    if let Some(rfd) = new.implements {
         out.push_str(&format!("- **Implements**: {rfd}\n"));
     }
+    for token in new.labels.to_tokens() {
+        out.push_str(&format!("- **{LABEL_KEY}**: {token}\n"));
+    }
 
-    let description = description.trim();
+    let description = new.description.trim();
     if !description.is_empty() {
         out.push('\n');
         out.push_str(description);
@@ -192,6 +189,64 @@ pub fn set_metadata(document: &str, key: &str, value: &str) -> Option<String> {
     }
 
     let mut out = lines.join("\n");
+    if document.ends_with('\n') {
+        out.push('\n');
+    }
+
+    Some(out)
+}
+
+/// Drop a field from the ticket's metadata block, returning the new document.
+///
+/// Every occurrence of the field goes, so this also clears a repeated one.
+/// Returns `None` when the document has no metadata block; a document that
+/// doesn't carry the field comes back unchanged.
+///
+/// Only the header block is considered, so a line quoted in a comment is left
+/// alone.
+#[must_use]
+pub fn remove_metadata(document: &str, key: &str) -> Option<String> {
+    set_repeated_metadata(document, key, &[])
+}
+
+/// Replace every occurrence of a repeated metadata field with `values`, one
+/// line each.
+///
+/// A field written once per value keeps each line short regardless of how many
+/// values there are, which is what lets the block survive a markdown formatter
+/// that wraps at a fixed width.
+///
+/// The new lines land where the first existing one was, so a field keeps its
+/// place in the block; a field the ticket doesn't carry yet joins the end.
+/// Returns `None` when the document has no metadata block at all.
+#[must_use]
+pub fn set_repeated_metadata(document: &str, key: &str, values: &[String]) -> Option<String> {
+    let header = parse::metadata_range(document)?;
+    let lines: Vec<&str> = document.lines().collect();
+
+    let matching = |line: &str| {
+        parse::meta_line(line).is_some_and(|(found, _)| found.eq_ignore_ascii_case(key))
+    };
+    let at = header.clone().find(|&i| matching(lines[i]));
+    let insert_at = at.unwrap_or(header.end);
+
+    let mut out: Vec<String> = vec![];
+    for (index, line) in lines.iter().enumerate() {
+        if index == insert_at {
+            out.extend(values.iter().map(|value| format!("- **{key}**: {value}")));
+        }
+        if header.contains(&index) && matching(line) {
+            continue;
+        }
+        out.push((*line).to_owned());
+    }
+    // A field appended to a block that runs to the end of the document has no
+    // following line to trigger the insert above.
+    if insert_at >= lines.len() {
+        out.extend(values.iter().map(|value| format!("- **{key}**: {value}")));
+    }
+
+    let mut out = out.join("\n");
     if document.ends_with('\n') {
         out.push('\n');
     }

@@ -4,6 +4,9 @@
 - **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-07
+- **Label**: client=cli
+- **Label**: package=jp_cli
+- **Label**: type=bug
 
 `-q` closes the chrome channel, and the notice that a turn ended on a
 non-standard finish reason travels on it.

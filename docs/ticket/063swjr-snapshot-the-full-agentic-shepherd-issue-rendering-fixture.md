@@ -4,6 +4,8 @@
 - **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-08-21
+- **Label**: package=jp_attachment_agentic_shepherd
+- **Label**: type=task
 
 `renders_full_issue_fixture` renders a complete user-visible Markdown document
 but checks selected substrings.

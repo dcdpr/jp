@@ -102,19 +102,25 @@ stdout.
 The **resolved set** is the labels themselves, written at creation, on fork, and
 by `jp c label`.
 A rule is not a label until it has been resolved.
+Naming a label on the CLI applies it without a rule, so a rule is one way a
+label arrives rather than the only one.
 
-**Implementation.** `Conversation::labels` in `jp_conversation`, a `Labels`
+**Implementation.** `Conversation::labels`, a `Labels` from [`jp_label`],
 persisted in `metadata.json`.
 `Labels` maps a key to an ordered set of values and enforces the empty-set
 invariant; a value is read as either a string or an array of strings, and is
 always written as an array.
+The type is shared with tickets, so the invariants above hold wherever a label
+is stored.
 Rules are `LabelConfig` in `jp_config::conversation::label`, turned into labels
 by the resolver in `jp_cli::cmd::label::resolve`.
-Keys match `[A-Za-z][A-Za-z0-9_-]*`; every excluded character is significant
-somewhere else — `.` separates dotted config paths, `=` splits a key from its
-value, `:` marks a rule reference, and a leading `-` would read as a flag where
-keys are written as bare command arguments.
-Values carry no such restriction.
+Keys match `[A-Za-z][A-Za-z0-9_-]*`; the grammar and its diagnostics live in
+[`jp_label`], shared with every other consumer of labels, so a key accepted on a
+conversation is a key accepted on a ticket.
+Every excluded character is significant somewhere else — `.` separates dotted
+config paths, `=` splits a key from its value, `:` marks a rule reference, and a
+leading `-` would read as a flag where keys are written as bare command
+arguments.
 
 **In context.** A key never holds an empty set: removing the last value removes
 the key.
@@ -130,9 +136,18 @@ and not exposed to tools.
 and serves as the conversation's name rather than a fact about it.
 Also not an **Attachment**, which is content added *to* a conversation.
 
+A **ticket** carries the same `Labels`, but its vocabulary is closed: a ticket
+label is checked against `docs/ticket/.labels.json`, which declares each key and
+the values it accepts, while a conversation label only has to match the key
+grammar.
+Closedness is a policy a consumer opts into through [`jp_label`]'s `Vocabulary`,
+not a difference in the concept.
+Where a label set is *stored* is each consumer's own business: a conversation
+keeps one in `metadata.json`, a ticket writes one `- **Label**:` line per pair.
+
 **Avoid.** *Tag*, *annotation*, *marker*.
-When you mean a `key=value` pair stored on a conversation, the word is
-**Label**.
+When you mean a `key=value` pair stored on a conversation or a ticket, the word
+is **Label**.
 
 ### Turn
 
@@ -160,4 +175,5 @@ None of these are project terms.
 When you mean a single user-prompt-to-final-response cycle with the assistant,
 the word is **Turn**.
 
+[`jp_label`]: https://github.com/dcdpr/jp/tree/main/crates/jp_label
 [legacy single-page glossary]: ../ubiquitous-language.md

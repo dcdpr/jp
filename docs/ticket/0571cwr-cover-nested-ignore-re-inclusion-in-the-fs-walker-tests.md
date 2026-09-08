@@ -4,6 +4,8 @@
 - **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-08-19
+- **Label**: domain=tooling
+- **Label**: type=task
 
 The fs tools support a two-level ignore arrangement that nothing tests: a root
 `.ignore` excludes a subtree, and a `.ignore` *inside* that subtree re-includes

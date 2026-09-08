@@ -23,7 +23,10 @@ use jp_plugin::message::{
 };
 use serde::Serialize;
 use serde_json::Value;
-use ticket::{Comment, Kind, Metadata, Status, Ticket, TicketId, import::Import, render, store};
+use ticket::{
+    Comment, Kind, LABELS_FILE, Labels, Metadata, NewTicket, Selector, Status, Ticket, TicketId,
+    Vocabulary, import::Import, render, store,
+};
 
 #[derive(Debug, Parser)]
 #[command(name = "jp ticket", about = "Track work items as markdown files.")]
@@ -60,6 +63,11 @@ enum Command {
         /// The RFD this work implements, e.g. `045`.
         #[arg(long)]
         implements: Option<String>,
+
+        /// A `key=value` label from the board's vocabulary.
+        /// Repeat for more than one.
+        #[arg(long = "label")]
+        labels: Vec<String>,
     },
 
     /// Append a comment to a ticket.
@@ -81,6 +89,24 @@ enum Command {
         #[arg(long)]
         body: Option<String>,
     },
+
+    /// Replace a ticket's labels.
+    ///
+    /// The whole set is written: pass every label the ticket should end up
+    /// with, or none to clear them.
+    Label {
+        /// Ticket id: `T-02wt0kx`, `T02wt0kx`, or `02wt0kx`.
+        /// Omit it to choose.
+        id: Option<TicketId>,
+
+        /// A `key=value` label from the board's vocabulary.
+        /// Repeat for more than one.
+        #[arg(long = "label")]
+        labels: Vec<String>,
+    },
+
+    /// List the labels the board defines.
+    Labels,
 
     /// Mark a ticket as Done.
     Close {
@@ -193,6 +219,11 @@ enum Command {
         /// Only tickets of this kind: `bug`, `feature`, or `chore`.
         #[arg(long)]
         kind: Option<Kind>,
+
+        /// Only tickets carrying this label, as `key` or `key=value`.
+        /// Repeat to require several.
+        #[arg(long = "label")]
+        labels: Vec<String>,
 
         /// Print JSON instead of a table.
         #[arg(long)]
@@ -402,22 +433,9 @@ fn compose_missing(
             author,
             body,
             implements,
+            labels,
         } if kind.is_none() || title.is_none() => {
-            // Kind first: it frames what you're about to write. The title is
-            // read out of the composed text, or asked for last.
-            let kind = match kind {
-                Some(kind) => kind,
-                None => pick_kind(stdin, stdout)?,
-            };
-            // A description given on the command line is a description, not a
-            // draft of the whole ticket. Composing from it would read its one
-            // line back as a title and file the ticket with no description at
-            // all, quietly turning an explicit `--body` into something else.
-            let (title, body) = match (title, body) {
-                (Some(title), body) => (title, body),
-                (None, Some(body)) => (ask_title(stdin, stdout)?, Some(body)),
-                (None, None) => compose_ticket(Some(kind), stdin, stdout)?,
-            };
+            let (kind, title, body) = compose_add(kind, title, body, stdin, stdout)?;
 
             Ok(Command::Add {
                 kind: Some(kind),
@@ -425,6 +443,7 @@ fn compose_missing(
                 author,
                 body,
                 implements,
+                labels,
             })
         }
 
@@ -489,6 +508,11 @@ fn compose_missing(
             body,
             kind,
             status,
+        }),
+
+        Command::Label { id: None, labels } => Ok(Command::Label {
+            id: Some(pick_ticket(dir, stdin, stdout, "Label", false)?),
+            labels,
         }),
 
         Command::Delete { id: None } => Ok(Command::Delete {
@@ -628,6 +652,34 @@ fn compose_ticket(
         // the title has to be asked for on its own.
         Composition::Body(body) => Ok((ask_title(stdin, stdout)?, Some(body))),
     }
+}
+
+/// Ask for the kind, title, and description a new ticket is missing.
+fn compose_add(
+    kind: Option<Kind>,
+    title: Option<String>,
+    body: Option<String>,
+    stdin: &mut impl BufRead,
+    stdout: &mut impl Write,
+) -> Result<(Kind, String, Option<String>), String> {
+    // Kind first: it frames what you're about to write. The title is read out
+    // of the composed text, or asked for last.
+    let kind = match kind {
+        Some(kind) => kind,
+        None => pick_kind(stdin, stdout)?,
+    };
+
+    // A description given on the command line is a description, not a draft of
+    // the whole ticket. Composing from it would read its one line back as a
+    // title and file the ticket with no description at all, quietly turning an
+    // explicit `--body` into something else.
+    let (title, body) = match (title, body) {
+        (Some(title), body) => (title, body),
+        (None, Some(body)) => (ask_title(stdin, stdout)?, Some(body)),
+        (None, None) => compose_ticket(Some(kind), stdin, stdout)?,
+    };
+
+    Ok((kind, title, body))
 }
 
 /// Ask which ticket to act on.
@@ -1135,25 +1187,16 @@ fn execute(dir: &Utf8Path, command: Command, config: &Value) -> Result<Output, S
             author,
             body,
             implements,
-        } => {
-            let kind = required(kind, "kind")?;
-            let title = required(title, "title")?;
-            let author = resolve_author(author, config)?;
-            let date = Local::now().format("%Y-%m-%d").to_string();
-            let description = body.unwrap_or_default();
-            let (id, path) = store::create(
-                dir,
-                kind,
-                &title,
-                &author,
-                &date,
-                implements.as_deref(),
-                &description,
-            )
-            .map_err(|error| error.to_string())?;
-
-            Ok(format!("Created {path} ({id})\n").into())
-        }
+            labels,
+        } => add(
+            dir,
+            required(kind, "kind")?,
+            &required(title, "title")?,
+            &resolve_author(author, config)?,
+            body.as_deref().unwrap_or_default(),
+            implements.as_deref(),
+            &labels,
+        ),
 
         Command::Comment {
             id,
@@ -1174,6 +1217,10 @@ fn execute(dir: &Utf8Path, command: Command, config: &Value) -> Result<Output, S
 
             Ok(format!("Added {id}#{position} by {author}\n").into())
         }
+
+        Command::Label { id, labels } => relabel(dir, required(id, "ticket id")?, &labels),
+
+        Command::Labels => vocabulary_listing(dir),
 
         Command::Close { id } => {
             let id = required(id, "ticket id")?;
@@ -1240,7 +1287,12 @@ fn execute(dir: &Utf8Path, command: Command, config: &Value) -> Result<Output, S
             Ok(output)
         }
 
-        Command::List { status, kind, json } => list(dir, status, kind, json),
+        Command::List {
+            status,
+            kind,
+            labels,
+            json,
+        } => list(dir, status, kind, &labels, json),
     }
 }
 
@@ -1348,6 +1400,94 @@ fn token() -> Option<String> {
     non_empty("JP_GITHUB_TOKEN").or_else(|| non_empty("GITHUB_TOKEN"))
 }
 
+/// File a ticket at `Todo`.
+fn add(
+    dir: &Utf8Path,
+    kind: Kind,
+    title: &str,
+    author: &str,
+    body: &str,
+    implements: Option<&str>,
+    labels: &[String],
+) -> Result<Output, String> {
+    let labels = resolve_labels(dir, labels)?;
+    let date = Local::now().format("%Y-%m-%d").to_string();
+
+    let (id, path) = store::create(dir, &NewTicket {
+        kind,
+        title,
+        authors: author,
+        date: &date,
+        implements,
+        labels: &labels,
+        description: body,
+    })
+    .map_err(|error| error.to_string())?;
+
+    Ok(format!("Created {path} ({id})\n").into())
+}
+
+/// Replace a ticket's labels with the set the caller named.
+///
+/// Checked against the ticket rather than against the vocabulary alone, so a
+/// retired value the ticket already carries can be listed again and kept.
+fn relabel(dir: &Utf8Path, id: TicketId, requested: &[String]) -> Result<Output, String> {
+    let vocabulary = read_vocabulary(dir)?;
+    let (path, applied) =
+        store::set_labels(dir, id, &vocabulary, requested).map_err(|error| error.to_string())?;
+
+    Ok(if applied.is_empty() {
+        format!("{path}: labels cleared\n")
+    } else {
+        format!("{path}: {applied}\n")
+    }
+    .into())
+}
+
+/// Check labels for a ticket being filed.
+///
+/// Both the refusal and the vocabulary's own error carry enough to act on, so
+/// they are handed to the user as they are.
+fn resolve_labels(dir: &Utf8Path, requested: &[String]) -> Result<Labels, String> {
+    read_vocabulary(dir)?
+        .resolve(requested)
+        .map_err(|error| error.to_string())
+}
+
+fn read_vocabulary(dir: &Utf8Path) -> Result<Vocabulary, String> {
+    store::vocabulary(dir).map_err(|error| error.to_string())
+}
+
+/// List the labels the board defines, with what each one covers.
+fn vocabulary_listing(dir: &Utf8Path) -> Result<Output, String> {
+    let vocabulary = read_vocabulary(dir)?;
+    if vocabulary.is_empty() {
+        return Ok(format!(
+            "This board defines no labels. Add them to {}.\n",
+            dir.join(LABELS_FILE)
+        )
+        .into());
+    }
+
+    let mut out = String::new();
+    for (key, facet) in vocabulary.facets() {
+        out.push_str(&format!("{key}  {}\n", facet.description()));
+        for value in facet.values() {
+            out.push_str(&format!("  {key}={value}\n"));
+        }
+        for value in facet.retired() {
+            out.push_str(&format!("  {key}={value}  (retired)\n"));
+        }
+        out.push('\n');
+    }
+
+    if vocabulary.facets().any(|(_, f)| f.retired().count() > 0) {
+        out.push_str("A retired label stays on a ticket that carries it, but can't be added.\n");
+    }
+
+    Ok(out.into())
+}
+
 /// Apply an edit, touching only the parts the caller named.
 fn edit(
     dir: &Utf8Path,
@@ -1417,6 +1557,9 @@ fn show(dir: &Utf8Path, id: TicketId, json: bool) -> Result<Output, String> {
     out.push_str(&format!("- **Path**: {}\n", entry.path));
     out.push_str(&format!("- **Status**: {}\n", ticket.metadata.status));
     out.push_str(&format!("- **Kind**: {}\n", ticket.metadata.kind));
+    for token in ticket.metadata.labels.to_tokens() {
+        out.push_str(&format!("- **Label**: {token}\n"));
+    }
     if !ticket.description.is_empty() {
         out.push_str(&format!("\n{}\n", ticket.description));
     }
@@ -1434,10 +1577,16 @@ fn show(dir: &Utf8Path, id: TicketId, json: bool) -> Result<Output, String> {
     Ok(out.into())
 }
 
+/// List tickets, filtered by whatever the caller named.
+///
+/// Labels are matched as written on the ticket rather than through the
+/// vocabulary, so a ticket carrying a label the board has since dropped can
+/// still be found and fixed.
 fn list(
     dir: &Utf8Path,
     status: Option<Status>,
     kind: Option<Kind>,
+    labels: &[String],
     json: bool,
 ) -> Result<Output, String> {
     let entries = store::list(dir).map_err(|error| error.to_string())?;
@@ -1450,9 +1599,11 @@ fn list(
             Err(error) => warnings.push(format!("{}: {error}", entry.path)),
         }
     }
+    let selectors = Selector::parse_all(labels).map_err(|error| error.to_string())?;
     tickets.retain(|(_, ticket, _)| {
         status.is_none_or(|status| status == ticket.metadata.status)
             && kind.is_none_or(|kind| kind == ticket.metadata.kind)
+            && ticket.metadata.labels.matches(&selectors)
     });
 
     let text = if json {
@@ -1491,8 +1642,16 @@ fn row(id: TicketId, ticket: &Ticket) -> String {
         .blocked_by
         .as_deref()
         .map_or_else(String::new, |by| format!(" (blocked by {by})"));
+    let labels = if ticket.metadata.labels.is_empty() {
+        String::new()
+    } else {
+        format!(" [{}]", ticket.metadata.labels)
+    };
 
-    format!("{id:<9} {status:<12} {kind:<8} {}{blocked}\n", ticket.title)
+    format!(
+        "{id:<9} {status:<12} {kind:<8} {}{labels}{blocked}\n",
+        ticket.title
+    )
 }
 
 fn help_text() -> String {

@@ -5,6 +5,7 @@ import { dirname, posix, resolve } from 'node:path'
 import { defineConfig } from 'vitepress'
 import abnfGrammar from './grammars/abnf.tmLanguage.json'
 import { joinMultilineInlineCode } from './join-inline-code.mjs'
+import { readLabels } from './loaders/ticket-shared.mjs'
 import { rfdRedirectServer, writeRfdRedirects } from './rfd-redirects.mjs'
 
 // Rewrite relative links that climb above the docs root to absolute GitHub
@@ -199,6 +200,11 @@ const ticketBoardWriter = {
                     status: field('Status'),
                     kind: field('Kind'),
                     blockedBy: field('Blocked by'),
+                    // The shared reader, so the dev board and the published
+                    // one agree: it is scoped to the header block, where a
+                    // scan of the whole file would also collect a label line
+                    // quoted in a description or a comment.
+                    labels: readLabels(content),
                     implements: field('Implements'),
                     path: `/ticket/${name.replace(/\.md$/, '')}`,
                 })

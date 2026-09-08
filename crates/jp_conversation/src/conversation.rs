@@ -7,12 +7,10 @@ use jp_id::{
     Id, NANOSECONDS_PER_DECISECOND,
     parts::{TargetId, Variant},
 };
+use jp_label::Labels;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    error::{Error, Result},
-    labels::Labels,
-};
+use crate::error::{Error, Result};
 
 /// A sequence of events between the user and LLM.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

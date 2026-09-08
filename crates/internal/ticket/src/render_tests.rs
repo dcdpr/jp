@@ -1,7 +1,26 @@
 use indoc::indoc;
 
 use super::*;
-use crate::parse;
+use crate::{Kind, Labels, Vocabulary, parse};
+
+/// A ticket with everything but the parts under test fixed.
+fn draft<'a>(
+    title: &'a str,
+    kind: Kind,
+    authors: &'a str,
+    labels: &'a Labels,
+    description: &'a str,
+) -> NewTicket<'a> {
+    NewTicket {
+        kind,
+        title,
+        authors,
+        date: "2026-08-05",
+        implements: None,
+        labels,
+        description,
+    }
+}
 
 fn new_comment(from: &str, body: &str, re: Option<&str>) -> Comment {
     Comment {
@@ -14,14 +33,13 @@ fn new_comment(from: &str, body: &str, re: Option<&str>) -> Comment {
 
 #[test]
 fn renders_a_new_ticket() {
-    let out = ticket(
+    let out = ticket(&draft(
         "Tool call header misaligned",
         Kind::Bug,
         "John Doe",
-        "2026-08-05",
-        None,
+        &Labels::default(),
         "The header renders one column left of the body.",
-    );
+    ));
 
     assert_eq!(out, indoc! {"
             # Tool call header misaligned
@@ -37,14 +55,13 @@ fn renders_a_new_ticket() {
 
 #[test]
 fn renders_a_new_ticket_without_a_description() {
-    let out = ticket(
+    let out = ticket(&draft(
         "Bump the deny list",
         Kind::Chore,
         "john",
-        "2026-08-05",
-        None,
+        &Labels::default(),
         "   ",
-    );
+    ));
 
     assert_eq!(out, indoc! {"
             # Bump the deny list
@@ -58,14 +75,13 @@ fn renders_a_new_ticket_without_a_description() {
 
 #[test]
 fn first_comment_opens_the_comments_section() {
-    let document = ticket(
+    let document = ticket(&draft(
         "Tool call header misaligned",
         Kind::Bug,
         "John Doe",
-        "2026-08-05",
-        None,
+        &Labels::default(),
         "The header renders one column left of the body.",
-    );
+    ));
 
     let out = append_comment(
         &document,
@@ -116,14 +132,13 @@ fn renders_a_comment_block() {
 #[test]
 fn later_comments_are_a_pure_append() {
     let document = append_comment(
-        &ticket(
+        &ticket(&draft(
             "Tool call header misaligned",
             Kind::Bug,
             "John Doe",
-            "2026-08-05",
-            None,
+            &Labels::default(),
             "Description.",
-        ),
+        )),
         &new_comment("john", "Reproduced at 72 columns.", None),
     );
 
@@ -149,14 +164,13 @@ fn later_comments_are_a_pure_append() {
 fn appended_comments_parse_back() {
     let document = append_comment(
         &append_comment(
-            &ticket(
+            &ticket(&draft(
                 "Round trip",
                 Kind::Feature,
                 "john",
-                "2026-08-05",
-                None,
+                &Labels::default(),
                 "Description.",
-            ),
+            )),
             &new_comment("john", "First.", None),
         ),
         &new_comment("jp", "Second.", Some("#1")),
@@ -253,4 +267,119 @@ fn adds_a_field_the_ticket_lacks() {
 #[test]
 fn reports_a_document_with_no_metadata_block() {
     assert_eq!(set_metadata("# Bare\n\nProse.\n", "Status", "Done"), None);
+    assert_eq!(remove_metadata("# Bare\n\nProse.\n", "Label"), None);
+}
+
+#[test]
+fn removing_a_repeated_field_drops_every_line() {
+    let document = indoc! {"
+        # Tool call header misaligned
+
+        - **Status**: Todo
+        - **Kind**: Bug
+        - **Authors**: john
+        - **Date**: 2026-08-05
+        - **Label**: client=cli
+        - **Label**: package=jp_cli
+
+        Description.
+    "};
+
+    let out = remove_metadata(document, "Label").unwrap();
+
+    assert_eq!(out, indoc! {"
+            # Tool call header misaligned
+
+            - **Status**: Todo
+            - **Kind**: Bug
+            - **Authors**: john
+            - **Date**: 2026-08-05
+
+            Description.
+        "});
+}
+
+/// Clearing labels on a ticket that has none is not an error, so a caller
+/// doesn't have to read the ticket first to know which write to make.
+#[test]
+fn removing_a_field_the_ticket_lacks_changes_nothing() {
+    let document = indoc! {"
+        # Tool call header misaligned
+
+        - **Status**: Todo
+        - **Kind**: Bug
+        - **Authors**: john
+        - **Date**: 2026-08-05
+
+        Description.
+    "};
+
+    assert_eq!(remove_metadata(document, "Label").unwrap(), document);
+}
+
+/// The replacement lands where the old run was, so relabelling doesn't shuffle
+/// the block.
+#[test]
+fn replaces_a_repeated_field_in_place() {
+    let document = indoc! {"
+        # Labelled
+
+        - **Status**: Todo
+        - **Label**: client=cli
+        - **Label**: package=jp_cli
+        - **Authors**: john
+
+        Description.
+    "};
+
+    let out = set_repeated_metadata(document, "Label", &["client=web".to_owned()]).unwrap();
+
+    assert_eq!(out, indoc! {"
+            # Labelled
+
+            - **Status**: Todo
+            - **Label**: client=web
+            - **Authors**: john
+
+            Description.
+        "});
+}
+
+/// One line per pair, so the block survives a formatter that wraps at a fixed
+/// width no matter how many labels a ticket carries.
+#[test]
+fn renders_one_line_per_label() {
+    let vocabulary = Vocabulary::parse(
+        r#"{"package": {"values": ["jp_cli", "jp_config"]}, "client": {"values": ["cli"]}}"#,
+    )
+    .unwrap();
+    let labels = vocabulary
+        .resolve(&[
+            "package=jp_config".to_owned(),
+            "client=cli".to_owned(),
+            "package=jp_cli".to_owned(),
+        ])
+        .unwrap();
+
+    let out = ticket(&draft(
+        "Labelled",
+        Kind::Bug,
+        "john",
+        &labels,
+        "Description.",
+    ));
+
+    assert_eq!(out, indoc! {"
+            # Labelled
+
+            - **Status**: Todo
+            - **Kind**: Bug
+            - **Authors**: john
+            - **Date**: 2026-08-05
+            - **Label**: client=cli
+            - **Label**: package=jp_cli
+            - **Label**: package=jp_config
+
+            Description.
+        "});
 }

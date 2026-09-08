@@ -5,6 +5,8 @@
 - **Authors**: jp
 - **Date**: 2026-08-24
 - **Implements**: 035
+- **Label**: package=jp_config
+- **Label**: type=question
 
 #887 made the `extends` graph resolve fully before any file is loaded, then
 reduced it to one entry per file keeping each file's **last** position

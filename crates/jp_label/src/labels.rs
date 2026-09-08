@@ -1,7 +1,7 @@
-//! The labels attached to a conversation.
+//! The label set: keys, each holding an ordered set of values.
 //!
-//! [`Labels`] maps a key to an ordered set of values, and owns the on-disk
-//! contract for the `labels` field of `metadata.json`.
+//! [`Labels`] owns the on-disk contract for a consumer's label field, and the
+//! invariants that make a label set readable wherever it is shown.
 
 use std::{
     collections::{BTreeMap, btree_map},
@@ -11,7 +11,9 @@ use std::{
 use indexmap::IndexSet;
 use serde::{Deserialize, Deserializer, Serialize, de};
 
-/// Key-value annotations attached to a conversation.
+use crate::{KeyError, Selector, parse_token};
+
+/// Key-value annotations attached to a thing.
 ///
 /// A key maps to a set of values: `crate=jp_config` and `crate=jp_llm` coexist
 /// under the same key.
@@ -53,6 +55,12 @@ impl Labels {
         self.0.get(key)
     }
 
+    /// Whether `key` is present, holding any value.
+    #[must_use]
+    pub fn contains_key(&self, key: &str) -> bool {
+        self.0.contains_key(key)
+    }
+
     /// Whether `key` holds `value`.
     ///
     /// `value` is folded onto one line before the lookup, the same way storing
@@ -68,6 +76,27 @@ impl Labels {
     /// Iterate over every key and the values it holds, sorted by key.
     pub fn iter(&self) -> btree_map::Iter<'_, String, IndexSet<String>> {
         self.0.iter()
+    }
+
+    /// Every key, sorted.
+    pub fn keys(&self) -> impl Iterator<Item = &str> {
+        self.0.keys().map(String::as_str)
+    }
+
+    /// The values held under `key`, in insertion order, empty for an absent
+    /// key.
+    ///
+    /// A bare key yields one empty value, which is how its presence is stored.
+    pub fn values(&self, key: &str) -> impl Iterator<Item = &str> {
+        self.0.get(key).into_iter().flatten().map(String::as_str)
+    }
+
+    /// How many `key=value` pairs the set renders as.
+    ///
+    /// A bare key counts once, as the one token it renders to.
+    #[must_use]
+    pub fn count(&self) -> usize {
+        self.0.values().map(IndexSet::len).sum()
     }
 
     /// Add `value` to the set held under `key`, creating the key when absent.
@@ -136,6 +165,89 @@ impl Labels {
 
         removed
     }
+
+    /// Read a set from `key=value` tokens.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error on the first token whose key can't be used as written.
+    pub fn from_tokens<I, S>(tokens: I) -> Result<Self, KeyError>
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let mut labels = Self::default();
+        for token in tokens {
+            let (key, value) = parse_token(token.as_ref())?;
+            labels.insert(key, value.unwrap_or_default());
+        }
+
+        Ok(labels)
+    }
+
+    /// Read a set from tokens, keeping whatever is well-formed.
+    ///
+    /// For reading a hand-edited file, where a malformed label should surface
+    /// as itself rather than take the whole document down.
+    /// Returns the set alongside the tokens it couldn't read.
+    #[must_use]
+    pub fn from_tokens_lossy<I, S>(tokens: I) -> (Self, Vec<String>)
+    where
+        I: IntoIterator<Item = S>,
+        S: AsRef<str>,
+    {
+        let mut labels = Self::default();
+        let mut rejected = vec![];
+
+        for token in tokens {
+            let token = token.as_ref();
+            match parse_token(token) {
+                Ok((key, value)) => {
+                    labels.insert(key, value.unwrap_or_default());
+                }
+                Err(_) => rejected.push(token.to_owned()),
+            }
+        }
+
+        (labels, rejected)
+    }
+
+    /// Every pair as a `key=value` token, sorted by key then insertion order.
+    ///
+    /// A bare key renders as the key alone, with no `=`.
+    #[must_use]
+    pub fn to_tokens(&self) -> Vec<String> {
+        self.0
+            .iter()
+            .flat_map(|(key, values)| {
+                values.iter().map(move |value| {
+                    if value.is_empty() {
+                        key.clone()
+                    } else {
+                        format!("{key}={value}")
+                    }
+                })
+            })
+            .collect()
+    }
+
+    /// Whether every selector matches.
+    ///
+    /// Requiring all of them rather than any composes with other filters: each
+    /// selector narrows the result.
+    #[must_use]
+    pub fn matches(&self, selectors: &[Selector]) -> bool {
+        selectors.iter().all(|selector| match &selector.value {
+            Some(value) => self.contains(&selector.key, value),
+            None => self.contains_key(&selector.key),
+        })
+    }
+}
+
+impl fmt::Display for Labels {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.to_tokens().join(", "))
+    }
 }
 
 impl<K, V, I> FromIterator<(K, I)> for Labels
@@ -174,7 +286,7 @@ impl<'a> IntoIterator for &'a Labels {
 
 impl<'de> Deserialize<'de> for Labels {
     /// Read labels through a validating conversion, so the empty-set invariant
-    /// holds for hand-edited files as well as for ones JP wrote.
+    /// holds for hand-edited files as well as for ones the consumer wrote.
     ///
     /// A small mistake normalizes rather than failing the whole load: a scalar
     /// becomes a one-element set, repeated values collapse, and an empty array

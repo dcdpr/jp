@@ -5,6 +5,9 @@
 - **Authors**: jp
 - **Date**: 2026-09-04
 - **Implements**: 076
+- **Label**: package=jp_cli
+- **Label**: package=jp_tool
+- **Label**: type=bug
 
 A local tool with `style.parameters = "<command>"` runs that command with a
 `Context` whose `access` field is absent, so it deserializes as `None` —

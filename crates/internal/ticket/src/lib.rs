@@ -34,6 +34,10 @@
 //! close, list, import), and [`import`] carries the rules for content that
 //! comes from upstream.
 //!
+//! Labels are `key=value` annotations from [`jp_label`]; the board's vocabulary
+//! lives in `.labels.json` next to the ticket files and is read by
+//! [`store::vocabulary`].
+//!
 //! The id is in the filename and nowhere else, so renaming a ticket is a rename
 //! and there is no second copy to keep in step.
 //!
@@ -50,6 +54,16 @@ pub mod render;
 pub mod store;
 
 pub use id::TicketId;
+pub use jp_label::{Labels, Selector, Vocabulary};
+
+/// The vocabulary file, inside the ticket directory.
+pub const LABELS_FILE: &str = ".labels.json";
+
+/// The metadata key one label is written under.
+///
+/// Singular, and repeated once per `key=value` pair, so no line grows with the
+/// number of labels a ticket carries.
+pub const LABEL_KEY: &str = "Label";
 
 /// Where a ticket sits on the board.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
@@ -133,12 +147,33 @@ impl FromStr for Kind {
 pub struct Metadata {
     pub status: Status,
     pub kind: Kind,
+    /// The labels the ticket carries.
+    ///
+    /// Read as written, without checking them against the vocabulary: a
+    /// hand-edited ticket can name a label the vocabulary doesn't define, and
+    /// dropping it here would make the listing disagree with the file.
+    pub labels: Labels,
     pub authors: String,
     pub date: String,
     pub blocked_by: Option<String>,
     pub implements: Option<String>,
     pub promoted_to: Option<String>,
     pub github: Option<String>,
+}
+
+/// The parts of a ticket that are settled when it is filed.
+///
+/// A struct rather than a run of positional arguments: five of these are
+/// strings, and at a call site nothing would catch two of them being swapped.
+pub struct NewTicket<'a> {
+    pub kind: Kind,
+    pub title: &'a str,
+    pub authors: &'a str,
+    pub date: &'a str,
+    /// The RFD this work comes from, if any.
+    pub implements: Option<&'a str>,
+    pub labels: &'a Labels,
+    pub description: &'a str,
 }
 
 /// One comment on a ticket.

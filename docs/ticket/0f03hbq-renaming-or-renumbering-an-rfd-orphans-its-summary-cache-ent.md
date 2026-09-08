@@ -4,6 +4,8 @@
 - **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-09-07
+- **Label**: domain=tooling
+- **Label**: type=bug
 
 `docs/.vitepress/rfd-summaries.json` is keyed by RFD filename.
 `just rfd-renumber` and `just rfd-rename` both move the file, so the old key is

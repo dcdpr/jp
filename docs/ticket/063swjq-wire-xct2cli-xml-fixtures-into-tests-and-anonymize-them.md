@@ -4,6 +4,8 @@
 - **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-08-21
+- **Label**: package=xct2cli
+- **Label**: type=task
 
 `crates/contrib/xct2cli/tests/fixtures/sample-toc.xml` and `time-sample.xml`
 have no test consumer; the parser tests use inline XML.

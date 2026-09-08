@@ -58,42 +58,17 @@ use crate::{
     types::command::{CommandConfigOrString, PartialCommandConfigOrString},
 };
 
-/// The label key grammar, in words.
-///
-/// Every excluded character is significant somewhere the key is used: `.`
-/// separates dotted config paths, `=` and `,` are CLI separators, and `:` marks
-/// an alias reference.
-/// The leading character is narrower still, because a key that starts with `-`
-/// would be read as a flag where keys are written as bare command arguments.
-const KEY_GRAMMAR: &str = "a label key starts with an ASCII letter, followed by any number of \
-                           letters, digits, underscores, and hyphens";
-
 /// Validate a label key against the `[A-Za-z][A-Za-z0-9_-]*` grammar.
+///
+/// The grammar lives in `jp_label`, shared with every other consumer of labels,
+/// so a key accepted here is a key accepted everywhere.
 ///
 /// # Errors
 ///
 /// Returns a human-readable message if the key is empty, starts with something
 /// other than an ASCII letter, or contains a character outside the grammar.
 pub fn validate_key(key: &str) -> Result<(), String> {
-    let mut chars = key.chars();
-
-    let Some(first) = chars.next() else {
-        return Err("label key must not be empty".to_owned());
-    };
-
-    if !first.is_ascii_alphabetic() {
-        return Err(format!(
-            "label key '{key}' starts with '{first}': {KEY_GRAMMAR}"
-        ));
-    }
-
-    if let Some(invalid) = chars.find(|c| !c.is_ascii_alphanumeric() && *c != '_' && *c != '-') {
-        return Err(format!(
-            "invalid character '{invalid}' in label key '{key}': {KEY_GRAMMAR}"
-        ));
-    }
-
-    Ok(())
+    jp_label::validate_key(key).map_err(|error| error.to_string())
 }
 
 /// A label declaration.

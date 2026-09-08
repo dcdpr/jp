@@ -4,6 +4,10 @@
 - **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-04
+- **Label**: domain=llm
+- **Label**: llm-provider=cerebras
+- **Label**: package=jp_llm
+- **Label**: type=bug
 
 Cerebras clamps a request's completion budget to the room left in the context
 window rather than rejecting the request.

@@ -89,6 +89,8 @@ one `fs_read_file`, one `cat`, or one page on the website.
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-08-05
 - **Implements**: 095
+- **Label**: client=cli
+- **Label**: package=jp_printer
 
 The header renders one column left of the body when `style.parameters` is
 `function_call` and the terminal is narrower than 80 columns.
@@ -122,20 +124,109 @@ let available = width - indent;
 Tickets use the same `- **Key**: Value` idiom as RFDs, for the same reason: it
 parses with a three-line regex and renders as visible content.
 
-| Field         | Required | Values                         |
-| ------------- | -------- | ------------------------------ |
-| `Status`      | yes      | `Todo`, `In Progress`, `Done`  |
-| `Kind`        | yes      | `Bug`, `Feature`, `Chore`      |
-| `Authors`     | yes      |                                |
-| `Date`        | yes      | `YYYY-MM-DD`                   |
-| `Blocked by`  | no       | `T-02wt0m3`, or free text      |
-| `Implements`  | no       | The RFD this ticket implements |
-| `Promoted to` | no       | The RFD this ticket became     |
-| `GitHub`      | no       | `#123`, set by import          |
+| Field         | Required | Values                           |
+| ------------- | -------- | -------------------------------- |
+| `Status`      | yes      | `Todo`, `In Progress`, `Done`    |
+| `Kind`        | yes      | `Bug`, `Feature`, `Chore`        |
+| `Authors`     | yes      |                                  |
+| `Date`        | yes      | `YYYY-MM-DD`                     |
+| `Blocked by`  | no       | `T-02wt0m3`, or free text        |
+| `Implements`  | no       | The RFD this ticket implements   |
+| `Promoted to` | no       | The RFD this ticket became       |
+| `GitHub`      | no       | `#123`, set by import            |
+| `Label`       | no       | One `key=value` pair, repeatable |
 
 There is no close date.
 The `ticket_*` tooling reads it from git history, so the file never carries a
 timestamp that can go stale.
+
+#### Labels
+
+A label is a `key=value` annotation grouping tickets by area of the system,
+orthogonally to `Kind`: `Kind` says what type of work a ticket is, a label says
+what part of the system it lands in.
+A ticket carries any number of them, or none, and a key may repeat: a ticket
+spanning two crates carries `package=jp_cli` and `package=jp_config`.
+
+The field is written once per pair rather than joining them onto one line:
+
+```markdown
+- **Label**: client=cli
+- **Label**: package=jp_cli
+- **Label**: package=jp_config
+```
+
+That is not cosmetic.
+Every markdown file in the repository is formatted by `comfort`, which wraps a
+list item at 80 columns; a single line listing several long values would be
+wrapped onto an indented continuation that the metadata parser reads as the
+start of the description.
+One pair per line means no line grows with the number of labels.
+The formatter also escapes what would otherwise be emphasis, so `package=jp_cli`
+is written `package=jp\_cli` and every reader undoes that.
+
+The shape, the key grammar, and the on-disk invariants come from [`jp_label`],
+the same `Labels` conversation labels use ([RFD 101]); the closed vocabulary
+below is the ticket board's own, declared through that crate's `Vocabulary`.
+
+The vocabulary is closed and lives in `docs/ticket/.labels.json`, next to the
+tickets and to `.board.json`.
+That file is the only source of truth for which labels exist; nothing here
+enumerates them.
+It declares one entry per key, with the values that key accepts:
+
+```json
+{
+  "<key>": {
+    "description": "<what the key covers>",
+    "values": ["<value>"],
+    "retired": ["<value>"]
+  }
+}
+```
+
+A closed set is the point.
+Free-text labels accumulate near-synonyms and grouping stops working.
+A write naming a key or value the file doesn't declare is refused, and the
+refusal names the ones that can be added.
+
+**Retiring is not deleting.** A retired value stays valid on a ticket that
+already carries it and can be listed again on a write to that ticket, so
+relabelling an old ticket never forces its history to be rewritten.
+It cannot be added anywhere new.
+Deleting the entry outright is the other option, and it turns every ticket
+carrying that value into a docs-build failure until they are fixed.
+
+Reading is liberal throughout: a ticket lists the labels it carries as written,
+and the docs build reports one the vocabulary doesn't declare rather than hiding
+it.
+
+Filtering takes a pair or a bare key: `--label package=jp_cli` matches that
+value, `--label package` matches any value under the key.
+Repeating the flag narrows further, so each term is an additional requirement.
+
+Labelling replaces the whole set rather than merging: `jp ticket label <id>
+--label client=cli` is what the ticket ends up with, and no arguments clears it.
+A retried call therefore lands the same way twice.
+Because the check is against the ticket as well as the vocabulary, listing a
+retired value the ticket already has is how you keep it.
+
+The `ticket_*` tools advertise the accepted tokens as a JSON Schema `enum`, so
+the assistant is offered the set rather than guessing at it.
+`ticket_create` is offered only what it may add; `ticket_label` and
+`ticket_list` also get retired values, because replacing a whole set means
+naming a retired value to keep it, and finding what still carries one means
+filtering on it.
+The tool declarations cannot read `.labels.json` themselves, so the tokens are
+mirrored into `.jp/mcp/tools/ticket/labels.toml` by `just ticket-labels-sync`.
+The mirror is a hint rather than a contract: writes are validated against
+`.labels.json`, so a stale mirror degrades to a corrective round trip and never
+to a wrong write, and editing the vocabulary never fails a test.
+It is a stopgap, and goes when config values can reference a file directly.
+
+An import never sets labels.
+The repository owns the metadata block, so an imported issue is labelled here by
+whoever triages it.
 
 ### Comments
 
@@ -284,7 +375,11 @@ issue rather than one board file, and tombstones rather than deletes.
 
 ## Non-Goals
 
-- **Labels, assignees, milestones.** Add them when the absence hurts.
+- **Assignees and milestones.** Add them when the absence hurts.
+  Labels landed later, once grouping by area started to matter; see
+  [Labels](#labels).
+- **Label hierarchies, colours, or per-label board columns.** A label is a name
+  and a description.
 - **A search DSL.** `just ticket-grep` over markdown files.
 - **Write-back to GitHub.**
 - **Notifications.** The board is the notification.
@@ -328,4 +423,6 @@ How the tooling gets there is not fixed.
 [PR #872]: https://github.com/dcdpr/jp/pull/872
 [RFD 001]: 001-jp-rfd-process.md
 [RFD 041]: 041-rfd-lifecycle-enhancements.md
+[RFD 101]: 101-conversation-labels.md
 [RFD 102]: 102-collision-resistant-ticket-identifiers.md
+[`jp_label`]: https://github.com/dcdpr/jp/tree/main/crates/jp_label

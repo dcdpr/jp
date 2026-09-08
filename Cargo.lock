@@ -2351,6 +2351,7 @@ dependencies = [
  "indoc",
  "insta",
  "jp_id",
+ "jp_label",
  "pretty_assertions",
  "relative-path",
  "schematic",
@@ -2381,6 +2382,7 @@ dependencies = [
  "jp_attachment",
  "jp_config",
  "jp_id",
+ "jp_label",
  "proptest",
  "quick-xml",
  "serde",
@@ -2458,6 +2460,16 @@ dependencies = [
  "inquire",
  "parking_lot",
  "reedline",
+]
+
+[[package]]
+name = "jp_label"
+version = "0.1.0"
+dependencies = [
+ "indexmap",
+ "indoc",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -4692,6 +4704,7 @@ dependencies = [
  "camino",
  "camino-tempfile",
  "indoc",
+ "jp_label",
  "serde",
  "serde_json",
 ]

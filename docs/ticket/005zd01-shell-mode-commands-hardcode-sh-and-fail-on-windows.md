@@ -4,6 +4,8 @@
 - **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-14
+- **Label**: package=jp_config
+- **Label**: type=bug
 
 Every consumer of `CommandConfig` with `shell = true` spawns `sh` (or `/bin/sh`)
 by name.

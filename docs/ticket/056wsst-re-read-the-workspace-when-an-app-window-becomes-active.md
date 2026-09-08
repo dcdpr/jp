@@ -5,6 +5,8 @@
 - **Authors**: jp
 - **Date**: 2026-08-19
 - **Implements**: 099
+- **Label**: client=macos
+- **Label**: type=enhancement
 
 `jp_workspace_conversations` and `jp_workspace_events` re-read the conversation
 index before answering, so a handle kept open across a concurrent `jp query`

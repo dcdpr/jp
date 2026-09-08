@@ -4,6 +4,8 @@
 - **Kind**: Feature
 - **Authors**: jp
 - **Date**: 2026-08-19
+- **Label**: domain=tooling
+- **Label**: type=enhancement
 
 `cargo_check` hardcodes `--all-targets --all-features`
 (`.config/jp/tools/src/cargo/check.rs`).

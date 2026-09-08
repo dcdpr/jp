@@ -4,6 +4,9 @@
 - **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-20
+- **Label**: domain=conversation
+- **Label**: package=jp_conversation
+- **Label**: type=bug
 
 `Workspace::conversations()` calls `ensure_all_metadata_loaded`, which logs a
 `warn!` for each conversation whose metadata will not load and leaves that

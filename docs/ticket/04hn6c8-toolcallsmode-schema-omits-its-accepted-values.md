@@ -4,6 +4,8 @@
 - **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-08-18
+- **Label**: package=jp_config
+- **Label**: type=bug
 
 `ToolCallsMode` hand-writes its `Schematic` impl and returns a bare string
 (`crates/jp_config/src/conversation/compaction.rs:590-593`):

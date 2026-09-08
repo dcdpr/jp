@@ -4,6 +4,8 @@
 - **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-11
+- **Label**: package=jp_config
+- **Label**: type=bug
 
 `[conversation.tools.'*'.style]` is silently ignored for any tool that sets a
 single style field of its own.

@@ -4,6 +4,10 @@
 - **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-21
+- **Label**: domain=llm
+- **Label**: llm-provider=llamacpp
+- **Label**: package=jp_llm
+- **Label**: type=bug
 
 The llama.cpp fixture requests `llamacpp/qwen3.5:9b`, while `/v1/models` reports
 `unsloth/Qwen3.5-9B-GGUF`.

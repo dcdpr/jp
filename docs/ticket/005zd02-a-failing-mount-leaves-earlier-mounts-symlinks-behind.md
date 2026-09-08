@@ -4,6 +4,9 @@
 - **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-14
+- **Label**: client=cli
+- **Label**: package=jp_cli
+- **Label**: type=bug
 
 `create_mount_effects` (`crates/jp_cli/src/cmd/query.rs:2203`) walks the
 `--mount` specs in a loop, creating each symlink as it goes.

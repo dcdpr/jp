@@ -38,6 +38,7 @@ export function parseTicket(content, filename) {
         authors: field(content, 'Authors'),
         date: field(content, 'Date'),
         blockedBy: field(content, 'Blocked by'),
+        labels: readLabels(content),
         implements: field(content, 'Implements'),
         promotedTo: field(content, 'Promoted to'),
         github: field(content, 'GitHub'),
@@ -46,6 +47,98 @@ export function parseTicket(content, filename) {
         links: referencedLabels(content).filter(label => label !== `T${id}`),
         slug: filename.replace(/\.md$/, ''),
     }
+}
+
+// Every `- **Label**: key=value` line in a ticket's metadata block, in order.
+//
+// The field repeats once per pair rather than joining them onto one line, so no
+// line grows with the number of labels and the block survives `comfort`'s width
+// wrapping. A formatter escapes what would otherwise be emphasis (`jp_config`
+// becomes `jp\_config`), so reading undoes that.
+//
+// Read as written rather than checked against the vocabulary: a listing that
+// hid a label the file carries would disagree with the file.
+// `findUnknownLabels` below is what catches one the board doesn't define.
+//
+// Line endings are normalized first: the header match needs a literal blank
+// line, and `.` does not consume the `\r` of a CRLF file. Rust's `str::lines()`
+// reads such a file fine, so without this the CLI and the board disagree.
+export function readLabels(content) {
+    const block = content.replace(/\r\n/g, '\n')
+        .match(/^# .+\n\n((?:- \*\*[^*]+\*\*:.*\n)+)/m)?.[1]
+    if (!block) return []
+
+    return block
+        .split('\n')
+        .map(line => line.match(/^- \*\*Label\*\*:\s*(.*)$/i)?.[1])
+        .filter(value => value !== undefined)
+        .map(value => value.replace(/\\([!-/:-@[-`{-~])/g, '$1').trim())
+        .filter(Boolean)
+        .sort()
+}
+
+// The labels the board defines, as a map of key to `{ values, retired }`.
+//
+// A board with no `.labels.json` defines none, which is a board that hasn't
+// started using them.
+export function loadVocabulary() {
+    const path = resolve(import.meta.dirname, '../../ticket/.labels.json')
+
+    let raw
+    try {
+        raw = readFileSync(path, 'utf-8')
+    } catch {
+        return {}
+    }
+
+    if (raw.trim() === '') return {}
+
+    const parsed = JSON.parse(raw)
+    const isMap = v => v !== undefined && v !== null
+        && typeof v === 'object' && !Array.isArray(v)
+    if (!isMap(parsed)) {
+        throw new Error(`${path} is not a JSON object of label key to entry.`)
+    }
+
+    return parsed
+}
+
+// Every `key=value` token the vocabulary accepts, retired ones included.
+//
+// Retired values count as defined: retiring one keeps existing tickets valid,
+// which is the whole difference between retiring and deleting.
+function knownTokens(vocabulary) {
+    const known = new Set()
+    for (const [key, entry] of Object.entries(vocabulary)) {
+        const values = [...(entry?.values ?? []), ...(entry?.retired ?? [])]
+        if (values.length === 0) {
+            known.add(key)
+            continue
+        }
+        for (const value of values) known.add(`${key}=${value}`)
+    }
+
+    return known
+}
+
+// Labels used on a ticket that the vocabulary doesn't define.
+//
+// A typo in a hand-edited ticket would otherwise sit there silently, grouping
+// with nothing and showing up as its own one-ticket category.
+export function findUnknownLabels(tickets, vocabulary) {
+    const known = knownTokens(vocabulary)
+    const offenders = tickets
+        .map(ticket => [ticket.id, ticket.labels.filter(label => !known.has(label))])
+        .filter(([, unknown]) => unknown.length > 0)
+
+    if (offenders.length === 0) return null
+
+    const report = offenders
+        .map(([id, unknown]) => `  ${id}: ${unknown.join(', ')}`)
+        .join('\n')
+    return `Tickets carry labels the vocabulary doesn't define:\n${report}\n\n` +
+        `Add them to docs/ticket/.labels.json, or fix the tickets ` +
+        `(\`jp ticket label <id> --label key=value\`).`
 }
 
 // Count the comments in a ticket.
@@ -203,10 +296,15 @@ export function loadTickets() {
     const duplicate = findDuplicateIds(files)
     if (duplicate) throw new Error(duplicate)
 
-    return files.map(f => ({
+    const tickets = files.map(f => ({
         ...parseTicket(readFileSync(resolve(dir, f), 'utf-8'), f),
         path: `/ticket/${f.replace(/\.md$/, '')}`,
     }))
+
+    const unknown = findUnknownLabels(tickets, loadVocabulary())
+    if (unknown) throw new Error(unknown)
+
+    return tickets
 }
 
 // Assemble the board: every ticket, plus the three columns in display order.

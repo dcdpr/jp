@@ -1,0 +1,87 @@
+{
+  "client": {
+    "description": "The client surface",
+    "values": [
+      "cli",
+      "macos",
+      "web"
+    ]
+  },
+  "llm-provider": {
+    "description": "The provider related to the ticket, if any",
+    "values": [
+      "anthropic",
+      "cerebras",
+      "google",
+      "llamacpp",
+      "ollama",
+      "openai",
+      "openrouter"
+    ]
+  },
+  "domain": {
+    "description": "The subsystem, across whatever crates it spans.",
+    "values": [
+      "conversation",
+      "llm",
+      "mcp",
+      "plugins",
+      "storage",
+      "tooling"
+    ]
+  },
+  "type": {
+    "description": "The type of ticket",
+    "values": [
+      "bug",
+      "enhancement",
+      "feature",
+      "follow-up",
+      "pre-rfd",
+      "question",
+      "task"
+    ]
+  },
+  "package": {
+    "description": "Any relevant packages",
+    "values": [
+      "bookworm",
+      "comfort",
+      "grizzly",
+      "jp_attachment",
+      "jp_attachment_agentic_shepherd",
+      "jp_attachment_bear_note",
+      "jp_attachment_cmd_output",
+      "jp_attachment_file_content",
+      "jp_attachment_github",
+      "jp_attachment_http_content",
+      "jp_attachment_internal",
+      "jp_attachment_mcp_resources",
+      "jp_cli",
+      "jp_config",
+      "jp_conversation",
+      "jp_editor",
+      "jp_github",
+      "jp_id",
+      "jp_inquire",
+      "jp_label",
+      "jp_llm",
+      "jp_macro",
+      "jp_mcp",
+      "jp_md",
+      "jp_openrouter",
+      "jp_plugin",
+      "jp_printer",
+      "jp_storage",
+      "jp_task",
+      "jp_term",
+      "jp_test",
+      "jp_tombmap",
+      "jp_tool",
+      "jp_workspace",
+      "json_edit",
+      "schematic",
+      "xct2cli"
+    ]
+  }
+}

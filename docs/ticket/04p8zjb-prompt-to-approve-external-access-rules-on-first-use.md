@@ -4,6 +4,10 @@
 - **Kind**: Feature
 - **Authors**: jp
 - **Date**: 2026-08-18
+- **Label**: client=cli
+- **Label**: package=jp_cli
+- **Label**: package=jp_tool
+- **Label**: type=feature
 
 Finish the deferred half of the approval lifecycle in RFD D43 Phase 3: a
 hand-authored `external = true` access rule should prompt for approval on first

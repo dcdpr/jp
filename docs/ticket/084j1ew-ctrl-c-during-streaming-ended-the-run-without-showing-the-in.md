@@ -4,6 +4,9 @@
 - **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-11
+- **Label**: client=cli
+- **Label**: package=jp_cli
+- **Label**: type=bug
 
 A single `^C` during an Opus reasoning stream ended the turn immediately.
 No interrupt menu appeared, no message was printed, and the process exited 0.

@@ -1,37 +1,65 @@
 use camino_tempfile::Utf8TempDir;
 
 use super::*;
+use crate::{Kind, LABELS_FILE};
 
 const DATE: &str = "2026-08-05";
 const STAMP: &str = "2026-08-05T14:03:11Z";
 
-fn new_ticket(dir: &Utf8TempDir, title: &str) -> TicketId {
-    create(
-        dir.path(),
-        Kind::Bug,
+/// A ticket with everything but the title fixed, so a test only spells out what
+/// it cares about.
+fn draft<'a>(title: &'a str, labels: &'a Labels) -> NewTicket<'a> {
+    NewTicket {
+        kind: Kind::Bug,
         title,
-        "john",
-        DATE,
-        None,
-        "Description.",
+        authors: "john",
+        date: DATE,
+        implements: None,
+        labels,
+        description: "Description.",
+    }
+}
+
+fn new_ticket(dir: &Utf8TempDir, title: &str) -> TicketId {
+    create(dir.path(), &draft(title, &Labels::default()))
+        .unwrap()
+        .0
+}
+
+/// A vocabulary written into a board, so label writes have something to check
+/// against.
+fn write_vocabulary(dir: &Utf8TempDir) {
+    fs::write(
+        dir.path().join(LABELS_FILE),
+        r#"{
+            "client": {"description": "The client.", "values": ["cli", "macos"]},
+            "package": {
+                "description": "The crate.",
+                "values": ["jp_cli", "jp_config"],
+                "retired": ["jp_legacy"]
+            }
+        }"#,
     )
-    .unwrap()
-    .0
+    .unwrap();
+}
+
+fn owned(labels: &[&str]) -> Vec<String> {
+    labels.iter().map(|label| (*label).to_owned()).collect()
 }
 
 #[test]
 fn create_writes_a_file_named_for_its_id() {
     let dir = Utf8TempDir::new().unwrap();
 
-    let (id, path) = create(
-        dir.path(),
-        Kind::Bug,
-        "Tool call header misaligned",
-        "John Doe",
-        DATE,
-        None,
-        "The header renders one column left of the body.",
-    )
+    let (id, path) = create(dir.path(), &NewTicket {
+        kind: Kind::Bug,
+        title: "Tool call header misaligned",
+        authors: "John Doe",
+        date: DATE,
+        implements: None,
+        labels: &Labels::default(),
+        description: "The header renders one column left of the body.",
+    })
     .unwrap();
 
     assert_eq!(
@@ -97,7 +125,7 @@ fn an_id_in_a_future_bucket_is_ignored() {
     fs::write(
         dir.path()
             .join(format!("{}future.md", future.file_prefix())),
-        render::ticket("Future", Kind::Bug, "john", DATE, None, ""),
+        render::ticket(&draft("Future", &Labels::default())),
     )
     .unwrap();
 
@@ -116,7 +144,7 @@ fn list_rejects_a_duplicated_id() {
 
     fs::write(
         dir.path().join(format!("{}second.md", id.file_prefix())),
-        render::ticket("Second", Kind::Bug, "john", DATE, None, ""),
+        render::ticket(&draft("Second", &Labels::default())),
     )
     .unwrap();
 
@@ -406,14 +434,15 @@ fn editing_only_the_description_leaves_the_filename_alone() {
         .join(format!("{}hand-written-name.md", id.file_prefix()));
     fs::write(
         &path,
-        render::ticket(
-            "A quite different title",
-            Kind::Bug,
-            "john",
-            DATE,
-            None,
-            "Body.",
-        ),
+        render::ticket(&NewTicket {
+            kind: Kind::Bug,
+            title: "A quite different title",
+            authors: "john",
+            date: DATE,
+            implements: None,
+            labels: &Labels::default(),
+            description: "Body.",
+        }),
     )
     .unwrap();
 
@@ -464,7 +493,7 @@ fn a_write_by_a_duplicated_id_is_refused() {
 
     fs::write(
         dir.path().join(format!("{}second.md", id.file_prefix())),
-        render::ticket("Second", Kind::Bug, "john", DATE, None, ""),
+        render::ticket(&draft("Second", &Labels::default())),
     )
     .unwrap();
 
@@ -571,6 +600,235 @@ fn stripping_ids_converts_the_heading_and_its_own_replies() {
         render::strip_ids(document, "T0005"),
         "# Old ticket\n\n- **Status**: Todo\n\n-----\n\n- **From**: jp\n- **Re**: #1\n\nBody.\n"
     );
+}
+
+/// A board that hasn't started using labels reads fine; it just defines none.
+#[test]
+fn a_board_without_a_vocabulary_file_defines_no_labels() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    assert!(vocabulary(dir.path()).unwrap().is_empty());
+}
+
+/// A vocabulary that is present but broken must not read as "no labels": every
+/// write would then be refused with the caller blamed for the typo.
+#[test]
+fn a_malformed_vocabulary_file_is_an_error() {
+    let dir = Utf8TempDir::new().unwrap();
+    fs::write(dir.path().join(LABELS_FILE), "not json").unwrap();
+
+    assert!(matches!(
+        vocabulary(dir.path()),
+        Err(Error::Labels(vocabulary::Error::Malformed(_)))
+    ));
+}
+
+#[test]
+fn create_writes_one_line_per_label() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_vocabulary(&dir);
+
+    let resolved = vocabulary(dir.path())
+        .unwrap()
+        .resolve(&owned(&[
+            "package=jp_config",
+            "client=cli",
+            "package=jp_cli",
+        ]))
+        .unwrap();
+    let (_, path) = create(dir.path(), &draft("Labelled", &resolved)).unwrap();
+
+    let source = fs::read_to_string(&path).unwrap();
+    assert!(source.contains("- **Label**: client=cli\n"), "{source}");
+    assert!(source.contains("- **Label**: package=jp_cli\n"), "{source}");
+    assert!(
+        source.contains("- **Label**: package=jp_config\n"),
+        "{source}"
+    );
+    assert_eq!(parse::document(&source).unwrap().metadata.labels, resolved);
+}
+
+/// A long label set can't produce a long line, which is what keeps the block
+/// stable under a markdown formatter that wraps at a fixed width.
+#[test]
+fn no_label_line_grows_with_the_number_of_labels() {
+    let dir = Utf8TempDir::new().unwrap();
+    fs::write(
+        dir.path().join(LABELS_FILE),
+        r#"{"package": {"values": [
+            "jp_attachment_agentic_shepherd",
+            "jp_attachment_mcp_resources",
+            "jp_conversation"
+        ]}}"#,
+    )
+    .unwrap();
+
+    let resolved = vocabulary(dir.path())
+        .unwrap()
+        .resolve(&owned(&[
+            "package=jp_attachment_agentic_shepherd",
+            "package=jp_attachment_mcp_resources",
+            "package=jp_conversation",
+        ]))
+        .unwrap();
+    let (_, path) = create(dir.path(), &draft("Labelled", &resolved)).unwrap();
+
+    let source = fs::read_to_string(&path).unwrap();
+    let longest = source.lines().map(str::len).max().unwrap_or_default();
+    assert!(longest <= 80, "a line reached {longest} columns:\n{source}");
+    assert_eq!(parse::document(&source).unwrap().metadata.labels, resolved);
+}
+
+#[test]
+fn set_labels_replaces_the_whole_set() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_vocabulary(&dir);
+    let vocabulary = vocabulary(dir.path()).unwrap();
+
+    let resolved = vocabulary
+        .resolve(&owned(&["package=jp_config", "client=cli"]))
+        .unwrap();
+    let (id, _) = create(dir.path(), &draft("Labelled", &resolved)).unwrap();
+
+    let (path, applied) = set_labels(dir.path(), id, &vocabulary, &owned(&["client=cli"])).unwrap();
+
+    assert_eq!(applied.to_tokens(), ["client=cli"]);
+    let ticket = parse::document(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(ticket.metadata.labels.to_tokens(), ["client=cli"]);
+}
+
+/// Clearing drops every line rather than leaving an empty one behind, so a
+/// ticket with no labels looks like one that never had any.
+#[test]
+fn set_labels_with_nothing_drops_every_line() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_vocabulary(&dir);
+    let vocabulary = vocabulary(dir.path()).unwrap();
+
+    let resolved = vocabulary
+        .resolve(&owned(&["client=cli", "package=jp_cli"]))
+        .unwrap();
+    let (id, _) = create(dir.path(), &draft("Labelled", &resolved)).unwrap();
+
+    let (path, applied) = set_labels(dir.path(), id, &vocabulary, &[]).unwrap();
+
+    assert!(applied.is_empty());
+    let source = fs::read_to_string(&path).unwrap();
+    assert!(!source.contains("- **Label**"), "{source}");
+    assert!(parse::document(&source).unwrap().metadata.labels.is_empty());
+}
+
+/// Labelling a ticket that was filed without labels adds the field.
+#[test]
+fn set_labels_adds_the_field_to_a_ticket_without_one() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_vocabulary(&dir);
+    let vocabulary = vocabulary(dir.path()).unwrap();
+    let id = new_ticket(&dir, "Unlabelled");
+
+    let (path, _) = set_labels(dir.path(), id, &vocabulary, &owned(&["client=macos"])).unwrap();
+
+    let ticket = parse::document(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(ticket.metadata.labels.to_tokens(), ["client=macos"]);
+    assert_eq!(ticket.description, "Description.");
+}
+
+/// One key carries several values, so a ticket touching two crates says so
+/// without inventing two keys.
+#[test]
+fn one_key_holds_several_values() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_vocabulary(&dir);
+    let vocabulary = vocabulary(dir.path()).unwrap();
+    let id = new_ticket(&dir, "Two crates");
+
+    let (path, applied) = set_labels(
+        dir.path(),
+        id,
+        &vocabulary,
+        &owned(&["package=jp_cli", "package=jp_config"]),
+    )
+    .unwrap();
+
+    assert_eq!(applied.to_tokens(), ["package=jp_cli", "package=jp_config"]);
+    let ticket = parse::document(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(
+        ticket.metadata.labels.values("package").collect::<Vec<_>>(),
+        ["jp_cli", "jp_config"]
+    );
+}
+
+/// The case the active/retired split exists for: an old ticket carries a value
+/// the board has since retired, and adding a new one must not force the retired
+/// one off first.
+#[test]
+fn a_retired_label_already_on_a_ticket_survives_a_relabel() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_vocabulary(&dir);
+    let vocabulary = vocabulary(dir.path()).unwrap();
+
+    // Written by hand: `jp_legacy` can no longer be applied through the API,
+    // which is exactly the situation an old ticket is in.
+    let id = new_ticket(&dir, "Old ticket");
+    let path = locate(dir.path(), id).unwrap();
+    let source = fs::read_to_string(&path).unwrap();
+    fs::write(
+        &path,
+        render::set_repeated_metadata(&source, LABEL_KEY, &["package=jp_legacy".to_owned()])
+            .unwrap(),
+    )
+    .unwrap();
+
+    let (path, applied) = set_labels(
+        dir.path(),
+        id,
+        &vocabulary,
+        &owned(&["package=jp_legacy", "client=cli"]),
+    )
+    .unwrap();
+
+    assert_eq!(applied.to_tokens(), ["client=cli", "package=jp_legacy"]);
+    let ticket = parse::document(&fs::read_to_string(&path).unwrap()).unwrap();
+    assert_eq!(ticket.metadata.labels, applied);
+}
+
+#[test]
+fn a_retired_label_cannot_be_added_to_a_ticket_without_it() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_vocabulary(&dir);
+    let vocabulary = vocabulary(dir.path()).unwrap();
+    let id = new_ticket(&dir, "Fresh");
+
+    let error =
+        set_labels(dir.path(), id, &vocabulary, &owned(&["package=jp_legacy"])).unwrap_err();
+
+    assert!(
+        matches!(&error, Error::Rejected(rejected) if rejected.retired == ["package=jp_legacy"]),
+        "{error}"
+    );
+}
+
+/// A rejected write leaves the ticket exactly as it was, so a typo in one label
+/// doesn't drop the others.
+#[test]
+fn a_rejected_relabel_writes_nothing() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_vocabulary(&dir);
+    let vocabulary = vocabulary(dir.path()).unwrap();
+
+    let resolved = vocabulary.resolve(&owned(&["client=cli"])).unwrap();
+    let (id, path) = create(dir.path(), &draft("Labelled", &resolved)).unwrap();
+    let before = fs::read_to_string(&path).unwrap();
+
+    set_labels(
+        dir.path(),
+        id,
+        &vocabulary,
+        &owned(&["package=jp_cli", "package=nope"]),
+    )
+    .unwrap_err();
+
+    assert_eq!(fs::read_to_string(&path).unwrap(), before);
 }
 
 #[test]

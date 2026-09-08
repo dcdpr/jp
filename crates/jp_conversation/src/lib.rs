@@ -32,7 +32,6 @@ mod compat;
 pub mod conversation;
 pub mod error;
 pub mod event;
-pub mod labels;
 pub mod patch;
 pub(crate) mod storage;
 pub mod stream;
@@ -45,7 +44,7 @@ pub use compaction::{
 pub use conversation::{Conversation, ConversationId};
 pub use error::Error;
 pub use event::{ConversationEvent, EventKind};
-pub use labels::Labels;
+pub use jp_label::Labels;
 pub use patch::{EventOverlay, OverlayAction, OverlayMatcher, OverlayPatch};
 pub use storage::{decode_event_value, rfc3339};
 pub use stream::{ConversationStream, IterTurns, StreamError, Turn, TurnMut};

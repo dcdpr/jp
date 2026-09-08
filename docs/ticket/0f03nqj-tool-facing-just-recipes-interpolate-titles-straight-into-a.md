@@ -4,6 +4,8 @@
 - **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-07
+- **Label**: domain=tooling
+- **Label**: type=bug
 
 `just rfd-draft`, `just rfd-rename`, and `just ticket-add` all take a free-text
 title and reach it through `{{TITLE}}` inside a `#!/usr/bin/env sh` recipe body.

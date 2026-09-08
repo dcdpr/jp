@@ -110,6 +110,11 @@ onBeforeUnmount(() => {
                     <span v-if="ticket.blockedBy" class="ticket-badge doc-badge--blocked">
                         blocked by {{ ticket.blockedBy }}
                     </span>
+                    <span
+                        v-for="label in ticket.labels ?? []"
+                        :key="label"
+                        class="ticket-badge doc-badge--label"
+                    >{{ label }}</span>
                     <span v-if="ticket.implements" class="ticket-meta">
                         implements RFD {{ ticket.implements }}
                     </span>

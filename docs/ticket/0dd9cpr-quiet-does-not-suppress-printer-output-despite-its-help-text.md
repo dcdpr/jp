@@ -4,6 +4,9 @@
 - **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-04
+- **Label**: client=cli
+- **Label**: package=jp_printer
+- **Label**: type=bug
 
 `--quiet` is documented as "Suppress all output, including errors"
 (`crates/jp_cli/src/lib.rs:144-146`), but it only turns tracing off:

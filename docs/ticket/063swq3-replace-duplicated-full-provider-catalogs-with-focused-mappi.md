@@ -4,6 +4,9 @@
 - **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-08-21
+- **Label**: domain=llm
+- **Label**: package=jp_llm
+- **Label**: type=task
 
 Provider model-list fixtures are too large to review and several model-details
 cassettes duplicate the full catalog byte for byte.

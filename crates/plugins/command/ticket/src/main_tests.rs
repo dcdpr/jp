@@ -24,6 +24,43 @@ fn run_command(dir: &Utf8TempDir, command: Command) -> Result<Output, String> {
     )
 }
 
+/// Give a board a vocabulary, so label writes have something to check against.
+fn write_vocabulary(dir: &Utf8TempDir) {
+    std::fs::create_dir_all(dir.path()).unwrap();
+    std::fs::write(
+        dir.path().join(LABELS_FILE),
+        r#"{
+            "client": {"description": "The client.", "values": ["cli", "macos"]},
+            "package": {
+                "description": "The crate.",
+                "values": ["jp_cli", "jp_config"],
+                "retired": ["jp_legacy"]
+            }
+        }"#,
+    )
+    .unwrap();
+}
+
+/// File a labelled ticket and hand back its id.
+fn add_labelled(dir: &Utf8TempDir, title: &str, labels: &[&str]) -> TicketId {
+    run_command(dir, Command::Add {
+        kind: Some(Kind::Bug),
+        title: Some(title.to_owned()),
+        author: Some("john".to_owned()),
+        body: None,
+        implements: None,
+        labels: labels.iter().map(|label| (*label).to_owned()).collect(),
+    })
+    .unwrap();
+
+    store::list(dir.path())
+        .unwrap()
+        .into_iter()
+        .find(|entry| entry.ticket.as_ref().is_ok_and(|t| t.title == title))
+        .expect("the ticket that was just filed")
+        .id
+}
+
 /// Run git in `dir`, failing the test with its stderr rather than a bare status
 /// code.
 fn git(dir: &Utf8Path, args: &[&str]) -> String {
@@ -171,12 +208,14 @@ fn add_takes_a_kind_and_a_title_and_defaults_the_author() {
             author,
             body,
             implements,
+            labels,
         } => {
             assert_eq!(kind, Some(Kind::Bug));
             assert_eq!(title.as_deref(), Some("Tool call header misaligned"));
             assert_eq!(author, None);
             assert_eq!(body, None);
             assert_eq!(implements, None);
+            assert!(labels.is_empty());
         }
         other => panic!("expected add, got {other:?}"),
     }
@@ -391,13 +430,61 @@ fn list_filters_are_optional() {
     let args = parse(&["list", "--status", "In Progress"]).unwrap();
 
     match args.command {
-        Command::List { status, kind, json } => {
+        Command::List {
+            status,
+            kind,
+            labels,
+            json,
+        } => {
             assert_eq!(status, Some(Status::InProgress));
             assert_eq!(kind, None);
+            assert!(labels.is_empty());
             assert!(!json);
         }
         other => panic!("expected list, got {other:?}"),
     }
+}
+
+/// Repeating `--label` narrows the listing rather than replacing the previous
+/// value, so several can be required at once.
+#[test]
+fn list_takes_repeated_label_filters() {
+    let args = parse(&[
+        "list",
+        "--label",
+        "package=jp_cli",
+        "--label",
+        "client=macos",
+    ])
+    .unwrap();
+
+    match args.command {
+        Command::List { labels, .. } => assert_eq!(labels, ["package=jp_cli", "client=macos"]),
+        other => panic!("expected list, got {other:?}"),
+    }
+}
+
+/// An omitted id reaches the picker rather than the "no terminal" refusal,
+/// which is what the subcommand's `Omit it to choose` promises.
+///
+/// Asserted through the picker's own empty-board error: reaching it at all is
+/// the thing under test, and it fires before any protocol exchange.
+#[test]
+fn labelling_without_an_id_offers_the_picker() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let error = compose_missing(
+        dir.path(),
+        Command::Label {
+            id: None,
+            labels: vec!["client=cli".to_owned()],
+        },
+        &mut &b""[..],
+        &mut Vec::new(),
+    )
+    .unwrap_err();
+
+    assert_eq!(error, "No tickets to choose from.");
 }
 
 /// `--help` reaches us as an error, but it is output, not a failure.
@@ -436,6 +523,7 @@ fn editing_the_title_renames_the_file() {
         author: Some("John Doe".to_owned()),
         body: None,
         implements: None,
+        labels: vec![],
     })
     .unwrap();
     let id = store::list(dir.path()).unwrap()[0].id;
@@ -473,6 +561,7 @@ fn commands_run_against_the_resolved_directory() {
         author: Some("John Doe".to_owned()),
         body: Some("The header renders one column left of the body.".to_owned()),
         implements: None,
+        labels: vec![],
     })
     .unwrap();
     assert!(created.warnings.is_empty());
@@ -498,6 +587,7 @@ fn commands_run_against_the_resolved_directory() {
     let listed = run_command(&dir, Command::List {
         status: None,
         kind: None,
+        labels: vec![],
         json: false,
     })
     .unwrap();
@@ -512,6 +602,7 @@ fn commands_run_against_the_resolved_directory() {
     let json = run_command(&dir, Command::List {
         status: Some(Status::Done),
         kind: None,
+        labels: vec![],
         json: true,
     })
     .unwrap();
@@ -936,6 +1027,7 @@ fn show_json_carries_the_id() {
         author: Some("john".to_owned()),
         body: Some("The header renders one column left.".to_owned()),
         implements: None,
+        labels: vec![],
     })
     .unwrap();
     let id = store::list(dir.path()).unwrap()[0].id;
@@ -961,6 +1053,7 @@ fn migrate_of_a_converted_directory_does_nothing() {
         author: Some("john".to_owned()),
         body: None,
         implements: None,
+        labels: vec![],
     })
     .unwrap();
 
@@ -1097,6 +1190,217 @@ fn a_bad_argument_exits_non_zero_with_a_reason() {
     }
 }
 
+#[test]
+fn labels_survive_the_round_trip_and_show_in_the_listing() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_vocabulary(&dir);
+
+    let id = add_labelled(&dir, "Window title truncates", &[
+        "package=jp_config",
+        "client=macos",
+    ]);
+
+    let listed = run_command(&dir, Command::List {
+        status: None,
+        kind: None,
+        labels: vec![],
+        json: false,
+    })
+    .unwrap();
+
+    assert_eq!(
+        listed.text,
+        format!(
+            "{id} Todo         Bug      Window title truncates [client=macos, package=jp_config]\n"
+        )
+    );
+}
+
+#[test]
+fn listing_narrows_to_tickets_carrying_every_label() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_vocabulary(&dir);
+
+    let both = add_labelled(&dir, "Both", &["client=macos", "package=jp_cli"]);
+    add_labelled(&dir, "One", &["package=jp_cli"]);
+    add_labelled(&dir, "None", &[]);
+
+    let listed = run_command(&dir, Command::List {
+        status: None,
+        kind: None,
+        labels: vec!["package=jp_cli".to_owned(), "client=macos".to_owned()],
+        json: false,
+    })
+    .unwrap();
+
+    assert_eq!(
+        listed.text,
+        format!("{both} Todo         Bug      Both [client=macos, package=jp_cli]\n")
+    );
+}
+
+/// A bare key filters on "carries this key at all", which is how you find
+/// everything touching one facet.
+#[test]
+fn listing_narrows_on_a_bare_key() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_vocabulary(&dir);
+
+    add_labelled(&dir, "Client work", &["client=cli"]);
+    add_labelled(&dir, "Crate work", &["package=jp_cli"]);
+
+    let listed = run_command(&dir, Command::List {
+        status: None,
+        kind: None,
+        labels: vec!["client".to_owned()],
+        json: false,
+    })
+    .unwrap();
+
+    assert_eq!(listed.text.lines().count(), 1, "{}", listed.text);
+    assert!(listed.text.contains("Client work"), "{}", listed.text);
+}
+
+/// The whole set is written, so labelling is idempotent and a label left off
+/// the call is a label removed.
+#[test]
+fn labelling_replaces_the_whole_set() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_vocabulary(&dir);
+    let id = add_labelled(&dir, "Replace me", &["client=macos", "package=jp_cli"]);
+
+    let out = run_command(&dir, Command::Label {
+        id: Some(id),
+        labels: vec!["package=jp_cli".to_owned()],
+    })
+    .unwrap();
+    assert!(out.text.ends_with(": package=jp_cli\n"), "{}", out.text);
+
+    let cleared = run_command(&dir, Command::Label {
+        id: Some(id),
+        labels: vec![],
+    })
+    .unwrap();
+    assert!(
+        cleared.text.ends_with(": labels cleared\n"),
+        "{}",
+        cleared.text
+    );
+
+    let path = store::locate_ticket(dir.path(), id).unwrap();
+    let source = std::fs::read_to_string(path).unwrap();
+    assert!(!source.contains("- **Label**"), "{source}");
+}
+
+/// A typo names the vocabulary rather than landing a label nothing groups by.
+#[test]
+fn an_unknown_label_is_refused_with_the_known_set() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_vocabulary(&dir);
+
+    let error = run_command(&dir, Command::Add {
+        kind: Some(Kind::Bug),
+        title: Some("Typo".to_owned()),
+        author: Some("john".to_owned()),
+        body: None,
+        implements: None,
+        labels: vec!["client=mcaos".to_owned()],
+    })
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        "`client=mcaos` is not a known label. Labels you can add: client=cli, client=macos, \
+         package=jp_cli, package=jp_config."
+    );
+    assert!(
+        store::list(dir.path()).unwrap().is_empty(),
+        "a ticket was filed anyway"
+    );
+}
+
+#[test]
+fn the_vocabulary_listing_names_each_label_and_what_it_covers() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_vocabulary(&dir);
+
+    let out = run_command(&dir, Command::Labels).unwrap();
+
+    assert_eq!(
+        out.text,
+        "client  The client.\n  client=cli\n  client=macos\n\npackage  The crate.\n  \
+         package=jp_cli\n  package=jp_config\n  package=jp_legacy  (retired)\n\nA retired label \
+         stays on a ticket that carries it, but can't be added.\n"
+    );
+}
+
+/// The case the active/retired split exists for: an old ticket carries a label
+/// the board has since retired, and adding a new one must not force the retired
+/// one off first.
+#[test]
+fn a_retired_label_already_on_a_ticket_can_be_kept() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_vocabulary(&dir);
+
+    // Written by hand: `legacy-ui` can no longer be applied through the CLI,
+    // which is exactly the situation an old ticket is in.
+    let id = add_labelled(&dir, "Old ticket", &[]);
+    let path = store::locate_ticket(dir.path(), id).unwrap();
+    let source = std::fs::read_to_string(&path).unwrap();
+    std::fs::write(
+        &path,
+        ticket::render::set_repeated_metadata(&source, "Label", &["package=jp_legacy".to_owned()])
+            .unwrap(),
+    )
+    .unwrap();
+
+    let out = run_command(&dir, Command::Label {
+        id: Some(id),
+        labels: vec!["package=jp_legacy".to_owned(), "client=cli".to_owned()],
+    })
+    .unwrap();
+
+    assert!(
+        out.text.ends_with(": client=cli, package=jp_legacy\n"),
+        "{}",
+        out.text
+    );
+}
+
+#[test]
+fn a_retired_label_cannot_be_added_fresh() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_vocabulary(&dir);
+    let id = add_labelled(&dir, "Fresh", &[]);
+
+    let error = run_command(&dir, Command::Label {
+        id: Some(id),
+        labels: vec!["package=jp_legacy".to_owned()],
+    })
+    .unwrap_err();
+
+    assert_eq!(
+        error,
+        "`package=jp_legacy` is retired and can only stay on an item that already carries it. \
+         Labels you can add: client=cli, client=macos, package=jp_cli, package=jp_config."
+    );
+}
+
+#[test]
+fn a_board_without_a_vocabulary_says_where_to_define_one() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let out = run_command(&dir, Command::Labels).unwrap();
+
+    assert_eq!(
+        out.text,
+        format!(
+            "This board defines no labels. Add them to {}.\n",
+            dir.path().join(".labels.json")
+        )
+    );
+}
+
 /// An unreadable ticket is reported to the log, not mixed into stdout where it
 /// would corrupt `--json`.
 #[test]
@@ -1108,6 +1412,7 @@ fn unreadable_tickets_are_warned_about_separately() {
         author: Some("john".to_owned()),
         body: None,
         implements: None,
+        labels: vec![],
     })
     .unwrap();
     std::fs::write(dir.path().join("zzzzzzz-mangled.md"), "no heading here\n").unwrap();
@@ -1115,6 +1420,7 @@ fn unreadable_tickets_are_warned_about_separately() {
     let listed = run_command(&dir, Command::List {
         status: None,
         kind: None,
+        labels: vec![],
         json: true,
     })
     .unwrap();

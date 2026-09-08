@@ -4,6 +4,10 @@
 - **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-09-04
+- **Label**: domain=llm
+- **Label**: llm-provider=cerebras
+- **Label**: package=jp_llm
+- **Label**: type=task
 
 `map_model` in `crates/jp_llm/src/provider/cerebras.rs` carries a hand-written
 entry for `zai-glm-4.7` — display name, context window, output limit, reasoning

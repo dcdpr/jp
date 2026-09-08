@@ -14,6 +14,7 @@ version.workspace = true
 
 [dependencies]
 jp_id = { workspace = true }
+jp_label = { workspace = true }
 
 camino = { workspace = true }
 clean-path = { workspace = true }

@@ -5,6 +5,8 @@
 - **Authors**: jp
 - **Date**: 2026-09-07
 - **Implements**: 100
+- **Label**: domain=tooling
+- **Label**: type=bug
 
 `store::edit` moves a ticket's file to the slug a new title produces, so the
 filename never disagrees with the heading.
