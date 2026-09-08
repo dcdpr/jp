@@ -86,10 +86,14 @@ impl EditorBackend for SuspendingEditor {
 /// Surface an editor failure that JP recovered from rather than aborting.
 ///
 /// The full error goes to the diagnostics channel (`tracing`, visible with
-/// `-vvv` or in the log file); a concise notice goes to the chrome channel
-/// (stderr) so the user actually sees that their editor didn't open.
+/// `-vvv` or in the log file); a concise notice goes to the prompt stream.
 /// `recovery` names what JP did instead (e.g. "Continuing with the inline
 /// editor.").
+///
+/// The notice travels with the question it explains rather than as chrome: it
+/// reaches the user while a prompt session still owns the terminal, and
+/// `--quiet` cannot leave them looking at a re-opened widget with no reason for
+/// it.
 ///
 /// Safe to call between inline-reply prompts: the `reedline` engine is dropped
 /// when `InlineReply::prompt` returns, so the terminal is back in cooked mode
@@ -97,7 +101,7 @@ impl EditorBackend for SuspendingEditor {
 /// The leading newline starts the notice on a fresh line below the prompt.
 pub(crate) fn report_editor_failure(printer: &Printer, error: &EditorError, recovery: &str) {
     warn!(%error, "editor failed during reply/edit");
-    printer.eprintln(format!(
+    printer.prompt_println(format!(
         "\n⚠ Couldn't open your editor: {error}. {recovery}"
     ));
 }
