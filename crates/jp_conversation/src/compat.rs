@@ -343,30 +343,24 @@ fn sole_matching_variant<'a>(union_type: &'a UnionType, value: &Value) -> Option
 /// map.
 /// An entry named `value` needs the sibling `strategy` before it reads as the
 /// wrapper, which is what keeps a tool called `value` addressable.
+///
+/// The pair is recognised by one side being a map rather than by the wrapper's
+/// own fields: the wrapper type is described once and referred to by name
+/// wherever it appears again, so most of its uses are a reference with no
+/// fields to inspect.
 fn strategy_carrying_variant<'a>(union_type: &'a UnionType, value: &Value) -> Option<&'a Schema> {
-    let mut variants = union_type
-        .variants_types
-        .iter()
-        .map(Box::as_ref)
-        .filter(|variant| !variant.is_null());
-
-    let (first, second) = (variants.next()?, variants.next()?);
-    if variants.next().is_some() {
-        return None;
-    }
-
-    let is_wrapper = |schema: &Schema| {
-        matches!(&schema.ty, SchemaType::Struct(wrapper)
-            if wrapper.fields.contains_key("value") && wrapper.fields.contains_key("strategy"))
+    let variants = || {
+        union_type
+            .variants_types
+            .iter()
+            .map(Box::as_ref)
+            .filter(|variant| !variant.is_null())
     };
 
-    let (wrapper, collection) = if is_wrapper(first) {
-        (first, second)
-    } else if is_wrapper(second) {
-        (second, first)
-    } else {
-        return None;
-    };
+    let is_map = |schema: &Schema| matches!(schema.ty, SchemaType::Object(_));
+
+    let collection = sole(variants().filter(|variant| is_map(variant)))?;
+    let wrapper = sole(variants().filter(|variant| !is_map(variant)))?;
 
     let stated = value
         .as_object()
@@ -439,7 +433,8 @@ fn strip_struct<'a>(
         return 0;
     };
 
-    let entry_schema = flattened_entry_schema(struct_type);
+    let flattened = flattened_field_schema(struct_type);
+    let entry_schema = flattened.and_then(map_value_schema);
     let has_flatten = struct_type.fields.values().any(|f| f.flatten);
 
     let mut stripped = if has_flatten {
@@ -473,7 +468,7 @@ fn strip_struct<'a>(
 /// flattens something other than a map — in each of those cases the shape of a
 /// leftover key is not knowable, and walking it against the wrong schema would
 /// delete valid data.
-fn flattened_entry_schema(struct_type: &StructType) -> Option<&Schema> {
+fn flattened_field_schema(struct_type: &StructType) -> Option<&Schema> {
     let mut flattened = struct_type
         .fields
         .values()
@@ -481,11 +476,33 @@ fn flattened_entry_schema(struct_type: &StructType) -> Option<&Schema> {
         .map(Box::as_ref);
 
     match (flattened.next(), flattened.next()) {
-        (Some(SchemaField { schema, .. }), None) => match &schema.ty {
+        (Some(SchemaField { schema, .. }), None) => Some(schema),
+        _ => None,
+    }
+}
+
+/// The schema of a map's values, for a map written either plainly or with a
+/// stated merge strategy.
+///
+/// A map that can state one is a union of the plain map and the wrapper holding
+/// it under `value`.
+/// Flattened, its entries are sibling keys of the struct around it, which is
+/// the plain map's shape, so that is the variant their values are walked
+/// against.
+fn map_value_schema(schema: &Schema) -> Option<&Schema> {
+    fn value_type(ty: &SchemaType) -> Option<&Schema> {
+        match ty {
             SchemaType::Object(object_type) => Some(&object_type.value_type),
             _ => None,
-        },
-        _ => None,
+        }
+    }
+
+    match &schema.ty {
+        SchemaType::Union(union_type) => union_type
+            .variants_types
+            .iter()
+            .find_map(|variant| value_type(&variant.ty)),
+        ty => value_type(ty),
     }
 }
 
