@@ -42,5 +42,5 @@ Two things to check before starting:
 There are 177 references to the type across the tree, so this is mechanical but
 wide.
 
-Raised in review of PR \#962, where `TurnInputs` holds a typed
-`jp_workspace::Id` and converts to a string at this boundary.
+Raised in review of PR #962, where `TurnInputs` holds a typed `jp_workspace::Id`
+and converts to a string at this boundary.
