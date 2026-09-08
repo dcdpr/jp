@@ -127,13 +127,14 @@ impl io::Write for PromptCanvas<'_> {
         }
     }
 
-    /// Nothing is held back that a flush could release: each write reaches the
-    /// printer's worker as its own task, and the worker flushes every task it
-    /// writes.
+    /// A widget flushes before it reads a key, and on this path a flush is a
+    /// barrier rather than a buffer drain: it blocks until the printer's worker
+    /// has written everything queued ahead of it.
+    /// Shading decorates the writer and must not swallow that.
     fn flush(&mut self) -> io::Result<()> {
         match self {
             Self::Plain(writer) => io::Write::flush(writer),
-            Self::Shaded(_) => Ok(()),
+            Self::Shaded(writer) => io::Write::flush(writer.get_mut()),
         }
     }
 }
