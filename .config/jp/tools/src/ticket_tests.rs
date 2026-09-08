@@ -1,4 +1,4 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use camino_tempfile::Utf8TempDir;
 use jp_tool::{Action, Outcome};
@@ -1073,9 +1073,7 @@ fn labelling_a_missing_ticket_says_so() {
 /// never turn a second file into a failing test.
 #[test]
 fn the_board_vocabulary_parses() {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../../docs/ticket")
-        .join(::ticket::LABELS_FILE);
+    let path = PathBuf::from("../../../docs/ticket").join(::ticket::LABELS_FILE);
     let source = std::fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
 

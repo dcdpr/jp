@@ -15,7 +15,7 @@
 # retired value to keep it, and finding what still carries one means
 # filtering on it.
 #
-# RFD D38 replaces this file with a reference the loader resolves directly.
+# RFD D64 replaces this file with a reference the loader resolves directly.
 
 [conversation.tools.ticket_create.parameters.labels.items]
 enum = [

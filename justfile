@@ -2967,7 +2967,7 @@ ticket-labels: _install-ticket
 # missing from the mirror still writes, and one left in it after being retired
 # is refused with a message naming the real set.
 #
-# RFD D38 replaces the mirror with a reference the config loader resolves, at
+# RFD D64 replaces the mirror with a reference the config loader resolves, at
 # which point this recipe and the file it writes both go.
 [group('ticket')]
 ticket-labels-sync:
@@ -3022,7 +3022,7 @@ ticket-labels-sync:
         echo '# retired value to keep it, and finding what still carries one means'
         echo '# filtering on it.'
         echo '#'
-        echo '# RFD D38 replaces this file with a reference the loader resolves directly.'
+        echo '# RFD D64 replaces this file with a reference the loader resolves directly.'
 
         echo
         echo '[conversation.tools.ticket_create.parameters.labels.items]'
