@@ -6,7 +6,7 @@ use jp_config::{
     assistant::tool_choice::ToolChoice,
     model::{
         id::{ModelIdConfig, Name, ProviderId},
-        parameters::{ReasoningConfig, ReasoningEffort},
+        parameters::{ReasoningConfig, ReasoningEffort, ServiceTier},
     },
     providers::llm::cerebras::CerebrasConfig,
 };
@@ -509,6 +509,12 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Value, bool
         body["max_completion_tokens"] = json!(max_tokens);
     }
 
+    // Service tiers are only served by dedicated endpoints; a shared endpoint
+    // rejects the field, which is why it is sent only when asked for.
+    if let Some(tier) = parameters.service_tier.and_then(convert_service_tier) {
+        body["service_tier"] = json!(tier);
+    }
+
     // Reasoning effort for gpt-oss-120b and zai-glm-4.7.
     let reasoning = model.custom_reasoning_config(parameters.reasoning);
     if let Some(r) = &reasoning {
@@ -564,6 +570,16 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Value, bool
     }
 
     Ok((body, is_structured))
+}
+
+/// Map a requested tier onto Cerebras's `service_tier` parameter.
+fn convert_service_tier(tier: ServiceTier) -> Option<&'static str> {
+    match tier {
+        ServiceTier::Off => None,
+        ServiceTier::Flex => Some("flex"),
+        ServiceTier::Standard => Some("default"),
+        ServiceTier::Priority => Some("priority"),
+    }
 }
 
 /// Transform a JSON schema for Cerebras's strict structured output mode.

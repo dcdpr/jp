@@ -1,3 +1,68 @@
+mod service_tier {
+    use jp_config::{
+        PartialAppConfig, assistant::tool_choice::ToolChoice, model::parameters::ServiceTier,
+    };
+    use jp_conversation::{ConversationStream, thread::Thread};
+    use serde_json::json;
+
+    use super::super::create_request;
+    use crate::{model::ModelDetails, provider::ProviderId, query::ChatQuery};
+
+    fn request_tier(tier: Option<ServiceTier>) -> Option<serde_json::Value> {
+        let mut events = ConversationStream::new_test().with_turn("test");
+        let mut delta = PartialAppConfig::empty();
+        delta.assistant.model.parameters.service_tier = tier;
+        events.add_config_delta(delta);
+
+        let query = ChatQuery {
+            thread: Thread {
+                system_prompt: None,
+                sections: vec![],
+                attachments: vec![],
+                events,
+            },
+            tools: vec![],
+            tool_choice: ToolChoice::Auto,
+        };
+
+        let model = ModelDetails::empty((ProviderId::Openai, "gpt-5.6").try_into().unwrap());
+        let (request, ..) = create_request(&model, query).unwrap();
+        let request = serde_json::to_value(request).unwrap();
+
+        request
+            .get("service_tier")
+            .cloned()
+            .filter(|v| !v.is_null())
+    }
+
+    #[test]
+    fn request_omits_the_tier_when_unset() {
+        assert_eq!(request_tier(None), None);
+    }
+
+    /// `off` sends no field, leaving the project's own default in force.
+    #[test]
+    fn request_omits_the_tier_for_off() {
+        assert_eq!(request_tier(Some(ServiceTier::Off)), None);
+    }
+
+    #[test]
+    fn request_serializes_every_tier() {
+        assert_eq!(request_tier(Some(ServiceTier::Flex)), Some(json!("flex")));
+        // OpenAI spells the base rung `default`, not `standard`.
+        assert_eq!(
+            request_tier(Some(ServiceTier::Standard)),
+            Some(json!("default"))
+        );
+        // `fast` is accepted as an alias, but `priority` is what the response
+        // echoes for either spelling, so it is the one requests send.
+        assert_eq!(
+            request_tier(Some(ServiceTier::Priority)),
+            Some(json!("priority"))
+        );
+    }
+}
+
 mod make_schema_nullable {
     use serde_json::json;
 

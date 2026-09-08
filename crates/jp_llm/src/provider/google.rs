@@ -12,9 +12,9 @@ use jp_config::{
     assistant::tool_choice::ToolChoice,
     model::{
         id::{ModelIdConfig, Name, ProviderId},
-        parameters::{ReasoningConfig, ReasoningEffort},
+        parameters::{ReasoningConfig, ReasoningEffort, ServiceTier},
     },
-    providers::llm::google::{GoogleConfig, ServiceTier},
+    providers::llm::google::GoogleConfig,
 };
 use jp_conversation::{
     ConversationStream,
@@ -45,7 +45,6 @@ const THOUGHT_SIGNATURE_DUMMY_VALUE: &str = "skip_thought_signature_validator";
 #[derive(Debug, Clone)]
 pub struct Google {
     client: GeminiClient,
-    service_tier: Option<ServiceTier>,
 }
 
 #[async_trait]
@@ -77,7 +76,7 @@ impl Provider for Google {
         query: ChatQuery,
     ) -> Result<EventStream> {
         let client = self.client.clone();
-        let (request, structured) = create_request(model, query, self.service_tier)?;
+        let (request, structured) = create_request(model, query)?;
         let slug = model.id.name.clone();
 
         debug!(stream = true, "Google chat completion stream request.");
@@ -169,12 +168,16 @@ impl Google {
     /// without sending.
     /// Test-only seam for snapshotting request construction (notably compaction
     /// projection) across providers.
+    #[expect(
+        clippy::unused_self,
+        reason = "uniform per-provider seam; only some providers read instance state"
+    )]
     pub(crate) fn request_value(
         &self,
         model: &ModelDetails,
         query: ChatQuery,
     ) -> Result<serde_json::Value> {
-        let (request, _) = create_request(model, query, self.service_tier)?;
+        let (request, _) = create_request(model, query)?;
         Ok(serde_json::to_value(request)?)
     }
 }
@@ -183,7 +186,6 @@ impl Google {
 fn create_request(
     model: &ModelDetails,
     query: ChatQuery,
-    default_service_tier: Option<ServiceTier>,
 ) -> Result<(types::GenerateContentRequest, bool)> {
     let ChatQuery {
         thread,
@@ -197,17 +199,7 @@ fn create_request(
     let config = thread.events.config()?;
     let parameters = &config.assistant.model.parameters;
 
-    let service_tier = parameters
-        .other
-        .get("service_tier")
-        .or_else(|| parameters.other.get("serviceTier"))
-        .and_then(|v| match &v.0 {
-            Value::String(s) => s.parse().ok(),
-            _ => None,
-        })
-        .or(config.providers.llm.google.service_tier)
-        .or(default_service_tier)
-        .map(convert_service_tier);
+    let service_tier = parameters.service_tier.and_then(convert_service_tier);
 
     let tools = convert_tools(tools);
 
@@ -869,16 +861,17 @@ impl TryFrom<&GoogleConfig> for Google {
 
         Ok(Google {
             client: GeminiClient::new(api_key).with_api_url(config.base_url.clone()),
-            service_tier: config.service_tier,
         })
     }
 }
 
-fn convert_service_tier(tier: ServiceTier) -> types::ServiceTier {
+/// Map a requested tier onto Gemini's `service_tier` field.
+fn convert_service_tier(tier: ServiceTier) -> Option<types::ServiceTier> {
     match tier {
-        ServiceTier::Flex => types::ServiceTier::Flex,
-        ServiceTier::Priority => types::ServiceTier::Priority,
-        ServiceTier::Standard => types::ServiceTier::Standard,
+        ServiceTier::Off => None,
+        ServiceTier::Flex => Some(types::ServiceTier::Flex),
+        ServiceTier::Standard => Some(types::ServiceTier::Standard),
+        ServiceTier::Priority => Some(types::ServiceTier::Priority),
     }
 }
 

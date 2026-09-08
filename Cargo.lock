@@ -171,7 +171,7 @@ checksum = "9b34d609dfbaf33d6889b2b7106d3ca345eacad44200913df5ba02bfd31d2ba9"
 [[package]]
 name = "async-anthropic"
 version = "0.6.0"
-source = "git+https://github.com/JeanMertz/async-anthropic#2a9e19d3fe368258275f46ecfab759cce5c582d6"
+source = "git+https://github.com/JeanMertz/async-anthropic#8c12222078fe90f9e8f15fb078790a6d86ea42c9"
 dependencies = [
  "backon",
  "derive_builder",
@@ -3095,7 +3095,7 @@ checksum = "a4895175b425cb1f87721b59f0f286c2092bd4af812243672510e1ac53e2e0ad"
 [[package]]
 name = "openai_responses"
 version = "0.1.6"
-source = "git+https://github.com/JeanMertz/openai-responses-rs#dac7d6992a213ca4ec13d41527ddd7f5c54e9885"
+source = "git+https://github.com/JeanMertz/openai-responses-rs#8d78ffd404c0d01248ce2b6e155deb85d590ac8f"
 dependencies = [
  "async-fn-stream",
  "chrono",

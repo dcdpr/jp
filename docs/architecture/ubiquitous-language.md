@@ -37,6 +37,7 @@ In disagreements between code and docs, the code is authoritative.
     - [Provider](#provider)
     - [RFD](#rfd)
     - [Search Hit](#search-hit)
+    - [Service Tier](#service-tier)
     - [Signal Router](#signal-router)
     - [Summary](#summary)
     - [Thread](#thread)
@@ -255,6 +256,25 @@ both are hits.
 **Not the same as.** A Match (a hit whose line contains the pattern), a
 Conversation Event (one hit is a single line from within an event, and one event
 can yield many hits).
+
+### Service Tier
+
+The grade of capacity a request is served from, trading price against latency
+and availability.
+JP models four rungs (`off`, `flex`, `standard`, `priority`) as `ServiceTier` in
+`jp_config::model::parameters`, and each [Provider](#provider) maps them onto
+its own wire vocabulary.
+`off` is the rung that asks for nothing, which every provider expresses by
+sending no tier at all.
+
+A provider that sells no equivalent of the requested tier refuses the query
+rather than substituting a neighbouring rung, since the substitute would cost
+something else.
+A tier that is sent is still only a request: providers may shed it to another
+tier under load, and bill at whatever actually served it.
+
+**Not the same as** the model: a tier changes what the request costs and how
+fast it is served, not which weights answer it.
 
 ### Signal Router
 

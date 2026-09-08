@@ -1265,6 +1265,179 @@ fn query_model_override_is_persisted_as_config_delta() {
 }
 
 #[test]
+fn tier_flag_parses_every_rung() {
+    for (arg, expected) in [
+        ("off", ServiceTier::Off),
+        ("flex", ServiceTier::Flex),
+        ("standard", ServiceTier::Standard),
+        ("priority", ServiceTier::Priority),
+    ] {
+        let query = parse_query(&["--tier", arg]).unwrap();
+        assert_eq!(query.service_tier, Some(expected));
+    }
+
+    // Rungs individual providers offer that JP does not model; accepting either
+    // would hand an unmappable value to every other provider.
+    assert!(parse_query(&["--tier", "auto"]).is_err());
+    assert!(parse_query(&["--tier", "scale"]).is_err());
+}
+
+#[test]
+fn tier_flag_reaches_the_model_parameters() {
+    let query = parse_query(&["--tier", "flex"]).unwrap();
+
+    let partial = query
+        .apply_cli_config(None, PartialAppConfig::empty(), None)
+        .unwrap();
+
+    assert_eq!(
+        partial.assistant.model.parameters.service_tier,
+        Some(ServiceTier::Flex)
+    );
+}
+
+#[test]
+fn tier_flag_is_persisted_as_config_delta() {
+    // Each tier is served from separate provider capacity, so a tier that
+    // reverted after one turn would throw the prompt cache away twice: once on
+    // the way in and once on the way back out. `--tier` is durable for that
+    // reason, unlike the invocation-scoped `-u`/`-U`.
+    let base_config = Arc::new(config_with_model(ProviderId::Anthropic, "base-model"));
+    let conversation_id = make_id(1100);
+
+    let mut workspace = Workspace::in_memory("/tmp/test");
+    workspace.create_conversation_with_id(
+        conversation_id,
+        Conversation::default(),
+        Arc::clone(&base_config),
+    );
+
+    let handle = workspace.acquire_conversation(&conversation_id).unwrap();
+    let lock = workspace.test_lock(handle);
+
+    let query = Query {
+        service_tier: Some(ServiceTier::Flex),
+        ..Default::default()
+    };
+
+    let partial = query
+        .apply_cli_config(None, base_config.to_partial(), None)
+        .unwrap();
+    let runtime_config = build(partial).unwrap();
+
+    let delta = get_config_delta_from_cli(&runtime_config, &lock)
+        .unwrap()
+        .expect("expected --tier to produce a config delta");
+
+    lock.as_mut()
+        .update_events(|events| events.add_config_delta(delta));
+
+    let merged = lock.events().config().unwrap();
+    assert_eq!(
+        merged.assistant.model.parameters.service_tier,
+        Some(ServiceTier::Flex),
+        "the tier must still apply on the next turn, without the flag"
+    );
+}
+
+#[test]
+fn tier_and_no_tier_flags_conflict() {
+    assert!(parse_query(&["--tier", "flex", "--no-tier"]).is_err());
+}
+
+/// `--no-tier` is `--tier off`, and it takes a tier off a conversation that
+/// already carries one.
+///
+/// `off` rather than an absent field: a partial's `None` means "no opinion", so
+/// it would leave the earlier layer's tier standing and the flag would appear
+/// to do nothing on the next turn.
+#[test]
+fn no_tier_flag_replaces_a_persisted_tier_with_off() {
+    let base_config = Arc::new(config_with_model(ProviderId::Anthropic, "base-model"));
+    let conversation_id = make_id(1200);
+
+    let mut workspace = Workspace::in_memory("/tmp/test");
+    workspace.create_conversation_with_id(
+        conversation_id,
+        Conversation::default(),
+        Arc::clone(&base_config),
+    );
+
+    let handle = workspace.acquire_conversation(&conversation_id).unwrap();
+    let lock = workspace.test_lock(handle);
+
+    // Put a tier on the conversation, the way an earlier `--tier priority` did.
+    let mut seeded = PartialAppConfig::empty();
+    seeded.assistant.model.parameters.service_tier = Some(ServiceTier::Priority);
+    lock.as_mut()
+        .update_events(|events| events.add_config_delta(ApplyDelta::new(Utc::now(), seeded)));
+
+    let stored = lock.events().config().unwrap();
+    assert_eq!(
+        stored.assistant.model.parameters.service_tier,
+        Some(ServiceTier::Priority),
+        "the fixture must start with a tier to turn off"
+    );
+
+    let query = Query {
+        no_service_tier: true,
+        ..Default::default()
+    };
+    let partial = query
+        .apply_cli_config(None, stored.to_partial(), None)
+        .unwrap();
+    let runtime_config = build(partial).unwrap();
+
+    assert_eq!(
+        runtime_config.assistant.model.parameters.service_tier,
+        Some(ServiceTier::Off),
+        "--no-tier must resolve this query to `off`"
+    );
+
+    let delta = get_config_delta_from_cli(&runtime_config, &lock)
+        .unwrap()
+        .expect("turning the tier off must produce a config delta");
+
+    lock.as_mut()
+        .update_events(|events| events.add_config_delta(delta));
+
+    assert_eq!(
+        lock.events()
+            .config()
+            .unwrap()
+            .assistant
+            .model
+            .parameters
+            .service_tier,
+        Some(ServiceTier::Off),
+        "`off` must still apply on the next turn, without the flag"
+    );
+}
+
+/// `off` survives being layered under a config file that asks for a tier.
+///
+/// The conversation layer is gap-filled from the file layer rather than merged
+/// onto it, so an absent tier would be refilled with the file's and the flag
+/// would silently stop working after one turn.
+#[test]
+fn off_is_not_refilled_from_the_file_layer() {
+    use jp_config::FillDefaults as _;
+
+    let mut pipeline_base = PartialAppConfig::default();
+    pipeline_base.assistant.model.parameters.service_tier = Some(ServiceTier::Flex);
+
+    let mut conversation = PartialAppConfig::empty();
+    conversation.assistant.model.parameters.service_tier = Some(ServiceTier::Off);
+
+    let filled = conversation.fill_from(pipeline_base);
+
+    assert_eq!(
+        filled.assistant.model.parameters.service_tier,
+        Some(ServiceTier::Off)
+    );
+}
+
+#[test]
 fn query_cfg_sourced_compaction_persists_as_config_delta() {
     // Compaction config that arrives through the config layers (e.g. `-c
     // compaction/heavy` or `--cfg conversation.compaction.rules=...`) is

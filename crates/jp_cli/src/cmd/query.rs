@@ -82,7 +82,9 @@ use jp_config::{
         },
     },
     fs::{expand_tilde, load_partial},
-    model::parameters::{PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningConfig},
+    model::parameters::{
+        PartialCustomReasoningConfig, PartialReasoningConfig, ReasoningConfig, ServiceTier,
+    },
     style::{mcp_startup::McpStartupConfig, reasoning::ReasoningDisplayConfig},
 };
 use jp_conversation::{
@@ -250,6 +252,34 @@ pub(crate) struct Query {
     /// Disable reasoning.
     #[arg(short = 'R', long = "no-reasoning")]
     no_reasoning: bool,
+
+    /// Capacity tier to request from the provider.
+    ///
+    /// Providers sell more than one grade of capacity for the same model:
+    /// `flex` is cheaper and slower, `priority` is faster and pricier,
+    /// `standard` is the regular rate, and `off` asks for no tier at all.
+    ///
+    /// Which tiers are available depends on the provider, the model, and the
+    /// account; a provider that sells no equivalent refuses the query rather
+    /// than falling back to a rung that costs something else.
+    /// One that sells the tier but cannot serve this model with it may still
+    /// fall back.
+    ///
+    /// Applies to this query and every later one on the conversation, because
+    /// each tier is served from separate capacity and switching discards the
+    /// prompt cache.
+    #[arg(long = "tier", value_name = "TIER", conflicts_with = "no_service_tier")]
+    service_tier: Option<ServiceTier>,
+
+    /// Stop asking for a capacity tier.
+    ///
+    /// Shorthand for `--tier off`, which sends no tier and leaves the choice to
+    /// whatever the account is set up for.
+    ///
+    /// This is not `--tier standard`: `standard` names a rung and is sent as
+    /// one.
+    #[arg(long = "no-tier")]
+    no_service_tier: bool,
 
     /// Do not display the reasoning content.
     ///
@@ -1904,6 +1934,8 @@ impl IntoPartialAppConfig for Query {
             tool_directives,
             reasoning,
             no_reasoning,
+            service_tier,
+            no_service_tier,
             expires_in: _,
             target: _,
             fork: _,
@@ -1924,6 +1956,16 @@ impl IntoPartialAppConfig for Query {
         apply_attachments(&mut partial, attachments, workspace)?;
         apply_mounts(&mut partial, mount, workspace, merged_config)?;
         apply_reasoning(&mut partial, reasoning.as_ref(), *no_reasoning);
+
+        // `off` rather than `None`: a partial's `None` means "no opinion", so
+        // it would leave a tier an earlier layer asked for standing, and the
+        // conversation layer is gap-filled from the file layer on later turns.
+        if let Some(tier) = no_service_tier
+            .then_some(ServiceTier::Off)
+            .or(*service_tier)
+        {
+            partial.assistant.model.parameters.service_tier = Some(tier);
+        }
 
         for kv in parameters.clone() {
             partial.assistant.model.parameters.assign(kv)?;

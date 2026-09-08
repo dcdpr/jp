@@ -185,3 +185,43 @@ fn assign_known_keys_not_routed_to_other() {
     p.assign(kv).unwrap();
     assert!(p.other.is_none());
 }
+
+#[test]
+fn assign_service_tier_parses_every_rung() {
+    let mut p = PartialParametersConfig::default();
+
+    for (input, expected) in [
+        ("off", ServiceTier::Off),
+        ("flex", ServiceTier::Flex),
+        ("standard", ServiceTier::Standard),
+        ("priority", ServiceTier::Priority),
+    ] {
+        let kv = KvAssignment::try_from_cli("service_tier", input).unwrap();
+        p.assign(kv).unwrap();
+        assert_eq!(p.service_tier, Some(expected));
+    }
+
+    // A key routed to `other` reaches the provider as a raw parameter instead
+    // of going through the per-provider tier mapping.
+    assert!(p.other.is_none());
+}
+
+#[test]
+fn assign_rejects_an_unknown_service_tier() {
+    let mut p = PartialParametersConfig::default();
+
+    // `auto` and `scale` are rungs individual providers offer that JP does not
+    // model; accepting either would hand an unmappable value to the rest.
+    for input in ["auto", "scale"] {
+        let kv = KvAssignment::try_from_cli("service_tier", input).unwrap();
+        assert!(p.assign(kv).is_err(), "`{input}` must not parse");
+    }
+}
+
+#[test]
+fn deserialize_reads_service_tier_from_the_parameter_block() {
+    let p = parameters_from_toml(r#"service_tier = "flex""#);
+
+    assert_eq!(p.service_tier, Some(ServiceTier::Flex));
+    assert_eq!(p.other, None);
+}
