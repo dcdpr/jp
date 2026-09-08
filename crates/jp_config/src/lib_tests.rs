@@ -527,16 +527,15 @@ fn an_explicit_inquiry_value_survives_a_partial_round_trip() {
     );
 }
 
-/// An MCP server whose only difference cannot be expressed as a delta does not
-/// produce one.
+/// A dropped MCP argument is recorded, rather than producing an event holding
+/// nothing but the server's transport tag on every turn.
 ///
-/// `arguments` merges by appending, so a dropped argument has no delta to
-/// record.
-/// Keeping the server in the map anyway makes the whole partial look non-empty,
-/// and every turn then writes a `config_delta` event holding nothing but the
-/// server's transport tag.
+/// `arguments` carries its own merge strategy, so the delta says `replace` and
+/// the fold reaches the shorter list.
+/// Before it could, appending was unable to express the removal, the difference
+/// went unrecorded, and the next turn computed the same non-delta again.
 #[test]
-fn an_mcp_server_with_no_expressible_change_yields_no_delta() {
+fn a_dropped_mcp_argument_is_recorded() {
     use crate::providers::mcp::{McpProviderConfig, StdioConfig};
 
     let server = |arguments: &[&str]| {
@@ -562,12 +561,18 @@ fn an_mcp_server_with_no_expressible_change_yields_no_delta() {
 
     let delta = prev.to_partial().delta(next.to_partial());
 
-    assert!(
-        delta.providers.mcp.is_empty(),
-        "expected no server entry, got: {:?}",
-        delta.providers.mcp
+    let entry = delta
+        .providers
+        .mcp
+        .get("bookworm")
+        .expect("the change is recorded");
+
+    let crate::providers::mcp::PartialMcpProviderConfig::Stdio(stdio) = entry;
+    assert_eq!(
+        stdio.arguments.as_deref(),
+        Some(&vec!["serve".to_owned()]),
+        "the delta carries the whole list, since appending cannot shorten one"
     );
-    assert!(delta.is_empty(), "expected an empty delta, got: {delta:?}");
 }
 
 /// A union that names an expanded form contributes both the shorthand path and
@@ -689,7 +694,10 @@ fn test_partial_app_config_assign() {
 
     let kv = KvAssignment::try_from_cli("config_load_paths", "foo,bar").unwrap();
     p.assign(kv).unwrap();
-    assert_eq!(p.config_load_paths, Some(vec!["foo".into(), "bar".into()]));
+    assert_eq!(
+        p.config_load_paths,
+        Some(vec![RelativePathBuf::from("foo"), "bar".into()].into())
+    );
 
     let kv = KvAssignment::try_from_cli("assistant.name", "foo").unwrap();
     p.assign(kv).unwrap();
@@ -722,10 +730,12 @@ fn config_load_paths_append_across_layers() {
     // matters downstream: `--cfg <name>` resolution walks the list and takes
     // the first directory that holds a matching file.
     let mut base = PartialAppConfig::empty();
-    base.config_load_paths = Some(vec![".jp/global".into(), ".jp/shared".into()]);
+    base.config_load_paths =
+        Some(vec![RelativePathBuf::from(".jp/global"), ".jp/shared".into()].into());
 
     let mut overlay = PartialAppConfig::empty();
-    overlay.config_load_paths = Some(vec![".jp/shared".into(), ".jp/workspace".into()]);
+    overlay.config_load_paths =
+        Some(vec![RelativePathBuf::from(".jp/shared"), ".jp/workspace".into()].into());
 
     base.merge(&(), overlay).unwrap();
 
@@ -734,7 +744,7 @@ fn config_load_paths_append_across_layers() {
         ".jp/shared".into(),
         ".jp/workspace".into(),
     ];
-    assert_eq!(base.config_load_paths, Some(want));
+    assert_eq!(base.config_load_paths, Some(want.into()));
 }
 
 #[test]

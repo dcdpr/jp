@@ -414,11 +414,13 @@ Ok(
             editor: PartialEditorConfig {
                 cmd: None,
                 envs: Some(
-                    [
-                        "JP_EDITOR",
-                        "VISUAL",
-                        "EDITOR",
-                    ],
+                    Vec(
+                        [
+                            "JP_EDITOR",
+                            "VISUAL",
+                            "EDITOR",
+                        ],
+                    ),
                 ),
                 inline: PartialInlineEditorConfig {
                     edit_mode: None,
@@ -441,7 +443,9 @@ Ok(
                             true,
                         ),
                         beta_headers: Some(
-                            [],
+                            Vec(
+                                [],
+                            ),
                         ),
                     },
                     cerebras: PartialCerebrasConfig {

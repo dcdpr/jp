@@ -150,7 +150,11 @@ impl Field<'_> {
             }
             value_type
         } else {
-            FieldValue::value(result.value)
+            // `partial_via` applies to a plain field too, so a list of scalars
+            // can carry a wrapper that knows its own merge strategy. The
+            // partial holds the via type and `generate_from_partial_value`
+            // converts back to the field's own type.
+            FieldValue::value(result.partial_via_ty.as_ref().unwrap_or(result.value))
         };
 
         result

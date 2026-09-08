@@ -45,13 +45,36 @@ fn stream_with_server(arguments: &[&str]) -> ConversationStream {
 
 /// A partial setting the `bookworm` server's arguments and nothing else.
 fn server_arguments_partial(arguments: &[&str]) -> jp_config::PartialAppConfig {
+    arguments_partial(
+        arguments
+            .iter()
+            .map(|a| (*a).to_owned())
+            .collect::<Vec<_>>(),
+    )
+}
+
+/// The same, with the list asking to replace rather than extend.
+fn replacing_server_arguments_partial(arguments: &[&str]) -> jp_config::PartialAppConfig {
+    use jp_config::types::vec::{MergeableVec, MergedVec, MergedVecStrategy};
+
+    arguments_partial(MergeableVec::Merged(MergedVec {
+        value: arguments.iter().map(|a| (*a).to_owned()).collect(),
+        strategy: Some(MergedVecStrategy::Replace),
+        dedup: None,
+        discard_when_merged: false,
+    }))
+}
+
+fn arguments_partial(
+    arguments: impl Into<jp_config::types::vec::MergeableVec<String>>,
+) -> jp_config::PartialAppConfig {
     use jp_config::providers::mcp::{PartialMcpProviderConfig, PartialStdioConfig};
 
     let mut partial = jp_config::PartialAppConfig::empty();
     partial.providers.mcp.insert(
         "bookworm".to_owned(),
         PartialMcpProviderConfig::Stdio(PartialStdioConfig {
-            arguments: Some(arguments.iter().map(|a| (*a).to_owned()).collect()),
+            arguments: Some(arguments.into()),
             ..PartialStdioConfig::default()
         }),
     );
@@ -84,28 +107,22 @@ fn an_unset_clears_a_field_before_the_delta_merges() {
     assert_eq!(resolved_arguments(&stream), ["serve"]);
 }
 
-/// Without the clear, the same change cannot be recorded at all.
+/// A list that states `replace` needs no clear to reach the same result.
 ///
-/// No list the delta could carry produces `["serve"]` by appending to
-/// `["serve", "--verbose"]`, so the diff comes out empty and no event is
-/// written — the conversation keeps the argument the user dropped.
+/// `arguments` carries its own merge strategy, so a delta can shorten the list
+/// on its own.
+/// `unsets` remains for what cannot say it: a scalar going away, and a list
+/// whose merge strategy is fixed by its field.
 #[test]
-fn without_an_unset_a_dropped_argument_is_not_recorded() {
+fn a_replacing_list_needs_no_unset() {
     let mut stream = stream_with_server(&["serve", "--verbose"]);
 
     stream.add_config_delta(ApplyDelta::new(
         delta_timestamp(),
-        server_arguments_partial(&["serve"]),
+        replacing_server_arguments_partial(&["serve"]),
     ));
 
-    assert_eq!(resolved_arguments(&stream), ["serve", "--verbose"]);
-    assert!(
-        !stream
-            .events
-            .iter()
-            .any(|event| matches!(event, InternalEvent::ConfigDelta(_))),
-        "an empty diff writes no event"
-    );
+    assert_eq!(resolved_arguments(&stream), ["serve"]);
 }
 
 /// A delta that only clears carries no diff, and is still worth recording.

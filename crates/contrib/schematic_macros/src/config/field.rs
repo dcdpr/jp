@@ -152,22 +152,43 @@ impl Field<'_> {
 
         #[allow(clippy::collapsible_else_if)]
         if matches!(self.value_type, FieldValue::Value { .. }) {
+            // A `partial_via` field stores the via type in the partial and its
+            // own type in the resolved config, so the value converts on the way
+            // out. The conversion wraps the *inner* access, before any boxing,
+            // since it is the value that changes type and not its container.
+            let via = self.args.partial_via.is_some();
+            let convert = |value: TokenStream| {
+                if via {
+                    quote! { Into::into(#value) }
+                } else {
+                    value
+                }
+            };
+
             if self.value_type.is_outer_boxed() {
                 if self.is_nullable() {
-                    quote! { partial.#key.map(Box::new) }
+                    let inner = convert(quote! { value });
+                    quote! { partial.#key.map(|value| Box::new(#inner)) }
                 } else {
-                    quote! { Box::new(partial.#key) }
+                    let inner = convert(quote! { partial.#key });
+                    quote! { Box::new(#inner) }
                 }
             } else {
                 if self.is_nullable() {
                     // Use optional values as-is as they're already wrapped in `Option`
-                    quote! { partial.#key }
+                    if via {
+                        quote! { partial.#key.map(Into::into) }
+                    } else {
+                        quote! { partial.#key }
+                    }
                 } else if self.is_required() {
                     // Trigger a validation error if the value is missing
-                    quote! { partial.#key.ok_or(schematic::ConfigError::MissingRequired{ fields: { let mut fields = fields.clone(); fields.push(#key_quoted.to_owned()); fields } })? }
+                    convert(
+                        quote! { partial.#key.ok_or(schematic::ConfigError::MissingRequired{ fields: { let mut fields = fields.clone(); fields.push(#key_quoted.to_owned()); fields } })? },
+                    )
                 } else {
                     // Otherwise unwrap the resolved value or use the type default
-                    quote! { partial.#key.unwrap_or_default() }
+                    convert(quote! { partial.#key.unwrap_or_default() })
                 }
             }
         } else {

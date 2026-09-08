@@ -118,7 +118,7 @@ fn test_model_config_parameters() {
     p.assign(kv).unwrap();
     assert_eq!(
         p.parameters.stop_words,
-        Some(vec!["foo".into(), "bar".into()])
+        Some(vec!["foo".to_owned(), "bar".to_owned()].into())
     );
 
     let kv = KvAssignment::try_from_cli("parameters:", r#"{"max_tokens":42,"reasoning":{"effort":"low"},"temperature":0.42,"top_p":0.42,"top_k":42,"stop_words":["foo","bar"]}"#).unwrap();
@@ -138,7 +138,7 @@ fn test_model_config_parameters() {
     assert_eq!(p.parameters.top_k, Some(42));
     assert_eq!(
         p.parameters.stop_words,
-        Some(vec!["foo".into(), "bar".into()])
+        Some(vec!["foo".to_owned(), "bar".to_owned()].into())
     );
 
     let kv = KvAssignment::try_from_cli("parameters:", r#"{"reasoning":"off"}"#).unwrap();
