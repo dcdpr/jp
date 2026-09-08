@@ -11,8 +11,8 @@ use schematic::Config;
 use crate::{
     FillDefaults,
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
-    fill::fill_map,
     delta::{PartialConfigDelta, delta_mergeable_map, delta_opt},
+    fill::fill_map,
     internal::merge::map_with_strategy,
     partial::ToPartial,
     plugins::command::CommandPluginConfig,
@@ -84,9 +84,7 @@ impl FillDefaults for PartialPluginsConfig {
             // that states a strategy is left alone.
             command: match self.command {
                 merged @ MergeableMap::Merged(_) => merged,
-                MergeableMap::Map(entries) => {
-                    fill_map(entries, defaults.command.into_map()).into()
-                }
+                MergeableMap::Map(entries) => fill_map(entries, defaults.command.into_map()).into(),
             },
         }
     }

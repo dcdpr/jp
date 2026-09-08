@@ -96,9 +96,7 @@ impl FillDefaults for PartialProviderConfig {
             // combines, and filling gaps into it would answer differently.
             mcp: match self.mcp {
                 merged @ MergeableMap::Merged(_) => merged,
-                MergeableMap::Map(entries) => {
-                    fill_map(entries, defaults.mcp.into_map()).into()
-                }
+                MergeableMap::Map(entries) => fill_map(entries, defaults.mcp.into_map()).into(),
             },
         }
     }

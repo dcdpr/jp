@@ -161,9 +161,7 @@ impl FillDefaults for PartialLlmProviderConfig {
             // that states a strategy is left alone.
             aliases: match self.aliases {
                 merged @ MergeableMap::Merged(_) => merged,
-                MergeableMap::Map(entries) => {
-                    fill_map(entries, defaults.aliases.into_map()).into()
-                }
+                MergeableMap::Map(entries) => fill_map(entries, defaults.aliases.into_map()).into(),
             },
             anthropic: self.anthropic.fill_from(defaults.anthropic),
             cerebras: self.cerebras.fill_from(defaults.cerebras),
