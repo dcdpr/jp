@@ -698,7 +698,7 @@ fn setting_a_detail_repaints_the_row() {
 }
 
 #[test]
-fn a_row_background_survives_the_regions_own_erase() {
+fn releasing_a_shaded_region_leaves_no_paint_behind() {
     let (printer, _out, err) = region_printer();
 
     let region = printer.status_region(waiting_style());
@@ -707,9 +707,13 @@ fn a_row_background_survives_the_regions_own_erase() {
     drop(region);
     printer.flush();
 
+    // The row is shaded while the region owns it, and the release clears it to
+    // the terminal default. A background on the erase would paint the row to
+    // the right edge instead, and whatever wrote there next — including the
+    // shell prompt after `jp` exits — would sit in front of that paint.
     assert_eq!(
         *err.lock(),
-        "\r\x1b[Kwaiting\r\x1b[48;5;236m\x1b[Kwaiting\x1b[49m\r\x1b[48;5;236m\x1b[K\x1b[49m"
+        "\r\x1b[Kwaiting\r\x1b[48;5;236m\x1b[Kwaiting\x1b[49m\r\x1b[K"
     );
 }
 

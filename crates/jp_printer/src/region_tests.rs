@@ -143,18 +143,24 @@ fn setting_a_detail_repaints_the_row() {
 }
 
 #[test]
-fn a_background_wraps_the_row_and_its_erase() {
+fn a_background_paints_the_row_and_the_erase_gives_it_back() {
     let (mut stack, id, mut out) = visible_stack(unsized_terminal());
     out.clear();
 
     stack.set_background(id, Some("\x1b[48;5;236m".to_owned()), &mut out);
-    // The erase asserts the background too: `\x1b[K` fills with whatever is
-    // active, so a region inside a shaded block must not punch a hole in it.
     stack.erase(&mut out);
 
+    // The drawn row asserts the background before its own `\x1b[K`, so the fill
+    // reaches the right edge and the whole row is shaded (RFD 095).
+    //
+    // The erase asserts nothing. `\x1b[K` fills with whatever is active, so a
+    // background here would paint the row to the edge rather than clear it —
+    // and with no redraw behind an erase, that paint is what the next writer
+    // finds. It showed up as a shaded tail on the shell prompt after `jp`
+    // exited.
     assert_eq!(
         String::from_utf8(out).unwrap(),
-        "\r\x1b[48;5;236m\x1b[Kwaiting\x1b[49m\r\x1b[48;5;236m\x1b[K\x1b[49m"
+        "\r\x1b[48;5;236m\x1b[Kwaiting\x1b[49m\r\x1b[K"
     );
 }
 

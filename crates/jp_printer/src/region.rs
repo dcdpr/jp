@@ -1025,6 +1025,13 @@ impl RegionStack {
     /// Clear every row the worker painted, leaving the cursor where the region
     /// began.
     ///
+    /// Cleared to the terminal's default background, never to the region's own.
+    /// `\x1b[K` fills with whatever background is active, so asserting one here
+    /// would paint the row to the right edge and leave it painted: an erase has
+    /// no redraw behind it, and the row belongs to whatever writes there next.
+    /// A row the region still owns gets its background from the redraw that
+    /// paints it.
+    ///
     /// The walk is capped at the terminal's current height.
     /// A window shrunk below the drawn row count has already lost its top rows
     /// to scrollback and they cannot be reached again; walking up anyway would
@@ -1035,9 +1042,9 @@ impl RegionStack {
             return;
         }
 
-        let top = self.entries.last();
-        let background = top.and_then(|entry| entry.background.clone());
-        let reachable = top
+        let reachable = self
+            .entries
+            .last()
             .and_then(|entry| entry.terminal.live_size().1)
             .map_or(self.drawn_rows, |height| {
                 self.drawn_rows.min(usize::from(height))
@@ -1048,7 +1055,7 @@ impl RegionStack {
             if index > 0 {
                 frame.push_str(CURSOR_UP);
             }
-            push_erase(&mut frame, background.as_deref());
+            push_erase(&mut frame);
         }
 
         write_frame(writer, &frame);
@@ -1119,11 +1126,12 @@ impl RegionStack {
 
         // A window that shrank leaves rows below the new block that nothing
         // will overwrite, so they are cleared explicitly and the cursor walks
-        // back to the last painted row.
+        // back to the last painted row. The region no longer owns them, so they
+        // clear to the default background like any other erase.
         let surplus = footprint.saturating_sub(rows.len());
         for _ in 0..surplus {
             frame.push('\n');
-            push_erase(&mut frame, background.as_deref());
+            push_erase(&mut frame);
         }
         if surplus > 0 {
             let _err = write!(frame, "\x1b[{surplus}A");
@@ -1141,20 +1149,14 @@ impl RegionStack {
     }
 }
 
-/// Append a cleared row to `frame`, under `background` when one is set.
+/// Append a cleared row to `frame`.
 ///
-/// `\x1b[K` fills with whatever background is active, so the region re-asserts
-/// its own before clearing and closes it afterwards; otherwise the erase
-/// punches an unshaded hole in a reasoning block (RFD 095).
-fn push_erase(frame: &mut String, background: Option<&str>) {
+/// No background is asserted: `\x1b[K` fills with whatever is active, so one
+/// would paint the row to the right edge rather than clear it, and nothing
+/// repaints over an erase.
+fn push_erase(frame: &mut String) {
     frame.push('\r');
-    if let Some(background) = background {
-        frame.push_str(background);
-    }
     frame.push_str(ERASE_LINE);
-    if background.is_some() {
-        frame.push_str(BACKGROUND_END);
-    }
 }
 
 /// Append a painted row to `frame`, under `background` when one is set.
