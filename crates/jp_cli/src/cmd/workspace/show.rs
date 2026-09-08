@@ -176,7 +176,7 @@ impl Show {
                 Ok(Some(subject_for(env, id, "session history")))
             }
 
-            WorkspaceTarget::Latest => Ok(roots::known_workspaces(
+            WorkspaceTarget::Recent => Ok(roots::known_workspaces(
                 &env.workspaces_dir,
                 DEFAULT_STORAGE_DIR,
             )

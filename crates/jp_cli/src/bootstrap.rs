@@ -46,11 +46,18 @@ pub(crate) enum WorkspaceRequirement {
     /// plugin child cwd, path parsing — simply do not run.
     None,
 
-    /// Resolve and validate a target root, without loading the conversation
-    /// index.
-    Resolve,
+    /// The workspace is the command's *subject* rather than its context.
+    ///
+    /// `jp w show <id>` reports on a workspace instead of running inside one,
+    /// and `jp w use <id>` records a selection for later runs to resolve.
+    /// Both resolve their own [`WorkspaceTarget`] against the pre-workspace
+    /// [`TargetEnv`], from outside every workspace and possibly to no workspace
+    /// at all, so selecting a root on their behalf would answer a question they
+    /// have not asked.
+    Subject,
 
-    /// Resolve, construct the [`Workspace`], and load the conversation index.
+    /// Resolve a root, construct the [`Workspace`], and load the conversation
+    /// index.
     Load,
 }
 
@@ -74,8 +81,7 @@ pub(crate) enum RootSource {
     /// w use`).
     SessionActive,
 
-    /// The interactive picker fallback, recorded as the session's new active
-    /// workspace.
+    /// The interactive picker fallback, resolving this run only.
     Picker,
 }
 
@@ -191,10 +197,14 @@ impl ExecutionContext {
 /// 5. Else the session-active workspace, while the workspace still has a live
 ///    checkout — recovering through surviving checkouts when the recorded one
 ///    is gone.
-/// 6. Else the picker, recorded as the new session-active workspace.
+/// 6. Else the picker, resolving this run only.
 ///
 /// Non-interactive runs ignore the session layer entirely (steps 2–3 and
 /// 5–6), so scripts never depend on hidden per-session state.
+///
+/// Resolution may *repair* the session's recorded selection when its checkout
+/// is gone, but never creates one: attaching a workspace to a session is `jp w
+/// use`'s job, or the `C` / `A` answers to the conflict prompt.
 pub(crate) fn resolve(
     target: Option<&WorkspaceTarget>,
     session: Option<&Session>,
@@ -261,7 +271,7 @@ fn source_for(target: &WorkspaceTarget) -> RootSource {
         WorkspaceTarget::Session
         | WorkspaceTarget::SessionPicker
         | WorkspaceTarget::Picker
-        | WorkspaceTarget::Latest
+        | WorkspaceTarget::Recent
         | WorkspaceTarget::Fuzzy(_) => RootSource::CliSelector,
         WorkspaceTarget::Cwd | WorkspaceTarget::Help => {
             unreachable!("resolved before source mapping")
@@ -311,7 +321,7 @@ fn ladder(env: &TargetEnv<'_>, session: &Session) -> Result<(Utf8PathBuf, RootSo
         }
 
         // Step 6: the picker.
-        (None, None) => picker(env, session),
+        (None, None) => picker(env),
     }
 }
 
@@ -531,21 +541,14 @@ fn apply_conflict_choice(
 
 /// The ladder's last step: pick from every known workspace.
 ///
-/// The choice is recorded as the session's new active workspace: an
-/// unrecordable choice would be re-made on every invocation, which is why the
-/// session layer requires a session identity at all.
-fn picker(env: &TargetEnv<'_>, session: &Session) -> Result<(Utf8PathBuf, RootSource)> {
+/// The choice resolves this run only.
+/// Taking no session identity is the point: a fallback the user was never asked
+/// to keep cannot quietly become the answer to every later run from the same
+/// terminal.
+fn picker(env: &TargetEnv<'_>) -> Result<(Utf8PathBuf, RootSource)> {
     let Some(selected) = workspace_target::pick_known_workspace(env, "Select a workspace")? else {
         return Err(no_workspace_error(env));
     };
-
-    if let Some(id) = &selected.id
-        && let Err(error) = env
-            .store
-            .record_selection(session, id, &selected.root, Utc::now())
-    {
-        warn!(%error, "Failed to record the workspace selection.");
-    }
 
     Ok((selected.root, RootSource::Picker))
 }

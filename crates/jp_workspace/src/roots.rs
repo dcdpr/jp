@@ -45,7 +45,7 @@ const LEGACY_STORAGE_LINK: &str = "storage";
 /// How recent a recorded `last_used` can be for [`upsert_root`] to skip
 /// rewriting the entry, in minutes.
 ///
-/// Recency only feeds display ordering and `latest` targeting, where sub-minute
+/// Recency only feeds display ordering and `recent` targeting, where sub-minute
 /// precision carries no meaning, so a fresh entry is left untouched rather than
 /// rewritten on every run.
 /// Skipping the rewrite keeps repeated `jp` runs from churning the user-global

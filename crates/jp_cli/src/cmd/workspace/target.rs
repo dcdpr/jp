@@ -12,7 +12,7 @@
 //! | `?`              | pick from all known workspaces                       |
 //! | `?s`, `?session` | pick from this session's workspace history           |
 //! | `s`, `session`   | the previously active workspace (like `cd -`)        |
-//! | `l`, `latest`    | the most recently used known workspace               |
+//! | `r`, `recent`    | the most recently used known workspace               |
 //! | `cwd`, `.`       | the cwd-derived workspace (as a `use` target: clear) |
 //! | `-`              | read a workspace ID from stdin                       |
 //! | `help`           | print keyword help                                   |
@@ -64,9 +64,9 @@ pub(crate) enum WorkspaceTarget {
     /// `s` / `session` — the session's previously active workspace.
     Session,
 
-    /// `l` / `latest` — the live root with the newest `last_used` across the
+    /// `r` / `recent` — the live root with the newest `last_used` across the
     /// roots registry (global recency, distinct from `s`).
-    Latest,
+    Recent,
 
     /// `cwd` / `.` — the cwd-derived workspace.
     ///
@@ -98,7 +98,7 @@ impl FromStr for WorkspaceTarget {
             "?" => Self::Picker,
             "?s" | "?session" => Self::SessionPicker,
             "s" | "session" => Self::Session,
-            "l" | "latest" => Self::Latest,
+            "r" | "recent" => Self::Recent,
             "cwd" | "." => Self::Cwd,
             "-" => Self::Stdin,
             "help" => Self::Help,
@@ -119,7 +119,7 @@ pub(crate) fn help() -> String {
           ?             pick from all known workspaces
           ?s, ?session  pick from this session's workspace history
           s, session    the previously active workspace (like `cd -`)
-          l, latest     the most recently used known workspace
+          r, recent     the most recently used known workspace
           cwd, .        the cwd-derived workspace (as a `use` target: clears
                         the session selection)
           -             read a workspace ID from stdin
@@ -314,7 +314,7 @@ pub(crate) fn resolve(target: &WorkspaceTarget, env: &TargetEnv<'_>) -> Result<R
             pick("Select a workspace", rows).map(ResolvedTarget::Root)
         }
 
-        WorkspaceTarget::Latest => latest_root(env)
+        WorkspaceTarget::Recent => recent_root(env)
             .ok_or(no_known_workspaces().into())
             .map(ResolvedTarget::Root),
 
@@ -407,7 +407,7 @@ pub(crate) fn pick_known_workspace(
 }
 
 /// The live root with the newest `last_used` across every known workspace.
-fn latest_root(env: &TargetEnv<'_>) -> Option<SelectedRoot> {
+fn recent_root(env: &TargetEnv<'_>) -> Option<SelectedRoot> {
     // `known_workspaces` orders by most recently used checkout, rootless
     // workspaces last, so the first workspace with a root holds the answer.
     roots::known_workspaces(&env.workspaces_dir, DEFAULT_STORAGE_DIR)
