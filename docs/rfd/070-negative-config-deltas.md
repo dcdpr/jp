@@ -788,13 +788,38 @@ the first invocation's per-directive deltas, preserving the `events.json`
 cleanliness guarantee from [RFD 054] while giving first-invocation `-c`/`-C`
 directives the same per-directive persistence as subsequent ones.
 
+#### Pinning is a constraint on the reshaping
+
+A conversation carries its own configuration, and its behavior does not change
+underneath it.
+Upgrading JP or editing the workspace config leaves every existing conversation
+resolving exactly as it did before; `-c WORKSPACE` is how a user opts a
+conversation forward.
+That rule predates this RFD and is not up for revision here.
+
+A resolved `AppConfig` delivers the rule by construction.
+Resolving bakes program defaults into concrete values, so a
+`#[setting(default)]` that changes in a later release cannot reach a
+conversation created before it, and the stored type is total: every field has a
+value, and the value is valid.
+
+Storing a `PartialAppConfig` instead gives up both.
+A partial holds only what its source stated, so every unstated field would take
+its default from whichever binary happens to resolve it, and a conversation
+would start behaving differently after an upgrade.
+It is also not total: nothing about the type says the stored config is complete,
+and a partial holding almost nothing is a valid value of it.
+
+The fix is not to add a layer that reconstructs what resolution used to provide.
+It is to keep the resolved type and narrow *what* is resolved into it.
+
 #### File format
 
 `base_config.json` becomes a structured object with two fields:
 
 ```json
 {
-  "base": { /* PartialAppConfig — the workspace snapshot */ },
+  "base": { /* AppConfig — the resolved workspace configuration */ },
   "init": [
     { /* ConfigDelta — first creation-time directive */ },
     { /* ConfigDelta — next directive */ }
@@ -802,9 +827,14 @@ directives the same per-directive persistence as subsequent ones.
 }
 ```
 
-- **`base`** is the workspace `PartialAppConfig` — files merged via
-  inheritance, without environment variables, `-c` args, or CLI flags.
-  Same content as today's `base_config.json`; unchanged shape for hand-editing.
+- **`base`** is a resolved `AppConfig`, as today.
+  What changes is its input: the workspace's own config files merged via
+  inheritance — `.jp/config.toml` and the `.jp.toml` chain — resolved on their
+  own.
+  User-global config, user-workspace config, environment variables, `-c` args
+  and CLI flags are all excluded.
+  It stays the total, valid, defaults-baked type the conversation has always
+  stored; it simply stops absorbing anything that is not workspace state.
 - **`init`** is an ordered list of `ConfigDelta` entries, one per directive
   (`-c` file, `-c key=value`, `-c '{...}'`, `-C ...`, or the trailing
   shortcut-flags batch) from the invocation that created the conversation.
@@ -816,32 +846,75 @@ per-directive model described earlier — `events.json` stays free of leading
 config blobs.
 
 ```txt
-Before:  base_config.json = fully resolved PartialAppConfig  → no claims anywhere
-After:   base_config.json = { base: workspace-only partial,
+Before:  base_config.json = AppConfig resolved from every source at once
+After:   base_config.json = { base: AppConfig resolved from workspace files,
                               init: [creation-time ConfigDeltas] }
          events.json       = post-creation ConfigDeltas + ConversationEvents
 ```
 
-Separating env vars from the workspace base is deliberate.
+#### The workspace has to be self-contained
+
+A workspace is committed to a repository and cloned by other people.
+Anything machine-local baked into `base` breaks for them: a model named only in
+*my* user-global config resolves on my machine and resolves to nothing on my
+colleague's.
+
+So `base` draws from workspace files alone, and conversation creation requires
+those files to produce a valid `AppConfig` by themselves, failing loudly when
+they do not.
+The end state is that a colleague clones the repository and `jp query --new
+hello` works, given the external state JP cannot carry — provider credentials
+in the environment, a running `ollama`, a `command` on `PATH`.
+
+That draws the line in the same place this RFD already draws it for environment
+variables.
+User-global and user-workspace config are user intent, not workspace properties,
+so they join env vars, `-c` args and flags in `init`, where they carry a claim
+identity and can be reverted.
+The [source identity](#source-identity) table already labels them `<user-local>`
+and `<user-workspace>`, redacted for exactly this reason: the stream travels
+with the repository.
+
+Those contributions still travel with the conversation, and should.
+A conversation records the configuration its turns actually ran under, so a
+colleague reading it sees what produced the answers rather than what their own
+machine would have produced.
+
+The check runs at creation, where `base` is written.
+`base` is never re-resolved afterward, so existing conversations are unaffected
+and only `jp query --new` begins to fail, in a workspace that was not portable
+to begin with.
+
+This rejects an invocation that succeeds today, so it ships as its own change
+ahead of Phase 3 rather than inside it: the error a user meets should arrive
+with a release note explaining it, not alongside a storage format change that
+makes it ambiguous which one broke them.
+
+Separating user and machine state from the workspace base is deliberate.
 An env var like `JP_CFG_ASSISTANT_MODEL_PARAMETERS_REASONING=high` is user
-intent for this session, not a workspace property.
-Storing it as a creation- time delta in `init` (alongside `-c` and flag
+intent for this session, not a workspace property, and neither is a value from
+user-global or user-workspace config.
+Storing each as a creation-time delta in `init` (alongside `-c` and flag
 contributions) keeps the boundary clean: `base` is workspace state, `init`
 captures everything layered on at invocation time with full provenance.
 
 This preserves [RFD 054]'s readability win: the workspace snapshot remains a
-plain `PartialAppConfig` under `base`, inspectable and hand-editable;
-`events.json` contains no creation-time config blob.
+plain `AppConfig` under `base`, inspectable and hand-editable; `events.json`
+contains no creation-time config blob.
 A creation-time `-c dev` (which may be hundreds of lines) lives inside `init`,
 not in `events.json`.
 
 #### API changes
 
-- **`ConversationStream`**: the `base_config: Arc<AppConfig>` field is joined by
-  an `init: Vec<ConfigDelta>` field holding the creation-time deltas in order.
-  `config()`'s fold becomes `AppConfig::default()` → `base` partial → each
-  `init` delta → each event-stream delta, using the `apply_config_delta` helper
-  from Phase 1 for deltas.
+- **`ConversationStream`**: the `base_config: Arc<AppConfig>` field keeps its
+  type and is joined by an `init: Vec<ConfigDelta>` field holding the
+  creation-time deltas in order.
+  Only its *content* changes: it is resolved from workspace config files alone
+  rather than from every source at once.
+  `config()`'s fold becomes `base_config.to_partial()` → each `init` delta →
+  each event-stream delta, using the `apply_config_delta` helper from Phase 1
+  for deltas — the same shape as today, with `init` inserted ahead of the
+  events.
 - **`from_parts()` / `to_parts()`**: the `base_config` JSON component now has
   the `{ base, init }` shape.
   The signatures keep two JSON components on the outside (base_config JSON
@@ -858,7 +931,9 @@ not in `events.json`.
   compat](#backward-compat-for-base_configjson) below.
 - **Fork** (`crates/jp_cli/src/cmd/conversation/fork.rs`): clone the source's
   `base` and `init` together when seeding the new conversation.
-  A source's initial overrides flow into the fork's `init` list unchanged.
+  A source's initial overrides flow into the fork's `init` list unchanged, and
+  the fork inherits the source's resolved base rather than re-resolving from
+  current files, so forking does not quietly move a conversation forward.
 
 #### Backward compat for `base_config.json`
 
@@ -867,13 +942,19 @@ transparently:
 
 1. Parse `base_config.json` as JSON.
 2. If the root is a JSON object with a `base` key → new format; use `base` as
-   the workspace partial and `init` (defaulting to `[]` if absent) as the
-   creation-time delta list.
-3. Otherwise treat the root object as a legacy `PartialAppConfig` and wrap it as
-   `{ base: <that>, init: [] }`.
+   the resolved workspace config and `init` (defaulting to `[]` if absent) as
+   the creation-time delta list.
+3. Otherwise treat the root object as a legacy `AppConfig` and wrap it as `{
+   base: <that>, init: [] }`.
    Legacy conversations therefore have an empty `init` list, matching their
    historical "no claims" behavior.
    `-C` is a no-op on their fields.
+
+A legacy file needs no conversion beyond the wrapping.
+It already holds a resolved `AppConfig`; the only difference from a new one is
+that the creating invocation's overrides are baked into it rather than sitting
+in `init`, which is exactly why `-C` cannot reach them.
+The conversation stays pinned as it is today.
 
 **Writers always emit the new shape, and explicitly migrate legacy files on
 persist.** On every persist, `Storage::persist_conversation` inspects the
@@ -1171,10 +1252,14 @@ heavy use of layered config.
 A future turn-based counting mechanism (deferred) would fix this.
 
 **Conversation creation change.** `base_config.json` changes shape: it becomes a
-JSON object `{ base: PartialAppConfig, init: Vec<ConfigDelta> }` instead of a
-flat `PartialAppConfig`.
+JSON object `{ base: AppConfig, init: Vec<ConfigDelta> }` instead of a flat
+`AppConfig`.
 Code that reads `base_config.json` expecting the flat shape needs to handle the
 new form (the loader falls back transparently on legacy files).
+The stored type is unchanged; what changes is that `base` is resolved from the
+workspace's own config files alone, with user-global config, user-workspace
+config, environment variables, `-c` args and flags moved into `init` where they
+carry claims.
 The steady-state persist cost is unchanged: `base_config.json` is written once
 at creation, subsequent persists write only `events.json` and `metadata.json`.
 
@@ -1743,23 +1828,77 @@ Tests:
 Depends on Phase 1.
 Can be merged independently.
 
+### Phase 2b: Require a workspace to be self-contained
+
+A prerequisite for Phase 3, shipped separately because it rejects an invocation
+that succeeds today (see [The workspace has to be
+self-contained](#the-workspace-has-to-be-self-contained)).
+
+Conversation creation resolves the workspace's own config files —
+`.jp/config.toml` and the `.jp.toml` chain, merged via inheritance — and fails
+when they do not produce a valid `AppConfig`.
+User-global config, user-workspace config, environment variables, `-c` arguments
+and CLI flags are all excluded from that resolution, since none of them travel
+with the repository.
+
+The error names the field that is missing and says that a value from user-global
+config, user-workspace config, an environment variable or a flag does not count.
+That matters because the user's own machine will still be supplying the value
+while they read the message, so "no model configured" alone reads as a lie.
+The message's job is to explain that the workspace is not portable, not that the
+field is unset.
+
+This is worth having on its own terms, ahead of anything it unblocks: it is the
+check that makes "clone the repository and run `jp query --new`" a property a
+team can rely on rather than a thing that happens to work on the machine where
+the workspace was made.
+
+Tests:
+
+- A workspace whose own files name a model creates a conversation.
+- A workspace whose own files name no model fails, even when user-global config,
+  an env var, or `--model` supplies one.
+- The failure names the missing field and says where it may not come from.
+- `jp query` on an existing conversation is unaffected, including in a workspace
+  that would now fail to create one.
+
+Depends on nothing else in this RFD.
+Ships ahead of Phase 3 with its own change-log entry.
+
 ### Phase 3: Conversation creation and `base_config.json` shape change
 
+This phase is the one that can break the pinning rule (see [Pinning is a
+constraint on the reshaping](#pinning-is-a-constraint-on-the-reshaping)), so its
+tests carry a case that fails loudly if it does: resolve a conversation, change
+a `#[setting(default)]` value, resolve it again, and assert the result is
+unchanged.
+That test is why `base` stays a resolved `AppConfig`, and it belongs in the same
+commit as the shape change rather than after it.
+
 This phase reshapes `base_config.json` to carry creation-time per-directive
-deltas alongside the workspace snapshot.
+deltas alongside the workspace snapshot, and narrows what that snapshot resolves
+from.
 
 **`ConversationStream`** (`crates/jp_conversation/src/stream.rs`):
 
 - Add `init: Vec<ConfigDelta>` as a first-class field, between `base_config` and
   `events`.
-- Update `config()` to fold `AppConfig::default()` → `base` partial → each
-  `init` delta → each event delta, using the `apply_config_delta` helper from
-  Phase 1 for deltas.
+  `base_config: Arc<AppConfig>` keeps its type.
+- Update `config()` to fold `base_config.to_partial()` → each `init` delta →
+  each event delta, using the `apply_config_delta` helper from Phase 1 for
+  deltas.
 - Update `Iter`, `IterMut`, and `IntoIter` to fold `base` and each `init` delta
   before walking events, so per-event views match `config()`.
 - `from_parts()` / `to_parts()` keep their two-component signatures (base_config
   JSON value, events JSON vec); the JSON shape of the base_config component
   changes to `{ base, init }`.
+
+**Conversation creation** resolves `base` from the workspace's own config files
+and records user-global config, user-workspace config, environment variables,
+`-c` args and flags as `init` deltas, rather than resolving all of them together
+into one snapshot.
+Phase 2b already rejects a workspace whose files do not resolve on their own, so
+this phase can rely on `base` being valid.
 
 **Storage layer** (`jp_storage`):
 
@@ -1830,16 +1969,19 @@ Tests:
 - Legacy flat `base_config.json` loads as `{ base, init: [] }` and the stream
   behaves as today.
 - Legacy file is rewritten to the new shape on first persist: create a
-  conversation directory with a flat `PartialAppConfig` `base_config.json`,
-  persist the loaded stream unchanged, assert the on-disk file now has the `{
-  base, init }` shape with the legacy content verbatim under `base`.
+  conversation directory with a flat `AppConfig` `base_config.json`, persist the
+  loaded stream unchanged, assert the on-disk file now has the `{ base, init }`
+  shape with the legacy content verbatim under `base`.
 - Once rewritten, subsequent persists copy the new-shape file verbatim (the
   user-hand-edit preservation path still works).
-- Fork propagates `init` from source: a forked conversation carries the same
-  creation-time deltas.
+- **A changed program default does not reach an existing conversation**: resolve
+  a conversation, change a `#[setting(default)]` value, resolve again, assert
+  the result is unchanged.
+- Fork propagates `base` and `init` from source: a forked conversation carries
+  the same creation-time deltas and the same resolved base.
 - `conversation path --base-config` still returns the `base_config.json` path.
 
-Depends on Phase 2.
+Depends on Phase 2 and Phase 2b.
 Can be merged independently.
 
 ### Phase 4: `-C` flag and claim-history-driven revert
@@ -1879,11 +2021,12 @@ Add `CfgDirective` wrapper enum with `Apply` and `Revert` variants wrapping
   identity set and are a no-op.
   Scope = `{field | claims_state[field] has any identity in target_set}`.
   Walk deltas backward past all claims whose identity list intersects the target
-  set, stopping at the first claim with no target-matching identity (or base).
+  set, stopping at the first claim with no target-matching identity (or `base`,
+  which carries no claims and is the floor of any walk-back).
 - **Key-value `-C` (value-scoped)**: read the current resolved value of the
   field, compare to the specified value, skip on mismatch.
   Walk deltas backward past all claims on the field where the resolved value was
-  still the target, stop at the first different state (or base).
+  still the target, stop at the first different state (or `base`).
 - **JSON-object `-C`**: pre-expand via `try_merge_object` into per-leaf kv
   reverts, run the kv-revert algorithm for each leaf independently.
 - Emit diagnostics for unmatched `-C` invocations (see [Missing
@@ -1915,6 +2058,9 @@ Depends on Phase 3.
   config) is defined in a future RFD.
   This RFD assumes inherited conversation partials claim every field they set
   under `hash(conversation_id)`, collapsing inner provenance.
+- [RFD 038]: Config Reset Keywords — defines `--cfg=WORKSPACE`, which is how a
+  user opts a conversation forward onto current workspace config, and so the
+  reason a conversation may otherwise stay pinned.
 - [RFD 054]: Split Conversation Config and Events — separates `base_config`
   into its own file.
   This RFD reshapes that file to carry both the workspace snapshot and
@@ -1929,6 +2075,7 @@ Depends on Phase 3.
 
 [RFD 008]: 008-ordered-tool-directives.md
 [RFD 035]: 035-multi-root-config-load-path-resolution.md
+[RFD 038]: 038-config-reset-keywords.md
 [RFD 054]: 054-split-conversation-config-and-events.md
 [RFD 060]: 060-config-explain.md
 [RFD 078]: 078-tool-config-mutation.md
