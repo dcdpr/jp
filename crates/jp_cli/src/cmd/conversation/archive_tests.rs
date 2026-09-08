@@ -3,19 +3,13 @@ use std::sync::Arc;
 use chrono::{DateTime, TimeZone as _, Utc};
 use jp_config::{AppConfig, conversation::DefaultConversationId};
 use jp_conversation::{Conversation, ConversationId};
-use jp_printer::{OutputFormat, Printer};
 use jp_workspace::{
     Workspace,
     session::{Session, SessionId, SessionSource},
 };
-use tokio::runtime::Runtime;
 
 use super::*;
-use crate::{
-    Globals,
-    bootstrap::ExecutionContext,
-    cmd::{conversation_id::PositionalIds, target::resolve_request, time::CreationRange},
-};
+use crate::cmd::{conversation_id::PositionalIds, target::resolve_request, time::CreationRange};
 
 fn make_id(secs: u64) -> ConversationId {
     ConversationId::try_from(DateTime::<Utc>::UNIX_EPOCH + std::time::Duration::from_secs(secs))
@@ -43,29 +37,6 @@ fn workspace_with_active_conversation(id: ConversationId) -> (Workspace, Session
     .unwrap();
 
     (ws, session)
-}
-
-/// A `Ctx` over a workspace holding a single unpinned, session-inactive
-/// conversation.
-fn test_ctx(id: ConversationId) -> Ctx {
-    let mut workspace = Workspace::in_memory("/tmp/jp-cli-archive-test");
-    workspace.create_conversation_with_id(
-        id,
-        Conversation::default(),
-        Arc::new(AppConfig::new_test()),
-    );
-
-    let (printer, _, _) = Printer::memory(OutputFormat::TextPretty);
-    Ctx::new(
-        ExecutionContext::for_workspace(&workspace),
-        workspace,
-        None,
-        Runtime::new().unwrap(),
-        Globals::default(),
-        AppConfig::new_test(),
-        None,
-        printer,
-    )
 }
 
 /// Default constructor for tests — no targets, no filters, default confirm.
@@ -133,36 +104,34 @@ fn explicit_target_resolves_to_that_conversation() {
     assert_eq!(handles[0].id(), id);
 }
 
-/// A bulk archive prompts per conversation.
-/// With nobody to answer, a failed prompt used to read as "skip", so the run
-/// reported success having archived nothing.
-///
-/// `--no-confirm` is still the way through, and it must not start asking.
+/// An explicit flag decides on its own, whatever the conversation looks like.
 #[test]
-fn a_required_confirmation_without_a_user_fails_rather_than_skipping() {
-    let id = make_id(1000);
-    let mut ctx = test_ctx(id);
-    ctx.term.interactive = false;
+fn an_explicit_confirm_flag_overrides_every_other_signal() {
+    for is_active in [false, true] {
+        for is_pinned in [false, true] {
+            for multi in [false, true] {
+                assert!(
+                    needs_confirmation(Some(true), is_active, is_pinned, multi),
+                    "--confirm always asks"
+                );
+                assert!(
+                    !needs_confirmation(Some(false), is_active, is_pinned, multi),
+                    "--no-confirm never asks"
+                );
+            }
+        }
+    }
+}
 
-    // `multi` is what makes the prompt required here: the conversation is
-    // neither pinned nor session-active.
-    let error = confirm_archive(&mut ctx, &id, None, true)
-        .expect_err("an archive nobody can confirm must not be silently skipped");
-    let crate::error::Error::Command(error) = error else {
-        panic!("expected a command error, got: {error}");
-    };
-    assert_eq!(
-        error.message.as_deref(),
-        Some(
-            "archiving conversation jp-c10000 needs a confirmation and nobody is available to \
-             give one; pass --no-confirm to archive it without asking"
-        )
-    );
-
-    assert!(
-        confirm_archive(&mut ctx, &id, Some(false), true).unwrap(),
-        "--no-confirm archives without asking"
-    );
+/// Archiving is reversible, so the default only stops for the cases a user is
+/// likely to regret: the conversation they are working in, one they marked as
+/// worth keeping, and a run that covers more than the one they named.
+#[test]
+fn without_a_flag_only_pinned_active_or_bulk_archives_ask() {
+    assert!(!needs_confirmation(None, false, false, false));
+    assert!(needs_confirmation(None, true, false, false), "active asks");
+    assert!(needs_confirmation(None, false, true, false), "pinned asks");
+    assert!(needs_confirmation(None, false, false, true), "bulk asks");
 }
 
 /// Any filter flag skips the load request — the command resolves its own

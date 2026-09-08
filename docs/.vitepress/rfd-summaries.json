@@ -284,7 +284,7 @@
     "summary": "Introduces `-C` flag to selectively revert previously applied config sources using provenance tracking via claims maps."
   },
   "071-conversation-archiving.md": {
-    "hash": "610123dc36a3a09bbf3f9b26b9910b7c37bf0e45ae43e0b65e6420b7b94eb69c",
+    "hash": "6addf85d9b4eddbe8e7734488a17cd153af5d96d423ef9ff017c5219160ab66d",
     "summary": "Adds conversation archiving to JP, moving inactive conversations to a hidden partition while preserving them."
   },
   "038-config-reset-keywords.md": {

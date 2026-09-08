@@ -33,6 +33,11 @@ impl InlineOption {
 /// typing a single character.
 /// The '?' key always shows help text.
 ///
+/// Per-option descriptions stay behind '?'.
+/// A caution the user has to see before answering belongs in
+/// [`with_help_message`], which renders on the line below the prompt without
+/// being asked for.
+///
 /// # Example
 ///
 /// ```no_run
@@ -51,10 +56,13 @@ impl InlineOption {
 ///     Err(error) => eprintln!("Error: {error}"),
 /// }
 /// ```
+///
+/// [`with_help_message`]: Self::with_help_message
 pub struct InlineSelect {
     message: String,
     options: Vec<InlineOption>,
     default: Option<char>,
+    help_message: Option<String>,
 }
 
 impl InlineSelect {
@@ -69,6 +77,7 @@ impl InlineSelect {
             message: message.into(),
             options,
             default: None,
+            help_message: None,
         }
     }
 
@@ -76,6 +85,19 @@ impl InlineSelect {
     #[must_use]
     pub fn with_default(mut self, default: char) -> Self {
         self.default = Some(default);
+        self
+    }
+
+    /// Sets a message rendered on the line below the prompt.
+    ///
+    /// Shown for as long as the prompt is open, without the user pressing '?',
+    /// and cleared along with the prompt once an option is chosen.
+    /// Use it for something the user needs in order to answer at all, such as a
+    /// warning that the action cannot be reversed; the per-option descriptions
+    /// remain behind '?'.
+    #[must_use]
+    pub fn with_help_message(mut self, help_message: impl Into<String>) -> Self {
+        self.help_message = Some(help_message.into());
         self
     }
 
@@ -120,7 +142,7 @@ impl InlineSelect {
                 starting_input: None,
                 default: self.default,
                 placeholder: None,
-                help_message: None,
+                help_message: self.help_message.as_deref(),
                 formatter: &|c| c.to_string(),
                 default_value_formatter: &|c| c.to_string(),
                 parser: &|input: &str| {

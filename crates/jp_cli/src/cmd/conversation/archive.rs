@@ -1,17 +1,16 @@
 use crossterm::style::Stylize as _;
 use jp_conversation::{Conversation, ConversationId};
-use jp_inquire::InlineOption;
 use jp_workspace::{ConversationHandle, Workspace};
 
 use crate::{
     cmd::{
-        ConversationLoadRequest, Error as CmdError, Output,
+        ConversationLoadRequest, Output,
         conversation_id::PositionalIds,
         lock::{LockOutcome, LockRequest, acquire_lock},
         time::{CreationRange, TimeThreshold},
     },
     ctx::Ctx,
-    shared::confirm::ConfirmFlag,
+    shared::confirm::{ConfirmFlag, ConversationAction, confirm_conversation_action},
 };
 
 /// Archive conversations.
@@ -89,19 +88,38 @@ impl Archive {
             handles
         };
 
+        let active_id = ctx
+            .session
+            .as_ref()
+            .and_then(|s| ctx.workspace.session_active_conversation(s));
         let preference = self.confirm.preference();
         let multi = handles.len() > 1;
+
         for handle in handles {
             let id = handle.id();
 
-            if !confirm_archive(ctx, &id, preference, multi)? {
-                continue;
-            }
-
+            // The lock comes before the question and is held until it is
+            // answered, so a conversation another tab is still writing to
+            // cannot be archived out from under it by an answer given an hour
+            // after the details were read.
             let lock = match acquire_lock(LockRequest::from_ctx(handle, ctx)).await? {
                 LockOutcome::Acquired(lock) => lock,
                 LockOutcome::NewConversation | LockOutcome::ForkConversation(_) => unreachable!(),
             };
+
+            let asks = needs_confirmation(
+                preference,
+                active_id == Some(id),
+                lock.metadata().is_pinned(),
+                multi,
+            );
+
+            if asks
+                && !confirm_conversation_action(ctx, ConversationAction::Archive, &lock, active_id)?
+            {
+                continue;
+            }
+
             ctx.workspace.archive_conversation(lock.into_mut())?;
             ctx.printer.println(format!(
                 "Conversation {} archived.",
@@ -134,82 +152,21 @@ impl Archive {
     }
 }
 
-/// Decide whether to archive `id`, prompting when appropriate.
+/// Whether archiving a conversation asks the user first.
 ///
-/// Returns `true` to proceed, `false` to skip.
-/// `preference` is the resolved `--confirm` / `--no-confirm` choice:
-/// `Some(true)` always prompts, `Some(false)` never prompts, and `None` prompts
-/// only for pinned or active conversations, or when archiving more than one
-/// conversation at once (`multi`).
-/// The conversation title, when known, is shown so a bulk selection can be
-/// verified.
-///
-/// Errors when a prompt is required and no user is available to answer it.
-/// Returning `false` there would read as the user declining, and a bulk archive
-/// would report success having archived nothing.
-fn confirm_archive(
-    ctx: &mut Ctx,
-    id: &ConversationId,
+/// `preference` is the resolved `--confirm` / `--no-confirm` choice and wins
+/// outright when set.
+/// Without one, a pinned or session-active conversation asks, and so does every
+/// conversation in a run covering more than one (`multi`).
+const fn needs_confirmation(
     preference: Option<bool>,
+    is_active: bool,
+    is_pinned: bool,
     multi: bool,
-) -> Result<bool, crate::error::Error> {
-    if preference == Some(false) {
-        return Ok(true);
-    }
-
-    let handle = ctx.workspace.acquire_conversation(id)?;
-    let meta = ctx.workspace.metadata(&handle)?;
-
-    let is_active = ctx
-        .session
-        .as_ref()
-        .and_then(|s| ctx.workspace.session_active_conversation(s))
-        == Some(*id);
-    let is_pinned = meta.is_pinned();
-
-    // Default (`None`) prompts only for pinned, active, or bulk archives;
-    // `--confirm` (`Some(true)`) prompts for everything.
-    if preference != Some(true) && !is_active && !is_pinned && !multi {
-        return Ok(true);
-    }
-
-    if !ctx.term.interactive {
-        return Err(CmdError::from(format!(
-            "archiving conversation {id} needs a confirmation and nobody is available to give \
-             one; pass --no-confirm to archive it without asking"
-        ))
-        .into());
-    }
-
-    // Active subsumes pinned in the prompt; with `--confirm` a plain
-    // conversation gets an unqualified prompt. The title, when known, is shown
-    // so a bulk selection can be verified.
-    let id_label = id.to_string().bold().yellow();
-    let title = meta
-        .title
-        .as_deref()
-        .map(|t| format!(" \"{t}\""))
-        .unwrap_or_default();
-    let prompt = if is_active {
-        format!("Archive the active conversation {id_label}{title}?")
-    } else if is_pinned {
-        format!("Archive the pinned conversation {id_label}{title}?")
-    } else {
-        format!("Archive conversation {id_label}{title}?")
-    };
-
-    let options = vec![
-        InlineOption::new('y', "yes, archive"),
-        InlineOption::new('n', "no, skip"),
-    ];
-
-    let result = jp_inquire::InlineSelect::new(&prompt, options)
-        .with_default('n')
-        .prompt(&mut ctx.printer.prompt_writer());
-
-    match result {
-        Ok('y') => Ok(true),
-        _ => Ok(false),
+) -> bool {
+    match preference {
+        Some(explicit) => explicit,
+        None => is_active || is_pinned || multi,
     }
 }
 

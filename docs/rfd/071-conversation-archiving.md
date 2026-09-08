@@ -72,14 +72,31 @@ jp c archive --inactive-since 6mo --yes
 ```
 
 When archiving a pinned or active session conversation, JP prompts for
-confirmation:
+confirmation, showing the conversation's details above the question so a bulk
+selection can be checked one entry at a time:
 
 ```
-Archive the active conversation jp-c123? [y/n/?]
+Archiving conversation jp-c123
+
+             ID  jp-c123
+          Title  Rework the config pipeline
+         Events  12
+          Turns  6
+ Latest Message  2 hours ago (2026-09-07 18:12:04)
+ Last Activated  Currently Active
+         Pinned  No
+          Local  Yes
+
+Archive this conversation? [y,n,?]
 ```
 
 The prompt defaults to "no" and the conversation is skipped if declined.
 `--yes` (`-y`) suppresses the prompt for batch use.
+
+The block is the same one `jp c rm` shows, and the same one `jp c show` renders
+without a heading; all three go through `DetailsFmt` in
+`jp_cli::format::conversation`, and the prompt itself through
+`jp_cli::shared::confirm::confirm_conversation_action`.
 
 #### Unarchiving
 
@@ -240,6 +257,15 @@ by `jp c rm` so the two commands' creation-range semantics stay in lockstep.
 `jp c unarchive` returns `ConversationLoadRequest::none()` because its targets
 are in the archive partition and cannot be resolved through the active index.
 It handles resolution internally.
+
+The conversation lock is acquired before the confirmation prompt renders and
+held until the answer arrives, so the details the user reads describe the state
+their answer acts on.
+Without that ordering, a prompt left unanswered while another terminal continued
+the conversation would archive work the user never saw.
+The cost is that a bulk archive waits on the lock for each conversation in turn,
+including ones the user goes on to skip.
+`jp c rm` orders the two the same way.
 
 ## Drawbacks
 

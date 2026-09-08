@@ -39,6 +39,24 @@ fn test_inline_option_new() {
     assert_eq!(opt.description, "yes - proceed");
 }
 
+/// The help message is a separate channel from the '?' listing: it reaches a
+/// user who answers straight away, which is exactly the user a warning about an
+/// irreversible action needs to reach.
+#[test]
+fn help_message_is_unset_until_asked_for_and_kept_out_of_the_option_listing() {
+    let options = vec![InlineOption::new('y', "yes, remove it")];
+
+    let plain = InlineSelect::new("Remove this?", options.clone());
+    assert_eq!(plain.help_message, None);
+
+    let warned = InlineSelect::new("Remove this?", options).with_help_message("cannot be undone");
+    assert_eq!(warned.help_message.as_deref(), Some("cannot be undone"));
+
+    // '?' still lists only the options, so the two do not duplicate each other.
+    let help = warned.build_help_text().unwrap();
+    assert_eq!(help, "y - yes, remove it\n? - print help");
+}
+
 #[test]
 fn test_inline_select_build_help_text() {
     let options = vec![

@@ -55,7 +55,7 @@ impl Show {
                 .with_last_activated_at(Some(conversation.last_activated_at))
                 .with_pinned_flag(conversation.is_pinned())
                 .with_local_flag(local)
-                .with_active_conversation(active_id.unwrap_or(id))
+                .with_active_conversation(active_id)
                 .with_expires_at(conversation.expires_at)
                 .with_labels(labels)
                 .with_attachments(attachments)
@@ -67,7 +67,7 @@ impl Show {
             if ctx.printer.format().is_json() {
                 print_json(&ctx.printer, &details.json());
             } else {
-                print_details(&ctx.printer, details.title.as_deref(), details.rows());
+                print_details(&ctx.printer, details.heading(), details.rows());
             }
         }
         Ok(())
