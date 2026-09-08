@@ -741,6 +741,14 @@ impl ConversationStream {
         })
     }
 
+    /// Returns an iterator over the [`ConfigDelta`] events in the stream.
+    pub fn config_deltas(&self) -> impl Iterator<Item = &ConfigDelta> {
+        self.events.iter().filter_map(|e| match e {
+            InternalEvent::ConfigDelta(delta) => Some(delta),
+            _ => None,
+        })
+    }
+
     /// Returns an iterator over the [`EventOverlay`] events in the stream.
     pub fn overlays(&self) -> impl Iterator<Item = &EventOverlay> {
         self.events.iter().filter_map(|e| match e {

@@ -17,6 +17,129 @@ fn empty_pipeline() -> ConfigPipeline {
     }
 }
 
+/// A config whose `bash` tool grants the named filesystem paths.
+fn config_with_fs_rules(paths: &[&str]) -> jp_config::AppConfig {
+    use jp_config::conversation::tool::{
+        PartialToolConfig, ToolSource,
+        access::{PartialAccessConfig, PartialFsRuleConfig},
+    };
+
+    let mut partial = PartialAppConfig::new_test();
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("bash".to_owned(), PartialToolConfig {
+            source: Some(ToolSource::Local { tool: None }),
+            access: Some(PartialAccessConfig {
+                fs: paths
+                    .iter()
+                    .map(|path| PartialFsRuleConfig {
+                        path: Some((*path).to_owned()),
+                        read: Some(true),
+                        ..PartialFsRuleConfig::default()
+                    })
+                    .collect(),
+                env: jp_config::types::vec::MergeableVec::default(),
+            }),
+            ..PartialToolConfig::default()
+        });
+
+    jp_config::util::build(partial).expect("valid config")
+}
+
+// `override_to_record` names no field and knows no merge strategy: it merges,
+// resolves, and compares whole configs. These tests therefore cover the axes a
+// field can vary along — how it merges, and whether the override changes it —
+// rather than particular fields. Each picks a field that merges the way the
+// case needs.
+
+/// A field that merges by replacement, restated at its current value.
+#[test]
+fn an_override_matching_the_current_scalar_records_nothing() {
+    let current = jp_config::util::build(PartialAppConfig::new_test()).unwrap();
+
+    let mut overrides = PartialAppConfig::empty();
+    overrides.conversation.start_local = Some(current.conversation.start_local);
+
+    assert_eq!(override_to_record(&current, overrides).unwrap(), None);
+}
+
+/// A field that merges by replacement, given a different value.
+#[test]
+fn an_override_changing_a_scalar_is_recorded() {
+    let current = jp_config::util::build(PartialAppConfig::new_test()).unwrap();
+
+    let mut overrides = PartialAppConfig::empty();
+    overrides.conversation.start_local = Some(!current.conversation.start_local);
+
+    assert!(override_to_record(&current, overrides).unwrap().is_some());
+}
+
+/// A list carrying its own merge strategy, restated at its current value.
+///
+/// Such a list is the same shape whether the element it holds is already there
+/// or not, so only resolving the merge tells the two apart — which is why the
+/// comparison is not made against the override itself.
+///
+/// The override is scoped to the subtree under test rather than being a whole
+/// snapshot: a snapshot layered over itself appends every list that merges by
+/// appending without deduplicating to itself, which is a real change.
+/// See `an_override_repeating_an_appending_list_is_recorded`.
+#[test]
+fn an_override_restating_an_existing_rule_records_nothing() {
+    let current = config_with_fs_rules(&["src"]);
+
+    let mut overrides = PartialAppConfig::empty();
+    overrides.conversation.tools = config_with_fs_rules(&["src"])
+        .to_partial()
+        .conversation
+        .tools;
+
+    assert_eq!(override_to_record(&current, overrides).unwrap(), None);
+}
+
+/// A list that merges by appending, restated at a value it already holds.
+///
+/// Appending without deduplicating is not idempotent: asking for `FOO` twice
+/// leaves the list holding it twice, which is a different config and so a real
+/// change to record.
+/// A caller that means to set such a list rather than grow it says `replace`.
+#[test]
+fn an_override_repeating_an_appending_list_is_recorded() {
+    let current = jp_config::util::build(PartialAppConfig::new_test()).unwrap();
+
+    let mut overrides = PartialAppConfig::empty();
+    overrides.editor.envs = Some(vec!["FOO".to_owned()]);
+
+    assert!(
+        override_to_record(&current, overrides.clone())
+            .unwrap()
+            .is_some()
+    );
+
+    // Again, against a config that already has it.
+    let mut merged = current.to_partial();
+    merged.merge(&(), overrides.clone()).unwrap();
+    let current = jp_config::util::build(merged).unwrap();
+
+    assert!(override_to_record(&current, overrides).unwrap().is_some());
+}
+
+/// A list carrying its own merge strategy, given an element it lacks.
+#[test]
+fn an_override_adding_a_rule_is_recorded() {
+    let current = config_with_fs_rules(&["src"]);
+
+    let mut overrides = PartialAppConfig::empty();
+    overrides.conversation.tools = config_with_fs_rules(&["src", "docs"])
+        .to_partial()
+        .conversation
+        .tools;
+
+    assert!(override_to_record(&current, overrides).unwrap().is_some());
+}
+
 #[test]
 fn without_conversation_returns_base_plus_cfg() {
     let mut pipeline = empty_pipeline();

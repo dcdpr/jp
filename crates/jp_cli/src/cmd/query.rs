@@ -141,7 +141,7 @@ use crate::{
         label::resolve::{Resolver, Trigger},
         lock::{LockRequest, acquire_lock},
     },
-    config_pipeline::{ConfigReset, ConfigResetEvents},
+    config_pipeline::{self, ConfigReset, ConfigResetEvents},
     ctx::IntoPartialAppConfig,
     editor,
     error::{Error, Result},
@@ -622,7 +622,20 @@ impl Query {
             // Resolve any model aliases before storing in the stream so
             // that per-event configs always contain concrete model IDs.
             editor_provided_config.resolve_model_aliases(&cfg.providers.llm.aliases);
-            setup.update_events(|events| events.add_config_delta(editor_provided_config));
+
+            // The editor hands back the config it was shown, so most of what
+            // comes back is what was already in effect. Only the part that
+            // changes anything is worth an event.
+            let current = setup
+                .events()
+                .config()
+                .map_err(jp_conversation::Error::from)?;
+
+            if let Some(delta) =
+                config_pipeline::override_to_record(&current, editor_provided_config)?
+            {
+                setup.update_events(|events| events.add_config_delta(delta));
+            }
         }
 
         // Snapshot the stream for title generation and thread assembly. The

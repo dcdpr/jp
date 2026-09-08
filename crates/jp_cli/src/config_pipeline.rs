@@ -15,11 +15,11 @@ use std::path::Path;
 
 use camino::Utf8PathBuf;
 use jp_config::{
-    FillDefaults as _, PartialAppConfig,
+    AppConfig, FillDefaults as _, PartialAppConfig, PartialConfig as _,
     assignment::{AssignKeyValue as _, KvAssignment},
     fs::{load_partial, user_global_config_dir},
     loader::PartialLoaderConfig,
-    util::{find_file_in_load_path, load_loader_directives, load_partial_at_path},
+    util::{build, find_file_in_load_path, load_loader_directives, load_partial_at_path},
 };
 use jp_storage::backend::FsStorageBackend;
 use jp_workspace::Workspace;
@@ -28,6 +28,42 @@ use tracing::{debug, error};
 
 use super::{CfgKeyword, KeyValueOrPath};
 use crate::error::{Error, Result};
+
+/// The config override to record on a conversation, if it changes anything.
+///
+/// `overrides` holds values to set, in the shape a config layer arrives in: an
+/// appending list carries the elements to add rather than the whole list.
+/// Whether it asks for anything `current` does not already have is decided by
+/// resolving the merge of the two and comparing, so an override naming a value
+/// already in effect returns `None`.
+///
+/// The comparison is between resolved configs rather than partials.
+/// A partial also carries the merge strategy each field arrived with, so two
+/// partials holding identical values can still differ; resolution normalizes
+/// that away.
+///
+/// An override whose merged result does not resolve is returned rather than
+/// dropped: its outcome cannot be compared, so it is not known to change
+/// nothing.
+pub(crate) fn override_to_record(
+    current: &AppConfig,
+    overrides: PartialAppConfig,
+) -> Result<Option<PartialAppConfig>> {
+    let base = current.to_partial();
+
+    let mut merged = base.clone();
+    merged
+        .merge(&(), overrides.clone())
+        .map_err(jp_config::Error::from)?;
+
+    // Both sides go through the same transform, so the comparison does not rest
+    // on `to_partial` round-tripping a config exactly.
+    let (Ok(before), Ok(after)) = (build(base), build(merged)) else {
+        return Ok(Some(overrides));
+    };
+
+    Ok((before != after).then_some(overrides))
+}
 
 /// A config reset point encountered in the `--cfg` directive stream.
 ///
