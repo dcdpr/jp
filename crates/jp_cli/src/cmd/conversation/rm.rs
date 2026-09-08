@@ -53,11 +53,18 @@ impl Rm {
         // Removal is destructive, so the default (`None`) prompts; only an
         // explicit `--no-confirm` / `--yes` skips it.
         let force = self.confirm.preference() == Some(false);
+        let mut removed = 0_usize;
         for handle in handles {
-            remove(ctx, handle, active_id, force).await?;
+            if remove(ctx, handle, active_id, force).await? {
+                removed += 1;
+            }
         }
 
-        ctx.printer.println("Conversation(s) removed.");
+        if removed == 0 {
+            ctx.printer.println("No conversations removed.");
+        } else {
+            ctx.printer.println("Conversation(s) removed.");
+        }
         Ok(())
     }
 
@@ -91,6 +98,11 @@ impl Rm {
 /// Remove one conversation, asking first unless `force` says the caller already
 /// decided.
 ///
+/// Returns whether the conversation was removed.
+/// Declining leaves it in place and is not an error: the user answered the
+/// question they were asked, and the next conversation in the run still gets
+/// its own.
+///
 /// The lock is taken before the question is asked and held until it is
 /// answered, so the conversation cannot gain events between the details the
 /// user read and the removal they approved.
@@ -99,21 +111,19 @@ async fn remove(
     handle: ConversationHandle,
     active_id: Option<ConversationId>,
     force: bool,
-) -> Output {
+) -> Result<bool, crate::error::Error> {
     let lock = match acquire_lock(LockRequest::from_ctx(handle, ctx)).await? {
         LockOutcome::Acquired(lock) => lock,
         LockOutcome::NewConversation => unreachable!("new conversation not allowed"),
         LockOutcome::ForkConversation(_) => unreachable!("fork not allowed"),
     };
 
-    // A decline ends the run rather than moving to the next conversation: the
-    // exit code is how a script learns the removal did not happen.
     if !force && !confirm_conversation_action(ctx, ConversationAction::Remove, &lock, active_id)? {
-        return Err(1.into());
+        return Ok(false);
     }
 
     ctx.workspace.remove_conversation_with_lock(lock.into_mut());
-    Ok(())
+    Ok(true)
 }
 
 #[cfg(test)]

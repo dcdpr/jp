@@ -62,6 +62,38 @@ fn only_the_irreversible_action_cautions_the_user() {
     assert_eq!(ConversationAction::Archive.caution(), None);
 }
 
+/// `n` and Esc are both the user answering the question, so the run carries on
+/// to the next conversation.
+/// Ctrl-C is not an answer: `inquire` reads it in raw mode, so no SIGINT is
+/// raised and this is the only thing that can end a bulk run part-way through.
+#[test]
+fn esc_declines_but_ctrl_c_ends_the_run() {
+    assert!(decide(Ok('y')).unwrap(), "y accepts");
+    assert!(!decide(Ok('n')).unwrap(), "n declines");
+    assert!(
+        !decide(Err(InquireError::OperationCanceled)).unwrap(),
+        "Esc declines"
+    );
+
+    let error = decide(Err(InquireError::OperationInterrupted))
+        .expect_err("Ctrl-C must not read as a decline");
+    let crate::error::Error::Command(error) = error else {
+        panic!("expected a command error, got: {error}");
+    };
+    assert_eq!(error.code.get(), 130, "the shell's status for a SIGINT");
+    assert_eq!(error.message, None, "Ctrl-C needs no diagnostic");
+}
+
+/// A terminal that cannot be read is a broken prompt, not a choice the user
+/// made, so it keeps its cause instead of silently skipping the conversation.
+#[test]
+fn a_broken_prompt_is_reported_rather_than_treated_as_a_decline() {
+    assert!(matches!(
+        decide(Err(InquireError::NotTTY)),
+        Err(crate::error::Error::Inquire(InquireError::NotTTY))
+    ));
+}
+
 fn make_id(secs: u64) -> ConversationId {
     ConversationId::try_from(DateTime::<Utc>::UNIX_EPOCH + std::time::Duration::from_secs(secs))
         .unwrap()

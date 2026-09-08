@@ -11,6 +11,7 @@
 //! change that state while the question is open.
 
 use crossterm::style::Stylize as _;
+use inquire::InquireError;
 use jp_conversation::ConversationId;
 use jp_inquire::{InlineOption, InlineSelect};
 use jp_storage::backend::Projection;
@@ -62,6 +63,14 @@ impl ConfirmFlag {
         }
     }
 }
+
+/// Exit status for a run the user ended with Ctrl-C.
+///
+/// The shell's convention for a process killed by SIGINT (128 + 2).
+/// `inquire` reads Ctrl-C as a keypress in raw mode rather than letting the
+/// signal through, so JP reports the status the shell would otherwise have set
+/// itself.
+const INTERRUPTED_EXIT_STATUS: u8 = 130;
 
 /// A conversation-mutating action that asks before it proceeds.
 ///
@@ -132,11 +141,15 @@ impl ConversationAction {
 ///
 /// Prints a heading, the conversation's details, and a single-key question, and
 /// returns whether the user accepted.
+/// `n` and Esc both decline, which leaves the conversation untouched and lets a
+/// run covering several of them carry on to the next.
 /// `active_id` is the session's active conversation, which the details mark as
 /// such.
 ///
-/// Errors when nobody is available to answer: a caller that read that as a
-/// decline would report success having done nothing.
+/// Errors rather than declining when nobody is available to answer, when the
+/// user interrupts with Ctrl-C, and when the prompt itself breaks.
+/// Reading any of those as a decline would let a bulk run walk past every
+/// conversation in it and report success.
 pub(crate) fn confirm_conversation_action(
     ctx: &Ctx,
     action: ConversationAction,
@@ -178,11 +191,27 @@ pub(crate) fn confirm_conversation_action(
         select = select.with_help_message(caution);
     }
 
-    let answer = select.prompt(&mut ctx.printer.prompt_writer());
+    decide(select.prompt(&mut ctx.printer.prompt_writer()))
+}
 
-    // A prompt that failed rather than answered (a cancelled read, a terminal
-    // that went away) is not consent.
-    Ok(matches!(answer, Ok('y')))
+/// Turn a prompt's result into a decision.
+///
+/// Esc declines, the same as `n`: the user backed out of the question, which is
+/// an answer to it.
+/// Ctrl-C is not, and ends the run instead.
+/// `inquire` reads it as a keypress in raw mode, so no signal is raised and
+/// nothing else would stop a run part-way through a list.
+/// Every other error keeps its cause, so a broken terminal is reported as a
+/// failure rather than as a choice.
+fn decide(answer: std::result::Result<char, InquireError>) -> Result<bool> {
+    match answer {
+        Ok('y') => Ok(true),
+        Ok(_) | Err(InquireError::OperationCanceled) => Ok(false),
+        Err(InquireError::OperationInterrupted) => {
+            Err(CmdError::from(INTERRUPTED_EXIT_STATUS).into())
+        }
+        Err(error) => Err(error.into()),
+    }
 }
 
 /// Build the details block shown above a confirmation prompt.
