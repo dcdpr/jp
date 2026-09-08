@@ -3472,7 +3472,7 @@ _install-ticket *args:
     fi
     cargo install {{quiet_flag}} --locked --path crates/plugins/command/ticket --debug {{args}}
 
-@_install-comfort *args:
+_install-comfort *args:
     #!/usr/bin/env sh
     set -eu
     if [ -z "${JP_INSTALL:-}" ]; then
