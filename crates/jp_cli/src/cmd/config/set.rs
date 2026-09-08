@@ -56,7 +56,7 @@ impl Set {
             let id = lock.id();
             let current = lock
                 .events()
-                .config()
+                .config_partial()
                 .map_err(jp_conversation::Error::from)?;
             let delta = config_pipeline::override_to_record(&current, config_delta.clone())?;
 

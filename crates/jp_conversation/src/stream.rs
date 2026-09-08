@@ -512,6 +512,29 @@ impl ConversationStream {
     ///
     /// [`Reset`]: ConfigDelta::Reset
     pub fn config(&self) -> Result<AppConfig, StreamError> {
+        // `build`, not the bare conversion: a delta can introduce a model alias
+        // that the base config never had, and reading an unresolved alias panics.
+        // `build` is also what orders instructions and prompt sections, which the
+        // rest of the system assumes has happened.
+        jp_config::util::build(self.config_partial()?).map_err(Into::into)
+    }
+
+    /// Get the accumulated config state of the stream, before resolution.
+    ///
+    /// Takes the base configuration and folds every [`ConfigDelta`] in the
+    /// stream onto it, first to last, the same way [`Self::config`] does.
+    ///
+    /// A field's merge metadata — its strategy, separator, or dedup mode —
+    /// lives here and has no counterpart in a resolved [`AppConfig`], which
+    /// holds values alone.
+    /// A caller merging a further layer onto the conversation's state therefore
+    /// starts from this, so the merge runs under the metadata the conversation
+    /// established rather than under program defaults.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if a delta cannot be folded onto the accumulated state.
+    pub fn config_partial(&self) -> Result<PartialAppConfig, StreamError> {
         let mut partial = self.base_config.to_partial();
         let iter = self.events.iter().filter_map(|event| match event {
             InternalEvent::ConfigDelta(delta) => Some(delta.clone()),
@@ -525,11 +548,7 @@ impl ConversationStream {
             fold_config_delta(&mut partial, delta)?;
         }
 
-        // `build`, not the bare conversion: a delta can introduce a model alias
-        // that the base config never had, and reading an unresolved alias panics.
-        // `build` is also what orders instructions and prompt sections, which the
-        // rest of the system assumes has happened.
-        jp_config::util::build(partial).map_err(Into::into)
+        Ok(partial)
     }
 
     /// Removes all events from the end of the stream, until a [`ChatRequest`]

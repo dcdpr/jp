@@ -626,7 +626,7 @@ impl Query {
             // changes anything is worth an event.
             let current = setup
                 .events()
-                .config()
+                .config_partial()
                 .map_err(jp_conversation::Error::from)?;
 
             if let Some(delta) =
