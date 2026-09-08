@@ -135,6 +135,44 @@ struct SchematicImplArgs<'a> {
     instrument: &'a TokenStream,
 }
 
+/// The body of a `schema_name` that says which instantiation it describes.
+///
+/// A schema names each type it expands and refers back to that name wherever
+/// the type appears again, so a name has to identify one type.
+/// A generic named after its base alone does not: `MergeableMap<ToolConfig>`
+/// and `MergeableMap<ToolParameterConfig>` would both answer `MergeableMap`,
+/// and a consumer resolving a reference by name would walk a value against
+/// whichever of them it met first.
+///
+/// The arguments are appended instead, so the two are `MergeableMap_ToolConfig`
+/// and `MergeableMap_ToolParameterConfig`.
+/// An argument with no name of its own (a primitive) contributes nothing, which
+/// leaves the base name for a type generic only over those.
+#[cfg(feature = "schema")]
+fn generate_schema_name(base: &str, generics: &syn::Generics) -> TokenStream {
+    let type_params = generics.type_params().map(|param| &param.ident);
+    let mut appends = type_params.peekable();
+
+    if appends.peek().is_none() {
+        return quote! { Some(#base.into()) };
+    }
+
+    let appends = appends.map(|ident| {
+        quote! {
+            if let Some(argument) = <#ident as schematic::Schematic>::schema_name() {
+                name.push('_');
+                name.push_str(&argument);
+            }
+        }
+    });
+
+    quote! {
+        let mut name = String::from(#base);
+        #(#appends)*
+        Some(name)
+    }
+}
+
 #[cfg(feature = "schema")]
 fn emit_schematic_impls(args: &SchematicImplArgs<'_>) -> TokenStream {
     let &SchematicImplArgs {
@@ -152,6 +190,9 @@ fn emit_schematic_impls(args: &SchematicImplArgs<'_>) -> TokenStream {
     let schema_impl = cfg.type_of.generate_schema(&cfg.attrs);
     let partial_schema_name = partial_name.to_string();
     let partial_schema_impl = crate::common::Container::generate_partial_schema(name, cfg.generics);
+
+    let schema_name_impl = generate_schema_name(&schema_name, cfg.generics);
+    let partial_schema_name_impl = generate_schema_name(&partial_schema_name, cfg.generics);
 
     // `schema_union_with` unions the derived schema with caller-supplied
     // variants, for a type that deserializes from more shapes than its fields
@@ -180,7 +221,7 @@ fn emit_schematic_impls(args: &SchematicImplArgs<'_>) -> TokenStream {
         #[automatically_derived]
         impl #impl_generics schematic::Schematic for #name #ty_generics #schematic_where {
             fn schema_name() -> Option<String> {
-                Some(#schema_name.into())
+                #schema_name_impl
             }
 
             #instrument
@@ -194,7 +235,7 @@ fn emit_schematic_impls(args: &SchematicImplArgs<'_>) -> TokenStream {
         #[automatically_derived]
         impl #impl_generics schematic::Schematic for #partial_name #ty_generics #partial_schematic_where {
             fn schema_name() -> Option<String> {
-                Some(#partial_schema_name.into())
+                #partial_schema_name_impl
             }
 
             #instrument

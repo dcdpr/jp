@@ -81,34 +81,27 @@ fn assert_law(before: &[&str], after: &[&str]) {
 
 /// Fields whose clear is known not to survive a fold, and why.
 ///
-/// `conversation.compaction.rules` has built-in defaults carrying
-/// `discard_when_merged`, so a resolved empty list and the resolved defaults
-/// compare unequal while resolving alike.
-/// A delta helper that judged them by their elements would write a
-/// replace-with-empty for no change at all, which is how it was found: routing
-/// it through [`delta_mergeable_vec`] turned 39 tests red with exactly that
-/// noise.
+/// `conversation.compaction.rules` keeps its rules in a bare `MergeableVec`, so
+/// an empty one cannot say whether the user asked for no rules or said nothing
+/// about them.
+/// A delta that replaced on any difference would record zero rules from any
+/// sparse partial that reached it, which is how it was found: routing it
+/// through [`delta_mergeable_vec`] wrote `replace` with an empty list into 37
+/// snapshots and appended an event that should not exist.
+/// Reaching it needs the partial to be an `Option<MergeableVec<_>>`, as every
+/// converted list field has.
 ///
 /// `model.parameters.other` is the catch-all arm of its own key-value dispatch,
 /// so `parameters.other` names a key *inside* the map rather than the map
 /// itself, and clearing removes an entry that was never there.
 /// Reaching the whole field needs a path vocabulary that can say "this map"
 /// where the map is also the fallback.
-///
-/// `conversation.tools.*` addresses the tool defaults block, whose types have
-/// no path-reporting delta yet.
-/// Mechanical to add, and left for the pass that does the tool config as a
-/// whole.
 const CLEAR_NOT_RECORDED: &[&str] = &[
     "conversation.compaction.rules",
     "assistant.model.parameters.other",
     "style.reasoning.summary_model.parameters.other",
     "conversation.inquiry.assistant.model.parameters.other",
     "conversation.title.generate.model.parameters.other",
-    "conversation.tools.*.enable",
-    "conversation.tools.*.enable.state",
-    "conversation.tools.*.enable.allow_toggle",
-    "conversation.tools.*.style.error.inline_results",
 ];
 
 /// Set `path` to whichever of a few generic values it accepts.

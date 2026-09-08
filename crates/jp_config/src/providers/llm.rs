@@ -14,8 +14,9 @@ use schematic::Config;
 
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
-    delta::{PartialConfigDelta, delta_map, path},
+    delta::{PartialConfigDelta, delta_mergeable_map, path},
     fill::{FillDefaults, fill_map},
+    internal::merge::map_with_strategy,
     model::id::{ModelIdConfig, ModelIdConfigError, ModelIdOrAliasConfig, resolve_alias_chain},
     partial::ToPartial,
     providers::llm::{
@@ -28,7 +29,7 @@ use crate::{
         openai::{OpenaiConfig, PartialOpenaiConfig},
         openrouter::{OpenrouterConfig, PartialOpenrouterConfig},
     },
-    util::merge_nested_indexmap,
+    types::map::{MergeableMap, map_to_partial_per_key},
 };
 
 /// Provider configuration.
@@ -48,8 +49,13 @@ pub struct LlmProviderConfig {
     /// haiku = { provider = "anthropic", name = "claude-haiku-4-5" }
     /// coder = "opus"
     /// ```
-    #[setting(nested, merge = merge_nested_indexmap)]
-    pub aliases: IndexMap<String, ModelIdOrAliasConfig>,
+    ///
+    /// Entries merge by key, so an alias defined in a later layer joins the
+    /// ones an earlier layer set.
+    /// Declare the map as `{ value = { … }, strategy = "replace" }` to drop
+    /// them instead.
+    #[setting(nested, merge = map_with_strategy)]
+    pub aliases: MergeableMap<ModelIdOrAliasConfig>,
 
     /// Anthropic API configuration.
     #[setting(nested)]
@@ -110,7 +116,7 @@ impl PartialConfigDelta for PartialLlmProviderConfig {
     // that drops the paths would merge a list onto the one already there.
     fn delta(&self, next: Self) -> Self {
         Self {
-            aliases: delta_map(&self.aliases, next.aliases),
+            aliases: delta_mergeable_map(&self.aliases, next.aliases),
             anthropic: self.anthropic.delta(next.anthropic),
             cerebras: self.cerebras.delta(next.cerebras),
             deepseek: self.deepseek.delta(next.deepseek),
@@ -124,7 +130,9 @@ impl PartialConfigDelta for PartialLlmProviderConfig {
 
     fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
         Self {
-            aliases: delta_map(&self.aliases, next.aliases),
+            // The map states its own strategy, so a removed alias travels in
+            // the value as a `replace` and needs no path reported.
+            aliases: delta_mergeable_map(&self.aliases, next.aliases),
             anthropic: self.anthropic.delta_with_unsets(
                 next.anthropic,
                 &path(prefix, "anthropic"),
@@ -148,7 +156,13 @@ impl PartialConfigDelta for PartialLlmProviderConfig {
 impl FillDefaults for PartialLlmProviderConfig {
     fn fill_from(self, defaults: Self) -> Self {
         Self {
-            aliases: fill_map(self.aliases, defaults.aliases),
+            // Key by key, so an alias only the defaults declare is added
+            // while one this layer already has keeps its own value. A map
+            // that states a strategy is left alone.
+            aliases: match self.aliases {
+                merged @ MergeableMap::Merged(_) => merged,
+                MergeableMap::Map(entries) => fill_map(entries, defaults.aliases.into_map()).into(),
+            },
             anthropic: self.anthropic.fill_from(defaults.anthropic),
             cerebras: self.cerebras.fill_from(defaults.cerebras),
             deepseek: self.deepseek.fill_from(defaults.deepseek),
@@ -164,11 +178,9 @@ impl FillDefaults for PartialLlmProviderConfig {
 impl ToPartial for LlmProviderConfig {
     fn to_partial(&self) -> Self::Partial {
         Self::Partial {
-            aliases: self
-                .aliases
-                .iter()
-                .map(|(k, v)| (k.clone(), v.to_partial()))
-                .collect(),
+            // Per key rather than `replace`: an alias the workspace config
+            // gained after this conversation was created still reaches it.
+            aliases: map_to_partial_per_key(self.aliases.iter()),
             anthropic: self.anthropic.to_partial(),
             cerebras: self.cerebras.to_partial(),
             deepseek: self.deepseek.to_partial(),

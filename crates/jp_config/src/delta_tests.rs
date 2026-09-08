@@ -4,7 +4,10 @@ use test_log::test;
 use super::*;
 use crate::{
     providers::mcp::{PartialMcpProviderConfig, PartialStdioConfig},
-    types::vec::{MergeableVec, MergedVec, MergedVecStrategy},
+    types::{
+        map::{MergeableMap, MergedMapStrategy},
+        vec::{MergeableVec, MergedVec, MergedVecStrategy},
+    },
 };
 
 /// A server entry with `arguments` set and every other field unset.
@@ -23,10 +26,41 @@ fn server(arguments: &[&str]) -> PartialMcpProviderConfig {
 }
 
 /// A one-server map, keyed as `kagi`.
-fn map(arguments: &[&str]) -> IndexMap<String, PartialMcpProviderConfig> {
+fn map(arguments: &[&str]) -> MergeableMap<PartialMcpProviderConfig> {
     let mut map = IndexMap::new();
     map.insert("kagi".to_owned(), server(arguments));
-    map
+    map.into()
+}
+
+/// A removed entry is carried as a `replace`, since a deep merge would bring
+/// the key back.
+#[test]
+fn map_delta_replaces_when_an_entry_is_removed() {
+    let prev = map(&["--a"]);
+    let next = MergeableMap::default();
+
+    let delta = delta_mergeable_map(&prev, next);
+
+    assert!(
+        matches!(&delta, MergeableMap::Merged(merged)
+            if merged.strategy == Some(MergedMapStrategy::Replace) && merged.value.is_empty()),
+        "expected an empty map stated as `replace`, got: {delta:?}"
+    );
+}
+
+/// An entry both maps hold is diffed, not replaced.
+#[test]
+fn map_delta_diffs_a_surviving_entry() {
+    let prev = map(&["--a"]);
+    let next = map(&["--a", "--b"]);
+
+    let delta = delta_mergeable_map(&prev, next);
+
+    assert!(
+        matches!(&delta, MergeableMap::Map(_)),
+        "no key went away, so the map merges per key: {delta:?}"
+    );
+    assert_eq!(delta.len(), 1);
 }
 
 /// The `arguments` of a server entry, for asserting on a computed delta.
@@ -254,10 +288,10 @@ fn a_dropped_stop_word_is_recorded_at_every_site() {
 
 #[test]
 fn map_delta_keeps_an_entry_only_next_has() {
-    let prev = IndexMap::new();
+    let prev = MergeableMap::default();
     let next = map(&["--a"]);
 
-    assert_eq!(delta_map(&prev, next.clone()), next);
+    assert_eq!(delta_mergeable_map(&prev, next.clone()), next);
 }
 
 #[test]
@@ -265,7 +299,7 @@ fn map_delta_keeps_the_changed_fields_of_an_entry() {
     let prev = map(&["--a"]);
     let next = map(&["--a", "--b"]);
 
-    let delta = delta_map(&prev, next);
+    let delta = delta_mergeable_map(&prev, next);
 
     assert_eq!(delta.len(), 1);
     assert_eq!(arguments(&delta["kagi"]), Some(&vec!["--b".to_owned()]));
@@ -279,7 +313,7 @@ fn map_delta_keeps_the_changed_fields_of_an_entry() {
 /// can now say `replace`, so the case is built directly.
 #[test]
 fn map_delta_drops_an_entry_whose_delta_is_empty() {
-    let entry = |command: &str| -> IndexMap<String, PartialMcpProviderConfig> {
+    let entry = |command: &str| -> MergeableMap<PartialMcpProviderConfig> {
         let mut map = IndexMap::new();
         map.insert(
             "kagi".to_owned(),
@@ -288,13 +322,13 @@ fn map_delta_drops_an_entry_whose_delta_is_empty() {
                 ..PartialStdioConfig::default()
             }),
         );
-        map
+        map.into()
     };
 
     // Equal entries are dropped by the equality check ahead of the delta.
-    assert!(delta_map(&entry("serve"), entry("serve")).is_empty());
+    assert!(delta_mergeable_map(&entry("serve"), entry("serve")).is_empty());
 
     // A differing entry contributes only what changed.
-    let delta = delta_map(&entry("serve"), entry("other"));
+    let delta = delta_mergeable_map(&entry("serve"), entry("other"));
     assert_eq!(delta.len(), 1);
 }

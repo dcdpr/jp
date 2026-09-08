@@ -2068,12 +2068,12 @@ fn apply_enable_tools(
     for d in directives.iter() {
         match d {
             ToolDirective::EnableAll => {
-                for (name, tool) in &mut partial.conversation.tools.tools {
+                for (name, tool) in partial.conversation.tools.tools.iter_mut() {
                     apply_directive_to_tool(name, tool, &defaults, ToggleScope::Bulk, true)?;
                 }
             }
             ToolDirective::DisableAll => {
-                for (name, tool) in &mut partial.conversation.tools.tools {
+                for (name, tool) in partial.conversation.tools.tools.iter_mut() {
                     apply_directive_to_tool(name, tool, &defaults, ToggleScope::Bulk, false)?;
                 }
             }

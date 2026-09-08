@@ -1,9 +1,11 @@
 //! Configuration delta calculation.
 
-use indexmap::IndexMap;
 use schematic::PartialConfig;
 
-use crate::types::vec::{MergeableVec, MergedVec, MergedVecStrategy};
+use crate::types::{
+    map::{MergeableMap, MergedMap, MergedMapStrategy},
+    vec::{MergeableVec, MergedVec, MergedVecStrategy},
+};
 
 /// Calculate the delta between two partial configurations.
 ///
@@ -95,6 +97,47 @@ pub fn delta_mergeable_vec<T: Clone + PartialEq>(
     })
 }
 
+/// Calculate the delta between two strategy-carrying maps.
+///
+/// An entry only `next` has is carried whole, an entry both maps have carries
+/// its own delta, and an entry whose delta is empty is left out: a missing
+/// entry already means "unchanged", so carrying an empty one reads as a change
+/// that isn't there.
+///
+/// A key `prev` has and `next` does not was dropped, which entries cannot
+/// spell.
+/// The whole map is then carried with `replace`, since a deep merge would
+/// resurrect the dropped key.
+pub fn delta_mergeable_map<T>(prev: &MergeableMap<T>, next: MergeableMap<T>) -> MergeableMap<T>
+where
+    T: PartialConfigDelta + PartialEq,
+{
+    if prev.keys().any(|key| !next.contains_key(key)) {
+        // Stated rather than inherited from `next`'s shape: a plain map
+        // deep-merges on the fold and brings the dropped key back.
+        return MergeableMap::Merged(MergedMap {
+            value: next.into_map(),
+            strategy: Some(MergedMapStrategy::Replace),
+            discard_when_merged: false,
+        });
+    }
+
+    next.into_iter()
+        .filter_map(|(key, next)| {
+            let Some(prev) = prev.get(&key) else {
+                return Some((key, next));
+            };
+
+            if prev == &next {
+                return None;
+            }
+
+            let delta = prev.delta(next);
+            (!delta.is_empty()).then_some((key, delta))
+        })
+        .collect()
+}
+
 /// Calculate the delta between two optional strategy-carrying lists.
 ///
 /// Wraps [`delta_mergeable_vec`] for a field whose partial is
@@ -137,36 +180,26 @@ pub fn delta_opt_partial_at<T: PartialConfigDelta + PartialEq>(
     }
 }
 
-/// Calculate the delta between two maps, reporting each entry's unsets.
+/// Calculate the delta between two strategy-carrying maps of plain values.
 ///
-/// Mirrors [`delta_map`], descending into each entry with the entry's own
-/// dotted path so a field inside it reports where it lives.
-pub fn delta_map_with_unsets<V>(
-    prefix: &str,
-    prev: &IndexMap<String, V>,
-    next: IndexMap<String, V>,
-    unsets: &mut Vec<String>,
-) -> IndexMap<String, V>
-where
-    V: PartialConfigDelta + PartialEq,
-{
+/// Mirrors [`delta_mergeable_map`] for a map whose values carry no partial of
+/// their own, so an entry is compared and carried whole rather than diffed.
+pub fn delta_mergeable_value_map<T: Clone + PartialEq>(
+    prev: &MergeableMap<T>,
+    next: MergeableMap<T>,
+) -> MergeableMap<T> {
+    if prev.keys().any(|key| !next.contains_key(key)) {
+        // Stated rather than inherited from `next`'s shape: a plain map
+        // deep-merges on the fold and brings the dropped key back.
+        return MergeableMap::Merged(MergedMap {
+            value: next.into_map(),
+            strategy: Some(MergedMapStrategy::Replace),
+            discard_when_merged: false,
+        });
+    }
+
     next.into_iter()
-        .filter_map(|(key, next)| {
-            let Some(prev) = prev.get(&key) else {
-                return Some((key, next));
-            };
-
-            if prev == &next {
-                return None;
-            }
-
-            let mut entry = Vec::new();
-            let delta = prev.delta_with_unsets(next, &path(prefix, &key), &mut entry);
-            let cleared = !entry.is_empty();
-            unsets.append(&mut entry);
-
-            (cleared || !delta.is_empty()).then_some((key, delta))
-        })
+        .filter(|(key, next)| !prev.get(key).is_some_and(|prev| prev == next))
         .collect()
 }
 
@@ -209,35 +242,6 @@ pub fn delta_opt_partial<T: PartialConfigDelta + PartialEq>(
         (None, next) => next,
         _ => None,
     }
-}
-
-/// Calculate the delta between two maps of partial configurations.
-///
-/// An entry only `next` has is kept whole.
-/// An entry both maps have contributes its own delta, and is left out when that
-/// delta is empty.
-///
-/// Dropping the empty ones is what keeps [`PartialConfig::is_empty`] meaningful
-/// for the enclosing config: a map counts as empty only when it has no entries
-/// at all, so an entry that carries no values still reads as a change.
-pub fn delta_map<V>(prev: &IndexMap<String, V>, next: IndexMap<String, V>) -> IndexMap<String, V>
-where
-    V: PartialConfigDelta + PartialEq,
-{
-    next.into_iter()
-        .filter_map(|(key, next)| {
-            let Some(prev) = prev.get(&key) else {
-                return Some((key, next));
-            };
-
-            if prev == &next {
-                return None;
-            }
-
-            let delta = prev.delta(next);
-            (!delta.is_empty()).then_some((key, delta))
-        })
-        .collect()
 }
 
 /// Calculate the delta between two vectors that merge by appending.

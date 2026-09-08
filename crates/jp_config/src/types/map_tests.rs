@@ -2,6 +2,39 @@ use serde_json::json;
 
 use super::*;
 
+/// A schema names each type it expands and refers back to that name below, so
+/// two instantiations of one generic have to answer differently.
+///
+/// Sharing a name makes a consumer that resolves a reference walk a value
+/// against whichever instantiation it met first: a tool's `parameters` read as
+/// the map of tools, whose entries are a different type entirely.
+#[test]
+fn a_generic_schema_is_named_by_its_instantiation() {
+    use schematic::Schematic as _;
+
+    use crate::{conversation::label::LabelConfig, providers::mcp::McpProviderConfig};
+
+    assert_eq!(
+        MergeableMap::<LabelConfig>::schema_name().as_deref(),
+        Some("MergeableMap_LabelConfig")
+    );
+    assert_eq!(
+        MergeableMap::<McpProviderConfig>::schema_name().as_deref(),
+        Some("MergeableMap_McpProviderConfig")
+    );
+}
+
+/// An argument with no name of its own leaves the base name alone.
+#[test]
+fn a_generic_over_a_primitive_keeps_its_base_name() {
+    use schematic::Schematic as _;
+
+    assert_eq!(
+        MergeableMap::<String>::schema_name().as_deref(),
+        Some("MergeableMap")
+    );
+}
+
 #[test]
 fn deserialize_plain_map() {
     let v: MergeableMap<serde_json::Value> =

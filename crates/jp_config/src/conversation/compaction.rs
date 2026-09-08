@@ -87,10 +87,17 @@ impl AssignKeyValue for PartialCompactionConfig {
 impl PartialConfigDelta for PartialCompactionConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
-            // Not `delta_mergeable_vec`: the built-in defaults carry
-            // `discard_when_merged`, so an empty resolved list and the defaults
-            // compare unequal while resolving alike, and a replace-with-empty
-            // delta would be written for no change at all.
+            // Not `delta_mergeable_vec`, which would say `replace` for any
+            // difference: this field's partial is a bare `MergeableVec`, so an
+            // empty one is both "the user said nothing about rules" and "the
+            // user asked for no rules". A sparse partial (a `--model` override,
+            // say) carries the empty one, and replacing with it would record
+            // zero rules the user never asked for, making a later
+            // `jp conversation compact` a no-op.
+            //
+            // Telling the two apart needs the field's partial to be an
+            // `Option<MergeableVec<_>>`, as every converted list field has,
+            // where `None` is absent and `Some([])` is a deliberate empty.
             rules: {
                 next.rules
                     .into_iter()
