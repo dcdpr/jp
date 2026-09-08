@@ -673,6 +673,72 @@ fn schema_style_code_is_struct_with_color() {
     );
 }
 
+/// Provider parameters survive a stored config, in either spelling.
+///
+/// They are collected into a flattened field, so they arrive as keys the schema
+/// does not name.
+/// Stripping would forward the conversation's next request without them,
+/// silently changing what the model is asked.
+#[test]
+fn partial_config_keeps_provider_parameters() {
+    let value = json!({
+        "assistant": {
+            "model": {
+                "parameters": {
+                    "temperature": 0.7,
+                    "presence_penalty": 0.5,
+                },
+            },
+        },
+    });
+
+    let config = deserialize_partial_config(value);
+    let parameters = &config.assistant.model.parameters;
+
+    assert_eq!(parameters.temperature, Some(0.7));
+    assert_eq!(
+        parameters
+            .other
+            .as_ref()
+            .and_then(|o| o.get("presence_penalty")),
+        Some(&jp_config::types::json_value::JsonValue(json!(0.5))),
+        "a parameter JP does not model is not a stray key to strip"
+    );
+}
+
+/// A config stored before the collector was flattened nested its parameters
+/// under `other`, and they still arrive as parameters.
+#[test]
+fn partial_config_hoists_a_legacy_other_table() {
+    let value = json!({
+        "assistant": {
+            "model": {
+                "parameters": {
+                    "other": { "presence_penalty": 0.5 },
+                },
+            },
+        },
+    });
+
+    let config = deserialize_partial_config(value);
+    let other = config
+        .assistant
+        .model
+        .parameters
+        .other
+        .as_ref()
+        .expect("the legacy table is hoisted");
+
+    assert_eq!(
+        other.get("presence_penalty"),
+        Some(&jp_config::types::json_value::JsonValue(json!(0.5)))
+    );
+    assert!(
+        !other.contains_key("other"),
+        "the wrapper is not itself a parameter: {other:?}"
+    );
+}
+
 #[test]
 fn strip_directly_on_delta_subtree() {
     // Reproduce exactly what deserialize_config_delta does: strip the "delta"

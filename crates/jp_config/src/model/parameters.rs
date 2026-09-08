@@ -24,7 +24,7 @@ use crate::{
 /// Parameters JP does not model are collected into [`Self::other`], so a
 /// provider-specific key can be written directly in the parameter block.
 #[derive(Debug, Clone, PartialEq, Config)]
-#[config(default, rename_all = "snake_case")]
+#[config(default, rename_all = "snake_case", allow_unknown_fields)]
 pub struct ParametersConfig {
     /// Maximum number of tokens to generate.
     ///
@@ -91,57 +91,43 @@ pub struct ParametersConfig {
     )]
     pub stop_words: Vec<String>,
 
-    /// Other non-typed parameters that some models might support.
+    /// Where the parameters JP does not model are collected.
     ///
-    /// Any key in the parameter block that JP does not recognize lands here and
-    /// is forwarded to the provider as written:
+    /// Not a key to write.
+    /// A parameter JP does not recognize is written in the block itself and
+    /// forwarded to the provider as given:
     ///
     /// ```toml
     /// [assistant.model.parameters]
     /// presence_penalty = 0.5
     /// ```
     ///
-    /// The equivalent explicit form is also accepted:
-    ///
-    /// ```toml
-    /// [assistant.model.parameters.other]
-    /// presence_penalty = 0.5
-    /// ```
-    #[setting(default, merge = schematic::merge::merge_iter)]
+    /// Flattened, so the parameters reach the wire under their own names and
+    /// this field is never a key anyone writes.
+    /// That is also what keeps them: the compat layer strips whatever the
+    /// schema does not name, and skips a struct holding a flattened field for
+    /// exactly this reason.
+    #[setting(flatten, default, merge = schematic::merge::merge_iter)]
     pub other: IndexMap<String, JsonValue>,
 }
 
-/// Every key [`ParametersConfig`] models.
-/// Anything else is a provider parameter and is collected into `other`.
+/// Deserialize a parameter block, hoisting a legacy `other` table into it.
 ///
-/// Kept in sync with the struct by `known_keys_match_the_schema`.
-pub(crate) const KNOWN_KEYS: &[&str] = &[
-    "max_tokens",
-    "reasoning",
-    "temperature",
-    "top_p",
-    "top_k",
-    "stop_words",
-    "other",
-];
-
-/// Deserialize a parameter block, collecting unrecognized keys into `other`.
-///
-/// Unrecognized keys are provider parameters JP does not model, so discarding
-/// them (what serde does with an unknown field on a lenient container) silently
-/// drops user intent.
-/// An explicit `other` table is also accepted and merges with the collected
-/// keys, the explicit entries winning.
+/// A provider parameter is written in the block itself and collected by the
+/// flattened [`ParametersConfig::other`].
+/// Config files and stored conversation configs written before that nested them
+/// under an explicit `other` table, and left alone those entries would land in
+/// a parameter *named* `other` and reach the provider as one.
 ///
 /// Applied through `#[setting(deserialize_with = ...)]` on the field holding
-/// this config rather than as a `Deserialize` impl, so the generated
-/// field-by-field deserializer still does the real work.
+/// this config, so the generated field-by-field deserializer still does the
+/// collecting.
 ///
 /// # Errors
 ///
-/// Returns an error if the block is not a map, if `other` is present but is not
-/// a map, or if any modelled field fails to deserialize.
-pub(crate) fn deserialize_collecting_other<'de, D>(
+/// Returns an error if the block is not a map, or if any field in it fails to
+/// deserialize.
+pub(crate) fn deserialize_hoisting_legacy_other<'de, D>(
     deserializer: D,
 ) -> Result<PartialParametersConfig, D::Error>
 where
@@ -149,35 +135,14 @@ where
 {
     let mut map = serde_json::Map::<String, serde_json::Value>::deserialize(deserializer)?;
 
-    let mut other = IndexMap::new();
-    map.retain(|key, value| {
-        if KNOWN_KEYS.contains(&key.as_str()) {
-            return true;
-        }
-
-        other.insert(key.clone(), JsonValue(value.clone()));
-        false
-    });
-
-    // Merged after the collected keys so an explicit entry wins a collision.
-    let explicit = map.remove("other");
-    let has_explicit = explicit.is_some();
-    if let Some(explicit) = explicit {
-        let explicit: IndexMap<String, JsonValue> =
-            serde_json::from_value(explicit).map_err(DeError::custom)?;
-        other.extend(explicit);
+    // Hoisted after the siblings so a nested entry still wins a collision with
+    // one of the same name, which is what the nested form did when it was the
+    // documented spelling.
+    if let Some(serde_json::Value::Object(legacy)) = map.remove("other") {
+        map.extend(legacy);
     }
 
-    let mut partial: PartialParametersConfig =
-        serde_json::from_value(serde_json::Value::Object(map)).map_err(DeError::custom)?;
-
-    // An explicit `other` is kept even when empty, so a serialize/deserialize
-    // round-trip of a config carrying `other = {}` is lossless.
-    if has_explicit || !other.is_empty() {
-        partial.other = Some(other);
-    }
-
-    Ok(partial)
+    serde_json::from_value(serde_json::Value::Object(map)).map_err(DeError::custom)
 }
 
 impl AssignKeyValue for PartialParametersConfig {
@@ -190,6 +155,11 @@ impl AssignKeyValue for PartialParametersConfig {
             "top_k" => self.top_k = kv.try_some_u32()?,
             _ if kv.p("stop_words") => kv.try_some_mergeable_strings(&mut self.stop_words)?,
             _ if kv.p("reasoning") => self.reasoning.assign(kv)?,
+
+            // Anything else is a provider parameter JP does not model, named
+            // as it reaches the provider. `other` holds them but is flattened,
+            // so it is not a name to trim here: a parameter called `other`
+            // is addressed like any other.
             _ => kv.assign_to_entry(self.other.get_or_insert_default())?,
         }
 
