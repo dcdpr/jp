@@ -1420,8 +1420,8 @@ impl TurnInputs {
 
     /// Finish preparing, then run the turn.
     ///
-    /// Reads no context, so the waiting happens away from whoever assembled
-    /// this.
+    /// Borrows only the lock, which owns itself, so this can run on a task of
+    /// its own, which is where the waiting belongs.
     /// `stream` is the snapshot the thread is assembled from.
     pub(crate) async fn run(
         self,
