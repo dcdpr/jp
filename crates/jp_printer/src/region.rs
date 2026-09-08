@@ -1015,9 +1015,19 @@ impl RegionStack {
     }
 
     /// Release one suspension, repainting once the last one is gone.
+    ///
+    /// The suspending writer owned the cursor for its lifetime and routinely
+    /// leaves it mid-row — a prompt widget ends on its own question, not on a
+    /// line break.
+    /// That is the widget's business rather than content the region has to sit
+    /// below, so the open-line state is dropped along with the suspension.
+    /// Carrying it forward would keep the rows hidden until something
+    /// newline-terminated happened by, which can be a whole tool execution
+    /// later.
     fn resume(&mut self, writer: &mut dyn io::Write) {
         self.suspensions = self.suspensions.saturating_sub(1);
         if self.suspensions == 0 {
+            self.content_open = false;
             self.redraw(writer);
         }
     }

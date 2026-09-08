@@ -795,6 +795,34 @@ fn a_prompt_writer_suspends_the_region_for_its_lifetime() {
 }
 
 #[test]
+fn a_prompt_that_ends_mid_line_does_not_hold_the_region_hostage() {
+    // A prompt widget owns the cursor and routinely leaves it mid-row. That is
+    // the widget's business, not the region's: the suspension is what kept the
+    // rows away, and when it lifts the region starts fresh. Treating the
+    // prompt's last write as unfinished content keeps the region hidden until
+    // something newline-terminated happens by, which may be a whole tool
+    // execution later.
+    let (printer, _out, err) = region_printer();
+
+    let _region = printer.status_region(waiting_style());
+    printer.flush();
+    err.lock().clear();
+
+    {
+        let mut prompt = printer.prompt_writer();
+        write!(prompt, "Deliver result? [y/n] ").unwrap();
+        printer.flush();
+    }
+
+    printer.flush();
+    assert!(
+        err.lock().ends_with("waiting"),
+        "the row must return when the prompt releases the terminal, got {:?}",
+        *err.lock()
+    );
+}
+
+#[test]
 fn suspend_status_erases_before_it_returns() {
     let (printer, _out, err) = region_printer();
 
