@@ -7,6 +7,7 @@ use crate::{
     delta::{PartialConfigDelta, delta_opt},
     fill::FillDefaults,
     partial::{ToPartial, partial_opt},
+    style::stderr_rows::StderrRows,
 };
 
 /// Tool call content style configuration.
@@ -24,7 +25,7 @@ pub struct ToolCallConfig {
     ///
     /// Shows elapsed time for long-running tool executions.
     #[setting(nested)]
-    pub progress: ProgressConfig,
+    pub progress: ToolProgressConfig,
 
     /// Preparing indicator configuration.
     ///
@@ -40,23 +41,56 @@ pub struct ToolCallConfig {
 }
 
 /// Progress indicator configuration for tool execution.
+///
+/// ```toml
+/// [style.tool_call.progress]
+/// delay_secs = 3
+/// stderr_rows = true
+/// ```
 #[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
-pub struct ProgressConfig {
+pub struct ToolProgressConfig {
     /// Whether to show the progress indicator.
+    ///
+    /// Defaults to `true`.
     #[setting(default = true)]
     pub show: bool,
 
-    /// Delay in seconds before showing progress indicator.
+    /// Delay in seconds before showing the progress indicator.
     ///
-    /// Progress is only shown for tools that run longer than this threshold.
-    /// Set to 0 to show progress immediately.
+    /// Defaults to `3`.
+    /// Tools that finish faster than this never show anything.
+    /// Set to `0` to show progress immediately.
     #[setting(default = 3)]
     pub delay_secs: u32,
 
     /// Interval in milliseconds between progress updates.
+    ///
+    /// Defaults to `100`.
     #[setting(default = 100)]
     pub interval_ms: u32,
+
+    /// Rows of tool stderr to show above the timer.
+    ///
+    /// - `false` or `0`: show the timer alone.
+    /// - `true`: size the window from the terminal height.
+    ///   This is the default.
+    /// - `N`: show exactly `N` rows.
+    ///
+    /// A tool that outlives `delay_secs` — a build, a test run, a deploy — is
+    /// the one whose output you want, and `delay_secs` is what keeps quick
+    /// tools from showing anything at all.
+    /// The lines are erased with the timer and never reach the transcript; the
+    /// tool's full output still goes to the assistant either way.
+    ///
+    /// This is the size of the window, which is screen space and therefore
+    /// shared: one window holds every tool running at once, each line labelled
+    /// with the tool that wrote it.
+    /// To keep one noisy tool out of it, set
+    /// `conversation.tools.<name>.style.print_stderr = false` rather than
+    /// shrinking the window for everything.
+    #[setting(default = "auto")]
+    pub stderr_rows: StderrRows,
 }
 
 /// Configuration for the "(receiving arguments…)" indicator shown while tool
@@ -99,13 +133,14 @@ impl AssignKeyValue for PartialToolCallConfig {
     }
 }
 
-impl AssignKeyValue for PartialProgressConfig {
+impl AssignKeyValue for PartialToolProgressConfig {
     fn assign(&mut self, kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
             "show" => self.show = kv.try_some_bool()?,
             "delay_secs" => self.delay_secs = kv.try_some_u32()?,
             "interval_ms" => self.interval_ms = kv.try_some_u32()?,
+            "stderr_rows" => self.stderr_rows = kv.try_some_bool_number_or_from_str()?,
             _ => return missing_key(&kv),
         }
 
@@ -137,12 +172,13 @@ impl PartialConfigDelta for PartialToolCallConfig {
     }
 }
 
-impl PartialConfigDelta for PartialProgressConfig {
+impl PartialConfigDelta for PartialToolProgressConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
             show: delta_opt(self.show.as_ref(), next.show),
             delay_secs: delta_opt(self.delay_secs.as_ref(), next.delay_secs),
             interval_ms: delta_opt(self.interval_ms.as_ref(), next.interval_ms),
+            stderr_rows: delta_opt(self.stderr_rows.as_ref(), next.stderr_rows),
         }
     }
 }
@@ -167,12 +203,13 @@ impl FillDefaults for PartialToolCallConfig {
     }
 }
 
-impl FillDefaults for PartialProgressConfig {
+impl FillDefaults for PartialToolProgressConfig {
     fn fill_from(self, defaults: Self) -> Self {
         Self {
             show: self.show.or(defaults.show),
             delay_secs: self.delay_secs.or(defaults.delay_secs),
             interval_ms: self.interval_ms.or(defaults.interval_ms),
+            stderr_rows: self.stderr_rows.or(defaults.stderr_rows),
         }
     }
 }
@@ -199,7 +236,7 @@ impl ToPartial for ToolCallConfig {
     }
 }
 
-impl ToPartial for ProgressConfig {
+impl ToPartial for ToolProgressConfig {
     fn to_partial(&self) -> Self::Partial {
         let defaults = Self::Partial::default();
 
@@ -207,6 +244,7 @@ impl ToPartial for ProgressConfig {
             show: partial_opt(&self.show, defaults.show),
             delay_secs: partial_opt(&self.delay_secs, defaults.delay_secs),
             interval_ms: partial_opt(&self.interval_ms, defaults.interval_ms),
+            stderr_rows: partial_opt(&self.stderr_rows, defaults.stderr_rows),
         }
     }
 }

@@ -15,7 +15,6 @@ mod schema;
 mod session;
 mod shared;
 mod signals;
-mod timer;
 
 use std::{
     env, fmt, fs,
@@ -50,7 +49,7 @@ use jp_config::{
         load_partials_with_inheritance, log_load_diagnostics,
     },
 };
-use jp_printer::{Chrome, OutputFormat, OutputWidth, Printer};
+use jp_printer::{Chrome, OutputFormat, OutputWidth, Printer, RegionStyle};
 use jp_storage::backend::{
     FsStorageBackend, NullLockBackend, NullPersistBackend, ReadOnlySessionBackend,
 };
@@ -70,7 +69,6 @@ use crate::{
         target::resolve_request,
     },
     config_pipeline::{ConfigPipeline, ConfigReset, ConfigResetEvents},
-    timer::{LineTimer, spawn_line_timer},
 };
 
 static WORKER_THREADS: AtomicUsize = AtomicUsize::new(0);
@@ -550,8 +548,9 @@ fn detect_output_width(declared: Option<u16>) -> OutputWidth {
         })
 }
 
-/// The printer for a run: the terminal streams, the resolved output format, and
-/// the chrome policy.
+/// The printer for a run: the terminal streams, the resolved output format, the
+/// chrome policy, and whether stderr is free for the printer to own ephemeral
+/// status rows on.
 ///
 /// `--quiet` closes the chrome channel, which is what the flag is for: the
 /// run's commentary on itself goes away and stdout keeps carrying the command's
@@ -566,6 +565,12 @@ fn build_printer(globals: &Globals, format: OutputFormat) -> Printer {
     Printer::terminal(format)
         .with_chrome(chrome)
         .with_output_width(detect_output_width(globals.width))
+        .with_stderr_logging(logs_to_stderr(
+            globals.verbose,
+            globals.quiet,
+            globals.log_file.as_deref(),
+            globals.log.as_deref(),
+        ))
 }
 
 #[expect(clippy::too_many_lines)]
@@ -823,22 +828,15 @@ async fn drain_background_tasks(
     let cancel = ctx.task_handler.cancel_token();
     let printer = ctx.printer.clone();
     let shutdown = ctx.signals.shutdown_token();
-    let show_chrome = ctx.term.is_tty;
     // The shutdown token only cancels once; after acting on it, stop
     // selecting on it so the loop doesn't spin on a completed future.
     let mut shutdown_watched = true;
 
-    let mut timer = if show_chrome {
-        spawn_line_timer(
-            printer.clone(),
-            true,
-            Duration::from_secs(1),
-            Duration::from_millis(100),
-            |secs, _status| format!("\r\x1b[K⏱ Finishing background tasks… {secs:.1}s"),
-        )
-    } else {
-        None
-    };
+    let mut region = printer.status_region(RegionStyle::new(
+        Duration::from_secs(1),
+        Duration::from_millis(100),
+        |secs, _detail| format!("⏱ Finishing background tasks… {secs:.1}s"),
+    ));
 
     let sync_fut = ctx
         .task_handler
@@ -852,36 +850,26 @@ async fn drain_background_tasks(
             // command, or arriving mid-drain) cancels background tasks.
             () = shutdown.cancelled(), if shutdown_watched => {
                 shutdown_watched = false;
-                stop_drain_timer(timer.take()).await;
+                region.release();
 
                 cancel.cancel();
-                if show_chrome {
-                    timer = spawn_line_timer(
-                        printer.clone(),
-                        true,
-                        Duration::ZERO,
-                        Duration::from_millis(100),
-                        |secs, _status| {
-                            format!(
-                                "\r\x1b[K⏱ Cancelling background tasks… {:.1}s",
-                                (2.0 - secs).max(0.0),
-                            )
-                        },
-                    );
-                }
+                region = printer.status_region(RegionStyle::new(
+                    Duration::ZERO,
+                    Duration::from_millis(100),
+                    |secs, _detail| {
+                        format!(
+                            "⏱ Cancelling background tasks… {:.1}s",
+                            (2.0 - secs).max(0.0),
+                        )
+                    },
+                ));
             }
             result = &mut sync_fut => break result,
         }
     };
 
-    stop_drain_timer(timer).await;
+    region.release();
     result
-}
-
-async fn stop_drain_timer(timer: Option<LineTimer>) {
-    if let Some(timer) = timer {
-        timer.finish().await;
-    }
 }
 
 /// Check if the current invocation is a root-level help request (`jp -h`).
@@ -1368,6 +1356,24 @@ impl TracingGuard {
     }
 }
 
+/// Whether a tracing layer writes to stderr for this invocation.
+///
+/// `-v` implies stderr output (the user wants to see logs), `--log-file=-` and
+/// `--log` are explicit opt-ins (otherwise `--log` would silently do nothing
+/// without also passing `-v`), and `--quiet` suppresses it regardless.
+///
+/// By default tracing goes only to the log file: stderr is reserved for chrome
+/// (progress indicators, tool headers), which keeps `2> chrome.log` clean of
+/// tracing noise and leaves the printer free to own ephemeral rows there.
+fn logs_to_stderr(
+    verbose: u8,
+    quiet: bool,
+    log_file: Option<&str>,
+    log_filter: Option<&str>,
+) -> bool {
+    !quiet && (verbose > 0 || log_filter.is_some() || log_file.is_some_and(|f| f == "-"))
+}
+
 fn configure_logging(
     verbose: u8,
     quiet: bool,
@@ -1438,18 +1444,7 @@ fn configure_logging(
     let registry = tracing_subscriber::registry().with(file_layer);
 
     // Stderr layer: only enabled when the user asks for it.
-    //
-    // By default, tracing goes only to the log file. Stderr is reserved for
-    // chrome (progress indicators, tool headers). This keeps `2> chrome.log`
-    // clean of tracing noise.
-    //
-    // `-v` implies stderr output (the user wants to see logs).
-    // `--log-file=-` is an explicit opt-in.
-    // `--log` is an explicit opt-in (otherwise the flag would silently do
-    // nothing without also passing `-v`).
-    // `--quiet` suppresses stderr output regardless.
-    let log_to_stderr =
-        !quiet && (verbose > 0 || log_filter.is_some() || log_file.is_some_and(|f| f == "-"));
+    let log_to_stderr = logs_to_stderr(verbose, quiet, log_file, log_filter);
 
     if log_to_stderr {
         let mut term_filter: Vec<_> = match more {

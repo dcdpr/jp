@@ -37,6 +37,8 @@ pub fn describe_tools() -> PartialToolConfig {
             inline_results: Some(InlineResults::Off),
             results_file_link: Some(LinkStyle::Off),
             parameters: Some(ParametersStyle::Off),
+            // A built-in runs in-process and writes no stderr.
+            print_stderr: Some(false),
             error: PartialErrorStyleConfig::default(),
         }),
         ..Default::default()

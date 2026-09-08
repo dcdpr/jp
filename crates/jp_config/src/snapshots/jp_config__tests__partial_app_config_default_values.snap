@@ -131,6 +131,9 @@ Ok(
                             inline_results: None,
                             results_file_link: None,
                             parameters: None,
+                            print_stderr: Some(
+                                true,
+                            ),
                             error: PartialErrorStyleConfig {
                                 inline_results: None,
                                 results_file_link: None,
@@ -315,6 +318,9 @@ Ok(
                     interval_ms: Some(
                         100,
                     ),
+                    stderr_rows: Some(
+                        Auto,
+                    ),
                 },
                 reasoning: PartialReasoningConfig {
                     display: None,
@@ -359,7 +365,7 @@ Ok(
                     show: Some(
                         true,
                     ),
-                    progress: PartialProgressConfig {
+                    progress: PartialToolProgressConfig {
                         show: Some(
                             true,
                         ),
@@ -368,6 +374,9 @@ Ok(
                         ),
                         interval_ms: Some(
                             100,
+                        ),
+                        stderr_rows: Some(
+                            Auto,
                         ),
                     },
                     preparing: PartialPreparingConfig {

@@ -1,5 +1,5 @@
 use jp_config::{AppConfig, style::typewriter::DelayDuration, types::color::Color};
-use jp_printer::{OutputFormat, OutputWidth, SharedBuffer};
+use jp_printer::{OutputFormat, OutputWidth, SharedBuffer, TerminalCapability};
 
 use super::*;
 
@@ -46,6 +46,18 @@ fn the_gap_around_tool_chrome_is_not_left_on_stdout() {
         *out.lock(),
         "Let me check the README title.\n\n`# Jean-Pierre`\n\n"
     );
+}
+
+/// A renderer whose printer believes stderr is a terminal, so the `Timer`
+/// reasoning display can claim a status region.
+///
+/// Live rather than replay: the timer only runs while a response streams.
+fn create_timer_renderer(config: AppConfig) -> (ChatRenderer, SharedBuffer, SharedBuffer) {
+    let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = printer.with_terminal(TerminalCapability::interactive(Some(80)));
+    let renderer = ChatRenderer::new(Arc::new(printer), config.style, RenderFlow::Live);
+
+    (renderer, out, err)
 }
 
 #[test]
@@ -350,7 +362,7 @@ fn test_progress_reasoning_shows_dots() {
 async fn test_timer_reasoning_suppresses_output() {
     let mut config = AppConfig::new_test();
     config.style.reasoning.display = ReasoningDisplayConfig::Timer;
-    let (mut renderer, out, _err) = create_renderer_with_config(config);
+    let (mut renderer, out, _err) = create_timer_renderer(config);
 
     renderer.render_response(&ChatResponse::Reasoning {
         reasoning: "First chunk\n\n".into(),
@@ -367,26 +379,28 @@ async fn test_timer_reasoning_suppresses_output() {
     );
 }
 
-/// The timer line and the tool chrome share the terminal row, so entering a
-/// tool call must erase the timer.
-/// Nothing else pins this: the timer writes to stderr, so a leaked line is
+/// The timer row and the tool chrome share the terminal row, so entering a tool
+/// call must release the timer region — which is what erases the row.
+/// Nothing else pins this: the region is drawn on stderr, so a leaked row is
 /// invisible to assertions on rendered stdout.
 #[tokio::test]
-async fn test_timer_reasoning_erased_when_entering_tool_call() {
+async fn test_timer_reasoning_released_when_entering_tool_call() {
     let mut config = AppConfig::new_test();
     config.style.reasoning.display = ReasoningDisplayConfig::Timer;
-    let (mut renderer, _out, err) = create_renderer_with_config(config);
+    let (mut renderer, _out, _err) = create_timer_renderer(config);
 
     renderer.render_response(&ChatResponse::Reasoning {
         reasoning: "Thinking hard\n\n".into(),
     });
-    renderer.enter_tool_call();
+    assert!(
+        renderer.reasoning_timer.is_active(),
+        "reasoning should have claimed the timer region"
+    );
 
-    renderer.printer.flush();
-    assert_eq!(
-        *err.lock(),
-        "\r\x1b[K",
-        "the tool-call boundary must erase the timer line"
+    renderer.enter_tool_call();
+    assert!(
+        !renderer.reasoning_timer.is_active(),
+        "the tool-call boundary must release the timer region"
     );
 }
 
@@ -394,7 +408,7 @@ async fn test_timer_reasoning_erased_when_entering_tool_call() {
 async fn test_timer_reasoning_then_message() {
     let mut config = AppConfig::new_test();
     config.style.reasoning.display = ReasoningDisplayConfig::Timer;
-    let (mut renderer, out, _err) = create_renderer_with_config(config);
+    let (mut renderer, out, _err) = create_timer_renderer(config);
 
     renderer.render_response(&ChatResponse::Reasoning {
         reasoning: "Thinking hard\n\n".into(),
@@ -425,7 +439,7 @@ async fn test_timer_reasoning_then_message() {
 async fn test_no_separator_for_tool_call_timer_reasoning_tool_call() {
     let mut config = AppConfig::new_test();
     config.style.reasoning.display = ReasoningDisplayConfig::Timer;
-    let (mut renderer, out, _err) = create_renderer_with_config(config);
+    let (mut renderer, out, _err) = create_timer_renderer(config);
 
     // Tool call 1: chat renderer enters ToolCall mode. (The tool
     // renderer itself writes "Calling tool …" to stderr; nothing on

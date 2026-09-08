@@ -184,7 +184,7 @@
     "summary": "Add `jp conversation edit` (opens directory in $EDITOR) and `jp conversation path` (prints conversation filesystem path)."
   },
   "048-four-channel-output-model.md": {
-    "hash": "0fde942857ca1a7f7a0dbf181f19df379b2255744eb92c8e4544f978c94b425b",
+    "hash": "15db61bc63a8b4d1648ada5b12ebd5d0de5a31a795dcbe9ebf7a21dab32c858a",
     "summary": "Separate JP output into four channels: stdout for responses, stderr for chrome, /dev/tty for prompts, log file for tracing."
   },
   "049-non-interactive-mode-and-detached-prompt-policy.md": {
@@ -359,9 +359,9 @@
     "hash": "2f2a3694924055b6abf1a6e5a40af4759861017e172e1c94798dda2c3f7557e2",
     "summary": "JP gains Anthropic subscription auth with automatic fallback to API key billing when quotas exhaust."
   },
-  "091-printer-owned-status-line.md": {
-    "hash": "654e340514f57e8b195ff9c71e7e7ad070f5edde925ae8bd4e9c71de307f2af1",
-    "summary": "Centralize ephemeral status-line rendering in the printer's worker thread to eliminate cross-site ordering bugs."
+  "091-printer-owned-status-region.md": {
+    "hash": "9f50bec24fd8434ab87f60ece312c4ec6492f67fcb8014e2d8afc33e9d31e286",
+    "summary": "Consolidates nine ephemeral terminal indicators into a printer-owned status region primitive, showing live child-process output with multi-row windows and standardized chrome lifecycle."
   },
   "092-predictable-and-responsive-interrupt-escalation.md": {
     "hash": "04132add4db5ee2b02339cea46a42ae794cd2b93043499dc9c1336cf3a71cdbf",
@@ -412,7 +412,7 @@
     "summary": "Multi-valued labels replacing single-valued ones; add/set/rm verbs, set-membership filtering, config list-values, removes --label from query/fork."
   },
   "104-terminal-capability-and-promptability-signals.md": {
-    "hash": "730c2672d54c0124b7f17329b29b535cca1fd63b61e681012a653b6be82aa412",
+    "hash": "cd7a302b62466866caf39751d5ec6280c2a7bc7d0ecdfabacd6c530c23a64f8f",
     "summary": "Separate four terminal-capability questions onto different signals to fix prompts and repaints in piped and redirected runs."
   },
   "106-collision-free-conversation-id-allocation.md": {

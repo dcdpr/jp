@@ -77,6 +77,7 @@ fn test_error_overlay_falls_back_per_field() {
         parameters: ParametersStyle::Json,
         inline_results: InlineResults::Truncate(TruncateLines { lines: 5 }),
         results_file_link: LinkStyle::Full,
+        print_stderr: true,
         error: ErrorStyleConfig {
             inline_results: Some(InlineResults::Full),
             results_file_link: None,

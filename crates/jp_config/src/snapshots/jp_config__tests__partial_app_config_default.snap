@@ -66,6 +66,7 @@ PartialAppConfig {
                     inline_results: None,
                     results_file_link: None,
                     parameters: None,
+                    print_stderr: None,
                     error: PartialErrorStyleConfig {
                         inline_results: None,
                         results_file_link: None,
@@ -149,6 +150,7 @@ PartialAppConfig {
             show: None,
             delay_secs: None,
             interval_ms: None,
+            stderr_rows: None,
         },
         reasoning: PartialReasoningConfig {
             display: None,
@@ -171,10 +173,11 @@ PartialAppConfig {
         },
         tool_call: PartialToolCallConfig {
             show: None,
-            progress: PartialProgressConfig {
+            progress: PartialToolProgressConfig {
                 show: None,
                 delay_secs: None,
                 interval_ms: None,
+                stderr_rows: None,
             },
             preparing: PartialPreparingConfig {
                 show: None,

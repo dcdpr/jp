@@ -9,7 +9,7 @@ use jp_conversation::{
     event::{ChatRequest, ChatResponse},
 };
 use jp_llm::{StreamError, event::Event};
-use jp_printer::{OutputFormat, Printer, SharedBuffer};
+use jp_printer::{OutputFormat, Printer, SharedBuffer, TerminalCapability};
 use jp_workspace::{ConversationLock, Workspace};
 
 use super::*;
@@ -24,7 +24,7 @@ fn make_retry_state(max_retries: u32) -> StreamRetryState {
         max_response_bytes: MaxResponseBytes::default(),
         cache: CachePolicy::default(),
     };
-    StreamRetryState::new(config, false)
+    StreamRetryState::new(config)
 }
 
 fn make_turn_coordinator() -> TurnCoordinator {
@@ -95,24 +95,26 @@ fn reset_clears_failure_count() {
     assert!(state.can_retry(&StreamError::transient("test")));
 }
 
-// A terminal on stdout says nothing about what is consuming stderr: `jp -F
-// json query ... 2> >(jq .)` leaves `is_tty` true while a parser reads the
-// chrome. The in-place redraw has no record form, so JSON output takes the
-// permanent-line path and the notification stays parseable.
+// A terminal on stderr says nothing about what is consuming it: `jp -F json
+// query ... 2> >(jq .)` leaves stderr a tty while a parser reads the chrome. A
+// status region has no record form, so JSON output takes the permanent-line
+// path and the notification stays parseable.
+//
+// The terminal is declared interactive so the format is the only thing
+// refusing the region — otherwise this would pass on the piped-stderr default
+// and prove nothing.
 #[test]
 fn json_retry_notification_is_a_record_even_on_a_tty() {
     let (printer, _out, err) = Printer::memory(OutputFormat::Json);
-    let mut state = StreamRetryState::new(
-        RequestConfig {
-            max_retries: 3,
-            base_backoff_ms: 1,
-            max_backoff_secs: 1,
-            stream_idle_timeout_secs: 120,
-            max_response_bytes: MaxResponseBytes::default(),
-            cache: CachePolicy::default(),
-        },
-        true,
-    );
+    let printer = printer.with_terminal(TerminalCapability::interactive(Some(80)));
+    let mut state = StreamRetryState::new(RequestConfig {
+        max_retries: 3,
+        base_backoff_ms: 1,
+        max_backoff_secs: 1,
+        stream_idle_timeout_secs: 120,
+        max_response_bytes: MaxResponseBytes::default(),
+        cache: CachePolicy::default(),
+    });
 
     state.record_attempt();
     state.notify("rate_limit", &printer);
@@ -122,8 +124,8 @@ fn json_retry_notification_is_a_record_even_on_a_tty() {
         *err.lock(),
         "{\"message\":\"⚠ rate_limit, retrying (1/3)…\"}\n"
     );
-    // No line is left on screen to erase, so a later clear writes nothing.
-    assert!(!state.line_active);
+    // Nothing was claimed, so there is no row for a later release to erase.
+    assert!(!state.notice.is_active());
 }
 
 #[test]
@@ -136,7 +138,7 @@ fn backoff_uses_retry_after_when_present() {
         max_response_bytes: MaxResponseBytes::default(),
         cache: CachePolicy::default(),
     };
-    let state = StreamRetryState::new(config, false);
+    let state = StreamRetryState::new(config);
     let err = StreamError::rate_limit(Some(Duration::from_secs(42)));
 
     assert_within_jitter_window(state.backoff_duration(&err), Duration::from_secs(42));
@@ -442,7 +444,7 @@ async fn interrupt_during_backoff_cuts_wait_short() {
         max_response_bytes: MaxResponseBytes::default(),
         cache: CachePolicy::default(),
     };
-    let mut retry_state = StreamRetryState::new(config, false);
+    let mut retry_state = StreamRetryState::new(config);
     let mut turn_coordinator = make_turn_coordinator();
     let (_ws, lock) = make_test_lock();
     let conv = lock.as_mut();

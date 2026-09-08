@@ -12,6 +12,7 @@ use jp_config::{
         ResultMode, RunMode, access::PartialEnvRuleConfig,
     },
     model::id::{ModelIdConfig, PartialModelIdConfig, ProviderId},
+    style::stderr_rows::{RowCount, StderrRows},
     util::build,
 };
 use jp_conversation::{
@@ -24,7 +25,8 @@ use jp_llm::{
     provider::mock::MockProvider,
     tool::{InvocationContext, builtin::BuiltinExecutors, executor::ExecutorSource},
 };
-use jp_printer::{OutputFormat, Printer, SharedBuffer};
+use jp_mcp::{Startup, StderrLine};
+use jp_printer::{OutputFormat, Printer, SharedBuffer, TerminalCapability};
 use jp_storage::backend::FsStorageBackend;
 use jp_term::width::display_width;
 use jp_workspace::{
@@ -33,7 +35,7 @@ use jp_workspace::{
 };
 use relative_path::RelativePathBuf;
 use serde_json::Value;
-use tokio::runtime::Runtime;
+use tokio::{runtime::Runtime, sync::broadcast};
 
 use super::*;
 use crate::{
@@ -311,7 +313,6 @@ async fn run_mock_turn(
         &router,
         &mcp_client,
         root,
-        false,
         false, // interactive
         &[],
         lock,
@@ -1990,6 +1991,7 @@ fn edit_message_synthesizes_when_no_edit_without_query() {
             false,
             &config,
             root,
+            &Printer::sink(),
         )
         .unwrap();
     assert_eq!(source, QuerySource::Synthesized);
@@ -2010,6 +2012,7 @@ fn edit_message_synthesizes_when_no_edit_without_query() {
             false,
             &config,
             root,
+            &Printer::sink(),
         )
         .unwrap();
     assert_eq!(source, QuerySource::Synthesized);
@@ -2048,6 +2051,7 @@ fn edit_message_quote_without_editor_is_synthesized() {
             false,
             &config,
             Utf8Path::new("/tmp"),
+            &Printer::sink(),
         )
         .unwrap();
     assert_eq!(source, QuerySource::Synthesized);
@@ -2080,6 +2084,7 @@ fn edit_message_skips_editor_when_no_edit_with_piped_stdin() {
             true,
             &config,
             root,
+            &Printer::sink(),
         )
         .unwrap();
 
@@ -2487,7 +2492,30 @@ fn immediate_mcp_startup_config() -> McpStartupConfig {
         show: true,
         delay_secs: 0,
         interval_ms: 10,
+        // Most of these cases assert on the status row alone; the ones that
+        // exercise the window override this.
+        stderr_rows: StderrRows::Off,
     }
+}
+
+/// A startup set over `joins`, plus the sender a test can feed stderr through.
+///
+/// Callers that don't exercise the window drop the sender, which closes the
+/// channel; the wait treats that as "no more lines" rather than an error.
+fn startup_set(
+    joins: tokio::task::JoinSet<std::result::Result<Startup, jp_mcp::Error>>,
+    pending: Vec<McpServerId>,
+) -> (StartupSet, broadcast::Sender<StderrLine>) {
+    let (tx, rx) = broadcast::channel(64);
+
+    (
+        StartupSet {
+            joins,
+            pending,
+            stderr: rx,
+        },
+        tx,
+    )
 }
 
 #[tokio::test]
@@ -2495,22 +2523,18 @@ async fn await_mcp_servers_drains_all_startups() {
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
 
     let mut joins = tokio::task::JoinSet::new();
-    joins.spawn(async { Ok(McpServerId::new("bookworm")) });
-    joins.spawn(async { Ok(McpServerId::new("grizzly")) });
-    let startup = StartupSet {
-        joins,
-        pending: vec![McpServerId::new("bookworm"), McpServerId::new("grizzly")],
-    };
+    joins.spawn(async { Ok(Startup::Ready(McpServerId::new("bookworm"))) });
+    joins.spawn(async { Ok(Startup::Ready(McpServerId::new("grizzly"))) });
+    let (startup, _lines) = startup_set(joins, vec![
+        McpServerId::new("bookworm"),
+        McpServerId::new("grizzly"),
+    ]);
 
-    await_mcp_servers(
-        startup,
-        immediate_mcp_startup_config(),
-        Arc::new(printer),
-        false,
-        None,
-    )
-    .await
-    .expect("all startups succeed");
+    let skipped = await_mcp_servers(startup, immediate_mcp_startup_config(), Arc::new(printer))
+        .await
+        .expect("all startups succeed");
+
+    assert!(skipped.is_empty(), "no server was skipped");
 }
 
 #[tokio::test]
@@ -2519,20 +2543,11 @@ async fn await_mcp_servers_propagates_startup_error() {
 
     let mut joins = tokio::task::JoinSet::new();
     joins.spawn(async { Err(jp_mcp::Error::UnknownServer(McpServerId::new("bookworm"))) });
-    let startup = StartupSet {
-        joins,
-        pending: vec![McpServerId::new("bookworm")],
-    };
+    let (startup, _lines) = startup_set(joins, vec![McpServerId::new("bookworm")]);
 
-    let error = await_mcp_servers(
-        startup,
-        immediate_mcp_startup_config(),
-        Arc::new(printer),
-        false,
-        None,
-    )
-    .await
-    .expect_err("a failed required server must fail the wait");
+    let error = await_mcp_servers(startup, immediate_mcp_startup_config(), Arc::new(printer))
+        .await
+        .expect_err("a failed required server must fail the wait");
 
     assert_eq!(error.message.as_deref(), Some("MCP error"));
 }
@@ -2540,7 +2555,7 @@ async fn await_mcp_servers_propagates_startup_error() {
 #[tokio::test(flavor = "multi_thread")]
 async fn await_mcp_servers_shows_and_clears_timer_line() {
     let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
-    let printer = Arc::new(printer);
+    let printer = Arc::new(printer.with_terminal(TerminalCapability::interactive(Some(80))));
 
     // Hold the startup window open until the test releases it, so the timer
     // is guaranteed to tick while the server is still "starting".
@@ -2548,19 +2563,14 @@ async fn await_mcp_servers_shows_and_clears_timer_line() {
     let mut joins = tokio::task::JoinSet::new();
     joins.spawn(async move {
         release_rx.await.ok();
-        Ok(McpServerId::new("bookworm"))
+        Ok(Startup::Ready(McpServerId::new("bookworm")))
     });
-    let startup = StartupSet {
-        joins,
-        pending: vec![McpServerId::new("bookworm")],
-    };
+    let (startup, _lines) = startup_set(joins, vec![McpServerId::new("bookworm")]);
 
     let wait = tokio::spawn(await_mcp_servers(
         startup,
         immediate_mcp_startup_config(),
         printer.clone(),
-        true,
-        None,
     ));
 
     // Let a few ticks land before releasing the startup.
@@ -2580,6 +2590,216 @@ async fn await_mcp_servers_shows_and_clears_timer_line() {
         chrome.ends_with("\r\x1b[K"),
         "finishing the wait must leave the line cleared.\nChrome:\n{chrome}"
     );
+}
+
+/// An `AppConfig` whose `search` tool is backed by the `bookworm` MCP server.
+fn config_with_mcp_tool(enabled: bool) -> AppConfig {
+    let mut partial = AppConfig::new_test().to_partial();
+    partial
+        .conversation
+        .tools
+        .tools
+        .insert("search".to_owned(), PartialToolConfig {
+            source: Some(ToolSource::Mcp {
+                server: "bookworm".to_owned(),
+                tool: None,
+            }),
+            enable: Some(PartialEnableConfig {
+                state: Some(enabled),
+                ..PartialEnableConfig::default()
+            }),
+            ..PartialToolConfig::default()
+        });
+
+    build(partial).expect("the fixture config resolves")
+}
+
+#[test]
+fn skipped_server_report_names_the_tools_that_went_with_it() {
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+
+    report_skipped_servers(&printer, &config_with_mcp_tool(true), &[McpServerId::new(
+        "bookworm",
+    )]);
+    printer.flush();
+
+    let chrome = err.lock();
+    assert!(
+        chrome.contains("Optional MCP server 'bookworm' did not start"),
+        "the report must name the server.\nChrome:\n{chrome}"
+    );
+    assert!(
+        chrome.contains("unavailable tools: search"),
+        "the report must name the tools that went with it.\nChrome:\n{chrome}"
+    );
+    assert!(
+        chrome.contains("-v"),
+        "the report must point at where the reason lives.\nChrome:\n{chrome}"
+    );
+}
+
+#[test]
+fn skipped_server_report_is_ndjson_under_json_format() {
+    let (printer, _out, err) = Printer::memory(OutputFormat::Json);
+
+    report_skipped_servers(&printer, &config_with_mcp_tool(true), &[McpServerId::new(
+        "bookworm",
+    )]);
+    printer.flush();
+
+    let chrome = err.lock().clone();
+    let parsed: serde_json::Value =
+        serde_json::from_str(chrome.trim()).expect("chrome is one NDJSON record");
+
+    assert_eq!(parsed["event"], "mcp_server_unavailable");
+    assert_eq!(parsed["server"], "bookworm");
+    assert_eq!(parsed["tools"][0], "search");
+}
+
+#[test]
+fn skipped_server_report_skips_disabled_tools() {
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+
+    report_skipped_servers(&printer, &config_with_mcp_tool(false), &[McpServerId::new(
+        "bookworm",
+    )]);
+    printer.flush();
+
+    let chrome = err.lock();
+    assert!(
+        chrome.contains("Optional MCP server 'bookworm' did not start"),
+        "the server is still reported.\nChrome:\n{chrome}"
+    );
+    assert!(
+        !chrome.contains("unavailable tools"),
+        "a tool that was already off did not become unavailable.\nChrome:\n{chrome}"
+    );
+}
+
+/// A startup wait that shows two window rows above the status row.
+fn windowed_mcp_startup_config() -> McpStartupConfig {
+    McpStartupConfig {
+        stderr_rows: StderrRows::Fixed(RowCount { rows: 2 }),
+        ..immediate_mcp_startup_config()
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn await_mcp_servers_shows_server_stderr_while_it_starts() {
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(
+        printer.with_terminal(TerminalCapability::interactive(Some(80)).with_rows(Some(24))),
+    );
+
+    let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+    let mut joins = tokio::task::JoinSet::new();
+    joins.spawn(async move {
+        release_rx.await.ok();
+        Ok(Startup::Ready(McpServerId::new("bookworm")))
+    });
+    let (startup, lines) = startup_set(joins, vec![McpServerId::new("bookworm")]);
+
+    let wait = tokio::spawn(await_mcp_servers(
+        startup,
+        windowed_mcp_startup_config(),
+        printer.clone(),
+    ));
+
+    lines
+        .send((McpServerId::new("bookworm"), "Compiling serde".to_owned()))
+        .expect("the wait holds a receiver");
+    wait_for_frame(&err, "Compiling serde").await;
+
+    release_tx.send(()).expect("wait task is still running");
+    wait.await
+        .expect("task did not panic")
+        .expect("startup succeeds");
+    printer.flush();
+
+    let chrome = err.lock();
+    assert!(
+        chrome.contains("⏱ Starting MCP server bookworm…"),
+        "the status row still names the pending server.\nChrome:\n{chrome}"
+    );
+    assert!(
+        !chrome.contains("[bookworm]"),
+        "a single source renders verbatim, without a label.\nChrome:\n{chrome}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn window_lines_are_labelled_once_two_servers_contribute() {
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(
+        printer.with_terminal(TerminalCapability::interactive(Some(80)).with_rows(Some(24))),
+    );
+
+    let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+    let mut joins = tokio::task::JoinSet::new();
+    joins.spawn(async move {
+        release_rx.await.ok();
+        Ok(Startup::Ready(McpServerId::new("bookworm")))
+    });
+    let (startup, lines) = startup_set(joins, vec![
+        McpServerId::new("bookworm"),
+        McpServerId::new("grizzly"),
+    ]);
+
+    let wait = tokio::spawn(await_mcp_servers(
+        startup,
+        windowed_mcp_startup_config(),
+        printer.clone(),
+    ));
+
+    // Interleaved output from two sources is worse than none unlabelled: it
+    // misattributes progress.
+    lines
+        .send((McpServerId::new("bookworm"), "Compiling serde".to_owned()))
+        .expect("the wait holds a receiver");
+    lines
+        .send((McpServerId::new("grizzly"), "Compiling tantivy".to_owned()))
+        .expect("the wait holds a receiver");
+    // Labelling only starts once the window holds two sources, so the first
+    // label appearing means both lines have landed.
+    wait_for_frame(&err, "[bookworm]").await;
+
+    release_tx.send(()).expect("wait task is still running");
+    wait.await
+        .expect("task did not panic")
+        .expect("startup succeeds");
+    printer.flush();
+
+    // The label's own colour is `jp_printer`'s business; what matters here is
+    // that each line carries its source's name, padded to line up, and that the
+    // colour closes before the source's own text starts.
+    let chrome = err.lock();
+    assert!(
+        chrome.contains("[bookworm]\x1b[39m Compiling serde"),
+        "the first source must be labelled.\nChrome:\n{chrome}"
+    );
+    assert!(
+        chrome.contains("[grizzly ]\x1b[39m Compiling tantivy"),
+        "the second source must be labelled and aligned.\nChrome:\n{chrome}"
+    );
+}
+
+#[tokio::test]
+async fn await_mcp_servers_reports_skipped_optional_servers() {
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+
+    let mut joins = tokio::task::JoinSet::new();
+    joins.spawn(async { Ok(Startup::Skipped(McpServerId::new("bookworm"))) });
+    joins.spawn(async { Ok(Startup::Ready(McpServerId::new("grizzly"))) });
+    let (startup, _lines) = startup_set(joins, vec![
+        McpServerId::new("bookworm"),
+        McpServerId::new("grizzly"),
+    ]);
+
+    let skipped = await_mcp_servers(startup, immediate_mcp_startup_config(), Arc::new(printer))
+        .await
+        .expect("an optional failure completes the wait");
+
+    assert_eq!(skipped, vec![McpServerId::new("bookworm")]);
 }
 
 /// Poll `err` until `needle` appears, failing after a hard timeout.
@@ -2603,7 +2823,7 @@ async fn wait_for_frame(err: &SharedBuffer, needle: &str) {
 #[tokio::test(flavor = "multi_thread")]
 async fn await_mcp_servers_redraws_as_servers_finish() {
     let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
-    let printer = Arc::new(printer);
+    let printer = Arc::new(printer.with_terminal(TerminalCapability::interactive(Some(80))));
 
     // Two independently-released tasks: releasing `bookworm` first makes
     // `grizzly` the deterministic survivor of the mid-drain redraw.
@@ -2612,23 +2832,21 @@ async fn await_mcp_servers_redraws_as_servers_finish() {
     let mut joins = tokio::task::JoinSet::new();
     joins.spawn(async move {
         bookworm_rx.await.ok();
-        Ok(McpServerId::new("bookworm"))
+        Ok(Startup::Ready(McpServerId::new("bookworm")))
     });
     joins.spawn(async move {
         grizzly_rx.await.ok();
-        Ok(McpServerId::new("grizzly"))
+        Ok(Startup::Ready(McpServerId::new("grizzly")))
     });
-    let startup = StartupSet {
-        joins,
-        pending: vec![McpServerId::new("bookworm"), McpServerId::new("grizzly")],
-    };
+    let (startup, _lines) = startup_set(joins, vec![
+        McpServerId::new("bookworm"),
+        McpServerId::new("grizzly"),
+    ]);
 
     let wait = tokio::spawn(await_mcp_servers(
         startup,
         immediate_mcp_startup_config(),
         printer.clone(),
-        true,
-        None,
     ));
 
     // Advance on the rendered frames, not the clock: wait until each frame is
@@ -2668,12 +2886,12 @@ async fn await_mcp_servers_redraws_as_servers_finish() {
 fn mcp_startup_line_renders_full_when_it_fits() {
     assert_eq!(
         mcp_startup_line(4.2, Some("MCP server bookworm"), Some(80)),
-        "\r\x1b[K⏱ Starting MCP server bookworm… 4.2s"
+        "⏱ Starting MCP server bookworm… 4.2s"
     );
     // Unknown width leaves the line unbounded.
     assert_eq!(
         mcp_startup_line(4.2, Some("MCP server bookworm"), None),
-        "\r\x1b[K⏱ Starting MCP server bookworm… 4.2s"
+        "⏱ Starting MCP server bookworm… 4.2s"
     );
 }
 
@@ -2688,9 +2906,7 @@ fn mcp_startup_line_truncation_preserves_timer_suffix() {
 
     assert!(line.ends_with(" 12.3s"), "suffix must survive: {line:?}");
     assert!(line.contains('…'), "server list must truncate: {line:?}");
-    // The visible text (control prefix stripped) must fit the declared width.
-    let visible = line.strip_prefix("\r\x1b[K").expect("control prefix");
-    assert!(display_width(visible) <= 30, "must fit width: {line:?}");
+    assert!(display_width(&line) <= 30, "must fit width: {line:?}");
 }
 
 // A terminal too narrow for even the prefix and suffix still keeps a moving
@@ -2699,9 +2915,8 @@ fn mcp_startup_line_truncation_preserves_timer_suffix() {
 fn mcp_startup_line_ultra_narrow_keeps_bounded_timer() {
     let line = mcp_startup_line(7.0, Some("MCP server bookworm"), Some(6));
 
-    let visible = line.strip_prefix("\r\x1b[K").expect("control prefix");
-    assert!(display_width(visible) <= 6, "must fit width: {line:?}");
-    assert!(visible.contains("7.0s"), "timer must survive: {line:?}");
+    assert!(display_width(&line) <= 6, "must fit width: {line:?}");
+    assert!(line.contains("7.0s"), "timer must survive: {line:?}");
 }
 
 #[test]
@@ -2783,6 +2998,7 @@ fn built_request_against(args: &[&str], stream: &ConversationStream) -> String {
             stream,
             &AppConfig::new_test(),
             Utf8Path::new("/tmp"),
+            &Printer::sink(),
         )
         .unwrap()
         .chat_request
@@ -2869,6 +3085,7 @@ fn build_conversation_prepends_query_to_piped_stdin() {
             &ConversationStream::new_test(),
             &AppConfig::new_test(),
             Utf8Path::new("/tmp"),
+            &Printer::sink(),
         )
         .unwrap();
 

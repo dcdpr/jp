@@ -3,7 +3,78 @@ use schematic::{SchemaBuilder, SchemaType, schema::LiteralValue};
 use serde_json::json;
 
 use super::*;
-use crate::{PartialAppConfig, types::json_value::JsonValue, util::build};
+use crate::{
+    PartialAppConfig, conversation::tool::style::InlineResults, types::json_value::JsonValue,
+    util::build,
+};
+
+/// A tool opting out of the progress window keeps that answer through the whole
+/// loader, not just when the style is built in memory.
+///
+/// The per-tool style is filled field-by-field from the `'*'` block at
+/// partial-merge time, so a tool that sets one style key takes the rest from
+/// the defaults — and the key it did set has to survive that fill.
+#[test]
+fn a_tool_keeps_its_own_print_stderr_through_the_loader() {
+    let loaded: PartialAppConfig = toml::from_str(
+        r#"
+[conversation.tools.'*']
+run = "unattended"
+
+[conversation.tools.'*'.style]
+inline_results = "off"
+
+[conversation.tools.loud]
+source = "local"
+run = "unattended"
+
+[conversation.tools.quiet]
+source = "local"
+run = "unattended"
+
+[conversation.tools.quiet.style]
+print_stderr = false
+"#,
+    )
+    .expect("the fixture parses");
+
+    // Only the tool tree comes from TOML; the rest is whatever a test config
+    // needs to resolve at all.
+    let mut partial = PartialAppConfig::new_test();
+    partial.conversation.tools = loaded.conversation.tools;
+
+    let config = build(partial).expect("the fixture resolves");
+    let tools = &config.conversation.tools;
+
+    assert!(
+        !tools
+            .get("quiet")
+            .expect("quiet is configured")
+            .style()
+            .print_stderr,
+        "a tool setting print_stderr = false must keep it"
+    );
+    assert!(
+        tools
+            .get("loud")
+            .expect("loud is configured")
+            .style()
+            .print_stderr,
+        "a tool setting nothing takes the default"
+    );
+
+    // The `'*'` fill still reaches the opted-out tool's other fields, which is
+    // the interaction that could silently drop the key it did set.
+    assert_eq!(
+        tools
+            .get("quiet")
+            .expect("quiet is configured")
+            .style()
+            .inline_results,
+        InlineResults::Off,
+        "the '*' block still fills the fields the tool left out"
+    );
+}
 
 // `--tool` and `--no-tool` read a comma as the separator between tool names, so
 // a tool named `read,write` could never be enabled or disabled from the CLI.

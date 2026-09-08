@@ -67,7 +67,8 @@ expression: v
               }
             },
             "results_file_link": "full",
-            "parameters": "json"
+            "parameters": "json",
+            "print_stderr": true
           }
         }
       },
@@ -114,7 +115,8 @@ expression: v
       "mcp_startup": {
         "show": true,
         "delay_secs": 4,
-        "interval_ms": 100
+        "interval_ms": 100,
+        "stderr_rows": "auto"
       },
       "reasoning": {
         "display": "full",
@@ -139,7 +141,8 @@ expression: v
         "progress": {
           "show": true,
           "delay_secs": 3,
-          "interval_ms": 100
+          "interval_ms": 100,
+          "stderr_rows": "auto"
         },
         "preparing": {
           "show": true,

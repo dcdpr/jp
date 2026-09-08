@@ -8,6 +8,7 @@
 //! parameters = "json"      # how arguments are rendered on the call
 //! inline_results = "full"  # how successful results are rendered
 //! results_file_link = "osc8"
+//! print_stderr = true      # feed this tool's stderr to the progress window
 //!
 //! [tools.my_tool.style.error]
 //! inline_results = "full"  # overrides on top of `style` for failed results
@@ -73,6 +74,23 @@ pub struct DisplayStyleConfig {
     #[setting(default)]
     pub parameters: ParametersStyle,
 
+    /// Whether this tool's stderr feeds the progress window while it runs.
+    ///
+    /// Defaults to `true`.
+    /// Set to `false` to keep one noisy tool out of the window without
+    /// affecting the others — a test runner whose output you would rather not
+    /// watch, say.
+    ///
+    /// Two levels gate the window, and both must allow it: this key, and
+    /// `style.tool_call.stderr_rows`, which decides whether there is a window
+    /// at all and how tall it is.
+    /// Rows are screen space, so their count is shared by every tool running at
+    /// once; only membership is per-tool.
+    ///
+    /// The tool's full output reaches the assistant either way.
+    #[setting(default = true)]
+    pub print_stderr: bool,
+
     /// Per-field overrides applied when the tool result is `Err`.
     /// Unset overlay fields take their value from the matching top-level field.
     ///
@@ -126,6 +144,7 @@ impl AssignKeyValue for PartialDisplayStyleConfig {
             "inline_results" => self.inline_results = kv.try_some_from_str()?,
             "results_file_link" => self.results_file_link = kv.try_some_from_str()?,
             "parameters" => self.parameters = kv.try_some_from_str()?,
+            "print_stderr" => self.print_stderr = kv.try_some_bool()?,
             _ if kv.p("error") => self.error.assign(kv)?,
             _ => return missing_key(&kv),
         }
@@ -141,6 +160,7 @@ impl PartialConfigDelta for PartialDisplayStyleConfig {
             inline_results: delta_opt(self.inline_results.as_ref(), next.inline_results),
             results_file_link: delta_opt(self.results_file_link.as_ref(), next.results_file_link),
             parameters: delta_opt(self.parameters.as_ref(), next.parameters),
+            print_stderr: delta_opt(self.print_stderr.as_ref(), next.print_stderr),
             error: self.error.delta(next.error),
         }
     }
@@ -153,6 +173,7 @@ impl FillDefaults for PartialDisplayStyleConfig {
             inline_results: self.inline_results.or(defaults.inline_results),
             results_file_link: self.results_file_link.or(defaults.results_file_link),
             parameters: self.parameters.or(defaults.parameters),
+            print_stderr: self.print_stderr.or(defaults.print_stderr),
             error: self.error.fill_from(defaults.error),
         }
     }
@@ -167,6 +188,7 @@ impl ToPartial for DisplayStyleConfig {
             inline_results: partial_opt(&self.inline_results, defaults.inline_results),
             results_file_link: partial_opt(&self.results_file_link, defaults.results_file_link),
             parameters: partial_opt(&self.parameters, defaults.parameters),
+            print_stderr: partial_opt(&self.print_stderr, defaults.print_stderr),
             error: self.error.to_partial(),
         }
     }

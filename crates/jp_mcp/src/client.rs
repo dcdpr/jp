@@ -23,7 +23,7 @@ use tokio::{
     io::{AsyncBufReadExt, BufReader},
     process::{ChildStderr, Command},
     runtime::Handle,
-    sync::RwLock,
+    sync::{RwLock, broadcast},
     task::JoinSet,
 };
 use tracing::{trace, warn};
@@ -33,6 +33,9 @@ use crate::{
     error::Result,
     id::{McpServerId, McpToolId},
 };
+
+/// One line a starting MCP server wrote to stderr, tagged with its server.
+pub type StderrLine = (McpServerId, String);
 
 /// A batch of MCP servers starting in the background.
 ///
@@ -45,13 +48,53 @@ use crate::{
 /// [`pending`]: Self::pending
 pub struct StartupSet {
     /// One task per starting server.
-    /// Each resolves to the id of the server it started (also for `optional`
-    /// servers that failed and were skipped), or to the startup error for a
-    /// required server.
-    pub joins: JoinSet<Result<McpServerId>>,
+    /// Each resolves to how that server's startup finished, or to the startup
+    /// error for a required server.
+    pub joins: JoinSet<Result<Startup>>,
 
     /// Ids of the servers being started, sorted by name.
     pub pending: Vec<McpServerId>,
+
+    /// Stderr lines from the starting servers, tagged with their source.
+    ///
+    /// A server can spend minutes building before anyone drains this, so
+    /// whatever is queued when a reader arrives is the backlog.
+    /// The queue is bounded and drops its oldest entries rather than making a
+    /// child wait on a reader: a display shows the most recent lines by
+    /// definition, and a forwarder parked on a send would let the child block
+    /// on a full pipe.
+    pub stderr: broadcast::Receiver<StderrLine>,
+}
+
+/// How one server's startup finished.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Startup {
+    /// The server is running.
+    Ready(McpServerId),
+
+    /// The server is marked optional, failed to start, and was skipped.
+    ///
+    /// The failure is logged under the `mcp` target.
+    /// A caller that wants to tell the user which tools went away with it needs
+    /// to know it happened at all, which is why this is distinct from
+    /// [`Self::Ready`] rather than folded into it.
+    Skipped(McpServerId),
+}
+
+impl Startup {
+    /// The server this outcome is about.
+    #[must_use]
+    pub const fn id(&self) -> &McpServerId {
+        match self {
+            Self::Ready(id) | Self::Skipped(id) => id,
+        }
+    }
+
+    /// Whether the server was skipped rather than started.
+    #[must_use]
+    pub const fn was_skipped(&self) -> bool {
+        matches!(self, Self::Skipped(_))
+    }
 }
 
 /// Outcome of attempting to start an MCP server.
@@ -134,7 +177,9 @@ impl Client {
             client.peer().list_all_tools().await?
         } else {
             drop(running);
-            match Self::try_create_client(server_id, server, self.child_cwd.as_deref()).await? {
+            match Self::try_create_client(server_id, server, self.child_cwd.as_deref(), None)
+                .await?
+            {
                 SpawnOutcome::Started(client) => client.list_all_tools().await?,
                 SpawnOutcome::OptionalFailed => return Err(Error::UnknownTool(id.to_string())),
             }
@@ -219,7 +264,8 @@ impl Client {
         }
 
         let _guard = handle.enter();
-        let mut joins = JoinSet::<Result<McpServerId>>::new();
+        let (stderr_tx, stderr_rx) = broadcast::channel(STDERR_CHANNEL_LINES);
+        let mut joins = JoinSet::<Result<Startup>>::new();
         let mut pending = Vec::new();
         for server_id in server_ids {
             // Determine which servers to start (in configs but not currently
@@ -235,19 +281,28 @@ impl Client {
                 let servers = self.servers.clone();
                 let clients = self.services.clone();
                 let child_cwd = self.child_cwd.clone();
+                let stderr_tx = stderr_tx.clone();
                 async move {
                     let servers = servers.read().await;
                     let server = servers
                         .get(&server_id)
                         .ok_or(Error::UnknownServer(server_id.clone()))?;
 
-                    match Self::try_create_client(&server_id, server, child_cwd.as_deref()).await? {
+                    let outcome = Self::try_create_client(
+                        &server_id,
+                        server,
+                        child_cwd.as_deref(),
+                        Some(&stderr_tx),
+                    )
+                    .await?;
+
+                    match outcome {
                         SpawnOutcome::Started(client) => {
                             clients.write().await.insert(server_id.clone(), client);
+                            Ok(Startup::Ready(server_id))
                         }
-                        SpawnOutcome::OptionalFailed => {}
+                        SpawnOutcome::OptionalFailed => Ok(Startup::Skipped(server_id)),
                     }
-                    Ok(server_id)
                 }
             });
         }
@@ -256,7 +311,11 @@ impl Client {
         // a stable presentation order.
         pending.sort_by(|a, b| a.as_str().cmp(b.as_str()));
 
-        Ok(StartupSet { joins, pending })
+        Ok(StartupSet {
+            joins,
+            pending,
+            stderr: stderr_rx,
+        })
     }
 
     /// Check whether a server has an active running service.
@@ -281,8 +340,9 @@ impl Client {
         id: &McpServerId,
         config: &McpProviderConfig,
         child_cwd: Option<&Path>,
+        stderr_lines: Option<&broadcast::Sender<StderrLine>>,
     ) -> Result<SpawnOutcome> {
-        match Self::create_client(id, config, child_cwd).await {
+        match Self::create_client(id, config, child_cwd, stderr_lines).await {
             Ok(client) => Ok(SpawnOutcome::Started(client)),
             Err(error) if config.optional() => {
                 warn!(
@@ -302,6 +362,7 @@ impl Client {
         id: &McpServerId,
         config: &McpProviderConfig,
         child_cwd: Option<&Path>,
+        stderr_lines: Option<&broadcast::Sender<StderrLine>>,
     ) -> Result<RunningService<RoleClient, ()>> {
         match config {
             McpProviderConfig::Stdio(config) => {
@@ -380,7 +441,12 @@ impl Client {
                     STDERR_TAIL_LINES,
                 )));
                 if let Some(stderr) = stderr {
-                    spawn_stderr_forwarder(stderr, id.clone(), Arc::clone(&stderr_tail));
+                    spawn_stderr_forwarder(
+                        stderr,
+                        id.clone(),
+                        Arc::clone(&stderr_tail),
+                        stderr_lines.cloned(),
+                    );
                 }
 
                 // Give the server time to start and answer the MCP
@@ -423,6 +489,13 @@ impl Client {
 
 /// Maximum number of stderr lines retained for diagnostic error reporting.
 const STDERR_TAIL_LINES: usize = 100;
+
+/// Capacity of the tagged stderr channel a caller can read startup output from.
+///
+/// Comfortably more than any display can show, so a reader that arrives late
+/// still finds recent output, while a build that emits thousands of lines
+/// before anyone reads costs a bounded amount of memory.
+const STDERR_CHANNEL_LINES: usize = 256;
 
 /// Render a command (program + arguments) as a single human-readable line.
 fn render_command(cmd: &Command) -> String {
@@ -476,10 +549,17 @@ fn render_stderr_tail(buffer: &Mutex<VecDeque<String>>) -> String {
 /// The same lines are appended to `tail` (capped at [`STDERR_TAIL_LINES`]) so
 /// initialization failures can attach the recent stderr output to the resulting
 /// error without requiring the user to enable trace logging.
+///
+/// When `lines` is set, each line is also published on it tagged with `server`,
+/// for a caller that wants to show startup output while it waits.
+/// The send never blocks and its failures are ignored: reading has to keep up
+/// with the child regardless of whether anyone is listening, or the child
+/// stalls on a full pipe and the handshake never completes.
 fn spawn_stderr_forwarder(
     stderr: ChildStderr,
     server: McpServerId,
     tail: Arc<Mutex<VecDeque<String>>>,
+    lines: Option<broadcast::Sender<StderrLine>>,
 ) {
     tokio::spawn(async move {
         let mut reader = BufReader::new(stderr);
@@ -507,6 +587,10 @@ fn spawn_stderr_forwarder(
                             buf.pop_front();
                         }
                         buf.push_back(trimmed.to_owned());
+                    }
+
+                    if let Some(lines) = &lines {
+                        drop(lines.send((server.clone(), trimmed.to_owned())));
                     }
                 }
                 Err(error) => {

@@ -23,6 +23,7 @@ const BRIEF_TOOL_STYLE: DisplayStyleConfig = DisplayStyleConfig {
     parameters: ParametersStyle::Off,
     inline_results: InlineResults::Off,
     results_file_link: style::LinkStyle::Off,
+    print_stderr: false,
     error: ErrorStyleConfig {
         inline_results: None,
         results_file_link: None,
@@ -35,6 +36,7 @@ const CHAT_TOOL_STYLE: DisplayStyleConfig = DisplayStyleConfig {
     parameters: ParametersStyle::Off,
     inline_results: InlineResults::Off,
     results_file_link: style::LinkStyle::Off,
+    print_stderr: false,
     error: ErrorStyleConfig {
         inline_results: None,
         results_file_link: None,
@@ -47,6 +49,7 @@ const FULL_TOOL_STYLE: DisplayStyleConfig = DisplayStyleConfig {
     parameters: ParametersStyle::Json,
     inline_results: InlineResults::Full,
     results_file_link: style::LinkStyle::Full,
+    print_stderr: false,
     error: ErrorStyleConfig {
         inline_results: None,
         results_file_link: None,
@@ -182,7 +185,6 @@ impl Print {
             assistant_name,
             model_id,
             root,
-            ctx.term.is_tty,
             source,
             invocation,
             style_overlay,

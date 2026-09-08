@@ -25,11 +25,11 @@
 //!
 //! [`StreamError::is_retryable`]: jp_llm::StreamError::is_retryable
 
-use std::{fmt, fmt::Write as _, mem, sync::Arc};
+use std::{fmt, mem, sync::Arc, time::Duration};
 
 use jp_config::assistant::request::RequestConfig;
 use jp_llm::{StreamError, retry_delay};
-use jp_printer::Printer;
+use jp_printer::{Printer, RegionStyle, StatusRegion};
 use jp_workspace::ConversationMut;
 use tracing::{error, warn};
 
@@ -55,6 +55,12 @@ use crate::{
 /// The count resets once a cycle produces its first successful event, so a turn
 /// that repairs, streams, and later repairs again gets a fresh allowance.
 pub(crate) const MAX_CONSECUTIVE_REBUILDS: u32 = 10;
+
+/// How often the retry notice redraws.
+///
+/// Its text does not change while it is up, so it only needs a heartbeat, not
+/// the tenth-of-a-second cadence a ticking elapsed time asks for.
+const NOTICE_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Why a provider-requested rebuild was refused.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,52 +120,43 @@ pub struct StreamRetryState {
     /// cycle.
     consecutive_rebuilds: u32,
 
-    /// Whether a temporary retry notification line is currently displayed.
-    ///
-    /// When `true`, the next retry or successful event should overwrite the
-    /// line using `\r\x1b[K` rather than printing a new one.
-    line_active: bool,
-
-    /// Whether output is a TTY (enables temp-line rewriting).
-    is_tty: bool,
-}
-
-/// Whether the retry notification may redraw itself in place.
-///
-/// In-place redrawing needs a terminal to erase the line on, and a stream that
-/// tolerates a partial line.
-/// JSON output is neither: `\r\x1b[K` has no record form, so a redrawn line
-/// lands among the NDJSON records as raw text and a consumer parsing stderr
-/// gives up on the rest of the stream.
-fn can_redraw(is_tty: bool, printer: &Printer) -> bool {
-    is_tty && !printer.format().is_json()
+    /// The status region holding the current retry notice, if one is up.
+    notice: StatusRegion,
 }
 
 impl StreamRetryState {
     /// Create a new retry state from the given configuration.
-    pub fn new(config: RequestConfig, is_tty: bool) -> Self {
+    pub fn new(config: RequestConfig) -> Self {
         Self {
             config,
             consecutive_failures: 0,
             patch_changed_projection: false,
             patch_sets_shrink: true,
             consecutive_rebuilds: 0,
-            line_active: false,
-            is_tty,
+            notice: StatusRegion::inert(),
         }
     }
 
-    /// Reset the failure counter.
+    /// Reset the failure counter and retire any retry notice.
     ///
     /// Call this when the first successful LLM event arrives in a new streaming
     /// cycle.
     /// This ensures that partially successful streams (e.g. rate-limited
     /// mid-response) don't permanently consume the retry budget.
     pub fn reset(&mut self) {
+        self.retire_notice();
         self.consecutive_failures = 0;
         self.patch_changed_projection = false;
         self.patch_sets_shrink = true;
         self.consecutive_rebuilds = 0;
+    }
+
+    /// Retire the retry notice, erasing its row.
+    ///
+    /// Call this on any path that ends the retry sequence without a successful
+    /// event: a fatal error, an interrupt, or a refused rebuild.
+    pub fn retire_notice(&mut self) {
+        self.notice.release();
     }
 
     /// Record the outcome of one provider patch set.
@@ -209,19 +206,6 @@ impl StreamRetryState {
         Ok(())
     }
 
-    /// Clear the retry notification line if one is currently displayed.
-    ///
-    /// Call this when the first successful event arrives, before rendering any
-    /// LLM content.
-    pub fn clear_line(&mut self, printer: &Printer) {
-        if !self.line_active {
-            return;
-        }
-
-        printer.erase_line();
-        self.line_active = false;
-    }
-
     /// Check whether we should retry the given error.
     fn can_retry(&self, error: &StreamError) -> bool {
         error.is_retryable() && self.consecutive_failures < self.config.max_retries
@@ -248,17 +232,30 @@ impl StreamRetryState {
         )
     }
 
-    /// Write the retry notification, overwriting any previous retry line on a
-    /// terminal or printing a new permanent line otherwise.
+    /// Show the retry notification for the duration of the backoff.
+    ///
+    /// On a terminal the notice takes a status region, replacing whatever the
+    /// previous attempt put there.
+    /// Everywhere else it is a persistent line, so a log or a pipe keeps one
+    /// entry per attempt.
     fn notify(&mut self, kind: &str, printer: &Printer) {
         let attempt = self.consecutive_failures;
         let max = self.config.max_retries;
         let msg = format!("⚠ {kind}, retrying ({attempt}/{max})…");
 
-        if can_redraw(self.is_tty, printer) {
-            // Overwrite any previous retry line in-place.
-            let _ = write!(printer.err_writer(), "\r\x1b[K{msg}");
-            self.line_active = true;
+        // Released first so successive notices replace each other on the same
+        // row rather than stacking.
+        self.retire_notice();
+
+        let row = msg.clone();
+        let notice = printer.status_region(RegionStyle::new(
+            Duration::ZERO,
+            NOTICE_INTERVAL,
+            move |_, _| row.clone(),
+        ));
+
+        if notice.is_active() {
+            self.notice = notice;
         } else {
             printer.eprintln(msg);
         }
@@ -365,9 +362,9 @@ pub async fn handle_stream_error(
     commit_partial_response(turn_coordinator, conv, printer, boundary);
 
     if boundary == ResponseBoundary::Final {
-        // Clear the temp line before printing the final error so it doesn't
+        // Retire the notice before reporting the final error so it doesn't
         // linger on screen.
-        retry_state.clear_line(printer);
+        retry_state.retire_notice();
 
         error!("Stream error (not retryable or max retries exceeded): {error}");
         return StreamErrorOutcome::Fatal(jp_llm::Error::Stream(error).into());
@@ -403,7 +400,7 @@ pub async fn handle_stream_error(
     drop(interrupt_guard);
 
     if let Some(notice) = notice {
-        retry_state.clear_line(printer);
+        retry_state.retire_notice();
         return StreamErrorOutcome::Interrupted(notice);
     }
 
