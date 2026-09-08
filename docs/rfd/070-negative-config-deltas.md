@@ -810,8 +810,8 @@ would start behaving differently after an upgrade.
 It is also not total: nothing about the type says the stored config is complete,
 and a partial holding almost nothing is a valid value of it.
 
-The fix is not to add a layer that reconstructs what resolution used to provide.
-It is to keep the resolved type and narrow *what* is resolved into it.
+The fix is to keep the resolved type and narrow *what* is resolved into it,
+rather than adding a layer that reconstructs what resolution already provides.
 
 #### File format
 
@@ -856,7 +856,7 @@ An entry is the difference between resolving the sources up to and including it
 and resolving the sources before it, in the existing load order — not the
 partial that source declared.
 
-That distinction is load-bearing twice over.
+Two things follow.
 
 A source can change a value it never mentions.
 A workspace naming `assistant.model.id = "coder"` with
@@ -880,9 +880,9 @@ that and silently change tool execution policy.
 Recording what it *contributed* carries nothing for a field the workspace
 overrides, so the order in which `init` replays cannot change the outcome.
 
-The invariant this buys, and the one Phase 3 tests directly: folding `base` and
-then every `init` entry produces the same `AppConfig` as resolving the whole
-invocation at once.
+The invariant, and what Phase 3 tests directly: folding `base` and then every
+`init` entry produces the same `AppConfig` as resolving the whole invocation at
+once.
 
 Both parts are written once at conversation creation and immutable afterward.
 Subsequent `-c`/`-C` deltas continue to land in `events.json` as under the
@@ -919,7 +919,7 @@ The [source identity](#source-identity) table already labels them `<user-local>`
 and `<user-workspace>`, redacted for exactly this reason: the stream travels
 with the repository.
 
-Those contributions still travel with the conversation, and should.
+Those contributions still travel with the conversation.
 A conversation records the configuration its turns actually ran under, so a
 colleague reading it sees what produced the answers rather than what their own
 machine would have produced.
@@ -963,9 +963,8 @@ A `Reset` inside `init` would therefore discard `base` during replay, and every
 field the reset's own `Apply` does not restore —
 `assistant.request.max_retries` and every other `#[setting(default)]` — would
 come from whichever binary reads the conversation next.
-That is precisely the pinning break this section exists to prevent.
-Creation keeps absorbing reset directives into `base`, and `init` holds only the
-sources that follow the last reset in the list.
+So creation keeps absorbing reset directives into `base`, and `init` holds only
+the sources that follow the last reset in the list.
 
 The cost in both cases is provenance, not pinning: `-C` cannot reach a
 creation-time reset, or anything the reset discarded, or any contribution to a
@@ -1934,8 +1933,8 @@ and CLI flags are all excluded from that resolution, since none of them travel
 with the repository.
 
 An invocation carrying `--cfg=NONE` is exempt: it has opted out of implicit
-config, so there are no workspace files to hold to a standard (see
-[Creation-time resets, and `NONE`](#creation-time-resets-and-none)).
+config, so there are no workspace files to check (see [Creation-time resets, and
+`NONE`](#creation-time-resets-and-none)).
 
 The error names the field that is missing and says that a value from user-global
 config, user-workspace config, an environment variable or a flag does not count.
@@ -1944,10 +1943,9 @@ while they read the message, so "no model configured" alone reads as a lie.
 The message's job is to explain that the workspace is not portable, not that the
 field is unset.
 
-This is worth having on its own terms, ahead of anything it unblocks: it is the
-check that makes "clone the repository and run `jp query --new`" a property a
-team can rely on rather than a thing that happens to work on the machine where
-the workspace was made.
+The check is worth having ahead of anything it unblocks: it is what lets a team
+rely on "clone the repository and run `jp query --new`", instead of finding out
+per machine whether the workspace carries what it needs.
 
 Tests:
 
