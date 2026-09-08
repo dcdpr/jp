@@ -43,7 +43,7 @@ For this to work, we need the following pieces of data:
 
 Let's walk through these steps one by one.
 
-### 1\. Git Diff Attachment {\#git-diff}
+### 1. Git Diff Attachment {#git-diff}
 
 First, we need to add [context][] to the query we're sending to the model.
 JP has support for many different [attachment types][attachments], but for this
@@ -81,7 +81,7 @@ Now let's populate the file with our attachment handler:
 This tells JP, if we enable the `commit` context, to attach the output of the
 `git diff --cached` command to the query.
 
-### 2\. Commit Persona {\#model-instructions}
+### 2. Commit Persona {#model-instructions}
 
 Next, we need to create a [persona][] for the model to use.
 A persona, as the name implies, is a set of properties that shape the behavior
@@ -164,7 +164,7 @@ Next, we add this persona to the context we created earlier:
 }
 ```
 
-### 3\. Running The Query {\#cli-usage}
+### 3. Running The Query {#cli-usage}
 
 Now that we have our context and persona set up, we can run the query.
 We can do this by using the `query` command.

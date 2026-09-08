@@ -294,13 +294,13 @@ fn build_attachment(path: &Utf8Path, cwd: &Utf8Path) -> Option<Attachment> {
 /// - For `file:**/*.md`, the `**` part is marked as the domain, so we need to
 ///   merge it back.
 ///
-/// - A file URI is \*almost always absolute, but there's also a way to make it
+/// - A file URI is *almost always absolute, but there's also a way to make it
 ///   relative:
 ///
-///   - <file:path/to/file.txt> -\> absolute
-///   - <file:/path/to/file.txt> -\> absolute
-///   - <file://path/to/file.txt> -\> relative (host is `path`)
-///   - <file:///path/to/file.txt> -\> absolute
+///   - <file:path/to/file.txt> -> absolute
+///   - <file:/path/to/file.txt> -> absolute
+///   - <file://path/to/file.txt> -> relative (host is `path`)
+///   - <file:///path/to/file.txt> -> absolute
 ///
 /// To manage this, we make *all* paths absolute.
 /// This is okay, because paths are always relative to the workspace root, so

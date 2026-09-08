@@ -150,10 +150,9 @@ This is a known trade-off shared with LSP, MCP, and git remote helpers, all of
 which use stdin/stdout successfully.
 
 The mitigation is straightforward: stderr is the designated escape valve.
-Plugin authors use stderr for all debugging output (`eprintln!()` in Rust,
-\`echo
+Plugin authors use stderr for all debugging output (`eprintln!()` in Rust, `echo
 
-> &2`in shell,`fprintf(stderr, ...)\` in C), and JP forwards it to tracing.
+> &2`in shell,`fprintf(stderr, ...)` in C), and JP forwards it to tracing.
 > The protocol contract is simple: stdout is exclusively for protocol messages.
 
 Stdin/stdout is chosen because it is the simplest cross-language, cross-platform

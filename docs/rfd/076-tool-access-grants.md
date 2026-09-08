@@ -154,7 +154,7 @@ value = [
 ]
 ```
 
-This applies the standard jp\_config merge primitives uniformly — users already
+This applies the standard jp_config merge primitives uniformly — users already
 familiar with `MergeableVec` semantics elsewhere (attachments, instructions,
 sections) don't learn new rules for `access`.
 
@@ -1011,7 +1011,7 @@ Add `AccessPolicy`, `FsRule`, `NetRule`, `EnvRule`, and `FsAccessError` to
 Implement the path-canonicalization helper (reused by tools for target paths and
 by the host for rule paths at `AccessConfig` → `AccessPolicy` conversion) and
 `Context::check_*` methods.
-Implement structured net matching (scheme/host/port/path\_prefix) with
+Implement structured net matching (scheme/host/port/path_prefix) with
 `url::Host` normalization for both rule and target hosts, and explicit-`*` env
 matching with literal-length specificity.
 Add `access: Option<AccessPolicy>` to `Context` with `#[serde(default)]`.

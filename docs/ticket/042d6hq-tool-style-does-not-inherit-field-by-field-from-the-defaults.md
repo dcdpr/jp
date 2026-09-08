@@ -1,4 +1,4 @@
-# Tool style does not inherit field-by-field from the '\*' defaults
+# Tool style does not inherit field-by-field from the '*' defaults
 
 - **Status**: Done
 - **Kind**: Bug

@@ -1,7 +1,7 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-import { field, unescapeTitle } from './metadata.mjs'
+import { field } from './metadata.mjs'
 import { referencedLabels } from './rfd-shared.mjs'
 
 // Reading the tickets under `docs/ticket/` for the site.
@@ -27,12 +27,12 @@ export const DONE_HEAD = 8
 // Parse one ticket file.
 export function parseTicket(content, filename) {
     const id = filename.match(/^([0-9a-z]{7})-/)?.[1] ?? '0000000'
-    const rawTitle = content.match(/^# (.+)/m)?.[1]?.trim() ?? filename
+    const title = content.match(/^# (.+)/m)?.[1]?.trim() ?? filename
 
     return {
         id: `T-${id}`,
         num: id,
-        title: unescapeTitle(rawTitle),
+        title,
         status: field(content, 'Status'),
         kind: field(content, 'Kind'),
         authors: field(content, 'Authors'),

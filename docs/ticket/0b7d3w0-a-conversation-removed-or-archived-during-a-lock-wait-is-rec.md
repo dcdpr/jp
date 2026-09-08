@@ -43,7 +43,7 @@ conversation carrying `archived_at`.
 
 ## Not a regression
 
-This predates the lock-refresh work in \#1045.
+This predates the lock-refresh work in #1045.
 Before that change, `maybe_init_conversation` returned early on an
 already-populated cell, so the cached copy survived the deletion and the flush
 recreated it — the same outcome, reached by omission instead of by an explicit

@@ -328,7 +328,7 @@ roughly linear for text content.
 ### Phase 1: `Attachment::byte_size()` and config types
 
 Add the `byte_size()` method to `Attachment` in `jp_attachment`.
-Add `AttachmentSizeConfig` (threshold, policy, truncate\_to) and `SizePolicy`
+Add `AttachmentSizeConfig` (threshold, policy, truncate_to) and `SizePolicy`
 enum to `jp_config::conversation::attachment`.
 Wire the new config fields into `PartialConversationConfig`.
 

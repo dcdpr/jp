@@ -22,7 +22,7 @@ No changes to JP's agent loop are required.
 
 Using a frontier model (e.g. Claude Opus) for an entire conversation is
 expensive.
-A typical agent task — "refactor error handling in jp\_llm" — benefits from a
+A typical agent task — "refactor error handling in jp_llm" — benefits from a
 research-plan-implement workflow: research the codebase on a cheaper model,
 produce a plan, then execute.
 Manually orchestrating these phases means switching models or starting new
@@ -749,7 +749,7 @@ recent response.
 output uses display-oriented keys (`"ID"`, `"#"`, `"Activity"`).
 These are the table column headers serialized to JSON, not a stable API
 contract.
-The shell scripts in this guide use these keys; they may change to snake\_case
+The shell scripts in this guide use these keys; they may change to snake_case
 (`id`, `events_count`) when a proper structured output format is defined.
 
 ## Prerequisites

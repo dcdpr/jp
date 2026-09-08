@@ -32,5 +32,5 @@ equality comparison still skips the list on every drag frame.
 The row labels are only ever accurate to the minute anyway, so nothing finer is
 needed.
 
-Found while triaging review feedback on the macOS app PR (dcdpr/jp\#1008,
-comment 3815396254).
+Found while triaging review feedback on the macOS app PR (dcdpr/jp#1008, comment
+3815396254).

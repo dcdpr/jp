@@ -632,7 +632,7 @@ reconcile.
   a separate, smaller change.
   It is complementary (visible IDs make `jp w` and `jp -w` discoverable) but not
   required for this design to function.
-- **A global-local workspace for use outside any project.** Issue \#144 asks for
+- **A global-local workspace for use outside any project.** Issue #144 asks for
   JP to work anywhere by falling back to a "global local" workspace when the
   user is outside every project workspace.
   This RFD does not implement that — it only lets commands launched outside a
@@ -641,7 +641,7 @@ reconcile.
 - **A unified path-resolution model.** Defining, per input class, how every
   relative path argument, mount spec, and cwd-targeted config edit resolves
   across launch cwd / workspace root / child cwd is broader than this RFD and
-  intersects the "use JP outside a workspace" work (issue \#144).
+  intersects the "use JP outside a workspace" work (issue #144).
   This RFD commits only to two rules: child processes run with the workspace
   root as their cwd, and user-typed relative path arguments resolve against the
   launch cwd.

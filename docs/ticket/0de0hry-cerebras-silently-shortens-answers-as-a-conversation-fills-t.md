@@ -39,4 +39,4 @@ matters here too: the first is the user's own ceiling and needs no explanation,
 the second does.
 Both arrive as the same `finish_reason`.
 
-Found while investigating \#1069; not caused by it.
+Found while investigating #1069; not caused by it.

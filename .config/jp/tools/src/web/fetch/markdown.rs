@@ -71,7 +71,7 @@ async fn fetch_markdown_body(url: &Url) -> Result<String, Error> {
     response.text().await.map_err(Into::into)
 }
 
-/// Accept text/\* except `text/html` (the common soft-404 shape).
+/// Accept text/* except `text/html` (the common soft-404 shape).
 /// Reject anything that's clearly not text.
 fn is_acceptable_markdown_content_type(ct: &str) -> bool {
     let ct = ct.trim().to_ascii_lowercase();

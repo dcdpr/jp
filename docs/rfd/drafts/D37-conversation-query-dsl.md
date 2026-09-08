@@ -91,7 +91,7 @@ bool     := 'true' | 'false'
 escape   := '\n' | '\t' | '\r' | '\"' | '\\' | '\u{HEX}'
 ```
 
-Operator precedence: `not` \> `and` \> `or`.
+Operator precedence: `not` > `and` > `or`.
 Parentheses override.
 
 A predicate may omit the operator and value when the field is boolean-typed:

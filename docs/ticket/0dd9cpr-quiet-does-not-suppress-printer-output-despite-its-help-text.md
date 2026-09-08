@@ -54,7 +54,7 @@ same thing.
 
 ## Why it is filed rather than fixed in place
 
-Raised while reviewing PR \#1074, which adds a chrome line announcing a run that
+Raised while reviewing PR #1074, which adds a chrome line announcing a run that
 left the cwd's workspace.
 Guarding that one line on `!quiet` would have made it the only printer emission
 in the CLI honouring the flag while everything around it ignores it.

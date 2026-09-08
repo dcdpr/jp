@@ -220,7 +220,7 @@ conversation details and attachment listings; those are two addresses, not one.
 
 #### Naming convention
 
-Addresses are `<subject>.<shape>`, lowercase and snake\_case:
+Addresses are `<subject>.<shape>`, lowercase and snake_case:
 
 - **Subject** is the domain entity the record describes, using the [ubiquitous
   language] term where one exists.

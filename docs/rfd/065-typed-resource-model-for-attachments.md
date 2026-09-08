@@ -399,7 +399,7 @@ Whether to omit a superseded resource involves trade-offs between token savings
 and cache invalidation.
 Several heuristics are relevant:
 
-- **Token size threshold.** Small resources (\< N tokens) may cost less to keep
+- **Token size threshold.** Small resources (< N tokens) may cost less to keep
   than the cache invalidation caused by removing them.
 - **Cache position.** Resources within the provider's cache lookback window
   (e.g., Anthropic's ~30 turns) are expensive to remove.

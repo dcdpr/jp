@@ -351,7 +351,7 @@ worktrees and nested project structures make.
 
 ## Implementation Plan
 
-All phases from [RFD 039] apply unchanged (parent\_id, tree index, create with
+All phases from [RFD 039] apply unchanged (parent_id, tree index, create with
 parent, fork-as-child, ls --tree, rm strategies, garbage collection).
 This RFD adds three additional phases that can be interleaved:
 
@@ -365,7 +365,7 @@ Add workspace projection cleanup (recursive walk to remove stale directories).
 
 User-local storage remains flat — no changes to user-local paths.
 
-Depends on [RFD 039] Phase 1 (parent\_id and tree index).
+Depends on [RFD 039] Phase 1 (parent_id and tree index).
 
 ### Phase B: `--local` cascade
 

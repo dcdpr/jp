@@ -294,12 +294,12 @@ are out of scope (see The terminal sink).
 
 Precedence:
 
-- **Emit color on a target:** explicit config -\> `NO_COLOR` (off) -\>
-  `CLICOLOR_FORCE` (on, even when not a TTY) -\> handle is a TTY (on) -\> off.
-- **Depth (terminal-wide):** explicit config -\> `COLORTERM` truecolor -\>
-  `TERM` `*-256color` -\> colorful `TERM` (16).
-- **Scheme (terminal-wide):** explicit config -\> `COLORFGBG` -\> best-effort
-  OSC 11 query -\> `None`.
+- **Emit color on a target:** explicit config -> `NO_COLOR` (off) ->
+  `CLICOLOR_FORCE` (on, even when not a TTY) -> handle is a TTY (on) -> off.
+- **Depth (terminal-wide):** explicit config -> `COLORTERM` truecolor -> `TERM`
+  `*-256color` -> colorful `TERM` (16).
+- **Scheme (terminal-wide):** explicit config -> `COLORFGBG` -> best-effort OSC
+  11 query -> `None`.
 
 `CLICOLOR_FORCE` precedes the TTY check, so it can force color into a pipe;
 `NO_COLOR` still wins over it.
@@ -458,7 +458,7 @@ strings); we deliberately do not pull `tinted-builder` (GPL-3.0) or
   palette, syntect }`).
 - This is a breaking change to `style`; the load path maps the known old keys
   and documents the new shape.
-  The full scope taxonomy beyond markdown + tool\_call is deferred to follow-on
+  The full scope taxonomy beyond markdown + tool_call is deferred to follow-on
   RFDs.
   Depends on Phase 2.
 

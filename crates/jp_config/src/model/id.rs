@@ -620,7 +620,7 @@ pub enum ProviderId {
 }
 
 impl ProviderId {
-    /// Get the provider ID as a \&str.
+    /// Get the provider ID as a &str.
     #[must_use]
     pub const fn as_str(&self) -> &'static str {
         match self {

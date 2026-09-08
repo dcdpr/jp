@@ -11,7 +11,7 @@ left pointing at a document that no longer exists and the new filename has no
 entry at all.
 
 Both recipes handle this by printing `Run \`just rfd-summaries\` to refresh the
-summary cache.\` to stderr.
+summary cache.` to stderr.
 That regenerates the missing entry, at the cost of an LLM call for a document
 whose content did not change, and it never removes the orphan.
 

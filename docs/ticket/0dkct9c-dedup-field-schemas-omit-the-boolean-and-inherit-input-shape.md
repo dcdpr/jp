@@ -61,7 +61,7 @@ Either way, add a schema-shape test in the style of `test_enable_schema`.
 
 ## Context
 
-Raised in review on \#1064 (comment 3926664348), for the string field only.
+Raised in review on #1064 (comment 3926664348), for the string field only.
 Deferred there because the vec field has the same gap, no schema consumer exists
 yet, and the fix needs a `schematic_macros` change that is out of scope for a
 config-merge bug fix.

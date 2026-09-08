@@ -253,7 +253,7 @@ ResponseHandler.handle()              ToolDefinition.call()
 
 ## Core Components
 
-### 1\. Query Command (`jp_cli::cmd::query`)
+### 1. Query Command (`jp_cli::cmd::query`)
 
 **Responsibilities:**
 
@@ -287,7 +287,7 @@ async fn handle_stream(&self, ctx: &mut Ctx, turn_state: &mut TurnState,
 - Mixes concerns (input, execution, output, persistence)
 - Hard to test (requires full `Ctx` with real I/O)
 
-### 2\. Context (`jp_cli::ctx::Ctx`)
+### 2. Context (`jp_cli::ctx::Ctx`)
 
 **Responsibilities:**
 
@@ -316,7 +316,7 @@ pub struct Ctx {
 - Mixes concerns (config, I/O, async runtime)
 - Makes unit testing impossible (needs real workspace)
 
-### 3\. LLM Provider (`jp_llm::provider`)
+### 3. LLM Provider (`jp_llm::provider`)
 
 **Responsibilities:**
 
@@ -340,12 +340,12 @@ pub trait Provider: Debug + Send + Sync {
 
 **Problems:**
 
-- Trait cannot be mocked easily (async\_trait)
+- Trait cannot be mocked easily (async_trait)
 - Provider selection is global (`get_provider(id, config)`)
 - Error types are provider-specific but wrapped generically
 - Reasoning extraction is post-hoc (parsed from stream)
 
-### 4\. Stream Event Handler (`jp_cli::cmd::query::event`)
+### 4. Stream Event Handler (`jp_cli::cmd::query::event`)
 
 **Responsibilities:**
 
@@ -372,7 +372,7 @@ pub struct StreamEventHandler {
 - User prompts during streaming (synchronous I/O)
 - Turn-level state (persisted answers) lives elsewhere
 
-### 5\. Response Handler (`jp_cli::cmd::query::response_handler`)
+### 5. Response Handler (`jp_cli::cmd::query::response_handler`)
 
 **Responsibilities:**
 
@@ -403,7 +403,7 @@ pub struct ResponseHandler {
 - Handles both streaming and buffered modes differently
 - Markdown parser state is implicit (`jp_md` integration)
 
-### 6\. Tool System (`jp_llm::tool`, `jp_tool`)
+### 6. Tool System (`jp_llm::tool`, `jp_tool`)
 
 **Responsibilities:**
 
@@ -433,7 +433,7 @@ ToolConfig → ToolDefinition → ToolDefinition.call() → ToolCallResult
 - MCP tool parameters are dynamically merged (schema drift)
 - Tool prompts (confirmation, editing) use blocking I/O
 
-### 7\. Workspace (`jp_workspace`)
+### 7. Workspace (`jp_workspace`)
 
 **Responsibilities:**
 
@@ -699,7 +699,7 @@ self.handle_stream(ctx, turn_state, thread, tool_choice, tools, messages).await?
 
 ## Refactoring Opportunities
 
-### 1\. Extract Command Phases
+### 1. Extract Command Phases
 
 Split `Query::run()` into discrete phases with clear boundaries:
 
@@ -728,7 +728,7 @@ impl QueryCommand {
 - Clear separation of concerns
 - Can replace phases for testing (stub output, mock LLM)
 
-### 2\. Introduce Provider Abstraction
+### 2. Introduce Provider Abstraction
 
 Replace direct provider calls with a trait object:
 
@@ -760,7 +760,7 @@ let client = Box::new(MockLlmClient::new(vec![
 - Provider selection is encapsulated
 - Easier to add new providers
 
-### 3\. Decouple Tool Execution
+### 3. Decouple Tool Execution
 
 Move tool execution out of event stream handling:
 
@@ -789,7 +789,7 @@ let result = executor.execute(call).await?;
 - Executor can be swapped (test, dry-run, parallel)
 - User prompts can be decoupled (pre-approved, config-driven)
 
-### 4\. Make Context Injectable
+### 4. Make Context Injectable
 
 Replace `Ctx` with focused traits:
 
@@ -831,7 +831,7 @@ impl Query {
 - Easier to mock (implement trait for test struct)
 - Prevents leaking access to unrelated state
 
-### 5\. Event-Driven Architecture
+### 5. Event-Driven Architecture
 
 Replace recursive `handle_stream` with event loop:
 
@@ -872,7 +872,7 @@ impl QueryStateMachine {
 - State machine is explicit (can visualize)
 - Events can be recorded/replayed (debugging, testing)
 
-### 6\. Separate Rendering from Processing
+### 6. Separate Rendering from Processing
 
 Move `ResponseHandler` to a pure function:
 
@@ -898,7 +898,7 @@ pub struct RenderedOutput {
 - Can render offline (e.g., in web UI)
 - Easier to add new output formats (JSON, HTML)
 
-### 7\. Introduce Repository Pattern
+### 7. Introduce Repository Pattern
 
 Wrap workspace operations:
 
@@ -925,7 +925,7 @@ pub struct InMemoryRepository {
 - Can swap storage (SQLite, cloud)
 - Easy to test without disk I/O
 
-### 8\. Configuration Builder Pattern
+### 8. Configuration Builder Pattern
 
 Replace partial config mutation:
 

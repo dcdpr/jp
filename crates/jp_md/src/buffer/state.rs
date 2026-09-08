@@ -92,10 +92,10 @@ pub struct ListState {
 /// Represents the type of fence character used.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FenceType {
-    /// \`
+    /// A `` ` `` fence.
     Backtick,
 
-    /// ~
+    /// A `~` fence.
     Tilde,
 }
 

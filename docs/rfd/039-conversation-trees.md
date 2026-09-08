@@ -512,7 +512,7 @@ missing-parent case.
 
 Two team members could reparent the same conversation on different branches.
 When git merges, the `metadata.json` conflict is a normal JSON merge conflict —
-the same as any other metadata field (title, expires\_at).
+the same as any other metadata field (title, expires_at).
 Git's conflict markers surface the issue, and the user resolves it manually.
 JP does not attempt automatic merge resolution.
 

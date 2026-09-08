@@ -1,4 +1,4 @@
-# A tool call truncated by max\_tokens is discarded without a record
+# A tool call truncated by max_tokens is discarded without a record
 
 - **Status**: Todo
 - **Kind**: Bug

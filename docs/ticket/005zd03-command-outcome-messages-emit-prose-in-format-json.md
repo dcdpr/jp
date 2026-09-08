@@ -24,7 +24,7 @@ output at all, in any format, so a script cannot chain off a fork.
 
 ## The mechanism already exists
 
-`jp c label` was converted in PR \#982 and emits structured objects:
+`jp c label` was converted in PR #982 and emits structured objects:
 
 ```console
 $ jp c label add team=platform --format=json
@@ -86,7 +86,7 @@ from the rest of this list and worth treating as such.
 
 ## Why it is filed rather than fixed in place
 
-Raised while converting `jp c label` in PR \#982.
+Raised while converting `jp c label` in PR #982.
 Converting twelve commands touches their tests and forces the empty-collection
 decision above, which is a change of its own rather than a rider on a labels PR.
 

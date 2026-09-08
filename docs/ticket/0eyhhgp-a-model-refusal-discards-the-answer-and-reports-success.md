@@ -42,8 +42,7 @@ little to say, and a later replay cannot show it at all.
 
 ## Why it is filed rather than fixed in place
 
-Raised while reviewing PR \#1088, which makes `--quiet` close the chrome
-channel.
+Raised while reviewing PR #1088, which makes `--quiet` close the chrome channel.
 That PR made the refusal notice suppressible, which prompted the question, but
 the defect predates it: the discarded record and the zero exit status are there
 whatever `--quiet` does.

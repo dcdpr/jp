@@ -1,4 +1,4 @@
-# RFD 094: Built-in tell\_user Tool for Mid-Turn User-Addressed Messages
+# RFD 094: Built-in tell_user Tool for Mid-Turn User-Addressed Messages
 
 - **Status**: Discussion
 - **Category**: Design
@@ -258,7 +258,7 @@ distinguished from the audience map by their keys.
 
 A block with no `audience` annotation is addressed to both audiences and renders
 under the more permissive of the two settings.
-Permissiveness is a total order: `off` \< a line count \< `full`, the larger of
+Permissiveness is a total order: `off` < a line count < `full`, the larger of
 two line counts wins, and `0` is accepted as a line count equivalent to `off`.
 `chat` counts as `full` in this comparison, but the speech classification
 applies only to blocks explicitly annotated `user`: an unannotated block

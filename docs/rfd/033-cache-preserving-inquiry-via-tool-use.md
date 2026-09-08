@@ -27,7 +27,7 @@ Anthropic, rewriting ~95k tokens at 125% cost instead of reading them at 10%
 cost.
 Two issues cause this:
 
-### 1\. Empty tool list
+### 1. Empty tool list
 
 The inquiry backend sends `tools: vec![]` while normal requests include the full
 tool definitions.
@@ -40,7 +40,7 @@ This is a straightforward bug, fixed by passing the same tool definitions to the
 inquiry backend (merged separately).
 But fixing it alone is not sufficient because of issue 2.
 
-### 2\. Structured output invalidates the system cache
+### 2. Structured output invalidates the system cache
 
 Anthropic's structured output feature injects an additional system prompt
 describing the expected output format.
@@ -48,7 +48,7 @@ From the [Anthropic docs][cache-docs]:
 
 > When using structured outputs, Claude automatically receives an additional
 > system prompt explaining the expected output format.
-> Changing the output\_config.format parameter will invalidate any prompt cache
+> Changing the output_config.format parameter will invalidate any prompt cache
 > for that conversation thread.
 
 Even with matching tool definitions, the inquiry request gets a system-level
@@ -275,7 +275,7 @@ returns `Value` regardless of the underlying mechanism.
 
 - **Extra retries on malformed answers.** A structured output response never
   needs a retry for schema violations.
-  The tool use approach may occasionally need 1 retry (estimated \<5% of
+  The tool use approach may occasionally need 1 retry (estimated <5% of
   inquiries based on the simplicity of the answer types).
   Each retry is cheap (cache hit + small message delta).
 

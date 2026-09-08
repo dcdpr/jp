@@ -111,7 +111,7 @@ separate `Vec<Option<String>>` fields without losing the ordering guarantee that
 compositions like `--no-tools --tool=write` rely on.
 
 `--title` / `--no-title` apply at creation, fork, and resume time today (PR
-\#600), so they belong with `ConversationCreateOpts` rather than living
+#600), so they belong with `ConversationCreateOpts` rather than living
 separately on each command.
 
 **Mode-parameterized wrappers** — each command flattens a mode-typed wrapper
@@ -231,16 +231,16 @@ Config overrides are applied to the forked conversation's base config, on top of
 whatever config the source conversation had.
 
 `conversation fork` accepts multiple source conversations (positional).
-When N \> 1 sources are forked:
+When N > 1 sources are forked:
 
 - **Text output:** one new conversation ID per line, in the same order as the
   sources.
 - **JSON output (`-F json`):** a top-level array of IDs, e.g. `["jp-c...",
   "jp-c..."]`.
   Matches the convention used elsewhere in JP for list outputs.
-- **`--activate` with N \> 1 sources:** rejected with a clear error
-  (*"--activate cannot be combined with multiple source conversations; pick one
-  to activate."*).
+- **`--activate` with N > 1 sources:** rejected with a clear error (*"--activate
+  cannot be combined with multiple source conversations; pick one to
+  activate."*).
   Activating "the last forked one" is too clever — its meaning would depend on
   argument order, and Hyrum's Law guarantees someone would rely on it.
 

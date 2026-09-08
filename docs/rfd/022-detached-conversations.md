@@ -73,8 +73,8 @@ The process running the query can be **attached** to a terminal or **detached**
 | -------------------------------- | --------------- | -------- | ----------- |
 | `jp query "..."`                 | session default | Yes      | Yes         |
 | `jp query --id=<cid> "..."`      | specified       | Yes      | Yes         |
-| `jp query "..." \| less`         | session default | No       | Yes \*      |
-| `echo foo \| jp query \| script` | session default | No       | Maybe \*    |
+| `jp query "..." \| less`         | session default | No       | Yes *       |
+| `echo foo \| jp query \| script` | session default | No       | Maybe *     |
 | `jp query --detach "..."`        | session default | No       | No          |
 | `jp conversation attach <cid>`   | specified       | Via IPC  | Via IPC     |
 
@@ -82,7 +82,7 @@ The process running the query can be **attached** to a terminal or **detached**
 headers) to the user's terminal via stderr.
 **Can prompt?** indicates whether the process can ask the user interactive
 questions via `/dev/tty` (per [RFD 019]).
-Entries marked \* depend on `/dev/tty` availability — if the user is at a
+Entries marked * depend on `/dev/tty` availability — if the user is at a
 terminal, `/dev/tty` works even when stdin/stdout are piped.
 
 The process is ephemeral runtime state — PID, socket, streaming state.

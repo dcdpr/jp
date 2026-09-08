@@ -1,4 +1,4 @@
-# RFD 083: Built-in ask\_user tool for assistant-initiated inquiries
+# RFD 083: Built-in ask_user tool for assistant-initiated inquiries
 
 - **Status**: Discussion
 - **Category**: Design
@@ -137,7 +137,7 @@ string-splitting heuristic that could reorder context and question.
   questions](#generic-enrichments-to-tool-questions).
   The prompt's "who's asking" label is `"Assistant"`, set by the tool's
   registered `QuestionConfig.prompt_label` (see [Tool configuration]
-  (\#tool-configuration)).
+  (#tool-configuration)).
 - Second call: `answers` contains the response keyed by the question ID.
   The tool returns `Outcome::Success { content: <JSON-encoded answer> }`.
 
@@ -183,7 +183,7 @@ override for `ask_user`, the `InquiryQuestion` widening for
 `CancellationReason::InvalidStaticAnswer` variant for the static-answer
 validation it introduces, and the emit sites for 083's routing paths (which
 reuse 082's `NoPromptBackend` and `AssistantRoutingDenied` variants).
-See [Persisted recording] (\#persisted-recording) below for the full breakdown.
+See [Persisted recording] (#persisted-recording) below for the full breakdown.
 
 ### Tool configuration
 

@@ -43,7 +43,7 @@ derive entry point emitting `error.write_errors()`, which produces a spanned
 
 That threads `Result` through `Container::from`, the struct and enum builders,
 and both derive entry points — a refactor across the macro crate, larger than
-the schematic changes in \#887 combined.
+the schematic changes in #887 combined.
 It should carry its own compile-fail test coverage to be worth doing.
 
 Explicitly not worth a shortcut: a thread-local error accumulator would avoid
@@ -52,5 +52,5 @@ does not need.
 
 ## Context
 
-Raised in review on \#887 (comment 3659116544), where the reviewer scoped it as
-a follow-up.
+Raised in review on #887 (comment 3659116544), where the reviewer scoped it as a
+follow-up.

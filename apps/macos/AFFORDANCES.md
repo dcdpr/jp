@@ -19,7 +19,7 @@ Anything listed here that is not implemented says so.
 | File   | Close               | ⌘W       | Closes the window, or the frontmost tab.                      |
 | Edit   | Copy Link           | ⇧⌘C      | Copies the selected conversation's `jp://` URI.               |
 | View   | Hide/Show Sidebar   | ⌃⌘S      | Hides or shows the conversation list.                         |
-| View   | Show All Tabs       | ⇧⌘\\     | Standard.                                                     |
+| View   | Show All Tabs       | ⇧⌘\      | Standard.                                                     |
 | Window | Show Previous Tab   | ⌃⇧⇥      | Standard.                                                     |
 | Window | Merge All Windows   |          | Standard.                                                     |
 

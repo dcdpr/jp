@@ -100,7 +100,7 @@ jp q -! -s 'summary' "summarize this" -a doc.md -m haiku | jq .
 When `--schema` is present, JP can infer scripting-friendly defaults.
 These are defaults, not hard overrides — explicit flags always win.
 
-Precedence: explicit flag \> `--schema` inference \> config file \> hardcoded
+Precedence: explicit flag > `--schema` inference > config file > hardcoded
 default.
 
 | Inference                           | Condition                              | Rationale                              |

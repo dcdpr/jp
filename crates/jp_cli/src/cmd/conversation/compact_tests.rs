@@ -723,8 +723,8 @@ fn verbatim_summary_covering_an_existing_summary_is_accepted() {
 }
 
 /// Each `ToolCallsMode` from the config maps to the right `ToolCallPolicy` on
-/// the produced `Compaction` event (the `jp_config` -\> `jp_conversation`
-/// bridge that lives in `build_mechanical_compaction`).
+/// the produced `Compaction` event (the `jp_config` -> `jp_conversation` bridge
+/// that lives in `build_mechanical_compaction`).
 #[test]
 fn tool_calls_mode_maps_to_policy() {
     // A few empty turns; `keep 0/0` makes the range cover all of them.

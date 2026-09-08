@@ -179,7 +179,7 @@ fn unzip(bytes: &[u8], destination: &Path) -> Result<(), Error> {
 /// Target-triple wrapper directories don't — they only contain nested crate
 /// directories.
 /// Keeping dirs that look like crate docs dirs handles hyphenated crate names
-/// (`ra-ap-rustc_lexer` -\> `ra_ap_rustc_lexer/`), custom `[lib] name = "…"`
+/// (`ra-ap-rustc_lexer` -> `ra_ap_rustc_lexer/`), custom `[lib] name = "…"`
 /// declarations, and any other naming variation, without needing to know the
 /// crate's lib name in advance.
 ///

@@ -104,7 +104,7 @@ Parameters:
 | `archived`       | bool   | `false`    | Return archived conversations instead.        |
 | `title_contains` | string | `null`     | Substring filter on title (case-insensitive). |
 
-Output: an XML envelope listing matching conversations with snake\_case keys —
+Output: an XML envelope listing matching conversations with snake_case keys —
 `id`, `title`, `events_count`, `created_at`, `last_event_at`, `archived_at`,
 `expires_at`.
 The total count and the active offset are included so the LLM can paginate.
@@ -152,7 +152,7 @@ applicable).
 
 Two small changes to the CLI are part of this work and stand alone as bug fixes:
 
-1. **`jp conversation ls --format=json` emits snake\_case keys** (`id`,
+1. **`jp conversation ls --format=json` emits snake_case keys** (`id`,
    `events_count`, `last_event_at`, …) instead of display-derived keys (`"ID"`,
    `"#"`, `"Activity"`).
    The current JSON shape is the table-header row serialized verbatim; that was
@@ -319,7 +319,7 @@ documented here so it can be re-checked if storage behavior changes.
 
 **Phase 1: CLI JSON contracts.** Standalone bug fixes, reviewable independently.
 
-- Convert `jp conversation ls --format=json` to snake\_case keys.
+- Convert `jp conversation ls --format=json` to snake_case keys.
 - Add `--format=json` to `jp conversation print`, emitting filtered events.
 - Add tests covering both shapes.
 

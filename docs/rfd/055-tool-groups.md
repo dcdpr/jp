@@ -115,8 +115,8 @@ For any (tool, group) pair, there are exactly three states:
 | State         | Meaning                         | How expressed                      |
 | ------------- | ------------------------------- | ---------------------------------- |
 | **Included**  | Tool is a member of the group   | `"write"` or `{ group = "write" }` |
-| **Excluded**  | Tool is explicitly not a member | `"!write"` or \`{ group = "write", |
-|               |                                 | membership = "exclude" }\`         |
+| **Excluded**  | Tool is explicitly not a member | `"!write"` or `{ group = "write",  |
+|               |                                 | membership = "exclude" }`          |
 | **Undefined** | Tool has not been classified    | Group not mentioned in `groups`    |
 
 The distinction between excluded and undefined is what makes exhaustive

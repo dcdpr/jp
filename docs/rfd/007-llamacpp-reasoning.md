@@ -168,7 +168,7 @@ module (shared utility, not the `openai` crate).
   Mitigated by keeping the loop thin and delegating error classification to the
   existing `reqwest_eventsource` classifier.
 - **`ReasoningExtractor` buffering latency**: The extractor holds a small tail
-  buffer (\< 8 bytes) to detect split `<think>` tags.
+  buffer (< 8 bytes) to detect split `<think>` tags.
   Only affects the `none` format path; latency is negligible.
 
 ## Implementation

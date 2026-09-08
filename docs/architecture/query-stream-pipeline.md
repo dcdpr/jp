@@ -1165,7 +1165,7 @@ The Turn Coordinator implements this state machine:
 
 | From        | Event           | To                     | Action                                     |
 | ----------- | --------------- | ---------------------- | ------------------------------------------ |
-| Idle        | start\_turn     | Streaming              | Send ChatRequest to LLM                    |
+| Idle        | start_turn      | Streaming              | Send ChatRequest to LLM                    |
 | Streaming   | Event::Part     | Streaming              | Forward to Renderer + Builder              |
 | Streaming   | Event::Flush    | Streaming              | Finalize event in Builder                  |
 | Streaming   | Event::Finished | Evaluating             | Check for tool calls                       |

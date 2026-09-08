@@ -157,7 +157,7 @@ pub(crate) struct Query {
     ///
     /// Accepts either a full JSON Schema object or a concise DSL:
     ///
-    /// \-s 'summary' → single string field -s 'name, age int, bio' → mixed
+    /// -s 'summary' → single string field -s 'name, age int, bio' → mixed
     /// types -s 'summary: a brief summary' → field with description
     ///
     /// See: <https://jp.computer/rfd/030-schema-dsl>

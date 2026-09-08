@@ -34,7 +34,7 @@ reasons:
    Anthropic to inject an additional system prompt.
    From the [Anthropic docs][structured-docs]:
 
-   > Changing the output\_config.format parameter will invalidate any prompt
+   > Changing the output_config.format parameter will invalidate any prompt
    > cache for that conversation thread.
 
    Even with matching tools, the system-level cache misses because the injected
@@ -54,14 +54,13 @@ This avoids the structured output injection, but `tool_choice` changes (from
 — which is the bulk of the tokens (~80%).
 The savings are therefore marginal.
 
-| Approach                              | Cost per inquiry (Opus 4.6, ~100k Ctx) |
-| ------------------------------------- | -------------------------------------- |
-| Current (broken cache)                | ~$0.63                                 |
-| RFD 033 (tool use)                    | ~$0.60                                 |
-| **This RFD (Haiku 4.5, uncached)**    | **~$0.10**                             |
-| \*\*This RFD (Haiku 4.5, cached, 2nd+ | **~$0.02**                             |
-| inquiry)\*\*                          |                                        |
-| **This RFD (Haiku 3, uncached)**      | **~$0.025**                            |
+| Approach                                       | Cost per inquiry (Opus 4.6, ~100k Ctx) |
+| ---------------------------------------------- | -------------------------------------- |
+| Current (broken cache)                         | ~$0.63                                 |
+| RFD 033 (tool use)                             | ~$0.60                                 |
+| **This RFD (Haiku 4.5, uncached)**             | **~$0.10**                             |
+| **This RFD (Haiku 4.5, cached, 2nd+ inquiry)** | **~$0.02**                             |
+| **This RFD (Haiku 3, uncached)**               | **~$0.025**                            |
 
 The right framing is not "preserve the main model's cache" but "use a cheap
 model and build its own cache."

@@ -368,7 +368,7 @@ still adequate:
 
 The prompt includes:
 
-> The conversation currently has the title: "{current\_title}".
+> The conversation currently has the title: "{current_title}".
 > If this title still accurately describes the conversation, set
 > `retain_current` to `true`.
 > Only generate new titles if the conversation has meaningfully changed
@@ -410,8 +410,8 @@ needs its instruction sections.
 
 `jp_llm::title::generate` applies this to every title request, so the refresh
 path inherits it by calling that function rather than repeating the logic.
-The pipeline for each candidate is: scope to last `turn_context` turns \>
-truncate if over budget \> send to LLM.
+The pipeline for each candidate is: scope to last `turn_context` turns >
+truncate if over budget > send to LLM.
 
 #### Sync (main thread)
 
