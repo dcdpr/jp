@@ -50,6 +50,18 @@ fn last_flag_on_the_line_wins() {
     assert_eq!(preference(&["--no-confirm", "--confirm"]), Some(true));
 }
 
+/// Removal hard-deletes the conversation from both storage roots, so the user
+/// has to be told before answering rather than after pressing `?`.
+/// Archiving is reversible with `jp c unarchive`, so it carries no caution.
+#[test]
+fn only_the_irreversible_action_cautions_the_user() {
+    assert_eq!(
+        ConversationAction::Remove.caution(),
+        Some("this action cannot be undone")
+    );
+    assert_eq!(ConversationAction::Archive.caution(), None);
+}
+
 fn make_id(secs: u64) -> ConversationId {
     ConversationId::try_from(DateTime::<Utc>::UNIX_EPOCH + std::time::Duration::from_secs(secs))
         .unwrap()

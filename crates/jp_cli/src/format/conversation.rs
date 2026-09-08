@@ -38,9 +38,8 @@ pub struct DetailsFmt {
     pub local: Option<bool>,
 
     /// Whether this is the session's active conversation.
-    ///
-    /// `None` leaves it unqueried, which omits the `Last Activated` row and the
-    /// `active` JSON key.
+    /// If `None`, the `Last Activated` row is not shown and the `active` JSON
+    /// key is `null`.
     pub active: Option<bool>,
 
     /// Display the timestamp of the last message in the conversation.

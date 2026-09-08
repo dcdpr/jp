@@ -101,10 +101,20 @@ impl ConversationAction {
         }
     }
 
+    /// A caution shown beneath the question for as long as it is open.
+    ///
+    /// `None` for an action the user can walk back unaided.
+    const fn caution(self) -> Option<&'static str> {
+        match self {
+            Self::Remove => Some("this action cannot be undone"),
+            Self::Archive => None,
+        }
+    }
+
     /// What accepting does, listed under the prompt's `?` help.
     const fn accept_help(self) -> &'static str {
         match self {
-            Self::Remove => "yes, remove it; this cannot be undone",
+            Self::Remove => "yes, remove it",
             Self::Archive => "yes, archive it",
         }
     }
@@ -163,9 +173,12 @@ pub(crate) fn confirm_conversation_action(
         InlineOption::new('n', action.decline_help()),
     ];
 
-    let answer = InlineSelect::new(&message, options)
-        .with_default('n')
-        .prompt(&mut ctx.printer.prompt_writer());
+    let mut select = InlineSelect::new(&message, options).with_default('n');
+    if let Some(caution) = action.caution() {
+        select = select.with_help_message(caution);
+    }
+
+    let answer = select.prompt(&mut ctx.printer.prompt_writer());
 
     // A prompt that failed rather than answered (a cancelled read, a terminal
     // that went away) is not consent.
