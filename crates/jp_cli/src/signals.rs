@@ -49,7 +49,6 @@ use futures::{Stream, StreamExt as _};
 use tokio::{
     runtime::{Handle, Runtime},
     sync::mpsc::{self, error::TrySendError},
-    task::JoinHandle,
 };
 use tokio_util::sync::CancellationToken;
 use tracing::debug;
@@ -100,15 +99,6 @@ enum Routed {
 #[derive(Clone)]
 pub struct SignalRouter {
     inner: Arc<RouterInner>,
-
-    /// Keeps the signal-consuming task attached to the router.
-    /// The task runs until the signal source ends (never, for the OS-backed
-    /// source); the handle is never awaited or aborted.
-    ///
-    /// Shared so the router can be cloned.
-    /// Dropping the last clone detaches the task, which is what dropping the
-    /// router has always done.
-    _signal_task: Arc<JoinHandle<()>>,
 }
 
 impl SignalRouter {
@@ -154,7 +144,13 @@ impl SignalRouter {
         let inner = RouterInner::new(escalation_cooldown);
 
         let router = inner.clone();
-        let signal_task = handle.spawn(async move {
+
+        // Detached: nothing joins or aborts this task, and dropping its handle
+        // does not stop it. It ends when the signal source does, which for the
+        // OS-backed source is never. Ending that source is the ordered way to
+        // stop routing; aborting the task would leave the process deaf to
+        // Ctrl-C and SIGTERM with no way to say so.
+        drop(handle.spawn(async move {
             tokio::pin!(signals);
 
             while let Some(signal) = signals.next().await {
@@ -163,12 +159,9 @@ impl SignalRouter {
                     routed => debug!(?signal, ?routed, "Routed OS signal."),
                 }
             }
-        });
+        }));
 
-        Self {
-            inner,
-            _signal_task: Arc::new(signal_task),
-        }
+        Self { inner }
     }
 
     /// The root shutdown token.
