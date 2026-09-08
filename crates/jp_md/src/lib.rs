@@ -27,12 +27,10 @@
     reason = "we don't host the docs, and use them mainly for LSP integration"
 )]
 
-mod ansi;
 pub mod buffer;
 pub mod format;
 pub mod heading;
 mod render;
-pub mod shade;
 mod table;
 pub mod theme;
 mod writer;
