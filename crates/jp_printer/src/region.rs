@@ -838,6 +838,16 @@ impl RegionStack {
         }
     }
 
+    /// Whether the terminal is currently handed to a writer outside the
+    /// printer.
+    ///
+    /// A suspension is taken for exactly as long as someone else — a prompt
+    /// widget, an external `$EDITOR` — owns the cursor, so this answers both
+    /// "are the rows hidden" and "may ordinary output land".
+    pub const fn is_suspended(&self) -> bool {
+        self.suspensions > 0
+    }
+
     /// Record whether the persistent write that just landed left the cursor
     /// part-way along a row.
     ///
