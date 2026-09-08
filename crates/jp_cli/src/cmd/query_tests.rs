@@ -2314,49 +2314,58 @@ fn stream_with_assistant_reply() -> ConversationStream {
 
 #[test]
 fn quote_false_seeds_the_message_verbatim() {
+    let config = AppConfig::new_test();
     let mut request = ChatRequest::default();
     assert!(seed_quoted_reply(
         &mut request,
         &stream_with_assistant_reply(),
-        false
+        false,
+        &config
     ));
 
     // The trailing blank line separates the seed from the reply the user is
-    // about to type below it.
-    assert_eq!(request.content, "line one\nline two\n\n");
+    // about to type below it. The two source lines are joined by a soft
+    // break, so reformatting flows them into a single wrapped line.
+    assert_eq!(request.content, "line one line two\n\n");
 }
 
 #[test]
 fn quote_true_seeds_the_message_as_a_blockquote() {
+    let config = AppConfig::new_test();
     let mut request = ChatRequest::default();
     assert!(seed_quoted_reply(
         &mut request,
         &stream_with_assistant_reply(),
-        true
+        true,
+        &config
     ));
 
-    assert_eq!(request.content, "> line one\n> line two\n\n");
+    assert_eq!(request.content, "> line one line two\n\n");
 }
 
 #[test]
 fn quote_seeds_above_an_already_composed_request() {
+    let config = AppConfig::new_test();
     let mut request = ChatRequest::from("and what about X?");
     assert!(seed_quoted_reply(
         &mut request,
         &stream_with_assistant_reply(),
-        false
+        false,
+        &config
     ));
 
-    assert_eq!(request.content, "line one\nline two\n\nand what about X?");
+    assert_eq!(request.content, "line one line two\n\nand what about X?");
 }
 
 #[test]
 fn quote_leaves_the_request_untouched_without_an_assistant_message() {
+    let config = AppConfig::new_test();
     let mut request = ChatRequest::from("only my words");
     assert!(!seed_quoted_reply(
         &mut request,
         &ConversationStream::new_test(),
-        true
+        true,
+        &config
     ));
 
     assert_eq!(request.content, "only my words");
@@ -2382,6 +2391,59 @@ fn blockquote_trailing_newline_is_dropped_by_lines() {
     // `str::lines` drops the trailing terminator, so a string with and
     // without a trailing newline produce identical quotes.
     assert_eq!(blockquote("a\nb\n"), "> a\n> b");
+}
+
+#[test]
+fn quote_wraps_a_long_paragraph_to_the_configured_width() {
+    // The raw assistant message has no line breaks; the seed must be
+    // rewrapped, not quoted verbatim, or a long reply would produce one
+    // unreadable blockquote line.
+    let mut config = AppConfig::new_test();
+    config.style.markdown.wrap_width = 20;
+
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("question");
+    stream
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::message(
+            "alpha bravo charlie delta echo foxtrot",
+        ))
+        .build()
+        .unwrap();
+
+    let mut request = ChatRequest::default();
+    assert!(seed_quoted_reply(&mut request, &stream, true, &config));
+
+    assert_eq!(
+        request.content,
+        "> alpha bravo charlie\n> delta echo foxtrot\n\n"
+    );
+}
+
+#[test]
+fn quote_aligns_table_columns() {
+    // The source table's pipes don't line up ("1" vs "two"); the seed must
+    // reformat it into a properly padded table rather than copying the
+    // ragged source through.
+    let config = AppConfig::new_test();
+
+    let mut stream = ConversationStream::new_test();
+    stream.start_turn("question");
+    stream
+        .current_turn_mut()
+        .add_chat_response(ChatResponse::message(
+            "| A | B |\n| --- | --- |\n| 1 | two |\n",
+        ))
+        .build()
+        .unwrap();
+
+    let mut request = ChatRequest::default();
+    assert!(seed_quoted_reply(&mut request, &stream, false, &config));
+
+    assert_eq!(
+        request.content,
+        "| A   | B   |\n|-----|-----|\n| 1   | two |\n\n"
+    );
 }
 
 #[test]
@@ -3073,7 +3135,7 @@ fn build_conversation_seeds_a_verbatim_quote_above_the_query() {
         &stream_with_assistant_reply(),
     );
 
-    assert_eq!(built, "line one\nline two\n\nand what about X?");
+    assert_eq!(built, "line one line two\n\nand what about X?");
 }
 
 #[test]
@@ -3083,7 +3145,7 @@ fn build_conversation_seeds_a_blockquoted_quote_above_the_query() {
         &stream_with_assistant_reply(),
     );
 
-    assert_eq!(built, "> line one\n> line two\n\nand what about X?");
+    assert_eq!(built, "> line one line two\n\nand what about X?");
 }
 
 #[test]
