@@ -449,12 +449,42 @@ fn list_filters_are_optional() {
 /// value, so several can be required at once.
 #[test]
 fn list_takes_repeated_label_filters() {
-    let args = parse(&["list", "--label", "config", "--label", "app/macos"]).unwrap();
+    let args = parse(&[
+        "list",
+        "--label",
+        "package=jp_cli",
+        "--label",
+        "client=macos",
+    ])
+    .unwrap();
 
     match args.command {
-        Command::List { labels, .. } => assert_eq!(labels, ["config", "app/macos"]),
+        Command::List { labels, .. } => assert_eq!(labels, ["package=jp_cli", "client=macos"]),
         other => panic!("expected list, got {other:?}"),
     }
+}
+
+/// An omitted id reaches the picker rather than the "no terminal" refusal,
+/// which is what the subcommand's `Omit it to choose` promises.
+///
+/// Asserted through the picker's own empty-board error: reaching it at all is
+/// the thing under test, and it fires before any protocol exchange.
+#[test]
+fn labelling_without_an_id_offers_the_picker() {
+    let dir = Utf8TempDir::new().unwrap();
+
+    let error = compose_missing(
+        dir.path(),
+        Command::Label {
+            id: None,
+            labels: vec!["client=cli".to_owned()],
+        },
+        &mut &b""[..],
+        &mut Vec::new(),
+    )
+    .unwrap_err();
+
+    assert_eq!(error, "No tickets to choose from.");
 }
 
 /// `--help` reaches us as an error, but it is output, not a failure.

@@ -82,11 +82,15 @@ pub fn run(ctx: Context, t: Tool) -> ToolResult {
                 Ok(id) => id,
                 Err(message) => return error(message),
             };
-            label(
-                root,
-                id,
-                &t.opt::<Vec<String>>("labels")?.unwrap_or_default(),
-            )
+            // A missing or null `labels` is refused rather than read as an
+            // empty set: this write replaces the whole set, so treating the
+            // absent case as "clear" would drop every label a call meant to
+            // leave alone, and the result line saying so is styled off.
+            let Some(labels) = t.opt::<Vec<String>>("labels")? else {
+                return error("`labels` must be an array. Pass `[]` to clear the labels.");
+            };
+
+            label(root, id, &labels)
         }
 
         "comment" => {

@@ -435,21 +435,7 @@ fn compose_missing(
             implements,
             labels,
         } if kind.is_none() || title.is_none() => {
-            // Kind first: it frames what you're about to write. The title is
-            // read out of the composed text, or asked for last.
-            let kind = match kind {
-                Some(kind) => kind,
-                None => pick_kind(stdin, stdout)?,
-            };
-            // A description given on the command line is a description, not a
-            // draft of the whole ticket. Composing from it would read its one
-            // line back as a title and file the ticket with no description at
-            // all, quietly turning an explicit `--body` into something else.
-            let (title, body) = match (title, body) {
-                (Some(title), body) => (title, body),
-                (None, Some(body)) => (ask_title(stdin, stdout)?, Some(body)),
-                (None, None) => compose_ticket(Some(kind), stdin, stdout)?,
-            };
+            let (kind, title, body) = compose_add(kind, title, body, stdin, stdout)?;
 
             Ok(Command::Add {
                 kind: Some(kind),
@@ -522,6 +508,11 @@ fn compose_missing(
             body,
             kind,
             status,
+        }),
+
+        Command::Label { id: None, labels } => Ok(Command::Label {
+            id: Some(pick_ticket(dir, stdin, stdout, "Label", false)?),
+            labels,
         }),
 
         Command::Delete { id: None } => Ok(Command::Delete {
@@ -661,6 +652,34 @@ fn compose_ticket(
         // the title has to be asked for on its own.
         Composition::Body(body) => Ok((ask_title(stdin, stdout)?, Some(body))),
     }
+}
+
+/// Ask for the kind, title, and description a new ticket is missing.
+fn compose_add(
+    kind: Option<Kind>,
+    title: Option<String>,
+    body: Option<String>,
+    stdin: &mut impl BufRead,
+    stdout: &mut impl Write,
+) -> Result<(Kind, String, Option<String>), String> {
+    // Kind first: it frames what you're about to write. The title is read out
+    // of the composed text, or asked for last.
+    let kind = match kind {
+        Some(kind) => kind,
+        None => pick_kind(stdin, stdout)?,
+    };
+
+    // A description given on the command line is a description, not a draft of
+    // the whole ticket. Composing from it would read its one line back as a
+    // title and file the ticket with no description at all, quietly turning an
+    // explicit `--body` into something else.
+    let (title, body) = match (title, body) {
+        (Some(title), body) => (title, body),
+        (None, Some(body)) => (ask_title(stdin, stdout)?, Some(body)),
+        (None, None) => compose_ticket(Some(kind), stdin, stdout)?,
+    };
+
+    Ok((kind, title, body))
 }
 
 /// Ask which ticket to act on.

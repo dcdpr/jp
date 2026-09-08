@@ -10,10 +10,10 @@
 # and one left here after being deleted is refused with a message naming the
 # real set. Re-run the recipe to bring it back in step.
 #
-# `ticket_create` is offered only the values it may add. `ticket_label` and
-# `ticket_list` also get retired ones: replacing a whole set means naming a
-# retired value to keep it, and finding what still carries one means
-# filtering on it.
+# The three lists differ. `ticket_create` is offered only the values it may
+# add. `ticket_label` also gets retired ones, because replacing a whole set
+# means naming a retired value to keep it. `ticket_list` gets those plus a
+# bare key per facet, which is how a filter asks for any value under it.
 #
 # RFD D64 replaces this file with a reference the loader resolves directly.
 
@@ -146,18 +146,21 @@ enum = [
   "type=task",
 ]
 
-# Includes retired values: see the note above.
+# Includes retired values and bare keys: see the note above.
 [conversation.tools.ticket_list.parameters.labels.items]
 enum = [
+  "client",
   "client=cli",
   "client=macos",
   "client=web",
+  "domain",
   "domain=conversation",
   "domain=llm",
   "domain=mcp",
   "domain=plugins",
   "domain=storage",
   "domain=tooling",
+  "llm-provider",
   "llm-provider=anthropic",
   "llm-provider=cerebras",
   "llm-provider=google",
@@ -165,6 +168,7 @@ enum = [
   "llm-provider=ollama",
   "llm-provider=openai",
   "llm-provider=openrouter",
+  "package",
   "package=bookworm",
   "package=comfort",
   "package=grizzly",
@@ -202,6 +206,7 @@ enum = [
   "package=json_edit",
   "package=schematic",
   "package=xct2cli",
+  "type",
   "type=bug",
   "type=enhancement",
   "type=feature",

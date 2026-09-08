@@ -963,6 +963,60 @@ fn label_replaces_the_whole_set() {
     assert!(!shown.contains("Labels"), "{shown}");
 }
 
+/// A null `labels` is the shape a model reaches for when it means "leave them
+/// alone", and this write replaces the whole set.
+/// Refusing it is what stops a call that named no labels from dropping the ones
+/// already there.
+#[test]
+fn a_null_label_list_is_refused_and_writes_nothing() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_vocabulary(&dir);
+    let id = write_ticket(&dir, "Tool call header misaligned");
+
+    content(run_tool(
+        &dir,
+        "ticket_label",
+        json!({ "id": FIXED_ID, "labels": ["client=cli", "package=jp_config"] }),
+    ));
+    let path = store::locate_ticket(&dir.path().join(store::DEFAULT_DIR), id).unwrap();
+    let before = std::fs::read_to_string(&path).unwrap();
+
+    let message = error_message(run_tool(
+        &dir,
+        "ticket_label",
+        json!({ "id": FIXED_ID, "labels": null }),
+    ));
+
+    assert_eq!(
+        message,
+        "`labels` must be an array. Pass `[]` to clear the labels."
+    );
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+}
+
+/// Clearing stays reachable, so the refusal above costs nothing a caller
+/// actually wanted.
+#[test]
+fn an_empty_label_list_still_clears() {
+    let dir = Utf8TempDir::new().unwrap();
+    write_vocabulary(&dir);
+    let id = write_ticket(&dir, "Tool call header misaligned");
+
+    content(run_tool(
+        &dir,
+        "ticket_label",
+        json!({ "id": FIXED_ID, "labels": ["client=cli"] }),
+    ));
+
+    let out = content(run_tool(
+        &dir,
+        "ticket_label",
+        json!({ "id": FIXED_ID, "labels": [] }),
+    ));
+
+    assert_eq!(out, format!("Cleared the labels on {id}."));
+}
+
 /// A typo names the vocabulary, so the assistant can fix the call rather than
 /// landing a label nothing groups by.
 #[test]

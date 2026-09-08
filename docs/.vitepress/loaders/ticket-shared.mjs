@@ -59,8 +59,13 @@ export function parseTicket(content, filename) {
 // Read as written rather than checked against the vocabulary: a listing that
 // hid a label the file carries would disagree with the file.
 // `findUnknownLabels` below is what catches one the board doesn't define.
+//
+// Line endings are normalized first: the header match needs a literal blank
+// line, and `.` does not consume the `\r` of a CRLF file. Rust's `str::lines()`
+// reads such a file fine, so without this the CLI and the board disagree.
 export function readLabels(content) {
-    const block = content.match(/^# .+\n\n((?:- \*\*[^*]+\*\*:.*\n)+)/m)?.[1]
+    const block = content.replace(/\r\n/g, '\n')
+        .match(/^# .+\n\n((?:- \*\*[^*]+\*\*:.*\n)+)/m)?.[1]
     if (!block) return []
 
     return block
