@@ -835,8 +835,8 @@ It is to keep the resolved type and narrow *what* is resolved into it.
   User-global config, user-workspace config, environment variables, `-c` args
   and CLI flags are all excluded.
 - **`init`** is an ordered list of `ConfigDelta` entries, one per source the
-  creating invocation layered on top of the workspace files: user-global
-  config, user-workspace config, the environment, each `-c` directive (file,
+  creating invocation layered on top of the workspace files: user-global config,
+  user-workspace config, the environment, each `-c` directive (file,
   `key=value`, or JSON object), each `-C` directive, and the trailing
   shortcut-flags batch.
   Each entry carries its diff, claims map, and any `unsets`.
@@ -847,8 +847,8 @@ The stored type is `AppConfig`; the stored *encoding* is what it is today.
 `base` appears on disk as a partial-shaped object and is finalized on load.
 That path is retained as-is, including the schema-aware stripping of unknown
 fields and the fallback for a stored config that has lost a required field.
-Nothing about this RFD changes how `base` is encoded, only what is resolved
-into it.
+Nothing about this RFD changes how `base` is encoded, only what is resolved into
+it.
 
 ##### What an `init` entry holds
 
@@ -863,8 +863,8 @@ A workspace naming `assistant.model.id = "coder"` with
 `providers.llm.aliases.coder = "openai/gpt-4o"`, plus a user-workspace override
 setting only that alias to `anthropic/claude-opus-4-6`, resolves to the
 Anthropic model — but `base` already holds the flattened `openai/gpt-4o`, and
-`ModelIdOrAliasConfig::resolve_in_place` is a no-op once the field is a
-concrete `Id`.
+`ModelIdOrAliasConfig::resolve_in_place` is a no-op once the field is a concrete
+`Id`.
 Replaying the alias map alone would leave the conversation on the wrong model.
 A difference between resolutions carries the resolved `assistant.model.id` too,
 so the replay lands where ordinary resolution lands.
@@ -960,12 +960,12 @@ RFD 038 persists `--cfg=WORKSPACE` as a `Reset` followed by an `Apply` of the
 workspace state, and `fold_config_delta` implements `Reset` by returning the
 accumulated state to the empty partial.
 A `Reset` inside `init` would therefore discard `base` during replay, and every
-field the reset's own `Apply` does not restore — `assistant.request.max_retries`
-and every other `#[setting(default)]` — would come from whichever binary reads
-the conversation next.
+field the reset's own `Apply` does not restore —
+`assistant.request.max_retries` and every other `#[setting(default)]` — would
+come from whichever binary reads the conversation next.
 That is precisely the pinning break this section exists to prevent.
-Creation keeps absorbing reset directives into `base`, and `init` holds only
-the sources that follow the last reset in the list.
+Creation keeps absorbing reset directives into `base`, and `init` holds only the
+sources that follow the last reset in the list.
 
 The cost in both cases is provenance, not pinning: `-C` cannot reach a
 creation-time reset, or anything the reset discarded, or any contribution to a
@@ -1033,8 +1033,8 @@ transparently:
 2. If the root is a JSON object with a `base` key → new format; read `base` as
    the stored config and `init` (defaulting to `[]` if absent) as the
    creation-time delta list.
-3. Otherwise the root object *is* the stored config; wrap it as `{ base:
-   <that>, init: [] }`.
+3. Otherwise the root object *is* the stored config; wrap it as `{ base: <that>,
+   init: [] }`.
    Legacy conversations therefore have an empty `init` list, matching their
    historical "no claims" behavior.
    `-C` is a no-op on their fields.
@@ -2004,8 +2004,8 @@ Phase 2b already rejects a workspace whose files do not resolve on their own, so
 this phase can rely on `base` being valid.
 
 An invocation carrying a reset keyword, or `NONE`, keeps today's behavior:
-creation absorbs those contributions into `base` and writes an empty `init`
-(see [Creation-time resets, and `NONE`](#creation-time-resets-and-none)).
+creation absorbs those contributions into `base` and writes an empty `init` (see
+[Creation-time resets, and `NONE`](#creation-time-resets-and-none)).
 
 **Storage layer** (`jp_storage`):
 
