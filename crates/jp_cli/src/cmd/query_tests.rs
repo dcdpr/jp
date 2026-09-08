@@ -935,7 +935,7 @@ fn test_tool_use_of_unknown_tool_errors() {
 fn test_tool_use_does_not_persist_into_partial_config() {
     // `-u` binds one turn. Mirrors `no_title_does_not_persist_into_partial_config`:
     // anything this flag writes into the partial would reach the conversation
-    // through `get_config_delta_from_cli` and force the tool on every later
+    // through `turn_config_delta` and force the tool on every later
     // query.
     let base = make_partial_with_tools();
 
@@ -1242,7 +1242,7 @@ fn query_model_override_is_persisted_as_config_delta() {
         .unwrap();
     let runtime_config = build(partial).unwrap();
 
-    let delta = get_config_delta_from_cli(&runtime_config, &lock)
+    let delta = turn_config_delta(&runtime_config, &lock)
         .unwrap()
         .expect("expected query model override to produce a config delta");
 
@@ -1326,7 +1326,7 @@ fn tier_flag_is_persisted_as_config_delta() {
         .unwrap();
     let runtime_config = build(partial).unwrap();
 
-    let delta = get_config_delta_from_cli(&runtime_config, &lock)
+    let delta = turn_config_delta(&runtime_config, &lock)
         .unwrap()
         .expect("expected --tier to produce a config delta");
 
@@ -1395,7 +1395,7 @@ fn no_tier_flag_replaces_a_persisted_tier_with_off() {
         "--no-tier must resolve this query to `off`"
     );
 
-    let delta = get_config_delta_from_cli(&runtime_config, &lock)
+    let delta = turn_config_delta(&runtime_config, &lock)
         .unwrap()
         .expect("turning the tier off must produce a config delta");
 
@@ -1472,7 +1472,7 @@ fn query_cfg_sourced_compaction_persists_as_config_delta() {
     }]);
     let runtime_config = build(partial).unwrap();
 
-    let delta = get_config_delta_from_cli(&runtime_config, &lock)
+    let delta = turn_config_delta(&runtime_config, &lock)
         .unwrap()
         .expect("cfg-sourced compaction config should produce a delta");
 
@@ -1706,7 +1706,7 @@ async fn query_sequence_new_cfg_profile_then_model_override_persists_for_plain_q
     };
     let cfg2 = build_query_config(&workspace, base.clone(), &[], &query2, Some(&handle2));
     let lock2 = workspace.test_lock(handle2);
-    let delta = get_config_delta_from_cli(&cfg2, &lock2)
+    let delta = turn_config_delta(&cfg2, &lock2)
         .unwrap()
         .expect("expected model override to persist");
     lock2
@@ -1814,6 +1814,66 @@ fn cleanup_any_removes_a_replaced_draft() {
     cleanup_query_message_file(Some(&fs), &id, DraftRemoval::Any);
 
     assert!(!path.exists());
+}
+
+fn attachment(source: &str) -> Attachment {
+    Attachment {
+        source: source.to_owned(),
+        description: None,
+        content: jp_attachment::AttachmentContent::Text(String::new()),
+    }
+}
+
+/// An MCP attachment resolves later than the rest, but the assistant has to see
+/// every attachment in the order the conversation declares them: each one is
+/// sent as a document numbered by its position.
+#[test]
+fn attachments_keep_their_configured_order_across_deferral() {
+    let mcp = Url::parse("mcp+server+res://one").unwrap();
+
+    // Declared as `[mcp, file, mcp, file]`, so both MCP slots resolve after the
+    // two around them and every one of them has to land back in place.
+    let slots = vec![
+        AttachmentSlot::Deferred(mcp.clone()),
+        AttachmentSlot::Ready(vec![attachment("file://second")]),
+        AttachmentSlot::Deferred(mcp),
+        AttachmentSlot::Ready(vec![attachment("file://fourth")]),
+    ];
+
+    let resolved = vec![vec![attachment("mcp://first")], vec![attachment(
+        "mcp://third",
+    )]];
+
+    let sources: Vec<String> = splice(slots, resolved)
+        .into_iter()
+        .map(|attachment| attachment.source)
+        .collect();
+
+    assert_eq!(sources, [
+        "mcp://first",
+        "file://second",
+        "mcp://third",
+        "file://fourth"
+    ]);
+}
+
+/// One URL can yield several attachments, so a slot holds a group rather than a
+/// single item and the whole group belongs at the slot's position.
+#[test]
+fn a_deferred_slot_keeps_its_whole_group_together() {
+    let slots = vec![
+        AttachmentSlot::Deferred(Url::parse("mcp+server+res://dir").unwrap()),
+        AttachmentSlot::Ready(vec![attachment("file://last")]),
+    ];
+
+    let resolved = vec![vec![attachment("mcp://a"), attachment("mcp://b")]];
+
+    let sources: Vec<String> = splice(slots, resolved)
+        .into_iter()
+        .map(|attachment| attachment.source)
+        .collect();
+
+    assert_eq!(sources, ["mcp://a", "mcp://b", "file://last"]);
 }
 
 fn lock_with_title(
@@ -1927,7 +1987,7 @@ fn no_title_does_not_persist_into_partial_config() {
     // `--no-title` through `apply_cli_config` previously wrote
     // `conversation.title.generate.auto = Some(false)` into the
     // partial, which would then flow into the conversation's
-    // `config_delta` via `get_config_delta_from_cli` and persist
+    // `config_delta` via `turn_config_delta` and persist
     // for every future query on that conversation. The flag is
     // now strictly invocation-scoped, so the partial must be
     // untouched relative to a run without the flag.

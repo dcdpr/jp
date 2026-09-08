@@ -9,6 +9,27 @@ use url::Url;
 use super::*;
 use crate::{Globals, ctx::Ctx, error::Error};
 
+/// An `mcp+…` attachment is the one kind that cannot resolve until its server
+/// is running, so the query path holds it back until after the startup wait.
+#[test]
+fn only_mcp_attachments_wait_for_a_server() {
+    let mcp = Url::parse("mcp+github-mcp-server+repo://owner/repo/contents/README.md").unwrap();
+    assert!(needs_mcp_server(&mcp));
+
+    for other in [
+        "jp://17861332336",
+        "file://./README.md",
+        "https://example.com/page",
+        "cmd://git?arg=diff",
+    ] {
+        let url = Url::parse(other).unwrap();
+        assert!(
+            !needs_mcp_server(&url),
+            "{other} resolves without a running MCP server"
+        );
+    }
+}
+
 fn make_id(secs: u64) -> ConversationId {
     ConversationId::try_from(
         chrono::DateTime::<chrono::Utc>::UNIX_EPOCH + std::time::Duration::from_secs(secs),
@@ -103,17 +124,15 @@ fn load_conversation_attachments_skips_missing_references() {
     let first = Url::parse(&format!("jp://{}", make_id(1_700_000_002))).unwrap();
     let second = Url::parse(&format!("jp://{}", make_id(1_700_000_003))).unwrap();
 
-    let attachments = runtime
+    let groups = runtime
         .block_on(load_conversation_attachments(&ctx, vec![first, second]))
         .expect("missing references should not propagate as errors");
 
     // Both URLs point at conversations the workspace doesn't know about, so
-    // both get warn-and-skipped. The query continues with zero attachments.
-    assert!(
-        attachments.is_empty(),
-        "got {} attachments",
-        attachments.len()
-    );
+    // both get warn-and-skipped. A skipped reference still holds its slot, so
+    // the groups stay aligned with the URLs and carry no attachments.
+    assert_eq!(groups.len(), 2);
+    assert!(groups.iter().all(Vec::is_empty), "got {groups:?}");
 }
 
 #[test]

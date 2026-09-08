@@ -96,7 +96,7 @@
     "summary": "Abandoned design for live re-attachment to detached query processes via Unix domain sockets; superseded by RFD 027."
   },
   "026-agent-loop-extraction.md": {
-    "hash": "3dbbff9f7a66d51681cbee6053543080b67c406b1e9efac192b85500dd3852bb",
+    "hash": "847be7fdef627d4e22232ca41bec23dba4d98bc099ff5aae40b49cccee91ce31",
     "summary": "Extract the agent turn loop from jp_cli into a new jp_agent crate with trait-based I/O hooks."
   },
   "027-client-server-query-architecture.md": {

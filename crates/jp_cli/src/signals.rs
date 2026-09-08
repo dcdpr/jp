@@ -93,13 +93,22 @@ enum Routed {
 ///
 /// Created once at application startup; the embedded signal task lives for the
 /// duration of the process.
+///
+/// Cloning gives another view of the same router rather than a second one: the
+/// handler stack and the shutdown token are shared, so a handler pushed through
+/// any clone is reachable by a signal arriving at any other.
+#[derive(Clone)]
 pub struct SignalRouter {
     inner: Arc<RouterInner>,
 
     /// Keeps the signal-consuming task attached to the router.
     /// The task runs until the signal source ends (never, for the OS-backed
     /// source); the handle is never awaited or aborted.
-    _signal_task: JoinHandle<()>,
+    ///
+    /// Shared so the router can be cloned.
+    /// Dropping the last clone detaches the task, which is what dropping the
+    /// router has always done.
+    _signal_task: Arc<JoinHandle<()>>,
 }
 
 impl SignalRouter {
@@ -158,7 +167,7 @@ impl SignalRouter {
 
         Self {
             inner,
-            _signal_task: signal_task,
+            _signal_task: Arc::new(signal_task),
         }
     }
 
