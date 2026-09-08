@@ -127,11 +127,15 @@ impl PartialConfigDelta for PartialAccessConfig {
 
 /// Diff two rule lists into a delta that replays to `next`.
 ///
-/// An append-shaped delta can only add, so a rule that disappeared between
-/// `prev` and `next` would come back when the delta is folded over `prev`
-/// again.
-/// When anything is missing from `next`, the delta therefore carries the whole
-/// list with `replace`; otherwise it carries just the new rules and appends.
+/// An append-shaped delta can only add to the end, and appending deduplicates,
+/// so it reaches `next` exactly when `next` starts with `prev` and repeats no
+/// rule; the delta is then the tail.
+/// Every other difference (a rule removed, reordered, inserted before the last
+/// one, or repeated) has the delta carry the whole list with `replace`.
+///
+/// Order is part of the answer, not a detail: rules of equal specificity break
+/// toward the one declared last, so a delta that reproduced the set of rules
+/// while appending them in a different order would invert which one wins.
 ///
 /// `next` comes from a fully resolved config, so it is the complete rule set
 /// and replacing with it loses nothing.
@@ -139,11 +143,8 @@ fn rule_delta<T: Clone + PartialEq>(
     prev: &MergeableVec<T>,
     next: MergeableVec<T>,
 ) -> MergeableVec<T> {
-    if prev.iter().all(|rule| next.contains(rule)) {
-        return next
-            .into_iter()
-            .filter(|rule| !prev.contains(rule))
-            .collect();
+    if next.starts_with(prev) && !repeats_a_rule(&next) {
+        return next.iter().skip(prev.len()).cloned().collect();
     }
 
     MergeableVec::Merged(MergedVec {
@@ -152,6 +153,19 @@ fn rule_delta<T: Clone + PartialEq>(
         dedup: None,
         discard_when_merged: false,
     })
+}
+
+/// Whether the list holds the same rule more than once.
+///
+/// An appending merge deduplicates unless a config opts out, keeping the first
+/// occurrence, so a repeated rule does not survive the fold: the list it
+/// reaches is shorter than the one asked for, and a repeat that trails a rule
+/// of equal specificity is what decides the tie.
+fn repeats_a_rule<T: PartialEq>(rules: &[T]) -> bool {
+    rules
+        .iter()
+        .enumerate()
+        .any(|(index, rule)| rules[..index].contains(rule))
 }
 
 impl ToPartial for AccessConfig {
