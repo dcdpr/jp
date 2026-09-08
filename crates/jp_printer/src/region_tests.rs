@@ -823,42 +823,52 @@ fn a_redraw_after_a_shrink_keeps_its_row_accounting() {
     // surplus loop scrolled the fresh rows away — leaving `drawn_rows`
     // describing a screen that no longer existed, so every later erase and
     // persistent write was positioned from a wrong count.
-    let mut term = Terminal::new(12, 40);
-    term.content(2);
+    let (term, mut tty) = terminal(12, 40);
+    content(&mut tty, 2);
 
     let (mut stack, style, cap) = windowed(5, 40, 12);
-    stack.claim_test(1, style, cap, &mut term);
+    stack.claim_test(1, style, cap, &mut tty);
     for n in 1..=5 {
         stack.push(1, Arc::from("build"), &format!("line {n}"));
     }
-    stack.redraw(&mut term);
+    stack.redraw(&mut tty);
+    wait_for_used(&term, &[
+        "content 01",
+        "content 02",
+        "line 1",
+        "line 2",
+        "line 3",
+        "line 4",
+        "line 5",
+        "* status",
+    ]);
     assert_eq!(stack.drawn_rows, 6);
 
     // Shrink to fewer rows than the block occupies, then let a tick repaint.
-    term.resize(4, 40);
+    term.resize(Size::new(4, 40)).unwrap();
     stack.entries[0].terminal = TerminalCapability::interactive(Some(40)).with_rows(Some(4));
-    stack.redraw(&mut term);
+    stack.redraw(&mut tty);
 
     // A 4-row terminal leaves two window rows plus the status row, and every
     // one of them is painted whole with the newest lines.
+    let screen = wait_for_used(&term, &["line 4", "line 5", "* status"]);
     assert_eq!(stack.drawn_rows, 3);
-    assert_eq!(term.used(), ["line 4", "line 5", "* status"]);
 
     // It sits one row short of the bottom, because the shrink clamped the
     // cursor and re-anchoring would need the cursor position the worker
     // deliberately never queries. Cosmetic, and it does not drift further: the
     // count on record matches the rows on screen, which is what later writes
     // are positioned from.
-    assert_eq!(term.cursor().0, 2);
+    assert_eq!(screen.cursor().0, 2);
 
     // That is the property worth pinning — a wrong count shows up here, as
     // eaten or duplicated content around the next persistent write. The write
     // also re-anchors the block to the bottom.
-    stack.erase(&mut term);
-    let _err = write!(term, "after\r\n");
-    stack.redraw(&mut term);
+    stack.erase(&mut tty);
+    writeln!(tty, "after").unwrap();
+    stack.redraw(&mut tty);
 
-    assert_eq!(term.tail(4), ["after", "line 4", "line 5", "* status"]);
+    wait_for_tail(&term, &["after", "line 4", "line 5", "* status"]);
 }
 
 #[test]
