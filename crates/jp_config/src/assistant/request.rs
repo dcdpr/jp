@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
-    delta::{PartialConfigDelta, delta_opt},
+    delta::{PartialConfigDelta, delta_opt, delta_opt_at, path},
     fill::FillDefaults,
     partial::{ToPartial, partial_opt},
     validate::Validator,
@@ -189,6 +189,47 @@ impl PartialConfigDelta for PartialRequestConfig {
                 next.max_response_bytes,
             ),
             cache: delta_opt(self.cache.as_ref(), next.cache),
+        }
+    }
+
+    fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
+        Self {
+            max_retries: delta_opt_at(
+                &path(prefix, "max_retries"),
+                self.max_retries.as_ref(),
+                next.max_retries,
+                unsets,
+            ),
+            base_backoff_ms: delta_opt_at(
+                &path(prefix, "base_backoff_ms"),
+                self.base_backoff_ms.as_ref(),
+                next.base_backoff_ms,
+                unsets,
+            ),
+            max_backoff_secs: delta_opt_at(
+                &path(prefix, "max_backoff_secs"),
+                self.max_backoff_secs.as_ref(),
+                next.max_backoff_secs,
+                unsets,
+            ),
+            stream_idle_timeout_secs: delta_opt_at(
+                &path(prefix, "stream_idle_timeout_secs"),
+                self.stream_idle_timeout_secs.as_ref(),
+                next.stream_idle_timeout_secs,
+                unsets,
+            ),
+            max_response_bytes: delta_opt_at(
+                &path(prefix, "max_response_bytes"),
+                self.max_response_bytes.as_ref(),
+                next.max_response_bytes,
+                unsets,
+            ),
+            cache: delta_opt_at(
+                &path(prefix, "cache"),
+                self.cache.as_ref(),
+                next.cache,
+                unsets,
+            ),
         }
     }
 }

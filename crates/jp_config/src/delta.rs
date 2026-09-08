@@ -3,6 +3,8 @@
 use indexmap::IndexMap;
 use schematic::PartialConfig;
 
+use crate::types::vec::{MergeableVec, MergedVec, MergedVecStrategy};
+
 /// Calculate the delta between two partial configurations.
 ///
 /// It takes `self`, and should check for any value in `next` that differs from
@@ -39,6 +41,18 @@ pub trait PartialConfigDelta: PartialConfig {
         self.delta(next)
     }
 }
+
+/// Fields a delta never stores.
+///
+/// Each is read while the config file declaring it is loaded, and only its
+/// effect outlives that: `extends` has already been merged in by the time a
+/// partial exists, `inherit` has already stopped the merge chain, and `loader`
+/// steered how its own entry was loaded ([RFD 038]).
+/// Carrying any of them into a conversation would re-apply a decision that was
+/// made once, so [`PartialConfigDelta::delta`] zeroes all three.
+///
+/// [RFD 038]: https://jp.computer/rfd/038
+pub const LOAD_TIME_ONLY: &[&str] = &["extends", "inherit", "loader"];
 
 /// Join a field name onto its parent's dotted path.
 #[must_use]
@@ -78,6 +92,37 @@ pub fn delta_opt_vec_at<T: PartialEq + Clone>(
     Some(next)
 }
 
+/// Calculate the delta between two strategy-carrying lists.
+///
+/// Appending reaches `next` exactly when `next` starts with `prev`, and the
+/// delta is then the tail, carried as a plain list so the fold appends it.
+/// Every other difference — an element removed, reordered, or inserted before
+/// the last one — carries the whole of `next` with `replace`.
+///
+/// Order is part of the answer, not a detail.
+/// A delta that reproduced the set of elements while appending them in a
+/// different order changes the meaning of any list whose order matters, and
+/// says nothing at all about a list that only lost an element.
+///
+/// A [`MergeableVec`] can express `replace` on the wire, which is why this
+/// needs no separate path report.
+/// A plain `Vec` cannot; see [`delta_opt_vec_at`].
+pub fn delta_mergeable_vec<T: Clone + PartialEq>(
+    prev: &MergeableVec<T>,
+    next: MergeableVec<T>,
+) -> MergeableVec<T> {
+    if next.starts_with(prev) {
+        return next.iter().skip(prev.len()).cloned().collect();
+    }
+
+    MergeableVec::Merged(MergedVec {
+        value: next.into_vec(),
+        strategy: Some(MergedVecStrategy::Replace),
+        dedup: None,
+        discard_when_merged: false,
+    })
+}
+
 /// Delta for an optional nested partial, reporting the fields it cannot reach.
 ///
 /// Mirrors [`delta_opt_partial`], descending with `path` as the nested value's
@@ -91,6 +136,11 @@ pub fn delta_opt_partial_at<T: PartialConfigDelta + PartialEq>(
     match (prev, next) {
         (Some(prev), Some(next)) if prev != &next => {
             Some(prev.delta_with_unsets(next, path, unsets))
+        }
+        // The whole block went away, which merging cannot say.
+        (Some(_), None) => {
+            unsets.push(path.to_owned());
+            None
         }
         (None, next) => next,
         _ => None,
@@ -128,6 +178,26 @@ where
             (cleared || !delta.is_empty()).then_some((key, delta))
         })
         .collect()
+}
+
+/// Calculate the delta between two optional values, reporting a cleared field.
+///
+/// A value that went away cannot be expressed by merging: schematic keeps the
+/// previous value when the next layer has none.
+/// The path joins `unsets` so the fold clears the field before merging, and
+/// resolution then supplies whatever the field's absence means.
+pub fn delta_opt_at<T: PartialEq>(
+    path: &str,
+    prev: Option<&T>,
+    next: Option<T>,
+    unsets: &mut Vec<String>,
+) -> Option<T> {
+    if prev.is_some() && next.is_none() {
+        unsets.push(path.to_owned());
+        return None;
+    }
+
+    delta_opt(prev, next)
 }
 
 /// Calculate the delta between two optional values.
