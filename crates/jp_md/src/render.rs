@@ -594,7 +594,7 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
         if pad {
             self.writer.output(" ", false)?;
         }
-        self.writer.output(literal, true)?;
+        self.write_code_literal(literal)?;
         if pad {
             self.writer.output(" ", false)?;
         }
@@ -611,6 +611,37 @@ impl<'a, 'w> TerminalFormatter<'a, 'w> {
         } else {
             self.writer.write_escape(BG_END)?;
             self.writer.attrs.background = None;
+        }
+
+        Ok(())
+    }
+
+    /// Write the literal of an inline code span, keeping runs of spaces intact.
+    ///
+    /// A lone space goes through the wrapping path, so a long span still breaks
+    /// there: CommonMark reads a line ending inside a span back as a single
+    /// space, which leaves the span's content unchanged.
+    /// A run of two or more adjacent spaces is content that both collapsing and
+    /// breaking would destroy: squeezing the run in a `grep` pattern into a
+    /// single space asks for a different match.
+    /// A run goes out verbatim and offers no break point.
+    fn write_code_literal(&mut self, literal: &str) -> fmt::Result {
+        let mut rest = literal;
+
+        while let Some(offset) = rest.find(' ') {
+            let (text, tail) = rest.split_at(offset);
+            if !text.is_empty() {
+                self.writer.output(text, false)?;
+            }
+
+            let spaces = tail.bytes().take_while(|&b| b == b' ').count();
+            let (run, tail) = tail.split_at(spaces);
+            self.writer.output(run, spaces == 1)?;
+            rest = tail;
+        }
+
+        if !rest.is_empty() {
+            self.writer.output(rest, false)?;
         }
 
         Ok(())

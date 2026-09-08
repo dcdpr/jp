@@ -2300,63 +2300,77 @@ fn quote_rejects_an_attached_non_boolean_value() {
     assert!(parse_query(&["--quote=foo"]).is_err());
 }
 
-/// A stream whose last assistant message is a two-line reply.
-fn stream_with_assistant_reply() -> ConversationStream {
+/// A stream whose last assistant message is `message`.
+fn stream_with_message(message: &str) -> ConversationStream {
     let mut stream = ConversationStream::new_test();
     stream.start_turn("question");
     stream
         .current_turn_mut()
-        .add_chat_response(ChatResponse::message("line one\nline two"))
+        .add_chat_response(ChatResponse::message(message))
         .build()
         .unwrap();
     stream
 }
 
+/// A stream whose last assistant message is a two-line reply.
+fn stream_with_assistant_reply() -> ConversationStream {
+    stream_with_message("line one\nline two")
+}
+
 #[test]
 fn quote_false_seeds_the_message_verbatim() {
+    let config = AppConfig::new_test();
     let mut request = ChatRequest::default();
     assert!(seed_quoted_reply(
         &mut request,
         &stream_with_assistant_reply(),
-        false
+        false,
+        &config
     ));
 
     // The trailing blank line separates the seed from the reply the user is
-    // about to type below it.
-    assert_eq!(request.content, "line one\nline two\n\n");
+    // about to type below it. The two source lines are joined by a soft
+    // break, so reformatting flows them into a single wrapped line.
+    assert_eq!(request.content, "line one line two\n\n");
 }
 
 #[test]
 fn quote_true_seeds_the_message_as_a_blockquote() {
+    let config = AppConfig::new_test();
     let mut request = ChatRequest::default();
     assert!(seed_quoted_reply(
         &mut request,
         &stream_with_assistant_reply(),
-        true
+        true,
+        &config
     ));
 
-    assert_eq!(request.content, "> line one\n> line two\n\n");
+    assert_eq!(request.content, "> line one line two\n\n");
 }
 
 #[test]
 fn quote_seeds_above_an_already_composed_request() {
+    let config = AppConfig::new_test();
     let mut request = ChatRequest::from("and what about X?");
     assert!(seed_quoted_reply(
         &mut request,
         &stream_with_assistant_reply(),
-        false
+        false,
+        &config
     ));
 
-    assert_eq!(request.content, "line one\nline two\n\nand what about X?");
+    assert_eq!(request.content, "line one line two\n\nand what about X?");
 }
 
 #[test]
 fn quote_leaves_the_request_untouched_without_an_assistant_message() {
+    let config = AppConfig::new_test();
     let mut request = ChatRequest::from("only my words");
     assert!(!seed_quoted_reply(
         &mut request,
         &ConversationStream::new_test(),
-        true
+        true,
+        &config
     ));
 
     assert_eq!(request.content, "only my words");
@@ -2382,6 +2396,102 @@ fn blockquote_trailing_newline_is_dropped_by_lines() {
     // `str::lines` drops the trailing terminator, so a string with and
     // without a trailing newline produce identical quotes.
     assert_eq!(blockquote("a\nb\n"), "> a\n> b");
+}
+
+#[test]
+fn quote_wraps_a_long_paragraph_to_the_configured_width() {
+    // The raw assistant message has no line breaks; the seed must be
+    // rewrapped, not quoted verbatim, or a long reply would produce one
+    // unreadable blockquote line.
+    let mut config = AppConfig::new_test();
+    config.style.markdown.wrap_width = 20;
+
+    let stream = stream_with_message("alpha bravo charlie delta echo foxtrot");
+
+    let mut request = ChatRequest::default();
+    assert!(seed_quoted_reply(&mut request, &stream, true, &config));
+
+    assert_eq!(
+        request.content,
+        "> alpha bravo charlie\n> delta echo foxtrot\n\n"
+    );
+}
+
+#[test]
+fn quote_aligns_table_columns() {
+    // The source table's pipes don't line up ("1" vs "two"); the seed must
+    // reformat it into a properly padded table rather than copying the
+    // ragged source through.
+    let config = AppConfig::new_test();
+
+    let stream = stream_with_message("| A | B |\n| --- | --- |\n| 1 | two |\n");
+
+    let mut request = ChatRequest::default();
+    assert!(seed_quoted_reply(&mut request, &stream, false, &config));
+
+    assert_eq!(
+        request.content,
+        "| A   | B   |\n|-----|-----|\n| 1   | two |\n\n"
+    );
+}
+
+#[test]
+fn quote_keeps_a_table_header_wider_than_the_display_cap() {
+    // On screen a header past `table_max_column_width` is cut short with an
+    // ellipsis. The seed is the text of the user's next request, so the cut
+    // would send the model a column name that never existed.
+    let config = AppConfig::new_test();
+    assert_eq!(config.style.markdown.table_max_column_width, 40);
+
+    let stream = stream_with_message(
+        "| Execution time before optimization (milliseconds) | Result |\n| --- | --- |\n| 12 | ok \
+         |\n",
+    );
+
+    let mut request = ChatRequest::default();
+    assert!(seed_quoted_reply(&mut request, &stream, false, &config));
+
+    assert_eq!(
+        request.content,
+        "| Execution time before optimization (milliseconds) | Result |\n|---------------------------------------------------|--------|\n| 12                                                | ok     |\n\n"
+    );
+}
+
+#[test]
+fn quote_keeps_a_wide_body_cell_on_one_row() {
+    // A body cell past the cap is wrapped onto continuation lines for display.
+    // Re-parsed as markdown those lines are extra rows, so the table the model
+    // receives has a different shape than the one it wrote.
+    let config = AppConfig::new_test();
+
+    let stream = stream_with_message(
+        "| Step | Detail |\n| --- | --- |\n| one | the quick brown fox jumps over the lazy dog \
+         twice |\n",
+    );
+
+    let mut request = ChatRequest::default();
+    assert!(seed_quoted_reply(&mut request, &stream, false, &config));
+
+    assert_eq!(
+        request.content,
+        "| Step | Detail                                            \
+         |\n|------|---------------------------------------------------|\n| one  | the quick \
+         brown fox jumps over the lazy dog twice |\n\n"
+    );
+}
+
+#[test]
+fn quote_keeps_consecutive_spaces_in_inline_code() {
+    // Spaces inside a code span are content: quoting `grep 'a  b'` back with
+    // one space asks the model about a different command.
+    let config = AppConfig::new_test();
+
+    let stream = stream_with_message("Run `grep 'a  b' file` next.");
+
+    let mut request = ChatRequest::default();
+    assert!(seed_quoted_reply(&mut request, &stream, true, &config));
+
+    assert_eq!(request.content, "> Run `grep 'a  b' file` next.\n\n");
 }
 
 #[test]
@@ -3073,7 +3183,7 @@ fn build_conversation_seeds_a_verbatim_quote_above_the_query() {
         &stream_with_assistant_reply(),
     );
 
-    assert_eq!(built, "line one\nline two\n\nand what about X?");
+    assert_eq!(built, "line one line two\n\nand what about X?");
 }
 
 #[test]
@@ -3083,7 +3193,7 @@ fn build_conversation_seeds_a_blockquoted_quote_above_the_query() {
         &stream_with_assistant_reply(),
     );
 
-    assert_eq!(built, "> line one\n> line two\n\nand what about X?");
+    assert_eq!(built, "> line one line two\n\nand what about X?");
 }
 
 #[test]

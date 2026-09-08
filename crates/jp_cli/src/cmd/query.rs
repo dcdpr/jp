@@ -107,12 +107,14 @@ use jp_llm::{
     },
 };
 use jp_mcp::{StartupSet, id::McpServerId};
+use jp_md::format::Formatter;
 use jp_printer::{LineSink, PrintableExt as _, Printer, RegionStyle, StatusRegion};
 use jp_storage::backend::{FsStorageBackend, Projection};
 use jp_task::task::TitleGeneratorTask;
 use jp_term::width::{display_width, truncate_to_width};
 use jp_workspace::{ConversationHandle, ConversationLock, Id as WorkspaceId, Workspace};
 use minijinja::{Environment, UndefinedBehavior};
+use strip_ansi_escapes::strip_str;
 use tokio::sync::broadcast::error::RecvError;
 use tool::{TerminalExecutorSource, ToolCoordinator};
 use tracing::{debug, trace, warn};
@@ -833,7 +835,7 @@ impl Query {
         // (e.g. brand new conversation) degrades to a warning and the editor
         // opens with whatever else was seeded.
         if let Some(prefixed) = self.input.quote
-            && !seed_quoted_reply(&mut chat_request, view, prefixed)
+            && !seed_quoted_reply(&mut chat_request, view, prefixed, config)
         {
             warn!("--quote: no prior assistant message in this conversation");
         }
@@ -1742,27 +1744,55 @@ fn blockquote(text: &str) -> String {
 /// Prepend the stream's last assistant message to `request` as a quoted reply
 /// seed.
 ///
-/// With `prefixed` the message is marked up as a markdown blockquote, otherwise
-/// it is inserted verbatim.
+/// The message is reformatted with `style.markdown`'s wrap width and table
+/// settings before quoting, so a table copied out of a prior response stays
+/// aligned and long paragraphs stay wrapped.
+/// With `prefixed` the reformatted message is marked up as a markdown
+/// blockquote, otherwise it is inserted verbatim.
 /// Returns `false` when the stream holds no assistant message, leaving
 /// `request` untouched.
 fn seed_quoted_reply(
     request: &mut ChatRequest,
     stream: &ConversationStream,
     prefixed: bool,
+    config: &AppConfig,
 ) -> bool {
     let Some(message) = last_assistant_message(stream) else {
         return false;
     };
 
+    let formatted = reformat_quoted_message(message, config);
     let quoted = if prefixed {
-        blockquote(message)
+        blockquote(&formatted)
     } else {
-        message.to_owned()
+        formatted
     };
     request.content = format!("{quoted}\n\n{request}");
 
     true
+}
+
+/// Reformat `message` with the project's standard markdown formatting: prose
+/// wrapped at `style.markdown.wrap_width`, tables padded into aligned columns.
+///
+/// The result is markdown source rather than terminal output, so the display-
+/// only parts of that formatting are left off: styling escapes are stripped,
+/// horizontal rules stay the plain `---` a parser reads back as one, and table
+/// columns keep their full content.
+/// `style.markdown.table_max_column_width` deliberately does not apply here: it
+/// cuts a wide header short and splits a wide cell across physical lines, which
+/// reads fine on screen but puts truncated text and extra rows into the request
+/// the user sends next.
+fn reformat_quoted_message(message: &str, config: &AppConfig) -> String {
+    let formatter = Formatter::with_width(config.style.markdown.wrap_width)
+        .table_max_column_width(0)
+        .pretty_hr(false);
+
+    let rendered = formatter
+        .format_terminal(message)
+        .unwrap_or_else(|_| message.to_owned());
+
+    strip_str(rendered).trim_end().to_owned()
 }
 
 /// The query text and the `--quote` seed.
