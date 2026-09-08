@@ -554,6 +554,13 @@ impl ToolCoordinator {
         turn_state: &mut TurnState,
         tool_renderer: &ToolRenderer,
     ) -> ToolCallDecision {
+        // A tool call reached from a reasoning block sits inside that block's
+        // shading, and a prompt is a visual row like any other (RFD 095). The
+        // prompter writes through the printer rather than through the
+        // renderer, so it has to be handed the background rather than finding
+        // it.
+        prompter.set_background(tool_renderer.current_region());
+
         // Step 1: decide.
         let decision = self.decide_permission(executor, interactive, turn_state);
 

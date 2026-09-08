@@ -232,6 +232,15 @@ impl ToolRenderer {
         let _ = self.channel.writer().write_str(&buffer);
     }
 
+    /// The reasoning-region background this tool call sits in, if any.
+    ///
+    /// Chrome the renderer writes is shaded by [`Self::write_chrome`]; a prompt
+    /// is written by someone else and has to be handed the background to shade
+    /// itself with.
+    pub(crate) fn current_region(&self) -> Option<DefaultBackground> {
+        self.current_region.clone()
+    }
+
     /// Emit the blank-line separator owed by a preceding tool result or custom
     /// argument block, if any, then clear the debt.
     ///

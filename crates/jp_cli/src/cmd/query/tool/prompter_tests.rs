@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use jp_editor::MockEditorBackend;
 use jp_inquire::{ReplyOutcome, prompt::MockPromptBackend};
-use jp_printer::OutputFormat;
+use jp_md::format::BackgroundFill;
+use jp_printer::{OutputFormat, SharedBuffer};
 use serde_json::json;
 
 use super::*;
@@ -10,6 +11,123 @@ use super::*;
 fn printer() -> Arc<Printer> {
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
     Arc::new(printer)
+}
+
+/// A prompter whose printer's prompt stream is readable.
+///
+/// `Printer::memory` has no tty, so prompts fall back to `out`.
+fn prompter_with_output(prompt: MockPromptBackend) -> (ToolPrompter, SharedBuffer) {
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let prompter = ToolPrompter::with_backends(Arc::new(printer), None, Arc::new(prompt));
+
+    (prompter, out)
+}
+
+/// A full-width reasoning-region background.
+fn terminal_region() -> DefaultBackground {
+    DefaultBackground {
+        param: "48;5;236".into(),
+        fill: BackgroundFill::Terminal,
+    }
+}
+
+#[test]
+fn a_prompt_inside_a_reasoning_block_carries_its_background() {
+    let (prompter, out) = prompter_with_output(MockPromptBackend::new());
+    prompter.set_background(Some(terminal_region()));
+
+    {
+        let mut canvas = prompter.canvas();
+        write!(canvas, "Run local shell tool?").unwrap();
+    }
+    prompter.printer.flush();
+
+    // The background is asserted before the text and closed once the widget is
+    // done with the terminal, so the row is shaded and nothing after it is.
+    assert_eq!(*out.lock(), "\x1b[48;5;236mRun local shell tool?\x1b[49m");
+}
+
+#[test]
+fn a_prompt_outside_a_reasoning_block_is_unshaded() {
+    let (prompter, out) = prompter_with_output(MockPromptBackend::new());
+
+    {
+        let mut canvas = prompter.canvas();
+        write!(canvas, "Run local shell tool?").unwrap();
+    }
+    prompter.printer.flush();
+
+    assert_eq!(*out.lock(), "Run local shell tool?");
+}
+
+#[test]
+fn a_cancelled_prompt_still_closes_its_background() {
+    // A widget can end by `Ctrl+C` or by an error, neither of which returns
+    // through the normal path. The close lives in `Drop` so the background
+    // cannot outlive the prompt and paint whatever is printed next.
+    let (prompter, out) = prompter_with_output(MockPromptBackend::new());
+    prompter.set_background(Some(terminal_region()));
+
+    {
+        let mut canvas = prompter.canvas();
+        write!(canvas, "Deliver result?").unwrap();
+        // No further writes: the prompt is abandoned mid-session.
+    }
+    prompter.printer.flush();
+
+    let rendered = out.lock().clone();
+    assert!(
+        rendered.ends_with("\x1b[49m"),
+        "an abandoned prompt must still close its background, got {rendered:?}"
+    );
+}
+
+#[test]
+fn prompting_a_question_shades_through_the_canvas() {
+    // The tests above drive the canvas directly, so they hold even if a prompt
+    // method still reached for a bare prompt writer. This one goes through
+    // `prompt_question`, whose pre-amble is the one part of a prompt written by
+    // the prompter rather than by the widget.
+    let (prompter, out) =
+        prompter_with_output(MockPromptBackend::new().with_inline_responses(['y']));
+    prompter.set_background(Some(terminal_region()));
+
+    let mut question = jp_tool::Question::boolean("confirm", "Proceed?").expect("valid question");
+    question.pre_amble = Some("About to run a shell command".to_owned());
+
+    prompter
+        .prompt_question(&question)
+        .expect("the mock answers the question");
+    prompter.printer.flush();
+
+    // Background asserted, text, fill to the right edge, then the background
+    // closed *before* the line break — a `\n` written under an active
+    // background paints the row the terminal scrolls in.
+    assert_eq!(
+        *out.lock(),
+        "\x1b[48;5;236mAbout to run a shell command\x1b[K\x1b[49m\n"
+    );
+}
+
+#[test]
+fn clearing_the_background_unshades_later_prompts() {
+    let (prompter, out) = prompter_with_output(MockPromptBackend::new());
+
+    prompter.set_background(Some(terminal_region()));
+    drop(prompter.canvas());
+    prompter.set_background(None);
+
+    {
+        let mut canvas = prompter.canvas();
+        write!(canvas, "after").unwrap();
+    }
+    prompter.printer.flush();
+
+    assert!(
+        out.lock().ends_with("after"),
+        "a prompt after the block closed carries no background: {:?}",
+        *out.lock()
+    );
 }
 
 /// Prompter with a mock prompt backend and no editor.
