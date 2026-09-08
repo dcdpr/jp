@@ -31,7 +31,10 @@ const TIMEOUT: Duration = Duration::from_secs(20);
 /// child's output cannot be seen.
 ///
 /// The child is returned rather than dropped, because dropping it kills it.
-#[expect(clippy::print_stderr, reason = "a case that does nothing has to say so")]
+#[expect(
+    clippy::print_stderr,
+    reason = "a case that does nothing has to say so"
+)]
 fn spawn_probe(size: Size) -> Option<(Terminal, Child)> {
     if !spawn_is_observable() {
         eprintln!("skipped: a spawned child's output is unreachable on this host");

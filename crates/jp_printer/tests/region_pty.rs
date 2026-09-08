@@ -54,7 +54,10 @@ fn drawn_block(screen: &Screen) -> bool {
 ///
 /// The child is returned rather than dropped, because dropping it kills it —
 /// which is how the `draw` step is ended.
-#[expect(clippy::print_stderr, reason = "a case that does nothing has to say so")]
+#[expect(
+    clippy::print_stderr,
+    reason = "a case that does nothing has to say so"
+)]
 fn probe(
     step: &str,
     what: &str,
