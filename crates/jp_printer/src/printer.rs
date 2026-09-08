@@ -9,11 +9,11 @@ use std::{
         mpsc::{self, Receiver, RecvTimeoutError, Sender},
     },
     thread::{self, JoinHandle},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use parking_lot::{Condvar, Mutex};
-use tracing::error;
+use tracing::{debug, error};
 
 use crate::{
     ansi::AnsiStripper,
@@ -541,6 +541,7 @@ impl Printer {
                 target: self.prompt_target(),
             },
             _suspension: self.suspend_regions(false),
+            _trace: PromptTrace::open(),
         }
     }
 
@@ -578,6 +579,7 @@ impl Printer {
             tx: self.tx.clone(),
             target: self.prompt_target(),
             _suspension: self.suspend_regions(false),
+            _trace: PromptTrace::open(),
         })
     }
 
@@ -801,6 +803,44 @@ impl io::Write for PrinterWriter<'_> {
     }
 }
 
+/// Records one prompt session's lifetime on the `prompt` tracing target.
+///
+/// A prompt writer is held for exactly as long as a widget owns the terminal,
+/// so its acquisition and drop bracket the wait.
+/// The pair of events tells a reader of the trace how much of a run was spent
+/// waiting on the user rather than on itself, which is otherwise invisible: a
+/// widget writes to the terminal, never to the log.
+///
+/// Neither event records what was asked or answered.
+/// The reply can be a secret, and the caller already records whatever it does
+/// with it.
+#[derive(Debug)]
+struct PromptTrace {
+    /// When the widget took the terminal.
+    opened: Instant,
+}
+
+impl PromptTrace {
+    /// Note that a widget has taken the terminal.
+    fn open() -> Self {
+        debug!(target: "prompt", "Prompt opened.");
+
+        Self {
+            opened: Instant::now(),
+        }
+    }
+}
+
+impl Drop for PromptTrace {
+    fn drop(&mut self) {
+        debug!(
+            target: "prompt",
+            waited_ms = %self.opened.elapsed().as_millis(),
+            "Prompt closed."
+        );
+    }
+}
+
 /// A writer for interactive prompt output that suspends status regions.
 ///
 /// Region rows are erased when the writer is acquired and no redraw lands until
@@ -813,6 +853,9 @@ pub struct PromptWriter<'a> {
 
     /// Holds the suspension for the writer's lifetime.
     _suspension: SuspendGuard,
+
+    /// Records the session's lifetime for the trace log.
+    _trace: PromptTrace,
 }
 
 impl fmt::Write for PromptWriter<'_> {
@@ -846,6 +889,9 @@ struct OwnedPrinterWriter {
 
     /// Holds the status-region suspension for the writer's lifetime.
     _suspension: SuspendGuard,
+
+    /// Records the session's lifetime for the trace log.
+    _trace: PromptTrace,
 }
 
 impl io::Write for OwnedPrinterWriter {

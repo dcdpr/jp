@@ -112,7 +112,7 @@ use jp_workspace::ConversationMut;
 use serde_json::{Map, Value};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::warn;
+use tracing::{debug, warn};
 
 use super::{
     ToolRenderer,
@@ -629,6 +629,8 @@ impl ToolCoordinator {
             }
         };
 
+        debug!(tool = executor.tool_name(), "Tool call decision resolved.");
+
         ToolCallDecision::Approved {
             executor,
             rendered_arguments,
@@ -951,6 +953,8 @@ impl ToolCoordinator {
                 outcome: ExecutionOutcome::Completed,
             };
         }
+
+        debug!(tools = executors.len(), "Starting tool execution.");
 
         // Register the tool interrupt handler for this execution phase. While
         // registered, the first Ctrl-C press is delivered to this event loop;
