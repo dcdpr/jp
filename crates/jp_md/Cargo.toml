@@ -13,6 +13,8 @@ repository.workspace = true
 version.workspace = true
 
 [dependencies]
+jp_term = { workspace = true }
+
 comrak = { workspace = true }
 syntect = { workspace = true, features = ["regex-fancy", "default-themes", "default-syntaxes"] }
 two-face = { workspace = true, features = ["syntect-fancy"] }

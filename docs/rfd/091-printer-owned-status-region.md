@@ -273,7 +273,7 @@ A line that leaves an attribute open is terminated with a reset, so child state
 cannot bleed into JP's own chrome below it.
 
 This is the policy `jp_md::table` already applies when truncating cells (retain
-SGR, drop the rest, close with a reset), and `jp_md::ansi::is_sgr` is the same
+SGR, drop the rest, close with a reset), and `jp_term::ansi::is_sgr` is the same
 predicate.
 In `jp_printer` it is a second policy over the existing `vte` parser that backs
 `AnsiStripper` — same crate, same parser, no new dependency.
@@ -347,7 +347,7 @@ temp and progress rows as part of it: while a reasoning region with background
 produced by cursor-relative rewrites, and including the `\x1b[K` that erases
 them, which fills with whatever background is active when it runs.
 `ToolRenderer` holds that invariant today by routing its writes through
-`jp_md::shade::ShadedWriter`.
+`jp_term::shade::ShadedWriter`.
 A worker that draws and erases those rows itself, knowing nothing about the
 reasoning region, would punch an unshaded hole in the middle of a shaded one —
 the exact gap RFD 095 closed.
@@ -1068,12 +1068,12 @@ contracts commits to.
   replaces.
 - `crates/jp_cli/src/cmd/query/stream/retry.rs` — `notify` and `clear_line`,
   the ninth hand-rolled mechanism.
-- `crates/jp_md/src/shade.rs` — `ShadedWriter`, which holds the background
+- `crates/jp_term/src/shade.rs` — `ShadedWriter`, which holds the background
   invariant for tool chrome today.
 - `crates/jp_printer/src/printer.rs` — the worker loop this RFD extends.
 - `crates/jp_printer/src/ansi.rs` — the `vte`-based `AnsiStripper` the SGR
   allowlist extends.
-- `crates/jp_md/src/ansi.rs` — `is_sgr`, the predicate the allowlist reuses,
+- `crates/jp_term/src/ansi.rs` — `is_sgr`, the predicate the allowlist reuses,
   and the retain-SGR-drop-the-rest precedent in `jp_md/src/table.rs`.
 - `crates/jp_mcp/src/client.rs` — `spawn_stderr_forwarder`, the stderr ring
   buffer, and `StartupSet`.
