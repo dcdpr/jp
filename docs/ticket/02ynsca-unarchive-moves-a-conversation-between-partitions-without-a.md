@@ -6,7 +6,7 @@
 - **Date**: 2026-08-15
 - **Label**: domain=conversation
 - **Label**: domain=storage
-- **Label**: package=jp\_cli
+- **Label**: package=jp_cli
 - **Label**: type=bug
 
 `Workspace::unarchive_conversation` moves a conversation directory out of the

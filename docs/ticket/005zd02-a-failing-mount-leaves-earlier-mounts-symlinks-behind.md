@@ -5,7 +5,7 @@
 - **Authors**: jp
 - **Date**: 2026-08-14
 - **Label**: client=cli
-- **Label**: package=jp\_cli
+- **Label**: package=jp_cli
 - **Label**: type=bug
 
 `create_mount_effects` (`crates/jp_cli/src/cmd/query.rs:2203`) walks the

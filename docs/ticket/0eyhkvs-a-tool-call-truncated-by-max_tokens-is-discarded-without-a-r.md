@@ -5,7 +5,7 @@
 - **Authors**: jp
 - **Date**: 2026-09-07
 - **Label**: domain=llm
-- **Label**: package=jp\_llm
+- **Label**: package=jp_llm
 - **Label**: type=bug
 
 When a response runs out of output tokens while the model is still assembling a

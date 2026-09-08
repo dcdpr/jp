@@ -5,7 +5,7 @@
 - **Authors**: jp
 - **Date**: 2026-09-04
 - **Label**: client=cli
-- **Label**: package=jp\_printer
+- **Label**: package=jp_printer
 - **Label**: type=bug
 
 `--quiet` is documented as "Suppress all output, including errors"

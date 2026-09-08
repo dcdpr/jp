@@ -4,7 +4,7 @@
 - **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-08-19
-- **Label**: package=jp\_workspace
+- **Label**: package=jp_workspace
 - **Label**: type=bug
 
 `Workspace::open` returns a value whose `conversations()` yields nothing,

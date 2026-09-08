@@ -4,7 +4,7 @@
 - **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-27
-- **Label**: package=jp\_config
+- **Label**: package=jp_config
 - **Label**: type=bug
 
 JP probes for configuration files with the extensions `toml`, `json`, `json5`,

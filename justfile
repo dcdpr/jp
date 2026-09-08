@@ -3473,6 +3473,12 @@ _install-ticket *args:
     cargo install {{quiet_flag}} --locked --path crates/plugins/command/ticket --debug {{args}}
 
 @_install-comfort *args:
+    #!/usr/bin/env sh
+    set -eu
+    if [ -z "${JP_INSTALL:-}" ]; then
+        echo "Skipping comfort rebuild (set JP_INSTALL=1 to rebuild); using the installed binary." >&2
+        exit 0
+    fi
     cargo install {{quiet_flag}} --locked --path crates/contrib/comfort {{args}}
 
 @_install-binstall:

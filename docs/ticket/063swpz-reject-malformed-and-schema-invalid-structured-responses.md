@@ -5,7 +5,7 @@
 - **Authors**: jp
 - **Date**: 2026-08-21
 - **Label**: domain=llm
-- **Label**: package=jp\_llm
+- **Label**: package=jp_llm
 - **Label**: type=bug
 
 The Ollama structured-output cassette returns plain text despite receiving the

@@ -6,7 +6,7 @@
 - **Date**: 2026-08-31
 - **Label**: domain=conversation
 - **Label**: domain=storage
-- **Label**: package=jp\_workspace
+- **Label**: package=jp_workspace
 - **Label**: type=bug
 
 ## What happens

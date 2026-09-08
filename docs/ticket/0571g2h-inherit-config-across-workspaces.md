@@ -4,7 +4,7 @@
 - **Kind**: Feature
 - **Authors**: jp
 - **Date**: 2026-08-19
-- **Label**: package=jp\_config
+- **Label**: package=jp_config
 - **Label**: type=feature
 
 A workspace cannot reuse another workspace's configuration.

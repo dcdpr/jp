@@ -6,7 +6,7 @@
 - **Date**: 2026-08-21
 - **Label**: domain=llm
 - **Label**: llm-provider=ollama
-- **Label**: package=jp\_llm
+- **Label**: package=jp_llm
 - **Label**: type=bug
 
 Recorded Ollama responses contain provider-generated call IDs such as

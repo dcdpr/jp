@@ -5,7 +5,7 @@
 - **Authors**: jp
 - **Date**: 2026-08-21
 - **Label**: domain=llm
-- **Label**: package=jp\_llm
+- **Label**: package=jp_llm
 - **Label**: type=task
 
 The provider VCR tests snapshot whatever happened but usually have no semantic

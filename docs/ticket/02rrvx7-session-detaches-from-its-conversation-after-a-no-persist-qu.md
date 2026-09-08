@@ -5,7 +5,7 @@
 - **Authors**: jp
 - **Date**: 2026-08-15
 - **Label**: domain=conversation
-- **Label**: package=jp\_workspace
+- **Label**: package=jp_workspace
 - **Label**: type=bug
 
 Running `jp -! q --new ...` in a terminal loses that terminal's active

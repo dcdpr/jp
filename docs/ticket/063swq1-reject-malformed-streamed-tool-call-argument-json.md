@@ -5,7 +5,7 @@
 - **Authors**: jp
 - **Date**: 2026-08-21
 - **Label**: domain=llm
-- **Label**: package=jp\_llm
+- **Label**: package=jp_llm
 - **Label**: type=bug
 
 `EventBuilder` converts malformed tool-call argument JSON into an empty map and

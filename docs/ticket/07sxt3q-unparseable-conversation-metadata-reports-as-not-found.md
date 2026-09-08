@@ -5,7 +5,7 @@
 - **Authors**: jp
 - **Date**: 2026-08-24
 - **Label**: domain=conversation
-- **Label**: package=jp\_conversation
+- **Label**: package=jp_conversation
 - **Label**: type=bug
 
 A conversation whose `metadata.json` exists but does not deserialize is reported

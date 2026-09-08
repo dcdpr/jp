@@ -4,7 +4,7 @@
 - **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-04
-- **Label**: package=jp\_config
+- **Label**: package=jp_config
 - **Label**: type=bug
 
 Both `dedup` fields accept more input shapes than their generated schema

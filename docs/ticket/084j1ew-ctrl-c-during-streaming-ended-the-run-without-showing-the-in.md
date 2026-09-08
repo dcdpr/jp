@@ -5,7 +5,7 @@
 - **Authors**: jp
 - **Date**: 2026-08-11
 - **Label**: client=cli
-- **Label**: package=jp\_cli
+- **Label**: package=jp_cli
 - **Label**: type=bug
 
 A single `^C` during an Opus reasoning stream ended the turn immediately.

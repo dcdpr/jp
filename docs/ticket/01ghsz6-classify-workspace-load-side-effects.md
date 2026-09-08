@@ -4,7 +4,7 @@
 - **Kind**: Chore
 - **Authors**: Jean Mertz
 - **Date**: 2026-08-12
-- **Label**: package=jp\_workspace
+- **Label**: package=jp_workspace
 - **Label**: type=task
 
 Opening a workspace mutates it.

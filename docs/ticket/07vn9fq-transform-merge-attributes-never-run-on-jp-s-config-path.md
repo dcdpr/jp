@@ -4,7 +4,7 @@
 - **Kind**: Chore
 - **Authors**: jp
 - **Date**: 2026-08-24
-- **Label**: package=jp\_config
+- **Label**: package=jp_config
 - **Label**: package=schematic
 - **Label**: type=bug
 

@@ -6,7 +6,7 @@
 - **Date**: 2026-09-05
 - **Label**: client=cli
 - **Label**: domain=conversation
-- **Label**: package=jp\_cli
+- **Label**: package=jp_cli
 - **Label**: type=bug
 
 `jp conversation use` advertises `?a` as composable with `--grep`

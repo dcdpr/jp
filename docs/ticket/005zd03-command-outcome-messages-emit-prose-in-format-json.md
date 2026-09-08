@@ -5,7 +5,7 @@
 - **Authors**: jp
 - **Date**: 2026-08-15
 - **Label**: client=cli
-- **Label**: package=jp\_cli
+- **Label**: package=jp_cli
 - **Label**: type=bug
 
 Most commands report what they did with `Printer::println`, which wraps its

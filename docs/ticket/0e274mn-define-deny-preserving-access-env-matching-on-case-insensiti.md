@@ -5,7 +5,7 @@
 - **Authors**: jp
 - **Date**: 2026-09-05
 - **Implements**: 076
-- **Label**: package=jp\_tool
+- **Label**: package=jp_tool
 - **Label**: type=question
 
 `EnvRule::matches` is case-sensitive on every platform.

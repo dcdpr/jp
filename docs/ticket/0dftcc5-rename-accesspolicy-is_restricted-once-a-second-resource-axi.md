@@ -5,7 +5,7 @@
 - **Authors**: jp
 - **Date**: 2026-09-04
 - **Implements**: 076
-- **Label**: package=jp\_tool
+- **Label**: package=jp_tool
 - **Label**: type=follow-up
 
 `AccessPolicy::is_restricted()` reports on `fs` alone — it is

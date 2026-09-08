@@ -5,7 +5,7 @@
 - **Authors**: jp
 - **Date**: 2026-08-27
 - **Label**: client=cli
-- **Label**: package=jp\_config
+- **Label**: package=jp_config
 - **Label**: type=bug
 
 `jp config fmt --all` parses, exits zero, and does exactly what `jp config fmt`
