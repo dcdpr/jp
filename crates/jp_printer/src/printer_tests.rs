@@ -874,6 +874,86 @@ fn a_prompt_that_ends_mid_line_does_not_hold_the_region_hostage() {
 }
 
 #[test]
+fn output_produced_while_a_prompt_is_open_waits_for_it() {
+    let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
+
+    {
+        let mut prompt = printer.prompt_writer();
+        write!(prompt, "Run local shell tool? [y/n] ").unwrap();
+
+        // A streaming response, an MCP server's stderr, a title generator: all
+        // of them keep producing while the user thinks about the question.
+        printer.println("assistant content");
+        printer.eprintln("chrome");
+        printer.flush();
+
+        assert_eq!(
+            *out.lock(),
+            "Run local shell tool? [y/n] ",
+            "only the widget writes while it owns the terminal"
+        );
+        assert_eq!(*err.lock(), "");
+    }
+
+    printer.flush();
+    assert_eq!(
+        *out.lock(),
+        "Run local shell tool? [y/n] assistant content\n"
+    );
+    assert_eq!(*err.lock(), "chrome\n");
+}
+
+#[test]
+fn a_nested_prompt_does_not_release_the_outer_hold() {
+    // A permission prompt holds its writer and opens the inline reply widget
+    // on top of it, so sessions nest. The terminal comes back when the
+    // outermost one gives it back, not the first.
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+
+    let outer = printer.prompt_writer();
+    {
+        let _inner = printer.owned_prompt_writer();
+        printer.println("assistant content");
+    }
+
+    printer.flush();
+    assert_eq!(*out.lock(), "", "the outer session still owns the terminal");
+
+    drop(outer);
+    printer.flush();
+    assert_eq!(*out.lock(), "assistant content\n");
+}
+
+#[test]
+fn a_nested_acquisition_does_not_flush_held_output() {
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+
+    let _outer = printer.prompt_writer();
+    printer.println("assistant content");
+
+    // Acquisition drains the queue instantly, which must not mean pushing held
+    // output onto the screen a widget is already drawing on.
+    let _inner = printer.owned_prompt_writer();
+
+    assert_eq!(*out.lock(), "");
+}
+
+#[test]
+fn output_held_by_a_prompt_is_not_lost_at_shutdown() {
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+
+    let _prompt = printer.prompt_writer();
+    printer.println("assistant content");
+    printer.shutdown();
+
+    assert_eq!(
+        *out.lock(),
+        "assistant content\n",
+        "held output is deferred, not discarded"
+    );
+}
+
+#[test]
 fn suspend_status_erases_before_it_returns() {
     let (printer, _out, err) = region_printer();
 
