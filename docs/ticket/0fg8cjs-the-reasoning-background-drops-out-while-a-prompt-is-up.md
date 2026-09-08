@@ -1,6 +1,6 @@
 # The reasoning background drops out while a prompt is up
 
-- **Status**: Todo
+- **Status**: Done
 - **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-08
@@ -126,3 +126,61 @@ painted the row rather than clearing it, and the shell prompt inherited it after
 `prompter_tests.rs` has a test that abandons a prompt mid-session and asserts
 the close still lands; worth extending to the editor path rather than writing a
 new one.
+
+-----
+
+- **From**: jp
+- **Date**: 2026-09-08T13:57:29Z
+
+Done, including the `Ctrl+X` / inline-reply path this ticket left open.
+
+## Where it landed
+
+The background moved into `jp_printer`, which is where this ticket's "shape of a
+fix" pointed: `Printer::set_prompt_background` holds it, and both
+`prompt_writer` and `owned_prompt_writer` wrap their writer in a `ShadedWriter`
+when one is set.
+Every prompt taken from the printer is shaded without its call site knowing a
+region exists, so the reply widget is covered by the same code as the approval
+prompt rather than needing its own.
+
+That required `ShadedWriter` to be reachable from `jp_printer`, which depends on
+`jp_term` and deliberately not on `jp_md`.
+`ansi` and `shade` moved to `jp_term` along with `DefaultBackground`,
+`BackgroundFill` and `line_fill` (now `jp_term::background`).
+None of them were markdown: `segments` tokenizes an escape stream, `AnsiState`
+tracks what a stream left active.
+
+The `owned_prompt_writer` trait problem this ticket recorded resolved itself in
+the move.
+`OwnedPrinterWriter` gained a `fmt::Write` impl and became the inner writer of a
+shared `Canvas<W>`, so the adapter is a trait impl on the type that needs it
+rather than a wrapper at the call site.
+
+`ToolPrompter::set_background`, `canvas()`, and `PromptCanvas` are deleted.
+The coordinator still names the background at the same point in
+`resolve_tool_call_decision` — the region is per tool call, so the read has to
+happen there — but it now hands it to the printer.
+
+## Two things found on the way
+
+The `PromptCanvas::flush` this ticket's earlier comment described was swallowing
+the flush for the shaded variant, on the grounds that the printer holds nothing
+back a flush could release.
+True of buffering, false of ordering: on the prompt path a flush is a barrier,
+and `inquire` flushes before it reads a key.
+Inside a reasoning block that was the only difference between the two variants,
+which is why prompt output staircased there and nowhere else.
+Fixed separately, along with making prompt-writer acquisition quiesce the
+terminal.
+
+`MockPromptBackend::inline_reply` wrote nothing to the stream it was handed, so
+a test asserting on what the reply widget renders passed against no prompt at
+all.
+It now writes its message, like the real widget does.
+
+## Not covered
+
+The eight prompts in `T-0ffsv2r` still build their own `io::stderr()` writer, so
+they are still unshaded.
+They pick this up for free once they go through the printer.
