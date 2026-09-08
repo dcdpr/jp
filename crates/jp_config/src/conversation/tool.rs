@@ -99,22 +99,41 @@ impl FillDefaults for PartialToolsConfig {
         // tool's grants must be complete where they are written, so the `*`
         // block applies whole or not at all, `fs` and `env` together (resolved
         // in `ToolConfigWithDefaults::access`).
-        let tools = self
-            .tools
-            .into_iter()
-            .map(|(name, mut tool)| {
-                tool.style = tool
-                    .style
-                    .map(|style| style.fill_from(tool_defaults.style.clone()));
+        let fill_style = |mut tool: PartialToolConfig| {
+            tool.style = tool
+                .style
+                .map(|style| style.fill_from(tool_defaults.style.clone()));
+            tool
+        };
 
-                (name, tool)
-            })
-            .collect::<IndexMap<_, _>>()
-            .into();
+        let tools = match self.tools {
+            // A map that states a strategy said how it combines, so only its
+            // tools' styles are filled and no default tool joins them.
+            MergeableMap::Merged(mut merged) => {
+                merged.value = merged
+                    .value
+                    .into_iter()
+                    .map(|(name, tool)| (name, fill_style(tool)))
+                    .collect();
+
+                MergeableMap::Merged(merged)
+            }
+
+            // Key by key, so a tool only the defaults declare is added while
+            // one this layer already has keeps its own value.
+            MergeableMap::Map(entries) => {
+                let entries = entries
+                    .into_iter()
+                    .map(|(name, tool)| (name, fill_style(tool)))
+                    .collect();
+
+                fill_map(entries, defaults.tools.into_map()).into()
+            }
+        };
 
         Self {
             defaults: tool_defaults,
-            tools: fill_map(tools, defaults.tools),
+            tools,
         }
     }
 }
@@ -238,7 +257,7 @@ fn reject_comma_in_tool_names(tools: &ToolsConfig) -> Result<(), ConfigError> {
 /// reporting; the `'*'` defaults make no claim about any individual tool, so
 /// they pass over builtin and MCP tools instead of failing the whole config.
 fn reject_access_on_non_local_tools(tools: &ToolsConfig) -> Result<(), ConfigError> {
-    for (name, tool) in &tools.tools {
+    for (name, tool) in tools.tools.iter() {
         if tool.access.is_none() {
             continue;
         }

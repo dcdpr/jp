@@ -84,9 +84,7 @@ impl FillDefaults for PartialPluginsConfig {
             // that states a strategy is left alone.
             command: match self.command {
                 merged @ MergeableMap::Merged(_) => merged,
-                MergeableMap::Map(entries) => {
-                    fill_map(entries, defaults.command.into_map()).into()
-                }
+                MergeableMap::Map(entries) => fill_map(entries, defaults.command.into_map()).into(),
             },
         }
     }
