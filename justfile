@@ -3441,7 +3441,7 @@ vet-ci: (_install "cargo-vet@" + vet_version)
 _install-jp *args:
     #!/usr/bin/env sh
     set -eu
-    if [ -z "${JP_INSTALL:-}" ]; then
+    if [ -z "${JP_INSTALL:-}" ] && command -v jp >/dev/null 2>&1; then
         echo "Skipping jp rebuild (set JP_INSTALL=1 to rebuild); using the installed binary." >&2
         exit 0
     fi
@@ -3453,7 +3453,7 @@ _install-jp *args:
 _install-tools *args:
     #!/usr/bin/env sh
     set -eu
-    if [ -z "${JP_INSTALL:-}" ]; then
+    if [ -z "${JP_INSTALL:-}" ] && command -v jp-tools >/dev/null 2>&1; then
         echo "Skipping jp-tools rebuild (set JP_INSTALL=1 to rebuild); using the installed binary." >&2
         exit 0
     fi
@@ -3466,7 +3466,7 @@ _install-tools *args:
 _install-ticket *args:
     #!/usr/bin/env sh
     set -eu
-    if [ -z "${JP_INSTALL:-}" ]; then
+    if [ -z "${JP_INSTALL:-}" ] && command -v jp-ticket >/dev/null 2>&1; then
         echo "Skipping jp-ticket rebuild (set JP_INSTALL=1 to rebuild); using the installed binary." >&2
         exit 0
     fi
@@ -3475,7 +3475,7 @@ _install-ticket *args:
 _install-comfort *args:
     #!/usr/bin/env sh
     set -eu
-    if [ -z "${JP_INSTALL:-}" ]; then
+    if [ -z "${JP_INSTALL:-}" ] && command -v comfort >/dev/null 2>&1; then
         echo "Skipping comfort rebuild (set JP_INSTALL=1 to rebuild); using the installed binary." >&2
         exit 0
     fi
