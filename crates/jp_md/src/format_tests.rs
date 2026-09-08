@@ -140,6 +140,35 @@ fn test_terminal_blockquote_continuation_lines_colored() {
 }
 
 #[test]
+fn test_inline_code_keeps_a_run_of_spaces() {
+    // Spaces inside a code span are content, not layout: collapsing a run
+    // rewrites the command the span names.
+    let rendered = Formatter::new()
+        .format_terminal("Run `grep 'a  b' file` first.")
+        .unwrap();
+
+    assert_eq!(
+        strip_ansi_for_test(&rendered),
+        "Run `grep 'a  b' file` first.\n"
+    );
+}
+
+#[test]
+fn test_inline_code_still_breaks_at_a_lone_space() {
+    // A span too long for the line has to break somewhere. A lone space is the
+    // safe place: CommonMark reads the line ending back as a single space, so
+    // the span's content survives the round trip.
+    let rendered = Formatter::with_width(20)
+        .format_terminal("`alpha bravo charlie delta`")
+        .unwrap();
+
+    assert!(
+        strip_ansi_for_test(&rendered).lines().count() > 1,
+        "expected the span to wrap: {rendered:?}"
+    );
+}
+
+#[test]
 fn test_no_escaped_special_characters() {
     let cases = vec![
         ("exclamation_mark", TestCase {
