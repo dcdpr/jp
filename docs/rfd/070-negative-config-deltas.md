@@ -364,9 +364,9 @@ below for the identity computation.
 A single `-c dev` can resolve to multiple files across config roots ([RFD 035]):
 user-global, workspace, and user-workspace.
 Each file gets its own source identity and claims.
-Files are merged in precedence order (user-global \< workspace \<
-user-workspace), so if two files set the same field, the higher-precedence
-file's claim overwrites the lower one.
+Files are merged in precedence order (user-global < workspace < user-workspace),
+so if two files set the same field, the higher-precedence file's claim
+overwrites the lower one.
 
 If multiple files share the same `id` value, they hash to the same source
 identity.
@@ -1100,22 +1100,22 @@ jp query -c dev           # invocation 3: dev overwrites again
 jp query -C dev           # invocation 4: revert dev
 ```
 
-**Invocation 1**: delta \#1 claims `assistant.name → hash(dev)`.
+**Invocation 1**: delta #1 claims `assistant.name → hash(dev)`.
 
-**Invocation 2**: delta \#2 claims `assistant.name → hash(architect)`.
+**Invocation 2**: delta #2 claims `assistant.name → hash(architect)`.
 
-**Invocation 3**: delta \#3 claims `assistant.name → hash(dev)` (overwriting
+**Invocation 3**: delta #3 claims `assistant.name → hash(dev)` (overwriting
 architect's claim).
 
 **Invocation 4**: `-C dev`.
 Walk back:
 
-1. Delta \#3: claim on `assistant.name` is `hash(dev)` — in the target set.
+1. Delta #3: claim on `assistant.name` is `hash(dev)` — in the target set.
    Mark for revert.
 2. Walk past claims whose hash is in dev's target set.
-   Delta \#2: claim is `hash(architect)` — not in target set.
+   Delta #2: claim is `hash(architect)` — not in target set.
    Stop.
-3. Revert value = `assistant.name` as it stood after delta \#2 (architect's
+3. Revert value = `assistant.name` as it stood after delta #2 (architect's
    value).
 
 Architect's value re-emerges, not the base-config value.

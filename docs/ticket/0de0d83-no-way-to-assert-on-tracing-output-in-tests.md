@@ -11,7 +11,7 @@ Grepping `tracing_subscriber|with_default|logs_contain` across `jp_llm` and
 is invisible.
 
 That is a gap wherever a log line *is* the behaviour.
-PR \#1083 added a `warn!` in `jp_llm::provider::openai_compat::parse_chunk` that
+PR #1083 added a `warn!` in `jp_llm::provider::openai_compat::parse_chunk` that
 fires when a stream chunk is discarded — the whole point of the change, since
 the alternative is diagnosing a silent drop from a blank retry loop.
 Its tests pin `parse_chunk`'s return value and the `error` field's round-trip,

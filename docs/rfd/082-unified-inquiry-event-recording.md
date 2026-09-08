@@ -31,7 +31,7 @@ handle to the conversation stream), not principled.
 The archival value of a question/answer exchange is the same regardless of
 routing path.
 Leaving the prompter path off the stream freezes an implementation gap into the
-data model and forces every future feature that wants Q\&A visibility — replay,
+data model and forces every future feature that wants Q&A visibility — replay,
 debugging, sub-agent reasoning trails, conversation viewers — to re-derive the
 workaround.
 
@@ -872,7 +872,7 @@ Keep [RFD 005]'s carve-out for prompter-answered questions and record only the
 Rejected: the archival value of question/answer exchanges is the same regardless
 of whether the user or the inquiry backend answered.
 Leaving the prompter path off the stream freezes an implementation gap into the
-data model and forces every future feature that wants Q\&A visibility to
+data model and forces every future feature that wants Q&A visibility to
 re-derive the gap.
 
 ### Record only when source is `Assistant`
@@ -883,7 +883,7 @@ ordinary user-prompter-answered tool questions off the stream.
 Rejected: gates a generic recording mechanism on a discriminator that has
 nothing to do with whether the event has archival value.
 Keeps the three-path table ([RFD 005]'s) that this RFD is trying to collapse,
-and burdens every future RFD that wants stream-level Q\&A visibility with the
+and burdens every future RFD that wants stream-level Q&A visibility with the
 same conditional.
 
 ### Derive `InquirySource` from `QuestionConfig`

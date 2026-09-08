@@ -486,7 +486,7 @@ Composability lets users tailor the operation.
 - **Subsumption performance.** For tools with many calls, checking all pairs for
   subsumption could be expensive.
   An O(n²) check per tool name is likely fine in practice (most conversations
-  have \<100 calls per tool), but worth monitoring.
+  have <100 calls per tool), but worth monitoring.
 
 - **Config delta handling.** `ConversationStream` interleaves `ConfigDelta`
   events with conversation events.
@@ -560,7 +560,7 @@ Depends on Phases 1-4.
 - [Issue #57] — Make conversation management more powerful
 - [RFD 011] — System Message Queue (compaction interaction)
 - [RFD 034] — Inquiry-Specific Assistant Configuration (defers compaction)
-- [Multi-turn degradation paper] — cited in Issue \#57
+- [Multi-turn degradation paper] — cited in Issue #57
 
 [Issue #57]: https://github.com/dcdpr/jp/issues/57
 [Multi-turn degradation paper]: https://arxiv.org/abs/2505.06120

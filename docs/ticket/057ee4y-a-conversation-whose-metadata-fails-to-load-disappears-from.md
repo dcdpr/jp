@@ -37,7 +37,7 @@ alongside the conversations that did load, letting each consumer decide how to
 present them — the sidebar could show a row that says the conversation could
 not be read, and `jp conversation ls` could print a count of what it skipped.
 
-Found while triaging review feedback on the macOS app PR (dcdpr/jp\#1008,
-comment 3815419227).
+Found while triaging review feedback on the macOS app PR (dcdpr/jp#1008, comment
+3815419227).
 Not introduced there; the app only made an existing silent failure completely
 silent.

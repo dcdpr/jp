@@ -106,7 +106,7 @@ The detached process is the server; the attach client connects.
 
 #### Message types
 
-**Server -\> Client:**
+**Server -> Client:**
 
 ```rust
 enum ServerMessage {
@@ -124,7 +124,7 @@ enum ServerMessage {
 }
 ```
 
-**Client -\> Server:**
+**Client -> Server:**
 
 ```rust
 enum ClientMessage {

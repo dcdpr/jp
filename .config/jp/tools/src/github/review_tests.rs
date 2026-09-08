@@ -86,8 +86,8 @@ fn extract_window_handles_empty_file() {
 // --- diff anchor validation ---
 
 /// A patch shaped like the real-world failure this validation was added for: PR
-/// \#849 changed `crates/jp_cli/src/lib.rs` with (among others) hunks `@@
-/// -659,7 +694,33 @@` and `@@ -744,8 +769,16 @@`.
+/// #849 changed `crates/jp_cli/src/lib.rs` with (among others) hunks `@@ -659,7
+/// +694,33 @@` and `@@ -744,8 +769,16 @@`.
 /// A comment anchored at RIGHT line 751 — between the hunks — was accepted by
 /// GitHub but never displayed.
 fn pr849_style_patch() -> DiffRanges {

@@ -410,8 +410,8 @@ needs its instruction sections.
 
 `jp_llm::title::generate` applies this to every title request, so the refresh
 path inherits it by calling that function rather than repeating the logic.
-The pipeline for each candidate is: scope to last `turn_context` turns \>
-truncate if over budget \> send to LLM.
+The pipeline for each candidate is: scope to last `turn_context` turns >
+truncate if over budget > send to LLM.
 
 #### Sync (main thread)
 

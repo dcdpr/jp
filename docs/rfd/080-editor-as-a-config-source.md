@@ -683,7 +683,7 @@ Phase 9 is verification.
   If this RFD lands first: events have no claims, and 070 must treat them as
   legacy.
 - RFD 079 — source/precedence model this RFD extends.
-- Issue \#217 — original `QUERY_MESSAGE.md` config-surface proposal.
-- Issue \#91 — broader query-editor protocol concerns.
+- Issue #217 — original `QUERY_MESSAGE.md` config-surface proposal.
+- Issue #91 — broader query-editor protocol concerns.
 
 [RFD 079]: 079-config-sources-and-load-order.md

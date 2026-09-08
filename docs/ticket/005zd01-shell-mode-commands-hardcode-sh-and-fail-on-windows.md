@@ -23,7 +23,7 @@ on `windows-latest`.
 
 ## Why it is filed rather than fixed in place
 
-Raised in review of PR \#982 (conversation labels).
+Raised in review of PR #982 (conversation labels).
 The label resolver matches the existing convention rather than introducing the
 gap, and fixing it only for labels would leave `conversation.tools` shell
 commands broken on the same platform — a uniform, documented limitation is

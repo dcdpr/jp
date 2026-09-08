@@ -60,9 +60,9 @@ fn max_tokens_sse_body() -> String {
 /// A model that truncates on every request must stop chaining once the
 /// continuation budget is spent, rather than continuing forever.
 ///
-/// This drives the real `call` -\> `chain` -\> `call` recursion against a
-/// server that always answers `max_tokens`, so it fails if the budget stops
-/// being decremented or a continuation is handed the original budget.
+/// This drives the real `call` -> `chain` -> `call` recursion against a server
+/// that always answers `max_tokens`, so it fails if the budget stops being
+/// decremented or a continuation is handed the original budget.
 #[test(tokio::test)]
 async fn chaining_is_bounded_by_the_continuation_budget() {
     let server = MockServer::start_async().await;

@@ -18,8 +18,8 @@ This replaces the current fixed-order processing that ignores flag position.
 
 Today, `--tool` values are collected into one `Vec` and `--no-tools` values into
 another.
-`apply_enable_tools` then processes them in a hardcoded sequence: disable-all \>
-enable-all \> enable-named \> disable-named.
+`apply_enable_tools` then processes them in a hardcoded sequence: disable-all >
+enable-all > enable-named > disable-named.
 The position of flags on the command line has no effect.
 
 This means `jp q --tool=write --no-tools --tool=read` and `jp q --no-tools

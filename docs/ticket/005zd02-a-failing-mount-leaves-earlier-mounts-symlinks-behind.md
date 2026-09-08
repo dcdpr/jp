@@ -38,7 +38,7 @@ The links exist but no tool can use them.
 
 ## Severity
 
-Contained and visible, which is why it was not fixed in PR \#982 (raised in
+Contained and visible, which is why it was not fixed in PR #982 (raised in
 review there, item 4).
 
 - The command errors with a message naming the bad target.

@@ -28,7 +28,7 @@ negation applies.
 
 ## Why it needs a test
 
-PR \#727 rewrote this code path (`walk_spec` now "scopes the workspace walk with
+PR #727 rewrote this code path (`walk_spec` now "scopes the workspace walk with
 a path filter rather than re-rooting") and the behaviour survived, but nothing
 would have caught it if it hadn't.
 The failure mode is silent: searches quietly stop seeing a directory, and the

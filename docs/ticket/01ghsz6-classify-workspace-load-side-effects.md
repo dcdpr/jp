@@ -53,5 +53,5 @@ The `LoadIntent` enum is a starting point, not necessarily the final shape — a
 two-value split may be too coarse once "always repair, never re-identify" is in
 scope.
 
-Context: PR \#866 review threads on `crates/jp_cli/src/cmd/workspace/show.rs`,
+Context: PR #866 review threads on `crates/jp_cli/src/cmd/workspace/show.rs`,
 where this was raised and explicitly deferred.

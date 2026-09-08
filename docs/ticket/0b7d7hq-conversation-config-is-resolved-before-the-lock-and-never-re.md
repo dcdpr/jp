@@ -56,7 +56,7 @@ and would give the ordering a natural home.
 
 ## Origin
 
-Noticed while fixing the stale-event-stream data loss in \#1045
+Noticed while fixing the stale-event-stream data loss in #1045
 (`Workspace::lock_conversation` now re-reads metadata, events, and the write
 projection once the flock is held).
 The config layer is the remaining thing read before the lock and not refreshed

@@ -542,12 +542,12 @@ Compaction A (turn 20): from=0, to=20, summary=SummaryPolicy("...")
 Compaction B (turn 30): from=0, to=30, tool_calls=Strip { request: false, response: true }
 ```
 
-| Turn | Event type | A            | B     | Winner         |
-| ---- | ---------- | ------------ | ----- | -------------- |
-| 5    | Any        | Summarize    | —     | A: Summarize   |
-| 5    | Tool calls | Summarize    | Strip | A: Summarize\* |
-| 25   | Tool calls | out of range | Strip | B: Strip       |
-| 25   | Reasoning  | out of range | —     | Keep           |
+| Turn | Event type | A            | B     | Winner        |
+| ---- | ---------- | ------------ | ----- | ------------- |
+| 5    | Any        | Summarize    | —     | A: Summarize  |
+| 5    | Tool calls | Summarize    | Strip | A: Summarize* |
+| 25   | Tool calls | out of range | Strip | B: Strip      |
+| 25   | Reasoning  | out of range | —     | Keep          |
 
 \* `summary` takes precedence over per-type policies when both cover an event.
 
@@ -990,7 +990,7 @@ Can proceed in parallel with Phases 3 and 4.
 - [RFD 034] — Inquiry-Specific Assistant Configuration (defers compaction)
 - [RFD 036] — Conversation Compaction (superseded by this RFD)
 - [Issue #57] — Make conversation management more powerful
-- [Multi-turn degradation paper][paper] — cited in Issue \#57
+- [Multi-turn degradation paper][paper] — cited in Issue #57
 
 [Indexing and Counting Conventions]: ../architecture/indexing-conventions.md
 [InternalEvent]: https://github.com/dcdpr/jp/blob/main/crates/jp_conversation/src/stream.rs

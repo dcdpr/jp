@@ -282,7 +282,7 @@ Event::Part { index, part, metadata } => {
 - `ConversationStream` (persistence layer)
 - `ToolCallRequestAggregator` (argument parsing — see [RFD 048] for its
   replacement)
-- The query stream pipeline's Part \> Flush \> Finished lifecycle
+- The query stream pipeline's Part > Flush > Finished lifecycle
 
 ## Drawbacks
 

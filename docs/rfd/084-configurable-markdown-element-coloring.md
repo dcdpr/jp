@@ -365,7 +365,7 @@ build themes against it.
 | `link.delimiters`       | `[`, `](`, `  " `, `"`, `)` for inline links; `<`, `>` for autolinks | surrounding context                                                                          |
 | `table.border`          | grid characters, padding, separator rows                             | surrounding context                                                                          |
 | `table.header`          | header cell content only                                             | surrounding context (does not affect padding or separators, which stay under `table.border`) |
-| `code_fence`            | ` ` \`\`\` glyphs and info string                                    | surrounding context                                                                          |
+| `code_fence`            | ` ` \`\`` glyphs and info string                                     | surrounding context                                                                          |
 
 ### Renderer changes
 

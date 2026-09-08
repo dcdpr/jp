@@ -267,7 +267,7 @@ After connecting to the server socket, the client enters a loop:
 When the user presses Ctrl+Z, the client:
 
 1. Sends a `Disconnect` message to the server.
-2. Prints "Detached: \<conversation-id\>".
+2. Prints "Detached: <conversation-id\>".
 3. Exits.
 
 The server continues running.
@@ -446,30 +446,28 @@ on its own context.
 
 #### Client → Server
 
-| Message                          | When                                   |
-| -------------------------------- | -------------------------------------- |
-| `InquiryResponse { id, answer }` | User answered an inquiry               |
-| `Signal { kind }`                | Ctrl+C or other interrupt              |
-| `InterruptAction { action }`     | User's menu choice                     |
-| `Resize { width, height }`       | Terminal resized (reserved for future  |
-|                                  | use)                                   |
-| `Disconnect`                     | Client detaching (Ctrl+Z)              |
-| `Shutdown`                       | Clean shutdown request (\`conversation |
-|                                  | kill\`)                                |
+| Message                          | When                                  |
+| -------------------------------- | ------------------------------------- |
+| `InquiryResponse { id, answer }` | User answered an inquiry              |
+| `Signal { kind }`                | Ctrl+C or other interrupt             |
+| `InterruptAction { action }`     | User's menu choice                    |
+| `Resize { width, height }`       | Terminal resized (reserved for future |
+|                                  | use)                                  |
+| `Disconnect`                     | Client detaching (Ctrl+Z)             |
+| `Shutdown`                       | Clean shutdown request (`conversation |
+|                                  | kill`)                                |
 
 ### The `defer` Detached Policy
 
 This RFD carries forward the fourth detached policy from [RFD 024], renamed from
 `queue` to `defer`:
 
-| Mode        | Behavior                            |
-| ----------- | ----------------------------------- |
-| `auto`      | Auto-approve or route to LLM (\[RFD |
-|             | 019\]).                             |
-| `defaults`  | Use default values ([RFD 019]). |
-| `deny`      | Fail the tool call ([RFD 019]). |
-| **`defer`** | \*\*Persist the incomplete turn and |
-|             | exit.\*\*                           |
+| Mode        | Behavior                                      |
+| ----------- | --------------------------------------------- |
+| `auto`      | Auto-approve or route to LLM ([RFD 019]). |
+| `defaults`  | Use default values ([RFD 019]).           |
+| `deny`      | Fail the tool call ([RFD 019]).           |
+| **`defer`** | **Persist the incomplete turn and exit.**     |
 
 `defer` is the default policy when no client is attached.
 The server lets other tools in the batch complete, persists their results

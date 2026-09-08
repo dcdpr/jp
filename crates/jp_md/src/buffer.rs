@@ -760,7 +760,7 @@ impl Buffer {
     ///   The list has ended.
     ///   Transition back to `AtBoundary`.
     ///
-    /// Blank lines and indented continuations (column \> `marker_column`) are
+    /// Blank lines and indented continuations (column > `marker_column`) are
     /// buffered, not flushed.
     fn handle_in_list(&mut self, list: ListState) -> (Option<Event>, State) {
         let current_state = State::InList(list);
@@ -1357,7 +1357,7 @@ enum ListLineKind {
     /// nested container inside the current item.
     NestedContainer,
     /// A line that terminates the list: less-indented after a blank, or a block
-    /// interrupter at \<= 3 spaces.
+    /// interrupter at <= 3 spaces.
     Terminator,
     /// Any other non-blank line: continuation of the current item.
     Continuation,

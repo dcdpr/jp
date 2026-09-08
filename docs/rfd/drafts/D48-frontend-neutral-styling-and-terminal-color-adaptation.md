@@ -95,7 +95,7 @@ visual style scope.
 
 The system has three layers.
 
-#### 1\. Shared semantic style
+#### 1. Shared semantic style
 
 A new pure `jp_style` crate owns the frontend-neutral vocabulary:
 
@@ -113,7 +113,7 @@ emit ANSI.
 It may convert to and from `anstyle` color values, but it is not a terminal
 rendering crate.
 
-#### 2\. Frontend renderers
+#### 2. Frontend renderers
 
 Each frontend resolves semantic style while it still has semantic context.
 
@@ -133,7 +133,7 @@ If frontend sharing becomes necessary, JP extracts a target-neutral view model
 or styled-span representation; it does not route other frontends through
 terminal bytes.
 
-#### 3\. Terminal sink
+#### 3. Terminal sink
 
 `jp_printer` remains CLI-specific.
 It receives bytes and adapts them to the terminal target.

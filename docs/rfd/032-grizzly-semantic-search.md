@@ -153,7 +153,7 @@ pub enum SearchMode {
 - Modify `src/error.rs` — add `FtsError` variant.
 
 **Performance concern:** For a few hundred notes, building the FTS table
-per-search is \<50ms.
+per-search is <50ms.
 For thousands, it could be slow.
 Measure this.
 If it's a problem, consider caching the FTS table in a persistent temp file that

@@ -76,9 +76,9 @@ It serves three distinct purposes today:
    This is a workaround for the real problem: there is no in-memory storage
    backend.
 
-Use case \#3 is a workaround that `InMemoryStorageBackend` eliminates directly.
-Use cases \#1 and \#2, however, are legitimate production behaviors that require
-a hybrid model: filesystem-backed loading and locking, but no persistence.
+Use case #3 is a workaround that `InMemoryStorageBackend` eliminates directly.
+Use cases #1 and #2, however, are legitimate production behaviors that require a
+hybrid model: filesystem-backed loading and locking, but no persistence.
 The trait decomposition in this RFD enables this naturally through backend
 composition — the `persist` trait object can be swapped independently of the
 other three.

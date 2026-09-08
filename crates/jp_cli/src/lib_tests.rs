@@ -805,8 +805,8 @@ fn resolve_config_consumes_default_id() {
     );
 }
 
-/// `jp conversation compact --model` has to travel `Commands` -\>
-/// `Conversation` -\> `Compact` to reach the config.
+/// `jp conversation compact --model` has to travel `Commands` -> `Conversation`
+/// -> `Compact` to reach the config.
 /// A missing delegation arm anywhere on that chain makes the flag a silent
 /// no-op, which no test on `Compact` alone can catch.
 #[test]

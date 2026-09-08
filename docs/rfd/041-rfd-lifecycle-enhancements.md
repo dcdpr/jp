@@ -49,7 +49,7 @@ The relationship has to be discovered by reading.
 
 ## Design
 
-### 1\. Deferred Numbering
+### 1. Deferred Numbering
 
 Drafts are created as `NNN-title.md` — the literal placeholder `NNN`, not a
 number.
@@ -72,7 +72,7 @@ from another RFD, because it does not have one.
 This eliminates speculative cross-draft dependencies and forces design
 relationships to be resolved before both RFDs reach Discussion.
 
-### 2\. Tracking Issues
+### 2. Tracking Issues
 
 > [!TIP]
 > This section is superseded by [RFD 100].
@@ -125,7 +125,7 @@ comment stating why.
 When an RFD is superseded, the tracking issue is closed and linked to the
 successor's tracking issue.
 
-### 3\. `Extends` and `Extended by` Metadata
+### 3. `Extends` and `Extended by` Metadata
 
 Two new optional metadata fields capture directional extension relationships
 between RFDs:
@@ -155,7 +155,7 @@ RFD 034 extends RFD 028 (adds cheaper model routing); it does not supersede it
 The deferred numbering policy makes this natural: a draft has no number, so it
 cannot appear in an `Extends` or `Extended by` field.
 
-### 4\. Related RFDs (Automated)
+### 4. Related RFDs (Automated)
 
 A `Related` metadata field is deliberately not introduced.
 At scale, maintaining bidirectional `Related` links manually becomes a burden

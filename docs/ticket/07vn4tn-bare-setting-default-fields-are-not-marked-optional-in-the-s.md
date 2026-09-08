@@ -57,5 +57,5 @@ fine to defer until a schema consumer exists.
 
 ## Context
 
-Raised in review on \#887 (comment 3657548560) and dismissed there as out of
+Raised in review on #887 (comment 3657548560) and dismissed there as out of
 scope for that PR, which was explicitly behavior-neutral in the macro hunk.

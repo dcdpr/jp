@@ -79,7 +79,7 @@ pub(crate) struct Term {
 
     /// Whether or not stdout is connected to a TTY.
     ///
-    /// If you pipe (|) or redirect (\>) the output, stdout is connected to a
+    /// If you pipe (|) or redirect (>) the output, stdout is connected to a
     /// pipe or a regular file, respectively.
     /// These are not managed by the TTY subsystem.
     ///

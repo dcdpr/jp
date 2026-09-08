@@ -289,13 +289,13 @@ The mapping from `AccessPolicy` to Landlock:
 
 | AccessPolicy field        | Landlock flags                       |
 | ------------------------- | ------------------------------------ |
-| `FsRule { read: true }`   | \`AccessFs::ReadFile                 |
-| `FsRule { create: true }` | \`AccessFs::MakeDir                  |
-|                           | ...\`                                |
-| `FsRule { update: true }` | \`AccessFs::WriteFile                |
-|                           | ...\`                                |
-| `FsRule { delete: true }` | \`AccessFs::RemoveFile               |
-|                           | AccessFs::RemoveDir\`                |
+| `FsRule { read: true }`   | `AccessFs::ReadFile                  |
+| `FsRule { create: true }` | `AccessFs::MakeDir                   |
+|                           | ...`                                 |
+| `FsRule { update: true }` | `AccessFs::WriteFile                 |
+|                           | ...`                                 |
+| `FsRule { delete: true }` | `AccessFs::RemoveFile                |
+|                           | AccessFs::RemoveDir`                 |
 | `NetRule` (any allow)     | `AccessNet::ConnectTcp` + port rules |
 |                           | (kernel 6.7+)                        |
 

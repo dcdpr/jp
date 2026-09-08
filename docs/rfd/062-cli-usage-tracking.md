@@ -543,7 +543,7 @@ Not worth the complexity for counter data.
   diversity (every unique `KEY=VALUE` string becomes an entry).
   Over months of use, the `values` map could grow large.
   A future RFD could add eviction (e.g., drop entries older than 90 days or with
-  count \< 3), but this isn't needed initially.
+  count < 3), but this isn't needed initially.
 
 - **`--no-persist` interaction**: When the user passes `--no-persist` (or `-!`),
   workspace persistence is disabled.

@@ -951,9 +951,9 @@ fn parse_auto_approve_config(options: &Map<String, Value>) -> AutoApproveConfig 
 ///
 /// Criteria (all must hold):
 ///
-/// - Tlta. changed files \<= threshold
-/// - Total changed lines (insertions + deletions) \<= threshold
-/// - Deletion ratio per file \< threshold percent
+/// - Total changed files <= threshold
+/// - Total changed lines (insertions + deletions) <= threshold
+/// - Deletion ratio per file < threshold percent
 fn should_auto_approve(changes: &[(String, String, String)], config: &AutoApproveConfig) -> bool {
     if !config.enabled || changes.len() > config.max_changed_files {
         return false;

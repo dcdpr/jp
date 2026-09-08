@@ -6,7 +6,7 @@
 - **Date**: 2026-08-24
 - **Implements**: 035
 
-\#887 made the `extends` graph resolve fully before any file is loaded, then
+#887 made the `extends` graph resolve fully before any file is loaded, then
 reduced it to one entry per file keeping each file's **last** position
 (`dedup_keep_last` in `jp_config::util`).
 Keep-last was chosen because it preserves `main`'s observable resolution: under
@@ -60,6 +60,6 @@ It belongs with the rest of the `extends` semantics rather than in a dedup fix
 
 ## Context
 
-Raised in review on \#887 (comment 3657547063).
+Raised in review on #887 (comment 3657547063).
 The reviewer accepted the compatibility argument for keep-last and agreed the
 `before`-edge semantics belong with the broader `extends` design work.

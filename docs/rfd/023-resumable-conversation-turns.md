@@ -392,7 +392,7 @@ However, any events that *were* flushed (complete `ChatResponse` chunks,
 
 A `ChatResponse` stored from a partial stream marks the turn as complete, even
 though the LLM didn't finish generating.
-This is the same behavior as Ctrl+C -\> Stop today.
+This is the same behavior as Ctrl+C -> Stop today.
 The user sees what was generated and can choose to continue the conversation
 with a follow-up query.
 

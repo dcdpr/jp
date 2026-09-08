@@ -294,12 +294,12 @@ are out of scope (see The terminal sink).
 
 Precedence:
 
-- **Emit color on a target:** explicit config -\> `NO_COLOR` (off) -\>
-  `CLICOLOR_FORCE` (on, even when not a TTY) -\> handle is a TTY (on) -\> off.
-- **Depth (terminal-wide):** explicit config -\> `COLORTERM` truecolor -\>
-  `TERM` `*-256color` -\> colorful `TERM` (16).
-- **Scheme (terminal-wide):** explicit config -\> `COLORFGBG` -\> best-effort
-  OSC 11 query -\> `None`.
+- **Emit color on a target:** explicit config -> `NO_COLOR` (off) ->
+  `CLICOLOR_FORCE` (on, even when not a TTY) -> handle is a TTY (on) -> off.
+- **Depth (terminal-wide):** explicit config -> `COLORTERM` truecolor -> `TERM`
+  `*-256color` -> colorful `TERM` (16).
+- **Scheme (terminal-wide):** explicit config -> `COLORFGBG` -> best-effort OSC
+  11 query -> `None`.
 
 `CLICOLOR_FORCE` precedes the TTY check, so it can force color into a pipe;
 `NO_COLOR` still wins over it.

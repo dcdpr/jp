@@ -19,7 +19,7 @@ constraints and supports forcing a value.
 Those constraints must be enforced by JP rather than treated only as model
 guidance.
 
-Open PR \#998 validates resolved schema definitions but does not validate
+Open PR #998 validates resolved schema definitions but does not validate
 argument instances at dispatch time.
 
 Acceptance criteria:

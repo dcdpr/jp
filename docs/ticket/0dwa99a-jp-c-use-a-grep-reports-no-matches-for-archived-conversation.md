@@ -52,7 +52,7 @@ the failure is upstream of scope selection.
 
 Predates the label scope.
 `git log -G 'acquire_conversation(&id) else'` on `shared/search.rs` puts the
-guard in cb036f69 ("Add `--grep` and `--from`/`--until` to `c use`", \#679), so
+guard in cb036f69 ("Add `--grep` and `--from`/`--until` to `c use`", #679), so
 `--grep` has never worked against the archive partition.
 
 ## Possible directions

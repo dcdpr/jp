@@ -87,5 +87,5 @@ tool-scope confirmation prompt.
 D43 is still a Draft, so `implements` is deliberately unset — that field is for
 phases of an accepted RFD's plan, and setting it would put a draft in the In
 Progress column.
-Phases 1, 2 and 5 of D43 shipped in PR \#727 while it was a draft, so filing
-this against the draft matches how the RFD has actually been built out.
+Phases 1, 2 and 5 of D43 shipped in PR #727 while it was a draft, so filing this
+against the draft matches how the RFD has actually been built out.

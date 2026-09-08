@@ -44,5 +44,4 @@ variable is denied" without them.
 - A test covering both `Action::Run` and `Action::FormatArguments` on one tool
   with one policy, asserting the `access` field is present and equal in both.
 
-Predates `access.env`: `access.fs` has had the same gap since `ab94ec0a`
-(\#727).
+Predates `access.env`: `access.fs` has had the same gap since `ab94ec0a` (#727).

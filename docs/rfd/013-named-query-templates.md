@@ -66,11 +66,11 @@ jp q -%
 
 When `-%` is passed without a value, JP presents a fuzzy-searchable list of all
 loaded templates (showing each template's `title`).
-The user selects one, then proceeds through the Q\&A flow as above.
+The user selects one, then proceeds through the Q&A flow as above.
 
 #### Submit behavior
 
-After the Q\&A, the rendered template is handled according to the template's
+After the Q&A, the rendered template is handled according to the template's
 `submit` field:
 
 - `ask` (default): Show the rendered template and prompt with an inline select
@@ -198,7 +198,7 @@ jp q -% feature
 jp q -%
 ```
 
-### Interactive Q\&A Flow
+### Interactive Q&A Flow
 
 When a named template is loaded:
 
@@ -307,12 +307,12 @@ The `build_conversation` method gains a branch:
 
 1. `template == Some(Some("-"))` → inline template mode (query input is a
    minijinja template, rendered with `templates.*.values`).
-2. `template == Some(Some(name))` → load named template, run Q\&A, render.
+2. `template == Some(Some(name))` → load named template, run Q&A, render.
 3. `template == Some(None)` → show picker, then as above.
 4. `template == None` → no template processing.
 
-The Q\&A loop and template rendering can be extracted into a function in
-`jp_cli` (or a new `jp_template` crate if the logic grows).
+The Q&A loop and template rendering can be extracted into a function in `jp_cli`
+(or a new `jp_template` crate if the logic grows).
 
 ## Drawbacks
 
@@ -321,7 +321,7 @@ The Q\&A loop and template rendering can be extracted into a function in
   Template names must not collide with these reserved names.
   The list of reserved names is small and stable, and schematic will produce a
   clear error on collision.
-- **Complexity budget.** The Q\&A flow, validation, and submit modes add surface
+- **Complexity budget.** The Q&A flow, validation, and submit modes add surface
   area to the query command, which is already the largest module in the
   codebase.
 - **Minijinja learning curve.** Users need to learn minijinja syntax to write
@@ -370,8 +370,8 @@ project's configuration and travel with the repository.
   templates from external sources.
 - **Template versioning.** Templates are config values; they version with the
   config file in Git.
-- **Complex control flow in Q\&A.** No conditional questions, branching, or
-  loops in the question sequence.
+- **Complex control flow in Q&A.** No conditional questions, branching, or loops
+  in the question sequence.
   Each question is independent.
 - **Custom template functions.** Noted as a future extension point but not
   designed here.
@@ -430,13 +430,13 @@ Implement the fuzzy-searchable template picker using `inquire::Select` (showing
 `title` and `description`).
 Wire up the named template loading path in `build_conversation`, including the
 `-%-` inline mode.
-At this point, selecting a template loads it but does not yet run the Q\&A — it
+At this point, selecting a template loads it but does not yet run the Q&A — it
 renders with whatever values are available in `templates.*.values`.
 
 Depends on Phase 1.
 Can be merged independently.
 
-### Phase 3: Interactive Q\&A
+### Phase 3: Interactive Q&A
 
 Implement the question loop: text prompts, selection prompts for `enum` fields,
 default values, type validation, Esc (skip one), Ctrl+D (skip all).
@@ -477,7 +477,7 @@ Can be merged independently.
 - **Custom template functions.** Expose Rust functions in the minijinja
   environment (e.g. `get_config()`, `model_id()`, `git_branch()`, `env()`).
 
-- **`answer` mode.** A field controlling the Q\&A process itself (`ask`,
+- **`answer` mode.** A field controlling the Q&A process itself (`ask`,
   `unattended`, `edit`) — e.g. skipping prompts when all defaults are present.
 
 ## References

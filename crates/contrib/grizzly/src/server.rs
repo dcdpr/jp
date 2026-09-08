@@ -106,7 +106,7 @@ pub struct NoteCreateRequest {
     /// Title of the new note.
     pub title: String,
 
-    /// Tags to apply (without the \# prefix).
+    /// Tags to apply (without the # prefix).
     #[serde(default)]
     pub tags: Vec<String>,
 

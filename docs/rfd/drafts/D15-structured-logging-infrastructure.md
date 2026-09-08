@@ -180,7 +180,7 @@ The persistent log file always uses JSON format for machine parseability.
 **Default TRACE logging produces large files.** Without log rotation, the
 `~/.local/share/jp/logs/` directory will grow unbounded.
 This is mitigated by a planned log rotation task (not in this RFD's scope) and
-by the fact that individual log files for typical queries are small (\< 1 MB).
+by the fact that individual log files for typical queries are small (< 1 MB).
 
 **The in-memory buffer layer adds complexity.** A custom `tracing` layer with
 buffering, flushing, counting, and tee semantics is approximately 150-250 lines
@@ -241,7 +241,7 @@ lifecycle.
 
 The in-memory buffer holds all events from process start until the file path is
 resolved.
-For typical startup sequences, this is a few hundred events (\< 100 KB).
+For typical startup sequences, this is a few hundred events (< 100 KB).
 For pathological cases (e.g., workspace with thousands of conversations
 triggering warnings during index load), the buffer could grow larger.
 A cap (e.g., 10,000 events, dropping oldest) would bound memory usage at the

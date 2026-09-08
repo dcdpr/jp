@@ -6,7 +6,7 @@
 //! Reduced to the English-only subset comfort actually needs and inlined to
 //! avoid the upstream dependency.
 //! Logic is otherwise unchanged: protect inline tokens (URLs, code spans,
-//! links) with placeholders, run UAX \#29 sentence segmentation, then merge
+//! links) with placeholders, run UAX #29 sentence segmentation, then merge
 //! false splits caused by abbreviations and quoted punctuation.
 
 use std::{ops::Range, sync::LazyLock};
@@ -250,7 +250,7 @@ fn restore_placeholders(s: &str, placeholders: &[String]) -> String {
 }
 
 /// Re-join consecutive segments when the earlier one ends in a known
-/// abbreviation; UAX \#29 doesn't know about these and false-splits.
+/// abbreviation; UAX #29 doesn't know about these and false-splits.
 fn merge_abbreviation_splits(segments: &[&str]) -> Vec<String> {
     let mut result: Vec<String> = Vec::with_capacity(segments.len());
     for &segment in segments {

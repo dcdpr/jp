@@ -168,8 +168,8 @@ $ jp init --defaults --cfg assistant.name="My Assistant"
 $ jp init --model anthropic/claude-sonnet-4-5 --cfg style.reasoning.display=full
 ```
 
-Resolution order: hard-coded defaults \< defaults file \< `--cfg` overrides \<
-CLI flags (`--model`, `--tools-run`) .
+Resolution order: hard-coded defaults < defaults file < `--cfg` overrides < CLI
+flags (`--model`, `--tools-run`) .
 
 If `--defaults` is passed and the file does not exist or is missing the required
 `assistant.model.id` field, init errors with a message pointing to the expected

@@ -25,7 +25,7 @@ strategies, so an appending default would append to itself.
 
 ## Current state
 
-\#887 removed both existing uses rather than leaving them dead:
+#887 removed both existing uses rather than leaving them dead:
 
 - `AppConfig::config_load_paths` and `AnthropicConfig::beta_headers` both
   declared `transform = util::vec_dedup` on top of `merge = append_vec`.
@@ -39,7 +39,7 @@ The hazard is that the next one added will silently do nothing.
 
 1. **Remove `transform` support from `schematic_macros`.** Turns a silent no-op
    into a compile error.
-   Cheapest, and matches the "fail loudly" direction \#887 took with invalid
+   Cheapest, and matches the "fail loudly" direction #887 took with invalid
    `#[setting]` keys.
 2. **Apply transforms on JP's path.** Generate a `transform_values()` on the
    partial that runs only the transforms, and call it from
@@ -51,6 +51,6 @@ Option 1 is the smaller change and nothing currently needs the feature.
 
 ## Context
 
-Found in \#887 while writing a merge test for `config_load_paths` — the first
+Found in #887 while writing a merge test for `config_load_paths` — the first
 draft asserted the resolved config was deduplicated and failed.
 Disclosed in review comment 3659114885.

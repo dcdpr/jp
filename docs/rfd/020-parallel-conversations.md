@@ -474,7 +474,7 @@ by remaining conversations sorted by last activation time.
 This follows the same pattern as the bare `--cfg` interactive browser described
 in [RFD 061].
 
-In clap, `--id` uses `num_args = 0..=1` with \`default_missing_value = "".
+In clap, `--id` uses `num_args = 0..=1` with `default_missing_value = "".
 The empty string triggers the interactive picker; recognized keywords trigger
 their respective resolution; any other value is treated as a conversation ID.
 
@@ -833,7 +833,7 @@ Two call sites:
    `pick_session_conversation()` in `lib.rs` shows the same picker.
    Returns `Option<ConversationId>` — `None` on cancel falls through to the
    most-recent-conversation default.
-   Only shown when \>1 conversation exists.
+   Only shown when >1 conversation exists.
 
 Both pickers display `{id} {title}` per line (or just `{id}` if untitled).
 
@@ -875,7 +875,7 @@ the sequence.
   the title to the workspace.
 - `jp_term` added as a dependency of `jp_task`.
 
-### Phase 6: Stale File Cleanup {\#stale-file-cleanup}
+### Phase 6: Stale File Cleanup {#stale-file-cleanup}
 
 Runs synchronously at the end of every `jp` invocation (alongside ephemeral
 conversation cleanup) via `Workspace::cleanup_stale_files()`:
@@ -900,7 +900,7 @@ conversation cleanup) via `Workspace::cleanup_stale_files()`:
 
 ## Implementation Details
 
-### Conversation Targeting {\#conversation-targeting}
+### Conversation Targeting {#conversation-targeting}
 
 #### Problem
 

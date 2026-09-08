@@ -91,10 +91,10 @@ something consumes it.
 
 ## Why it is filed rather than fixed in place
 
-Raised in review of PR \#994, which added an `over` size threshold to the
+Raised in review of PR #994, which added an `over` size threshold to the
 compaction policies and wrapped both mode enums in `PolicySpec<P>`.
 That PR fixed `PolicySpec`'s own schema, which had collapsed to "any JSON value"
 and erased whatever `P` contributed.
-Fixing `P` itself is a separate change: it touches a type \#994 otherwise leaves
-alone, and it needs the canonical-versus-aliases decision above, which \#994 has
+Fixing `P` itself is a separate change: it touches a type #994 otherwise leaves
+alone, and it needs the canonical-versus-aliases decision above, which #994 has
 no reason to make.

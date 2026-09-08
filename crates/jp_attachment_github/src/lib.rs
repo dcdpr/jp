@@ -171,7 +171,7 @@ enum ResourceKind {
 /// Owner/repo used by the shortform `gh:pull/N/diff`.
 ///
 /// The shortform is project-rooted: anyone using `gh:pull/N/diff` in this
-/// workspace means "pull \#N of the JP project."
+/// workspace means "pull #N of the JP project."
 /// Hardcoded to match the rest of the project-specific tooling that already
 /// targets `dcdpr/jp`.
 const SHORTFORM_OWNER: &str = "dcdpr";

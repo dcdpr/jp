@@ -478,7 +478,7 @@ assistant gets: ToolCallResponse { result: "ok, 0 warnings" }
 The assistant sees no difference.
 The `StreamEventHandler.handle_tool_call` function wraps the existing call in
 this loop.
-The `NeedsInput` -\> re-execute pattern maps to: tool returns `Waiting`, JP
+The `NeedsInput` -> re-execute pattern maps to: tool returns `Waiting`, JP
 collects the answer (prompt or inquiry), sends `Apply`, tool continues.
 
 For shell-based tools that exit immediately, the internal flow is: spawn process

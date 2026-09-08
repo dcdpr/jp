@@ -774,7 +774,7 @@ across invocations.
 
 ### Complex JSON Schema questions in the terminal
 
-The JSON Schema \> terminal prompt mapping covers simple cases (`boolean`,
+The JSON Schema > terminal prompt mapping covers simple cases (`boolean`,
 `string`, `enum`).
 For complex schemas, JP falls back to opening the user's editor with a JSON
 template.
