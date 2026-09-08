@@ -2300,16 +2300,21 @@ fn quote_rejects_an_attached_non_boolean_value() {
     assert!(parse_query(&["--quote=foo"]).is_err());
 }
 
-/// A stream whose last assistant message is a two-line reply.
-fn stream_with_assistant_reply() -> ConversationStream {
+/// A stream whose last assistant message is `message`.
+fn stream_with_message(message: &str) -> ConversationStream {
     let mut stream = ConversationStream::new_test();
     stream.start_turn("question");
     stream
         .current_turn_mut()
-        .add_chat_response(ChatResponse::message("line one\nline two"))
+        .add_chat_response(ChatResponse::message(message))
         .build()
         .unwrap();
     stream
+}
+
+/// A stream whose last assistant message is a two-line reply.
+fn stream_with_assistant_reply() -> ConversationStream {
+    stream_with_message("line one\nline two")
 }
 
 #[test]
@@ -2401,15 +2406,7 @@ fn quote_wraps_a_long_paragraph_to_the_configured_width() {
     let mut config = AppConfig::new_test();
     config.style.markdown.wrap_width = 20;
 
-    let mut stream = ConversationStream::new_test();
-    stream.start_turn("question");
-    stream
-        .current_turn_mut()
-        .add_chat_response(ChatResponse::message(
-            "alpha bravo charlie delta echo foxtrot",
-        ))
-        .build()
-        .unwrap();
+    let stream = stream_with_message("alpha bravo charlie delta echo foxtrot");
 
     let mut request = ChatRequest::default();
     assert!(seed_quoted_reply(&mut request, &stream, true, &config));
@@ -2427,15 +2424,7 @@ fn quote_aligns_table_columns() {
     // ragged source through.
     let config = AppConfig::new_test();
 
-    let mut stream = ConversationStream::new_test();
-    stream.start_turn("question");
-    stream
-        .current_turn_mut()
-        .add_chat_response(ChatResponse::message(
-            "| A | B |\n| --- | --- |\n| 1 | two |\n",
-        ))
-        .build()
-        .unwrap();
+    let stream = stream_with_message("| A | B |\n| --- | --- |\n| 1 | two |\n");
 
     let mut request = ChatRequest::default();
     assert!(seed_quoted_reply(&mut request, &stream, false, &config));
@@ -2444,6 +2433,65 @@ fn quote_aligns_table_columns() {
         request.content,
         "| A   | B   |\n|-----|-----|\n| 1   | two |\n\n"
     );
+}
+
+#[test]
+fn quote_keeps_a_table_header_wider_than_the_display_cap() {
+    // On screen a header past `table_max_column_width` is cut short with an
+    // ellipsis. The seed is the text of the user's next request, so the cut
+    // would send the model a column name that never existed.
+    let config = AppConfig::new_test();
+    assert_eq!(config.style.markdown.table_max_column_width, 40);
+
+    let stream = stream_with_message(
+        "| Execution time before optimization (milliseconds) | Result |\n| --- | --- |\n| 12 | ok \
+         |\n",
+    );
+
+    let mut request = ChatRequest::default();
+    assert!(seed_quoted_reply(&mut request, &stream, false, &config));
+
+    assert_eq!(
+        request.content,
+        "| Execution time before optimization (milliseconds) | Result |\n|---------------------------------------------------|--------|\n| 12                                                | ok     |\n\n"
+    );
+}
+
+#[test]
+fn quote_keeps_a_wide_body_cell_on_one_row() {
+    // A body cell past the cap is wrapped onto continuation lines for display.
+    // Re-parsed as markdown those lines are extra rows, so the table the model
+    // receives has a different shape than the one it wrote.
+    let config = AppConfig::new_test();
+
+    let stream = stream_with_message(
+        "| Step | Detail |\n| --- | --- |\n| one | the quick brown fox jumps over the lazy dog \
+         twice |\n",
+    );
+
+    let mut request = ChatRequest::default();
+    assert!(seed_quoted_reply(&mut request, &stream, false, &config));
+
+    assert_eq!(
+        request.content,
+        "| Step | Detail                                            \
+         |\n|------|---------------------------------------------------|\n| one  | the quick \
+         brown fox jumps over the lazy dog twice |\n\n"
+    );
+}
+
+#[test]
+fn quote_keeps_consecutive_spaces_in_inline_code() {
+    // Spaces inside a code span are content: quoting `grep 'a  b'` back with
+    // one space asks the model about a different command.
+    let config = AppConfig::new_test();
+
+    let stream = stream_with_message("Run `grep 'a  b' file` next.");
+
+    let mut request = ChatRequest::default();
+    assert!(seed_quoted_reply(&mut request, &stream, true, &config));
+
+    assert_eq!(request.content, "> Run `grep 'a  b' file` next.\n\n");
 }
 
 #[test]

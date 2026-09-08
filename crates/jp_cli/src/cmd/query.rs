@@ -1772,18 +1772,20 @@ fn seed_quoted_reply(
     true
 }
 
-/// Reformat `message` with the project's standard markdown formatting: wrapped
-/// paragraphs and aligned tables, using the wrap width and table settings from
-/// `style.markdown`.
+/// Reformat `message` with the project's standard markdown formatting: prose
+/// wrapped at `style.markdown.wrap_width`, tables padded into aligned columns.
 ///
-/// Horizontal rules are kept as plain `---` rather than the terminal's
-/// decorative unicode line, and any styling escapes the formatter injects are
-/// stripped, since the result is markdown source, not terminal output.
+/// The result is markdown source rather than terminal output, so the display-
+/// only parts of that formatting are left off: styling escapes are stripped,
+/// horizontal rules stay the plain `---` a parser reads back as one, and table
+/// columns keep their full content.
+/// `style.markdown.table_max_column_width` deliberately does not apply here: it
+/// cuts a wide header short and splits a wide cell across physical lines, which
+/// reads fine on screen but puts truncated text and extra rows into the request
+/// the user sends next.
 fn reformat_quoted_message(message: &str, config: &AppConfig) -> String {
-    let markdown = &config.style.markdown;
-    let formatter = Formatter::with_width(markdown.wrap_width)
-        .table_max_column_width(markdown.table_max_column_width)
-        .table_continuation_edge(markdown.table_continuation_edge)
+    let formatter = Formatter::with_width(config.style.markdown.wrap_width)
+        .table_max_column_width(0)
         .pretty_hr(false);
 
     let rendered = formatter
