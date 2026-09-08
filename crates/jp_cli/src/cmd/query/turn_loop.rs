@@ -637,6 +637,7 @@ pub(super) async fn run_turn_loop(
                                                 interactive,
                                                 &mut turn_state,
                                                 &tool_renderer,
+                                                &printer,
                                             )
                                             .await;
 
@@ -729,6 +730,7 @@ pub(super) async fn run_turn_loop(
                             interactive,
                             &mut turn_state,
                             &tool_renderer,
+                            &printer,
                         )
                         .await;
 

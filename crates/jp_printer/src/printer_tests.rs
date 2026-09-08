@@ -1,3 +1,5 @@
+use jp_term::background::BackgroundFill;
+
 use super::*;
 use crate::region::OutputLines;
 
@@ -950,6 +952,123 @@ fn output_held_by_a_prompt_is_not_lost_at_shutdown() {
         *out.lock(),
         "assistant content\n",
         "held output is deferred, not discarded"
+    );
+}
+
+/// A full-width reasoning-region background.
+fn shaded_region() -> DefaultBackground {
+    DefaultBackground {
+        param: "48;5;236".into(),
+        fill: BackgroundFill::Terminal,
+    }
+}
+
+#[test]
+fn a_prompt_inside_a_shaded_region_carries_its_background() {
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+    printer.set_prompt_background(Some(shaded_region()));
+
+    {
+        let mut prompt = printer.prompt_writer();
+        write!(prompt, "Run local shell tool?").unwrap();
+    }
+    printer.flush();
+
+    // The background is asserted before the text and closed once the widget is
+    // done with the terminal, so the row is shaded and nothing after it is.
+    assert_eq!(*out.lock(), "\x1b[48;5;236mRun local shell tool?\x1b[49m");
+}
+
+#[test]
+fn an_owned_prompt_writer_carries_the_background_too() {
+    // The inline reply widget owns its output stream, so it takes this writer
+    // rather than the borrowed one. Both are prompts and both are inside the
+    // region.
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+    printer.set_prompt_background(Some(shaded_region()));
+
+    {
+        let mut prompt = printer.owned_prompt_writer();
+        write!(prompt, "Edit arguments").unwrap();
+    }
+    printer.flush();
+
+    assert_eq!(*out.lock(), "\x1b[48;5;236mEdit arguments\x1b[49m");
+}
+
+#[test]
+fn a_prompt_outside_a_shaded_region_is_unshaded() {
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+
+    {
+        let mut prompt = printer.prompt_writer();
+        write!(prompt, "Run local shell tool?").unwrap();
+    }
+    printer.flush();
+
+    assert_eq!(*out.lock(), "Run local shell tool?");
+}
+
+#[test]
+fn clearing_the_background_unshades_later_prompts() {
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+
+    printer.set_prompt_background(Some(shaded_region()));
+    drop(printer.prompt_writer());
+    printer.set_prompt_background(None);
+
+    {
+        let mut prompt = printer.prompt_writer();
+        write!(prompt, "after").unwrap();
+    }
+    printer.flush();
+
+    assert_eq!(*out.lock(), "after");
+}
+
+#[test]
+fn an_abandoned_prompt_still_closes_its_background() {
+    // A widget can end by `Ctrl+C` or by an error, neither of which returns
+    // through the normal path. The close lives in `Drop` so the background
+    // cannot outlive the prompt and paint whatever is printed next.
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+    printer.set_prompt_background(Some(shaded_region()));
+
+    {
+        let mut prompt = printer.prompt_writer();
+        write!(prompt, "Deliver result?").unwrap();
+        // No further writes: the prompt is abandoned mid-session.
+    }
+    printer.set_prompt_background(None);
+    printer.println("after");
+    printer.flush();
+
+    assert_eq!(*out.lock(), "\x1b[48;5;236mDeliver result?\x1b[49mafter\n");
+}
+
+#[test]
+fn flushing_a_shaded_prompt_waits_for_the_printer() {
+    // A widget flushes its writer before it reads a key, and on this path a
+    // flush is a barrier rather than a buffer drain: the bytes have to have
+    // landed before the widget takes the cursor and the terminal's mode.
+    // Shading decorates that writer and must not swallow it.
+    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+    printer.set_prompt_background(Some(shaded_region()));
+
+    let mut prompt = printer.prompt_writer();
+
+    // Queued after acquisition drained the printer, and slow enough that the
+    // worker is certainly still inside it.
+    printer.print("slow".typewriter(Duration::from_millis(100)));
+
+    write!(prompt, "Run local shell tool?").unwrap();
+    io::Write::flush(&mut prompt).unwrap();
+
+    // Deliberately no `printer.flush()`, which is the assertion.
+    assert!(
+        out.lock().contains("Run local shell tool?"),
+        "flushing the prompt must drain the printer, got {:?}",
+        *out.lock()
     );
 }
 

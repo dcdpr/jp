@@ -553,13 +553,14 @@ impl ToolCoordinator {
         interactive: bool,
         turn_state: &mut TurnState,
         tool_renderer: &ToolRenderer,
+        printer: &Printer,
     ) -> ToolCallDecision {
         // A tool call reached from a reasoning block sits inside that block's
-        // shading, and a prompt is a visual row like any other (RFD 095). The
-        // prompter writes through the printer rather than through the
-        // renderer, so it has to be handed the background rather than finding
-        // it.
-        prompter.set_background(tool_renderer.current_region());
+        // shading, and a prompt is a visual row like any other (RFD 095). This
+        // is the one place holding both the renderer that owns the region and
+        // the printer that draws the prompts, and the region is per tool, so
+        // the read happens here rather than at the tool-call boundary.
+        printer.set_prompt_background(tool_renderer.current_region());
 
         // Step 1: decide.
         let decision = self.decide_permission(executor, interactive, turn_state);
@@ -886,6 +887,7 @@ impl ToolCoordinator {
         interactive: bool,
         turn_state: &mut TurnState,
         tool_renderer: &ToolRenderer,
+        printer: &Printer,
     ) -> (
         Vec<(usize, Box<dyn Executor>)>,
         Vec<(usize, ToolCallResponse)>,
@@ -905,6 +907,7 @@ impl ToolCoordinator {
                     interactive,
                     turn_state,
                     tool_renderer,
+                    printer,
                 )
                 .await;
 
