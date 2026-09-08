@@ -1,4 +1,4 @@
-# RFD D64: End-to-End CLI Test Harness
+# RFD D65: End-to-End CLI Test Harness
 
 - **Status**: Draft
 - **Category**: Design
