@@ -19,10 +19,7 @@ use jp_printer::Printer;
 use jp_workspace::session::Session;
 use target::{TargetEnv, WorkspaceTarget};
 
-use crate::{
-    bootstrap::WorkspaceRequirement,
-    cmd::{self, Output},
-};
+use crate::cmd::{self, Output};
 
 /// Manage workspaces.
 #[derive(Debug, clap::Args)]
@@ -70,19 +67,6 @@ impl Workspace {
             Commands::Use(args) => args.run(printer, &env),
             Commands::Ls(args) => args.run(printer, &env),
             Commands::Show(args) => args.run(printer, &env, persist),
-        }
-    }
-
-    /// What each subcommand needs from the workspace bootstrap (RFD 087).
-    ///
-    /// `ls` reads the user-global registries only; `use` resolves and validates
-    /// a target root to record a selection; `show` additionally loads
-    /// conversation indexes for its count.
-    pub(crate) fn workspace_requirement(&self) -> WorkspaceRequirement {
-        match &self.command {
-            Commands::Ls(_) => WorkspaceRequirement::None,
-            Commands::Use(_) => WorkspaceRequirement::Resolve,
-            Commands::Show(_) => WorkspaceRequirement::Load,
         }
     }
 }
