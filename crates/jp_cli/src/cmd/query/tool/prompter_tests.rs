@@ -1,9 +1,9 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use jp_editor::MockEditorBackend;
 use jp_inquire::{ReplyOutcome, prompt::MockPromptBackend};
 use jp_md::format::BackgroundFill;
-use jp_printer::{OutputFormat, SharedBuffer};
+use jp_printer::{OutputFormat, PrintableExt as _, SharedBuffer};
 use serde_json::json;
 
 use super::*;
@@ -106,6 +106,36 @@ fn prompting_a_question_shades_through_the_canvas() {
     assert_eq!(
         *out.lock(),
         "\x1b[48;5;236mAbout to run a shell command\x1b[K\x1b[49m\n"
+    );
+}
+
+#[test]
+fn flushing_a_shaded_canvas_waits_for_the_printer() {
+    // A widget flushes its writer before it reads a key, and on this path a
+    // flush is a barrier rather than a buffer drain: it is what makes the bytes
+    // have landed before the widget takes the cursor and the terminal's mode.
+    // Shading is a decoration over that writer and has no business swallowing
+    // it.
+    let (prompter, out) = prompter_with_output(MockPromptBackend::new());
+    prompter.set_background(Some(terminal_region()));
+
+    let mut canvas = prompter.canvas();
+
+    // Queued after acquisition drained the printer, and slow enough that the
+    // worker is certainly still inside it: without a real barrier the prompt's
+    // own text cannot have reached the terminal yet.
+    prompter
+        .printer
+        .print("slow".typewriter(Duration::from_millis(100)));
+
+    write!(canvas, "Run local shell tool?").unwrap();
+    canvas.flush().unwrap();
+
+    // Deliberately no `printer.flush()`, which is the assertion.
+    assert!(
+        out.lock().contains("Run local shell tool?"),
+        "flushing the canvas must drain the printer, got {:?}",
+        *out.lock()
     );
 }
 

@@ -301,21 +301,16 @@ impl Printer {
     /// Returns immediately when regions are disabled.
     #[must_use]
     pub fn suspend_status(&self) -> SuspendGuard {
-        self.suspend_regions(true)
+        self.suspend_regions()
     }
 
-    /// Enqueue a suspension, optionally waiting for the worker to apply it.
-    fn suspend_regions(&self, blocking: bool) -> SuspendGuard {
+    /// Enqueue a suspension and wait for the worker to apply it.
+    fn suspend_regions(&self) -> SuspendGuard {
         if !self.chrome_repaints() || !self.terminal.permits_regions(self.format) {
             return SuspendGuard::inert();
         }
 
-        let (ack, wait) = if blocking {
-            let (tx, rx) = mpsc::channel();
-            (Some(tx), Some(rx))
-        } else {
-            (None, None)
-        };
+        let (ack, rx) = mpsc::channel();
 
         if self
             .tx
@@ -325,9 +320,7 @@ impl Printer {
             return SuspendGuard::inert();
         }
 
-        if let Some(rx) = wait {
-            let _ = rx.recv();
-        }
+        let _ = rx.recv();
 
         SuspendGuard::new(self.tx.clone())
     }
@@ -525,14 +518,34 @@ impl Printer {
         }
     }
 
+    /// Hand the terminal to a widget, and take it back when the guard drops.
+    ///
+    /// Blocks until the worker has drained every queued task and erased any
+    /// drawn region, so the terminal is quiet and clean before the widget
+    /// paints.
+    ///
+    /// A widget is the one writer the printer does not serialize: it puts the
+    /// terminal in raw mode and moves the cursor directly, on the calling
+    /// thread, while the worker runs on its own.
+    /// Anything left in the queue therefore lands on a terminal the widget has
+    /// already reconfigured, where a `\n` no longer carries a carriage return
+    /// and every row after it steps to the right.
+    /// Typewriter delays are skipped rather than waited out: nobody answering a
+    /// question wants to watch the text before it type itself out first.
+    fn begin_prompt_session(&self) -> SuspendGuard {
+        self.flush_instant();
+        self.suspend_regions()
+    }
+
     /// Get a writer for interactive prompt output.
     ///
     /// Prefers the TTY (`/dev/tty`) if available, falling back to `out`.
     /// This ensures prompts always render somewhere visible.
     ///
-    /// Status-region rendering is suspended for the writer's lifetime: a prompt
-    /// session is a run of small writes with the widget owning the cursor in
-    /// between, and a redraw landing between them corrupts it.
+    /// Acquisition blocks until the printer is idle and any status region is
+    /// erased, and no region redraws until the writer drops: a prompt session
+    /// is a run of small writes with the widget owning the cursor in between,
+    /// and anything landing between them corrupts it.
     #[must_use]
     pub fn prompt_writer(&self) -> PromptWriter<'_> {
         PromptWriter {
@@ -540,7 +553,7 @@ impl Printer {
                 printer: self,
                 target: self.prompt_target(),
             },
-            _suspension: self.suspend_regions(false),
+            _suspension: self.begin_prompt_session(),
             _trace: PromptTrace::open(),
         }
     }
@@ -578,7 +591,7 @@ impl Printer {
         Box::new(OwnedPrinterWriter {
             tx: self.tx.clone(),
             target: self.prompt_target(),
-            _suspension: self.suspend_regions(false),
+            _suspension: self.begin_prompt_session(),
             _trace: PromptTrace::open(),
         })
     }
