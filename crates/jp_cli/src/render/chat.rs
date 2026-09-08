@@ -38,13 +38,11 @@ use jp_config::style::{
 use jp_conversation::event::ChatResponse;
 use jp_md::{
     buffer::{Buffer, Event, Fixups},
-    format::{
-        BackgroundFill, CodeBlockState, DefaultBackground, Formatter, TerminalOptions,
-        render_separator,
-    },
+    format::{CodeBlockState, Formatter, TerminalOptions, render_separator},
     theme,
 };
 use jp_printer::{OutputWidth, PrintableExt as _, Printer, RegionStyle, StatusRegion};
+use jp_term::background::{BackgroundFill, DefaultBackground};
 use tracing::warn;
 
 /// The kind of content last pushed into the renderer.

@@ -9,18 +9,15 @@
 //! no row past the region is painted.
 //! [`shade`] is the buffer-at-a-time convenience built on the same core.
 //!
-//! Unlike the line-oriented [`apply_line_background`], the writer holds its
-//! state across `write_str` calls, so it can keep `B` active across cursor
-//! rewrites and escape sequences split between writes — the cases a pure
-//! per-line transform cannot express.
-//!
-//! [`apply_line_background`]: crate::format::apply_line_background
+//! The writer holds its state across `write_str` calls, so `B` survives a
+//! cursor rewrite or an escape sequence split between two writes — the cases a
+//! per-line transform over a finished string cannot express.
 
 use std::fmt::{self, Write};
 
 use crate::{
     ansi::{self, AnsiState, Segment, is_sgr},
-    format::{self, BackgroundFill, DefaultBackground},
+    background::{BackgroundFill, DefaultBackground, line_fill},
 };
 
 /// Wraps a writer and maintains a default-background invariant across the byte
@@ -199,7 +196,7 @@ impl<W: Write> ShadedWriter<W> {
     /// Fill the rest of the current line with the active background, ahead of a
     /// newline.
     fn fill_line(&mut self) -> fmt::Result {
-        let fill = format::line_fill(self.fill, self.column);
+        let fill = line_fill(self.fill, self.column);
         if fill.is_empty() {
             return Ok(());
         }

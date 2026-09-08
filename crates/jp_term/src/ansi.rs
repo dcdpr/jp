@@ -1,8 +1,11 @@
-//! Shared ANSI SGR escape constants and state tracking.
+//! ANSI SGR escape constants, state tracking, and escape-aware measurement.
 //!
-//! This module provides the escape sequences, state tracking, and visual width
-//! computation used by both the terminal renderer (`render.rs`) and the table
-//! formatter (`table.rs`).
+//! [`segments`] is the tokenizer everything else here is built on: it splits a
+//! byte stream into visible text and complete escape sequences.
+//! [`AnsiState`] tracks which attributes a stream has left active, so a writer
+//! can close them at a line break and re-open them on the next line.
+//! [`visual_width`] and [`advance_column`] measure text as the display lays it
+//! out, skipping escapes and advancing a tab to its stop.
 
 use unicode_width::UnicodeWidthStr as _;
 
@@ -47,9 +50,10 @@ pub const RESET: &str = "\x1b[0m";
 
 /// Tracks which ANSI SGR attributes are currently active.
 ///
-/// Used to close formatting at line breaks and re-open it on the next line,
-/// both for the terminal renderer's incremental wrapping and the table
-/// formatter's batch wrapping.
+/// Feed it every escape a stream emits, and it answers what a line break has to
+/// close and what the next line has to re-open.
+/// Attributes combined into one escape are tracked individually, so
+/// `\x1b[1;48;5;236m` registers as both bold and a background.
 #[derive(Debug, Clone, Default)]
 #[expect(clippy::struct_excessive_bools)]
 pub struct AnsiState {
@@ -80,7 +84,8 @@ pub struct AnsiState {
 
 impl AnsiState {
     /// Returns `true` if any attribute is currently active.
-    pub(crate) const fn is_active(&self) -> bool {
+    #[must_use]
+    pub const fn is_active(&self) -> bool {
         self.bold
             || self.italic
             || self.underline
@@ -102,7 +107,7 @@ impl AnsiState {
     /// Returns `true` when the escape resets all attributes or sets/clears the
     /// background — the signal a default-background overlay uses to know it
     /// must re-assert its fill after the escape is forwarded.
-    pub(crate) fn update(&mut self, esc: &str) -> bool {
+    pub fn update(&mut self, esc: &str) -> bool {
         let Some(params) = esc.strip_prefix("\x1b[").and_then(|s| s.strip_suffix('m')) else {
             return false;
         };
@@ -165,7 +170,7 @@ impl AnsiState {
     }
 
     /// Update state by scanning all ANSI escape sequences in `s`.
-    pub(crate) fn update_from_str(&mut self, s: &str) {
+    pub fn update_from_str(&mut self, s: &str) {
         for segment in segments(s) {
             if let Segment::Escape(esc) = segment {
                 let _affects_background = self.update(esc);
@@ -174,7 +179,8 @@ impl AnsiState {
     }
 
     /// Builds a string that re-activates all currently active attributes.
-    pub(crate) fn restore_sequence(&self) -> String {
+    #[must_use]
+    pub fn restore_sequence(&self) -> String {
         let mut s = String::new();
         if self.bold {
             s.push_str(BOLD_START);
@@ -232,6 +238,7 @@ fn consume_color<'a, I: Iterator<Item = &'a str>>(prefix: &str, tokens: &mut I) 
 /// SGR is the only family [`AnsiState`] tracks, so this doubles as the test for
 /// whether an escape's effect can be closed with [`RESET`] or re-opened after a
 /// line break.
+#[must_use]
 pub fn is_sgr(esc: &str) -> bool {
     esc.starts_with("\x1b[") && esc.ends_with('m')
 }
@@ -250,10 +257,10 @@ pub enum Segment<'a> {
 /// Split `s` into visible-text runs and ANSI escape sequences.
 ///
 /// An escape sequence runs from `\x1b` through the first ASCII letter or `~` —
-/// sufficient for the SGR/CSI sequences this crate emits and consumes.
-/// This is the single tokenizer for every escape-aware routine in the crate
-/// (width computation, state tracking, table wrapping), so the termination rule
-/// cannot drift between call sites.
+/// sufficient for the SGR/CSI sequences JP emits and consumes.
+/// This is the single tokenizer every escape-aware routine goes through, so the
+/// termination rule cannot drift between call sites.
+#[must_use]
 pub const fn segments(s: &str) -> Segments<'_> {
     Segments { rest: s }
 }
@@ -328,6 +335,7 @@ fn osc_terminator_end(body: &str) -> Option<usize> {
 /// Grapheme cluster boundaries are a property of this text, not of the escape
 /// separated runs it was built from, so anything measuring or cutting on
 /// cluster boundaries has to work from here.
+#[must_use]
 pub fn visible_text(s: &str) -> String {
     let mut plain = String::new();
     for segment in segments(s) {
@@ -343,6 +351,7 @@ pub fn visible_text(s: &str) -> String {
 /// A tab counts as a single column.
 /// Use [`advance_column`] where the resulting cursor position matters, since a
 /// tab moves the cursor to the next tab stop instead.
+#[must_use]
 pub fn visual_width(s: &str) -> usize {
     visible_text(s).width()
 }
@@ -353,6 +362,7 @@ pub fn visual_width(s: &str) -> usize {
 /// of [`TAB_STOP`], and a carriage return returns to column 0 — the positions
 /// the display actually arrives at, so text padded to a fixed column lands
 /// there instead of overshooting.
+#[must_use]
 pub fn advance_column(column: usize, s: &str) -> usize {
     let plain = visible_text(s);
     let mut column = column;

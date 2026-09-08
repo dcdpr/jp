@@ -9,8 +9,8 @@ use jp_llm::{
     event::{Event, EventPart, FinishReason},
     event_builder::EventBuilder,
 };
-use jp_md::format::DefaultBackground;
 use jp_printer::Printer;
+use jp_term::background::DefaultBackground;
 
 use crate::{
     cmd::query::{interrupt::InterruptAction, stream::TurnView},

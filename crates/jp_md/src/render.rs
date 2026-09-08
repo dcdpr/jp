@@ -34,14 +34,17 @@ use comrak::{
         NodeTaskItem, NodeValue,
     },
 };
-use syntect::highlighting::Theme;
-
-use crate::{
+use jp_term::{
     ansi::{
         BG_END, BOLD_END, BOLD_START, FG_END, ITALIC_END, ITALIC_START, STRIKETHROUGH_END,
         STRIKETHROUGH_START, UNDERLINE_END, UNDERLINE_START,
     },
-    format::{DefaultBackground, HrStyle, SYNTAXES},
+    background::DefaultBackground,
+};
+use syntect::highlighting::Theme;
+
+use crate::{
+    format::{HrStyle, SYNTAXES},
     table,
     writer::TerminalWriter,
 };

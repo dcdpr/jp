@@ -22,12 +22,9 @@ use jp_config::{
 };
 use jp_conversation::event::ToolCallResponse;
 use jp_llm::{CommandResult, run_tool_command, tool::InvocationContext};
-use jp_md::{
-    format::{DefaultBackground, Formatter},
-    shade::ShadedWriter,
-};
+use jp_md::format::Formatter;
 use jp_printer::{ErrChannel, LineSink, OutputLines, RegionStyle, StatusRegion};
-use jp_term::osc::hyperlink;
+use jp_term::{background::DefaultBackground, osc::hyperlink, shade::ShadedWriter};
 use serde_json::{Map, Value};
 use tokio_util::sync::CancellationToken;
 use tracing::warn;

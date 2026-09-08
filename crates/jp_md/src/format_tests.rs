@@ -1,3 +1,5 @@
+use jp_term::background::BackgroundFill;
+
 use super::*;
 
 struct TestCase {

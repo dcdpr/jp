@@ -2580,6 +2580,7 @@ dependencies = [
  "comrak",
  "glob",
  "insta",
+ "jp_term",
  "proptest",
  "syntect",
  "two-face",
