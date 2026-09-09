@@ -45,10 +45,10 @@ use jp_plugin::{
     },
 };
 use jp_printer::Printer;
-use jp_storage::backend::FsStorageBackend;
+use jp_storage::backend::{FsStorageBackend, Projection};
 use jp_workspace::{ConversationLock, LockResult, Workspace, session::Session};
 use serde_json::Value;
-use tokio::sync::mpsc;
+use tokio::{sync::mpsc, task::JoinSet};
 use tracing::{debug, error, info, trace, warn};
 
 use super::registry;
@@ -56,6 +56,7 @@ use crate::{
     Ctx, KeyValueOrPath, cmd,
     cmd::query::{PendingStreamTrim, TurnInputs, interrupt::reply_edit_mode},
     config_pipeline::{build_partial_over, config_search_roots},
+    ctx::McpServerScope,
     editor::{draft_query_text, draft_revision, report_editor_failure},
 };
 
@@ -379,6 +380,11 @@ pub(crate) async fn run_plugin(
     // the host from noticing what the plugin says next.
     let (mut requests, reader_thread) = spawn_reader(stdout);
 
+    // Turns a plugin asked for, still running. A turn outlives the request that
+    // started it, and the plugin can exit while one is in flight, so they are
+    // awaited below rather than left for the runtime to drop half-finished.
+    let mut turns = JoinSet::new();
+
     let result = message_loop(
         &mut requests,
         &stdin,
@@ -386,6 +392,7 @@ pub(crate) async fn run_plugin(
         &config_json,
         &shutdown_sent,
         &composer,
+        &mut turns,
     )
     .await;
 
@@ -400,6 +407,14 @@ pub(crate) async fn run_plugin(
     if result.is_err() {
         stop_plugin(&stdin, &shutdown_sent, child_id, Duration::from_secs(1));
     }
+
+    // After the plugin is dealt with, before the child is reaped: a turn writes
+    // its reply to a process that has to still be there to read it.
+    //
+    // Unbounded, because a turn takes as long as the assistant takes and the
+    // work is the user's. A run that has to end sooner than that is what the
+    // interrupt ladder is for.
+    while turns.join_next().await.is_some() {}
 
     // Always clean up, even on error.
     drop(child.wait());
@@ -570,6 +585,7 @@ async fn message_loop(
     config_json: &Value,
     shutdown_sent: &AtomicBool,
     composer: &Composer,
+    turns: &mut JoinSet<()>,
 ) -> Result<(), cmd::Error> {
     while let Some(line) = requests.recv().await {
         if line.trim().is_empty() {
@@ -595,7 +611,7 @@ async fn message_loop(
 
             PluginToHost::Query(request) => {
                 // `None` means the turn is running and will answer for itself.
-                if let Some(response) = run_query(ctx, request, stdin).await {
+                if let Some(response) = run_query(ctx, request, stdin, turns).await {
                     let mut writer = stdin.lock().expect("stdin lock poisoned");
                     write_message(&mut *writer, &response)
                         .map_err(|e| cmd::Error::from(format!("failed to answer a query: {e}")))?;
@@ -654,6 +670,7 @@ async fn run_query(
     ctx: &mut Ctx,
     request: QueryRequest,
     stdin: &Arc<Mutex<ChildStdin>>,
+    turns: &mut JoinSet<()>,
 ) -> Option<HostToPlugin> {
     let reply_id = request.id.clone();
     let failed = |message: String| Some(query_error(reply_id.clone(), message));
@@ -668,6 +685,26 @@ async fn run_query(
         Err(error) => return failed(error),
     };
 
+    // Read from the lock, not the request: a new conversation was named by the
+    // host, and the plugin has no other way to learn its id.
+    let conversation = lock.id().to_string();
+
+    // Answered as soon as the conversation exists, before anything that can
+    // fail: a caller that only needs somewhere to send the user cannot wait
+    // minutes to find out where that is, and a failure after this point leaves a
+    // conversation on disk that the caller can only read, retry or archive if it
+    // knows the id.
+    if new {
+        let mut writer = stdin.lock().expect("stdin lock poisoned");
+        drop(write_message(
+            &mut *writer,
+            &HostToPlugin::Created(CreatedResponse {
+                id: reply_id.clone(),
+                conversation: conversation.clone(),
+            }),
+        ));
+    }
+
     // The turn runs under the conversation's own config, not the host's.
     //
     // A host resolved its config once at startup with no conversation in view, so
@@ -675,23 +712,12 @@ async fn run_query(
     // The conversation carries all of that in its stored deltas, and running a
     // turn under anything else silently answers with the wrong model and no
     // tools.
-    let config = match conversation_config(ctx, &lock, &request.cfg) {
-        Ok(mut config) => {
-            // A delegated turn has no terminal, so nothing can answer a prompt.
-            //
-            // An interrupt runs the same escalation as Ctrl-C, and the default
-            // streaming action is to show the interrupt menu. With no keyboard
-            // attached that menu blocks on a read nobody can satisfy: the turn
-            // keeps the conversation locked, the next request is refused as
-            // already-locked, and the host's terminal sits at a prompt meant for
-            // someone who is elsewhere.
-            //
-            // Stopping is the only interpretation available here, so it is the
-            // configured one. The reply and abort variants need a person.
-            config.interrupt.streaming.action = StreamingInterruptAction::Stop;
-            config.interrupt.tool_call.action = ToolInterruptAction::Stop;
-            Arc::new(config)
-        }
+    //
+    // A conversation this request created already merged the named configurations
+    // into its base, so naming them again here would layer them twice.
+    let layered = if new { &[] } else { request.cfg.as_slice() };
+    let config = match conversation_config(ctx, &lock, layered) {
+        Ok(config) => Arc::new(config),
         Err(error) => return failed(error),
     };
 
@@ -712,29 +738,12 @@ async fn run_query(
         Err(error) => return failed(error.to_string()),
     };
 
-    // Read from the lock, not the request: a new conversation was named by the
-    // host, and the plugin has no other way to learn its id.
-    let conversation = lock.id().to_string();
-
-    // Answered before the turn, because a caller that only needs somewhere to
-    // send the user cannot wait minutes to find out where that is.
-    if new {
-        let mut writer = stdin.lock().expect("stdin lock poisoned");
-        drop(write_message(
-            &mut *writer,
-            &HostToPlugin::Created(CreatedResponse {
-                id: reply_id.clone(),
-                conversation: conversation.clone(),
-            }),
-        ));
-    }
-
     // Hand the turn to its own task. It owns everything it needs and the lock owns
     // itself, so nothing here is borrowed for the minutes a turn can take, which
     // is what keeps the message loop answering reads while it runs.
     let stdin = Arc::clone(stdin);
 
-    tokio::spawn(async move {
+    turns.spawn(async move {
         let outcome = inputs.run(&lock, stream).await;
 
         // Reported through tracing rather than to the terminal. These are facts
@@ -780,9 +789,23 @@ fn lock_for_query(ctx: &mut Ctx, request: &QueryRequest) -> Result<ConversationL
             ..jp_conversation::Conversation::default()
         };
 
+        // `start_local` keeps a conversation out of the workspace tree, so it is
+        // never committed. The protocol has no per-request override, so the
+        // configured value is the whole answer here.
+        let projection = if config.conversation.start_local {
+            Projection::LocalOnly
+        } else {
+            Projection::Projected
+        };
+
         return ctx
             .workspace
-            .create_and_lock_conversation(conversation, config, ctx.session.as_ref())
+            .create_and_lock_conversation_with_projection(
+                conversation,
+                config,
+                ctx.session.as_ref(),
+                projection,
+            )
             .map_err(|error| format!("failed to create the conversation: {error}"));
     }
 
@@ -883,8 +906,20 @@ async fn prepare_turn(
     lock: &ConversationLock,
     content: String,
 ) -> Result<(TurnInputs, ConversationStream), cmd::Error> {
+    // The client was built from the config this host read at startup. A provider
+    // added to the workspace since then is otherwise unknown to it, and starting
+    // it fails.
+    ctx.mcp_client
+        .set_servers(config.providers.mcp.clone())
+        .await;
+
+    // Shared, because a turn spawned earlier may still be using a server this
+    // one has no need for. Pruning is the owning caller's job; a host that runs
+    // turns concurrently would otherwise stop a server out from under one.
     let forced_tool = config.assistant.tool_choice.function_name();
-    let mcp_servers = ctx.configure_active_mcp_servers(forced_tool).await?;
+    let mcp_servers = ctx
+        .configure_active_mcp_servers(forced_tool, McpServerScope::Shared)
+        .await?;
 
     let chat_request = ChatRequest {
         content,
@@ -925,9 +960,24 @@ async fn prepare_turn(
 
     let stream = lock.events().clone();
 
+    // Applied after the delta above, so the conversation records what the caller
+    // asked for and not these two.
+    //
+    // A delegated turn has nobody at a keyboard, and both defaults stop to ask:
+    // the streaming interrupt opens its menu, and a tool at `ask` waits for
+    // approval. Either read blocks on an answer that is not coming, and the turn
+    // holds the conversation lock while it waits, so every later request for that
+    // conversation is refused as already-locked.
+    //
+    // Stopping is the only interpretation available without a person. The reply
+    // and abort variants need one.
+    let mut config = (*config).clone();
+    config.interrupt.streaming.action = StreamingInterruptAction::Stop;
+    config.interrupt.tool_call.action = ToolInterruptAction::Stop;
+
     let inputs = TurnInputs::collect(
         ctx,
-        config,
+        Arc::new(config),
         chat_request,
         PendingStreamTrim::default(),
         mcp_servers,
@@ -937,6 +987,10 @@ async fn prepare_turn(
         // here would also braid two concurrent turns into one stream with no way
         // to tell them apart.
         Arc::new(Printer::sink()),
+        // No terminal to ask at, whatever the host's own terminal looks like. A
+        // tool at `ask` runs rather than stopping for approval, matching what
+        // `jp query --no-interactive` does.
+        false,
     )
     .await?;
 

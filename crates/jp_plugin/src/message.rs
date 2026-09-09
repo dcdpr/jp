@@ -402,8 +402,9 @@ pub struct QueryRequest {
 
     /// A title for a conversation created by this request.
     ///
-    /// Left unset, a new conversation is untitled until the title generator
-    /// names it from the first turn.
+    /// Left unset, the conversation stays untitled: a delegated turn does not
+    /// run the title generator that `jp query` starts for a new conversation.
+    /// A caller that wants one named names it here.
     /// Ignored without `new`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
