@@ -1025,7 +1025,7 @@ fn flush_producing_tool_call_surfaces_request_as_committed_event() {
             assert_eq!(req.name, "fs_read_file");
             assert_eq!(req.arguments["path"], "foo.rs");
         }
-        CommittedEvent::None => panic!("expected committed ToolCallRequest, got None"),
+        other => panic!("expected committed ToolCallRequest, got {other:?}"),
     }
 }
 

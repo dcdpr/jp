@@ -92,13 +92,31 @@ impl HandleEventOutcome {
 /// the current provider stream finishes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommittedEvent {
-    /// No relevant event was committed.
+    /// Nothing was committed.
+    ///
+    /// A flush for an index that buffered no parts, or one whose message was
+    /// whitespace-only, reaches the shell as an event that changed nothing.
     None,
+
+    /// Assistant content was committed: a message, reasoning, or structured
+    /// output.
+    ///
+    /// The shell needs no payload; the distinction it draws is whether the
+    /// stream moved at all.
+    Content,
 
     /// A [`ToolCallRequest`] was committed.
     /// The shell should run the permission/preparation pipeline immediately so
     /// prompts appear at the same streaming boundary as before.
     ToolCallRequest(ToolCallRequest),
+}
+
+impl CommittedEvent {
+    /// Whether anything reached the conversation stream.
+    #[must_use]
+    pub const fn is_some(&self) -> bool {
+        !matches!(self, Self::None)
+    }
 }
 
 /// Actions returned by the Turn Coordinator to be executed by the shell.
@@ -306,7 +324,7 @@ impl TurnCoordinator {
                 let committed = event
                     .as_tool_call_request()
                     .cloned()
-                    .map_or(CommittedEvent::None, CommittedEvent::ToolCallRequest);
+                    .map_or(CommittedEvent::Content, CommittedEvent::ToolCallRequest);
 
                 // The provider closed this item. A structured response's `json`
                 // fence is terminated here; a text-bearing one stays open, so

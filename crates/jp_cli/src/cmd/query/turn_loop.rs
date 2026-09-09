@@ -580,6 +580,15 @@ pub(super) async fn run_turn_loop(
 
                             let is_finished = matches!(event, Event::Finished(_));
 
+                            // A refusal revokes assistant content the flush below
+                            // already wrote: the turn coordinator pops the trailing
+                            // chat responses, per `FinishReason::Refused`. Flushing
+                            // on that event keeps the removal with the event that
+                            // caused it, rather than leaving disk to a later flush
+                            // on whichever path the loop takes out of here.
+                            let revokes_content =
+                                matches!(event, Event::Finished(FinishReason::Refused { .. }));
+
                             // `handle_llm_event` returns turn control plus
                             // any newly committed event that needs immediate
                             // shell handling. We dispatch on the committed
@@ -594,6 +603,42 @@ pub(super) async fn run_turn_loop(
                                     &mut stream_retry,
                                 )
                             });
+
+                            // Persist each completed block and each tool call as it
+                            // lands, rather than once the phase ends.
+                            //
+                            // Durability is one reason: a process that dies mid-turn
+                            // keeps everything the assistant had finished saying,
+                            // instead of losing the whole phase. The other is that
+                            // anything reading the conversation from outside this
+                            // process sees the turn progress, which is what lets a
+                            // second frontend watch a turn rather than only its
+                            // result.
+                            //
+                            // Gated on what was committed rather than on the event:
+                            // a flush for an index that buffered nothing, or for a
+                            // whitespace-only message, commits nothing, and writing
+                            // the whole conversation to record no change is pure
+                            // cost on a long one.
+                            //
+                            // A failed write is not fatal: the phase-end flush will
+                            // try again, and the in-memory stream is still correct.
+                            //
+                            // Content written here is not final: a refusal takes it
+                            // back, and the flush on that event is what removes it
+                            // from disk again. Until the refusal arrives the block
+                            // is readable, so a watcher can see content the turn
+                            // goes on to withdraw, and a process that dies in that
+                            // window keeps it. Closing that needs persisted records
+                            // to carry a provisional marker that readers and
+                            // recovery both honour, which the format has no way to
+                            // say today.
+                            if (committed.is_some() || revokes_content)
+                                && let Err(error) = conv.flush()
+                            {
+                                warn!(%error, "Failed to persist mid-turn; will retry.");
+                            }
+
                             match action {
                                 LoopAction::Continue => {}
                                 LoopAction::Break => break,

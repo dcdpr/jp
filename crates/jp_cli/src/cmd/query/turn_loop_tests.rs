@@ -423,6 +423,174 @@ async fn test_interrupt_stop_during_streaming_persists_content() {
     assert!(test_result.is_ok(), "Test timed out after 10 seconds");
 }
 
+/// A block the provider has finished is on disk before the turn ends.
+///
+/// Read while the turn is still running, which is the only window where this
+/// differs from persisting at the end of the phase: the provider commits a
+/// block, flushes it, and then parks, and the store is read at that point
+/// rather than afterwards.
+/// Anything watching the conversation from another process sees the same thing.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_completed_block_is_persisted_before_the_turn_ends() {
+    let test_result = Box::pin(timeout(Duration::from_secs(10), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let config = AppConfig::new_test();
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+            .unwrap();
+        let conv_id = lock.id();
+
+        let stalled = Arc::new(Notify::new());
+        let provider: Arc<dyn Provider> = Arc::new(
+            StallingMockProvider::with_message("The answer is 4.").notify_when_stalled(&stalled),
+        );
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        let mcp_client = jp_mcp::Client::default();
+        let (router, signals) = test_router();
+        let router = Arc::new(router);
+
+        // Stop, so the turn ends once the store has been read.
+        let backend = MockPromptBackend::new().with_inline_responses(['s']);
+
+        // The window: the stream has flushed its block and parked, and the turn
+        // has not ended. Read the store here, then let the turn finish.
+        let observer = tokio::spawn({
+            let stalled = Arc::clone(&stalled);
+            let fs = Arc::clone(&fs);
+            async move {
+                stalled.notified().await;
+                let seen = fs.read_test_events_raw(&conv_id);
+                signals.interrupt().await;
+                seen
+            }
+        });
+
+        let result = run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &router,
+            &mcp_client,
+            root,
+            false, // is_tty
+            &[],   // attachments
+            &lock,
+            ToolChoice::Auto,
+            &[], // tools
+            printer.clone(),
+            Arc::new(backend),
+            ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
+            ChatRequest::from("What is 2+2?"),
+            InvocationContext::default(),
+            PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
+        )
+        .await;
+
+        let mid_turn = observer.await.unwrap();
+
+        assert!(result.is_ok(), "Turn loop should complete: {result:?}");
+
+        let mid_turn = mid_turn.expect("the store is written before the turn ends");
+        assert!(
+            mid_turn.contains("The answer is 4."),
+            "A flushed block should already be persisted while the turn runs.\nFile \
+             contents:\n{mid_turn}"
+        );
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out after 10 seconds");
+}
+
+/// A refusal takes back content that was already written to disk.
+///
+/// `FinishReason::Refused` requires partial output to be discarded.
+/// Persisting each block as it lands writes that content out before the refusal
+/// arrives, so "the stream is finished" is not the same as "the file is right"
+/// — this pins that the file ends up right.
+///
+/// It does not pin the *window*: the content is readable between its flush and
+/// the refusal, and reading disk inside that window needs a provider that parks
+/// between the two events.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_refusal_takes_back_content_it_had_persisted() {
+    let tmp = tempdir().unwrap();
+    let root = tmp.path();
+    let storage = root.join(".jp");
+
+    let config = AppConfig::new_test();
+    let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+    let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+
+    let lock = workspace
+        .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+        .unwrap();
+    let conv_id = lock.id();
+
+    // The shape Anthropic produces when a classifier declines mid-stream: the
+    // content block is complete and flushed before the refusal arrives.
+    let provider: Arc<dyn Provider> = Arc::new(MockProvider::new(vec![
+        Event::message(0, "Partial answer the classifier declines."),
+        Event::flush(0),
+        Event::Finished(FinishReason::Refused {
+            category: Some("cyber".to_owned()),
+            explanation: Some("This request was declined.".to_owned()),
+        }),
+    ]));
+    let model = provider
+        .model_details(&"test-model".parse().unwrap())
+        .await
+        .unwrap();
+
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let mcp_client = jp_mcp::Client::default();
+    let (router, _signals) = test_router();
+    let router = Arc::new(router);
+
+    run_turn_loop(
+        Arc::clone(&provider),
+        &model,
+        &config,
+        &router,
+        &mcp_client,
+        root,
+        false,
+        &[],
+        &lock,
+        ToolChoice::Auto,
+        &[],
+        printer.clone(),
+        Arc::new(MockPromptBackend::new()),
+        ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
+        ChatRequest::from("something declined"),
+        InvocationContext::default(),
+        PendingStreamTrim::default(),
+        router.turn_interrupt(lock.id()),
+    )
+    .await
+    .unwrap();
+
+    let persisted = fs.read_test_events_raw(&conv_id).unwrap_or_default();
+    assert!(
+        !persisted.contains("Partial answer"),
+        "refused content must not survive on disk\nFile contents:\n{persisted}"
+    );
+}
+
 /// Cancelling the streaming interrupt menu (a second Ctrl-C) escalates: the
 /// partial content is committed, a graceful shutdown begins, and the turn ends
 /// with the interrupt error.
