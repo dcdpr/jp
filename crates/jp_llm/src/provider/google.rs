@@ -191,6 +191,7 @@ fn create_request(
         thread,
         tools,
         tool_choice,
+        ..
     } = query;
 
     // Extract schema and config before into_parts() consumes the thread.

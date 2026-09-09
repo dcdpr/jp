@@ -6,7 +6,10 @@ use jp_test::function_name;
 use test_log::test;
 
 use super::*;
-use crate::test::{TestRequest, run_test};
+use crate::{
+    query::Truncation,
+    test::{TestRequest, run_test},
+};
 
 // TODO: Test specific conditions as detailed in
 // <https://ai.google.dev/gemini-api/docs/thought-signatures>:
@@ -53,6 +56,7 @@ fn test_unknown_model_requests_thoughts() {
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     };
 
     let (request, _) = create_request(&model, query).unwrap();
@@ -188,6 +192,7 @@ fn test_off_on_unknown_model_attempts_disable() {
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     };
 
     let (request, _) = create_request(&model, query).unwrap();
@@ -227,6 +232,7 @@ fn test_off_on_always_on_leveled_model_uses_lowest_level() {
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     };
 
     let (request, _) = create_request(&model, query).unwrap();
@@ -1269,7 +1275,7 @@ mod service_tier_configuration {
     use crate::{
         model::ModelDetails,
         provider::{Google, ProviderId},
-        query::ChatQuery,
+        query::{ChatQuery, Truncation},
     };
 
     static PROVIDER: ProviderId = ProviderId::Google;
@@ -1304,6 +1310,7 @@ mod service_tier_configuration {
             },
             tools: vec![],
             tool_choice: jp_config::assistant::tool_choice::ToolChoice::Auto,
+            truncation: Truncation::default(),
         }
     }
 
@@ -1367,6 +1374,7 @@ mod service_tier_configuration {
             },
             tools: vec![],
             tool_choice: jp_config::assistant::tool_choice::ToolChoice::Auto,
+            truncation: Truncation::default(),
         };
 
         let model = ModelDetails::empty((PROVIDER, "gemini-2.5-flash").try_into().unwrap());

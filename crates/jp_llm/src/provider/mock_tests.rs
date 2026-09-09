@@ -2,6 +2,7 @@ use futures::StreamExt;
 use jp_conversation::{ConversationStream, thread::Thread};
 
 use super::*;
+use crate::query::Truncation;
 
 fn empty_query() -> ChatQuery {
     ChatQuery {
@@ -13,6 +14,7 @@ fn empty_query() -> ChatQuery {
         },
         tools: vec![],
         tool_choice: jp_config::assistant::tool_choice::ToolChoice::Auto,
+        truncation: Truncation::default(),
     }
 }
 
