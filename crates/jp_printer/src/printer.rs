@@ -582,6 +582,31 @@ impl Printer {
         self.send(Command::Print(task));
     }
 
+    /// Print a line of chrome that must not wait for a prompt session.
+    ///
+    /// The same stream and the same record shape as [`Self::eprintln`] —
+    /// `--quiet` silences it, `2>` captures it — but the line belongs to the
+    /// prompt session, so it lands while a widget still owns the terminal
+    /// rather than queueing behind it.
+    /// For a notice about the question itself: held back, it arrives once the
+    /// question it explains is already answered.
+    ///
+    /// The caller owns the timing.
+    /// This bypasses the wait that keeps ordinary output off a screen someone
+    /// else is drawing on, so it is safe only when the widget has left the
+    /// terminal in cooked mode — between two of its frames, not during one.
+    pub fn prompt_eprintln<P: Printable>(&self, p: P) {
+        let mut task = p.into_task();
+        if self.format.is_json() {
+            task = self.wrap_json(task);
+        }
+
+        task.content.push('\n');
+        task.target = PrintTarget::Err;
+        task.origin = PrintOrigin::Prompt;
+        self.send(Command::Print(task));
+    }
+
     /// Get an **owned** writer for interactive prompt output.
     ///
     /// Like [`Self::prompt_writer`] it targets the TTY (`/dev/tty`) when

@@ -441,7 +441,7 @@ impl<P: PromptBackend> InterruptHandler<P> {
     /// `true` falls back to the inline widget so the user can still reply;
     /// `"always"` returns to the menu, never the inline widget (the user opted
     /// out of it).
-    /// Either way the reason is surfaced on the prompt stream, alongside
+    /// Either way the reason is surfaced on the chrome channel, in time for
     /// whatever the user is asked next.
     fn editor_unavailable(
         &self,
@@ -460,7 +460,7 @@ impl<P: PromptBackend> InterruptHandler<P> {
         // `"always"`: never the inline widget.
         match error {
             Some(error) => report_editor_failure(printer, &error, "Returning to the menu."),
-            None => printer.prompt_println("\n⚠ No editor configured; returning to the menu."),
+            None => printer.prompt_eprintln("\n⚠ No editor configured; returning to the menu."),
         }
         ReplyResult::Cancelled
     }

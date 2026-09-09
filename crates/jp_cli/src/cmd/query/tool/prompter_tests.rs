@@ -294,7 +294,7 @@ fn an_editor_failure_reaches_the_user_while_the_permission_prompt_is_open() {
     // land while that session still owns the terminal. Held until the prompt
     // returns, it arrives after the widget the user is looking at has already
     // re-opened with their text and no reason for it.
-    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
     let prompt = MockPromptBackend::new().with_reply_outcomes([
         ReplyOutcome::OpenEditor {
@@ -314,7 +314,7 @@ fn an_editor_failure_reaches_the_user_while_the_permission_prompt_is_open() {
 
     assert!(matches!(result, EditResult::Edited(_)));
     assert_eq!(
-        *out.lock(),
+        *err.lock(),
         "\n⚠ Couldn't open your editor: failed to spawn editor. Keeping your text.\n"
     );
 
@@ -356,13 +356,13 @@ fn edit_result_preserves_multiline_content() {
 }
 
 #[test]
-fn edit_result_editor_escape_failure_keeps_buffer_and_notifies_user() {
+fn edit_result_editor_escape_failure_keeps_buffer_and_notifies_chrome() {
     // Ctrl+X -> editor can't start -> the typed buffer is kept and the widget
     // re-prompts, so a second submit still returns the text (the spawn failure
-    // must NOT propagate as a fatal prompt error). The failure is surfaced on
-    // the prompt stream, not just the tracing log, so the user knows their
-    // editor didn't open.
-    let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
+    // must NOT propagate as a fatal prompt error — the old `?` behavior). The
+    // failure is surfaced on the chrome channel (stderr), not just the tracing
+    // log, so the user knows their editor didn't open.
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
     let prompt = MockPromptBackend::new().with_reply_outcomes([
         ReplyOutcome::OpenEditor {
@@ -381,7 +381,7 @@ fn edit_result_editor_escape_failure_keeps_buffer_and_notifies_user() {
 
     printer.flush();
     assert_eq!(
-        *out.lock(),
+        *err.lock(),
         "\n⚠ Couldn't open your editor: failed to spawn editor. Keeping your text.\n"
     );
 }

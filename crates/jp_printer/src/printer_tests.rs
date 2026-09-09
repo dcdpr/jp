@@ -954,6 +954,20 @@ fn output_held_by_a_prompt_is_not_lost_at_shutdown() {
 }
 
 #[test]
+fn a_prompt_notice_on_the_chrome_stream_is_not_held() {
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+
+    let _prompt = printer.prompt_writer();
+    printer.eprintln("chrome");
+    printer.prompt_eprintln("⚠ Couldn't open your editor.");
+    printer.flush();
+
+    // The notice explains the question the widget is asking, so it goes out
+    // while the widget is still asking it. The chrome around it waits.
+    assert_eq!(*err.lock(), "⚠ Couldn't open your editor.\n");
+}
+
+#[test]
 fn suspend_status_erases_before_it_returns() {
     let (printer, _out, err) = region_printer();
 
