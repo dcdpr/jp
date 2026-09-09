@@ -206,6 +206,23 @@ impl Ctx {
         self.config.clone()
     }
 
+    /// Install a resolved config for one scoped run, returning the previous
+    /// one.
+    ///
+    /// A `jp` invocation resolves config once and treats it as fixed, which is
+    /// why there is otherwise no way to change it here.
+    /// A long-running host is the exception: it serves many conversations from
+    /// one process, and a turn has to run under the config of the conversation
+    /// it belongs to, its persona, its enabled tools, its model.
+    /// Swap before the turn and swap back after.
+    ///
+    /// Takes an already-resolved [`AppConfig`], so this stays a substitution
+    /// rather than a mutation: assembling a config is still the partial API's
+    /// job.
+    pub(crate) fn swap_config(&mut self, config: Arc<AppConfig>) -> Arc<AppConfig> {
+        std::mem::replace(&mut self.config, config)
+    }
+
     /// Get a runtime handle.
     pub(crate) fn handle(&self) -> &Handle {
         self.runtime.handle()
@@ -222,6 +239,7 @@ impl Ctx {
     pub(crate) async fn configure_active_mcp_servers(
         &mut self,
         forced_tool: Option<&str>,
+        scope: McpServerScope,
     ) -> Result<StartupSet> {
         let mut server_ids = HashSet::new();
 
@@ -237,11 +255,29 @@ impl Ctx {
             server_ids.insert(McpServerId::new(server));
         }
 
-        self.mcp_client
-            .run_services(server_ids, self.handle().clone())
-            .await
-            .map_err(Into::into)
+        let handle = self.handle().clone();
+        match scope {
+            McpServerScope::Exclusive => self.mcp_client.run_services(server_ids, handle).await,
+            McpServerScope::Shared => self.mcp_client.start_services(server_ids, handle).await,
+        }
+        .map_err(Into::into)
     }
+}
+
+/// Whether a turn has the MCP client to itself.
+///
+/// The client is shared, and its running servers are process-wide.
+/// Which turns are in flight decides whether servers this one does not need may
+/// be stopped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum McpServerScope {
+    /// No other turn is running, so servers this one does not need are stopped.
+    Exclusive,
+
+    /// Another turn may be running, so servers this one does not need are left
+    /// alone.
+    /// One of them may be mid-tool-call on a server this turn has no use for.
+    Shared,
 }
 
 /// A trait for converting any type into a partial [`AppConfig`].

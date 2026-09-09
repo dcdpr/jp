@@ -142,7 +142,7 @@ use crate::{
         lock::{LockRequest, acquire_lock},
     },
     config_pipeline::{self, ConfigReset, ConfigResetEvents},
-    ctx::IntoPartialAppConfig,
+    ctx::{IntoPartialAppConfig, McpServerScope},
     editor,
     error::{Error, Result},
     output::print_json,
@@ -467,7 +467,9 @@ impl Query {
         let tool_choice = self.effective_tool_choice(&cfg);
         let forced_tool = tool_choice.function_name();
 
-        let mcp_servers_handle = ctx.configure_active_mcp_servers(forced_tool).await?;
+        let mcp_servers_handle = ctx
+            .configure_active_mcp_servers(forced_tool, McpServerScope::Exclusive)
+            .await?;
 
         let conv_title = lock.metadata().title.clone();
 
@@ -702,6 +704,7 @@ impl Query {
             pending_trim,
             mcp_servers_handle,
             ctx.printer.clone(),
+            ctx.term.interactive,
         )
         .await?;
 
@@ -1372,6 +1375,12 @@ impl TurnInputs {
     /// `printer` is where the turn's output goes: the terminal's printer for a
     /// turn typed there, or a sink printer, which writes nothing, for a turn
     /// started from somewhere with no terminal attached.
+    ///
+    /// `interactive` says whether a person can answer a prompt for this turn.
+    /// It is the caller's to state rather than the context's to report: a turn
+    /// asked for over a protocol has nobody at the terminal the host happens to
+    /// be running in, and a tool that stopped to ask would block on a read that
+    /// no answer is coming for.
     pub(crate) async fn collect(
         ctx: &Ctx,
         config: Arc<AppConfig>,
@@ -1379,6 +1388,7 @@ impl TurnInputs {
         pending_trim: PendingStreamTrim,
         mcp_servers: StartupSet,
         printer: Arc<Printer>,
+        interactive: bool,
     ) -> Result<Self> {
         let urls: Vec<Url> = config
             .conversation
@@ -1422,7 +1432,7 @@ impl TurnInputs {
             signals: ctx.signals.clone(),
             mcp_client: ctx.mcp_client.clone(),
             printer,
-            interactive: ctx.term.interactive,
+            interactive,
             attachments: PendingAttachments { slots },
             mcp_servers,
             chat_request,

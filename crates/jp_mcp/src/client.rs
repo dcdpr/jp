@@ -148,6 +148,21 @@ impl Client {
         }
     }
 
+    /// Replace the set of servers the client knows about.
+    ///
+    /// A client built at startup knows the providers the config named then.
+    /// A process that outlives one config read has to be told about a provider
+    /// added since, or starting it fails as an unknown server.
+    ///
+    /// Running services are left alone: this changes what *can* be started, not
+    /// what is.
+    pub async fn set_servers(&self, providers: IndexMap<String, McpProviderConfig>) {
+        *self.servers.write().await = providers
+            .into_iter()
+            .map(|(name, config)| (McpServerId::new(name), config))
+            .collect();
+    }
+
     /// Set the working directory spawned stdio servers inherit.
     ///
     /// `None` (the default) inherits the JP process cwd.
@@ -250,18 +265,42 @@ impl Client {
         server_ids: HashSet<McpServerId>,
         handle: Handle,
     ) -> Result<StartupSet> {
-        let mut clients = self.services.write().await;
-        let servers_to_stop: Vec<_> = clients
-            .keys()
-            .filter(|&name| server_ids.iter().all(|s| s != name))
-            .cloned()
-            .collect();
+        {
+            let mut clients = self.services.write().await;
+            let servers_to_stop: Vec<_> = clients
+                .keys()
+                .filter(|&name| server_ids.iter().all(|s| s != name))
+                .cloned()
+                .collect();
 
-        // Stop servers that are no longer needed
-        for server_id in &servers_to_stop {
-            trace!(id = %server_id, "Stopping MCP server.");
-            clients.remove(server_id);
+            // Stop servers that are no longer needed
+            for server_id in &servers_to_stop {
+                trace!(id = %server_id, "Stopping MCP server.");
+                clients.remove(server_id);
+            }
         }
+
+        self.start_services(server_ids, handle).await
+    }
+
+    /// Start the servers `server_ids` names, leaving any others running.
+    ///
+    /// [`Self::run_services`] makes the running set exactly what it is given
+    /// and stops the rest, which is right for a caller that owns the client
+    /// outright.
+    /// This one only adds, for a caller sharing the client with work already in
+    /// flight: stopping a server another turn is part-way through using would
+    /// fail its next tool call, and [`Self::call_tool`] does not restart one on
+    /// demand.
+    ///
+    /// The cost is a server process outliving the turn that needed it, until a
+    /// caller that owns the client prunes it.
+    pub async fn start_services(
+        &mut self,
+        server_ids: HashSet<McpServerId>,
+        handle: Handle,
+    ) -> Result<StartupSet> {
+        let clients = self.services.write().await;
 
         let _guard = handle.enter();
         let (stderr_tx, stderr_rx) = broadcast::channel(STDERR_CHANNEL_LINES);
