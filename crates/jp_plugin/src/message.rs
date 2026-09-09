@@ -137,6 +137,9 @@ pub enum PluginToHost {
     /// Ask the host to run a turn on a conversation.
     Query(QueryRequest),
 
+    /// Ask the host to interrupt the turn running on a conversation.
+    Interrupt(InterruptRequest),
+
     /// Print user-facing output through JP's printer.
     Print(PrintMessage),
 
@@ -174,9 +177,12 @@ impl PluginToHost {
             Self::WriteDraft(m) => m.id.as_deref(),
 
             // Not requests: nothing is waiting on an answer to any of these.
-            Self::Ready(_) | Self::Print(_) | Self::Log(_) | Self::Describe(_) | Self::Exit(_) => {
-                None
-            }
+            Self::Ready(_)
+            | Self::Interrupt(_)
+            | Self::Print(_)
+            | Self::Log(_)
+            | Self::Describe(_)
+            | Self::Exit(_) => None,
         }
     }
 }
@@ -418,6 +424,29 @@ pub struct QueryRequest {
     /// `jp q --cfg` does.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cfg: Vec<String>,
+}
+
+/// Ask the host to interrupt the turn running on a conversation.
+///
+/// Reaches the turn the way a Ctrl-C does, so it asks the turn to wrap up:
+/// partial output is kept and the conversation is left in a state a later turn
+/// can continue from.
+///
+/// A repeat re-asks the same turn.
+/// It does not escalate the way a terminal's second and third Ctrl-C do, since
+/// cancelling the host's shutdown token or exiting the process is not something
+/// a request naming one conversation should reach.
+///
+/// Fire-and-forget: the host sends no acknowledgement, because what the
+/// interrupt did shows up in the conversation itself.
+/// The outcome of the turn still arrives as the reply to the original `query`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct InterruptRequest {
+    /// The conversation whose turn should stop.
+    ///
+    /// Required, and not a convenience: a host can be running several turns at
+    /// once, so there is no "the" turn to infer.
+    pub conversation: String,
 }
 
 /// Response to `query`, sent once the turn has finished.

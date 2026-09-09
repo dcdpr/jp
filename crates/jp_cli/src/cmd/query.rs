@@ -117,7 +117,7 @@ use minijinja::{Environment, UndefinedBehavior};
 use strip_ansi_escapes::strip_str;
 use tokio::sync::broadcast::error::RecvError;
 use tool::{TerminalExecutorSource, ToolCoordinator};
-use tracing::{debug, trace, warn};
+use tracing::{debug, info, trace, warn};
 use turn_loop::run_turn_loop;
 use url::Url;
 
@@ -148,7 +148,7 @@ use crate::{
     output::print_json,
     parser::{AttachmentUrlOrPath, split_list},
     render::{RenderFlow, TurnView, tool::output_lines},
-    signals::SignalRouter,
+    signals::{SignalRouter, TurnInterrupt},
 };
 
 type BoxedResult<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -709,7 +709,7 @@ impl Query {
         .await?;
 
         let mut turn_result = inputs
-            .run(lock, stream)
+            .run(lock, stream, ctx.signals.turn_interrupt(lock.id()))
             .await
             .map_err(|error| cmd::Error::from(error).with_persistence(true));
 
@@ -1053,6 +1053,7 @@ impl Query {
         chat_request: ChatRequest,
         invocation: InvocationContext,
         pending_trim: PendingStreamTrim,
+        mut turn_interrupt: TurnInterrupt,
     ) -> Result<()> {
         let model_id = cfg.assistant.model.id.resolved();
         let provider: Arc<dyn jp_llm::Provider> = Arc::from(provider::get_provider(
@@ -1060,7 +1061,23 @@ impl Query {
             &cfg.providers.llm,
         )?);
         debug!(model = %model_id, "Fetching model details.");
-        let model = provider.model_details(&model_id.name).await?;
+
+        // A network round trip, and the last await before the turn loop starts
+        // reading the same receiver.
+        let model = tokio::select! {
+            details = provider.model_details(&model_id.name) => details?,
+
+            notified = turn_interrupt.recv() => {
+                // Nothing has been appended yet, so there is nothing to commit
+                // and nothing to sanitize.
+                if let Some(notice) = notified {
+                    notice.handled();
+                }
+                info!("Interrupted during model lookup; the turn did not start.");
+                return Ok(());
+            }
+        };
+
         debug!(model = model.name(), "Model details resolved.");
 
         // Build docs map from the resolved definitions for describe_tools.
@@ -1095,6 +1112,7 @@ impl Query {
             chat_request,
             invocation,
             pending_trim,
+            turn_interrupt,
         )
         .await
     }
@@ -1450,43 +1468,67 @@ impl TurnInputs {
         self,
         lock: &ConversationLock,
         stream: ConversationStream,
+        mut turn_interrupt: TurnInterrupt,
     ) -> Result<()> {
         let cfg = &self.config;
 
-        // Wait for all MCP servers to finish loading, showing a timer line when the
-        // wait takes long enough to be noticeable. Starting a server can mean
-        // compiling one, so this is not a wait to hold anything else up for.
-        let waited = Instant::now();
-        let skipped = await_mcp_servers(
-            self.mcp_servers,
-            cfg.style.mcp_startup.clone(),
-            self.printer.clone(),
-        )
-        .await?;
-        report_skipped_servers(&self.printer, cfg, &skipped);
-        debug!(
-            elapsed_ms = waited.elapsed().as_millis(),
-            "MCP servers ready."
-        );
+        let prepared = tokio::select! {
+            result = async {
+                // Wait for all MCP servers to finish loading, showing a timer line
+                // when the wait takes long enough to be noticeable.
+                let waited = Instant::now();
+                let skipped = await_mcp_servers(
+                    self.mcp_servers,
+                    cfg.style.mcp_startup.clone(),
+                    self.printer.clone(),
+                )
+                .await?;
+                report_skipped_servers(&self.printer, cfg, &skipped);
+                debug!(
+                    elapsed_ms = waited.elapsed().as_millis(),
+                    "MCP servers ready."
+                );
 
-        // Only now can the deferred ones resolve: the handler reads a resource
-        // from a running server, and until the wait above returns there is none.
-        let resolving = Instant::now();
-        let attachments = self
-            .attachments
-            .resolve(&self.workspace_root, &self.mcp_client)
-            .await?;
-        debug!(
-            count = attachments.len(),
-            elapsed_ms = resolving.elapsed().as_millis(),
-            "Attachments resolved."
-        );
+                // Only now can the deferred ones resolve: the handler reads a
+                // resource from a running server, and until the wait above returns
+                // there is none.
+                let resolving = Instant::now();
+                let attachments = self
+                    .attachments
+                    .resolve(&self.workspace_root, &self.mcp_client)
+                    .await?;
+                debug!(
+                    count = attachments.len(),
+                    elapsed_ms = resolving.elapsed().as_millis(),
+                    "Attachments resolved."
+                );
 
-        let forced_tool = cfg.assistant.tool_choice.function_name();
-        let tools =
-            tool_definitions(cfg.conversation.tools.iter(), &self.mcp_client, forced_tool).await?;
-        debug!(count = tools.len(), forced_tool, "Tools resolved.");
+                let forced_tool = cfg.assistant.tool_choice.function_name();
+                let tools = tool_definitions(
+                    cfg.conversation.tools.iter(),
+                    &self.mcp_client,
+                    forced_tool,
+                )
+                .await?;
+                debug!(count = tools.len(), forced_tool, "Tools resolved.");
 
+                Ok::<_, Error>((attachments, tools))
+            } => result?,
+
+            notified = turn_interrupt.recv() => {
+                // Nothing has been appended to the conversation yet: the request
+                // is added at the turn-start commit point inside the loop below.
+                // So there is nothing to commit and nothing to sanitize, and
+                // dropping the guards releases the lock.
+                if let Some(notice) = notified {
+                    notice.handled();
+                }
+                info!("Interrupted while preparing; the turn did not start.");
+                return Ok(());
+            }
+        };
+
+        let (attachments, tools) = prepared;
         let thread = build_thread(stream, attachments, &cfg.assistant, !tools.is_empty())?;
         debug!(
             events = thread.events.len(),
@@ -1518,6 +1560,7 @@ impl TurnInputs {
                 conversation_id: lock.id().to_string(),
             },
             self.pending_trim,
+            turn_interrupt,
         )
         .await
     }

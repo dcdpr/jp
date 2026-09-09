@@ -69,7 +69,7 @@ use crate::{
     editor::build_editor_backend,
     error::Error,
     render::metadata::set_rendered_arguments,
-    signals::{InterruptNotice, SignalRouter},
+    signals::{InterruptNotice, SignalRouter, TurnInterrupt},
 };
 
 /// Events produced by the merged streaming loop sources.
@@ -187,13 +187,18 @@ pub(super) async fn run_turn_loop(
     chat_request: ChatRequest,
     invocation: InvocationContext,
     pending_trim: PendingStreamTrim,
+    mut turn_interrupt: TurnInterrupt,
 ) -> Result<(), Error> {
-    // The turn-level interrupt handler (RFD 045) is the outermost handler
-    // scope within the turn: it owns the gaps between phases (persistence,
-    // thread building, response processing) and receives interrupts the inner
-    // streaming/tool handlers decline. Its notifications are consumed at the
-    // top of each phase-loop iteration; the guard drops when the turn ends.
-    let (_turn_interrupt_guard, mut turn_interrupt_rx) = signals.push_handler();
+    // The turn-level interrupt handler (RFD 045) is the outermost handler scope
+    // within the turn: it owns the gaps between phases (persistence, thread
+    // building, response processing) and receives interrupts the inner
+    // streaming/tool handlers decline. Its notifications are consumed at the top
+    // of each phase-loop iteration.
+    //
+    // Handed in rather than registered here, because the same handler covers the
+    // spans before the turn: an interrupt arriving while MCP servers start or
+    // the model is looked up has to reach the receiver this loop goes on to
+    // read, not one that was dropped on the way.
 
     let mut turn_state = TurnState::default();
     let mut stream_retry = StreamRetryState::new(cfg.assistant.request);
@@ -258,7 +263,7 @@ pub(super) async fn run_turn_loop(
     loop {
         // A Ctrl-C that landed between phases ends the turn gracefully:
         // commit any partial assistant content and complete.
-        if let Ok(notice) = turn_interrupt_rx.try_recv() {
+        if let Some(notice) = turn_interrupt.try_recv() {
             info!("Interrupt received between turn phases; completing the turn.");
             lock.as_mut()
                 .update_events(|stream| turn_coordinator.complete_early(stream));
@@ -319,7 +324,12 @@ pub(super) async fn run_turn_loop(
                 // goes out, so a Ctrl-C pressed while the connection is being
                 // set up is delivered as soon as the loop starts polling. The
                 // guard deregisters the handler when the cycle ends.
-                let (interrupt_guard, interrupt_rx) = signals.push_handler();
+                //
+                // Scoped like the turn-level handler above, and for the same
+                // reason: this is the handler being polled while a response
+                // streams, so an interrupt naming this conversation has to be
+                // able to reach it rather than wait for the phase to end.
+                let (interrupt_guard, interrupt_rx) = signals.push_handler_for(lock.id());
                 let interrupt_stream = StreamSource::Interrupt(
                     ReceiverStream::new(interrupt_rx).map(StreamingLoopEvent::Interrupt),
                 );

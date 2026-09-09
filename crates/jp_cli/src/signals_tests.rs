@@ -6,7 +6,144 @@ use super::*;
 
 /// Push a handler scope onto the router state.
 fn push_handler(inner: &Arc<RouterInner>) -> (InterruptGuard, mpsc::Receiver<InterruptNotice>) {
-    inner.push_handler()
+    inner.push_handler(None)
+}
+
+/// A fixed conversation id, distinct per `secs`.
+fn conversation(secs: u64) -> ConversationId {
+    ConversationId::try_from(
+        chrono::DateTime::<chrono::Utc>::UNIX_EPOCH + Duration::from_secs(secs),
+    )
+    .unwrap()
+}
+
+/// A targeted interrupt reaches the named scope and nothing else.
+///
+/// The failure this guards against is stopping the wrong turn: with several
+/// running, the topmost handler is very likely not the one that was asked for.
+#[test]
+fn a_scoped_interrupt_notifies_only_its_own_scope() {
+    let inner = RouterInner::new(Duration::from_secs(2));
+    let wanted = conversation(1_700_000_000);
+    let other = conversation(1_700_000_001);
+
+    let (_guard_wanted, mut rx_wanted) = inner.push_handler(Some(wanted));
+    // Pushed after, so it is topmost and would be the one a Ctrl-C reached.
+    let (_guard_other, mut rx_other) = inner.push_handler(Some(other));
+    let (_guard_plain, mut rx_plain) = push_handler(&inner);
+
+    assert!(inner.notify_scope(wanted));
+
+    assert!(took_notice(&mut rx_wanted));
+    assert_eq!(recv_error(&mut rx_other), Some(TryRecvError::Empty));
+    assert_eq!(recv_error(&mut rx_plain), Some(TryRecvError::Empty));
+}
+
+/// A turn registers a handler per phase under the same conversation, and the
+/// innermost one is the one being polled.
+///
+/// The outer turn-level handler is read only between phases, so reaching it
+/// while a response streams or a tool runs would leave a targeted interrupt
+/// waiting for that phase to finish.
+#[test]
+fn a_scoped_interrupt_reaches_the_innermost_handler_for_its_scope() {
+    let inner = RouterInner::new(Duration::from_secs(2));
+    let id = conversation(1_700_000_000);
+
+    // The turn-level handler, then the one a streaming or executing phase adds.
+    let (_turn_guard, mut rx_turn) = inner.push_handler(Some(id));
+    let (phase_guard, mut rx_phase) = inner.push_handler(Some(id));
+
+    assert!(inner.notify_scope(id));
+
+    assert!(took_notice(&mut rx_phase));
+    assert_eq!(recv_error(&mut rx_turn), Some(TryRecvError::Empty));
+
+    // The phase ends, and the turn-level handler is innermost again.
+    drop(phase_guard);
+    assert!(inner.notify_scope(id));
+    assert!(took_notice(&mut rx_turn));
+}
+
+/// A repeat while the handler has not picked up the first one still counts as
+/// reached: the turn has been told, so reporting otherwise would read as "that
+/// conversation is not running".
+#[test]
+fn a_repeat_interrupt_with_one_still_pending_counts_as_reached() {
+    let inner = RouterInner::new(Duration::from_secs(2));
+    let id = conversation(1_700_000_000);
+    let (_guard, mut rx) = inner.push_handler(Some(id));
+
+    // The channel holds one notice, so the second send finds it full.
+    assert!(inner.notify_scope(id));
+    assert!(inner.notify_scope(id));
+
+    assert!(took_notice(&mut rx));
+    assert_eq!(
+        recv_error(&mut rx),
+        Some(TryRecvError::Empty),
+        "the repeat added nothing to a handler that had not looked yet"
+    );
+}
+
+/// A scope whose handler's event loop is gone is not reached, even though its
+/// guard has not dropped yet.
+#[test]
+fn a_scope_whose_receiver_is_gone_is_not_reached() {
+    let inner = RouterInner::new(Duration::from_secs(2));
+    let id = conversation(1_700_000_000);
+    let (_guard, rx) = inner.push_handler(Some(id));
+
+    drop(rx);
+
+    assert!(!inner.notify_scope(id));
+}
+
+/// A scope with no handler is not an error: its work already finished, so there
+/// was nothing left to interrupt.
+#[test]
+fn interrupting_an_unknown_scope_reports_that_nothing_was_reached() {
+    let inner = RouterInner::new(Duration::from_secs(2));
+    let (_guard, mut rx) = push_handler(&inner);
+
+    assert!(!inner.notify_scope(conversation(1_700_000_000)));
+
+    assert_eq!(
+        recv_error(&mut rx),
+        Some(TryRecvError::Empty),
+        "an unscoped handler is not a fallback target"
+    );
+}
+
+/// A dropped guard takes its scope with it, so a later interrupt finds nothing
+/// rather than a stale channel.
+#[test]
+fn a_finished_scope_is_no_longer_reachable() {
+    let inner = RouterInner::new(Duration::from_secs(2));
+    let id = conversation(1_700_000_000);
+
+    let (guard, _rx) = inner.push_handler(Some(id));
+    assert!(inner.notify_scope(id));
+
+    drop(guard);
+    assert!(!inner.notify_scope(id));
+}
+
+/// A Ctrl-C still goes to whichever handler is topmost, scoped or not.
+///
+/// The scope is extra information for targeted interrupts, not a change to how
+/// the keyboard path chooses.
+#[test]
+fn a_scope_does_not_change_where_a_keypress_lands() {
+    let inner = RouterInner::new(Duration::from_secs(2));
+
+    let (_guard_bottom, mut rx_bottom) = inner.push_handler(Some(conversation(1_700_000_000)));
+    let (_guard_top, mut rx_top) = inner.push_handler(Some(conversation(1_700_000_001)));
+
+    assert_eq!(inner.route_interrupt(Instant::now()), Routed::Handler);
+
+    assert!(took_notice(&mut rx_top));
+    assert_eq!(recv_error(&mut rx_bottom), Some(TryRecvError::Empty));
 }
 
 /// Take a delivered press off the channel and drop it unresolved.
@@ -220,9 +357,9 @@ fn quit_exits() {
 fn decline_notifies_next_handler_down() {
     let inner = RouterInner::new(Duration::from_secs(2));
     let (_guard_bottom, mut rx_bottom) = push_handler(&inner);
-    let (_guard_top, mut rx_top) = push_handler(&inner);
+    let (guard_top, mut rx_top) = push_handler(&inner);
 
-    inner.notify_next_or_shutdown();
+    inner.notify_below(guard_top.id, None);
 
     assert!(took_notice(&mut rx_bottom));
     assert_eq!(recv_error(&mut rx_top), Some(TryRecvError::Empty));
@@ -232,12 +369,66 @@ fn decline_notifies_next_handler_down() {
 #[test]
 fn decline_with_single_handler_requests_shutdown() {
     let inner = RouterInner::new(Duration::from_secs(2));
-    let (_guard, mut rx) = push_handler(&inner);
+    let (guard, mut rx) = push_handler(&inner);
 
-    inner.notify_next_or_shutdown();
+    inner.notify_below(guard.id, None);
 
     assert_eq!(recv_error(&mut rx), Some(TryRecvError::Empty));
     assert!(inner.shutdown_token.is_cancelled());
+}
+
+/// A declined press walks down from the handler that declined it, not from the
+/// top of the stack.
+///
+/// Two turns in flight interleave their handlers, so the entry below the
+/// topmost one routinely belongs to the other turn.
+/// Declining A's press has to reach A's next handler, not whichever turn
+/// happens to be on top.
+#[test]
+fn a_decline_stays_inside_its_own_conversation() {
+    let inner = RouterInner::new(Duration::from_secs(2));
+    let a = conversation(1_700_000_000);
+    let b = conversation(1_700_000_001);
+
+    // Turn A registers its turn-level and tool handlers, then turn B starts and
+    // pushes its own on top.
+    let (_a_turn, mut rx_a_turn) = inner.push_handler(Some(a));
+    let (a_tool_guard, mut rx_a_tool) = inner.push_handler(Some(a));
+    let (_b_turn, mut rx_b_turn) = inner.push_handler(Some(b));
+    let (_b_stream, mut rx_b_stream) = inner.push_handler(Some(b));
+
+    // A's tool handler declines the press it was given.
+    inner.notify_below(a_tool_guard.id, Some(a));
+
+    assert!(
+        took_notice(&mut rx_a_turn),
+        "the press belongs to A, so A's next handler answers it"
+    );
+    assert_eq!(recv_error(&mut rx_a_tool), Some(TryRecvError::Empty));
+    assert_eq!(
+        recv_error(&mut rx_b_turn),
+        Some(TryRecvError::Empty),
+        "B is topmost but the press was never about B"
+    );
+    assert_eq!(recv_error(&mut rx_b_stream), Some(TryRecvError::Empty));
+    assert!(!inner.shutdown_token.is_cancelled());
+}
+
+/// A scoped press that nothing below it can answer stops there.
+///
+/// A keypress escalates to shutdown at this point, which is right for someone
+/// at a terminal.
+/// A request naming one conversation must not be able to shut the process down.
+#[test]
+fn a_declined_scoped_press_does_not_request_shutdown() {
+    let inner = RouterInner::new(Duration::from_secs(2));
+    let id = conversation(1_700_000_000);
+    let (guard, mut rx) = inner.push_handler(Some(id));
+
+    inner.notify_below(guard.id, Some(id));
+
+    assert_eq!(recv_error(&mut rx), Some(TryRecvError::Empty));
+    assert!(!inner.shutdown_token.is_cancelled());
 }
 
 #[test]

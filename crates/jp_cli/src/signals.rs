@@ -46,6 +46,7 @@ use std::{
 };
 
 use futures::{Stream, StreamExt as _};
+use jp_conversation::ConversationId;
 use tokio::{
     runtime::{Handle, Runtime},
     sync::mpsc::{self, error::TrySendError},
@@ -184,7 +185,87 @@ impl SignalRouter {
     /// fires, and resolves the notice with the outcome.
     #[must_use]
     pub fn push_handler(&self) -> (InterruptGuard, mpsc::Receiver<InterruptNotice>) {
-        self.inner.push_handler()
+        self.inner.push_handler(None)
+    }
+
+    /// Register an interrupt handler scope that can also be interrupted by
+    /// name.
+    ///
+    /// Behaves as [`push_handler`] for a Ctrl-C, which still goes to whichever
+    /// handler is topmost.
+    /// The scope only matters to [`interrupt_scope`], for interrupts that
+    /// arrive from somewhere with no notion of "topmost".
+    ///
+    /// [`interrupt_scope`]: Self::interrupt_scope
+    /// [`push_handler`]: Self::push_handler
+    #[must_use]
+    pub fn push_handler_for(
+        &self,
+        conversation: ConversationId,
+    ) -> (InterruptGuard, mpsc::Receiver<InterruptNotice>) {
+        self.inner.push_handler(Some(conversation))
+    }
+
+    /// Register the handler a turn is driven through, for as long as its
+    /// conversation is locked.
+    ///
+    /// Registered by whoever takes the lock, so every span between taking it
+    /// and releasing it reads the same receiver: waiting on MCP servers,
+    /// looking up the model, and the turn itself.
+    /// A handler that exists for only part of that time is worse than none for
+    /// the rest of it — a press delivered to a receiver nobody polls again is
+    /// reported as delivered and then dropped.
+    #[must_use]
+    pub fn turn_interrupt(&self, conversation: ConversationId) -> TurnInterrupt {
+        let (guard, rx) = self.inner.push_handler(Some(conversation));
+        TurnInterrupt { _guard: guard, rx }
+    }
+
+    /// Interrupt one named scope, leaving every other handler alone.
+    ///
+    /// For interrupts that arrive with a target rather than from a keyboard.
+    /// A Ctrl-C means "whatever I am looking at", and the topmost handler is
+    /// the right guess; a request naming a conversation means that
+    /// conversation, and with several turns running the topmost handler is very
+    /// likely the wrong one.
+    ///
+    /// Outside the escalation ladder: a repeat re-asks the same turn to stop.
+    /// A Ctrl-C escalates to cancelling the shutdown token and then to exiting
+    /// the process, neither of which a request naming one conversation should
+    /// reach.
+    ///
+    /// Returns whether the interrupt reached a handler for that scope.
+    /// `false` means nothing is registered for it, which usually means the turn
+    /// has already finished.
+    pub fn interrupt_scope(&self, conversation: ConversationId) -> bool {
+        self.inner.notify_scope(conversation)
+    }
+}
+
+/// The interrupt handler a turn is driven through.
+///
+/// Held from the moment the conversation is locked until the turn ends, and
+/// passed down rather than re-registered, so no span along the way can take a
+/// press onto a channel it will never read again.
+///
+/// Deregisters on drop.
+pub struct TurnInterrupt {
+    _guard: InterruptGuard,
+    rx: mpsc::Receiver<InterruptNotice>,
+}
+
+impl TurnInterrupt {
+    /// Wait for an interrupt naming this turn's conversation.
+    ///
+    /// Cancel-safe, so it can sit in a [`tokio::select!`] arm against the work
+    /// it is interrupting.
+    pub async fn recv(&mut self) -> Option<InterruptNotice> {
+        self.rx.recv().await
+    }
+
+    /// Take an interrupt that already arrived, without waiting for one.
+    pub fn try_recv(&mut self) -> Option<InterruptNotice> {
+        self.rx.try_recv().ok()
     }
 }
 
@@ -200,6 +281,20 @@ impl SignalRouter {
               ladder"]
 pub struct InterruptNotice {
     inner: Arc<RouterInner>,
+
+    /// The handler this press was delivered to.
+    ///
+    /// A decline walks down from here rather than from the top of the stack:
+    /// with two turns in flight the stack interleaves, so "second from the top"
+    /// is very likely a handler belonging to the other turn.
+    from: HandlerId,
+
+    /// The conversation this press named, when it named one.
+    ///
+    /// A decline stays inside it.
+    /// `None` is a keypress, which belongs to whatever the user is looking at
+    /// and so declines down the whole stack.
+    scope: Option<ConversationId>,
 }
 
 impl fmt::Debug for InterruptNotice {
@@ -219,12 +314,16 @@ impl InterruptNotice {
 
     /// The handler declined this press.
     ///
-    /// Notifies the next handler down the stack, or requests a graceful
-    /// shutdown when this was the last one.
+    /// Notifies the next handler below the one this press reached, skipping any
+    /// that belong to another conversation.
     /// The press keeps its place on the escalation ladder: nothing has acted on
     /// it yet.
+    ///
+    /// A keypress with nothing left below it requests a graceful shutdown.
+    /// A press that named a conversation does not: a request about one turn
+    /// must not be able to shut the process down.
     pub fn decline(self) {
-        self.inner.notify_next_or_shutdown();
+        self.inner.notify_below(self.from, self.scope);
     }
 }
 
@@ -247,6 +346,21 @@ struct HandlerId(u64);
 /// A handler scope on the router's stack.
 struct RegisteredHandler {
     id: HandlerId,
+
+    /// The conversation this handler is a scope for, when something other than
+    /// a keypress might want to interrupt it specifically.
+    ///
+    /// A Ctrl-C is aimed at whatever the user is looking at, which is the
+    /// topmost handler, so the terminal path ignores this.
+    /// An interrupt arriving over a protocol names its target instead: several
+    /// turns can be running at once, and stopping the wrong one is worse than
+    /// stopping nothing.
+    ///
+    /// The id itself, not a rendering of it.
+    /// An id has more than one spelling, and comparing one spelling to another
+    /// matches nothing while looking exactly like a stop button that does not
+    /// work.
+    scope: Option<ConversationId>,
 
     /// Notifies the handler's event loop that SIGINT arrived.
     /// The event loop runs the interrupt logic; the router never does.
@@ -372,8 +486,8 @@ impl RouterInner {
             return Routed::Shutdown;
         }
 
-        if let Some(notify_tx) = self.topmost() {
-            return match notify_tx.try_send(self.notice()) {
+        if let Some((id, notify_tx)) = self.topmost() {
+            return match notify_tx.try_send(self.notice(id, None)) {
                 // A full channel means the handler already has a pending
                 // interrupt notification; nothing to add. The undelivered
                 // notice is dropped unresolved, leaving this press on the
@@ -403,31 +517,43 @@ impl RouterInner {
             .reset();
     }
 
-    /// Build a notice for a press about to be delivered to a handler.
-    fn notice(self: &Arc<Self>) -> InterruptNotice {
+    /// Build a notice for a press about to be delivered to `id`.
+    ///
+    /// `scope` is the conversation the press named, and bounds where a decline
+    /// may go next.
+    fn notice(self: &Arc<Self>, id: HandlerId, scope: Option<ConversationId>) -> InterruptNotice {
         InterruptNotice {
             inner: Arc::clone(self),
+            from: id,
+            scope,
         }
     }
 
-    /// Clone the topmost handler's notification channel.
-    fn topmost(&self) -> Option<mpsc::Sender<InterruptNotice>> {
+    /// Clone the topmost handler's id and notification channel.
+    fn topmost(&self) -> Option<(HandlerId, mpsc::Sender<InterruptNotice>)> {
         self.stack
             .lock()
             .expect("handler stack lock poisoned")
             .last()
-            .map(|handler| handler.notify_tx.clone())
+            .map(|handler| (handler.id, handler.notify_tx.clone()))
     }
 
     /// Register a handler scope: push a fresh notification channel onto the
     /// stack and return the deregistration guard plus the receiver.
-    fn push_handler(self: &Arc<Self>) -> (InterruptGuard, mpsc::Receiver<InterruptNotice>) {
+    fn push_handler(
+        self: &Arc<Self>,
+        scope: Option<ConversationId>,
+    ) -> (InterruptGuard, mpsc::Receiver<InterruptNotice>) {
         let (notify_tx, notify_rx) = mpsc::channel(1);
         let id = HandlerId(self.next_handler_id.fetch_add(1, Ordering::Relaxed));
         self.stack
             .lock()
             .expect("handler stack lock poisoned")
-            .push(RegisteredHandler { id, notify_tx });
+            .push(RegisteredHandler {
+                id,
+                scope,
+                notify_tx,
+            });
 
         (
             InterruptGuard {
@@ -436,6 +562,38 @@ impl RouterInner {
             },
             notify_rx,
         )
+    }
+
+    /// Notify the handler registered for `scope`, if one still is.
+    ///
+    /// Searched from the top down, so the innermost handler for a conversation
+    /// is the one reached, matching how a Ctrl-C finds the innermost handler
+    /// overall.
+    ///
+    /// Returns whether anything was notified.
+    /// `false` means the scope has no handler, usually because its work already
+    /// finished, and is not an error: there was nothing left to interrupt.
+    fn notify_scope(self: &Arc<Self>, scope: ConversationId) -> bool {
+        let found = self
+            .stack
+            .lock()
+            .expect("handler stack lock poisoned")
+            .iter()
+            .rev()
+            .find(|handler| handler.scope == Some(scope))
+            .map(|handler| (handler.id, handler.notify_tx.clone()));
+
+        match found {
+            // A full channel means the handler already has a notice it has not
+            // picked up yet, so this one has nothing to add and is dropped
+            // unresolved. The handler has still been told, which is what the
+            // caller is asking about.
+            Some((id, tx)) => !matches!(
+                tx.try_send(self.notice(id, Some(scope))),
+                Err(TrySendError::Closed(_))
+            ),
+            None => false,
+        }
     }
 
     /// Remove a handler by id.
@@ -449,26 +607,45 @@ impl RouterInner {
         }
     }
 
-    /// Notify the handler below the topmost one, or request a graceful shutdown
-    /// when no other handler exists.
-    fn notify_next_or_shutdown(self: &Arc<Self>) {
+    /// Notify the first handler below `from`, skipping any outside `scope`.
+    ///
+    /// Walking from `from` rather than from the top of the stack is what keeps
+    /// a decline inside the turn that declined: two turns in flight interleave
+    /// their handlers, so the entry below the *topmost* one often belongs to
+    /// the other turn.
+    ///
+    /// With nothing left below, a keypress (`scope` of `None`) requests a
+    /// graceful shutdown, which is the terminal's escalation ladder.
+    /// A press that named a conversation stops instead: it asked about one
+    /// turn, and shutting the process down is not among the answers.
+    fn notify_below(self: &Arc<Self>, from: HandlerId, scope: Option<ConversationId>) {
         let next = {
             let stack = self.stack.lock().expect("handler stack lock poisoned");
             stack
                 .iter()
                 .rev()
-                .nth(1)
-                .map(|handler| handler.notify_tx.clone())
+                .skip_while(|handler| handler.id != from)
+                .skip(1)
+                .find(|handler| scope.is_none() || handler.scope == scope)
+                .map(|handler| (handler.id, handler.notify_tx.clone()))
         };
 
-        let Some(notify_tx) = next else {
-            self.shutdown_token.cancel();
+        let Some((id, notify_tx)) = next else {
+            if scope.is_none() {
+                self.shutdown_token.cancel();
+            }
             return;
         };
 
-        match notify_tx.try_send(self.notice()) {
-            Ok(()) | Err(TrySendError::Full(_)) => {}
-            Err(TrySendError::Closed(_)) => self.shutdown_token.cancel(),
+        // A closed channel means that handler's event loop is already gone. For
+        // a keypress that leaves the ladder with nothing further to try, so it
+        // falls through to shutdown; a scoped press has nowhere else to go.
+        let closed = matches!(
+            notify_tx.try_send(self.notice(id, scope)),
+            Err(TrySendError::Closed(_))
+        );
+        if closed && scope.is_none() {
+            self.shutdown_token.cancel();
         }
     }
 }

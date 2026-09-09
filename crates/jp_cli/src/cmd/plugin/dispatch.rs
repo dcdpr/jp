@@ -58,6 +58,7 @@ use crate::{
     config_pipeline::{build_partial_over, config_search_roots},
     ctx::McpServerScope,
     editor::{draft_query_text, draft_revision, report_editor_failure},
+    signals::SignalRouter,
 };
 
 /// Runs the prompts a plugin asks for.
@@ -622,6 +623,7 @@ async fn message_loop(
                 let config = ctx.config();
                 let fs_backend = ctx.fs_backend.clone();
                 let session = ctx.session.clone();
+                let signals = ctx.signals.clone();
                 let mut writer = stdin.lock().expect("stdin lock poisoned");
 
                 if handle_request(
@@ -632,6 +634,7 @@ async fn message_loop(
                     session.as_ref(),
                     fs_backend.as_deref(),
                     &config,
+                    &signals,
                 )? == Flow::Stop
                 {
                     return Ok(());
@@ -684,6 +687,13 @@ async fn run_query(
         Ok(lock) => lock,
         Err(error) => return failed(error),
     };
+
+    // Registered before the turn is spawned, not inside it: the message loop is
+    // serial, so a plugin that sends `query` and then `interrupt` has the second
+    // dispatched while the task may not have started. A handler registered by
+    // the task itself would not exist yet, and the stop request would be
+    // reported as reaching nothing.
+    let turn_interrupt = ctx.signals.turn_interrupt(lock.id());
 
     // Read from the lock, not the request: a new conversation was named by the
     // host, and the plugin has no other way to learn its id.
@@ -744,7 +754,7 @@ async fn run_query(
     let stdin = Arc::clone(stdin);
 
     turns.spawn(async move {
-        let outcome = inputs.run(&lock, stream).await;
+        let outcome = inputs.run(&lock, stream, turn_interrupt).await;
 
         // Reported through tracing rather than to the terminal. These are facts
         // about the host, not content: the turn's output belongs to the
@@ -1048,6 +1058,7 @@ fn handle_request(
     session: Option<&Session>,
     fs_backend: Option<&FsStorageBackend>,
     config: &AppConfig,
+    signals: &SignalRouter,
 ) -> Result<Flow, cmd::Error> {
     match msg {
         PluginToHost::Ready(ready) => {
@@ -1097,6 +1108,43 @@ fn handle_request(
         PluginToHost::WriteDraft(req) => {
             let response = handle_write_draft(fs_backend, workspace, req);
             write_message(writer, &response)?;
+        }
+
+        PluginToHost::Interrupt(req) => {
+            // Aimed at the named conversation, not at whatever is topmost.
+            //
+            // Several turns can be running at once, and the request already said
+            // which one it means. Falling back to the untargeted path would stop
+            // an arbitrary other turn, which is worse than stopping nothing.
+            //
+            // Nothing to answer: what the interrupt did lands in the
+            // conversation, and the turn's own outcome is still the reply to its
+            // `query`.
+            //
+            // A scope with no handler is benign, so it stays at debug: the turn
+            // finished before the request arrived. An id that does not parse is
+            // the plugin's bug, and silence would leave its author unable to
+            // tell the two apart.
+            //
+            // `interrupt_scope` is called before the macro, not inside it: a
+            // tracing field expression only runs when the callsite is enabled,
+            // and a run whose log file could not be created installs no
+            // subscriber at all. The interrupt has to happen either way.
+            match parse_conversation_id(&req.conversation) {
+                Ok(id) => {
+                    let reached = signals.interrupt_scope(id);
+                    debug!(
+                        conversation = %req.conversation,
+                        reached,
+                        "Interrupting on a plugin's behalf."
+                    );
+                }
+                Err(error) => warn!(
+                    conversation = %req.conversation,
+                    %error,
+                    "Ignoring an interrupt that names an unparseable conversation."
+                ),
+            }
         }
 
         PluginToHost::ListConfigs(req) => {

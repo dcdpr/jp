@@ -1,6 +1,6 @@
 use camino_tempfile::{Utf8TempDir, tempdir};
 use jp_conversation::{Conversation, ConversationId};
-use jp_plugin::message::{ExitMessage, ReadyMessage};
+use jp_plugin::message::{ExitMessage, InterruptRequest, ReadyMessage};
 use jp_storage::backend::{FsStorageBackend, PersistBackend as _};
 use relative_path::RelativePathBuf;
 use serde_json::json;
@@ -14,9 +14,91 @@ fn bare_workspace() -> Workspace {
     Workspace::in_memory("/tmp/jp-test-plugin")
 }
 
+/// A router with no signal source, for requests that never reach one.
+///
+/// Must be called inside a tokio runtime, which is why the tests using it are
+/// `#[tokio::test]` despite `handle_request` being synchronous.
+fn router() -> SignalRouter {
+    crate::signals::testing::detached_router()
+}
+
 /// How a conversation is spelled on the wire, matching `list_conversations`.
 fn wire_id(id: ConversationId) -> String {
     id.to_string()
+}
+
+/// A fixed conversation id, distinct per `secs`.
+fn conversation_id(secs: u64) -> ConversationId {
+    ConversationId::try_from(
+        chrono::DateTime::<chrono::Utc>::UNIX_EPOCH + std::time::Duration::from_secs(secs),
+    )
+    .unwrap()
+}
+
+/// The turn is told to stop whether or not anything is listening to logs.
+///
+/// A run whose `--log-file` names a directory that does not exist installs no
+/// tracing subscriber at all, and a `tracing` field expression does not run
+/// when its callsite is disabled.
+/// These tests install no subscriber either, so an `interrupt_scope` call
+/// written inside the macro is never made.
+#[tokio::test]
+async fn an_interrupt_is_issued_without_a_tracing_subscriber() {
+    let mut ws = bare_workspace();
+    let mut sink: Vec<u8> = Vec::new();
+    let signals = router();
+
+    let id = conversation_id(1_700_000_000);
+    let (_guard, mut interrupted) = signals.push_handler_for(id);
+
+    handle_request(
+        PluginToHost::Interrupt(InterruptRequest {
+            conversation: wire_id(id),
+        }),
+        &mut sink,
+        &mut ws,
+        &json!({}),
+        None,
+        None,
+        &AppConfig::new_test(),
+        &signals,
+    )
+    .unwrap();
+
+    assert!(
+        interrupted.try_recv().is_ok(),
+        "the turn was never told to stop"
+    );
+}
+
+/// An interrupt naming something that is not a conversation id is the plugin's
+/// bug, and must not be mistaken for a turn that already finished.
+#[tokio::test]
+async fn an_unparseable_interrupt_reaches_no_handler() {
+    let mut ws = bare_workspace();
+    let mut sink: Vec<u8> = Vec::new();
+    let signals = router();
+
+    let (_guard, mut interrupted) = signals.push_handler_for(conversation_id(1_700_000_000));
+
+    handle_request(
+        PluginToHost::Interrupt(InterruptRequest {
+            conversation: "not-an-id".to_owned(),
+        }),
+        &mut sink,
+        &mut ws,
+        &json!({}),
+        None,
+        None,
+        &AppConfig::new_test(),
+        &signals,
+    )
+    .unwrap();
+
+    assert!(
+        interrupted.try_recv().is_err(),
+        "a malformed id must not stop an unrelated turn"
+    );
 }
 
 /// A workspace holding one conversation already on disk.
@@ -506,8 +588,8 @@ fn a_conversation_is_named_the_way_jp_prints_it() {
     assert_eq!(summary.id, "jp-c17000000000");
 }
 
-#[test]
-fn a_ready_carries_on_and_a_clean_exit_stops() {
+#[tokio::test]
+async fn a_ready_carries_on_and_a_clean_exit_stops() {
     let mut ws = bare_workspace();
     let config = json!({});
     let mut sink: Vec<u8> = Vec::new();
@@ -521,6 +603,7 @@ fn a_ready_carries_on_and_a_clean_exit_stops() {
             None,
             None,
             &AppConfig::new_test(),
+            &router(),
         )
         .unwrap(),
         Flow::Continue
@@ -538,6 +621,7 @@ fn a_ready_carries_on_and_a_clean_exit_stops() {
             None,
             None,
             &AppConfig::new_test(),
+            &router(),
         )
         .unwrap(),
         Flow::Stop
@@ -546,8 +630,8 @@ fn a_ready_carries_on_and_a_clean_exit_stops() {
 
 /// A non-zero exit is the plugin's failure, so it surfaces as one rather than
 /// ending the run quietly.
-#[test]
-fn a_failing_exit_carries_its_code_and_reason() {
+#[tokio::test]
+async fn a_failing_exit_carries_its_code_and_reason() {
     let mut ws = bare_workspace();
     let mut sink: Vec<u8> = Vec::new();
 
@@ -562,6 +646,7 @@ fn a_failing_exit_carries_its_code_and_reason() {
         None,
         None,
         &AppConfig::new_test(),
+        &router(),
     )
     .expect_err("a non-zero exit is an error");
 
@@ -726,8 +811,8 @@ fn a_lone_error_is_reported_as_itself() {
 
 /// A plugin needing a newer protocol than this host is refused on its `ready`,
 /// before it can send anything the host would fail to parse.
-#[test]
-fn a_plugin_needing_a_newer_protocol_is_refused() {
+#[tokio::test]
+async fn a_plugin_needing_a_newer_protocol_is_refused() {
     let mut ws = bare_workspace();
     let mut sink: Vec<u8> = Vec::new();
 
@@ -741,6 +826,7 @@ fn a_plugin_needing_a_newer_protocol_is_refused() {
         None,
         None,
         &AppConfig::new_test(),
+        &router(),
     )
     .expect_err("a plugin needing a newer protocol must be refused");
 
