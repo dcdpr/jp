@@ -442,6 +442,11 @@ Ok(
                 llm: PartialLlmProviderConfig {
                     aliases: {},
                     anthropic: PartialAnthropicConfig {
+                        auth: Some(
+                            [
+                                ApiKey,
+                            ],
+                        ),
                         api_key_env: Some(
                             "ANTHROPIC_API_KEY",
                         ),

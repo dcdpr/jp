@@ -216,6 +216,7 @@ PartialAppConfig {
         llm: PartialLlmProviderConfig {
             aliases: {},
             anthropic: PartialAnthropicConfig {
+                auth: None,
                 api_key_env: None,
                 base_url: None,
                 chain_on_max_tokens: None,

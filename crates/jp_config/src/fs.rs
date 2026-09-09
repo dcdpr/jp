@@ -339,6 +339,51 @@ impl ConfigLoader {
     }
 }
 
+/// Environment variable used to override the user data directory.
+///
+/// When set, [`user_data_dir`] returns this path verbatim, taking precedence
+/// over `XDG_DATA_HOME` and the platform default.
+/// The path is JP-specific: no `jp` suffix is appended.
+const USER_DATA_DIR_ENV_VAR: &str = "JP_USER_DATA_DIR";
+
+/// Returns the directory JP stores its per-user data in.
+///
+/// Resolution order:
+///
+/// 1. `JP_USER_DATA_DIR` if set to a non-empty value (used verbatim).
+///    Empty values are treated as unset to avoid silently redirecting
+///    persistent state into the current working directory when callers join
+///    relative paths onto the result.
+/// 2. `$XDG_DATA_HOME/jp` if `XDG_DATA_HOME` is set to an absolute path.
+///    Honored on all platforms, not just Linux — on macOS and Windows this
+///    lets users who run JP alongside other XDG-aware tools keep their data in
+///    one place rather than under `~/Library/Application Support` or
+///    `%LOCALAPPDATA%`.
+///    Per the XDG Base Directory Specification, empty or relative values are
+///    treated as unset.
+/// 3. The platform default via `directories::ProjectDirs::data_local_dir`.
+///
+/// Returns `None` when no home directory can be determined, or the platform
+/// default is not valid UTF-8.
+#[must_use]
+pub fn user_data_dir() -> Option<Utf8PathBuf> {
+    if let Ok(path) = env::var(USER_DATA_DIR_ENV_VAR)
+        && !path.is_empty()
+    {
+        return Some(Utf8PathBuf::from(path));
+    }
+
+    if let Ok(xdg) = env::var("XDG_DATA_HOME") {
+        let xdg = Utf8PathBuf::from(xdg);
+        if xdg.is_absolute() {
+            return Some(xdg.join(APPLICATION));
+        }
+    }
+
+    ProjectDirs::from("", "", APPLICATION)
+        .and_then(|p| Utf8PathBuf::from_path_buf(p.data_local_dir().to_path_buf()).ok())
+}
+
 /// Get the path to the user-global config directory.
 ///
 /// If `JP_GLOBAL_CONFIG_DIR` is set, returns that path (after tilde expansion).

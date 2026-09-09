@@ -4,7 +4,7 @@ pub mod llm;
 pub mod mcp;
 
 use indexmap::IndexMap;
-use schematic::Config;
+use schematic::{Config, ConfigError};
 
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
@@ -16,6 +16,7 @@ use crate::{
         mcp::McpProviderConfig,
     },
     util::merge_nested_indexmap,
+    validate::Validator,
 };
 
 /// Provider configuration.
@@ -35,6 +36,12 @@ pub struct ProviderConfig {
     /// The key is the server ID.
     #[setting(nested, merge = merge_nested_indexmap)]
     pub mcp: IndexMap<String, McpProviderConfig>,
+}
+
+impl Validator for ProviderConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        self.llm.validate()
+    }
 }
 
 impl AssignKeyValue for PartialProviderConfig {
