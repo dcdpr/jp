@@ -148,7 +148,7 @@ use crate::{
     output::print_json,
     parser::{AttachmentUrlOrPath, split_list},
     render::{RenderFlow, TurnView, tool::output_lines},
-    signals::SignalRouter,
+    signals::{SignalRouter, TurnInterrupt},
 };
 
 type BoxedResult<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
@@ -709,7 +709,7 @@ impl Query {
         .await?;
 
         let mut turn_result = inputs
-            .run(lock, stream)
+            .run(lock, stream, ctx.signals.turn_interrupt(lock.id()))
             .await
             .map_err(|error| cmd::Error::from(error).with_persistence(true));
 
@@ -1053,6 +1053,7 @@ impl Query {
         chat_request: ChatRequest,
         invocation: InvocationContext,
         pending_trim: PendingStreamTrim,
+        mut turn_interrupt: TurnInterrupt,
     ) -> Result<()> {
         let model_id = cfg.assistant.model.id.resolved();
         let provider: Arc<dyn jp_llm::Provider> = Arc::from(provider::get_provider(
@@ -1061,16 +1062,12 @@ impl Query {
         )?);
         debug!(model = %model_id, "Fetching model details.");
 
-        // The last await before `run_turn_loop` registers its own handler, and a
-        // network round trip. Registered and polled here for the same reason the
-        // preflight sequence is: a handler that exists but nobody reads takes
-        // the interrupt off the channel and drops it, and the caller is told it
-        // was delivered.
-        let (lookup_guard, mut interrupted) = signals.push_handler_for(lock.id());
+        // A network round trip, and the last await before the turn loop starts
+        // reading the same receiver.
         let model = tokio::select! {
             details = provider.model_details(&model_id.name) => details?,
 
-            notified = interrupted.recv() => {
+            notified = turn_interrupt.recv() => {
                 // Nothing has been appended yet, so there is nothing to commit
                 // and nothing to sanitize.
                 if let Some(notice) = notified {
@@ -1080,10 +1077,6 @@ impl Query {
                 return Ok(());
             }
         };
-
-        // Everything from here to `run_turn_loop`'s own registration is
-        // synchronous, so this scope has no further awaits to cover.
-        drop(lookup_guard);
 
         debug!(model = model.name(), "Model details resolved.");
 
@@ -1119,6 +1112,7 @@ impl Query {
             chat_request,
             invocation,
             pending_trim,
+            turn_interrupt,
         )
         .await
     }
@@ -1474,19 +1468,9 @@ impl TurnInputs {
         self,
         lock: &ConversationLock,
         stream: ConversationStream,
+        mut turn_interrupt: TurnInterrupt,
     ) -> Result<()> {
         let cfg = &self.config;
-
-        // An interrupt naming this conversation has to reach something for the
-        // whole time the lock is held, and `run_turn_loop` does not register its
-        // handler until every await below has finished. Starting an MCP server
-        // can mean compiling one, so that is minutes during which a stop request
-        // would otherwise find no handler for this conversation and be dropped.
-        //
-        // Scoped like every handler within a turn, and outermost: once
-        // `run_turn_loop` registers its own, that one is innermost and receives
-        // interrupts instead.
-        let (_preflight_guard, mut interrupted) = self.signals.push_handler_for(lock.id());
 
         let prepared = tokio::select! {
             result = async {
@@ -1531,7 +1515,7 @@ impl TurnInputs {
                 Ok::<_, Error>((attachments, tools))
             } => result?,
 
-            notified = interrupted.recv() => {
+            notified = turn_interrupt.recv() => {
                 // Nothing has been appended to the conversation yet: the request
                 // is added at the turn-start commit point inside the loop below.
                 // So there is nothing to commit and nothing to sanitize, and
@@ -1576,6 +1560,7 @@ impl TurnInputs {
                 conversation_id: lock.id().to_string(),
             },
             self.pending_trim,
+            turn_interrupt,
         )
         .await
     }

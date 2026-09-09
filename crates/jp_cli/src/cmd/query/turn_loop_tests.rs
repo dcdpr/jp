@@ -395,6 +395,7 @@ async fn test_interrupt_stop_during_streaming_persists_content() {
             chat_request.clone(),
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await;
 
@@ -497,6 +498,7 @@ async fn test_streaming_interrupt_menu_cancel_escalates() {
             chat_request.clone(),
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await;
 
@@ -580,6 +582,7 @@ async fn test_normal_completion_persists_content() {
         chat_request.clone(),
         InvocationContext::default(),
         PendingStreamTrim::default(),
+        router.turn_interrupt(lock.id()),
     )
     .await
     .unwrap();
@@ -665,6 +668,7 @@ async fn premature_stream_end_without_finished_returns_error() {
             ChatRequest::from("hi"),
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         ),
     )
     .await
@@ -728,6 +732,7 @@ async fn premature_stream_end_exhausts_retry_budget() {
             ChatRequest::from("hi"),
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         ),
     )
     .await
@@ -807,6 +812,7 @@ async fn output_ceiling_ends_turn_without_re_requesting() {
             ChatRequest::from("hi"),
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         ),
     )
     .await
@@ -911,6 +917,7 @@ async fn orphan_tool_call_is_sanitized_before_provider_request() {
         ChatRequest::from("new query"),
         InvocationContext::default(),
         PendingStreamTrim::default(),
+        router.turn_interrupt(lock.id()),
     )
     .await
     .unwrap();
@@ -995,6 +1002,7 @@ async fn test_tool_call_cycle_completes_with_followup() {
         chat_request.clone(),
         InvocationContext::default(),
         PendingStreamTrim::default(),
+        router.turn_interrupt(lock.id()),
     )
     .await;
 
@@ -1292,6 +1300,7 @@ async fn test_tool_interrupt_menu_cancel_escalates() {
             chat_request.clone(),
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await;
 
@@ -1441,6 +1450,7 @@ async fn test_tool_stop_on_interrupt_commits_responses_without_follow_up() {
             chat_request.clone(),
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await;
 
@@ -1583,6 +1593,7 @@ async fn test_interrupt_during_tool_prompt_completes_turn_early() {
             chat_request.clone(),
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await;
 
@@ -1694,6 +1705,7 @@ async fn test_multiple_tool_calls_in_sequence() {
         chat_request.clone(),
         InvocationContext::default(),
         PendingStreamTrim::default(),
+        router.turn_interrupt(lock.id()),
     )
     .await;
 
@@ -1784,6 +1796,7 @@ async fn test_empty_tool_response_continues_cycle() {
         chat_request.clone(),
         InvocationContext::default(),
         PendingStreamTrim::default(),
+        router.turn_interrupt(lock.id()),
     )
     .await;
 
@@ -1929,6 +1942,7 @@ async fn test_tool_restart_on_interrupt() {
             chat_request.clone(),
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await;
 
@@ -2050,6 +2064,7 @@ async fn test_merged_stream_exits_after_tool_response() {
             chat_request.clone(),
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await;
 
@@ -2177,6 +2192,7 @@ async fn test_tool_call_with_run_mode_ask_approves() {
             chat_request.clone(),
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await;
 
@@ -2319,6 +2335,7 @@ async fn test_tool_call_with_run_mode_ask_skips() {
             chat_request.clone(),
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await;
 
@@ -2472,6 +2489,7 @@ async fn test_permission_prompt_follows_interactive_not_is_tty() {
             chat_request.clone(),
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await;
 
@@ -2595,6 +2613,7 @@ async fn test_tool_call_with_run_mode_unattended() {
             chat_request.clone(),
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await;
 
@@ -2742,6 +2761,7 @@ async fn test_tool_call_with_run_mode_skip() {
             chat_request.clone(),
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await;
 
@@ -2945,6 +2965,7 @@ async fn test_multiple_tools_with_different_run_modes() {
             chat_request.clone(),
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await;
 
@@ -3093,6 +3114,7 @@ async fn test_tool_call_returns_error() {
             chat_request.clone(),
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await;
 
@@ -3328,6 +3350,7 @@ async fn test_waiting_indicator_shows_during_delay() {
             chat_request.clone(),
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await
         .unwrap();
@@ -3428,6 +3451,7 @@ async fn test_waiting_indicator_survives_keep_alive_and_shows_status() {
             chat_request.clone(),
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await
         .unwrap();
@@ -3542,6 +3566,7 @@ async fn test_waiting_indicator_cleared_before_retry_notice() {
             chat_request.clone(),
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await
         .unwrap();
@@ -3629,6 +3654,7 @@ async fn test_waiting_indicator_not_shown_when_disabled() {
             chat_request.clone(),
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await
         .unwrap();
@@ -3708,6 +3734,7 @@ async fn test_waiting_indicator_not_shown_for_non_tty() {
             chat_request.clone(),
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await
         .unwrap();
@@ -3788,6 +3815,7 @@ async fn test_waiting_indicator_follows_stderr_not_stdout() {
             chat_request.clone(),
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await
         .unwrap();
@@ -3973,6 +4001,7 @@ async fn test_multi_part_tool_call_shows_preparing_spinner() {
             chat_request.clone(),
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await;
 
@@ -4060,6 +4089,7 @@ async fn test_turn_start_event_is_emitted() {
         chat_request.clone(),
         InvocationContext::default(),
         PendingStreamTrim::default(),
+        router.turn_interrupt(lock.id()),
     )
     .await
     .unwrap();
@@ -4123,6 +4153,7 @@ async fn test_turn_start_index_increments_across_turns() {
         chat_request.clone(),
         InvocationContext::default(),
         PendingStreamTrim::default(),
+        router.turn_interrupt(lock.id()),
     )
     .await
     .unwrap();
@@ -4158,6 +4189,7 @@ async fn test_turn_start_index_increments_across_turns() {
         chat_request.clone(),
         InvocationContext::default(),
         PendingStreamTrim::default(),
+        router.turn_interrupt(lock.id()),
     )
     .await
     .unwrap();
@@ -4253,6 +4285,7 @@ async fn test_markdown_flushed_before_tool_header() {
             chat_request.clone(),
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await
         .unwrap();
@@ -4438,6 +4471,7 @@ async fn test_parallel_tool_calls_rendered_atomically() {
             chat_request.clone(),
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await
         .unwrap();
@@ -4597,6 +4631,7 @@ async fn test_single_tool_call_rendered_with_args() {
             chat_request.clone(),
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await
         .unwrap();
@@ -4843,6 +4878,7 @@ async fn a_running_tools_stderr_reaches_the_progress_window() {
             ChatRequest::from("Build it"),
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await
         .unwrap();
@@ -4940,6 +4976,7 @@ async fn parallel_tools_label_their_window_rows() {
             ChatRequest::from("Run both"),
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await
         .unwrap();
@@ -5061,6 +5098,7 @@ async fn a_tool_result_survives_a_live_window() {
             ChatRequest::from("Run both"),
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await
         .unwrap();
@@ -5176,6 +5214,7 @@ async fn a_sink_survives_the_re_spawn_an_answer_triggers() {
             ChatRequest::from("Ask then work"),
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await
         .unwrap();
@@ -5309,6 +5348,7 @@ async fn a_tool_can_opt_out_of_the_progress_window() {
             ChatRequest::from("Run both"),
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await
         .unwrap();
@@ -5533,6 +5573,7 @@ async fn a_tool_prompt_hides_the_window_and_restores_it() {
             ChatRequest::from("Ask me"),
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await
         .unwrap();
@@ -6028,6 +6069,7 @@ async fn test_tool_with_single_inquiry() {
             chat_request,
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await;
 
@@ -6156,6 +6198,7 @@ async fn test_secret_question_without_tty_fails_tool() {
             chat_request,
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await;
 
@@ -6265,6 +6308,7 @@ async fn test_secret_question_with_assistant_target_fails_tool() {
             chat_request,
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await;
 
@@ -6367,6 +6411,7 @@ async fn test_secret_prompter_answer_is_redacted() {
             chat_request,
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await;
 
@@ -6473,6 +6518,7 @@ async fn test_secret_static_answer_is_redacted() {
             chat_request,
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await;
 
@@ -6580,6 +6626,7 @@ async fn test_static_answer_records_answered_inquiry() {
             chat_request,
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await;
 
@@ -6695,6 +6742,7 @@ async fn test_remembered_answer_cache_hit_records_new_inquiry_pair() {
             chat_request,
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await;
 
@@ -6817,6 +6865,7 @@ async fn test_tool_with_multiple_inquiries() {
             chat_request,
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await;
 
@@ -6969,6 +7018,7 @@ async fn test_parallel_tools_one_with_inquiry() {
             chat_request,
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await;
 
@@ -7107,6 +7157,7 @@ async fn test_parallel_tools_both_with_inquiries() {
             chat_request,
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await;
 
@@ -7257,6 +7308,7 @@ async fn test_retry_counter_resets_on_successful_event() {
             chat_request,
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await;
 
@@ -7396,6 +7448,7 @@ async fn test_unavailable_tool_before_approved_does_not_panic() {
             chat_request,
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await;
 
@@ -7506,6 +7559,7 @@ async fn test_inquiry_failure_marks_tool_as_error() {
             chat_request,
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await;
 
@@ -7700,6 +7754,7 @@ async fn test_live_header_uses_configured_model_id_not_provider_returned() {
             chat_request,
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await
         .unwrap();
@@ -7815,6 +7870,7 @@ async fn reasoning_before_a_tool_call_shades_the_tool_chrome() {
         ChatRequest::from("use the tool"),
         InvocationContext::default(),
         PendingStreamTrim::default(),
+        router.turn_interrupt(lock.id()),
     )
     .await
     .unwrap();
@@ -7943,6 +7999,7 @@ async fn test_rebuild_cap_stops_a_provider_that_keeps_requesting_rebuilds() {
         ChatRequest::from("repair this"),
         InvocationContext::default(),
         PendingStreamTrim::default(),
+        router.turn_interrupt(lock.id()),
     )
     .await;
 
@@ -8034,6 +8091,7 @@ async fn test_refused_rebuild_clears_the_retry_line() {
             ChatRequest::from("answer this"),
             InvocationContext::default(),
             PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
         )
         .await;
 
@@ -8118,6 +8176,7 @@ async fn test_refused_rebuild_persists_streamed_content() {
         ChatRequest::from("answer this"),
         InvocationContext::default(),
         PendingStreamTrim::default(),
+        router.turn_interrupt(lock.id()),
     )
     .await;
 

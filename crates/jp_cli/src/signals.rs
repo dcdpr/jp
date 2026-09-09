@@ -206,6 +206,21 @@ impl SignalRouter {
         self.inner.push_handler(Some(conversation))
     }
 
+    /// Register the handler a turn is driven through, for as long as its
+    /// conversation is locked.
+    ///
+    /// Registered by whoever takes the lock, so every span between taking it
+    /// and releasing it reads the same receiver: waiting on MCP servers,
+    /// looking up the model, and the turn itself.
+    /// A handler that exists for only part of that time is worse than none for
+    /// the rest of it — a press delivered to a receiver nobody polls again is
+    /// reported as delivered and then dropped.
+    #[must_use]
+    pub fn turn_interrupt(&self, conversation: ConversationId) -> TurnInterrupt {
+        let (guard, rx) = self.inner.push_handler(Some(conversation));
+        TurnInterrupt { _guard: guard, rx }
+    }
+
     /// Interrupt one named scope, leaving every other handler alone.
     ///
     /// For interrupts that arrive with a target rather than from a keyboard.
@@ -224,6 +239,33 @@ impl SignalRouter {
     /// has already finished.
     pub fn interrupt_scope(&self, conversation: ConversationId) -> bool {
         self.inner.notify_scope(conversation)
+    }
+}
+
+/// The interrupt handler a turn is driven through.
+///
+/// Held from the moment the conversation is locked until the turn ends, and
+/// passed down rather than re-registered, so no span along the way can take a
+/// press onto a channel it will never read again.
+///
+/// Deregisters on drop.
+pub struct TurnInterrupt {
+    _guard: InterruptGuard,
+    rx: mpsc::Receiver<InterruptNotice>,
+}
+
+impl TurnInterrupt {
+    /// Wait for an interrupt naming this turn's conversation.
+    ///
+    /// Cancel-safe, so it can sit in a [`tokio::select!`] arm against the work
+    /// it is interrupting.
+    pub async fn recv(&mut self) -> Option<InterruptNotice> {
+        self.rx.recv().await
+    }
+
+    /// Take an interrupt that already arrived, without waiting for one.
+    pub fn try_recv(&mut self) -> Option<InterruptNotice> {
+        self.rx.try_recv().ok()
     }
 }
 

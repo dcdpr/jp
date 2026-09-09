@@ -1,6 +1,6 @@
 use camino_tempfile::{Utf8TempDir, tempdir};
 use jp_conversation::{Conversation, ConversationId};
-use jp_plugin::message::{ExitMessage, ReadyMessage};
+use jp_plugin::message::{ExitMessage, InterruptRequest, ReadyMessage};
 use jp_storage::backend::{FsStorageBackend, PersistBackend as _};
 use relative_path::RelativePathBuf;
 use serde_json::json;
@@ -25,6 +25,80 @@ fn router() -> SignalRouter {
 /// How a conversation is spelled on the wire, matching `list_conversations`.
 fn wire_id(id: ConversationId) -> String {
     id.to_string()
+}
+
+/// A fixed conversation id, distinct per `secs`.
+fn conversation_id(secs: u64) -> ConversationId {
+    ConversationId::try_from(
+        chrono::DateTime::<chrono::Utc>::UNIX_EPOCH + std::time::Duration::from_secs(secs),
+    )
+    .unwrap()
+}
+
+/// The turn is told to stop whether or not anything is listening to logs.
+///
+/// A run whose `--log-file` names a directory that does not exist installs no
+/// tracing subscriber at all, and a `tracing` field expression does not run
+/// when its callsite is disabled.
+/// These tests install no subscriber either, so an `interrupt_scope` call
+/// written inside the macro is never made.
+#[tokio::test]
+async fn an_interrupt_is_issued_without_a_tracing_subscriber() {
+    let mut ws = bare_workspace();
+    let mut sink: Vec<u8> = Vec::new();
+    let signals = router();
+
+    let id = conversation_id(1_700_000_000);
+    let (_guard, mut interrupted) = signals.push_handler_for(id);
+
+    handle_request(
+        PluginToHost::Interrupt(InterruptRequest {
+            conversation: wire_id(id),
+        }),
+        &mut sink,
+        &mut ws,
+        &json!({}),
+        None,
+        None,
+        &AppConfig::new_test(),
+        &signals,
+    )
+    .unwrap();
+
+    assert!(
+        interrupted.try_recv().is_ok(),
+        "the turn was never told to stop"
+    );
+}
+
+/// An interrupt naming something that is not a conversation id is the plugin's
+/// bug, and must not be mistaken for a turn that already finished.
+#[tokio::test]
+async fn an_unparseable_interrupt_reaches_no_handler() {
+    let mut ws = bare_workspace();
+    let mut sink: Vec<u8> = Vec::new();
+    let signals = router();
+
+    let (_guard, mut interrupted) = signals.push_handler_for(conversation_id(1_700_000_000));
+
+    handle_request(
+        PluginToHost::Interrupt(InterruptRequest {
+            conversation: "not-an-id".to_owned(),
+        }),
+        &mut sink,
+        &mut ws,
+        &json!({}),
+        None,
+        None,
+        &AppConfig::new_test(),
+        &signals,
+    )
+    .unwrap();
+
+    assert!(
+        interrupted.try_recv().is_err(),
+        "a malformed id must not stop an unrelated turn"
+    );
 }
 
 /// A workspace holding one conversation already on disk.

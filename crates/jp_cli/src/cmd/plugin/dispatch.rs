@@ -688,6 +688,13 @@ async fn run_query(
         Err(error) => return failed(error),
     };
 
+    // Registered before the turn is spawned, not inside it: the message loop is
+    // serial, so a plugin that sends `query` and then `interrupt` has the second
+    // dispatched while the task may not have started. A handler registered by
+    // the task itself would not exist yet, and the stop request would be
+    // reported as reaching nothing.
+    let turn_interrupt = ctx.signals.turn_interrupt(lock.id());
+
     // Read from the lock, not the request: a new conversation was named by the
     // host, and the plugin has no other way to learn its id.
     let conversation = lock.id().to_string();
@@ -747,7 +754,7 @@ async fn run_query(
     let stdin = Arc::clone(stdin);
 
     turns.spawn(async move {
-        let outcome = inputs.run(&lock, stream).await;
+        let outcome = inputs.run(&lock, stream, turn_interrupt).await;
 
         // Reported through tracing rather than to the terminal. These are facts
         // about the host, not content: the turn's output belongs to the

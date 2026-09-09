@@ -289,6 +289,87 @@ fn build_query_config(
     build(partial).unwrap()
 }
 
+/// A stop request that lands while MCP servers are starting ends the turn
+/// before it runs.
+///
+/// Starting a server can mean compiling one, so this is the longest stretch
+/// between taking the conversation lock and the turn loop reading its first
+/// event.
+/// A handler registered only once that loop starts would leave a stop request
+/// with nothing to reach for the whole of it.
+///
+/// The startup here never completes, so the only way out of `run` is the
+/// interrupt: without it the test hangs, and the timeout reports that as a
+/// failure rather than letting it run forever.
+#[tokio::test]
+async fn an_interrupt_during_mcp_startup_stops_the_turn_before_it_runs() {
+    let tmp = camino_tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::in_memory(tmp.path());
+    let conversation_id = ConversationId::try_from(
+        chrono::DateTime::<chrono::Utc>::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000),
+    )
+    .unwrap();
+    let base_config = Arc::new(AppConfig::new_test());
+    workspace.create_conversation_with_id(
+        conversation_id,
+        Conversation::default(),
+        Arc::clone(&base_config),
+    );
+    let handle = workspace.acquire_conversation(&conversation_id).unwrap();
+    let lock = workspace.test_lock(handle);
+
+    // Held open for the life of the test: the server never finishes starting,
+    // so `await_mcp_servers` never returns on its own.
+    let (_release, release_rx) = tokio::sync::oneshot::channel::<()>();
+    let mut joins = tokio::task::JoinSet::new();
+    joins.spawn(async move {
+        release_rx.await.ok();
+        Ok(Startup::Ready(McpServerId::new("bookworm")))
+    });
+    let (mcp_servers, _lines) = startup_set(joins, vec![McpServerId::new("bookworm")]);
+
+    let router = detached_router();
+    let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
+
+    let inputs = TurnInputs {
+        config: Arc::clone(&base_config),
+        signals: router.clone(),
+        mcp_client: jp_mcp::Client::default(),
+        workspace_root: tmp.path().to_path_buf(),
+        interactive: false,
+        attachments: PendingAttachments { slots: vec![] },
+        printer: Arc::new(printer),
+        approvals: Arc::new(crate::access::approvals::ApprovalStore::default()),
+        chat_request: ChatRequest::from("hello"),
+        workspace_id: workspace.id().clone(),
+        pending_trim: PendingStreamTrim::default(),
+        mcp_servers,
+    };
+
+    // Registered where the lock is taken, so the request reaches it even though
+    // the turn has not started. The notice waits on the channel until `run`
+    // polls it.
+    let interrupt = router.turn_interrupt(conversation_id);
+    assert!(
+        router.interrupt_scope(conversation_id),
+        "the handler exists as soon as the conversation is locked"
+    );
+
+    let stream = lock.events().clone();
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        inputs.run(&lock, stream, interrupt),
+    )
+    .await
+    .expect("the interrupt ends the wait; a hang here means it was never seen")
+    .expect("stopping before the turn starts is not an error");
+
+    assert!(
+        lock.events().is_empty(),
+        "the turn was interrupted before its request was appended"
+    );
+}
+
 async fn run_mock_turn(
     root: &camino::Utf8Path,
     cfg: &AppConfig,
@@ -324,6 +405,7 @@ async fn run_mock_turn(
         ChatRequest::from(prompt),
         InvocationContext::default(),
         PendingStreamTrim::default(),
+        router.turn_interrupt(lock.id()),
     )
     .await
     .unwrap();
