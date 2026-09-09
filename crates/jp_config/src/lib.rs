@@ -427,11 +427,24 @@ impl AppConfig {
         // before the `#[setting(default)]` layer below, so an unset inquiry
         // field takes the user's configured assistant value rather than the
         // type's default.
+        //
+        // The capacity tier is withheld from what the inquiry inherits. An
+        // inquiry blocks the tool call that raised it, so it cannot pay for a
+        // discount in latency the way a long assistant turn can; Anthropic's
+        // `flex` is the sharp case, served by the Message Batches API, which
+        // answers in minutes. Withholding it here rather than pinning `off` on
+        // the inquiry leaves the field genuinely unset, so nothing is recorded
+        // into a conversation's stored config. Setting
+        // `conversation.inquiry.assistant.model.parameters.service_tier`
+        // explicitly still wins, since that value is already in place.
+        let mut inherited = partial.assistant.clone();
+        inherited.model.parameters.service_tier = None;
+
         partial.conversation.inquiry.assistant = partial
             .conversation
             .inquiry
             .assistant
-            .inherit_from(partial.assistant.clone());
+            .inherit_from(inherited);
 
         let partial = match PartialAppConfig::default_values(&())? {
             Some(defaults) => partial.fill_from(defaults),

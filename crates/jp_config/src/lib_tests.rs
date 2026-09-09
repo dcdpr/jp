@@ -3,7 +3,10 @@ use schematic::PartialConfig as _;
 use test_log::test;
 
 use super::*;
-use crate::assignment::{KvAssignmentError, KvAssignmentErrorKind};
+use crate::{
+    assignment::{KvAssignmentError, KvAssignmentErrorKind},
+    model::parameters::ServiceTier,
+};
 
 #[test]
 fn test_partial_app_config_empty_serialize() {
@@ -105,6 +108,65 @@ fn inquiry_inherits_assistant_collections() {
         inquiry.system_prompt_sections.len(),
         1,
         "the inquiry inherits the assistant's prompt sections"
+    );
+}
+
+/// An inquiry blocks the tool call that raised it, so it cannot pay for a
+/// discount in latency the way a long assistant turn can.
+///
+/// Anthropic's `flex` is the sharp case: it is served by the Message Batches
+/// API, so an inherited tier would stall the tool for however long the batch
+/// takes.
+#[test]
+fn an_inquiry_does_not_inherit_the_assistants_service_tier() {
+    let mut partial = PartialAppConfig::new_test();
+    partial.assistant.model.parameters.service_tier = Some(ServiceTier::Flex);
+
+    let config = AppConfig::from_partial_with_defaults(partial).expect("valid config");
+
+    assert_eq!(
+        config.assistant.model.parameters.service_tier,
+        Some(ServiceTier::Flex),
+        "the assistant keeps the tier it was given"
+    );
+    assert_eq!(
+        config
+            .conversation
+            .inquiry
+            .assistant
+            .model
+            .parameters
+            .service_tier,
+        None,
+        "the inquiry asks for no tier at all, and records no value for it"
+    );
+}
+
+/// The rule is about inheritance, not about forbidding the tier: an inquiry
+/// pointed at a tier explicitly still gets it.
+#[test]
+fn an_explicit_inquiry_service_tier_survives() {
+    let mut partial = PartialAppConfig::new_test();
+    partial.assistant.model.parameters.service_tier = Some(ServiceTier::Priority);
+    partial
+        .conversation
+        .inquiry
+        .assistant
+        .model
+        .parameters
+        .service_tier = Some(ServiceTier::Flex);
+
+    let config = AppConfig::from_partial_with_defaults(partial).expect("valid config");
+
+    assert_eq!(
+        config
+            .conversation
+            .inquiry
+            .assistant
+            .model
+            .parameters
+            .service_tier,
+        Some(ServiceTier::Flex)
     );
 }
 

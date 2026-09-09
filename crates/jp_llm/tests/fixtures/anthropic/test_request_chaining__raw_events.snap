@@ -11,7 +11,9 @@ expression: v
             ),
             metadata: {},
         },
-        KeepAlive,
+        KeepAlive {
+            detail: None,
+        },
         Part {
             index: 0,
             part: Reasoning(
@@ -361,7 +363,9 @@ expression: v
             ),
             metadata: {},
         },
-        KeepAlive,
+        KeepAlive {
+            detail: None,
+        },
         Flush {
             index: 0,
             metadata: {},
@@ -555,7 +559,9 @@ expression: v
             ),
             metadata: {},
         },
-        KeepAlive,
+        KeepAlive {
+            detail: None,
+        },
         Flush {
             index: 0,
             metadata: {},

@@ -282,7 +282,9 @@ The grade of capacity a request is served from, trading price against latency
 and availability.
 JP models four rungs (`off`, `flex`, `standard`, `priority`) as `ServiceTier` in
 `jp_config::model::parameters`, and each [Provider](#provider) maps them onto
-its own wire vocabulary.
+its own mechanism — usually a request field, but not always: Anthropic prices
+`flex` through its asynchronous Message Batches API, so the rung selects an
+endpoint rather than a parameter.
 `off` is the rung that asks for nothing, which every provider expresses by
 sending no tier at all.
 

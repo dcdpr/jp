@@ -3391,7 +3391,7 @@ async fn test_waiting_indicator_survives_keep_alive_and_shows_status() {
         let provider: Arc<dyn Provider> =
             Arc::new(PacedMockProvider::new(Duration::from_millis(250), vec![
                 vec![
-                    (Duration::from_millis(250), Ok(Event::KeepAlive)),
+                    (Duration::from_millis(250), Ok(Event::keep_alive())),
                     (
                         Duration::from_millis(250),
                         Ok(Event::message(0, "Response after keep-alive")),
@@ -3468,6 +3468,94 @@ async fn test_waiting_indicator_survives_keep_alive_and_shows_status() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_waiting_indicator_shows_the_keep_alives_own_detail() {
+    // A request that is not producing tokens at all — an Anthropic batch being
+    // polled, say — would otherwise be described as "receiving response data",
+    // which is a plain lie for a wait measured in minutes. A keep-alive that
+    // names its own wait replaces that wording.
+
+    let test_result = Box::pin(timeout(Duration::from_secs(10), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let storage = root.join(".jp");
+
+        let mut config = AppConfig::new_test();
+        config.style.streaming.progress.show = true;
+        config.style.streaming.progress.delay_secs = 0;
+        config.style.streaming.progress.interval_ms = 50;
+
+        let fs = Arc::new(FsStorageBackend::new(&storage).expect("failed to create backend"));
+        let mut workspace = Workspace::in_memory(root).with_backend(fs.clone());
+
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), Arc::new(config.clone()), None)
+            .unwrap();
+
+        let provider: Arc<dyn Provider> =
+            Arc::new(PacedMockProvider::new(Duration::from_millis(250), vec![
+                vec![
+                    (
+                        Duration::from_millis(250),
+                        Ok(Event::keep_alive_with_detail("waiting on the batch")),
+                    ),
+                    (
+                        Duration::from_millis(250),
+                        Ok(Event::message(0, "Batched answer")),
+                    ),
+                    (Duration::ZERO, Ok(Event::flush(0))),
+                    (Duration::ZERO, Ok(Event::Finished(FinishReason::Completed))),
+                ],
+            ]));
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+
+        let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer.with_terminal(TerminalCapability::interactive(Some(80))));
+        let mcp_client = jp_mcp::Client::default();
+        let router = detached_router();
+
+        run_turn_loop(
+            Arc::clone(&provider),
+            &model,
+            &config,
+            &router,
+            &mcp_client,
+            root,
+            true, // interactive
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &[],
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), empty_executor_source()),
+            ChatRequest::from("Hello"),
+            InvocationContext::default(),
+            PendingStreamTrim::default(),
+        )
+        .await
+        .unwrap();
+
+        printer.flush();
+
+        let chrome = err.lock();
+        assert!(
+            chrome.contains("(waiting on the batch)"),
+            "Indicator should show the keep-alive's own detail.\nChrome:\n{chrome}"
+        );
+        assert!(
+            !chrome.contains("(receiving response data)"),
+            "A labelled keep-alive replaces the default wording.\nChrome:\n{chrome}"
+        );
+    }))
+    .await;
+
+    assert!(test_result.is_ok(), "Test timed out");
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_waiting_indicator_cleared_before_retry_notice() {
     // A stream error is about to write retry chrome, so the indicator must be
     // finished (line cleared) first. The keep-alive before the error also
@@ -3499,7 +3587,7 @@ async fn test_waiting_indicator_cleared_before_retry_notice() {
         let provider: Arc<dyn Provider> =
             Arc::new(PacedMockProvider::new(Duration::from_millis(100), vec![
                 vec![
-                    (Duration::from_millis(100), Ok(Event::KeepAlive)),
+                    (Duration::from_millis(100), Ok(Event::keep_alive())),
                     (
                         Duration::from_millis(100),
                         Err(StreamError::transient("simulated hiccup")),

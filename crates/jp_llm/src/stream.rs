@@ -230,7 +230,7 @@ pub fn with_tool_call_keepalive(stream: EventStream, interval: Duration) -> Even
                 Ok(None) => break,
                 // No event within `interval` while a tool call is open: emit a
                 // heartbeat so the gap reads as activity, then keep waiting.
-                Err(_elapsed) => yield Ok(Event::KeepAlive),
+                Err(_elapsed) => yield Ok(Event::keep_alive()),
             }
         }
     }

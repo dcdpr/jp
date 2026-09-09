@@ -69,9 +69,14 @@ pub enum Event {
 
     /// A liveness signal from the provider, such as an SSE keep-alive ping.
     ///
-    /// Carries no content and is never persisted or rendered.
-    /// It signals only that the connection is still alive.
-    KeepAlive,
+    /// Carries no content and is never persisted.
+    /// It signals only that the request is still alive.
+    ///
+    /// `detail` is a short phrase describing what the request is waiting on,
+    /// shown in the terminal's waiting indicator while the provider is silent.
+    /// `None` leaves the indicator's wording to the caller, which is right for
+    /// a heartbeat that says nothing beyond "still connected".
+    KeepAlive { detail: Option<String> },
 }
 
 /// A chunk of streaming data from an LLM provider.
@@ -243,6 +248,21 @@ impl From<&EventPatch> for OverlayPatch {
 }
 
 impl Event {
+    /// Create a new [`Event::KeepAlive`] carrying no description of the wait.
+    #[must_use]
+    pub fn keep_alive() -> Self {
+        Self::KeepAlive { detail: None }
+    }
+
+    /// Create a new [`Event::KeepAlive`] describing what the request is waiting
+    /// on.
+    #[must_use]
+    pub fn keep_alive_with_detail(detail: impl Into<String>) -> Self {
+        Self::KeepAlive {
+            detail: Some(detail.into()),
+        }
+    }
+
     /// Create a new [`Event::Part`] with a message chunk.
     #[must_use]
     pub fn message(index: usize, content: impl Into<String>) -> Self {

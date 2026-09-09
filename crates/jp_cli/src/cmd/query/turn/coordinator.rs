@@ -357,7 +357,7 @@ impl TurnCoordinator {
 
             // Patch is handled by the caller before reaching here; KeepAlive is
             // a liveness signal with nothing to record or render.
-            Event::Patch(_) | Event::KeepAlive => HandleEventOutcome::new(Action::Continue),
+            Event::Patch(_) | Event::KeepAlive { .. } => HandleEventOutcome::new(Action::Continue),
         }
     }
 

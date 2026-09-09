@@ -14,7 +14,9 @@ expression: v
             ),
             metadata: {},
         },
-        KeepAlive,
+        KeepAlive {
+            detail: None,
+        },
         Part {
             index: 0,
             part: ToolCall(
@@ -78,7 +80,9 @@ expression: v
         ),
     ],
     [
-        KeepAlive,
+        KeepAlive {
+            detail: None,
+        },
         Part {
             index: 0,
             part: Message(

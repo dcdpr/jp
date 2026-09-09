@@ -454,6 +454,12 @@ Ok(
                         beta_headers: Some(
                             [],
                         ),
+                        batch_poll_interval_secs: Some(
+                            15,
+                        ),
+                        batch_max_wait_secs: Some(
+                            3600,
+                        ),
                     },
                     cerebras: PartialCerebrasConfig {
                         api_key_env: Some(

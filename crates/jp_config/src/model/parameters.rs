@@ -59,6 +59,10 @@ pub struct ParametersConfig {
     /// - `off`: Send no tier, taking whatever the account is set up for.
     /// - `flex`: Slower and best-effort, priced at a discount where the
     ///   provider offers one.
+    ///   On `anthropic` this runs the request through the Message Batches API:
+    ///   half price, no streaming, and an answer that usually takes minutes.
+    ///   Tune the wait with `providers.llm.anthropic.batch_max_wait_secs` and
+    ///   `providers.llm.anthropic.batch_poll_interval_secs`.
     /// - `standard`: Regular priority and regular pricing.
     /// - `priority`: Faster and served from prioritized capacity, priced above
     ///   the regular rate where the provider charges for it.
@@ -73,7 +77,7 @@ pub struct ParametersConfig {
     /// account.
     /// A provider that sells no equivalent of the requested tier refuses the
     /// query and says so, rather than quietly falling back to a rung that costs
-    /// something else: `anthropic` has no `flex`, for instance.
+    /// something else.
     ///
     /// That refusal is per provider, not per model.
     /// A provider that sells the tier but cannot serve the chosen model with it

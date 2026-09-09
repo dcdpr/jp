@@ -130,25 +130,37 @@ fn claim_waiting_region(printer: &Printer, config: &StreamingConfig) -> StatusRe
     ))
 }
 
-/// Whether a streaming-loop event leaves the waiting indicator running.
+/// The detail to show while a streaming-loop event leaves the waiting indicator
+/// running, or `None` when the indicator has to be released.
 ///
 /// Keep-alive pings, history patches, and part-less flushes produce no terminal
 /// output, so the indicator stays up through them.
 /// Everything else (content parts, finish, stream errors, signals, preparing
 /// ticks) is about to write to the terminal and releases the indicator first.
 ///
+/// A keep-alive that names what it is waiting on replaces the default wording,
+/// so a provider that knows more than "still connected" can say so.
+///
 /// A `Flush` that commits content is always preceded by a `Part` for the same
 /// index, which already released the indicator; only a part-less flush — which
 /// commits nothing — can reach a live indicator.
-fn event_keeps_waiting_indicator(event: &StreamingLoopEvent) -> bool {
-    match event {
-        StreamingLoopEvent::Llm(result) => matches!(
-            result.as_ref(),
-            Ok(Event::KeepAlive | Event::Patch(_) | Event::Flush { .. })
-        ),
-        StreamingLoopEvent::Interrupt(_) => false,
+fn waiting_indicator_detail(event: &StreamingLoopEvent) -> Option<&str> {
+    let StreamingLoopEvent::Llm(result) = event else {
+        return None;
+    };
+
+    match result.as_ref() {
+        Ok(Event::KeepAlive { detail }) => {
+            Some(detail.as_deref().unwrap_or(DEFAULT_WAITING_DETAIL))
+        }
+        Ok(Event::Patch(_) | Event::Flush { .. }) => Some(DEFAULT_WAITING_DETAIL),
+        _ => None,
     }
 }
+
+/// What the waiting indicator says while the provider is producing a response
+/// but has not yet written anything to the terminal.
+const DEFAULT_WAITING_DETAIL: &str = "receiving response data";
 
 /// Runs the turn loop: streaming from LLM, handling signals, executing tools.
 ///
@@ -380,10 +392,9 @@ pub(super) async fn run_turn_loop(
                     // released on the first event that can write to the
                     // terminal. The printer erases the row before that write
                     // lands, so no ordering is owed here.
-                    if event_keeps_waiting_indicator(&event) {
-                        waiting.set_detail("receiving response data");
-                    } else {
-                        waiting.release();
+                    match waiting_indicator_detail(&event) {
+                        Some(detail) => waiting.set_detail(detail),
+                        None => waiting.release(),
                     }
 
                     match event {
@@ -535,7 +546,9 @@ pub(super) async fn run_turn_loop(
                             let advances_cycle = match &event {
                                 Event::Part { .. } => true,
                                 Event::Finished(reason) => *reason != FinishReason::Retry,
-                                Event::Flush { .. } | Event::Patch(_) | Event::KeepAlive => false,
+                                Event::Flush { .. } | Event::Patch(_) | Event::KeepAlive { .. } => {
+                                    false
+                                }
                             };
                             if !received_provider_event && advances_cycle {
                                 received_provider_event = true;

@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use assert_matches::assert_matches;
 use indexmap::IndexMap;
 use jp_config::model::{
     id::ModelIdConfig,
@@ -96,7 +95,12 @@ async fn chaining_is_bounded_by_the_continuation_budget() {
         .build()
         .expect("a valid request");
 
-    let events: Vec<_> = call(client, request, MAX_CHAIN_DEPTH, false, None)
+    let transport = Transport {
+        client,
+        batch: None,
+    };
+
+    let events: Vec<_> = call(transport, request, MAX_CHAIN_DEPTH, false, None)
         .collect()
         .await;
 
@@ -910,20 +914,26 @@ fn no_other_tier_asks_for_the_fast_mode_beta() {
     }
 }
 
-/// Anthropic sells no discounted latency-tolerant tier.
-/// Substituting the neighbouring rung would quietly bill standard rates for a
-/// request that asked to be cheap, so the turn is refused instead.
+/// Anthropic prices `flex` through the Message Batches API, which is reached by
+/// posting to a different endpoint rather than by setting a request field.
+///
+/// `speed` matters specifically: the batch API rejects it outright, so a `flex`
+/// request that carried fast mode would be refused on submission.
 #[test]
-fn request_refuses_flex() {
-    let error = tier_request(Some(ServiceTier::Flex)).expect_err("flex has no Anthropic mapping");
+fn request_omits_both_tier_fields_for_flex() {
+    assert_eq!(tier_fields(Some(ServiceTier::Flex)), (None, None));
+}
 
-    assert_matches!(error, Error::UnsupportedServiceTier {
-        provider: ProviderId::Anthropic,
-        tier: ServiceTier::Flex,
-    });
-    assert_eq!(
-        error.to_string(),
-        "The `anthropic` provider has no `flex` service tier"
+/// The beta that admits `speed` is refused along with `speed` itself inside a
+/// batch, so `flex` must not ask for it either.
+#[test]
+fn flex_does_not_ask_for_the_fast_mode_beta() {
+    let request = tier_request(Some(ServiceTier::Flex)).unwrap();
+
+    assert!(
+        request.betas.is_empty(),
+        "flex must not request a beta, got {:?}",
+        request.betas
     );
 }
 

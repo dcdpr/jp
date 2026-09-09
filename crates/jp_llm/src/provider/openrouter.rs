@@ -225,7 +225,7 @@ fn call(
                     yield flush;
                 }
                 patch @ Event::Patch(_) => yield patch,
-                keep_alive @ Event::KeepAlive => yield keep_alive,
+                keep_alive @ Event::KeepAlive { .. } => yield keep_alive,
             }
         }
     })

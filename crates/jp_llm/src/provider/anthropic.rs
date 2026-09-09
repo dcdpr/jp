@@ -44,6 +44,8 @@ use crate::{
     tool::ToolDefinition,
 };
 
+mod batch;
+
 static PROVIDER: ProviderId = ProviderId::Anthropic;
 
 /// Anthropic limits the number of explicit cache breakpoints to 4 per request,
@@ -132,6 +134,49 @@ pub struct Anthropic {
 
     /// Which beta features are enabled.
     beta: BetaFeatures,
+
+    /// How long to wait on a batched request, and how often to check it.
+    ///
+    /// Only consulted for the `flex` service tier, which Anthropic serves
+    /// through the Message Batches API.
+    batch_poll: batch::PollConfig,
+}
+
+/// How a request reaches the model.
+///
+/// Both routes end in the same [`EventStream`], so everything layered on top of
+/// a request — chaining on the token ceiling, the forced-tool fallback, the
+/// thinking-rejection repair — behaves identically either way.
+#[derive(Debug, Clone)]
+struct Transport {
+    client: Client,
+
+    /// Set when the request is served through the Message Batches API rather
+    /// than the streaming Messages endpoint.
+    batch: Option<batch::PollConfig>,
+}
+
+impl Transport {
+    /// Send `request` and return the events it produces.
+    async fn send(
+        &self,
+        request: types::CreateMessagesRequest,
+        is_structured: bool,
+    ) -> EventStream {
+        if let Some(poll) = self.batch {
+            return batch::events(self.client.clone(), request, is_structured, poll);
+        }
+
+        Box::pin(
+            self.client
+                .messages()
+                .create_stream(request)
+                .await
+                .map_err(StreamError::from)
+                .map_ok(move |event| stream::iter(map_event(event, is_structured)))
+                .try_flatten(),
+        )
+    }
 }
 
 #[async_trait]
@@ -173,17 +218,20 @@ impl Provider for Anthropic {
         model: &ModelDetails,
         query: ChatQuery,
     ) -> Result<EventStream> {
-        let client = self.client.clone();
-        let max_tokens_config = query
-            .thread
-            .events
-            .config()?
-            .assistant
-            .model
-            .parameters
-            .max_tokens;
+        let parameters = query.thread.events.config()?.assistant.model.parameters;
+        let max_tokens_config = parameters.max_tokens;
 
-        let (request, is_structured, forced_tool) = create_request(model, query, true, &self.beta)?;
+        // `flex` is served by the Message Batches API, which refuses `stream`
+        // and hands back one complete message instead of a token stream.
+        let batched = parameters.service_tier == Some(ServiceTier::Flex);
+
+        let transport = Transport {
+            client: self.client.clone(),
+            batch: batched.then_some(self.batch_poll),
+        };
+
+        let (request, is_structured, forced_tool) =
+            create_request(model, query, !batched, &self.beta)?;
 
         // Chaining is disabled for structured output — the provider guarantees
         // schema compliance so the response won't hit max_tokens for a
@@ -199,7 +247,7 @@ impl Provider for Anthropic {
             0
         };
 
-        debug!(stream = true, "Anthropic chat completion stream request.");
+        debug!(batched, "Anthropic chat completion stream request.");
         trace!(
             request = %trace_to_tmpfile("jp-anthropic-request", &request),
             "Request payload."
@@ -207,7 +255,7 @@ impl Provider for Anthropic {
 
         Ok(with_tool_call_keepalive(
             call(
-                client,
+                transport,
                 request,
                 chains_remaining,
                 is_structured,
@@ -283,9 +331,8 @@ impl ForcedToolFallback {
 /// If the API rejects a thinking block in the request, emits [`Event::Patch`]
 /// instructions to fix the conversation stream and finishes with
 /// [`FinishReason::Retry`] so the caller can rebuild and retry.
-#[expect(clippy::too_many_lines)]
 fn call(
-    client: Client,
+    transport: Transport,
     request: types::CreateMessagesRequest,
     chains_remaining: u8,
     is_structured: bool,
@@ -314,13 +361,9 @@ fn call(
         // tool).
         let mut tool_names_called: Vec<String> = vec![];
 
-        let stream = client
-            .messages()
-            .create_stream(request.clone())
+        let stream = transport
+            .send(request.clone(), is_structured)
             .await
-            .map_err(StreamError::from)
-            .map_ok(|v| stream::iter(map_event(v, is_structured)))
-            .try_flatten()
             .peekable();
 
         pin_mut!(stream);
@@ -358,7 +401,7 @@ fn call(
 
                     chain_events.extend(chain_builder.drain());
                     for await event in chain(
-                        client.clone(),
+                        transport.clone(),
                         request.clone(),
                         chain_events,
                         is_structured,
@@ -380,7 +423,7 @@ fn call(
                 {
                     chain_events.extend(chain_builder.drain());
                     for await event in dispatch_force_retry(
-                        client.clone(),
+                        transport.clone(),
                         request.clone(),
                         chain_events,
                         fallback,
@@ -437,7 +480,7 @@ fn call(
                     yield flush;
                 }
                 patch @ Event::Patch(_) => yield patch,
-                keep_alive @ Event::KeepAlive => yield keep_alive,
+                keep_alive @ Event::KeepAlive { .. } => yield keep_alive,
             }
         }
     }))
@@ -453,7 +496,7 @@ fn should_chain(event: &Event, tool_calls_requested: bool, chains_remaining: u8)
 /// Create a new `EventStream` by asking the assistant to continue from where it
 /// left off.
 fn chain(
-    client: Client,
+    transport: Transport,
     mut request: types::CreateMessagesRequest,
     events: Vec<ConversationEvent>,
     is_structured: bool,
@@ -499,7 +542,7 @@ fn chain(
     });
 
     Box::pin(try_stream!({
-        for await event in call(client, request, chains_remaining, is_structured, None) {
+        for await event in call(transport, request, chains_remaining, is_structured, None) {
             let mut event = event?;
 
             // When chaining new events, the reasoning content is irrelevant, as
@@ -540,7 +583,7 @@ fn chain(
 
 /// Dispatch the forced-tool retry that matches `fallback`'s strategy.
 fn dispatch_force_retry(
-    client: Client,
+    transport: Transport,
     request: types::CreateMessagesRequest,
     events: Vec<ConversationEvent>,
     fallback: &ForcedToolFallback,
@@ -552,14 +595,21 @@ fn dispatch_force_retry(
                 "Model did not call the required tool. Retrying with thinking disabled and forced \
                  tool_choice."
             );
-            force_tool_retry(client, request, events, fallback, is_structured)
+            force_tool_retry(transport, request, events, fallback, is_structured)
         }
         ForceStrategy::EscalatingNudge { remaining } => {
             info!(
                 remaining,
                 "Model did not call the required tool. Retrying with a firmer nudge."
             );
-            soft_force_retry(client, request, events, fallback, is_structured, remaining)
+            soft_force_retry(
+                transport,
+                request,
+                events,
+                fallback,
+                is_structured,
+                remaining,
+            )
         }
     }
 }
@@ -572,7 +622,7 @@ fn dispatch_force_retry(
 /// message requesting the tool call, then issues a new request with thinking
 /// disabled and the original forced `tool_choice`.
 fn force_tool_retry(
-    client: Client,
+    transport: Transport,
     mut request: types::CreateMessagesRequest,
     events: Vec<ConversationEvent>,
     fallback: &ForcedToolFallback,
@@ -627,7 +677,7 @@ fn force_tool_retry(
 
     Box::pin(try_stream!({
         // Pass `None` for forced_tool_fallback to prevent infinite retries.
-        for await event in call(client, request, 0, is_structured, None) {
+        for await event in call(transport, request, 0, is_structured, None) {
             let event = event?;
 
             // Skip reasoning (shouldn't appear with thinking disabled, but
@@ -653,7 +703,7 @@ fn force_tool_retry(
 /// re-issue it with a progressively firmer instruction, up to `remaining` more
 /// times, before accepting the response.
 fn soft_force_retry(
-    client: Client,
+    transport: Transport,
     mut request: types::CreateMessagesRequest,
     events: Vec<ConversationEvent>,
     fallback: &ForcedToolFallback,
@@ -709,7 +759,7 @@ fn soft_force_retry(
     });
 
     Box::pin(try_stream!({
-        for await event in call(client, request, 0, is_structured, next_fallback) {
+        for await event in call(transport, request, 0, is_structured, next_fallback) {
             yield event?;
         }
 
@@ -1123,19 +1173,16 @@ const FAST_MODE_BETA: &str = "fast-mode-2026-02-01";
 /// Each tier sets at most one of them, never both, which is also what keeps the
 /// request out of the combination Anthropic rejects (fast mode is unavailable
 /// under a commitment).
-///
-/// # Errors
-///
-/// Returns [`Error::UnsupportedServiceTier`] for `flex`, which Anthropic sells
-/// no equivalent of.
-fn apply_service_tier(
-    builder: &mut types::CreateMessagesRequestBuilder,
-    tier: ServiceTier,
-) -> Result<()> {
+fn apply_service_tier(builder: &mut types::CreateMessagesRequestBuilder, tier: ServiceTier) {
     match tier {
         // Sending neither field is how the account's own default decides, which
         // for Anthropic means `service_tier: "auto"` and standard speed.
-        ServiceTier::Off => {}
+        //
+        // `Flex` also sends neither: Anthropic prices it through the Message
+        // Batches API, which is a different endpoint rather than a request
+        // field, so `Transport` realizes it instead of the request body. The
+        // batch API rejects `speed` outright.
+        ServiceTier::Off | ServiceTier::Flex => {}
 
         ServiceTier::Standard => {
             builder.service_tier(types::ServiceTier::StandardOnly);
@@ -1147,18 +1194,7 @@ fn apply_service_tier(
             builder.speed(types::Speed::Fast);
             builder.betas(vec![FAST_MODE_BETA.to_owned()]);
         }
-
-        // The Batch API is the nearest thing Anthropic offers and is not
-        // reachable through a request parameter, so there is nothing to map to.
-        ServiceTier::Flex => {
-            return Err(Error::UnsupportedServiceTier {
-                provider: PROVIDER,
-                tier,
-            });
-        }
     }
-
-    Ok(())
 }
 
 /// Map the configured cache policy to an Anthropic cache-control annotation.
@@ -1412,7 +1448,7 @@ fn create_request(
     let parameters = &config.assistant.model.parameters;
 
     if let Some(tier) = parameters.service_tier {
-        apply_service_tier(&mut builder, tier)?;
+        apply_service_tier(&mut builder, tier);
     }
 
     let max_tokens = parameters
@@ -1964,7 +2000,7 @@ fn map_event(
         MessageStart { .. } => vec![],
         // Keep-alive heartbeat: surface it so the idle-timeout layer treats the
         // connection as live, but it carries no content.
-        Ping => vec![Ok(Event::KeepAlive)],
+        Ping => vec![Ok(Event::keep_alive())],
     }
 }
 
@@ -1988,6 +2024,12 @@ impl TryFrom<&AnthropicConfig> for Anthropic {
         Ok(Anthropic {
             beta: BetaFeatures(config.beta_headers.clone()),
             chain_on_max_tokens: config.chain_on_max_tokens,
+            batch_poll: batch::PollConfig {
+                interval: Duration::from_secs(u64::from(config.batch_poll_interval_secs))
+                    .max(batch::MIN_POLL_INTERVAL),
+                max_wait: (config.batch_max_wait_secs > 0)
+                    .then(|| Duration::from_secs(u64::from(config.batch_max_wait_secs))),
+            },
             client: builder
                 .build()
                 .map_err(|e| Error::Anthropic(AnthropicError::Unknown(e.to_string())))?,

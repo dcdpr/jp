@@ -266,7 +266,7 @@ fn summarize_events(events: Vec<Event>) -> StreamOutcome {
             // else consumes them on this path, so keep them for the rebuild.
             Event::Patch(mut p) => patches.append(&mut p),
             // `KeepAlive` is a liveness signal.
-            Event::KeepAlive => {}
+            Event::KeepAlive { .. } => {}
         }
     }
 

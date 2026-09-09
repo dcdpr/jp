@@ -65,7 +65,7 @@ pub fn structured_data(events: Vec<Event>) -> Option<Value> {
                 flushed.extend(builder.handle_flush(index, metadata));
             }
             Event::Finished(_) => flushed.extend(builder.drain()),
-            Event::Patch(_) | Event::KeepAlive => {}
+            Event::Patch(_) | Event::KeepAlive { .. } => {}
         }
     }
 

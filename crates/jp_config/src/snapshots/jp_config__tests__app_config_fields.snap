@@ -71,6 +71,8 @@ expression: "AppConfig::fields()"
     "providers.llm.cerebras.base_url",
     "providers.llm.anthropic.api_key_env",
     "providers.llm.anthropic.base_url",
+    "providers.llm.anthropic.batch_max_wait_secs",
+    "providers.llm.anthropic.batch_poll_interval_secs",
     "providers.llm.anthropic.beta_headers",
     "providers.llm.anthropic.chain_on_max_tokens",
     "plugins.auto_install",

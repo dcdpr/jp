@@ -220,6 +220,8 @@ PartialAppConfig {
                 base_url: None,
                 chain_on_max_tokens: None,
                 beta_headers: None,
+                batch_poll_interval_secs: None,
+                batch_max_wait_secs: None,
             },
             cerebras: PartialCerebrasConfig {
                 api_key_env: None,

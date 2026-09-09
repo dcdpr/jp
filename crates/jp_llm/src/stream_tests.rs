@@ -125,7 +125,7 @@ async fn non_content_events_do_not_count_toward_the_ceiling() {
     // so a stream of nothing but those must survive a 1-byte ceiling.
     let inner = stream::iter(vec![
         Ok(Event::flush(0)),
-        Ok(Event::KeepAlive),
+        Ok(Event::keep_alive()),
         Ok(Event::Patch(vec![])),
         Ok(Event::flush(1)),
     ])
@@ -254,7 +254,7 @@ async fn tool_call_keepalive_emitted_during_open_tool_call() {
 
     assert!(matches!(wrapped.next().await, Some(Ok(Event::Part { .. }))));
     assert!(
-        matches!(wrapped.next().await, Some(Ok(Event::KeepAlive))),
+        matches!(wrapped.next().await, Some(Ok(Event::KeepAlive { .. }))),
         "a keepalive is injected during the gap"
     );
     assert!(matches!(
