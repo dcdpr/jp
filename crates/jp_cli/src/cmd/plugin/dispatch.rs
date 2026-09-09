@@ -1118,12 +1118,20 @@ fn handle_request(
             // finished before the request arrived. An id that does not parse is
             // the plugin's bug, and silence would leave its author unable to
             // tell the two apart.
+            //
+            // `interrupt_scope` is called before the macro, not inside it: a
+            // tracing field expression only runs when the callsite is enabled,
+            // and a run whose log file could not be created installs no
+            // subscriber at all. The interrupt has to happen either way.
             match parse_conversation_id(&req.conversation) {
-                Ok(id) => debug!(
-                    conversation = %req.conversation,
-                    reached = signals.interrupt_scope(id),
-                    "Interrupting on a plugin's behalf."
-                ),
+                Ok(id) => {
+                    let reached = signals.interrupt_scope(id);
+                    debug!(
+                        conversation = %req.conversation,
+                        reached,
+                        "Interrupting on a plugin's behalf."
+                    );
+                }
                 Err(error) => warn!(
                     conversation = %req.conversation,
                     %error,

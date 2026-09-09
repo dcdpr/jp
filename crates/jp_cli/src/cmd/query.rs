@@ -1060,7 +1060,31 @@ impl Query {
             &cfg.providers.llm,
         )?);
         debug!(model = %model_id, "Fetching model details.");
-        let model = provider.model_details(&model_id.name).await?;
+
+        // The last await before `run_turn_loop` registers its own handler, and a
+        // network round trip. Registered and polled here for the same reason the
+        // preflight sequence is: a handler that exists but nobody reads takes
+        // the interrupt off the channel and drops it, and the caller is told it
+        // was delivered.
+        let (lookup_guard, mut interrupted) = signals.push_handler_for(lock.id());
+        let model = tokio::select! {
+            details = provider.model_details(&model_id.name) => details?,
+
+            notified = interrupted.recv() => {
+                // Nothing has been appended yet, so there is nothing to commit
+                // and nothing to sanitize.
+                if let Some(notice) = notified {
+                    notice.handled();
+                }
+                info!("Interrupted during model lookup; the turn did not start.");
+                return Ok(());
+            }
+        };
+
+        // Everything from here to `run_turn_loop`'s own registration is
+        // synchronous, so this scope has no further awaits to cover.
+        drop(lookup_guard);
+
         debug!(model = model.name(), "Model details resolved.");
 
         // Build docs map from the resolved definitions for describe_tools.

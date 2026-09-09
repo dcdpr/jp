@@ -390,8 +390,13 @@ pub async fn handle_stream_error(
     // scope (stacked above the streaming handler for the duration of the
     // wait) catches the press, so the caller can show the interrupt menu
     // immediately instead of after the wait.
+    //
+    // Scoped to the conversation, because this is the handler being polled for
+    // the length of the backoff. An unscoped one would leave a targeted
+    // interrupt queued on the streaming handler instead, and a `Retry` outcome
+    // drops that receiver on its way out of the streaming loop.
     let delay = retry_state.backoff_duration(&error);
-    let (interrupt_guard, mut interrupt_rx) = signals.push_handler();
+    let (interrupt_guard, mut interrupt_rx) = signals.push_handler_for(conv.id());
     let notice = tokio::select! {
         biased;
         notice = interrupt_rx.recv() => notice,

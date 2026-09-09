@@ -357,9 +357,9 @@ fn quit_exits() {
 fn decline_notifies_next_handler_down() {
     let inner = RouterInner::new(Duration::from_secs(2));
     let (_guard_bottom, mut rx_bottom) = push_handler(&inner);
-    let (_guard_top, mut rx_top) = push_handler(&inner);
+    let (guard_top, mut rx_top) = push_handler(&inner);
 
-    inner.notify_next_or_shutdown();
+    inner.notify_below(guard_top.id, None);
 
     assert!(took_notice(&mut rx_bottom));
     assert_eq!(recv_error(&mut rx_top), Some(TryRecvError::Empty));
@@ -369,12 +369,66 @@ fn decline_notifies_next_handler_down() {
 #[test]
 fn decline_with_single_handler_requests_shutdown() {
     let inner = RouterInner::new(Duration::from_secs(2));
-    let (_guard, mut rx) = push_handler(&inner);
+    let (guard, mut rx) = push_handler(&inner);
 
-    inner.notify_next_or_shutdown();
+    inner.notify_below(guard.id, None);
 
     assert_eq!(recv_error(&mut rx), Some(TryRecvError::Empty));
     assert!(inner.shutdown_token.is_cancelled());
+}
+
+/// A declined press walks down from the handler that declined it, not from the
+/// top of the stack.
+///
+/// Two turns in flight interleave their handlers, so the entry below the
+/// topmost one routinely belongs to the other turn.
+/// Declining A's press has to reach A's next handler, not whichever turn
+/// happens to be on top.
+#[test]
+fn a_decline_stays_inside_its_own_conversation() {
+    let inner = RouterInner::new(Duration::from_secs(2));
+    let a = conversation(1_700_000_000);
+    let b = conversation(1_700_000_001);
+
+    // Turn A registers its turn-level and tool handlers, then turn B starts and
+    // pushes its own on top.
+    let (_a_turn, mut rx_a_turn) = inner.push_handler(Some(a));
+    let (a_tool_guard, mut rx_a_tool) = inner.push_handler(Some(a));
+    let (_b_turn, mut rx_b_turn) = inner.push_handler(Some(b));
+    let (_b_stream, mut rx_b_stream) = inner.push_handler(Some(b));
+
+    // A's tool handler declines the press it was given.
+    inner.notify_below(a_tool_guard.id, Some(a));
+
+    assert!(
+        took_notice(&mut rx_a_turn),
+        "the press belongs to A, so A's next handler answers it"
+    );
+    assert_eq!(recv_error(&mut rx_a_tool), Some(TryRecvError::Empty));
+    assert_eq!(
+        recv_error(&mut rx_b_turn),
+        Some(TryRecvError::Empty),
+        "B is topmost but the press was never about B"
+    );
+    assert_eq!(recv_error(&mut rx_b_stream), Some(TryRecvError::Empty));
+    assert!(!inner.shutdown_token.is_cancelled());
+}
+
+/// A scoped press that nothing below it can answer stops there.
+///
+/// A keypress escalates to shutdown at this point, which is right for someone
+/// at a terminal.
+/// A request naming one conversation must not be able to shut the process down.
+#[test]
+fn a_declined_scoped_press_does_not_request_shutdown() {
+    let inner = RouterInner::new(Duration::from_secs(2));
+    let id = conversation(1_700_000_000);
+    let (guard, mut rx) = inner.push_handler(Some(id));
+
+    inner.notify_below(guard.id, Some(id));
+
+    assert_eq!(recv_error(&mut rx), Some(TryRecvError::Empty));
+    assert!(!inner.shutdown_token.is_cancelled());
 }
 
 #[test]
