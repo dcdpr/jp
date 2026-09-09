@@ -4,7 +4,7 @@ use jp_conversation::ConversationEvent;
 use reqwest_eventsource::Error as SseError;
 
 use super::*;
-use crate::{event::EventPart, provider::openai_compat::StreamChunk};
+use crate::{event::EventPart, provider::openai_compat::StreamChunk, query::Truncation};
 
 fn qwen_model() -> LlamacppModel {
     serde_json::from_value(serde_json::json!({
@@ -40,8 +40,10 @@ fn map_model_falls_back_to_trained_context_length() {
 /// window unknown rather than asserting a value.
 #[test]
 fn map_model_without_meta_leaves_context_unknown() {
-    let model: LlamacppModel =
-        serde_json::from_value(serde_json::json!({"id": "local-model"})).unwrap();
+    let model: LlamacppModel = serde_json::from_value(serde_json::json!({
+      "id": "local-model"
+    }))
+    .unwrap();
 
     let details = map_model(&model, None).unwrap();
 
@@ -70,6 +72,7 @@ fn reasoning_query(
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     }
 }
 
@@ -509,17 +512,24 @@ fn tool_call_frame_releases_extractor_tail_before_tool_call_parts() {
 
     // The tool-call frame releases the tail...
     let tool_chunk = serde_json::json!({
-        "choices": [{
-            "delta": {
-                "tool_calls": [{
-                    "index": 0,
-                    "id": "call_1",
-                    "function": { "name": "describe_tools", "arguments": "{}" }
-                }]
-            },
-            "index": 0,
-            "finish_reason": "tool_calls"
-        }]
+      "choices": [
+        {
+          "delta": {
+            "tool_calls": [
+              {
+                "index": 0,
+                "id": "call_1",
+                "function": {
+                  "name": "describe_tools",
+                  "arguments": "{}"
+                }
+              }
+            ]
+          },
+          "index": 0,
+          "finish_reason": "tool_calls"
+        }
+      ]
     });
     let tool_events =
         handle_sse_event_sync(Ok(sse_message(&tool_chunk.to_string())), &mut state).unwrap();

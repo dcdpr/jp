@@ -5,7 +5,7 @@ use jp_conversation::{ConversationEvent, event::ToolCallRequest};
 use reqwest_eventsource::Error as SseError;
 
 use super::*;
-use crate::provider::openai_compat::StreamChunk;
+use crate::{provider::openai_compat::StreamChunk, query::Truncation};
 
 /// Regression: a model absent from the table must still request the parsed
 /// reasoning format.
@@ -26,6 +26,7 @@ fn test_unknown_model_requests_parsed_reasoning() {
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     };
 
     let (body, _) = create_request(&model, query).unwrap();
@@ -86,6 +87,7 @@ fn reasoning_query(reasoning: jp_config::model::parameters::PartialReasoningConf
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     }
 }
 
@@ -105,6 +107,7 @@ fn tier_query(tier: Option<ServiceTier>) -> ChatQuery {
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     }
 }
 

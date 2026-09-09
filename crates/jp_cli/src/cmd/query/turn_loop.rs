@@ -35,7 +35,7 @@ use jp_llm::{
     event::{Event, EventPart, FinishReason, ToolCallPart},
     model::ModelDetails,
     provider::get_provider,
-    query::ChatQuery,
+    query::{ChatQuery, Truncation},
     tool::{InvocationContext, ToolDefinition, executor::Executor},
     with_idle_timeout, with_output_limit,
 };
@@ -310,6 +310,10 @@ pub(super) async fn run_turn_loop(
                     thread,
                     tools: tools.to_vec(),
                     tool_choice: tool_choice.clone(),
+                    // Nothing fits the stream to the window on this path, so a
+                    // conversation that outgrows it stays answerable only if
+                    // the provider is allowed to drop what it cannot hold.
+                    truncation: Truncation::Allowed,
                 };
 
                 // Claim the waiting region BEFORE the HTTP request. Dropping

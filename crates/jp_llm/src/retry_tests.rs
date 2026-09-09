@@ -10,6 +10,7 @@ use crate::{
     event::Event,
     model::ModelDetails,
     provider::mock::MockProvider,
+    query::Truncation,
 };
 
 fn empty_query() -> ChatQuery {
@@ -22,6 +23,7 @@ fn empty_query() -> ChatQuery {
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     }
 }
 

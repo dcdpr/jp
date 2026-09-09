@@ -15,6 +15,7 @@ use jp_llm::{
     event_builder::EventBuilder,
     model::ModelDetails,
     provider,
+    query::Truncation,
     retry::{RetryConfig, collect_with_retry},
     window,
 };
@@ -184,6 +185,10 @@ async fn summarize_stream(
             },
             tools: vec![],
             tool_choice: jp_config::assistant::tool_choice::ToolChoice::default(),
+            // The summary is stored as standing for every turn in the range,
+            // so a provider that quietly dropped part of the request would
+            // hand back a summary covering less than it claims.
+            truncation: Truncation::Forbidden,
         };
 
         let llm_events = collect_with_retry(provider, model_details, query, &retry_config).await?;
@@ -241,6 +246,12 @@ enum StreamOutcome {
 /// truncated or declined response would otherwise be stored as the summary and
 /// replace the turns it was meant to stand in for, silently dropping whatever
 /// the model never got to.
+///
+/// This covers a response the model cut short.
+/// A request the *provider* cut short arrives here as an ordinary
+/// [`FinishReason::Completed`] and is indistinguishable from a complete one, so
+/// that half is prevented when the request is built, by asking for
+/// [`Truncation::Forbidden`].
 fn summarize_events(events: Vec<Event>) -> StreamOutcome {
     let mut builder = EventBuilder::new();
     let mut flushed = Vec::new();

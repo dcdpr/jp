@@ -446,6 +446,7 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Value, bool
         thread,
         tools,
         tool_choice,
+        ..
     } = query;
 
     let structured_schema = thread.events.schema();
