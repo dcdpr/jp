@@ -4,7 +4,7 @@ use jp_test::{Result, function_name};
 use serde_json::json;
 
 use super::*;
-use crate::{model::ReasoningDetails, test::TestRequest};
+use crate::{model::ReasoningDetails, query::Truncation, test::TestRequest};
 
 macro_rules! test_all_models {
         ($($fn:ident),* $(,)?) => {
@@ -111,6 +111,7 @@ fn tier_query(tier: Option<ServiceTier>) -> ChatQuery {
         },
         tools: vec![],
         tool_choice: ToolChoice::Auto,
+        truncation: Truncation::default(),
     }
 }
 

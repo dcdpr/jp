@@ -744,6 +744,7 @@ fn create_request(
         thread,
         tools,
         tool_choice,
+        ..
     } = query;
 
     let config = thread.events.config()?;

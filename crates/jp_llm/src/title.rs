@@ -28,7 +28,7 @@ use crate::{
     error::Result,
     event_builder,
     model::ModelDetails,
-    query::ChatQuery,
+    query::{ChatQuery, Truncation},
     retry::{RetryConfig, collect_with_retry},
     window,
 };
@@ -170,6 +170,7 @@ pub async fn generate(
         thread,
         tools: vec![],
         tool_choice: ToolChoice::default(),
+        truncation: Truncation::default(),
     };
 
     let retry = RetryConfig::default().with_max_response_bytes(max_response_bytes);

@@ -1213,6 +1213,7 @@ fn create_request(
         thread,
         tools,
         mut tool_choice,
+        ..
     } = query;
 
     let mut builder = types::CreateMessagesRequestBuilder::default();

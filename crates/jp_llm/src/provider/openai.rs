@@ -36,7 +36,7 @@ use crate::{
     event::{Event, FinishReason},
     model::{ModelDeprecation, ReasoningDetails},
     provider::trace_to_tmpfile,
-    query::ChatQuery,
+    query::{ChatQuery, Truncation},
     stream::with_tool_call_keepalive,
     tool::{ToolDefinition, json_schema},
 };
@@ -353,6 +353,7 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bo
         thread,
         tools,
         tool_choice,
+        truncation,
     } = query;
 
     let config = thread.events.config()?;
@@ -582,7 +583,13 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bo
         temperature,
         reasoning,
         max_output_tokens: parameters.max_tokens.map(Into::into),
-        truncation: Some(types::Truncation::Auto),
+        // `Auto` drops input items from the middle of the conversation and
+        // answers anyway, so a caller that needs the whole input read asks for
+        // `Forbidden` and gets a 400 instead of a quietly partial answer.
+        truncation: Some(match truncation {
+            Truncation::Allowed => types::Truncation::Auto,
+            Truncation::Forbidden => types::Truncation::Disabled,
+        }),
         top_p,
         text,
         // OpenAI routes requests by prompt prefix; a stable per-conversation
