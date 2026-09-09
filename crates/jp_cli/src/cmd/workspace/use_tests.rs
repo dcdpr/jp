@@ -364,6 +364,55 @@ fn use_cwd_clears_the_selection() {
     assert!(env.store.load(&session).is_none());
 }
 
+// Bare `jp w use` is the `cd -` of workspaces, mirroring bare `jp c use`: it
+// returns to where the session came from rather than asking again.
+#[test]
+fn bare_use_returns_to_the_previous_workspace() {
+    let tmp = tempdir().unwrap();
+    let first = make_workspace(tmp.path(), "first", "ws123");
+    let second = make_workspace(tmp.path(), "second", "ws456");
+    let session = env_session();
+    let env = env_at(tmp.path().to_owned(), tmp.path(), Some(&session), true);
+
+    let (printer, _out, _err) = Printer::memory(OutputFormat::Text);
+    Use {
+        target: Some(WorkspaceTarget::Path(first.clone())),
+        always: false,
+    }
+    .run(&printer, &env)
+    .unwrap();
+
+    let (printer, _out, _err) = Printer::memory(OutputFormat::Text);
+    Use {
+        target: Some(WorkspaceTarget::Path(second)),
+        always: false,
+    }
+    .run(&printer, &env)
+    .unwrap();
+
+    // `first` is now `history[1]`, so a bare `use` switches back to it without
+    // a prompt. Both selections registered their checkouts, so falling through
+    // to the picker would have two rows to offer and would try to prompt,
+    // failing without a terminal — the assertions below cannot pass that way.
+    let (printer, out, _err) = Printer::memory(OutputFormat::Text);
+    Use {
+        target: None,
+        always: false,
+    }
+    .run(&printer, &env)
+    .unwrap();
+
+    let active = env.store.active(&session).expect("active entry");
+    assert_eq!(active.workspace_id, "ws123");
+    assert_eq!(active.root, first);
+
+    let stdout = stdout_of(&printer, &out);
+    assert!(
+        stdout.contains("Switched the session-active workspace"),
+        "unexpected output: {stdout}"
+    );
+}
+
 #[test]
 fn a_path_without_a_workspace_id_is_rejected() {
     let tmp = tempdir().unwrap();
