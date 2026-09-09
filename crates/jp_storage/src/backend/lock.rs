@@ -4,7 +4,7 @@ use std::fmt::Debug;
 
 use jp_conversation::ConversationId;
 
-use crate::lock::LockInfo;
+use crate::{lock::LockInfo, resource_lock::ResourceGuard};
 
 /// Conversation-level locking.
 ///
@@ -30,7 +30,10 @@ pub trait LockBackend: Send + Sync + Debug {
 
 /// A held conversation lock.
 /// Released on drop.
-///
-/// The filesystem implementation wraps `ConversationFileLock`.
-/// In-memory backends use a mutex-based guard.
 pub trait ConversationLockGuard: Send + Sync + Debug {}
+
+/// Any held resource lock can serve as a conversation lock guard; the backends
+/// produce their guards through [`ResourceLocker`] implementations.
+///
+/// [`ResourceLocker`]: crate::resource_lock::ResourceLocker
+impl ConversationLockGuard for Box<dyn ResourceGuard> {}

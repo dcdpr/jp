@@ -5,8 +5,7 @@
 //! Intended for tests and future non-filesystem environments.
 
 use std::{
-    collections::{HashMap, HashSet},
-    fmt,
+    collections::HashMap,
     sync::{Arc, Mutex},
 };
 
@@ -19,7 +18,13 @@ use super::{
     ConversationFilter, ConversationIndexEntry, ConversationLockGuard, LoadBackend, LockBackend,
     PersistBackend, Projection, SanitizeReport, SessionBackend, StoragePresence,
 };
-use crate::{LoadError, error::Result, load::LoadErrorInner, lock::LockInfo};
+use crate::{
+    LoadError,
+    error::Result,
+    load::LoadErrorInner,
+    lock::LockInfo,
+    resource_lock::{InMemoryResourceLocker, ResourceLocker as _},
+};
 
 /// A stored conversation: metadata, event stream, and the projection of its
 /// most recent write.
@@ -34,7 +39,7 @@ type StoredConversation = (Conversation, ConversationStream, Projection);
 pub struct InMemoryStorageBackend {
     conversations: Arc<Mutex<HashMap<ConversationId, StoredConversation>>>,
     archived: Arc<Mutex<HashMap<ConversationId, StoredConversation>>>,
-    locks: Arc<Mutex<HashSet<String>>>,
+    locks: InMemoryResourceLocker,
     sessions: Arc<Mutex<HashMap<String, Value>>>,
 }
 
@@ -188,16 +193,14 @@ impl LockBackend for InMemoryStorageBackend {
         conversation_id: &str,
         _session: Option<&str>,
     ) -> Result<Option<Box<dyn ConversationLockGuard>>> {
-        let mut locks = self.locks.lock().expect("poisoned");
-        if locks.contains(conversation_id) {
-            return Ok(None);
+        match self
+            .locks
+            .try_lock(conversation_id, None)
+            .map_err(|error| error.source)?
+        {
+            Some(guard) => Ok(Some(Box::new(guard))),
+            None => Ok(None),
         }
-        locks.insert(conversation_id.to_owned());
-
-        Ok(Some(Box::new(InMemoryLockGuard {
-            conversation_id: conversation_id.to_owned(),
-            locks: Arc::clone(&self.locks),
-        })))
     }
 
     fn lock_info(&self, _conversation_id: &str) -> Option<LockInfo> {
@@ -234,32 +237,6 @@ impl SessionBackend for InMemoryStorageBackend {
             .collect()
     }
 }
-
-/// A held in-process lock.
-/// Removes itself from the lock set on drop.
-struct InMemoryLockGuard {
-    conversation_id: String,
-    locks: Arc<Mutex<HashSet<String>>>,
-}
-
-impl Drop for InMemoryLockGuard {
-    fn drop(&mut self) {
-        self.locks
-            .lock()
-            .expect("poisoned")
-            .remove(&self.conversation_id);
-    }
-}
-
-impl fmt::Debug for InMemoryLockGuard {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("InMemoryLockGuard")
-            .field("conversation_id", &self.conversation_id)
-            .finish_non_exhaustive()
-    }
-}
-
-impl ConversationLockGuard for InMemoryLockGuard {}
 
 #[cfg(test)]
 #[path = "memory_tests.rs"]

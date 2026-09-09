@@ -1,19 +1,24 @@
 //! Advisory file-based conversation locks.
 //!
-//! Uses OS-level advisory locks (`flock` on Unix, `LockFileEx` on Windows) to
-//! prevent concurrent writes to the same conversation.
+//! The domain layer over [`resource_lock`]: conversation-id resource names,
+//! [`LockInfo`] holder diagnostics, and the user-vs-workspace lock-file
+//! placement policy.
+//! The locking mechanics themselves (OS advisory locks, guard lifetimes) live
+//! in [`resource_lock`].
+//!
+//! [`resource_lock`]: crate::resource_lock
 
-use std::{
-    fs::{self, File, OpenOptions},
-    io::{self, Read, Seek, Write},
-};
+use std::fs::File;
 
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::Utc;
 use relative_path::RelativePath;
 use serde::{Deserialize, Serialize};
 
-use crate::error::Result;
+use crate::{
+    error::Result,
+    resource_lock::{FsResourceLocker, ResourceGuard, ResourceLocker as _, try_exclusive_lock},
+};
 
 pub(crate) const LOCKS_DIR: &str = "locks";
 
@@ -36,92 +41,13 @@ pub struct LockInfo {
     pub acquired_at: String,
 }
 
-/// An acquired exclusive advisory lock on a conversation.
-///
-/// The OS lock is held as long as the `File` is open.
-/// On drop, the lock file is deleted and the file handle is closed (releasing
-/// the flock).
-#[derive(Debug)]
-pub struct ConversationFileLock {
-    file: Option<File>,
-    path: Utf8PathBuf,
-}
-
-impl ConversationFileLock {
-    /// Try to acquire an exclusive advisory lock on the given path.
-    ///
-    /// `session` is the current process's session identity, written to the lock
-    /// file for diagnostics.
-    ///
-    /// Returns `Ok(Some(lock))` if the lock was acquired, `Ok(None)` if another
-    /// process holds it, or `Err` on I/O failure.
-    fn try_acquire(path: Utf8PathBuf, session: Option<&str>) -> Result<Option<Self>> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-
-        let file = OpenOptions::new()
-            .create(true)
-            .truncate(false)
-            .write(true)
-            .read(true)
-            .open(&path)?;
-
-        if try_exclusive_lock(&file) {
-            let mut lock = Self {
-                file: Some(file),
-                path,
-            };
-
-            // Write diagnostic info to the lock file (best-effort).
-            let _err = lock.write_info(session);
-
-            Ok(Some(lock))
-        } else {
-            Ok(None)
-        }
-    }
-
-    /// Write diagnostic info to the lock file (best-effort).
-    fn write_info(&mut self, session: Option<&str>) -> Result<()> {
-        let Some(file) = self.file.as_mut() else {
-            return Ok(());
-        };
-
-        let info = LockInfo {
-            pid: std::process::id(),
-            session: session.map(String::from),
-            acquired_at: Utc::now().to_rfc3339(),
-        };
-
-        // Truncate + rewrite. Ignore errors — the info is purely diagnostic.
-        file.set_len(0)?;
-        file.seek(io::SeekFrom::Start(0))?;
-        serde_json::to_writer(&*file, &info)?;
-        file.flush().map_err(Into::into)
-    }
-}
-
 /// Read diagnostic info from a lock file (best-effort).
 ///
 /// Returns `None` if the file can't be read or parsed.
 #[must_use]
 pub fn read_lock_info(path: &Utf8Path) -> Option<LockInfo> {
-    let mut file = File::open(path).ok()?;
-    let mut buf = String::new();
-
-    file.read_to_string(&mut buf).ok()?;
-    serde_json::from_str(&buf).ok()
-}
-
-impl Drop for ConversationFileLock {
-    fn drop(&mut self) {
-        // Drop the file handle first to release the OS lock.
-        self.file.take();
-
-        // Best-effort cleanup of the lock file.
-        let _err = fs::remove_file(&self.path);
-    }
+    let content = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str(&content).ok()
 }
 
 impl super::Storage {
@@ -133,15 +59,37 @@ impl super::Storage {
     /// The lock file is placed in user storage if available, otherwise in
     /// workspace storage.
     ///
-    /// Returns `Ok(Some(lock))` if the lock was acquired, `Ok(None)` if another
-    /// process holds it, or `Err` on I/O errors.
+    /// Returns `Ok(Some(guard))` if the lock was acquired, `Ok(None)` if
+    /// another process holds it, or `Err` on I/O errors.
     pub fn try_lock_conversation(
         &self,
         conversation_id: &str,
         session: Option<&str>,
-    ) -> Result<Option<ConversationFileLock>> {
+    ) -> Result<Option<Box<dyn ResourceGuard>>> {
         let path = self.lock_file_path(conversation_id).unwrap_or_else(|p| p);
-        ConversationFileLock::try_acquire(path, session)
+        let dir = path.parent().unwrap_or(Utf8Path::new("."));
+
+        // Holder info is purely diagnostic; failing to serialize it must
+        // not fail the acquisition.
+        let info = serde_json::to_string(&LockInfo {
+            pid: std::process::id(),
+            session: session.map(String::from),
+            acquired_at: Utc::now().to_rfc3339(),
+        })
+        .ok();
+
+        // Conversation lock files double as presence markers (see
+        // `is_conversation_locked` and the orphan scan), so they are removed
+        // when the guard drops. Removal is not free: a contender that opens the
+        // path between the handle closing and the unlink locks an inode about
+        // to disappear, while the next acquisition locks a fresh file at the
+        // same path. `try_lock` keeps that to the close/unlink window instead
+        // of the certainty a blocking wait would give, but does not close it;
+        // RFD 106 tracks the fix as the release-then-unlink defect.
+        FsResourceLocker::new(dir)
+            .with_remove_on_drop()
+            .try_lock(conversation_id, info.as_deref())
+            .map_err(|error| error.source.into())
     }
 
     /// Read lock holder info for a conversation.
@@ -201,7 +149,7 @@ impl super::Storage {
 /// If it succeeds, the file is orphaned.
 /// The lock is immediately released.
 pub(crate) fn is_orphaned_lock(path: &camino::Utf8Path) -> bool {
-    let Ok(file) = std::fs::File::open(path) else {
+    let Ok(file) = File::open(path) else {
         return false;
     };
 
@@ -212,42 +160,4 @@ pub(crate) fn is_orphaned_lock(path: &camino::Utf8Path) -> bool {
     } else {
         false
     }
-}
-
-#[cfg(unix)]
-fn try_exclusive_lock(file: &File) -> bool {
-    use std::os::unix::io::AsRawFd;
-
-    // SAFETY: flock is a standard POSIX function. The file descriptor is valid
-    // because we hold a reference to the open File.
-    unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) == 0 }
-}
-
-#[cfg(windows)]
-fn try_exclusive_lock(file: &File) -> bool {
-    use std::os::windows::io::AsRawHandle;
-
-    use windows_sys::Win32::{
-        Storage::FileSystem::{LOCKFILE_EXCLUSIVE_LOCK, LOCKFILE_FAIL_IMMEDIATELY, LockFileEx},
-        System::IO::OVERLAPPED,
-    };
-
-    let handle = file.as_raw_handle();
-    let mut overlapped: OVERLAPPED = unsafe { std::mem::zeroed() };
-    let flags = LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY;
-
-    // Lock a single byte at a high offset, far past the diagnostic JSON
-    // written at offset 0. Windows exclusive byte-range locks prevent ALL
-    // other handles from reading the locked region, so placing the lock
-    // away from the file content lets other handles read the lock info.
-    overlapped.Anonymous.Anonymous.Offset = u32::MAX;
-
-    // SAFETY: handle is valid (from an open File), overlapped is initialized.
-    unsafe { LockFileEx(handle, flags, 0, 1, 0, &mut overlapped) != 0 }
-}
-
-#[cfg(not(any(unix, windows)))]
-fn try_exclusive_lock(_file: &File) -> bool {
-    // No locking support; assume success (best-effort).
-    true
 }
