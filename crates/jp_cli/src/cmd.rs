@@ -7,6 +7,7 @@ mod init;
 pub(crate) mod label;
 mod lock;
 pub(crate) mod plugin;
+mod provider;
 mod query;
 pub(crate) mod target;
 pub(crate) mod time;
@@ -56,6 +57,9 @@ pub(crate) enum Commands {
     #[command(visible_alias = "w", alias = "workspaces")]
     Workspace(workspace::Workspace),
 
+    /// Manage provider credentials.
+    Provider(provider::Provider),
+
     /// External plugin subcommand (`jp-<name>` on $PATH or registry).
     #[command(external_subcommand)]
     External(Vec<String>),
@@ -89,7 +93,7 @@ impl Commands {
             }
             Commands::Plugin(args) => args.run(ctx).await,
             Commands::External(args) => plugin::dispatch::run_external(&args, ctx).await,
-            Commands::Init(_) | Commands::Workspace(_) => {
+            Commands::Init(_) | Commands::Provider(_) | Commands::Workspace(_) => {
                 unreachable!("handled before workspace initialization")
             }
         }
@@ -106,6 +110,7 @@ impl Commands {
             | Commands::Attachment(_)
             | Commands::AttachmentAdd(_)
             | Commands::Plugin(_)
+            | Commands::Provider(_)
             | Commands::Workspace(_)
             | Commands::External(_) => ConversationLoadRequest::none(),
         }
@@ -118,7 +123,9 @@ impl Commands {
     /// it.
     pub(crate) fn workspace_requirement(&self) -> WorkspaceRequirement {
         match self {
-            Commands::Init(_) => WorkspaceRequirement::None,
+            // Credentials are user-global, so the auth commands need no
+            // workspace at all.
+            Commands::Init(_) | Commands::Provider(_) => WorkspaceRequirement::None,
             Commands::Workspace(args) => args.workspace_requirement(),
             Commands::Query(_)
             | Commands::Config(_)
@@ -148,6 +155,7 @@ impl Commands {
             Commands::Init(_) => "init",
             Commands::Conversation(_) => "conversation",
             Commands::Plugin(_) => "plugin",
+            Commands::Provider(_) => "provider",
             Commands::Workspace(_) => "workspace",
             Commands::External(args) => {
                 // Use first arg as the command name (it's the subcommand name).
@@ -181,6 +189,7 @@ impl IntoPartialAppConfig for Commands {
             Commands::Config(_)
             | Commands::Init(_)
             | Commands::Plugin(_)
+            | Commands::Provider(_)
             | Commands::Workspace(_)
             | Commands::External(_) => Ok(partial),
         }
@@ -203,6 +212,7 @@ impl IntoPartialAppConfig for Commands {
             | Commands::Conversation(_)
             | Commands::Init(_)
             | Commands::Plugin(_)
+            | Commands::Provider(_)
             | Commands::Workspace(_)
             | Commands::External(_) => Ok(partial),
         }
@@ -433,6 +443,7 @@ impl From<crate::error::Error> for Error {
         let metadata: Vec<(&str, String)> = match error {
             Command(error) => return error,
             Config(error) => return error.into(),
+            Credentials(error) => with_cause(&error, "Credential store error"),
             KeyValue(error) => return error.into(),
             Workspace(error) => return error.into(),
             Conversation(error) => return error.into(),
@@ -479,7 +490,7 @@ impl From<crate::error::Error> for Error {
             ]
             .into(),
             InquiryModelOverride { model, source } => {
-                let mut meta = with_cause(&source, "Inquiry model override is unusable");
+                let mut meta = with_cause(source.as_ref(), "Inquiry model override is unusable");
                 meta.insert(1, ("model", model));
                 meta.push((
                     "suggestion",
@@ -747,6 +758,7 @@ impl From<jp_llm::Error> for Error {
                 ("variable", variable),
             ]
             .into(),
+            CredentialChain(error) => with_cause(&error, "No usable credential"),
             InvalidResponse(error) => [
                 ("message", "Invalid response received".into()),
                 ("error", error),

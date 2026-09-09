@@ -4,6 +4,7 @@ use std::{
 };
 
 use async_anthropic::errors::AnthropicError;
+use chrono::{DateTime, Utc};
 use jp_config::model::{id::ProviderId, parameters::ServiceTier};
 use reqwest::header::{HeaderMap, RETRY_AFTER};
 use serde_json::Value;
@@ -21,6 +22,22 @@ pub struct StreamError {
     /// If `Some`, the request can be retried after the specified duration.
     /// If `None`, the caller should use exponential backoff or not retry.
     pub retry_after: Option<Duration>,
+
+    /// When an exhausted quota resets, if the provider reported it.
+    ///
+    /// Distinct from [`retry_after`]: a quota cooldown spans a rolling usage
+    /// window measured in hours, which no backoff schedule should try to wait
+    /// out.
+    ///
+    /// [`retry_after`]: Self::retry_after
+    pub quota_reset: Option<DateTime<Utc>>,
+
+    /// What an exhausted quota applies to: the whole account (`"account"`) or a
+    /// model family (`"opus"`, `"sonnet"`).
+    ///
+    /// `None` when the provider gave no scope, which the caller treats as
+    /// account-wide.
+    pub quota_scope: Option<String>,
 
     /// Human-readable error message.
     message: String,
@@ -40,6 +57,8 @@ impl StreamError {
             kind,
             message: message.into(),
             retry_after: None,
+            quota_reset: None,
+            quota_scope: None,
             source: None,
         }
     }
@@ -60,10 +79,25 @@ impl StreamError {
     #[must_use]
     pub fn rate_limit(retry_after: Option<Duration>) -> Self {
         Self {
-            kind: StreamErrorKind::RateLimit,
             retry_after,
-            message: "Rate limited".into(),
-            source: None,
+            ..Self::new(StreamErrorKind::RateLimit, "Rate limited")
+        }
+    }
+
+    /// Create a subscription-window exhaustion error.
+    ///
+    /// `reset` is the provider-reported reset instant, when it gave one;
+    /// `scope` names what is exhausted (the whole account, or a model family).
+    #[must_use]
+    pub fn subscription_exhausted(
+        message: impl Into<String>,
+        reset: Option<DateTime<Utc>>,
+        scope: Option<String>,
+    ) -> Self {
+        Self {
+            quota_reset: reset,
+            quota_scope: scope,
+            ..Self::new(StreamErrorKind::SubscriptionExhausted, message)
         }
     }
 
@@ -136,6 +170,14 @@ impl StreamError {
     /// they end up classified as `Other` even though retrying usually succeeds.
     #[must_use]
     pub fn is_retryable(&self) -> bool {
+        // A spent or refused credential is never retryable in place: the
+        // same credential would fail the same way. It is retryable by
+        // switching credentials, which is a different decision (see
+        // `needs_credential_switch`).
+        if self.needs_credential_switch() {
+            return false;
+        }
+
         matches!(
             self.kind,
             StreamErrorKind::Timeout
@@ -145,6 +187,39 @@ impl StreamError {
         ) || self.retry_after.is_some()
             || (self.kind == StreamErrorKind::Other
                 && looks_like_transient_network_error(&self.message))
+    }
+
+    /// Whether the credential that produced this error is out of quota, so the
+    /// request can only succeed under a different credential.
+    ///
+    /// Covers both a subscription usage window and a per-token account's
+    /// billing limit.
+    #[must_use]
+    pub fn is_exhausted(&self) -> bool {
+        matches!(
+            self.kind,
+            StreamErrorKind::InsufficientQuota | StreamErrorKind::SubscriptionExhausted
+        )
+    }
+
+    /// Whether the provider refused the credential itself, so it needs
+    /// re-authorizing before it can be used again.
+    #[must_use]
+    pub fn is_auth_rejected(&self) -> bool {
+        self.kind == StreamErrorKind::AuthRejected
+    }
+
+    /// Whether the request can only proceed under a different credential,
+    /// because this one is spent or refused.
+    #[must_use]
+    pub fn needs_credential_switch(&self) -> bool {
+        self.is_exhausted() || self.is_auth_rejected()
+    }
+
+    /// Create a credential-rejection error.
+    #[must_use]
+    pub fn auth_rejected(message: impl Into<String>) -> Self {
+        Self::new(StreamErrorKind::AuthRejected, message)
     }
 }
 
@@ -354,6 +429,18 @@ pub enum StreamErrorKind {
     /// This is not retryable — the user needs to top up or change plans.
     InsufficientQuota,
 
+    /// A subscription account's rolling usage window is exhausted.
+    ///
+    /// Not retryable in place (the window is measured in hours), but the
+    /// request can proceed under the next credential in the chain.
+    SubscriptionExhausted,
+
+    /// The provider refused the credential itself (`401`/`403`).
+    ///
+    /// Retrying cannot help: the credential needs to be re-authorized, and the
+    /// request can only proceed under a different one.
+    AuthRejected,
+
     /// The request is larger than the model's context window.
     /// This is not retryable — the request has to shrink, or move to a model
     /// with a larger window.
@@ -378,6 +465,8 @@ impl StreamErrorKind {
             Self::RateLimit => "Rate limited",
             Self::Transient => "Server error",
             Self::InsufficientQuota => "Insufficient API quota",
+            Self::SubscriptionExhausted => "Subscription limit reached",
+            Self::AuthRejected => "Authentication rejected",
             Self::ContextWindowExceeded => "Context window exceeded",
             Self::OutputLimit => "Output limit exceeded",
             Self::Other => "Stream Error",
@@ -468,6 +557,10 @@ pub enum Error {
 
     #[error(transparent)]
     ModelId(#[from] jp_config::model::id::ModelIdError),
+
+    /// The provider's credential chain produced no usable credential.
+    #[error(transparent)]
+    CredentialChain(crate::provider::anthropic::resolve::ResolveError),
 }
 
 #[cfg(test)]
@@ -561,6 +654,19 @@ pub enum ToolError {
 impl From<jp_conversation::StreamError> for Error {
     fn from(error: jp_conversation::StreamError) -> Self {
         Self::Conversation(error.into())
+    }
+}
+
+impl From<crate::provider::anthropic::resolve::ResolveError> for Error {
+    fn from(error: crate::provider::anthropic::resolve::ResolveError) -> Self {
+        use crate::provider::anthropic::resolve::ResolveError;
+
+        // The single-entry `["api_key"]` chain fails the same way it did
+        // before credential chains existed.
+        match error {
+            ResolveError::MissingEnv(var) => Self::MissingEnv(var),
+            error => Self::CredentialChain(error),
+        }
     }
 }
 

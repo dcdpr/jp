@@ -47,9 +47,20 @@ pub trait Provider: Send + Sync {
 }
 
 /// Get a provider by ID.
+///
+/// Every provider is constructed from its configuration alone and validates its
+/// own credentials during construction: an environment variable read, or a
+/// credential-chain preflight against the store.
+///
+/// # Errors
+///
+/// Returns an error when the provider cannot possibly authenticate, e.g.
+/// [`Error::MissingEnv`] when its API key environment variable is unset.
+///
+/// [`Error::MissingEnv`]: crate::Error::MissingEnv
 pub fn get_provider(id: ProviderId, config: &LlmProviderConfig) -> Result<Box<dyn Provider>> {
     let provider: Box<dyn Provider> = match id {
-        ProviderId::Anthropic => Box::new(Anthropic::try_from(&config.anthropic)?),
+        ProviderId::Anthropic => Box::new(Anthropic::new(&config.anthropic)?),
         ProviderId::Cerebras => Box::new(Cerebras::try_from(&config.cerebras)?),
         ProviderId::Google => Box::new(Google::try_from(&config.google)?),
         ProviderId::Llamacpp => Box::new(Llamacpp::try_from(&config.llamacpp)?),
@@ -69,7 +80,8 @@ pub fn get_provider(id: ProviderId, config: &LlmProviderConfig) -> Result<Box<dy
 /// Validate that a provider is able to accept requests: credentials present,
 /// configuration well-formed.
 ///
-/// Local and synchronous — performs no I/O.
+/// Synchronous and local: it reads the environment and, for a provider with a
+/// credential chain, a store snapshot — never the network.
 /// Constructing a provider implies this check passes: this *is*
 /// [`get_provider`] with the client thrown away, packaged as an explicit seam
 /// so callers can fail fast before starting side-effectful work (spawning
@@ -103,7 +115,14 @@ pub(crate) fn build_request_value(
 ) -> Result<serde_json::Value> {
     match id {
         ProviderId::Anthropic => {
-            Anthropic::try_from(&config.anthropic)?.request_value(model, query)
+            // A fixed dummy credential: request construction is independent
+            // of the credential's value, and tests must not read the
+            // environment or the store.
+            Anthropic::with_credential(
+                &config.anthropic,
+                crate::credential::Credential::ApiKey("test-api-key".to_owned()),
+            )
+            .request_value(model, query)
         }
         ProviderId::Cerebras => Cerebras::try_from(&config.cerebras)?.request_value(model, query),
         ProviderId::Google => Google::try_from(&config.google)?.request_value(model, query),

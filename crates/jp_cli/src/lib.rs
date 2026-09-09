@@ -607,6 +607,13 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
         return output;
     }
 
+    // Credentials are user-global, so `jp provider auth` works anywhere:
+    // it bypasses workspace discovery entirely, the same startup exception
+    // `jp init` uses.
+    if let Commands::Provider(args) = &cli.command {
+        return args.run(&printer).map_err(Into::into);
+    }
+
     // The per-command workspace bootstrap requirement (RFD 087): commands
     // declaring `None` run without any workspace resolution or construction,
     // so the downstream consumers that assume a root do not run.

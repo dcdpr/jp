@@ -1,7 +1,16 @@
-use std::{env, mem, ops::RangeInclusive, time::Duration};
+pub mod auth;
+pub mod oauth;
+pub mod resolve;
+
+use std::{
+    mem,
+    ops::RangeInclusive,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use async_anthropic::{
-    Client,
+    Client, bearer,
     errors::AnthropicError,
     messages::DEFAULT_MAX_TOKENS,
     types::{
@@ -12,7 +21,7 @@ use async_anthropic::{
 use async_stream::try_stream;
 use async_trait::async_trait;
 use base64::Engine as _;
-use chrono::NaiveDate;
+use chrono::{NaiveDate, Utc};
 use futures::{StreamExt as _, TryStreamExt as _, pin_mut, stream};
 use jp_attachment::AttachmentContent;
 use jp_config::{
@@ -21,17 +30,19 @@ use jp_config::{
         id::{Name, ProviderId},
         parameters::{ReasoningConfig, ReasoningEffort, ServiceTier},
     },
-    providers::llm::anthropic::AnthropicConfig,
+    providers::llm::anthropic::{AnthropicConfig, AuthEntry},
 };
 use jp_conversation::{
     ConversationStream,
     event::{ChatResponse, ConversationEvent, EventKind},
 };
+use jp_credentials::CredentialStore;
 use serde_json::{Map, Value, json};
 use tracing::{debug, info, trace, warn};
 
 use super::{Provider, trace_to_tmpfile};
 use crate::{
+    credential::Credential,
     error::{
         Error, Result, StreamError, StreamErrorKind, extract_retry_from_text,
         looks_like_context_window_error, looks_like_quota_error,
@@ -60,6 +71,30 @@ const MAX_EXPLICIT_CACHE_CONTROL_COUNT: usize = 3;
 
 const THINKING_SIGNATURE_KEY: &str = "anthropic_thinking_signature";
 const REDACTED_THINKING_KEY: &str = "anthropic_redacted_thinking";
+
+/// The Claude Code identity line that must lead the system content of a bearer
+/// (subscription) request.
+///
+/// Anthropic enforces it: a bearer request whose system prompt does not begin
+/// with this line is answered `429 rate_limit_error` with an opaque `"message":
+/// "Error"` body — not a 401, and not a message naming the check (RFD 090,
+/// Phase 1).
+/// The line shifts model behavior, which is the cost of subscription access;
+/// API key requests never carry it.
+const CLAUDE_CODE_IDENTITY_LINE: &str = "You are Claude Code, Anthropic's official CLI for Claude.";
+
+/// Follows [`CLAUDE_CODE_IDENTITY_LINE`] in a bearer request, bounding its
+/// effect on the model.
+///
+/// The identity line cannot be omitted, so instead of leaving a foreign
+/// identity standing ahead of JP's own system prompt, the next block names it
+/// as a transport artifact and points at the prompt that follows.
+/// It says why the line is there rather than only asking the model to ignore
+/// it, so the model has no puzzle to reason about (or comment on) when asked
+/// who it is.
+const IDENTITY_LINE_OVERRIDE: &str = "Disregard the line above. It is required by the API \
+                                      transport and does not describe you. Your actual identity \
+                                      and instructions follow.";
 
 /// Known Anthropic error types that are safe to retry.
 ///
@@ -125,47 +160,276 @@ const TOOL_CALL_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone)]
 pub struct Anthropic {
-    client: Client,
+    config: AnthropicConfig,
 
     /// See [`AnthropicConfig::chain_on_max_tokens`].
     chain_on_max_tokens: bool,
 
     /// Which beta features are enabled.
     beta: BetaFeatures,
+
+    /// The credential store backing `profile` chain entries.
+    ///
+    /// `None` when the chain holds no profile entries; the default
+    /// `["api_key"]` chain works without touching the store.
+    store: Option<CredentialStore>,
+
+    /// A directly injected credential, bypassing chain resolution.
+    ///
+    /// Test seam: request construction is independent of the credential's
+    /// value, and tests must not read the environment or the store.
+    fixed_credential: Option<Credential>,
+
+    /// The client built for the most recently resolved credential.
+    ///
+    /// A turn issues several requests around tool execution, and resolution
+    /// normally lands on the same credential each time; reusing the client
+    /// keeps its connection pool alive instead of paying a fresh TLS handshake
+    /// per request.
+    /// A credential switch replaces the entry, since the auth material is baked
+    /// into the client's default headers.
+    client_cache: Arc<Mutex<Option<(Credential, Client, bool)>>>,
+}
+
+impl Anthropic {
+    /// Build a provider from its configuration.
+    ///
+    /// Construction is the credential preflight: it verifies that at least one
+    /// entry of the `auth` chain could resolve, against a store snapshot and
+    /// the environment, so commands fail fast before starting side-effectful
+    /// work.
+    /// The actual credential is resolved anew before each request the provider
+    /// sends.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the chain, the store, or one of their entries is
+    /// config-shaped-broken, or when no chain entry can resolve.
+    pub fn new(config: &AnthropicConfig) -> Result<Self> {
+        let store = config
+            .auth
+            .iter()
+            .any(|entry| matches!(entry, AuthEntry::Profile(_)))
+            .then(CredentialStore::file_default)
+            .transpose()
+            .map_err(resolve::ResolveError::from)?;
+
+        let provider = Anthropic {
+            config: config.clone(),
+            beta: BetaFeatures(config.beta_headers.clone()),
+            chain_on_max_tokens: config.chain_on_max_tokens,
+            store,
+            fixed_credential: None,
+            client_cache: Arc::new(Mutex::new(None)),
+        };
+
+        // No model is named at construction, so only account-scoped cooldowns
+        // participate; per-request resolution applies the precise model scope.
+        if provider.fixed_credential.is_none() {
+            resolve::preflight(&provider.config, provider.store.as_ref(), "", Utc::now())?;
+        }
+
+        Ok(provider)
+    }
+
+    /// Build a provider around an explicit credential, bypassing the chain.
+    ///
+    /// Test seam: no environment or store access, no preflight.
+    #[cfg(test)]
+    pub(crate) fn with_credential(config: &AnthropicConfig, credential: Credential) -> Self {
+        Anthropic {
+            config: config.clone(),
+            beta: BetaFeatures(config.beta_headers.clone()),
+            chain_on_max_tokens: config.chain_on_max_tokens,
+            store: None,
+            fixed_credential: Some(credential),
+            client_cache: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    /// Resolve the credential for a request against `model`.
+    ///
+    /// Refreshes an expired OAuth access token before returning it, so the
+    /// credential handed back is good for the request about to be sent.
+    async fn resolve(&self, model: &str) -> Result<resolve::Attempt> {
+        if let Some(credential) = &self.fixed_credential {
+            return Ok(resolve::Attempt {
+                credential: credential.clone(),
+                selected: None,
+                notices: vec![],
+            });
+        }
+
+        Ok(resolve::resolve(&self.config, self.store.as_ref(), model, Utc::now()).await?)
+    }
+
+    /// Record why the attempt's credential is out and move to the next one.
+    ///
+    /// Returns `None` when there is no chain to advance or nothing further in
+    /// it, which the caller surfaces as the original, now-terminal error.
+    async fn advance(
+        &self,
+        attempt: &resolve::Attempt,
+        error: &StreamError,
+        model: &str,
+    ) -> Option<resolve::Attempt> {
+        let spent = attempt.selected.as_ref()?;
+        resolve::advance(
+            &self.config,
+            self.store.as_ref(),
+            spent,
+            error,
+            model,
+            Utc::now(),
+        )
+        .await
+    }
+
+    /// Advance after a non-streaming request failed, or surface the failure.
+    async fn advance_or_fail(
+        &self,
+        attempt: &resolve::Attempt,
+        error: AnthropicError,
+        model: &str,
+    ) -> Result<resolve::Attempt> {
+        if !is_switchable(&error) {
+            return Err(error.into());
+        }
+
+        let error = StreamError::from(error);
+        match self.advance(attempt, &error, model).await {
+            Some(next) => Ok(next),
+            None => Err(Error::Stream(error)),
+        }
+    }
+
+    /// Build the HTTP client for a resolved credential.
+    ///
+    /// Returns the client and whether it authenticates with a bearer token.
+    /// Bearer requests carry the Claude Code fingerprint, including the
+    /// identity line leading the system content, so the flag feeds request
+    /// construction, not only the auth header.
+    fn client_for(&self, credential: &Credential) -> Result<(Client, bool)> {
+        let mut cache = self.client_cache.lock().expect("poisoned");
+        if let Some((cached, client, bearer)) = cache.as_ref()
+            && cached == credential
+        {
+            return Ok((client.clone(), *bearer));
+        }
+
+        let mut builder = Client::builder();
+        builder
+            .base_url(self.config.base_url.clone())
+            .version("2023-06-01");
+
+        let bearer = match credential {
+            Credential::ApiKey(key) => {
+                builder.api_key(key.clone());
+                false
+            }
+            Credential::Bearer(token) => {
+                builder.auth_token(token.clone());
+                true
+            }
+        };
+
+        if !self.config.beta_headers.is_empty() {
+            builder.beta(self.config.beta_headers.join(","));
+        }
+
+        // Bearer mode changes the request fingerprint, not just the auth
+        // header, so record which mode a request went out in and the beta
+        // set that accompanied it.
+        debug!(
+            bearer,
+            betas = %if bearer {
+                bearer::merge_betas(
+                    (!self.config.beta_headers.is_empty())
+                        .then(|| self.config.beta_headers.join(","))
+                        .as_deref(),
+                )
+            } else {
+                self.config.beta_headers.join(",")
+            },
+            "Constructing Anthropic client."
+        );
+
+        let client = builder
+            .build()
+            .map_err(|e| Error::Anthropic(AnthropicError::Unknown(e.to_string())))?;
+
+        *cache = Some((credential.clone(), client.clone(), bearer));
+
+        Ok((client, bearer))
+    }
+}
+
+/// Whether a failure means the credential is spent or refused, so the request
+/// can only proceed under a different credential.
+fn is_switchable(error: &AnthropicError) -> bool {
+    match error {
+        AnthropicError::Auth { .. } => true,
+        AnthropicError::RateLimit { limits, .. } => limits.is_quota_rejection(),
+        _ => false,
+    }
 }
 
 #[async_trait]
 impl Provider for Anthropic {
     async fn model_details(&self, name: &Name) -> Result<ModelDetails> {
-        let model = self.client.models().get(name).await?;
-        map_model(model)
+        let mut attempt = self.resolve(name).await?;
+
+        loop {
+            for notice in mem::take(&mut attempt.notices) {
+                warn!("{notice}");
+            }
+
+            let (client, _) = self.client_for(&attempt.credential)?;
+            match client.models().get(name).await {
+                Ok(model) => return map_model(model),
+                Err(error) => attempt = self.advance_or_fail(&attempt, error, name).await?,
+            }
+        }
     }
 
     async fn models(&self) -> Result<Vec<ModelDetails>> {
-        let mut all_models = vec![];
-        let mut after_id = None;
+        // No model is named, so only account-scoped cooldowns participate in
+        // resolution.
+        let mut attempt = self.resolve("").await?;
 
-        loop {
-            let path = match after_id {
-                Some(id) => format!("/v1/models?after_id={id}"),
-                None => "/v1/models".to_string(),
-            };
-
-            let models;
-            (after_id, models) = self
-                .client
-                .get::<ListModelsResponse>(&path)
-                .await
-                .map(|list| (list.has_more.then_some(list.last_id).flatten(), list.data))?;
-
-            all_models.extend(models);
-
-            if after_id.is_none() {
-                break;
+        'attempt: loop {
+            for notice in mem::take(&mut attempt.notices) {
+                warn!("{notice}");
             }
-        }
 
-        all_models.into_iter().map(map_model).collect::<Result<_>>()
+            let (client, _) = self.client_for(&attempt.credential)?;
+            let mut all_models = vec![];
+            let mut after_id = None;
+
+            loop {
+                let path = match after_id {
+                    Some(id) => format!("/v1/models?after_id={id}"),
+                    None => "/v1/models".to_string(),
+                };
+
+                let models;
+                (after_id, models) = match client.get::<ListModelsResponse>(&path).await {
+                    Ok(list) => (list.has_more.then_some(list.last_id).flatten(), list.data),
+                    Err(error) => {
+                        attempt = self.advance_or_fail(&attempt, error, "").await?;
+                        continue 'attempt;
+                    }
+                };
+
+                all_models.extend(models);
+
+                if after_id.is_none() {
+                    break;
+                }
+            }
+
+            return all_models.into_iter().map(map_model).collect::<Result<_>>();
+        }
     }
 
     async fn chat_completion_stream(
@@ -173,7 +437,6 @@ impl Provider for Anthropic {
         model: &ModelDetails,
         query: ChatQuery,
     ) -> Result<EventStream> {
-        let client = self.client.clone();
         let max_tokens_config = query
             .thread
             .events
@@ -183,36 +446,113 @@ impl Provider for Anthropic {
             .parameters
             .max_tokens;
 
-        let (request, is_structured, forced_tool) = create_request(model, query, true, &self.beta)?;
+        // The initial resolution happens here so a doomed request fails as an
+        // ordinary error before a stream exists; switches re-resolve inside
+        // the stream.
+        let attempt = self.resolve(model.name()).await?;
 
-        // Chaining is disabled for structured output — the provider guarantees
-        // schema compliance so the response won't hit max_tokens for a
-        // well-constrained schema.
-        //
-        // It is also disabled when the user has explicitly configured a max
-        // tokens value, or when chaining is disabled in the provider config.
-        let chain_on_max_tokens =
-            !is_structured && max_tokens_config.is_none() && self.chain_on_max_tokens;
-        let chains_remaining = if chain_on_max_tokens {
-            MAX_CHAIN_DEPTH
-        } else {
-            0
-        };
+        let this = self.clone();
+        let model = model.clone();
+        let stream = try_stream!({
+            let mut attempt = attempt;
 
-        debug!(stream = true, "Anthropic chat completion stream request.");
-        trace!(
-            request = %trace_to_tmpfile("jp-anthropic-request", &request),
-            "Request payload."
-        );
+            'attempt: loop {
+                for notice in mem::take(&mut attempt.notices) {
+                    yield Event::Notice(notice);
+                }
+
+                // Client and request are rebuilt per attempt: a bearer and an
+                // API key request differ in fingerprint, not only in the auth
+                // header.
+                let (client, bearer) = this
+                    .client_for(&attempt.credential)
+                    .map_err(|e| StreamError::other(e.to_string()))?;
+                let (request, is_structured, forced_tool) =
+                    create_request(&model, query.clone(), true, &this.beta, bearer)
+                        .map_err(|e| StreamError::other(e.to_string()))?;
+
+                // Chaining is disabled for structured output — the provider
+                // guarantees schema compliance so the response won't hit
+                // max_tokens for a well-constrained schema.
+                //
+                // It is also disabled when the user has explicitly configured
+                // a max tokens value, or when chaining is disabled in the
+                // provider config.
+                let chains_remaining =
+                    if !is_structured && max_tokens_config.is_none() && this.chain_on_max_tokens {
+                        MAX_CHAIN_DEPTH
+                    } else {
+                        0
+                    };
+
+                debug!(stream = true, "Anthropic chat completion stream request.");
+                trace!(
+                    request = %trace_to_tmpfile("jp-anthropic-request", &request),
+                    "Request payload."
+                );
+
+                let inner = call(
+                    client,
+                    request,
+                    chains_remaining,
+                    is_structured,
+                    forced_tool,
+                    resolve::QuotaWatch::new(this.store.as_ref(), attempt.selected.as_ref()),
+                );
+                pin_mut!(inner);
+
+                // Whether the request produced content: a switch is only
+                // silent at admission, before anything reached the stream.
+                let mut content_seen = false;
+
+                while let Some(item) = inner.next().await {
+                    match item {
+                        Ok(event) => {
+                            content_seen = content_seen
+                                || !matches!(event, Event::KeepAlive | Event::Notice(_));
+                            yield event;
+                        }
+                        Err(error) if error.needs_credential_switch() => {
+                            let Some(next) = this.advance(&attempt, &error, model.name()).await
+                            else {
+                                // Chain exhausted: the failure that prompted
+                                // the switch is terminal, reported as itself.
+                                Err(error)?;
+                                return;
+                            };
+
+                            if content_seen {
+                                // Mid-stream: partial content already reached
+                                // the caller, so an internal re-send would
+                                // duplicate it. The recorded outcome routes
+                                // the caller's retry onto the next credential;
+                                // surface the failure as retryable so the
+                                // existing retry flow (flush partial content,
+                                // rebuild the thread, fresh stream) takes it
+                                // from here.
+                                for notice in next.notices {
+                                    yield Event::Notice(notice);
+                                }
+                                Err(StreamError::transient(error.to_string()))?;
+                                return;
+                            }
+
+                            attempt = next;
+                            continue 'attempt;
+                        }
+                        Err(error) => {
+                            Err(error)?;
+                            return;
+                        }
+                    }
+                }
+
+                return;
+            }
+        });
 
         Ok(with_tool_call_keepalive(
-            call(
-                client,
-                request,
-                chains_remaining,
-                is_structured,
-                forced_tool,
-            ),
+            Box::pin(stream),
             TOOL_CALL_KEEPALIVE_INTERVAL,
         ))
     }
@@ -290,6 +630,7 @@ fn call(
     chains_remaining: u8,
     is_structured: bool,
     forced_tool_fallback: Option<ForcedToolFallback>,
+    watch: resolve::QuotaWatch,
 ) -> EventStream {
     Box::pin(try_stream!({
         // Buffer flushed ConversationEvents for chaining. When MaxTokens hits,
@@ -314,10 +655,22 @@ fn call(
         // tool).
         let mut tool_names_called: Vec<String> = vec![];
 
-        let stream = client
+        // An admission rejection (a spent quota, a refused credential)
+        // surfaces here, before any event exists.
+        let response = client
             .messages()
             .create_stream(request.clone())
             .await
+            .map_err(StreamError::from)?;
+
+        // The response's quota headers report the subscription's state even
+        // when the request succeeded.
+        for notice in watch.observe(&response.limits, Utc::now()) {
+            yield Event::Notice(notice);
+        }
+
+        let stream = response
+            .stream
             .map_err(StreamError::from)
             .map_ok(|v| stream::iter(map_event(v, is_structured)))
             .try_flatten()
@@ -363,6 +716,7 @@ fn call(
                         chain_events,
                         is_structured,
                         chains_remaining - 1,
+                        watch.clone(),
                     ) {
                         yield event?;
                     }
@@ -385,6 +739,7 @@ fn call(
                         chain_events,
                         fallback,
                         is_structured,
+                        watch.clone(),
                     ) {
                         yield event?;
                     }
@@ -438,6 +793,7 @@ fn call(
                 }
                 patch @ Event::Patch(_) => yield patch,
                 keep_alive @ Event::KeepAlive => yield keep_alive,
+                notice @ Event::Notice(_) => yield notice,
             }
         }
     }))
@@ -458,6 +814,7 @@ fn chain(
     events: Vec<ConversationEvent>,
     is_structured: bool,
     chains_remaining: u8,
+    watch: resolve::QuotaWatch,
 ) -> EventStream {
     debug_assert!(!events.iter().any(ConversationEvent::is_tool_call_request));
 
@@ -499,7 +856,14 @@ fn chain(
     });
 
     Box::pin(try_stream!({
-        for await event in call(client, request, chains_remaining, is_structured, None) {
+        for await event in call(
+            client,
+            request,
+            chains_remaining,
+            is_structured,
+            None,
+            watch,
+        ) {
             let mut event = event?;
 
             // When chaining new events, the reasoning content is irrelevant, as
@@ -545,6 +909,7 @@ fn dispatch_force_retry(
     events: Vec<ConversationEvent>,
     fallback: &ForcedToolFallback,
     is_structured: bool,
+    watch: resolve::QuotaWatch,
 ) -> EventStream {
     match fallback.strategy {
         ForceStrategy::DisableThinking => {
@@ -552,14 +917,22 @@ fn dispatch_force_retry(
                 "Model did not call the required tool. Retrying with thinking disabled and forced \
                  tool_choice."
             );
-            force_tool_retry(client, request, events, fallback, is_structured)
+            force_tool_retry(client, request, events, fallback, is_structured, watch)
         }
         ForceStrategy::EscalatingNudge { remaining } => {
             info!(
                 remaining,
                 "Model did not call the required tool. Retrying with a firmer nudge."
             );
-            soft_force_retry(client, request, events, fallback, is_structured, remaining)
+            soft_force_retry(
+                client,
+                request,
+                events,
+                fallback,
+                is_structured,
+                remaining,
+                watch,
+            )
         }
     }
 }
@@ -577,6 +950,7 @@ fn force_tool_retry(
     events: Vec<ConversationEvent>,
     fallback: &ForcedToolFallback,
     is_structured: bool,
+    watch: resolve::QuotaWatch,
 ) -> EventStream {
     // Append the assistant's response from the first request.
     let message = events
@@ -627,7 +1001,7 @@ fn force_tool_retry(
 
     Box::pin(try_stream!({
         // Pass `None` for forced_tool_fallback to prevent infinite retries.
-        for await event in call(client, request, 0, is_structured, None) {
+        for await event in call(client, request, 0, is_structured, None, watch) {
             let event = event?;
 
             // Skip reasoning (shouldn't appear with thinking disabled, but
@@ -659,6 +1033,7 @@ fn soft_force_retry(
     fallback: &ForcedToolFallback,
     is_structured: bool,
     remaining: u8,
+    watch: resolve::QuotaWatch,
 ) -> EventStream {
     // Append the assistant's (non-compliant) response from the previous attempt.
     let message = events
@@ -709,7 +1084,7 @@ fn soft_force_retry(
     });
 
     Box::pin(try_stream!({
-        for await event in call(client, request, 0, is_structured, next_fallback) {
+        for await event in call(client, request, 0, is_structured, next_fallback, watch) {
             yield event?;
         }
 
@@ -1193,7 +1568,8 @@ impl Anthropic {
         model: &ModelDetails,
         query: ChatQuery,
     ) -> Result<serde_json::Value> {
-        let (request, ..) = create_request(model, query, true, &self.beta)?;
+        let bearer = matches!(self.fixed_credential, Some(Credential::Bearer(_)));
+        let (request, ..) = create_request(model, query, true, &self.beta, bearer)?;
         Ok(serde_json::to_value(request)?)
     }
 }
@@ -1204,6 +1580,7 @@ fn create_request(
     query: ChatQuery,
     stream: bool,
     beta: &BetaFeatures,
+    bearer: bool,
 ) -> Result<(
     types::CreateMessagesRequest,
     bool,
@@ -1497,6 +1874,26 @@ fn create_request(
 
     if !tools.is_empty() {
         builder.tools(tools).tool_choice(tool_choice);
+    }
+
+    // Bearer requests must open with the Claude Code identity line;
+    // Anthropic rejects them otherwise. The override immediately after it
+    // keeps the foreign identity from standing as an instruction.
+    // Both are inserted after cache breakpoints are assigned, so the cached
+    // block keeps its annotation and neither of these is a breakpoint itself.
+    if bearer {
+        for (i, text) in [CLAUDE_CODE_IDENTITY_LINE, IDENTITY_LINE_OVERRIDE]
+            .into_iter()
+            .enumerate()
+        {
+            system_content.insert(
+                i,
+                types::SystemContent::Text(types::Text {
+                    text: text.to_owned(),
+                    cache_control: None,
+                }),
+            );
+        }
     }
 
     if !system_content.is_empty() {
@@ -1968,31 +2365,14 @@ fn map_event(
     }
 }
 
-impl TryFrom<&AnthropicConfig> for Anthropic {
-    type Error = Error;
-
-    fn try_from(config: &AnthropicConfig) -> Result<Self> {
-        let api_key = env::var(&config.api_key_env)
-            .map_err(|_| Error::MissingEnv(config.api_key_env.clone()))?;
-
-        let mut builder = Client::builder();
-        builder
-            .api_key(api_key)
-            .base_url(config.base_url.clone())
-            .version("2023-06-01");
-
-        if !config.beta_headers.is_empty() {
-            builder.beta(config.beta_headers.join(","));
-        }
-
-        Ok(Anthropic {
-            beta: BetaFeatures(config.beta_headers.clone()),
-            chain_on_max_tokens: config.chain_on_max_tokens,
-            client: builder
-                .build()
-                .map_err(|e| Error::Anthropic(AnthropicError::Unknown(e.to_string())))?,
-        })
-    }
+/// Convert a quota reset reported as Unix seconds into a timestamp.
+///
+/// A value that cannot be represented is dropped rather than clamped: the
+/// caller's fallback cooldown is a better answer than a fabricated instant.
+fn quota_reset_at(seconds: u64) -> Option<chrono::DateTime<chrono::Utc>> {
+    i64::try_from(seconds)
+        .ok()
+        .and_then(|secs| chrono::DateTime::from_timestamp(secs, 0))
 }
 
 /// Transform a JSON schema to conform to Anthropic's structured output
@@ -2510,9 +2890,49 @@ impl From<AnthropicError> for StreamError {
         match error {
             E::Network(error) => Self::from(error),
             E::StreamTransport(_) => StreamError::transient(error.to_string()).with_source(error),
-            E::RateLimit { retry_after } => {
-                Self::rate_limit(retry_after.map(Duration::from_secs)).with_source(error)
+            // A subscription window, ordinary throttling, and a rejected
+            // request fingerprint all arrive as `429 rate_limit_error`.
+            // Only the unified quota headers tell them apart: a rejection
+            // that names the exhausted window (or reports on paid
+            // spillover) is a spent allowance; one that carries neither is
+            // not a quota limit at all and is retried in place.
+            E::RateLimit { ref limits, .. } if limits.is_quota_rejection() => {
+                let scope = limits.representative_claim.clone();
+                let reset = limits.reset.and_then(quota_reset_at);
+                let window = scope.as_deref().unwrap_or("account");
+
+                // When paid extra usage could not cover the request either,
+                // the provider says why. Naming the reason distinguishes an
+                // empty wallet from an organization spending cap, which the
+                // user resolves in different places.
+                let refusal = limits
+                    .overage_disabled_reason
+                    .as_deref()
+                    .map(|reason| format!(" Extra usage unavailable: {reason}."))
+                    .unwrap_or_default();
+
+                StreamError::subscription_exhausted(
+                    format!("Subscription limit reached ({window}).{refusal} ({error})"),
+                    reset,
+                    scope,
+                )
+                .with_source(error)
             }
+
+            // The credential itself was refused. Retrying cannot help, and
+            // the shell marks the profile as needing re-login.
+            E::Auth { .. } => StreamError::auth_rejected(error.to_string()).with_source(error),
+
+            // A zero-second hint carries no timing information, and taking
+            // it literally makes the retry layer sleep zero and hammer the
+            // endpoint. Drop it so backoff applies, matching how retry
+            // headers are read elsewhere (see `extract_retry_after`).
+            E::RateLimit { retry_after, .. } => Self::rate_limit(
+                retry_after
+                    .filter(|secs| *secs > 0)
+                    .map(Duration::from_secs),
+            )
+            .with_source(error),
 
             // Anthropic's API is notoriously unreliable, so we special-case a
             // few common errors that most of the times resolve themselves when

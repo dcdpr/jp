@@ -7765,7 +7765,7 @@ async fn test_inquiry_failure_marks_tool_as_error() {
 fn inquiry_model_override_error_names_the_override() {
     let error = Error::InquiryModelOverride {
         model: "openrouter/foo/bar".to_owned(),
-        source: LlmError::MissingEnv("OPENROUTER_API_KEY".to_owned()),
+        source: Box::new(LlmError::MissingEnv("OPENROUTER_API_KEY".to_owned())),
     };
 
     // The variant names the override and keeps the cause chain intact.

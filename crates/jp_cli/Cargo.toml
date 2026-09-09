@@ -25,6 +25,7 @@ jp_attachment_internal = { workspace = true }
 jp_attachment_mcp_resources = { workspace = true }
 jp_config = { workspace = true }
 jp_conversation = { workspace = true }
+jp_credentials = { workspace = true }
 jp_editor = { workspace = true }
 jp_id = { workspace = true }
 jp_inquire = { workspace = true }
@@ -118,6 +119,7 @@ chrono = { workspace = true }
 [dev-dependencies]
 assert_matches = { workspace = true }
 camino-tempfile = { workspace = true }
+datetime_literal = { workspace = true }
 indoc = { workspace = true }
 insta = { workspace = true }
 pretty_assertions = { workspace = true, features = ["std"] }
