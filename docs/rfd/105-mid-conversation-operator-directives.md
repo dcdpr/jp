@@ -207,6 +207,14 @@ but it cannot *withdraw* a tool, and it answers a different question: which
 tools should the model pick from a large uncurated catalogue.
 Deferred to its own RFD.
 
+That deferral is not neutral, and the follow-up should know why.
+This RFD leaves discovery nowhere to operate: the initial directive offers every
+enabled tool and withdraws every disabled one, so a reference to an enabled tool
+is a no-op and a reference to a disabled one bypasses the user's intent.
+Discovery becomes meaningful only once tool enablement grows a third state — in
+the catalogue, permitted, not offered until the model asks for it.
+Designing that state, not the search itself, is the follow-up's real work.
+
 **Unify on `tool_reference` and drop directives.** Rejected: there is no
 "unreference" block, so mid-conversation disabling would still rewrite the
 prefix.
