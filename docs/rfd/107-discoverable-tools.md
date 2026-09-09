@@ -189,11 +189,9 @@ Consumers divide along those two sets:
 | Executor eligibility   | permitted                                  | a promoted tool is callable in the same turn         |
 | MCP server startup     | permitted                                  | an unstarted server has no metadata to search        |
 
-The search row is stated in terms of availability rather than as "permitted
-minus offered" because the forced-tool exemption puts an `off` tool into both
-sets.
-Deriving search eligibility by subtraction would leak exactly the tool the user
-disabled.
+The search row names an availability rather than a subtraction because it says
+what the set *is*, and because it stays correct if the permitted set later grows
+a member that is neither offered nor discoverable.
 
 **Discovery saves context, not startup.** A discoverable MCP tool's server
 starts with the conversation and its schema is fetched up front, exactly as an

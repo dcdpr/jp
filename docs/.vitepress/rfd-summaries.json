@@ -424,7 +424,7 @@
     "summary": "Mid-conversation system and tool changes anchored in message stream preserve Anthropic's prompt cache via positional directives."
   },
   "107-discoverable-tools.md": {
-    "hash": "6f78ec2198803d3c572448aa8ec769dde22bf0c038a299ba0f016718312eae59",
+    "hash": "9de2d1264370d0bfac642d3ab503c3c7c3cd79b1262d9644270356b0f765acd3",
     "summary": "JP adds discoverable tool state: tools in catalogue but not offered until model searches, keeping large MCP catalogues out of context."
   }
 }
