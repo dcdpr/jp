@@ -288,6 +288,39 @@ fn edit_arguments_open_editor_re_seeds_then_submits() {
     }
 }
 
+#[test]
+fn an_editor_failure_reaches_the_user_while_the_permission_prompt_is_open() {
+    // `prompt_ask` keeps its canvas alive across the edit, so the notice has to
+    // land while that session still owns the terminal. Held until the prompt
+    // returns, it arrives after the widget the user is looking at has already
+    // re-opened with their text and no reason for it.
+    let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
+    let printer = Arc::new(printer);
+    let prompt = MockPromptBackend::new().with_reply_outcomes([
+        ReplyOutcome::OpenEditor {
+            current_text: "{}".into(),
+        },
+        ReplyOutcome::Submit(r#"{"key":"value"}"#.into()),
+    ]);
+    let prompter = ToolPrompter::with_backends(
+        printer.clone(),
+        Some(Arc::new(MockEditorBackend::failing())),
+        Arc::new(prompt),
+    );
+
+    let canvas = printer.prompt_writer();
+    let result = prompter.try_edit_arguments(&json!({})).unwrap();
+    printer.flush();
+
+    assert!(matches!(result, EditResult::Edited(_)));
+    assert_eq!(
+        *err.lock(),
+        "\n⚠ Couldn't open your editor: failed to spawn editor. Keeping your text.\n"
+    );
+
+    drop(canvas);
+}
+
 // --- Result editing (`edit_result`) --------------------------------------
 
 #[test]
@@ -347,10 +380,9 @@ fn edit_result_editor_escape_failure_keeps_buffer_and_notifies_chrome() {
     assert_eq!(result, Some("draft, then more".to_string()));
 
     printer.flush();
-    let output = err.lock();
-    assert!(
-        output.contains("Couldn't open your editor"),
-        "editor failure must be surfaced on chrome. Output: {output}"
+    assert_eq!(
+        *err.lock(),
+        "\n⚠ Couldn't open your editor: failed to spawn editor. Keeping your text.\n"
     );
 }
 

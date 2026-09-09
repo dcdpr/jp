@@ -1,6 +1,7 @@
 //! The printer module.
 
 use std::{
+    collections::VecDeque,
     fmt::{self, Write},
     io,
     sync::{
@@ -158,6 +159,7 @@ impl Printer {
                     rx,
                     delay_control,
                     regions: RegionStack::new(),
+                    held: VecDeque::new(),
                 };
                 worker.run();
             })
@@ -292,13 +294,17 @@ impl Printer {
         StatusRegion::new(id, self.tx.clone(), buffer, refresh)
     }
 
-    /// Suspend status-region rendering until the returned guard drops.
+    /// Hand the terminal to a writer outside the printer until the returned
+    /// guard drops.
     ///
-    /// Blocks until the worker has erased any drawn region and entered the
-    /// suspended state, so a caller handing the terminal to a writer outside
-    /// the printer — an external `$EDITOR`, say — knows the rows are gone
+    /// Blocks until the worker has erased any drawn status region, so a caller
+    /// handing the terminal to an external `$EDITOR` knows the rows are gone
     /// before the child paints.
-    /// Returns immediately when regions are disabled.
+    /// For the guard's lifetime the worker also holds back ordinary output,
+    /// writing it once the terminal comes back: whoever holds the terminal owns
+    /// the cursor, and JP keeps producing while they have it.
+    ///
+    /// Handovers nest; the terminal comes back when the outermost guard drops.
     #[must_use]
     pub fn suspend_status(&self) -> SuspendGuard {
         self.suspend_regions()
@@ -306,10 +312,6 @@ impl Printer {
 
     /// Enqueue a suspension and wait for the worker to apply it.
     fn suspend_regions(&self) -> SuspendGuard {
-        if !self.chrome_repaints() || !self.terminal.permits_regions(self.format) {
-            return SuspendGuard::inert();
-        }
-
         let (ack, rx) = mpsc::channel();
 
         if self
@@ -493,6 +495,7 @@ impl Printer {
         PrinterWriter {
             printer: self,
             target: PrintTarget::Out,
+            origin: PrintOrigin::Content,
         }
     }
 
@@ -502,6 +505,7 @@ impl Printer {
         PrinterWriter {
             printer: self,
             target: PrintTarget::Err,
+            origin: PrintOrigin::Content,
         }
     }
 
@@ -552,6 +556,7 @@ impl Printer {
             writer: PrinterWriter {
                 printer: self,
                 target: self.prompt_target(),
+                origin: PrintOrigin::Prompt,
             },
             _suspension: self.begin_prompt_session(),
             _trace: PromptTrace::open(),
@@ -573,6 +578,32 @@ impl Printer {
         let mut task = p.into_task();
         task.content.push('\n');
         task.target = self.prompt_target();
+        task.origin = PrintOrigin::Prompt;
+        self.send(Command::Print(task));
+    }
+
+    /// Print a line of chrome that must not wait for a prompt session.
+    ///
+    /// The same stream and the same record shape as [`Self::eprintln`] —
+    /// `--quiet` silences it, `2>` captures it — but the line belongs to the
+    /// prompt session, so it lands while a widget still owns the terminal
+    /// rather than queueing behind it.
+    /// For a notice about the question itself: held back, it arrives once the
+    /// question it explains is already answered.
+    ///
+    /// The caller owns the timing.
+    /// This bypasses the wait that keeps ordinary output off a screen someone
+    /// else is drawing on, so it is safe only when the widget has left the
+    /// terminal in cooked mode — between two of its frames, not during one.
+    pub fn prompt_eprintln<P: Printable>(&self, p: P) {
+        let mut task = p.into_task();
+        if self.format.is_json() {
+            task = self.wrap_json(task);
+        }
+
+        task.content.push('\n');
+        task.target = PrintTarget::Err;
+        task.origin = PrintOrigin::Prompt;
         self.send(Command::Print(task));
     }
 
@@ -769,6 +800,9 @@ pub struct PrinterWriter<'a> {
 
     /// The target output stream.
     target: PrintTarget,
+
+    /// Who the writes belong to.
+    origin: PrintOrigin,
 }
 
 impl fmt::Write for PrinterWriter<'_> {
@@ -784,6 +818,7 @@ impl fmt::Write for PrinterWriter<'_> {
             content: s.to_owned(),
             mode: PrintMode::Instant,
             target: self.target,
+            origin: self.origin,
         };
 
         self.printer
@@ -914,6 +949,7 @@ impl io::Write for OwnedPrinterWriter {
             content: s.to_owned(),
             mode: PrintMode::Instant,
             target: self.target,
+            origin: PrintOrigin::Prompt,
         };
         self.tx
             .send(Command::Print(task))
@@ -950,6 +986,11 @@ struct Worker<O, E> {
 
     /// The claimed status regions and the rows currently painted for them.
     regions: RegionStack,
+
+    /// Ordinary output produced while the terminal is handed to someone else.
+    ///
+    /// Written, in the order it was produced, once the terminal comes back.
+    held: VecDeque<PrintTask>,
 }
 
 impl<O: io::Write, E: io::Write> Worker<O, E> {
@@ -977,8 +1018,18 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
             };
 
             match cmd {
-                Command::Print(task) => self.process_task(&task),
-                Command::Region(cmd) => self.regions.apply(cmd, &mut self.err),
+                Command::Print(task) => {
+                    if let Some(task) = self.admit(task) {
+                        self.process_task(&task);
+                    }
+                }
+                Command::Region(cmd) => {
+                    let resuming = matches!(cmd, RegionCommand::Resume);
+                    self.regions.apply(cmd, &mut self.err);
+                    if resuming {
+                        self.release_held();
+                    }
+                }
                 Command::Flush(tx) => {
                     // We don't need to do anything specific to flush out/err
                     // because we flush after every write in `process_task`. We
@@ -995,7 +1046,45 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
             }
         }
 
+        // A run can end with a widget still holding the terminal — a `Ctrl+C`
+        // at a prompt, an error unwinding past one. Nothing is going to give it
+        // back, and what is held is the answer the user asked for, so it goes
+        // out anyway: a last frame the widget left untidy is a smaller loss
+        // than the output.
+        self.drain_held();
         self.regions.erase(&mut self.err);
+    }
+
+    /// Decide whether `task` may be written now, holding it back if not.
+    ///
+    /// Only the prompt session's own writes reach a terminal someone else owns;
+    /// everything else waits for it to come back.
+    fn admit(&mut self, task: PrintTask) -> Option<PrintTask> {
+        if !self.regions.is_suspended() || task.origin == PrintOrigin::Prompt {
+            return Some(task);
+        }
+
+        self.held.push_back(task);
+        None
+    }
+
+    /// Write everything held back, now that the terminal has come back.
+    ///
+    /// A no-op while it is still away, so the inner close of a nested handover
+    /// releases nothing.
+    fn release_held(&mut self) {
+        if self.regions.is_suspended() {
+            return;
+        }
+
+        self.drain_held();
+    }
+
+    /// Write everything held back, in the order it was produced.
+    fn drain_held(&mut self) {
+        while let Some(task) = self.held.pop_front() {
+            self.process_task(&task);
+        }
     }
 
     /// Drain all pending commands, printing instantly.
@@ -1007,8 +1096,18 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
     fn drain_instant(&mut self) {
         while let Ok(cmd) = self.rx.try_recv() {
             match cmd {
-                Command::Print(task) => self.process_task_instant(&task),
-                Command::Region(cmd) => self.regions.apply(cmd, &mut self.err),
+                Command::Print(task) => {
+                    if let Some(task) = self.admit(task) {
+                        self.process_task_instant(&task);
+                    }
+                }
+                Command::Region(cmd) => {
+                    let resuming = matches!(cmd, RegionCommand::Resume);
+                    self.regions.apply(cmd, &mut self.err);
+                    if resuming {
+                        self.release_held();
+                    }
+                }
                 Command::Flush(tx) => {
                     let _ = tx.send(());
                 }
@@ -1092,6 +1191,7 @@ impl<O: io::Write, E: io::Write> Worker<O, E> {
             content,
             mode,
             target,
+            ..
         } = task;
 
         let writer: &mut dyn io::Write = match target {
@@ -1293,6 +1393,23 @@ pub enum PrintTarget {
     Tty,
 }
 
+/// Who a print task belongs to.
+///
+/// While the terminal is handed to a widget, ordinary output waits and the
+/// widget's own writes go straight through: it is drawing the screen the user
+/// is answering on, and content landing in the middle of that is what the wait
+/// exists to prevent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PrintOrigin {
+    /// Ordinary output: assistant responses, chrome, structured records.
+    #[default]
+    Content,
+
+    /// Part of a prompt session — the widget's own drawing, or a line written
+    /// to give its question the context it needs to be answerable.
+    Prompt,
+}
+
 #[derive(Debug, Clone)]
 /// A task to be printed.
 pub struct PrintTask {
@@ -1304,6 +1421,10 @@ pub struct PrintTask {
 
     /// The target output stream.
     pub target: PrintTarget,
+
+    /// Who the task belongs to, which decides whether it may land while a
+    /// widget owns the terminal.
+    pub origin: PrintOrigin,
 }
 
 impl Default for PrintTask {
@@ -1312,6 +1433,7 @@ impl Default for PrintTask {
             content: String::new(),
             mode: PrintMode::Instant,
             target: PrintTarget::Out,
+            origin: PrintOrigin::Content,
         }
     }
 }

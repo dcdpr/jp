@@ -91,13 +91,18 @@ impl EditorBackend for SuspendingEditor {
 /// `recovery` names what JP did instead (e.g. "Continuing with the inline
 /// editor.").
 ///
+/// The notice carries the prompt session's origin, so it reaches the user while
+/// the session that opened the editor still owns the terminal.
+/// It explains a widget that is about to re-open, and held back it would land
+/// after the user has already answered that widget.
+///
 /// Safe to call between inline-reply prompts: the `reedline` engine is dropped
 /// when `InlineReply::prompt` returns, so the terminal is back in cooked mode
 /// by the time this writes.
 /// The leading newline starts the notice on a fresh line below the prompt.
 pub(crate) fn report_editor_failure(printer: &Printer, error: &EditorError, recovery: &str) {
     warn!(%error, "editor failed during reply/edit");
-    printer.eprintln(format!(
+    printer.prompt_eprintln(format!(
         "\n⚠ Couldn't open your editor: {error}. {recovery}"
     ));
 }
