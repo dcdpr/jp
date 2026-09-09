@@ -148,7 +148,7 @@
     "summary": "Introduces `await` built-in tool to synchronize on parallel stateful tool handles with `any`/`all` completion modes."
   },
   "039-conversation-trees.md": {
-    "hash": "a40e2fab5d72dfa57e3b4a00affd43e49047dce03286fa3e7239fc46209ed5c2",
+    "hash": "aede63689185e2491d065558cbdf601555af5d5a0dcc4241f1b335e54695b74e",
     "summary": "Add parent-child conversation relationships via metadata field, enabling fork lineage and hierarchical organization without nested directories."
   },
   "040-hidden-conversations-and-tool-context.md": {
@@ -344,7 +344,7 @@
     "summary": "Convention for multi-value CLI arguments: `-` reads line-oriented values from stdin, starting with conversation targeting."
   },
   "087-session-scoped-active-workspace.md": {
-    "hash": "83c8178b6bc90b44f27a058f10694ab37e5555dd3a57d39340676e76aa850505",
+    "hash": "9dc586dc628538bf0c6002027ef8eed36865dad6ca197df72235554643fef9f0",
     "summary": "Session-scoped active workspace lets JP commands run from anywhere after selecting a workspace with `jp w use`."
   },
   "088-unified-editor-service-and-inline-reply-widget.md": {
@@ -422,5 +422,9 @@
   "105-mid-conversation-operator-directives.md": {
     "hash": "0ac17903569c11f2c6e09ccfc1a349aa708c2762fe815d1cf195a56fbd240726",
     "summary": "Mid-conversation system and tool changes anchored in message stream preserve Anthropic's prompt cache via positional directives."
+  },
+  "109-hierarchy-targets-and-explicit-selection-clearing.md": {
+    "hash": "cdd25fa1134995e0a7bb479a396a398adf628a6cc363b12f53716400a66367a5",
+    "summary": "Hierarchy targets `.`, `..`, `../..`, `/` navigate workspace/conversation nesting; `--clear` flag replaces `cwd` for clearing selections."
   }
 }

@@ -119,6 +119,25 @@ with the conversation through git — team members who pull a conversation also
 get its parent reference.
 Reparenting a conversation is an edit to a single file.
 
+### Depth is unbounded
+
+Trees nest to any depth: a child conversation can itself have children.
+A `parent_id` chain of arbitrary length is a supported shape, not an accident of
+the storage format, and every operation defined below is written against it.
+`--promote` reparents children onto the *grandparent* rather than onto the root,
+`--tree` indents each level under its own parent, and `--root=<id>` renders a
+subtree from any node rather than only from a top-level conversation.
+
+A sub-agent delegating to a further sub-agent is the motivating case: the
+hierarchy that produces is three levels deep before any user has organized
+anything by hand.
+
+Only two limits apply.
+A conversation has exactly one parent (see [Non-Goals](#non-goals)), so the
+structure is a tree rather than a graph, and a `parent_id` cycle is invalid —
+the tree index treats a conversation reachable from itself as a root and warns,
+the same way it treats a missing parent.
+
 ### Tree index
 
 On workspace load, JP builds an in-memory tree index from the `parent_id` fields
@@ -323,6 +342,42 @@ pub fn has_children(&self, id: &ConversationId) -> bool;
 
 These methods read from the in-memory tree index, not from disk.
 
+### Path-shaped targeting
+
+Once conversations form a hierarchy, the natural way to name a position in it is
+the vocabulary users already have for hierarchies.
+The intended grammar, as an extension of `ConversationTarget`:
+
+| Target  | Meaning                                          |
+| ------- | ------------------------------------------------ |
+| `.`     | the session's active conversation (exists today) |
+| `..`    | the parent of the active conversation            |
+| `../..` | its grandparent, and so on for any depth         |
+| `/`     | the root of the active conversation's tree       |
+
+The segments compose against whatever the target resolves to, so `..` applied to
+a root conversation is an error naming the conversation that has no parent,
+rather than silently resolving to the root itself.
+
+The grammar is deliberately shared with workspace targeting ([RFD 087]), where
+the same segments walk the workspace-nesting hierarchy instead: `jp -w .` is the
+current workspace whichever subdirectory you stand in, while `jp c show ..` is
+the active conversation's parent.
+One navigation vocabulary, two hierarchies — which is what makes `.` worth
+keeping as a conversation target rather than a lone borrowed character.
+
+The segments resolve against the hierarchy, never against directories: `.`,
+`..`, `../..`, and `/` are keywords, and a filesystem path is spelled with a
+named segment (`./foo`, `../foo`, `/foo/bar`).
+That distinction is what lets `..` mean "one level up the hierarchy" rather than
+"one directory up", which are different questions on the workspace axis and only
+the first of which has an answer on the conversation axis.
+
+This RFD does not implement the grammar; it establishes the tree the grammar
+addresses.
+`..` and `/` need `parent_of` and a walk to the root, both of which the tree
+index provides.
+
 ### Interaction with RFD 020 (Parallel Conversations)
 
 [RFD 020] introduces conversation locks and per-session conversation tracking.
@@ -455,6 +510,10 @@ self-contained.
 
 - **Cross-tree references.** A conversation can only be a child of one parent.
   Having a conversation appear in multiple trees is not supported.
+
+- **The path-shaped targeting grammar itself.** [Path-shaped
+  targeting](#path-shaped-targeting) records the intended spelling so the tree
+  is designed to support it, but `..`, `../..`, and `/` are a separate change.
 
 - **Tree-level config overrides.** Config inheritance flows from parent to child
   at creation time (via [RFD 038]).
@@ -595,3 +654,4 @@ Depends on Phase 1.
 [RFD 046]: 046-nested-workspace-projection.md
 [RFD 050]: 050-scripting-ergonomics-for-conversation-management.md
 [RFD 051]: 051-sub-agent-workflows.md
+[RFD 087]: 087-session-scoped-active-workspace.md
