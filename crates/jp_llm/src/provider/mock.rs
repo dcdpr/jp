@@ -36,7 +36,7 @@ use serde_json::{Map, Value};
 
 use super::Provider;
 use crate::{
-    error::Result,
+    error::{Result, StreamError, StreamErrorKind},
     event::{Event, FinishReason},
     model::ModelDetails,
     query::ChatQuery,
@@ -62,6 +62,12 @@ pub struct MockProvider {
     /// Requests received so far, when capture is enabled.
     requests: Option<Arc<Mutex<Vec<ChatQuery>>>>,
 
+    /// The error every request fails with, instead of returning events.
+    ///
+    /// Held as its parts rather than a [`StreamError`] so the provider stays
+    /// `Clone` and each request gets its own error value.
+    stream_error: Option<(StreamErrorKind, String)>,
+
     /// Model details to return.
     model: ModelDetails,
 }
@@ -78,6 +84,7 @@ impl MockProvider {
             events,
             batches: None,
             requests: None,
+            stream_error: None,
             model: Self::default_model(),
         }
     }
@@ -100,7 +107,24 @@ impl MockProvider {
             events: vec![],
             batches: Some(Arc::new(Mutex::new(batches.into()))),
             requests: None,
+            stream_error: None,
             model: Self::default_model(),
+        }
+    }
+
+    /// Create a mock provider whose stream yields `kind` instead of events.
+    ///
+    /// The error arrives mid-stream rather than from [`chat_completion_stream`]
+    /// itself, which is where providers surface a rejected request: the
+    /// connection opens and the API's complaint comes back as the first thing
+    /// on it.
+    ///
+    /// [`chat_completion_stream`]: Provider::chat_completion_stream
+    #[must_use]
+    pub fn with_stream_error(kind: StreamErrorKind, message: impl Into<String>) -> Self {
+        Self {
+            stream_error: Some((kind, message.into())),
+            ..Self::new(vec![])
         }
     }
 
@@ -222,6 +246,11 @@ impl Provider for MockProvider {
     ) -> Result<EventStream> {
         if let Some(requests) = &self.requests {
             requests.lock().expect("mock requests lock").push(query);
+        }
+
+        if let Some((kind, message)) = &self.stream_error {
+            let error = StreamError::new(*kind, message.clone());
+            return Ok(Box::pin(stream::iter([Err(error)])));
         }
 
         let events = match &self.batches {

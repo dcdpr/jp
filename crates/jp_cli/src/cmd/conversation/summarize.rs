@@ -10,13 +10,12 @@ use jp_conversation::{
     thread::ThreadBuilder,
 };
 use jp_llm::{
-    Provider,
+    Provider, StreamErrorKind,
     event::{Event, EventPatch, FinishReason, record_patches},
     event_builder::EventBuilder,
     model::ModelDetails,
     provider,
     retry::{RetryConfig, collect_with_retry},
-    window,
 };
 use tracing::debug;
 
@@ -86,25 +85,6 @@ pub async fn generate_summary(
     let provider = provider::get_provider(model_id.provider, &app_cfg.providers.llm)?;
     let model_details = provider.model_details(&model_id.name).await?;
 
-    // The instructions ride in the system prompt and the request in its own
-    // turn; both share the window with the range.
-    let overhead =
-        window::estimate_overhead_chars(Some(instructions), &[], &[], &[]) + user_message.len();
-
-    if let Some(overflow) = window_overflow(&stream, model_details.context_window, overhead) {
-        return Err(Error::Summarize {
-            model: model_id.to_string(),
-            // Stored indices are 0-based; turn numbers shown to the user are
-            // 1-based.
-            reason: format!(
-                "turns {}..{} {overflow}; compact a smaller range (`--from`/`--to`) or summarize \
-                 with a larger-window model",
-                range_from + 1,
-                range_to + 1,
-            ),
-        });
-    }
-
     summarize_stream(
         provider.as_ref(),
         &model_details,
@@ -115,33 +95,6 @@ pub async fn generate_summary(
         app_cfg.assistant.request.max_response_bytes.bytes(),
     )
     .await
-}
-
-/// Describe why `stream` does not fit `context_window`, or `None` when it does.
-///
-/// A summary stands in for every turn it covers, so a range that doesn't fit is
-/// rejected rather than shortened: summarizing only the tail would leave a
-/// compaction that claims a range it never read, and the projected conversation
-/// would quietly lose the rest.
-///
-/// `overhead_chars` is the size of everything else sharing the window (see
-/// [`window::estimate_overhead_chars`]).
-/// An unknown window always fits — there is no budget to measure against.
-fn window_overflow(
-    stream: &ConversationStream,
-    context_window: Option<u32>,
-    overhead_chars: usize,
-) -> Option<String> {
-    let context_window = context_window?;
-    let budget = window::budget_chars(context_window, overhead_chars);
-    let needed = window::estimate_chars(stream);
-
-    (needed > budget).then(|| {
-        format!(
-            "are roughly {needed} characters, which exceeds the ~{budget} that fit in the model's \
-             {context_window} token context window"
-        )
-    })
 }
 
 /// Request a summary of `stream`, honouring provider rebuild requests.
@@ -186,7 +139,9 @@ async fn summarize_stream(
             tool_choice: jp_config::assistant::tool_choice::ToolChoice::default(),
         };
 
-        let llm_events = collect_with_retry(provider, model_details, query, &retry_config).await?;
+        let llm_events = collect_with_retry(provider, model_details, query, &retry_config)
+            .await
+            .map_err(|error| summarize_error(model_id, error))?;
 
         let patches = match summarize_events(llm_events) {
             StreamOutcome::Summary(summary) => return Ok(summary),
@@ -216,6 +171,28 @@ async fn summarize_stream(
             applied,
             "Provider requested a rebuild; patched the summarizer stream and resending."
         );
+    }
+}
+
+/// Map a provider error into a summarization failure.
+///
+/// A request the provider rejected as too large becomes [`Error::Summarize`],
+/// keeping the provider's message — which reports the request's real token
+/// count against the model's window — and adding the two ways to get under it.
+/// Every other error takes its standard conversion.
+fn summarize_error(model_id: &ModelIdConfig, error: jp_llm::Error) -> Error {
+    match error {
+        jp_llm::Error::Stream(stream) if stream.kind == StreamErrorKind::ContextWindowExceeded => {
+            Error::Summarize {
+                model: model_id.to_string(),
+                reason: format!(
+                    "{}; compact a smaller range (`--from`/`--to`) or summarize with a \
+                     larger-window model",
+                    stream.message()
+                ),
+            }
+        }
+        error => error.into(),
     }
 }
 

@@ -191,8 +191,8 @@ fn message_texts(events: &ConversationStream) -> Vec<String> {
 /// event is dropped.
 ///
 /// The sizes are picked so the drop loop stops right after the request: a
-/// 3000-char request against a 1000-token window needs 720 chars dropped, which
-/// the request alone satisfies, leaving the 100-char response as the only
+/// 3000-char request against a 1000-token window needs 1600 chars dropped,
+/// which the request alone satisfies, leaving the 100-char response as the only
 /// survivor.
 #[test]
 fn truncate_empties_stream_when_no_chat_request_survives() {
