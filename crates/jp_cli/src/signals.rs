@@ -214,12 +214,14 @@ impl SignalRouter {
     /// conversation, and with several turns running the topmost handler is very
     /// likely the wrong one.
     ///
-    /// Deliberately outside the escalation ladder: a repeat is a repeat of the
-    /// same targeted request, not a signal to give up on the process.
+    /// Outside the escalation ladder: a repeat re-asks the same turn to stop.
+    /// A Ctrl-C escalates to cancelling the shutdown token and then to exiting
+    /// the process, neither of which a request naming one conversation should
+    /// reach.
     ///
-    /// Returns whether a handler was found.
-    /// `false` means nothing is registered for that scope, so there was nothing
-    /// to interrupt.
+    /// Returns whether the interrupt reached a handler for that scope.
+    /// `false` means nothing is registered for it, which usually means the turn
+    /// has already finished.
     pub fn interrupt_scope(&self, conversation: ConversationId) -> bool {
         self.inner.notify_scope(conversation)
     }
@@ -517,7 +519,11 @@ impl RouterInner {
             .map(|handler| handler.notify_tx.clone());
 
         match tx {
-            Some(tx) => tx.try_send(self.notice()).is_ok(),
+            // A full channel means the handler already has a notice it has not
+            // picked up yet, so this one has nothing to add and is dropped
+            // unresolved. The handler has still been told, which is what the
+            // caller is asking about.
+            Some(tx) => !matches!(tx.try_send(self.notice()), Err(TrySendError::Closed(_))),
             None => false,
         }
     }

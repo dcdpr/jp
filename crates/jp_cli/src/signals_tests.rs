@@ -39,6 +39,66 @@ fn a_scoped_interrupt_notifies_only_its_own_scope() {
     assert_eq!(recv_error(&mut rx_plain), Some(TryRecvError::Empty));
 }
 
+/// A turn registers a handler per phase under the same conversation, and the
+/// innermost one is the one being polled.
+///
+/// The outer turn-level handler is read only between phases, so reaching it
+/// while a response streams or a tool runs would leave a targeted interrupt
+/// waiting for that phase to finish.
+#[test]
+fn a_scoped_interrupt_reaches_the_innermost_handler_for_its_scope() {
+    let inner = RouterInner::new(Duration::from_secs(2));
+    let id = conversation(1_700_000_000);
+
+    // The turn-level handler, then the one a streaming or executing phase adds.
+    let (_turn_guard, mut rx_turn) = inner.push_handler(Some(id));
+    let (phase_guard, mut rx_phase) = inner.push_handler(Some(id));
+
+    assert!(inner.notify_scope(id));
+
+    assert!(took_notice(&mut rx_phase));
+    assert_eq!(recv_error(&mut rx_turn), Some(TryRecvError::Empty));
+
+    // The phase ends, and the turn-level handler is innermost again.
+    drop(phase_guard);
+    assert!(inner.notify_scope(id));
+    assert!(took_notice(&mut rx_turn));
+}
+
+/// A repeat while the handler has not picked up the first one still counts as
+/// reached: the turn has been told, so reporting otherwise would read as "that
+/// conversation is not running".
+#[test]
+fn a_repeat_interrupt_with_one_still_pending_counts_as_reached() {
+    let inner = RouterInner::new(Duration::from_secs(2));
+    let id = conversation(1_700_000_000);
+    let (_guard, mut rx) = inner.push_handler(Some(id));
+
+    // The channel holds one notice, so the second send finds it full.
+    assert!(inner.notify_scope(id));
+    assert!(inner.notify_scope(id));
+
+    assert!(took_notice(&mut rx));
+    assert_eq!(
+        recv_error(&mut rx),
+        Some(TryRecvError::Empty),
+        "the repeat added nothing to a handler that had not looked yet"
+    );
+}
+
+/// A scope whose handler's event loop is gone is not reached, even though its
+/// guard has not dropped yet.
+#[test]
+fn a_scope_whose_receiver_is_gone_is_not_reached() {
+    let inner = RouterInner::new(Duration::from_secs(2));
+    let id = conversation(1_700_000_000);
+    let (_guard, rx) = inner.push_handler(Some(id));
+
+    drop(rx);
+
+    assert!(!inner.notify_scope(id));
+}
+
 /// A scope with no handler is not an error: its work already finished, so there
 /// was nothing left to interrupt.
 #[test]

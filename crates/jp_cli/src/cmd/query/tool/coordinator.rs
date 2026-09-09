@@ -966,7 +966,12 @@ impl ToolCoordinator {
         // Register the tool interrupt handler for this execution phase. While
         // registered, the first Ctrl-C press is delivered to this event loop;
         // the guard deregisters the handler when execution completes.
-        let (interrupt_guard, mut interrupt_rx) = signals.push_handler();
+        //
+        // Scoped to the conversation, so an interrupt that names one reaches the
+        // handler this loop is polling. Tool execution has no timeout of its
+        // own, so an unscoped handler here would leave a targeted interrupt
+        // waiting for the longest tool to finish.
+        let (interrupt_guard, mut interrupt_rx) = signals.push_handler_for(conv.id());
 
         // The caller's `index` values come from the execution plan and may
         // be sparse (e.g. when some tools in the same plan are

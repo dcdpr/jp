@@ -1113,14 +1113,23 @@ fn handle_request(
             // Nothing to answer: what the interrupt did lands in the
             // conversation, and the turn's own outcome is still the reply to its
             // `query`.
-            let reached = parse_conversation_id(&req.conversation)
-                .is_ok_and(|id| signals.interrupt_scope(id));
-
-            debug!(
-                conversation = %req.conversation,
-                reached,
-                "Interrupting on a plugin's behalf."
-            );
+            //
+            // A scope with no handler is benign, so it stays at debug: the turn
+            // finished before the request arrived. An id that does not parse is
+            // the plugin's bug, and silence would leave its author unable to
+            // tell the two apart.
+            match parse_conversation_id(&req.conversation) {
+                Ok(id) => debug!(
+                    conversation = %req.conversation,
+                    reached = signals.interrupt_scope(id),
+                    "Interrupting on a plugin's behalf."
+                ),
+                Err(error) => warn!(
+                    conversation = %req.conversation,
+                    %error,
+                    "Ignoring an interrupt that names an unparseable conversation."
+                ),
+            }
         }
 
         PluginToHost::ListConfigs(req) => {

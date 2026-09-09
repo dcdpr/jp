@@ -428,9 +428,14 @@ pub struct QueryRequest {
 
 /// Ask the host to interrupt the turn running on a conversation.
 ///
-/// Reaches the turn the same way a Ctrl-C from a terminal would, so it
-/// escalates on repeat exactly as the terminal does: the first asks the turn to
-/// wrap up, and pressing on abandons it.
+/// Reaches the turn the way a Ctrl-C does, so it asks the turn to wrap up:
+/// partial output is kept and the conversation is left in a state a later turn
+/// can continue from.
+///
+/// A repeat re-asks the same turn.
+/// It does not escalate the way a terminal's second and third Ctrl-C do, since
+/// cancelling the host's shutdown token or exiting the process is not something
+/// a request naming one conversation should reach.
 ///
 /// Fire-and-forget: the host sends no acknowledgement, because what the
 /// interrupt did shows up in the conversation itself.

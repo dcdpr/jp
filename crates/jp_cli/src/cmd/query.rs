@@ -117,7 +117,7 @@ use minijinja::{Environment, UndefinedBehavior};
 use strip_ansi_escapes::strip_str;
 use tokio::sync::broadcast::error::RecvError;
 use tool::{TerminalExecutorSource, ToolCoordinator};
-use tracing::{debug, trace, warn};
+use tracing::{debug, info, trace, warn};
 use turn_loop::run_turn_loop;
 use url::Url;
 
@@ -1453,40 +1453,74 @@ impl TurnInputs {
     ) -> Result<()> {
         let cfg = &self.config;
 
-        // Wait for all MCP servers to finish loading, showing a timer line when the
-        // wait takes long enough to be noticeable. Starting a server can mean
-        // compiling one, so this is not a wait to hold anything else up for.
-        let waited = Instant::now();
-        let skipped = await_mcp_servers(
-            self.mcp_servers,
-            cfg.style.mcp_startup.clone(),
-            self.printer.clone(),
-        )
-        .await?;
-        report_skipped_servers(&self.printer, cfg, &skipped);
-        debug!(
-            elapsed_ms = waited.elapsed().as_millis(),
-            "MCP servers ready."
-        );
+        // An interrupt naming this conversation has to reach something for the
+        // whole time the lock is held, and `run_turn_loop` does not register its
+        // handler until every await below has finished. Starting an MCP server
+        // can mean compiling one, so that is minutes during which a stop request
+        // would otherwise find no handler for this conversation and be dropped.
+        //
+        // Scoped like every handler within a turn, and outermost: once
+        // `run_turn_loop` registers its own, that one is innermost and receives
+        // interrupts instead.
+        let (_preflight_guard, mut interrupted) = self.signals.push_handler_for(lock.id());
 
-        // Only now can the deferred ones resolve: the handler reads a resource
-        // from a running server, and until the wait above returns there is none.
-        let resolving = Instant::now();
-        let attachments = self
-            .attachments
-            .resolve(&self.workspace_root, &self.mcp_client)
-            .await?;
-        debug!(
-            count = attachments.len(),
-            elapsed_ms = resolving.elapsed().as_millis(),
-            "Attachments resolved."
-        );
+        let prepared = tokio::select! {
+            result = async {
+                // Wait for all MCP servers to finish loading, showing a timer line
+                // when the wait takes long enough to be noticeable.
+                let waited = Instant::now();
+                let skipped = await_mcp_servers(
+                    self.mcp_servers,
+                    cfg.style.mcp_startup.clone(),
+                    self.printer.clone(),
+                )
+                .await?;
+                report_skipped_servers(&self.printer, cfg, &skipped);
+                debug!(
+                    elapsed_ms = waited.elapsed().as_millis(),
+                    "MCP servers ready."
+                );
 
-        let forced_tool = cfg.assistant.tool_choice.function_name();
-        let tools =
-            tool_definitions(cfg.conversation.tools.iter(), &self.mcp_client, forced_tool).await?;
-        debug!(count = tools.len(), forced_tool, "Tools resolved.");
+                // Only now can the deferred ones resolve: the handler reads a
+                // resource from a running server, and until the wait above returns
+                // there is none.
+                let resolving = Instant::now();
+                let attachments = self
+                    .attachments
+                    .resolve(&self.workspace_root, &self.mcp_client)
+                    .await?;
+                debug!(
+                    count = attachments.len(),
+                    elapsed_ms = resolving.elapsed().as_millis(),
+                    "Attachments resolved."
+                );
 
+                let forced_tool = cfg.assistant.tool_choice.function_name();
+                let tools = tool_definitions(
+                    cfg.conversation.tools.iter(),
+                    &self.mcp_client,
+                    forced_tool,
+                )
+                .await?;
+                debug!(count = tools.len(), forced_tool, "Tools resolved.");
+
+                Ok::<_, Error>((attachments, tools))
+            } => result?,
+
+            notified = interrupted.recv() => {
+                // Nothing has been appended to the conversation yet: the request
+                // is added at the turn-start commit point inside the loop below.
+                // So there is nothing to commit and nothing to sanitize, and
+                // dropping the guards releases the lock.
+                if let Some(notice) = notified {
+                    notice.handled();
+                }
+                info!("Interrupted while preparing; the turn did not start.");
+                return Ok(());
+            }
+        };
+
+        let (attachments, tools) = prepared;
         let thread = build_thread(stream, attachments, &cfg.assistant, !tools.is_empty())?;
         debug!(
             events = thread.events.len(),

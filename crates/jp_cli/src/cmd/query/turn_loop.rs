@@ -325,7 +325,12 @@ pub(super) async fn run_turn_loop(
                 // goes out, so a Ctrl-C pressed while the connection is being
                 // set up is delivered as soon as the loop starts polling. The
                 // guard deregisters the handler when the cycle ends.
-                let (interrupt_guard, interrupt_rx) = signals.push_handler();
+                //
+                // Scoped like the turn-level handler above, and for the same
+                // reason: this is the handler being polled while a response
+                // streams, so an interrupt naming this conversation has to be
+                // able to reach it rather than wait for the phase to end.
+                let (interrupt_guard, interrupt_rx) = signals.push_handler_for(lock.id());
                 let interrupt_stream = StreamSource::Interrupt(
                     ReceiverStream::new(interrupt_rx).map(StreamingLoopEvent::Interrupt),
                 );
