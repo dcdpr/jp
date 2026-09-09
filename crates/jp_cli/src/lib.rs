@@ -577,48 +577,58 @@ fn build_printer(globals: &Globals, format: OutputFormat) -> Printer {
 fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     let printer = build_printer(&cli.globals, format);
 
-    // `jp workspace` runs on a dedicated pre-workspace path: selecting or
-    // inspecting a workspace must work from outside every workspace —
-    // including resolving to *no* workspace — so its subcommands never
-    // construct a `Ctx`. Each declares what it pays for through
-    // `workspace_requirement` (`ls`: registries only; `use`: resolve and
-    // validate a target root; `show`: additionally loads conversation
-    // indexes).
-    if let Commands::Workspace(args) = cli.command {
-        trace!("Resolving session identity.");
-        let session = session::resolve();
-
-        // The global `--workspace` flag names the workspace `use` and `show`
-        // act on here, rather than the one the run operates from.
-        let output = args
-            .run(
-                &printer,
-                session.as_ref(),
-                cli.globals.persist,
-                cli.globals.workspace.as_ref(),
-                cli.globals.no_interactive,
-            )
-            .map_err(Into::into);
-
-        // `jp w use` and friends mutate the user-global records, so they get
-        // the same hygiene pass as a workspace-consuming run.
-        cleanup_workspace_session_records();
-
-        return output;
-    }
-
-    // The per-command workspace bootstrap requirement (RFD 087): commands
-    // declaring `None` run without any workspace resolution or construction,
-    // so the downstream consumers that assume a root do not run.
+    // The per-command workspace bootstrap requirement (RFD 087) drives the
+    // startup dispatch: each arm performs exactly the pre-workspace work its
+    // commands declared, so no command can reach a path another arm owns.
     let requirement = cli.command.workspace_requirement();
-    if requirement == WorkspaceRequirement::None {
-        let Commands::Init(args) = &cli.command else {
-            unreachable!("every workspace-free command has a dedicated run path");
-        };
+    match requirement {
+        // Nothing to resolve: `jp init` creates the workspace another command
+        // would need selected, so the consumers that assume a root — config
+        // loading, MCP and plugin child cwd, path parsing — do not run.
+        WorkspaceRequirement::None => {
+            let Commands::Init(args) = cli.command else {
+                unreachable!("`None` is declared by `jp init` alone");
+            };
 
-        return args
-            .run(&printer, cli.globals.no_interactive)
-            .map_err(Into::into);
+            return args
+                .run(&printer, cli.globals.no_interactive)
+                .map_err(Into::into);
+        }
+
+        // `jp w` takes a workspace as its subject: it resolves its own target
+        // against the pre-workspace `TargetEnv` — from outside every
+        // workspace, possibly to no workspace at all — so it needs a session
+        // identity but never a selected root, and never a `Ctx`.
+        WorkspaceRequirement::Subject => {
+            let Commands::Workspace(args) = cli.command else {
+                unreachable!("`Subject` is declared by `jp workspace` alone");
+            };
+
+            trace!("Resolving session identity.");
+            let session = session::resolve();
+
+            // The global `--workspace` flag names the workspace `use` and
+            // `show` act on here, rather than the one the run operates from.
+            let output = args
+                .run(
+                    &printer,
+                    session.as_ref(),
+                    cli.globals.persist,
+                    cli.globals.workspace.as_ref(),
+                    cli.globals.no_interactive,
+                )
+                .map_err(Into::into);
+
+            // `jp w use` and friends mutate the user-global records, so they
+            // get the same hygiene pass as a workspace-consuming run.
+            cleanup_workspace_session_records();
+
+            return output;
+        }
+
+        // Resolves a root below, then constructs the workspace and loads the
+        // conversation index.
+        WorkspaceRequirement::Load => {}
     }
 
     // The pre-workspace bootstrap (RFD 087): session identity and the
@@ -650,25 +660,21 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
     let (mut workspace, fs_backend) =
         load_workspace(&exec.root, cli.globals.persist, LoadIntent::Run)?;
 
-    // `Resolve` commands stop at a validated root; only `Load` commands pay
-    // for sanitization and the conversation index.
-    if requirement == WorkspaceRequirement::Load {
-        trace!("Sanitizing workspace.");
-        let report = workspace.sanitize()?;
-        if report.has_repairs() {
-            for trashed in &report.trashed {
-                warn!(
-                    dirname = trashed.dirname,
-                    error = %trashed.error,
-                    "Trashed corrupt conversation"
-                );
-            }
+    trace!("Sanitizing workspace.");
+    let report = workspace.sanitize()?;
+    if report.has_repairs() {
+        for trashed in &report.trashed {
+            warn!(
+                dirname = trashed.dirname,
+                error = %trashed.error,
+                "Trashed corrupt conversation"
+            );
         }
-
-        // Populate the conversation index. This does NOT load the contents of
-        // individual conversations, this is done lazily as needed.
-        workspace.load_conversation_index();
     }
+
+    // Populate the conversation index. This does NOT load the contents of
+    // individual conversations, this is done lazily as needed.
+    workspace.load_conversation_index();
 
     // `--no-cfg` is shorthand for a leading `--cfg=NONE`, applied to config
     // resolution only. `Globals.config` stays as the user typed it: commands
@@ -1210,7 +1216,7 @@ pub(crate) enum LoadIntent {
     /// Reuses an existing user-workspace directory read-only and writes
     /// nothing: no directory creation, no migration, no import, no registry
     /// entry, no ID write.
-    /// Inspecting a workspace therefore cannot change which checkout `latest`
+    /// Inspecting a workspace therefore cannot change which checkout `recent`
     /// resolves to, nor mint user-local state for a workspace the user never
     /// ran a command in.
     Inspect,

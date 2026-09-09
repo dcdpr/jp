@@ -112,12 +112,12 @@ fn keywords_parse() {
         WorkspaceTarget::Session
     ));
     assert!(matches!(
-        WorkspaceTarget::from_str("l").unwrap(),
-        WorkspaceTarget::Latest
+        WorkspaceTarget::from_str("r").unwrap(),
+        WorkspaceTarget::Recent
     ));
     assert!(matches!(
-        WorkspaceTarget::from_str("latest").unwrap(),
-        WorkspaceTarget::Latest
+        WorkspaceTarget::from_str("recent").unwrap(),
+        WorkspaceTarget::Recent
     ));
     assert!(matches!(
         WorkspaceTarget::from_str("cwd").unwrap(),
@@ -301,7 +301,7 @@ fn session_target_errors_without_a_previous_entry() {
 }
 
 #[test]
-fn latest_resolves_the_newest_live_checkout() {
+fn recent_resolves_the_newest_live_checkout() {
     let tmp = tempdir().unwrap();
     let a = make_workspace(tmp.path(), "a", "aaa11");
     let b = make_workspace(tmp.path(), "b", "bbb22");
@@ -309,7 +309,7 @@ fn latest_resolves_the_newest_live_checkout() {
     register_at(&env, "a", "aaa11", &a, 1_000);
     register_at(&env, "b", "bbb22", &b, 2_000);
 
-    let ResolvedTarget::Root(selected) = resolve(&WorkspaceTarget::Latest, &env).unwrap() else {
+    let ResolvedTarget::Root(selected) = resolve(&WorkspaceTarget::Recent, &env).unwrap() else {
         panic!("expected a resolved root");
     };
     assert_eq!(selected.root, b);
@@ -317,11 +317,11 @@ fn latest_resolves_the_newest_live_checkout() {
 }
 
 #[test]
-fn latest_errors_with_an_empty_registry() {
+fn recent_errors_with_an_empty_registry() {
     let tmp = tempdir().unwrap();
     let env = env_at(tmp.path().to_owned(), tmp.path(), None, false);
 
-    let error = resolve(&WorkspaceTarget::Latest, &env).unwrap_err();
+    let error = resolve(&WorkspaceTarget::Recent, &env).unwrap_err();
     assert!(
         message_of(&error).contains("No known workspaces"),
         "unexpected error: {error:?}"

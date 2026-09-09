@@ -19,8 +19,10 @@ use crate::{
 
 /// Set the active conversation.
 ///
-/// Without flags, `jp c use [ID]` activates the given conversation (or opens a
-/// picker when no target is provided).
+/// `jp c use <ID>` activates the given conversation.
+/// Bare `jp c use` returns to the session's previously active conversation, the
+/// way `cd -` returns to the previous directory, and opens a picker only when
+/// the session has no previous conversation to return to.
 /// `--grep` and `--created-since`/`--created-before` restrict the picker's
 /// candidate set; when the combined filter leaves a single conversation, it is
 /// activated directly without prompting.

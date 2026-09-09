@@ -22,7 +22,7 @@ None of these go through the persist backend, so `--no-persist` does not
 suppress them.
 
 RFD 087 introduced `LoadIntent::{Run, Inspect}` to stop `jp w show` from
-reordering `l` / `latest` recency merely by reporting on a workspace.
+reordering `r` / `recent` recency merely by reporting on a workspace.
 That fixed one command by declaring it writes nothing at all.
 It did not answer the general question, which is what this ticket is for:
 

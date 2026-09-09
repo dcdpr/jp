@@ -114,12 +114,12 @@ impl Commands {
     /// Declare what this command needs from the workspace bootstrap (RFD 087).
     ///
     /// The workspace-level analog of [`Self::conversation_load_request`]: the
-    /// bootstrap step only runs workspace resolution when the command asks for
-    /// it.
+    /// declaration drives the startup dispatch, so a command reaches exactly
+    /// the pre-workspace work it asked for.
     pub(crate) fn workspace_requirement(&self) -> WorkspaceRequirement {
         match self {
             Commands::Init(_) => WorkspaceRequirement::None,
-            Commands::Workspace(args) => args.workspace_requirement(),
+            Commands::Workspace(_) => WorkspaceRequirement::Subject,
             Commands::Query(_)
             | Commands::Config(_)
             | Commands::Conversation(_)
