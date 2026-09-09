@@ -4,8 +4,12 @@
 //! byte stream into visible text and complete escape sequences.
 //! [`AnsiState`] tracks which attributes a stream has left active, so a writer
 //! can close them at a line break and re-open them on the next line.
-//! [`visual_width`] and [`advance_column`] measure text as the display lays it
-//! out, skipping escapes and advancing a tab to its stop.
+//! [`visual_width`] measures how many columns text occupies, skipping escapes.
+//! [`advance_column`] answers a different question: where the cursor ends up,
+//! which a tab or a carriage return moves somewhere the column count does not
+//! predict.
+//! `"a\tb"` occupies 3 columns and leaves the cursor at 9, so padding to a
+//! fixed column has to go through `advance_column`.
 
 use unicode_width::UnicodeWidthStr as _;
 
