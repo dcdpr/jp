@@ -19,7 +19,14 @@ use tracing::info;
 use crate::tool::ToolDefinition;
 
 /// Estimated chars-per-token ratio used for estimation.
-pub const CHARS_PER_TOKEN: usize = 3;
+///
+/// Measured against a real Anthropic request: a 4,220,150-byte serialized body
+/// counted 1,317,976 input tokens, which works out to roughly 1.9-2.0 chars per
+/// token once JSON framing and escaping are backed out of the byte count.
+/// Code and structured payloads tokenize denser than prose, so a conversation
+/// of mostly English text sits above this and is over-estimated — the safe
+/// direction.
+pub const CHARS_PER_TOKEN: usize = 2;
 
 /// Safety margin for tokenization imprecision (the chars-per-token ratio varies
 /// by content type) and provider framing overhead (JSON wrapping, role tags,

@@ -11,7 +11,7 @@ use jp_llm::{
 
 use super::{
     Error, StreamOutcome, build_range_stream, collect_range_events, failure_reason,
-    summarize_events, summarize_stream, window_overflow,
+    summarize_events, summarize_stream,
 };
 
 /// A stream that produced `text` and then stopped for `reason`.
@@ -107,6 +107,44 @@ async fn summarize_applies_the_configured_output_ceiling() {
     );
 }
 
+/// A request the provider rejects for size is reported as a summarization
+/// failure carrying the provider's own numbers.
+///
+/// The generic stream error would drop the summarizer framing (which model,
+/// what to do next) and leave the reader with a bare API complaint.
+#[tokio::test]
+async fn a_range_the_provider_rejects_for_size_reports_a_summarize_failure() {
+    let provider = MockProvider::with_stream_error(
+        jp_llm::StreamErrorKind::ContextWindowExceeded,
+        "api error: invalid_request_error: prompt is too long: 1318026 tokens > 1000000 maximum",
+    );
+    let model_id = test_model_id();
+    let model_details = ModelDetails::empty(model_id.clone());
+
+    let error = summarize_stream(
+        &provider,
+        &model_details,
+        &model_id,
+        range_stream(&["sig"]),
+        "instructions",
+        "summarize",
+        Some(1_048_576),
+    )
+    .await
+    .expect_err("an oversized request must fail");
+
+    let Error::Summarize { model, reason } = error else {
+        panic!("expected a summarize failure, got: {error:?}");
+    };
+
+    assert_eq!(model, "test/mock-model");
+    assert_eq!(
+        reason,
+        "api error: invalid_request_error: prompt is too long: 1318026 tokens > 1000000 maximum; \
+         compact a smaller range (`--from`/`--to`) or summarize with a larger-window model"
+    );
+}
+
 fn build_stream_with_turns(count: usize) -> ConversationStream {
     let mut stream = ConversationStream::new_test();
     for i in 0..count {
@@ -121,55 +159,6 @@ fn chat_request_texts(events: &[jp_conversation::ConversationEvent]) -> Vec<Stri
         .filter_map(|e| e.as_chat_request())
         .map(|r| r.content.clone())
         .collect()
-}
-
-/// A range comfortably inside the window is summarized as-is.
-#[test]
-fn a_range_that_fits_reports_no_overflow() {
-    let stream = build_stream_with_turns(4);
-    assert_eq!(window_overflow(&stream, Some(100_000), 0), None);
-}
-
-/// The reported failure's shape, on the summarizer path: a large range against
-/// a small-window model.
-/// Unlike title generation this is rejected rather than shortened, so the
-/// summary never covers less than the range it is stored for.
-#[test]
-fn a_range_past_the_window_overflows() {
-    let mut stream = ConversationStream::new_test();
-    for i in 0..200 {
-        stream.start_turn(format!("turn {i}: {}", "x".repeat(1000)));
-    }
-
-    let overflow = window_overflow(&stream, Some(1000), 0).expect("range must not fit");
-    assert_eq!(
-        overflow,
-        "are roughly 201890 characters, which exceeds the ~2700 that fit in the model's 1000 \
-         token context window"
-    );
-}
-
-/// Overhead is charged against the same window, so a range that fits on its own
-/// can still overflow once the instructions are counted.
-#[test]
-fn overhead_can_push_a_fitting_range_over() {
-    let mut stream = ConversationStream::new_test();
-    stream.start_turn("x".repeat(2000));
-
-    assert_eq!(window_overflow(&stream, Some(1000), 0), None);
-    assert!(window_overflow(&stream, Some(1000), 1000).is_some());
-}
-
-/// Providers that don't report a window (local llama.cpp, Ollama) have no
-/// budget to check against, so nothing is rejected.
-#[test]
-fn an_unknown_window_never_overflows() {
-    let mut stream = ConversationStream::new_test();
-    for i in 0..200 {
-        stream.start_turn(format!("turn {i}: {}", "x".repeat(1000)));
-    }
-
-    assert_eq!(window_overflow(&stream, None, 0), None);
 }
 
 /// A repair already recorded on the source applies to the summary request too.
