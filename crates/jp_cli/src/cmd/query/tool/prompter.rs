@@ -22,8 +22,8 @@ use jp_conversation::event::SelectOption;
 use jp_editor::{EditOutcome, EditorBackend};
 use jp_inquire::{InlineOption, ReplyEditMode, ReplyOutcome, prompt::PromptBackend};
 use jp_llm::tool::executor::PermissionInfo;
-use jp_md::{format::DefaultBackground, shade::ShadedWriter};
 use jp_printer::{Printer, PromptWriter};
+use jp_term::{background::DefaultBackground, shade::ShadedWriter};
 use jp_tool::AnswerType;
 use serde_json::Value;
 

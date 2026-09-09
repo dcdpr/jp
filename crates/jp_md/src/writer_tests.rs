@@ -1,5 +1,4 @@
 use super::*;
-use crate::format::{BackgroundFill, DefaultBackground};
 
 /// Regression test: a 1-byte prefix used to underflow in `write_prefix` because
 /// `prefix.len() - 2` wraps to `usize::MAX`.

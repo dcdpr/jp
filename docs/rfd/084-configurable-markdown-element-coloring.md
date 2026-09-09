@@ -369,7 +369,7 @@ build themes against it.
 
 ### Renderer changes
 
-`AnsiState` (`crates/jp_md/src/ansi.rs`) grows an `intensity: Intensity` field
+`AnsiState` (`crates/jp_term/src/ansi.rs`) grows an `intensity: Intensity` field
 in place of its existing `bold: bool`.
 `restore_sequence` re-emits SGR 1 or SGR 2 as appropriate after any SGR 22
 transition, so wrap-break and pop-style restoration handle dim with the same
@@ -778,7 +778,7 @@ Depends on Phase 2.
   This RFD extends that renderer's styling surface.
 - `jp_md::render::TerminalFormatter` — the AST walker whose hard-coded SGR
   calls this RFD replaces.
-- `jp_md::ansi::AnsiState` — the existing state-tracking primitive that the
+- `jp_term::ansi::AnsiState` — the existing state-tracking primitive that the
   proposed writer stack builds on.
 - `termimad`'s `MadSkin` — referenced as schema inspiration; not adopted.
 
