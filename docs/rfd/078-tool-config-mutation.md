@@ -5,6 +5,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-04-17
 - **Requires**: [RFD 076], [RFD 070]
+- **Extended by**: [RFD 107]
 
 ## Summary
 
@@ -1298,3 +1299,4 @@ Depends on: Phase 2.
 [RFD 042]: 042-tool-options.md
 [RFD 070]: 070-negative-config-deltas.md
 [RFD 076]: 076-tool-access-grants.md
+[RFD 107]: 107-discoverable-tools.md

@@ -312,7 +312,7 @@
     "summary": "Plugin configuration integration with AppConfig enabling trust policies, checksum pinning, execution policies, and per-plugin options."
   },
   "078-tool-config-mutation.md": {
-    "hash": "a7d017ca934de55cbfe69ca9d6becc4d98bdbadeb4cc5282444450238ed62e49",
+    "hash": "c208380ff1f5206c9c825d3dec0f28a436897a3f64846eee4003133637c92125",
     "summary": "Scoped tool config access via `access.config` rules, with re-invocation on delta rejection and per-cycle commit buffering."
   },
   "080-editor-as-a-config-source.md": {
@@ -320,7 +320,7 @@
     "summary": "Move editor invocation into startup pipeline to treat it as a config source, fixing phantom deltas."
   },
   "081-decompose-tool-enable-into-state-and-allow_toggle.md": {
-    "hash": "c3fd1931d5ac8f9fa534b5f16bae3fe8cb05ee28e43be7c4b617768c326f248c",
+    "hash": "1de1aa963258c8ad189bbc1c23bf438d8d51a6f7232c745ce43293c8e592a761",
     "summary": "Split tool enable into state and allow_toggle to fix directive bugs and eliminate variant proliferation."
   },
   "082-unified-inquiry-event-recording.md": {
@@ -420,7 +420,11 @@
     "summary": "Allocate collision-free conversation IDs by scanning for occupancy and claiming the first unoccupied slot under a stable lock."
   },
   "105-mid-conversation-operator-directives.md": {
-    "hash": "0ac17903569c11f2c6e09ccfc1a349aa708c2762fe815d1cf195a56fbd240726",
+    "hash": "84bf892d29776fa9b7be919075187351874e85215673ebf94bcd4e62bf504eef",
     "summary": "Mid-conversation system and tool changes anchored in message stream preserve Anthropic's prompt cache via positional directives."
+  },
+  "107-discoverable-tools.md": {
+    "hash": "9de2d1264370d0bfac642d3ab503c3c7c3cd79b1262d9644270356b0f765acd3",
+    "summary": "JP adds discoverable tool state: tools in catalogue but not offered until model searches, keeping large MCP catalogues out of context."
   }
 }
