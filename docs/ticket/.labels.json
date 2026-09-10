@@ -39,7 +39,8 @@
       "follow-up",
       "pre-rfd",
       "question",
-      "task"
+      "task",
+      "tracking"
     ]
   },
   "package": {

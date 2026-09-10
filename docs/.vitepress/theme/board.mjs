@@ -43,18 +43,39 @@ export async function loadBoard(endpoint) {
     return null
 }
 
-/// Persist board state, returning an error message or `null` on success.
-export async function saveBoard(endpoint, body) {
+/// POST to a dev-server endpoint, returning whether it succeeded and what it
+/// said.
+///
+/// `output` carries the endpoint's message on success as well as on failure.
+/// It is empty when an endpoint answers a bare `{ ok: true }`, and holds the
+/// response body when a request is rejected.
+export async function postBoard(endpoint, body) {
+    let res
+    let text
     try {
-        const res = await fetch(endpoint, {
+        res = await fetch(endpoint, {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify(body),
         })
-        if (!res.ok) return await res.text()
+        text = (await res.text()).trim()
     } catch (err) {
-        return String(err.message || err)
+        return { ok: false, output: String(err.message || err) }
     }
 
-    return null
+    // Success is JSON; a rejected request answers in plain text.
+    let output = text
+    try {
+        const parsed = JSON.parse(text)
+        output = typeof parsed?.output === 'string' ? parsed.output.trim() : ''
+    } catch { /* keep the plain-text body */ }
+
+    return { ok: res.ok, output: output || (res.ok ? '' : res.statusText) }
+}
+
+/// Persist board state, returning an error message or `null` on success.
+export async function saveBoard(endpoint, body) {
+    const { ok, output } = await postBoard(endpoint, body)
+
+    return ok ? null : output
 }

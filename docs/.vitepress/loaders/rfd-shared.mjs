@@ -156,9 +156,9 @@ export function mergePriority(entries, priority) {
 
 // Mark the RFDs someone is currently implementing.
 //
-// Derived from the tickets: an RFD is in development when a ticket claiming to
-// implement it sits in the In Progress column. The board doesn't record this and
-// can't set it — closing the ticket clears the flag on its own.
+// Derived from the tickets: an RFD is in development when its tracking ticket
+// sits in the In Progress column. The board file records nothing about this, so
+// moving or closing that ticket is what changes the flag.
 export function mergeInDevelopment(entries, tickets) {
     const inDev = new Set(inDevelopmentRfds(tickets))
     for (const entry of entries) {
@@ -513,8 +513,8 @@ export function checkRequiresOnImplemented(graph) {
 
 // Assemble the full priority board: every published RFD and prioritisable
 // draft, annotated with board position (`priority`), in-development flag (from
-// ticket state), and hard dependencies (`dependsOn`). Entries not placed on the
-// board — including terminal RFDs — carry `priority: null`.
+// the RFD's tracking ticket), and hard dependencies (`dependsOn`). Entries not
+// placed on the board — including terminal RFDs — carry `priority: null`.
 //
 // Returns the entries alongside the normalized `priority` record so callers
 // can tell the prioritised `order` — and its milestone groups, `planned` —

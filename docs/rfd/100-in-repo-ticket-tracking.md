@@ -297,17 +297,26 @@ Tickets and RFDs are separate document kinds with separate numbering and
 separate lifecycles.
 They meet in three places.
 
-### RFD phases become tickets, optionally
+### An accepted RFD gets a tracking ticket, optionally
 
-When an RFD is accepted, `rfd-promote` offers to turn each phase of its
-Implementation Plan into a ticket carrying `Implements: 045`.
+When an RFD is accepted, `rfd-promote` offers to file its tracking ticket: one
+ticket carrying `Implements: 045` and the label `type=tracking`, with the phases
+of the Implementation Plan as its description.
 A prompt, not an automatic step — the same shape as the existing tracking-issue
 prompt — because acceptance records an agreed direction, not a commitment to
 start building.
-Whoever accepts the prompt reviews the resulting tickets before they land.
+Whoever accepts the prompt reviews the ticket before it lands.
 
-This replaces the GitHub tracking issue from [RFD 041] §2, and one ticket now
-serves as both the tracking item and the prioritized work item.
+The same operation runs when the RFD board's box is checked, so an RFD that was
+accepted without a ticket gets one at the moment work starts.
+It is idempotent: an existing tracking ticket is reused, never duplicated.
+
+A phase that needs its own card is filed separately and carries `Implements:
+045` without the label.
+The fan-out is a decision made when the work is picked up, not at acceptance,
+where the phases are still a plan.
+
+This replaces the GitHub tracking issue from [RFD 041] §2.
 
 ### Tickets promote to RFDs
 
@@ -316,15 +325,32 @@ seeds an RFD draft from the ticket, and the ticket closes as `Done` with
 `Promoted to` pointing at the draft.
 The work item is finished; the work moved.
 
-### The RFD board keeps ordering; it loses `inDevelopment`
+### The RFD board keeps ordering; `inDevelopment` moves to the ticket
 
 The `inDevelopment` flag leaves `docs/rfd/priority.json`.
 "Someone is currently writing code for this" is a property of a work item, not
 of a design document — it was on the RFD board only because tickets did not
 exist.
-It becomes **derived**: an RFD is in development when any ticket carrying
-`Implements: NNN` sits in the In Progress column.
-Derived, not synced, so there is nothing to keep in step.
+
+Each RFD gets at most one **tracking ticket**: a ticket carrying `Implements:
+NNN` and the label `type=tracking`, holding the implementation plan as its
+description.
+It plays the role a tracking issue plays elsewhere; a phase that needs its own
+card gets a separate ticket, which carries `Implements: NNN` without the label.
+
+The flag becomes **derived** from that one ticket: an RFD is in development when
+its tracking ticket sits in the In Progress column.
+Phase tickets never light the flag.
+
+The RFD board is a control surface over that ticket, not a second store, the
+same way dragging a card between columns is.
+Checking an RFD's box creates the tracking ticket if it doesn't exist and sets
+it to In Progress; unchecking sets it back to Todo.
+No status history is written to the ticket — the file's git history already
+dates every change.
+The box is offered from Accepted onward, which is where implementation begins: a
+draft or an RFD still under discussion is something to prioritise finishing, not
+to start building.
 
 RFD priority ordering stays.
 The two boards rank different things:
@@ -410,9 +436,10 @@ How the tooling gets there is not fixed.
 2. **Assistant tools.** `ticket_*` tools through `.jp/mcp/tools/`.
    The point of the exercise.
 3. **Website and board.** A `/ticket/` index and the kanban board.
-   Retire `inDevelopment` and derive it from ticket state.
+   Retire the `inDevelopment` field and derive it from the tracking ticket,
+   which the RFD board's checkbox moves.
 4. **GitHub import.** One-way, issues and comments.
-5. **RFD seams.** The phase-ticket prompt and ticket-to-RFD promotion, which
+5. **RFD seams.** The tracking-ticket prompt and ticket-to-RFD promotion, which
    needs an idempotent retry story.
    Amend [RFD 001] and [RFD 041], including 041's stale claim that tracking
    issues are created at Discussion, and add a TIP to 041 once this RFD holds a

@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 
 import { normalizePriority, TERMINAL_STATUSES } from '../loaders/rfd-priority.mjs'
-import { createSortable, isDev, loadBoard, saveBoard } from './board.mjs'
+import { createSortable, isDev, loadBoard, postBoard, saveBoard } from './board.mjs'
 
 const props = defineProps({
     entries: { type: Array, required: true },
@@ -98,12 +98,70 @@ function buildRows(p) {
 
 const items = ref([])
 
-// Which RFDs are being implemented. Read-only here: the flag is derived from
-// ticket state (a ticket carrying `Implements: NNN` in the In Progress column),
-// so the board reports it and never sets it.
-const inDev = computed(
-    () => new Set(props.entries.filter(e => e.inDevelopment).map(e => e.num))
+// Which RFDs are being implemented: their tracking ticket sits in the In
+// Progress column. Seeded from ticket state, refreshed on mount, and updated in
+// place as the checkbox writes, because the data loader caches for the dev
+// server's lifetime and `entries` never carries a write back.
+const inDev = ref(
+    new Set(props.entries.filter(e => e.inDevelopment).map(e => e.num))
 )
+
+// Statuses whose RFDs can be marked in development. `just rfd-track` refuses
+// anything earlier, where implementation has not begun (see RFD 001).
+const TRACKABLE_STATUSES = new Set(['Accepted', 'Implemented'])
+
+// Whether to offer the checkbox. An RFD already marked keeps it whatever its
+// status, so a mark left behind by an RFD moving back to Discussion can still
+// be turned off.
+function canToggleDev(rfd) {
+    return TRACKABLE_STATUSES.has(rfd.status) || inDev.value.has(rfd.num)
+}
+
+// RFDs with a checkbox write in flight. The first mark on an RFD files its
+// tracking ticket, which reads the RFD's implementation plan through a provider
+// and takes seconds.
+const devPending = ref(new Set())
+
+// Mark an RFD as in development, or stop it, by moving its tracking ticket.
+//
+// Local state moves only once the endpoint has written the ticket, so a failed
+// write leaves the board showing what the tickets hold. The checkbox is a DOM
+// input that has already flipped by then, and Vue does not re-render an
+// unchanged value, so it is put back by hand.
+async function toggleDev(rfd, event) {
+    if (devPending.value.has(rfd.num)) return
+
+    const active = !inDev.value.has(rfd.num)
+    devPending.value = new Set(devPending.value).add(rfd.num)
+    setNotice(
+        active
+            ? `RFD ${rfd.num}: starting its tracking ticket…`
+            : `RFD ${rfd.num}: moving its tracking ticket back to Todo…`,
+        'warn',
+    )
+
+    const { ok, output } = await postBoard('/__rfd-development', {
+        num: rfd.num,
+        active,
+    })
+
+    const pending = new Set(devPending.value)
+    pending.delete(rfd.num)
+    devPending.value = pending
+
+    if (!ok) {
+        if (event?.target) event.target.checked = !active
+        setNotice(output, 'err', 8000)
+        return
+    }
+
+    const marked = new Set(inDev.value)
+    if (active) marked.add(rfd.num)
+    else marked.delete(rfd.num)
+    inDev.value = marked
+    setNotice(output || (active ? 'In development' : 'Back in Todo'), 'ok', 4000)
+}
+
 // Initial board state from the build-time data. On the dev server the same
 // function rebuilds it from a fresh fetch on mount.
 applyPriority(props.priority)
@@ -458,9 +516,19 @@ async function loadFreshPriority() {
     if (fresh) applyPriority(fresh)
 }
 
+// Re-read which RFDs are in development. Writing a ticket file reloads the
+// page, and the cached loader data shows the state the page was built with.
+async function loadFreshInDev() {
+    const fresh = await loadBoard('/__rfd-development')
+    if (Array.isArray(fresh?.inDevelopment)) {
+        inDev.value = new Set(fresh.inDevelopment)
+    }
+}
+
 onMounted(() => {
     if (!isDev) return
     loadFreshPriority()
+    loadFreshInDev()
     import('sortablejs').then(({ default: Sortable }) => {
         if (!listRef.value) return
         sortable = Sortable.create(listRef.value, {
@@ -497,7 +565,7 @@ onBeforeUnmount(() => {
 <div class="rfd-board">
     <div v-if="isDev" class="rfd-board-status">
         <span v-if="notice" :class="'rfd-board-' + notice.kind">{{ notice.text }}</span>
-        <span v-else class="rfd-board-hint">Drag a row to reorder; hover the gap between rows to add a milestone. Changes save automatically.</span>
+        <span v-else class="rfd-board-hint">Drag a row to reorder; hover the gap between rows to add a milestone; tick <code>dev</code> to start an RFD. Changes save automatically.</span>
     </div>
     <p v-else class="rfd-board-note">
         The active backlog in priority order. Top of the list is worked on first.
@@ -580,6 +648,20 @@ onBeforeUnmount(() => {
                     </div>
                     <div v-if="rfd.summary" class="rfd-board-summary">{{ rfd.summary }}</div>
                 </div>
+                <label
+                    v-if="isDev && canToggleDev(rfd)"
+                    class="rfd-board-devtoggle"
+                    :class="{ 'is-pending': devPending.has(rfd.num) }"
+                    title="Mark as in development: files the RFD's tracking ticket if it has none, and moves it to In Progress"
+                >
+                    <input
+                        type="checkbox"
+                        :checked="inDev.has(rfd.num)"
+                        :disabled="devPending.has(rfd.num)"
+                        @change="toggleDev(rfd, $event)"
+                    />
+                    dev
+                </label>
                 <span v-if="isDev" class="rfd-board-jump">
                     <button class="rfd-board-jump-btn" title="Move to top of section" @click="moveTo(rfd, 'top')">▲</button>
                     <button class="rfd-board-jump-btn" title="Move to bottom of section" @click="moveTo(rfd, 'bottom')">▼</button>
@@ -818,5 +900,9 @@ onBeforeUnmount(() => {
     color: var(--vp-c-text-3);
     cursor: pointer;
     white-space: nowrap;
+}
+.rfd-board-devtoggle.is-pending {
+    cursor: progress;
+    opacity: 0.5;
 }
 </style>

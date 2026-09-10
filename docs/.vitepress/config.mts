@@ -5,7 +5,7 @@ import { dirname, posix, resolve } from 'node:path'
 import { defineConfig } from 'vitepress'
 import abnfGrammar from './grammars/abnf.tmLanguage.json'
 import { joinMultilineInlineCode } from './join-inline-code.mjs'
-import { readLabels } from './loaders/ticket-shared.mjs'
+import { inDevelopmentRfds, parseTicket, readLabels } from './loaders/ticket-shared.mjs'
 import { rfdRedirectServer, writeRfdRedirects } from './rfd-redirects.mjs'
 
 // Rewrite relative links that climb above the docs root to absolute GitHub
@@ -413,6 +413,93 @@ const ticketWriter = {
     },
 }
 
+// Dev-only endpoint for an RFD's in-development state (`/rfd/priority`).
+//
+// The state lives on the RFD's tracking ticket, so a write shells out to
+// `just rfd-start` / `just rfd-stop` rather than touching a file. Marking an
+// RFD files that ticket when it has none, which reads the RFD's implementation
+// plan through a provider.
+const rfdDevelopmentWriter = {
+    name: 'rfd-development-writer',
+    configureServer(server) {
+        const dir = resolve(server.config.root, 'ticket')
+
+        server.middlewares.use('/__rfd-development', (req, res, next) => {
+            // The board reads this on mount. Writing a ticket file reloads the
+            // page, and the data loader caches for the server's lifetime, so
+            // without this the board comes back showing the state it was built
+            // with. Read through the site's own parser and rule.
+            if (req.method === 'GET') {
+                const tickets = readdirSync(dir)
+                    .filter((name) => /^[0-9a-z]{7}-.+\.md$/.test(name))
+                    .map((name) => parseTicket(readFileSync(resolve(dir, name), 'utf-8'), name))
+
+                res.setHeader('Content-Type', 'application/json')
+                res.end(JSON.stringify({ inDevelopment: inDevelopmentRfds(tickets) }))
+                return
+            }
+
+            if (req.method !== 'POST') return next()
+
+            let body = ''
+            let tooBig = false
+            req.on('data', (chunk) => {
+                body += chunk
+                if (body.length > 4 * 1024) {
+                    tooBig = true
+                    req.destroy()
+                }
+            })
+            req.on('end', () => {
+                if (tooBig) {
+                    res.statusCode = 413
+                    res.end('payload too large')
+                    return
+                }
+
+                let parsed
+                try {
+                    parsed = JSON.parse(body)
+                } catch {
+                    res.statusCode = 400
+                    res.end('invalid JSON')
+                    return
+                }
+
+                // The recipe name is chosen here rather than taken from the
+                // request, so a request can only ask for one of the two
+                // operations, on a published RFD. Whether that RFD is far
+                // enough along to carry a tracking ticket is the recipe's call.
+                if (
+                    typeof parsed.num !== 'string' ||
+                    !/^\d{3}$/.test(parsed.num) ||
+                    typeof parsed.active !== 'boolean'
+                ) {
+                    res.statusCode = 400
+                    res.end('expected { num: "NNN", active: boolean }')
+                    return
+                }
+
+                const recipe = parsed.active ? 'rfd-start' : 'rfd-stop'
+                execFile('just', [recipe, parsed.num], {
+                    cwd: resolve(server.config.root, '..'),
+                    // Reading the plan goes to a provider; the default (no
+                    // timeout) leaves a wedged run holding the request open
+                    // forever.
+                    timeout: 5 * 60 * 1000,
+                }, (error, stdout, stderr) => {
+                    res.statusCode = error ? 500 : 200
+                    res.setHeader('Content-Type', 'application/json')
+                    res.end(JSON.stringify({
+                        ok: !error,
+                        output: (stdout || stderr || String(error ?? '')).trim(),
+                    }))
+                })
+            })
+        })
+    },
+}
+
 // https://vitepress.dev/reference/site-config
 
 export default defineConfig({
@@ -495,6 +582,7 @@ export default defineConfig({
             serveMarkdownAsUtf8,
             rfdRedirectServer,
             rfdPriorityWriter,
+            rfdDevelopmentWriter,
             ticketBoardWriter,
             ticketWriter,
         ],

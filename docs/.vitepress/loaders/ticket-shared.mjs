@@ -222,17 +222,25 @@ export function orderColumn(tickets, column, order) {
     })
 }
 
+// The label marking a ticket as its RFD's tracking ticket.
+export const TRACKING_LABEL = 'type=tracking'
+
 // The RFDs currently being implemented, derived from ticket state.
 //
-// An RFD is in development when a ticket claiming to implement it sits in the In
-// Progress column. Derived, not synced, so there is nothing to keep in step (see
-// RFD 100).
+// An RFD is in development when its tracking ticket sits in the In Progress
+// column. Phase tickets name the same RFD in `Implements` without the tracking
+// label, and never light the flag. Derived, not synced, so there is nothing to
+// keep in step (see RFD 100).
 export function inDevelopmentRfds(tickets) {
     const rfds = new Set()
     for (const ticket of tickets) {
         if (ticket.status !== 'In Progress' || !ticket.implements) continue
-        const num = ticket.implements.match(/\d{1,3}/)?.[0]
-        if (num) rfds.add(num.padStart(3, '0'))
+        if (!ticket.labels.includes(TRACKING_LABEL)) continue
+        // Anchored, so a draft id keeps its `D`: an unanchored digit match
+        // reads `D33` as RFD 033, which is a different document.
+        const id = ticket.implements.trim().replace(/^RFD\s+/i, '')
+        if (!/^(D\d{1,2}|\d{1,3})$/.test(id)) continue
+        rfds.add(id.startsWith('D') ? id : id.padStart(3, '0'))
     }
 
     return [...rfds].sort()

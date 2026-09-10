@@ -58,7 +58,7 @@ status, which also moves the file up to `docs/rfd/`.
 
 `rfd_promote` handles deferred numbering: for DNN-prefixed drafts, it \
 assigns the next available permanent number and renames the file. When \
-promoting to Accepted, it creates a GitHub tracking issue.
+promoting to Accepted, it offers to file the RFD's tracking ticket.
 
 `rfd_renumber` moves an RFD (draft or published) to a new id and rewrites its \
 file name, heading, cross-references, and priority-board entry. The target id \
