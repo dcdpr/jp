@@ -129,12 +129,11 @@ fn test_assign_auth_chain_null_clears_to_none() {
     partial.assign(kv).unwrap();
 
     // `None` and `Some([])` merge differently: `None` lets a later layer's
-    // chain land verbatim, while an empty chain replaces it with a value
-    // validation then rejects.
+    // chain land verbatim, `Some([])` replaces it with an empty chain that
+    // validation rejects.
     assert_eq!(partial.auth, None);
 }
 
-/// A chain holding `before`, as one config layer's partial.
 fn partial_with_auth(chain: &[AuthEntry]) -> PartialAnthropicConfig {
     PartialAnthropicConfig {
         auth: Some(chain.to_vec()),
@@ -142,10 +141,11 @@ fn partial_with_auth(chain: &[AuthEntry]) -> PartialAnthropicConfig {
     }
 }
 
-/// Assert that the delta between two chains folds back onto the first.
+/// Assert that folding the delta between two chains onto `before` yields
+/// `after`.
 ///
 /// Order is part of the assertion: the chain is a fallback order, so a delta
-/// that reproduces the set but not the sequence silently changes which
+/// that reproduces the entries but not their sequence silently changes which
 /// credential pays for the request.
 fn assert_auth_delta_law(before: &[AuthEntry], after: &[AuthEntry]) {
     let prev = partial_with_auth(before);

@@ -1185,8 +1185,8 @@ fn maybe_init_events(
 
 /// Returns the directory JP stores its per-user data in.
 ///
-/// See [`jp_config::fs::user_data_dir`] for the resolution order; this wrapper
-/// maps the missing-directory case onto [`Error::MissingHome`].
+/// [`jp_config::fs::user_data_dir`] gives the resolution order; a home
+/// directory that cannot be determined becomes [`Error::MissingHome`].
 pub fn user_data_dir() -> Result<Utf8PathBuf> {
     jp_config::fs::user_data_dir().ok_or(Error::MissingHome)
 }

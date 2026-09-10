@@ -18,7 +18,7 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Config)]
 #[config(rename_all = "snake_case")]
 pub struct AnthropicConfig {
-    /// The credential chain used to authenticate requests, in fallback order.
+    /// The credentials a request may authenticate with, in fallback order.
     ///
     /// Defaults to `["api_key"]`.
     ///
@@ -33,11 +33,10 @@ pub struct AnthropicConfig {
     ///
     /// Entries are tried in order: when one cannot produce a usable credential,
     /// JP continues with the next.
-    /// Listing `api_key` after subscription profiles authorizes continuing on
-    /// per-token API billing when the subscription allowance is exhausted.
+    /// Listing `api_key` after a subscription profile authorizes continuing on
+    /// per-token billing once the subscription allowance is gone.
     ///
-    /// This list replaces the one from earlier config layers as a whole; it
-    /// never appends.
+    /// Replaces the chain from earlier config layers rather than extending it.
     ///
     /// ```toml
     /// [providers.llm.anthropic]
@@ -75,10 +74,10 @@ pub struct AnthropicConfig {
 }
 
 impl Validator for AnthropicConfig {
-    /// Rejects an empty or duplicate-carrying `auth` chain.
+    /// Rejects an `auth` chain that is empty or repeats an entry.
     ///
-    /// Unrecognized entries are rejected earlier, when the value is parsed into
-    /// an [`AuthEntry`].
+    /// An unrecognized entry is rejected earlier, when the string is parsed
+    /// into an [`AuthEntry`].
     fn validate(&self) -> Result<(), ConfigError> {
         if self.auth.is_empty() {
             return Err(HandlerError::new(
@@ -138,8 +137,8 @@ impl PartialConfigDelta for PartialAnthropicConfig {
 
     fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
         Self {
-            // `auth` replaces rather than appends, so the whole of `next` is
-            // reachable by merging and no path needs clearing first.
+            // `auth` merges by replacement, so merging reaches `next`
+            // without clearing the field first.
             auth: delta_opt(self.auth.as_ref(), next.auth),
             api_key_env: delta_opt(self.api_key_env.as_ref(), next.api_key_env),
             base_url: delta_opt(self.base_url.as_ref(), next.base_url),
