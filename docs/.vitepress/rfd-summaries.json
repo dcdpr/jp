@@ -64,7 +64,7 @@
     "summary": "Wasm plugins export an attachment interface, wrapped in a native Handler adapter for transparent integration."
   },
   "018-typed-prompt-routing-enum.md": {
-    "hash": "9a28dca0d700374a220fe35b3775b86b1cfc836c8e074ff7285cb86df5387944",
+    "hash": "7e0f2012bcfab77ecf1a23212421cbf67f362c82afc63df12191fdec6c3c05b8",
     "summary": "Codify prompt types as `Prompt` enum variants for unified routing, config, and extensibility."
   },
   "019-non-interactive-mode.md": {
@@ -140,7 +140,7 @@
     "summary": "Extend `--cfg` path resolution to search user-global, workspace, and user-workspace config roots, merging matches."
   },
   "036-conversation-compaction.md": {
-    "hash": "bbee8ea2d52ed097654a805c59d7b37b8320fc0a56a31e164a85912b5269a732",
+    "hash": "064f8869463adff94f41d3113c04e09bbcbd42cf878c558b9e1f196521bac567",
     "summary": "Composable conversation compaction via mechanical strategies, tool-aware deduplication, LLM summarization, and protocol extensions for declarative compaction hints."
   },
   "037-await-tool-for-stateful-handle-synchronization.md": {

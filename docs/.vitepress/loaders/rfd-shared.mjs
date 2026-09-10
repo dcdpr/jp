@@ -323,9 +323,16 @@ function normalizeLabel(label) {
     return label.trim().replace(/\s+/g, ' ').toLowerCase()
 }
 
-// Blank out fenced code blocks and inline code spans, keeping line numbers
-// intact. Bracket syntax inside code is never a link, and RFDs are full of
-// sample JSON, shell, and Rust that would otherwise look like one.
+// Neutralize code, keeping line numbers intact. Bracket syntax inside code is
+// never a link, and RFDs are full of sample JSON, shell, and Rust that would
+// otherwise look like one.
+//
+// Fenced blocks are blanked outright. Inline spans are *unwrapped* instead,
+// with only the brackets inside them blanked: a link label may contain a code
+// span (``[`wit-bindgen`]: url``), so deleting the span erases the label from
+// the usage and its definition alike and desynchronizes the two. Unwrapping
+// keeps the label byte-identical on both sides, while `[RFD 038]` written
+// inside backticks as literal syntax stops looking like a reference.
 function stripCode(content) {
     let fence = null
     return content
@@ -342,7 +349,9 @@ function stripCode(content) {
                 fence = marker
                 return ''
             }
-            return line.replace(/(`+)[\s\S]*?\1/g, '')
+            return line.replace(/(`+)([\s\S]*?)\1/g, (_, _ticks, body) =>
+                body.replace(/[[\]]/g, ' ')
+            )
         })
         .join('\n')
 }

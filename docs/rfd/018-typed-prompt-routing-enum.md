@@ -250,7 +250,8 @@ The method encodes the invariant in the type.
 
 - **Detached prompt policy.** This RFD introduces the type system; configurable
   detached policies are proposed in [RFD 049].
-- **Task model and prompt queuing.** See [RFD 020].
+- **Task model and prompt queuing.** Deferring a prompt rather than routing it
+  is a separate concern; no RFD owns it yet.
 - **New prompt variants.** This RFD formalizes the existing three prompt types.
   New variants are future work.
 
