@@ -381,16 +381,20 @@ impl Field<'_> {
         // the type it resolves to: `attachments` holds a `Vec<AttachmentConfig>`
         // once resolved, but a document writes either a bare list or the merge
         // wrapper carrying one, and the via type is what describes both.
-        let value = self.partial_via_ty.as_ref().unwrap_or(self.value);
+        let value = if self.partial_via_ty.is_some() && self.is_container() {
+            // Nested collections deserialize partial elements in every wire form.
+            self.value_type.to_token_stream()
+        } else {
+            self.partial_via_ty
+                .as_ref()
+                .unwrap_or(self.value)
+                .to_token_stream()
+        };
         let mut inner_schema = if self.is_nested() {
             quote! { schema.infer_as_nested::<#value>() }
         } else {
             quote! { schema.infer::<#value>() }
         };
-
-        if let Some(path) = &self.args.schema_union_with {
-            inner_schema = union_with_declared_shapes(path, &inner_schema);
-        }
 
         if let Some(Expr::Lit(lit)) = self.args.default.expr() {
             let lit_value = match &lit.lit {
@@ -414,6 +418,10 @@ impl Field<'_> {
             };
 
             inner_schema = quote! { schema.infer_with_default::<#value>(#lit_value) };
+        }
+
+        if let Some(path) = &self.args.schema_union_with {
+            inner_schema = union_with_declared_shapes(path, &inner_schema);
         }
 
         // Struct field (named)
