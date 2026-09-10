@@ -542,36 +542,40 @@ conversation: ConversationConfig
                 instructions?:
                   |: PartialMergeableVec
                     |:
-                      []: InstructionsConfig
-                        description: string | null
-                        examples:
-                          []: PartialExampleConfig
-                            |: string
-                            |: PartialContrastConfig
-                              bad?: string | null
-                              good?: string | null
-                              reason?: string | null
-                        items: [string]
-                        position?: int
-                        title: string | null
+                      []: PartialInstructionsConfig
+                        description?: string | null
+                        examples?:
+                          |:
+                            []: PartialExampleConfig
+                              |: string
+                              |: PartialContrastConfig
+                                bad?: string | null
+                                good?: string | null
+                                reason?: string | null
+                          |: null
+                        items?: [string] | null
+                        position?: int | null
+                        title?: string | null
                     |: PartialMergedVec
                       dedup?: "inherit" | "true" | "false" | bool | null | null
                       discard_when_merged?: bool | null
                       strategy?: "append" | "prepend" | "replace" | null
                       value?:
                         |:
-                          []: InstructionsConfig
-                            description: string | null
-                            examples:
-                              []: PartialExampleConfig
-                                |: string
-                                |: PartialContrastConfig
-                                  bad?: string | null
-                                  good?: string | null
-                                  reason?: string | null
-                            items: [string]
-                            position?: int
-                            title: string | null
+                          []: PartialInstructionsConfig
+                            description?: string | null
+                            examples?:
+                              |:
+                                []: PartialExampleConfig
+                                  |: string
+                                  |: PartialContrastConfig
+                                    bad?: string | null
+                                    good?: string | null
+                                    reason?: string | null
+                              |: null
+                            items?: [string] | null
+                            position?: int | null
+                            title?: string | null
                         |: null
                   |: null
                 model?:
@@ -628,22 +632,22 @@ conversation: ConversationConfig
                 system_prompt_sections?:
                   |: PartialMergeableVec
                     |:
-                      []: SectionConfig
-                        content: string
-                        position?: int
-                        tag: string | null
-                        title: string | null
+                      []: PartialSectionConfig
+                        content?: string | null
+                        position?: int | null
+                        tag?: string | null
+                        title?: string | null
                     |: PartialMergedVec
                       dedup?: "inherit" | "true" | "false" | bool | null | null
                       discard_when_merged?: bool | null
                       strategy?: "append" | "prepend" | "replace" | null
                       value?:
                         |:
-                          []: SectionConfig
-                            content: string
-                            position?: int
-                            tag: string | null
-                            title: string | null
+                          []: PartialSectionConfig
+                            content?: string | null
+                            position?: int | null
+                            tag?: string | null
+                            title?: string | null
                         |: null
                   |: null
                 tool_choice?: "auto" | "none" | "required" | string | null
@@ -723,6 +727,7 @@ providers: ProviderConfig
         |: string
     anthropic: AnthropicConfig
       api_key_env?: string
+      auth?: [string]
       base_url?: string
       beta_headers?: [string]
       chain_on_max_tokens?: bool

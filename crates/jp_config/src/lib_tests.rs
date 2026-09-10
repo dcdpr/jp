@@ -3,7 +3,10 @@ use schematic::PartialConfig as _;
 use test_log::test;
 
 use super::*;
-use crate::assignment::{KvAssignmentError, KvAssignmentErrorKind};
+use crate::{
+    assignment::{KvAssignmentError, KvAssignmentErrorKind},
+    assistant::instructions::PartialInstructionsConfig,
+};
 
 #[test]
 fn test_partial_app_config_empty_serialize() {
@@ -33,6 +36,134 @@ fn test_app_config_fields() {
 #[test]
 fn test_app_config_schema_shape() {
     insta::assert_snapshot!(crate::schema_shape::render(&AppConfig::schema()));
+}
+
+#[test]
+fn the_app_schema_keeps_instruction_elements_resolved_in_both_array_forms() {
+    let schema = AppConfig::schema();
+    let SchemaType::Struct(app) = &schema.ty else {
+        panic!("expected the app struct");
+    };
+    let SchemaType::Struct(assistant) = &app.fields["assistant"].schema.ty else {
+        panic!("expected the assistant struct");
+    };
+    let SchemaType::Union(instructions) = &assistant.fields["instructions"].schema.ty else {
+        panic!("expected the merge wrapper union");
+    };
+    let SchemaType::Array(bare) = &instructions.variants_types[0].ty else {
+        panic!("expected the bare array");
+    };
+    let SchemaType::Struct(wrapper) = &instructions.variants_types[1].ty else {
+        panic!("expected the wrapper struct");
+    };
+    let SchemaType::Array(wrapped) = &wrapper.fields["value"].schema.ty else {
+        panic!("expected the wrapped array");
+    };
+
+    for element in [&bare.items_type, &wrapped.items_type] {
+        let SchemaType::Struct(instruction) = &element.ty else {
+            panic!("expected the instruction struct");
+        };
+        let fields: Vec<_> = instruction
+            .fields
+            .iter()
+            .map(|(name, field)| {
+                (
+                    name.as_str(),
+                    field.optional,
+                    field.nullable,
+                    field.schema.nullable,
+                )
+            })
+            .collect();
+        assert_eq!(fields, [
+            ("description", false, true, false),
+            ("examples", false, false, false),
+            ("items", false, false, false),
+            ("position", true, false, false),
+            ("title", false, true, false),
+        ]);
+        assert_eq!(element.name.as_deref(), Some("InstructionsConfig"));
+        assert!(
+            instruction.partial,
+            "the nested marker must survive for the partial schema"
+        );
+    }
+}
+
+#[test]
+fn the_partial_schema_keeps_instruction_elements_partial_in_both_array_forms() {
+    for input in [
+        r#"{"assistant":{"instructions":[{"title":"Review"}]}}"#,
+        r#"{"assistant":{"instructions":{"value":[{"title":"Review"}]}}}"#,
+    ] {
+        let parsed: PartialAppConfig = serde_json::from_str(input).unwrap();
+        assert_eq!(parsed.assistant.instructions.as_slice(), [
+            PartialInstructionsConfig {
+                title: Some("Review".to_owned()),
+                description: None,
+                position: None,
+                items: None,
+                examples: vec![],
+            }
+        ]);
+    }
+
+    let schema = PartialAppConfig::schema();
+    let SchemaType::Struct(app) = &schema.ty else {
+        panic!("expected the app struct");
+    };
+    let SchemaType::Union(assistant) = &app.fields["assistant"].schema.ty else {
+        panic!("expected a nullable assistant");
+    };
+    let SchemaType::Struct(assistant) = &assistant.variants_types[0].ty else {
+        panic!("expected the assistant struct");
+    };
+    let SchemaType::Union(nullable_instructions) = &assistant.fields["instructions"].schema.ty
+    else {
+        panic!("expected nullable instructions");
+    };
+    let SchemaType::Union(instructions) = &nullable_instructions.variants_types[0].ty else {
+        panic!("expected the merge wrapper union");
+    };
+    let SchemaType::Array(bare) = &instructions.variants_types[0].ty else {
+        panic!("expected the bare array");
+    };
+    let SchemaType::Struct(wrapper) = &instructions.variants_types[1].ty else {
+        panic!("expected the wrapper struct");
+    };
+    let SchemaType::Union(value) = &wrapper.fields["value"].schema.ty else {
+        panic!("expected a nullable wrapper value");
+    };
+    let SchemaType::Array(wrapped) = &value.variants_types[0].ty else {
+        panic!("expected the wrapped array");
+    };
+
+    for element in [&bare.items_type, &wrapped.items_type] {
+        let SchemaType::Struct(instruction) = &element.ty else {
+            panic!("expected the instruction struct");
+        };
+        let fields: Vec<_> = instruction
+            .fields
+            .iter()
+            .map(|(name, field)| {
+                (
+                    name.as_str(),
+                    field.optional,
+                    field.nullable,
+                    field.schema.nullable,
+                )
+            })
+            .collect();
+        assert_eq!(fields, [
+            ("description", true, true, true),
+            ("examples", true, true, true),
+            ("items", true, true, true),
+            ("position", true, true, true),
+            ("title", true, true, true),
+        ]);
+        assert_eq!(element.name.as_deref(), Some("PartialInstructionsConfig"));
+    }
 }
 
 /// A reference has to name a type the partial schema still contains.
