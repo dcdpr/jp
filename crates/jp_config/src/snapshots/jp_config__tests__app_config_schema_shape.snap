@@ -52,6 +52,7 @@ assistant: AssistantConfig
             effort?: "none" | "auto" | "max" | "xhigh" | "high" | "medium" | "low" | "xlow" | string
             exclude?: bool
         |: null
+      service_tier: "off" | "flex" | "standard" | "priority" | null
       stop_words?: [string]
       temperature: float | null
       top_k: int | null
@@ -149,6 +150,7 @@ conversation: ConversationConfig
                           effort?: "none" | "auto" | "max" | "xhigh" | "high" | "medium" | "low" | "xlow" | string
                           exclude?: bool
                       |: null
+                    service_tier: "off" | "flex" | "standard" | "priority" | null
                     stop_words?: [string]
                     temperature: float | null
                     top_k: int | null
@@ -201,6 +203,7 @@ conversation: ConversationConfig
                             effort?: "none" | "auto" | "max" | "xhigh" | "high" | "medium" | "low" | "xlow" | string
                             exclude?: bool
                         |: null
+                      service_tier: "off" | "flex" | "standard" | "priority" | null
                       stop_words?: [string]
                       temperature: float | null
                       top_k: int | null
@@ -267,6 +270,7 @@ conversation: ConversationConfig
                 effort?: "none" | "auto" | "max" | "xhigh" | "high" | "medium" | "low" | "xlow" | string
                 exclude?: bool
             |: null
+          service_tier: "off" | "flex" | "standard" | "priority" | null
           stop_words?: [string]
           temperature: float | null
           top_k: int | null
@@ -373,6 +377,7 @@ conversation: ConversationConfig
                   effort?: "none" | "auto" | "max" | "xhigh" | "high" | "medium" | "low" | "xlow" | string
                   exclude?: bool
               |: null
+            service_tier: "off" | "flex" | "standard" | "priority" | null
             stop_words?: [string]
             temperature: float | null
             top_k: int | null
@@ -380,6 +385,47 @@ conversation: ConversationConfig
         |: null
   tools: ToolsConfig
     *: ToolsDefaultsConfig
+      access:
+        |: AccessConfig
+          env: MergeableVec
+            |:
+              []: EnvRuleConfig
+                name: string
+                read: bool | null
+            |: MergedVec
+              dedup?: "inherit" | "true" | "false" | bool | null
+              discard_when_merged?: bool
+              strategy?: "append" | "prepend" | "replace" | null
+              value?:
+                []: EnvRuleConfig
+                  name: string
+                  read: bool | null
+          fs: MergeableVec
+            |:
+              []: FsRuleConfig
+                create: bool | null
+                delete: bool | null
+                execute: bool | null
+                external: bool | null
+                path: string
+                read: bool | null
+                update: bool | null
+                write: bool | null
+            |: MergedVec
+              dedup?: "inherit" | "true" | "false" | bool | null
+              discard_when_merged?: bool
+              strategy?: "append" | "prepend" | "replace" | null
+              value?:
+                []: FsRuleConfig
+                  create: bool | null
+                  delete: bool | null
+                  execute: bool | null
+                  external: bool | null
+                  path: string
+                  read: bool | null
+                  update: bool | null
+                  write: bool | null
+        |: null
       cancellation_response?: string
       enable:
         |:
@@ -408,6 +454,7 @@ conversation: ConversationConfig
               args?: [string]
               program: string
               shell?: bool
+        print_stderr?: bool
         results_file_link?: "full" | "osc8" | "off"
     tools (flattened):
       *: ToolConfig
@@ -551,6 +598,7 @@ conversation: ConversationConfig
                               effort?: "none" | "auto" | "max" | "xhigh" | "high" | "medium" | "low" | "xlow" | string | null
                               exclude?: bool | null
                           |: null
+                        service_tier?: "off" | "flex" | "standard" | "priority" | null
                         stop_words?: [string] | null
                         temperature?: float | null
                         top_k?: int | null
@@ -619,6 +667,7 @@ conversation: ConversationConfig
                   args?: [string]
                   program: string
                   shell?: bool
+            print_stderr?: bool
             results_file_link?: "full" | "osc8" | "off"
           |: null
         summary: string | null
@@ -686,7 +735,6 @@ providers: ProviderConfig
     google: GoogleConfig
       api_key_env?: string
       base_url?: string
-      service_tier: "flex" | "priority" | "standard" | null
     llamacpp: LlamacppConfig
       base_url?: string
     ollama: OllamaConfig
@@ -737,6 +785,7 @@ style: StyleConfig
     delay_secs?: int
     interval_ms?: int
     show?: bool
+    stderr_rows?: "off" (aka false) | "auto" (aka true) | string
   reasoning: ReasoningConfig
     background?: int | string | null
     display?: "hidden" | "summary" | "static" | "progress" | "timer" | "full" | string
@@ -753,6 +802,7 @@ style: StyleConfig
           other?:
             *: unknown
           reasoning: @ReasoningConfig | null
+          service_tier: "off" | "flex" | "standard" | "priority" | null
           stop_words?: [string]
           temperature: float | null
           top_k: int | null
@@ -768,10 +818,11 @@ style: StyleConfig
       delay_secs?: int
       interval_ms?: int
       show?: bool
-    progress: ProgressConfig
+    progress: ToolProgressConfig
       delay_secs?: int
       interval_ms?: int
       show?: bool
+      stderr_rows?: "off" (aka false) | "auto" (aka true) | string
     show?: bool
   typewriter: TypewriterConfig
     code_delay?: string
