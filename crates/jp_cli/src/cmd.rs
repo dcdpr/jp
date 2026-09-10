@@ -759,6 +759,13 @@ impl From<jp_llm::Error> for Error {
             ]
             .into(),
             CredentialChain(error) => with_cause(&error, "No usable credential"),
+            OpenaiCredentialChain(error) => with_cause(&error, "No usable credential"),
+            ApiKeyChain(error) => with_cause(&error, "No usable credential"),
+            UnsupportedForCredential(error) => [
+                ("message", "Unsupported for the resolved credential".into()),
+                ("error", error),
+            ]
+            .into(),
             InvalidResponse(error) => [
                 ("message", "Invalid response received".into()),
                 ("error", error),

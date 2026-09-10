@@ -184,14 +184,23 @@ expression: v
           "beta_headers": []
         },
         "cerebras": {
+          "auth": [
+            "api_key"
+          ],
           "api_key_env": "CEREBRAS_API_KEY",
           "base_url": "https://api.cerebras.ai"
         },
         "deepseek": {
+          "auth": [
+            "api_key"
+          ],
           "api_key_env": "DEEPSEEK_API_KEY",
           "base_url": "https://api.deepseek.com"
         },
         "google": {
+          "auth": [
+            "api_key"
+          ],
           "api_key_env": "GEMINI_API_KEY",
           "base_url": "https://generativelanguage.googleapis.com/v1beta"
         },
@@ -202,11 +211,19 @@ expression: v
           "base_url": "http://localhost:11434"
         },
         "openai": {
+          "auth": [
+            "api_key"
+          ],
           "api_key_env": "OPENAI_API_KEY",
           "base_url": "https://api.openai.com",
-          "base_url_env": "OPENAI_BASE_URL"
+          "base_url_env": "OPENAI_BASE_URL",
+          "codex_base_url": "https://chatgpt.com/backend-api/codex",
+          "codex_base_url_env": "JP_OPENAI_CODEX_BASE_URL"
         },
         "openrouter": {
+          "auth": [
+            "api_key"
+          ],
           "api_key_env": "OPENROUTER_API_KEY",
           "app_name": "JP",
           "base_url": "https://openrouter.ai"
@@ -227,26 +244,27 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
-      "id": "call_9pIO9rxD5iBgHYWii3HGpW8u",
+      "id": "call_rlXfRPS0EW9R6JBOeaktJ4Vh",
       "name": "run_me",
       "arguments": {
-        "foo": "cHJvdmlkZWQgYnkgYXNzaXN0YW50",
-        "bar": "Zm9v"
+        "bar": "Zm9v",
+        "foo": "Zm9v"
       }
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
-      "id": "call_9pIO9rxD5iBgHYWii3HGpW8u",
+      "id": "call_rlXfRPS0EW9R6JBOeaktJ4Vh",
       "content": "d29ya2luZyE=",
       "is_error": false
     },
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "Done — I ran the tool with the arguments {\"foo\":\"provided by assistant\",\"bar\":\"foo\"}. The tool responded: \"working!\"",
+      "message": "The tool ran successfully.",
       "metadata": {
-        "openai_item_id": "bXNnXzBjZTIzYmYxYzliOTRiZjAwMTZhODg2ZGE5NmJlNDg3ZDI4YzRjNDk3YWQ3OTUwZDA4"
+        "openai_item_id": "bXNnXzBiMWRlZjEwMzk1ZmFhMTIwMTZhYTFiN2ExYzQ5Yzg3ZDI5YmUyZGM1MmM2YjljNjE5",
+        "openai_phase": "ZmluYWxfYW5zd2Vy"
       }
     }
   ]

@@ -1,0 +1,59 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "The user wants me to run the \"run_me\" tool with whatever arguments I want. Let me look at the function schema:\n\n```json\n{\n  \"name\": \"run_me\",\n  \"parameters\": {\n    \"properties\": {\n      \"bar\": {\n        \"enum\": [\"foo\"],\n        \"items\": {\n          \"enum\": [\"foo\", \"bar\"],\n          \"type\": \"string\"\n        },\n        \"type\": [\"string\", \"array\"]\n      },\n      \"foo\": {\n        \"default\": \"foo\",\n        \"type\": \"string\"\n      }\n    },\n    \"required\": [\"bar\"],\n    \"type\": \"object\"\n  }\n}\n```\n\nSo the function takes:\n- `bar` (required): Can be either a string (must be \"foo\") or an array of strings (each must be \"foo\" or \"bar\")\n- `foo` (optional): A string with default value \"foo\"\n\nSince I can provide whatever arguments I want, I'll provide:\n- `bar`: I could use \"foo\" as a string, or an array like [\"foo\", \"bar\"]. Let me use an array to make it interesting: [\"foo\", \"bar\"]\n- `foo`: I could use the default or provide a custom value. Let me just use the default by not providing it, or I could provide \"foo\" explicitly. Actually, let me provide a value like \"foo\" or something else. Since the default is \"foo\", I'll just let it use the default.\n\nActually, let me provide both to make the call more complete. I'll set bar to [\"foo\", \"bar\"] and foo to \"foo\".",
+                    },
+                ),
+                metadata: {
+                    "anthropic_thinking_signature": String("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"),
+                },
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "toolu_01VF4Z6KsrQ12necALfY2Cnn",
+                        name: "run_me",
+                        arguments: {
+                            "bar": Array [
+                                String("foo"),
+                                String("bar"),
+                            ],
+                            "foo": String("foo"),
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Great! The tool ran successfully. I called the `run_me` function with:\n- `bar`: `[\"foo\", \"bar\"]` - an array containing both valid enum values\n- `foo`: `\"foo\"` - using the default string value\n\nThe tool returned \"working!\" indicating it executed properly.",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+]

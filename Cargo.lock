@@ -2595,6 +2595,7 @@ dependencies = [
  "rand",
  "reqwest",
  "reqwest-eventsource",
+ "saphyr",
  "serde",
  "serde_json",
  "sha2",
@@ -3222,14 +3223,14 @@ checksum = "a4895175b425cb1f87721b59f0f286c2092bd4af812243672510e1ac53e2e0ad"
 [[package]]
 name = "openai_responses"
 version = "0.1.6"
-source = "git+https://github.com/JeanMertz/openai-responses-rs#8d78ffd404c0d01248ce2b6e155deb85d590ac8f"
+source = "git+https://github.com/JeanMertz/openai-responses-rs#db70ddd95c89d5dea3f58e06aefa7a4089b7ef20"
 dependencies = [
  "async-fn-stream",
  "chrono",
+ "eventsource-stream",
  "futures",
  "macon",
  "reqwest",
- "reqwest-eventsource",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
@@ -4457,6 +4458,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha1_smol"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bbfa15b3dddfee50a0fff136974b3e1bde555604ba463834a7eb7deb6417705d"
+
+[[package]]
 name = "sha2"
 version = "0.10.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5385,6 +5392,7 @@ checksum = "a68d3c8f01c0cfa54a75291d83601161799e4a89a39e0929f4b0354d88757a37"
 dependencies = [
  "getrandom 0.4.3",
  "js-sys",
+ "sha1_smol",
  "wasm-bindgen",
 ]
 

@@ -1,0 +1,59 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "The user wants me to run the `run_me` tool with whatever arguments I want. Let me look at the schema:\n\n```\n{\n  \"name\": \"run_me\",\n  \"parameters\": {\n    \"properties\": {\n      \"bar\": {\n        \"enum\": [\"foo\"],\n        \"items\": {\"enum\": [\"foo\", \"bar\"], \"type\": \"string\"},\n        \"type\": [\"string\", \"array\"]\n      },\n      \"foo\": {\n        \"default\": \"foo\",\n        \"type\": \"string\"\n      }\n    },\n    \"required\": [\"bar\"],\n    \"type\": \"object\"\n  }\n}\n```\n\nSo the function takes:\n- `bar` (required): Can be either a string or an array. If it's a string, the enum says it must be \"foo\". If it's an array, the items can be \"foo\" or \"bar\".\n- `foo` (optional): A string with default value \"foo\"\n\nThe user said I can provide whatever arguments I want. I'll call it with `bar` as a required parameter. I could use:\n- `bar` as the string \"foo\"\n- `bar` as an array like `[\"foo\", \"bar\"]` or `[\"foo\"]`\n\nI'll call it with `bar` as an array with both values for variety.",
+                    },
+                ),
+                metadata: {
+                    "anthropic_thinking_signature": String("ErYJCpoBCBEYAipAvLGsszqIgwl6QrGNtdBHUVIjpIomzUPjqAxzy4e9kgRZx8Vl2Q4U7YPhS+JBbZAY0tM7ct6FEoOQL8DyW2lBMjIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okNzk2MTdlOWEtMmE3YS00ZDkyLWI0NGMtODkzMGEwNmY3MGZkqAHt+obVBhIM3VNl1+0gfO/KbDUxGgw05n0X9ALgAItucEIiMJyZp5B0HMeR+vlT9s6SXix/iylSrjNwSsYP1FUGCxr42dQgyFYMECnXI94FJyasXirIBy2iRM7uv8pPB3yqyrfZ7REEUo3q8Un2aT/86aBQU3Toq0dQtyTXXHpRRbWD8f2r9M2ttezv63oTl9d+HV62G5WWYW+k1n1Q/tgRWNhjIgySbeAF9ozXsAOY59JchYARm/qQhN1DdSTF2IPTToN36rKmFxlMSdPC+RZzd8AncscBvykEFyoCq6OBMXR96oJ7wykRa29y5y123wdiRJpMEp6w/mAoUgqPbuYB2WqgghJyaI7HNNOlHH/HrNFVtygMlsvcjcUFTB9j50Z98ZcSGLtSKac50v9exvX0EZzSvK4alOnfV1sklJzqEtpo+9SbE68rjv5P0q6sL+VWKiZ1s93uKQAuEy6Y3odpMscVwfxPem+aL2WHbZI0AyNiCjbWCuWHshWfZuUisQzXz1FKkRsZoJlxn+q4xuu9sPr1L9uD+qre8mtsTSCBiDVoOcFBuL4Ozb0q/+J2VS4y2Vh9LIrkbT+JWQPJYWkILPKewqdDyI+OcAD+oG3RB5XkXMfKaI/bHNm7vxMBewZfQJFPY9w/2hGJXN1tqSqfT2sybY9TTSURQBrCMRW9SWcyev74Z9tqJYrZudJ/sUV8cnq+dCWEZzHrlCP2f0pNU/+423ZJTK8i3WHmjzMVRI+AQZPY7xu0pmTCAnzqWmboT2Ozxc2PuFR0H7JcrvaxUt+GGL3yBxVg0gtqg1UK4EVkGu3eLkHtIwoz+WJL3kM9sJnm8+82Ea6NmtPbATBoVNDnFiV5TrrkJROJOeJsMI71FmhQYDOAzQBZLrIYkazWIgzc2i2YYp6yF3JFxw80U7yTMmpCL/afW9ITG5jR/SwCsDLIqhkSeS9Ix4d9aULhOJLz3jVlW5CTaCZoMZIOb/4ASwKyiF2thNu1zvDxuBDYeIWWKZkCM5Ki2lrBF2l8gngtcPBcH0nmhMdnYX7Q03L96zZ0tBNNZKVEm/dQe5n/eIN+24ERgX+UNt0D7zMoLa0gyQ7H2XykzFwne5WPojdxQkZavQyQruGjhUsQXRiHViA8BFTWprpI6MtRrXPAGnZbgKaCX6p+i/9DzJulyekDfWbSH2qrUkxjvla8vNU6eV/h7aPK9JRqXbUb940yg+n66UhZtCdttcZ0/eIkRhfLlkPAOpXDKPEQ0X4yGsCvDiNwcSsKSTKSTrH+mKBVvWJ9naEYS1bT6FKEhEk48DTHOlD6I7hg57ntQaVWef//GX4N35CginR3LtHCuj0o4zs22TLXYu3jco7rupvRuFLoID45yksqezRi1mtf2ks70x/B02CdV6SpiQe6GAE="),
+                },
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "toolu_018cSiucvAcwo4FK1jStQtah",
+                        name: "run_me",
+                        arguments: {
+                            "bar": Array [
+                                String("foo"),
+                                String("bar"),
+                            ],
+                            "foo": String("foo"),
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Great! The `run_me` tool executed successfully. I called it with:\n- `bar`: an array containing `[\"foo\", \"bar\"]` (which satisfies the array type with enum values)\n- `foo`: `\"foo\"` (the default string value)\n\nThe tool returned \"working!\" indicating successful execution.",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+]

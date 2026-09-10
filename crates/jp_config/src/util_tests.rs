@@ -34,18 +34,18 @@ fn test_load_partials_with_inheritance() {
             partials: vec![
                 {
                     let mut partial = PartialAppConfig::empty();
-                    partial.providers.llm.openrouter.api_key_env = Some("FOO".to_owned());
+                    partial.providers.llm.openrouter.api_key_env = Some("FOO".into());
                     partial
                 },
                 {
                     let mut partial = PartialAppConfig::empty();
-                    partial.providers.llm.openrouter.api_key_env = Some("BAR".to_owned());
+                    partial.providers.llm.openrouter.api_key_env = Some("BAR".into());
                     partial.inherit = Some(false);
                     partial
                 },
                 {
                     let mut partial = PartialAppConfig::empty();
-                    partial.providers.llm.openrouter.api_key_env = Some("BAZ".to_owned());
+                    partial.providers.llm.openrouter.api_key_env = Some("BAZ".into());
                     partial
                 },
             ],
@@ -55,18 +55,18 @@ fn test_load_partials_with_inheritance() {
             partials: vec![
                 {
                     let mut partial = PartialAppConfig::empty();
-                    partial.providers.llm.openrouter.api_key_env = Some("FOO".to_owned());
+                    partial.providers.llm.openrouter.api_key_env = Some("FOO".into());
                     partial
                 },
                 {
                     let mut partial = PartialAppConfig::empty();
-                    partial.providers.llm.openrouter.api_key_env = Some("BAR".to_owned());
+                    partial.providers.llm.openrouter.api_key_env = Some("BAR".into());
                     partial.inherit = Some(true);
                     partial
                 },
                 {
                     let mut partial = PartialAppConfig::empty();
-                    partial.providers.llm.openrouter.api_key_env = Some("BAZ".to_owned());
+                    partial.providers.llm.openrouter.api_key_env = Some("BAZ".into());
                     partial
                 },
             ],
@@ -91,7 +91,7 @@ fn test_load_envs() {
     let partial = load_envs(PartialAppConfig::empty()).unwrap();
     assert_eq!(
         partial.providers.llm.openrouter.api_key_env,
-        Some("ENV1".to_owned())
+        Some("ENV1".into())
     );
 }
 
@@ -101,12 +101,12 @@ fn test_load_envs_overrides_file_config() {
     let _env = EnvVarGuard::set("JP_CFG_PROVIDERS_LLM_OPENROUTER_API_KEY_ENV", "FROM_ENV");
 
     let mut file_config = PartialAppConfig::empty();
-    file_config.providers.llm.openrouter.api_key_env = Some("FROM_FILE".to_owned());
+    file_config.providers.llm.openrouter.api_key_env = Some("FROM_FILE".into());
 
     let merged = load_envs(file_config).unwrap();
     assert_eq!(
         merged.providers.llm.openrouter.api_key_env,
-        Some("FROM_ENV".to_owned()),
+        Some("FROM_ENV".into()),
         "environment variables should override file config"
     );
 }
@@ -131,7 +131,7 @@ fn test_build() {
     let config = build(partial).unwrap();
     assert_eq!(
         config.providers.llm.openrouter.api_key_env,
-        "OPENROUTER_API_KEY".to_owned()
+        "OPENROUTER_API_KEY".into()
     );
 }
 
@@ -288,9 +288,7 @@ fn test_load_partial_at_path() {
             partial
                 .map(|r| r.and_then(|p| p.providers.llm.openrouter.api_key_env))
                 .map_err(|e| e.to_string()),
-            case.want
-                .map(|v| v.map(str::to_owned))
-                .map_err(str::to_owned),
+            case.want.map(|v| v.map(Into::into)).map_err(str::to_owned),
             "failed case: {name}",
         );
     }

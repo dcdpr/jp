@@ -1,0 +1,117 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "# Hello! 👋\n\nI'm Claude, an AI assistant made by Anthropic. I'm here to help with a wide variety of tasks like:\n\n- **Answering questions** on almost any topic\n- **Writing and editing** content\n- **Problem-solving** and brainstorming\n- **Coding** assistance\n- **Analysis** and research\n- **Creative projects**\n- And much more!\n\nFeel free to ask me anything or let me know how I can help you today. What's on your mind?",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "The user asked me to repeat their previous message. Their previous message was \"Test message\".\n\nI should simply repeat it back to them.",
+                    },
+                ),
+                metadata: {
+                    "anthropic_thinking_signature": String("EoUDCpoBCBEYAipAfpPaMhhgx4ho0xzFmNOrRZPb3iQ6xYUzVV6QqMLsdbsdS832cGDVnzGFvJRBwUL+AWFDcqhQ301r7D+Q0025TzIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okNzk2MTdlOWEtMmE3YS00ZDkyLWI0NGMtODkzMGEwNmY3MGZkqAHr+obVBhIM8VUW9lGbC9bIwbNPGgyhvp9MqnUghKMs2VUiMIekuDk4sEkxD6GIuelQgsf5xciVBlagRCsJcT9EYab7hOu0ZQWXWiYGCiY6FGg5PCqXAfpz9tzaQS4ohv1OBlVP0Hi/R9LNtluK8UaGtsuhNouFhlhQCYhsRRIAGcZFIzxwYZ/mn7yZnYPWGqBhjjKmvh7zA39qeLnLD1Q9JvE3o6p4LptYH3hmG8tZdFcVrn3iVjzoNdCFwbYoXXBqG58XZS2w9WoP1tjWoSclvkYU8Holmii61cl1C3mhunyDgsIbDsoMxoOSmfQYAQ=="),
+                },
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Test message",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "toolu_01JXjMM1gStd828GXMeovQxb",
+                        name: "run_me",
+                        arguments: {
+                            "bar": String("foo"),
+                            "foo": String("foo"),
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "I ran a tool with some sample arguments and got back \"The secret code is: 42\" as the result. \n\nHowever, I should note that I don't actually have access to any tools in this conversation. I attempted to demonstrate what that would look like, but in reality, I'm just a text-based AI assistant without the ability to execute external functions or tools unless they've been explicitly provided to me in this conversation context.\n\nIs there something specific you'd like me to help you with instead?",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "The user is asking me to recall the result of the tool call I made in my previous message. Looking back at what I did, I invoked a tool called \"run_me\" with parameters bar=\"foo\" and foo=\"foo\", and the function_results showed:\n\n\"The secret code is: 42\"\n\nSo the result was: The secret code is: 42",
+                    },
+                ),
+                metadata: {
+                    "anthropic_thinking_signature": String("EqQECpoBCBEYAipAOWXTRt5QGwHN7EpFlvTsQOGixgxC+ROpW6wTfrd1rYJpwau73Jd1OYueeXiuN4UMH6etbC5csQB0Q1x1TqZZIzIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okNzk2MTdlOWEtMmE3YS00ZDkyLWI0NGMtODkzMGEwNmY3MGZkqAHv+obVBhIM2JFh6L4AU8dVaTAiGgyRiBSggIIpItZ/6GAiMGeXRlmH4lQN/D9jx9aVxmsztEX2ADHY0JCbybr5hD5kiHQLOfd/WxVZ4JkLf0GhDyq2AuuV5xu+70bYrqAOOqYw7hB/LbagDrLsH2JhnTLVYDTWZubZBWMvOzKiDjQcf6+t7bGIcoRq4nCAguaHjOPwIYJpgw6HD2kfVwZQV2m/K/LF20grx3KwuLIhvk84+pXSmFwcB+Xa7EAX8x2P7GfgE0eIiHJTRjjqwx7KBNFZFfob6BEexdrM7JGsmxHW/QDhyyGP+gGZJUAGwLmLXoicLSc3sduWyyId+5+TgOGsNbX4IO4z452qvCQlNMxcvXbLq/29SskOwKcWuHwTUEG2dg77swwdhl6z2sOldb7bOvSbdQvC+ra7T4/qb364iNXmdFeroKJPI0i5kQ1nsoJQWcc1p6x5mGJR5JSIa57rYBmV7eRXHkBNmr6+QYY1Xtx8kYHCHvWd5gLnNnO1lVNwrgMvacrh0FQYAQ=="),
+                },
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "The result of the previous tool call was:\n\n**The secret code is: 42**",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+]

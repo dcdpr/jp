@@ -9,11 +9,11 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "The quick brown fox.",
+                        message: "The fox.",
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("msg_06f37a7c50fdadd9016a886d773f7887d2a99834d7b5579c83"),
+                    "openai_item_id": String("msg_01cee73fa2db609d016aa1b7a0a18c87d2a1966bf907606cba"),
                     "openai_phase": String("final_answer"),
                 },
             },
@@ -28,11 +28,11 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "The lazy dog.",
+                        message: "The dog.",
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("msg_06f37a7c50fdadd9016a886d784eb487d2a33f67f36c23524b"),
+                    "openai_item_id": String("msg_01cee73fa2db609d016aa1b7a23d4c87d2b71a0007d8d5f339"),
                     "openai_phase": String("final_answer"),
                 },
             },

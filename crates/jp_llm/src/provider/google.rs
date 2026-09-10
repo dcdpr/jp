@@ -1,4 +1,4 @@
-use std::{collections::HashMap, env, time::Duration};
+use std::{collections::HashMap, time::Duration};
 
 use async_stream::stream;
 use async_trait::async_trait;
@@ -512,6 +512,7 @@ fn map_model(model: types::Model) -> ModelDetails {
                 deprecated: Some(ModelDeprecation::Active),
                 structured_output: None,
                 prefill: None,
+                subscription: None,
                 features: vec![],
             }
         }
@@ -527,6 +528,7 @@ fn map_model(model: types::Model) -> ModelDetails {
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
             prefill: None,
+            subscription: None,
             features: vec![],
         },
         "gemini-3.8-flash" => ModelDetails {
@@ -541,6 +543,7 @@ fn map_model(model: types::Model) -> ModelDetails {
             deprecated: Some(ModelDeprecation::Active),
             structured_output: Some(true),
             prefill: None,
+            subscription: None,
             features: vec![],
         },
         // Closed to new users rather than retired: `generateContent` answers 404
@@ -565,6 +568,7 @@ fn map_model(model: types::Model) -> ModelDetails {
             )),
             structured_output: None,
             prefill: None,
+            subscription: None,
             features: vec![],
         },
         "gemini-flash-lite-latest" | "gemini-2.5-flash-lite" => ModelDetails {
@@ -580,6 +584,7 @@ fn map_model(model: types::Model) -> ModelDetails {
             )),
             structured_output: None,
             prefill: None,
+            subscription: None,
             features: vec![],
         },
         "gemini-2.5-pro" => ModelDetails {
@@ -595,6 +600,7 @@ fn map_model(model: types::Model) -> ModelDetails {
             )),
             structured_output: None,
             prefill: None,
+            subscription: None,
             features: vec![],
         },
         id => {
@@ -619,6 +625,7 @@ fn map_model(model: types::Model) -> ModelDetails {
                 deprecated: None,
                 structured_output: None,
                 prefill: None,
+                subscription: None,
                 features: vec![],
             }
         }
@@ -856,8 +863,8 @@ impl TryFrom<&GoogleConfig> for Google {
     type Error = Error;
 
     fn try_from(config: &GoogleConfig) -> Result<Self> {
-        let api_key = env::var(&config.api_key_env)
-            .map_err(|_| Error::MissingEnv(config.api_key_env.clone()))?;
+        let (api_key, _) =
+            super::api_key_chain::resolve("google", &config.auth, &config.api_key_env)?;
 
         Ok(Google {
             client: GeminiClient::new(api_key).with_api_url(config.base_url.clone()),
@@ -1365,6 +1372,35 @@ fn is_function_response_content(content: &types::Content) -> bool {
             .iter()
             .all(|part| matches!(part.data, types::ContentData::FunctionResponse(_)))
 }
+
+/// Google's recorded-test route.
+#[cfg(test)]
+pub(crate) static TEST_SUPPORT: super::ApiOnlyTestSupport = super::ApiOnlyTestSupport(&API_ROUTE);
+
+#[cfg(test)]
+static API_ROUTE: super::ApiTestRoute = super::ApiTestRoute {
+    id: ProviderId::Google,
+    base_url: |config| config.google.base_url.clone(),
+    // The client addresses the API version as part of the host, so the
+    // recording server has to be reachable at the same path.
+    set_base_url: |config, url| config.google.base_url = format!("{url}/v1beta"),
+    use_replay_credentials: |config| {
+        config.google.api_key_env = super::replay_credential_env().into();
+    },
+    model: || ModelDetails {
+        id: "google/gemini-2.5-flash-lite".parse().unwrap(),
+        display_name: None,
+        context_window: Some(200_000),
+        max_output_tokens: Some(64_000),
+        reasoning: Some(ReasoningDetails::budgetted(512, Some(24576))),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        subscription: None,
+        features: vec![],
+    },
+};
 
 #[cfg(test)]
 #[path = "google_tests.rs"]

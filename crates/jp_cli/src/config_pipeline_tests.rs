@@ -217,7 +217,7 @@ fn with_conversation_preserves_cfg_over_conversation() {
 fn rejected_cfg_value_reports_the_underlying_reason() {
     let mut pipeline = empty_pipeline();
     pipeline.cfg_args.push(ResolvedCfgArg::KeyValue(
-        "providers.llm.anthropic.auth=bogus"
+        "providers.llm.anthropic.auth=bogus:x"
             .parse::<KvAssignment>()
             .unwrap(),
     ));

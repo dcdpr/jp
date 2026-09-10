@@ -1,18 +1,22 @@
 //! Anthropic API configuration.
 
-use std::{collections::HashSet, fmt, str::FromStr};
+use schematic::{Config, ConfigError};
 
-use schematic::{Config, ConfigError, HandlerError, Schema, SchemaBuilder, Schematic};
-use serde::{Deserialize, Serialize};
-
+// Re-exported so `providers.llm.anthropic`'s own chain type is reachable
+// alongside its config, though the grammar itself is shared.
+pub use crate::providers::llm::{AuthEntry, AuthEntryParseError};
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::{PartialConfigDelta, delta_opt, delta_opt_vec, delta_opt_vec_at, path},
     fill::FillDefaults,
     internal::merge::append_vec_dedup,
     partial::{ToPartial, partial_opt},
+    types::api_key_env::ApiKeyEnv,
     validate::Validator,
 };
+
+/// The configuration path the credential chain lives at.
+const AUTH_KEY: &str = "providers.llm.anthropic.auth";
 
 /// Anthropic API configuration.
 #[derive(Debug, Clone, PartialEq, Config)]
@@ -24,12 +28,15 @@ pub struct AnthropicConfig {
     ///
     /// Each entry selects a credential source:
     ///
-    /// - `api_key`: The API key read from the environment variable named by
-    ///   `api_key_env`.
-    /// - `profile`: The sole stored credential profile.
+    /// - `api_key`: Metered billing, using the key `api_key_env` names.
+    /// - `api_key:<name>`: Metered billing with the named key, when
+    ///   `api_key_env` maps several.
+    /// - `subscription`: A plan's allowance, using the sole stored credential.
     ///   Log in with `jp provider auth login llm.anthropic`.
-    /// - `profile:<name>`: The stored credential profile `<name>`.
-    ///   Profile names are case-sensitive.
+    /// - `subscription:<name>`: The named stored credential.
+    ///
+    /// `api` and `sub` are accepted as shorthand for the two kinds.
+    /// Names are case-sensitive.
     ///
     /// Entries are tried in order: when one cannot produce a usable credential,
     /// JP continues with the next.
@@ -40,14 +47,21 @@ pub struct AnthropicConfig {
     ///
     /// ```toml
     /// [providers.llm.anthropic]
-    /// auth = ["profile:personal", "profile:work", "api_key"]
+    /// auth = ["subscription:personal", "subscription:work", "api_key"]
     /// ```
-    #[setting(default = vec![AuthEntry::ApiKey])]
+    #[setting(default = vec![AuthEntry::ApiKey(None)])]
     pub auth: Vec<AuthEntry>,
 
     /// Environment variable that contains the API key.
+    ///
+    /// A map names several keys, each selectable from the `auth` chain as
+    /// `api_key:<name>`:
+    ///
+    /// ```toml
+    /// api_key_env = { work = "WORK_ANTHROPIC_KEY", personal = "MY_ANTHROPIC_KEY" }
+    /// ```
     #[setting(default = "ANTHROPIC_API_KEY")]
-    pub api_key_env: String,
+    pub api_key_env: ApiKeyEnv,
 
     /// The base URL to use for API requests.
     #[setting(default = "https://api.anthropic.com")]
@@ -79,24 +93,7 @@ impl Validator for AnthropicConfig {
     /// An unrecognized entry is rejected earlier, when the string is parsed
     /// into an [`AuthEntry`].
     fn validate(&self) -> Result<(), ConfigError> {
-        if self.auth.is_empty() {
-            return Err(HandlerError::new(
-                "providers.llm.anthropic.auth must contain at least one entry, e.g. [\"api_key\"]",
-            )
-            .into());
-        }
-
-        let mut seen = HashSet::new();
-        for entry in &self.auth {
-            if !seen.insert(entry) {
-                return Err(HandlerError::new(format!(
-                    "providers.llm.anthropic.auth contains duplicate entry {entry}"
-                ))
-                .into());
-            }
-        }
-
-        Ok(())
+        AuthEntry::validate_chain(&self.auth, AUTH_KEY)
     }
 }
 
@@ -104,7 +101,7 @@ impl AssignKeyValue for PartialAnthropicConfig {
     fn assign(&mut self, mut kv: KvAssignment) -> AssignResult {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
-            "api_key_env" => self.api_key_env = kv.try_some_string()?,
+            "api_key_env" => self.api_key_env = kv.try_some_object_or_from_str()?,
             "base_url" => self.base_url = kv.try_some_string()?,
             "chain_on_max_tokens" => self.chain_on_max_tokens = kv.try_some_bool()?,
             _ if kv.p("auth") => {
@@ -182,89 +179,6 @@ impl ToPartial for AnthropicConfig {
             ),
             beta_headers: partial_opt(&self.beta_headers, defaults.beta_headers),
         }
-    }
-}
-
-/// A single entry in the `auth` credential chain.
-///
-/// Written as a string in configuration files:
-///
-/// - `api_key`: The API key read from the environment variable named by
-///   `api_key_env`.
-/// - `profile`: The sole stored credential profile.
-/// - `profile:<name>`: The stored credential profile `<name>`.
-///   Profile names are case-sensitive.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum AuthEntry {
-    /// Authenticate with the API key from the environment.
-    ApiKey,
-
-    /// Authenticate with a stored credential profile.
-    ///
-    /// `None` refers to the sole configured profile and is a preflight error
-    /// when zero or multiple profiles are stored.
-    Profile(Option<String>),
-}
-
-impl fmt::Display for AuthEntry {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::ApiKey => f.write_str("api_key"),
-            Self::Profile(None) => f.write_str("profile"),
-            Self::Profile(Some(name)) => write!(f, "profile:{name}"),
-        }
-    }
-}
-
-/// Error when parsing an [`AuthEntry`] from a string.
-#[derive(Debug, thiserror::Error)]
-#[error(
-    "unrecognized auth chain entry: {0:?} (expected \"api_key\", \"profile\", or \
-     \"profile:<name>\")"
-)]
-pub struct AuthEntryParseError(String);
-
-impl FromStr for AuthEntry {
-    type Err = AuthEntryParseError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "api_key" => Ok(Self::ApiKey),
-            "profile" => Ok(Self::Profile(None)),
-            _ => match s.strip_prefix("profile:") {
-                Some(name) if !name.is_empty() => Ok(Self::Profile(Some(name.to_owned()))),
-                _ => Err(AuthEntryParseError(s.to_owned())),
-            },
-        }
-    }
-}
-
-impl Serialize for AuthEntry {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(&self.to_string())
-    }
-}
-
-impl<'de> Deserialize<'de> for AuthEntry {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        s.parse().map_err(serde::de::Error::custom)
-    }
-}
-
-impl Schematic for AuthEntry {
-    fn schema_name() -> Option<String> {
-        Some("AuthEntry".into())
-    }
-
-    fn build_schema(mut schema: SchemaBuilder) -> Schema {
-        schema.string_default()
     }
 }
 

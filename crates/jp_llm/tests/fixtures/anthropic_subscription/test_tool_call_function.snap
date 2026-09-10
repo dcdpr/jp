@@ -1,0 +1,43 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "toolu_01R8uMVN6mbmNtqFQUsWiFTE",
+                        name: "run_me",
+                        arguments: {
+                            "bar": String("foo"),
+                            "foo": String("foo"),
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Great! The tool executed successfully. I called `run_me` with:\n- `bar`: \"foo\"\n- `foo`: \"foo\"\n\nAnd it returned the result: \"working!\"",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+]

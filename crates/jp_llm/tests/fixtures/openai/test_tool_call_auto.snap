@@ -9,11 +9,11 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "call_9pIO9rxD5iBgHYWii3HGpW8u",
+                        id: "call_rlXfRPS0EW9R6JBOeaktJ4Vh",
                         name: "run_me",
                         arguments: {
-                            "foo": String("provided by assistant"),
                             "bar": String("foo"),
+                            "foo": String("foo"),
                         },
                     },
                 ),
@@ -30,11 +30,12 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Done — I ran the tool with the arguments {\"foo\":\"provided by assistant\",\"bar\":\"foo\"}. The tool responded: \"working!\"",
+                        message: "The tool ran successfully.",
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("msg_0ce23bf1c9b94bf0016a886da96be487d28c4c497ad7950d08"),
+                    "openai_item_id": String("msg_0b1def10395faa12016aa1b7a1c49c87d29be2dc52c6b9c619"),
+                    "openai_phase": String("final_answer"),
                 },
             },
         ),

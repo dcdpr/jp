@@ -1,0 +1,325 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+{
+  "base_config": {
+    "inherit": false,
+    "config_load_paths": [],
+    "extends": [
+      "config.d/**/*"
+    ],
+    "assistant": {
+      "system_prompt": "You are a helpful assistant.",
+      "system_prompt_sections": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "instructions": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "tool_choice": "auto",
+      "model": {
+        "id": {
+          "provider": "anthropic",
+          "name": "test"
+        },
+        "parameters": {
+          "reasoning": "off",
+          "stop_words": [],
+          "other": {}
+        }
+      },
+      "request": {
+        "max_retries": 5,
+        "base_backoff_ms": 1000,
+        "max_backoff_secs": 60,
+        "stream_idle_timeout_secs": 60,
+        "max_response_bytes": 1048576,
+        "cache": true
+      }
+    },
+    "conversation": {
+      "title": {
+        "generate": {
+          "auto": false
+        },
+        "from_heading": true
+      },
+      "tools": {
+        "*": {
+          "run": "ask",
+          "result": "unattended",
+          "cancellation_response": "This tool request was intentionally rejected by the user. Please evaluate and either ask the user why it was rejected, or infer the reason by looking at the historical messages in the conversation.",
+          "style": {
+            "hidden": false,
+            "inline_results": {
+              "truncate": {
+                "lines": 10
+              }
+            },
+            "results_file_link": "full",
+            "parameters": "json",
+            "print_stderr": true
+          }
+        }
+      },
+      "compaction": {
+        "rules": {
+          "value": [
+            {
+              "keep_first": "1",
+              "keep_last": "1",
+              "reasoning": "strip",
+              "tool_calls": "strip"
+            }
+          ],
+          "strategy": "replace",
+          "discard_when_merged": false
+        }
+      },
+      "attachments": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "labels": {
+        "value": {},
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "start_local": false
+    },
+    "style": {
+      "code": {
+        "color": true,
+        "line_numbers": false,
+        "file_link": "osc8",
+        "copy_link": "off"
+      },
+      "markdown": {
+        "wrap_width": 80,
+        "table_max_column_width": 40,
+        "table_continuation_edge": true,
+        "theme": "gruvbox-dark",
+        "hr_style": "line"
+      },
+      "mcp_startup": {
+        "show": true,
+        "delay_secs": 4,
+        "interval_ms": 100,
+        "stderr_rows": "auto"
+      },
+      "reasoning": {
+        "display": "full",
+        "background": 236,
+        "extend_across_tool_calls": true
+      },
+      "streaming": {
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "lock_wait": {
+        "show": true,
+        "delay_secs": 1,
+        "interval_ms": 100,
+        "timeout_secs": 10
+      },
+      "tool_call": {
+        "show": true,
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100,
+          "stderr_rows": "auto"
+        },
+        "preparing": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "typewriter": {
+        "text_delay": "3ms",
+        "code_delay": "500us",
+        "max_latency": "0s"
+      }
+    },
+    "interrupt": {
+      "escalation_cooldown_secs": 2,
+      "streaming": {
+        "action": "prompt",
+        "compose_in_editor": false
+      },
+      "tool_call": {
+        "action": "prompt",
+        "compose_in_editor": false
+      }
+    },
+    "editor": {
+      "envs": [
+        "JP_EDITOR",
+        "VISUAL",
+        "EDITOR"
+      ],
+      "inline": {
+        "edit_mode": "emacs"
+      }
+    },
+    "providers": {
+      "llm": {
+        "anthropic": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "ANTHROPIC_API_KEY",
+          "base_url": "https://api.anthropic.com",
+          "chain_on_max_tokens": true,
+          "beta_headers": []
+        },
+        "cerebras": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "CEREBRAS_API_KEY",
+          "base_url": "https://api.cerebras.ai"
+        },
+        "deepseek": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "DEEPSEEK_API_KEY",
+          "base_url": "https://api.deepseek.com"
+        },
+        "google": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "GEMINI_API_KEY",
+          "base_url": "https://generativelanguage.googleapis.com/v1beta"
+        },
+        "llamacpp": {
+          "base_url": "http://127.0.0.1:8080"
+        },
+        "ollama": {
+          "base_url": "http://localhost:11434"
+        },
+        "openai": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "OPENAI_API_KEY",
+          "base_url": "https://api.openai.com",
+          "base_url_env": "OPENAI_BASE_URL",
+          "codex_base_url": "https://chatgpt.com/backend-api/codex",
+          "codex_base_url_env": "JP_OPENAI_CODEX_BASE_URL"
+        },
+        "openrouter": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "OPENROUTER_API_KEY",
+          "app_name": "JP",
+          "base_url": "https://openrouter.ai"
+        }
+      }
+    },
+    "plugins": {
+      "auto_install": true,
+      "shutdown_timeout_secs": 5
+    }
+  },
+  "events": [
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "parameters": {
+              "reasoning": {
+                "effort": "low",
+                "exclude": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "Please run the tool, providing whatever arguments you want."
+    },
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "id": {
+              "provider": "anthropic",
+              "name": "claude-haiku-4-5"
+            }
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "The user wants me to run the \"run_me\" tool with whatever arguments I want. Let me look at the function schema:\n\n```json\n{\n  \"name\": \"run_me\",\n  \"parameters\": {\n    \"properties\": {\n      \"bar\": {\n        \"enum\": [\"foo\"],\n        \"items\": {\n          \"enum\": [\"foo\", \"bar\"],\n          \"type\": \"string\"\n        },\n        \"type\": [\"string\", \"array\"]\n      },\n      \"foo\": {\n        \"default\": \"foo\",\n        \"type\": \"string\"\n      }\n    },\n    \"required\": [\"bar\"],\n    \"type\": \"object\"\n  }\n}\n```\n\nSo the function takes:\n- `bar` (required): Can be either a string (must be \"foo\") or an array of strings (each must be \"foo\" or \"bar\")\n- `foo` (optional): A string with default value \"foo\"\n\nSince I can provide whatever arguments I want, I'll provide:\n- `bar`: I could use \"foo\" as a string, or an array like [\"foo\", \"bar\"]. Let me use an array to make it interesting: [\"foo\", \"bar\"]\n- `foo`: I could use the default or provide a custom value. Let me just use the default by not providing it, or I could provide \"foo\" explicitly. Actually, let me provide a value like \"foo\" or something else. Since the default is \"foo\", I'll just let it use the default.\n\nActually, let me provide both to make the call more complete. I'll set bar to [\"foo\", \"bar\"] and foo to \"foo\".",
+      "metadata": {
+        "anthropic_thinking_signature": "RXVrTENwb0JDQkVZQWlwQXBZZDFRU1d6bzRxRExncitWVUNkM2xRemlvNkZTMlBHQ0RQQjJEcFJpOHBZTzJiQjdMVEZHcVc3QVR2RUpTQkFxT2o4WWJFVS9SMDd4UERBMlBydG96SVpZMnhoZFdSbExXaGhhV3QxTFRRdE5TMHlNREkxTVRBd01UZ0FRZ2gwYUdsdWEybHVaMW9rTnprMk1UZGxPV0V0TW1FM1lTMDBaRGt5TFdJME5HTXRPRGt6TUdFd05tWTNNR1prcUFIcytvYlZCaElNTXdlV1dMOUtremJoWlU0M0dneEZLcW03N00wZTJwaStKQ2tpTUZnZlhEWXBqWWpZbDRaZDA3bGMyZWJSMnAzb2pwZ0lZSk5UbmVlTVJsVVgwVTgrYjE2U2NDMERTcUE0WUpla3F5cjdDV3B5SW53ZWpnU0drRHlUT1lXbW5yQW9WMWpKb1NlNXZ3Z08rR3J3RlpEOWdySlY2Ui9hckJCU3hhM1pCSThXdTdsOWlKeWVFU0NkWjBmTG5kUVpqV3RaQUw4NFFEK0MrZHlSL05jTERZM21DNEFDUHNpNGRKRzdjWHVMY3l6WGVmWmRzTUNTbUVVK0FQQU1hN1dXZTY0RGZ3RUx1YUhtK0JOMUtKbGNEK2tIUitoSDJiT3NaaWxWVWJpeVRPbEpzWWoreUhpeGs3a1FNT1hFYWpqdCtYZXdyUUFuY2RxK09oU3E5N21zNThFc3R1a1ZlcmF2c2tjbmVMeHgvVEE2RGtUdnpVYmZHNkJyU2l3ck92TEZhUXdxMzRqUkFVNXcrVXR0a3JUcHZoZzh2bTBCY3FwQVVSOFh1UHF1UnNubk0yOW5MQkIwOGdBT3R3S1RVQUVkWDgra2F0UW9jS2RmdlNRWmtxT05mUmoyaXpQS3ZUbXVZajVZRXhib1JrNjlmTnVDekZsNDZTMkdjTWZ2UDAzSTA2QzU2RHl2N2syY3pxRzJBKy83UTN6RDV5ZFQyTjAyd2oxMmNYWnVWRHJOZEgzSlVFZ1poWGxqZ0dpWlBUSEJOR3hGNzIxWG1pTUlYbVJrdjZkMithbW55STZBcFFaUVJtSUorYmgxcnIrUVoxRHVKUTVBOGNNK3ZsTHViTFFhOUh4cHozME93TlA5eFl4eXJhU0lxSndDeEJZK2d6TFlRUTJ6eVh1T1BRWjBZMzFPQVk1RFd3cXZkQUhoNDFmbjdCL0V2OS9uM1ZCYU1nZ1BBM1pmUkhHak0xcWxRWXI0M0RQMzNKNWNWSDN4RDFvRHY5ZUNodDBzbkNPSjVvUC94UmdUK3k2ZTdhb0xSc1ltckNrbFE4QjVaT2dyQ0xTZ0p6cmYwb0VKNFQyUGFOWXpGK1hxRHN4ZkxCQmpzekxud3laNm8vUnU0aExzVXdyVWZGZ3ZqOXNZc1puNTBiN0ZCK3AxRHdhc2dXWExkYXlWaUpra3pZOTNSbXg4OUthZnJhZ3dHY0N5V2k4U2REVTlzUTljYkJkMENQdks1dHNJTUJ4elFGZnNkZ1NFNVRoNmpOLzBjZGl3NEJKSnk3Nkk5RVRoRmw2TGdjSllsUmlxcGt2QzFBbTZPOVJUM2FKeDI3OCtkVk11UG5pVzYvQ3JxUExkazE5Y2dEbkozYVdTR3JFTGhWVFZJbzZDV205RnhtMmlXWldaMC9Ya3ZEUVN1Wk5MUVhOejlJWDlqZjJKZTROdlBzeXRFYWVCczkwSjJuSEdpT2RSVjk4RWQzS3N0MUFCckFmWGU1aFR1SU1wZjZoelE1UVZYZFNGUlc3alRwWklVRllUckkzMXZxUDVzbU0vbVA0YXY2YUpHNGVRNkQ1bTlhRzZmS2Y4NmIvK1ZnWS9WdVJrRnZ2MVgrQVFDbE91V0l0RVBzY3UwMWdrWHNjMjVTdjJmTE9MY0JDMFU3ZDVmR29oOHpZODhwUFJLUTRzNWhqN2dJTmVqK2NwWnV6TDk0L0trZitYLzdNd3BZOGtZMFFqcTZIb1pNRkNNQ1VOdTdMMHBNVmhsYlZ1TENTVnQvSzU4aFVrZ3VtT1lOMGNGd2tGYThrWHJkZ29DUXRxVmRvN1JydmRHaFY3UDhGM0M1YlR3SnRBK1F5YjRPb2VyQXlmTjZ6SXlUQWRpdjBRTGV4SjFCT1V6anZNR1R4MVFmd2czQ1haZm1yYlNJTzQ3Zy9SNmxqekMrU3BaNzVkeEVDOUhaVkdBUVhYREtKd2tIeE43REhrRk1vYTBJL3UycS9WQTQyeE5HN3pTUUdoS2toWDBBUjNXU3NuZ28yeEJYQ3IzcFlERDlHbE9CdWlXZlpFU2pZOVZqLzBLQThTbUlZeG1FZTI0UnN6Z3hFazRoWHBRaHBUTlc1N3hncWlaenZ6WUEwN3plYWpaaVF1MTRBTnV5eUNFazRXUEQvZGtUWWVucVo1dXFWUlh6WFN3dVY2bE8yZzY3YWhiNGxsOUVnR2FURkU1NUd4VFEyQ3ZQTmdUS2ZlUk4rczVTYjBmUzNqUHUrQUszeUJyamtWOHZTQlJMSHlYR2ZDZVQzemZXZS9sVFNXUzFWQk9IRnhGL05iZjVxeEE3bWp5LzZvL21JbE1rczlvN1hGZmcrZHMyQVBoNEd2UDU5VVRQMkFlN1BXMEp0aXVzQUNhbzAzMlZnaFhWNDM2MDE1STZ1elM1OURJYkpVK1R1bzhoZ0I="
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_request",
+      "id": "toolu_01VF4Z6KsrQ12necALfY2Cnn",
+      "name": "run_me",
+      "arguments": {
+        "bar": [
+          "Zm9v",
+          "YmFy"
+        ],
+        "foo": "Zm9v"
+      }
+    },
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "id": {
+              "provider": "anthropic",
+              "name": "test"
+            },
+            "parameters": {
+              "reasoning": "off"
+            }
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_response",
+      "id": "toolu_01VF4Z6KsrQ12necALfY2Cnn",
+      "content": "d29ya2luZyE=",
+      "is_error": false
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "Great! The tool ran successfully. I called the `run_me` function with:\n- `bar`: `[\"foo\", \"bar\"]` - an array containing both valid enum values\n- `foo`: `\"foo\"` - using the default string value\n\nThe tool returned \"working!\" indicating it executed properly."
+    }
+  ]
+}

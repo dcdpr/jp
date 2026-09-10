@@ -4,6 +4,7 @@ use super::*;
 use crate::{
     assignment::KvAssignment,
     model::id::{PartialModelIdConfig, PartialModelIdOrAliasConfig, ProviderId},
+    types::api_key_env::ApiKeyEnv,
 };
 
 #[test]
@@ -12,7 +13,10 @@ fn test_provider_config_anthropic() {
 
     let kv = KvAssignment::try_from_cli("anthropic.api_key_env", "MY_ANTHROPIC_KEY").unwrap();
     p.assign(kv).unwrap();
-    assert_eq!(p.anthropic.api_key_env.as_deref(), Some("MY_ANTHROPIC_KEY"));
+    assert_eq!(
+        p.anthropic.api_key_env,
+        Some(ApiKeyEnv::One("MY_ANTHROPIC_KEY".to_owned()))
+    );
 }
 
 #[test]

@@ -5,17 +5,17 @@ expression: v
 [
     [
         Part {
-            index: 1,
+            index: 0,
             part: ToolCall(
                 Start {
-                    id: "call_9pIO9rxD5iBgHYWii3HGpW8u",
+                    id: "call_rlXfRPS0EW9R6JBOeaktJ4Vh",
                     name: "run_me",
                 },
             ),
             metadata: {},
         },
         Part {
-            index: 1,
+            index: 0,
             part: ToolCall(
                 ArgumentChunk(
                     "{\"",
@@ -24,79 +24,7 @@ expression: v
             metadata: {},
         },
         Part {
-            index: 1,
-            part: ToolCall(
-                ArgumentChunk(
-                    "foo",
-                ),
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: ToolCall(
-                ArgumentChunk(
-                    "\":",
-                ),
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: ToolCall(
-                ArgumentChunk(
-                    " \"",
-                ),
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: ToolCall(
-                ArgumentChunk(
-                    "provided",
-                ),
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: ToolCall(
-                ArgumentChunk(
-                    " by",
-                ),
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: ToolCall(
-                ArgumentChunk(
-                    " assistant",
-                ),
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: ToolCall(
-                ArgumentChunk(
-                    "\",",
-                ),
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: ToolCall(
-                ArgumentChunk(
-                    " \"",
-                ),
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
+            index: 0,
             part: ToolCall(
                 ArgumentChunk(
                     "bar",
@@ -105,25 +33,16 @@ expression: v
             metadata: {},
         },
         Part {
-            index: 1,
+            index: 0,
             part: ToolCall(
                 ArgumentChunk(
-                    "\":",
+                    "\":\"",
                 ),
             ),
             metadata: {},
         },
         Part {
-            index: 1,
-            part: ToolCall(
-                ArgumentChunk(
-                    " \"",
-                ),
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
+            index: 0,
             part: ToolCall(
                 ArgumentChunk(
                     "foo",
@@ -132,7 +51,43 @@ expression: v
             metadata: {},
         },
         Part {
-            index: 1,
+            index: 0,
+            part: ToolCall(
+                ArgumentChunk(
+                    "\",\"",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: ToolCall(
+                ArgumentChunk(
+                    "foo",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: ToolCall(
+                ArgumentChunk(
+                    "\":\"",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: ToolCall(
+                ArgumentChunk(
+                    "foo",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
             part: ToolCall(
                 ArgumentChunk(
                     "\"}",
@@ -141,7 +96,7 @@ expression: v
             metadata: {},
         },
         Flush {
-            index: 1,
+            index: 0,
             metadata: {},
         },
         Finished(
@@ -150,212 +105,52 @@ expression: v
     ],
     [
         Part {
-            index: 1,
+            index: 0,
             part: Message(
                 "",
             ),
             metadata: {},
         },
         Part {
-            index: 1,
+            index: 0,
             part: Message(
-                "Done",
+                "The",
             ),
             metadata: {},
         },
         Part {
-            index: 1,
+            index: 0,
             part: Message(
-                " —",
+                " tool",
             ),
             metadata: {},
         },
         Part {
-            index: 1,
-            part: Message(
-                " I",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
+            index: 0,
             part: Message(
                 " ran",
             ),
             metadata: {},
         },
         Part {
-            index: 1,
+            index: 0,
             part: Message(
-                " the",
+                " successfully",
             ),
             metadata: {},
         },
         Part {
-            index: 1,
+            index: 0,
             part: Message(
-                " tool",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " with",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " the",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " arguments",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " {\"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "foo",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "\":\"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "provided",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " by",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " assistant",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "\",\"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "bar",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "\":\"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "foo",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "\"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "}.",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " The",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " tool",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " responded",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                ":",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " \"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "working",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "!\"",
+                ".",
             ),
             metadata: {},
         },
         Flush {
-            index: 1,
+            index: 0,
             metadata: {
-                "openai_item_id": String("msg_0ce23bf1c9b94bf0016a886da96be487d28c4c497ad7950d08"),
+                "openai_item_id": String("msg_0b1def10395faa12016aa1b7a1c49c87d29be2dc52c6b9c619"),
+                "openai_phase": String("final_answer"),
             },
         },
         Finished(
