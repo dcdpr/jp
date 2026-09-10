@@ -9,11 +9,12 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "Received your test message — everything's working. Anything you'd like to try or ask?",
+                        message: "Received.",
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("msg_0c1de93a3a2e8398016a886da4455087d29cfa5ccdc09ccbf6"),
+                    "openai_item_id": String("msg_0b9450f9228a3c30016aa1b7a0308487d2aa4079654a139b0c"),
+                    "openai_phase": String("final_answer"),
                 },
             },
         ),
@@ -26,26 +27,13 @@ expression: v
             ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
-                    Reasoning {
-                        reasoning: "**Repeating message clearly**\n\nThe user has asked me to repeat my previous message, which was \"Test message.\" I want to keep it concise and clear, so I’ll just repeat that exactly. It’s important to ensure that I deliver what they requested straightforwardly and without adding anything unnecessary. Okay, I’m ready to respond with the exact quote. Here goes: \"Test message.\"",
-                    },
-                ),
-                metadata: {
-                    "openai_item_id": String("rs_0c1de93a3a2e8398016a886da55b2c87d292b5bc6caa736413"),
-                    "openai_encrypted_content": String("gAAAAABqiG2nRNjiF-EHLzNWu8QGXpz-0kg2zCVJeakGIZ5sCTl47nmOhdtvTGvwvmgUSSXIyvikDtvdxRSCETuSlUJMV_k6DUsrgvHxILRBHdhXaO-hOByw8xMsc3IGOqLLeylEGOAiOKEHpoOCiMgYoZnJSC93_K6vlmYrTI9cuCHMASrlY_2lxgscIFVq5kraFJaQHn4LnJz7t_DOg0sG1laPrGCzE0s1l5ZIaAB1xNhz9yggzQPCQvyeBkMqtpPw5eiPyRTW8KToEHDpJBZHRLHgJdTL3kSb-fjXTN-EMrzzPRpna2WuQ2mjjtiDbGJxC3Awa-4CxBlCz4Ocx8393MGeY5nD4zgkuDFOhf_Yxu1-45Uhmp9GjLch71Fkh0_cP5N23IjlGz9J5w9MOPUhYDgx1O0MFVheOvo51E1TbL1z_XGqkz4hVyjZc5Yv3O55sTYifooJXPI65WtlKUeYQWSJv9AHBigsFAfSPqbReZ67OucyjSthF_rGQAYNhgJTcRXzOE_CRWvoKzlT-ZYhgxTO10jRAeLVNb07bkqXeJe03XrrtNr4BCVSOjeZPu314H2ULzz3dwjqnjUxLALtJVwNSoUsybXHQ4kaxDIfiPZwHb7qQ2Suk2AukOjoTYGclprZW8nD74UkEwHzOkU6e5XO5dsuKa7buBsDm2jXMYs9lXYjOidkUUHCYeoI67dF-_9dngcX3JhoCZcBrs8kiPm9YUckp01xQIDDMF-gysx7dgY7jEl21p-8SJbBN1e3K-VGS0qjoyawDphNvej3J82NLpcwd83wvNE7JZe0ynMBBxsfyaIN3RiHQc60UpMdqEWsHBUrDDB7Tc7SE2eXLVbeHr0IvbPp53Ux6e5MAmokwEre6UReM5dfuhy-7Ifj3PhI8TPUT5uYUVR4CqFfszBBj-8urS5WDEXVhNU6eeWlxlOf91KdhXaBRhZnB5QeWXx0-n1hRMBSypuqftkjKof4Nir51F8-aFTpuztS7KbBMTBkohKrlc4zOjQ-YkTqjL0ZhJfNUZfr9kawmDRzhpgU7chdSnEXsDgFkHgPIqqHNcoN9lB0uArSmQchYiSPt6lX92DvhyYxdosa0-tma-mKWXuAUohtTMGMCK0Gv9Xz0r9uL4o1i2iYxx6vOi_ioNTt_PBjkNBKXjvuA-i1AEOVt10dpsupfgk-Uuk-fe798NShYdqGvmYkkPCwcX0MO_8NyPV7Vj2QnuwmGuLyJWlpv1VyGC_Up1_I2to-4gN3VCMyC-fqChKiXzh06o6FuNzE6viygdjiaY0GM_NGqRd8f9DpV7LI6WE49eaAsIaNsVCSRkmMTq1Z1GrpWxKox2estgpYXNkc2iiAT2xvoSXu-juj32TWIppNFkWYcdKXvmjoWeepiquSciOA92qvxfwEYgkKquwbQqqMMVEAdNbWdKflbg=="),
-                },
-            },
-        ),
-        Flushed(
-            ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
                     Message {
                         message: "Test message",
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("msg_0c1de93a3a2e8398016a886da72aa887d2b4c6c0584f35be0a"),
+                    "openai_item_id": String("msg_0b9450f9228a3c30016aa1b7a0f3d887d280dd04e60c663e1c"),
+                    "openai_phase": String("final_answer"),
                 },
             },
         ),
@@ -59,11 +47,11 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "call_aGqFUSwEmeqvj7EMW7rPrTsW",
+                        id: "call_eopKsGQB0UN5akfAqEClo9Z3",
                         name: "run_me",
                         arguments: {
-                            "foo": String("anything"),
                             "bar": String("foo"),
+                            "foo": Null,
                         },
                     },
                 ),
@@ -80,11 +68,12 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "I ran the tool with arguments {\"foo\":\"anything\",\"bar\":\"foo\"} and it returned: \"The secret code is: 42\". Do you want me to run it again with different arguments or do something with that code?",
+                        message: "The tool returned: **42**",
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("msg_0c1de93a3a2e8398016a886da97e4487d2b294e659ab3cf6b8"),
+                    "openai_item_id": String("msg_0b9450f9228a3c30016aa1b7a2ef4887d29662e7d61ae8ef20"),
+                    "openai_phase": String("final_answer"),
                 },
             },
         ),
@@ -97,26 +86,13 @@ expression: v
             ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
-                    Reasoning {
-                        reasoning: "**Responding to tool call result**\n\nThe user asked about the result of a previous tool call. I remember that I previously mentioned it returned, \"The secret code is: 42.\" I think the best response would be to keep it simple and state that the result was indeed \"The secret code is: 42.\" I might also want to add that this came from running the tool with specific arguments, but I’ll keep it concise to avoid any confusion.",
-                    },
-                ),
-                metadata: {
-                    "openai_item_id": String("rs_0c1de93a3a2e8398016a886daad1b487d2ba8644b87920a62b"),
-                    "openai_encrypted_content": String("gAAAAABqiG2tnKqzBOVJwSLOrkB5PXhTx8bwB5mA-mE5-GyD2LCQhW98FWWQ7g5wN_9uMHhXaW_vXIEA6M4wAMcVdz0UuU19zKUcj6vhpSeEWLEfBwbM45wnBJdFJLUoT129ApKZzbtPZT8FrIjnSTJznJl5xfov4PqWL1pFnvQKfMkCBqaftg665ZbkUWVCXwOUjMPQ37pouoJXV0BwATQhUmQGNWZTvFoSbzq9Kg23EMUUBHiw9ZYcD-fw--UUJEKippAch_AK7AB6fyNLfHRfG-7xna_Rzdu-PQ3pUxtHYdxsHui9f83c2UKtfCel_NGHSW7ePGQUEbdcsR-lXS6Rr2j3FK67lQ3lhvZgJQ-Ro9zJlDgBH7eH3F99rl1HxJhpQuXfWc1BHedjI3p3_8ju555YTN1mpPKQOdswLASMMW-TDUkIkPYbWsKtzcHhaAvCo2aic91_OuWObBEyOsYnWLGXhkIo92Mn9khToziVKPRmCV4TUfOpQFHk9lojoXD2N2Y68ucbI9ITSk7WfmW6c_Su207VY98-IVxL39V5dQuEIIq4u39YifPxEtuPoqY8Eyw32zcnNwD5C7ENviJg2Kt5BQpygTwVnafDiucQ-cIoFKE1qHJ2HA1MHjixclyICLL5HSQIWXtGm5x9lKU4VLVKrM48w2L7DIi-IzTo4pSvltt7LgfPLKtADVcx6tslif-KjEgV2ZVBZTmaeJhRf608E2ODeQXcpI6OsSTTNXNidHePr1hU_Wlr8ghKVy1b_-N0Xns_s02dEtlmoL2SJYGSOsQgUmtFg3HZuWHvEAYtdo_ZRABnTD6nAQ1cyRWc88VylO5W3bkKpUjG5Vzjhjt6rQb9kjJKo1kcjm6dzj1kQ-TbZVdKGZgna35Mng0ELN2o_XAPy12jIdtB6TXUljNmagw9w0beoqTi4V54d1cx4kSz_KYrWP8f9JQgD-FEOfeTsUT16-ZRP0lfd4YmSLk4jmFyhw-kwI5fy3f-0iq1H-I5961vKg-gL4wPwSsxYFyqZ8ZLrdhRdNFIwiMkGAXG72vk12ZVQcUYGjeZvFFLbrdox7gyMCYp_Bk9mwfGkf7C5MiF_lrzGCkgyjVtnxJPSmgpPkdhsYqGJKHfE7Y_7YJzkQVALX3BqH-d7to5Ek0v7WwtgLFiz5oKc4qNJPKjG4m4rHtJLt34O0U77Z90k1f_pPrHUPjO-CsL439UmYcFPBc2SI8b9n5NFa4b0MdvdFayyMwmsfPVkf1-FMNFE1DSYqOYE5mnZwvLO5P2AYDPA0uN9EwD_po6adKVIlSCUrAcm-COga_kRCWFTO7H9uWVnaTZgsmJEPqAhlQg65-g6fhzpwpToRkHqp9M5xpfigV-oej_badmeoyA5tQcCE5-AZjnEZu6MvHFMAUCnmyIn-V8GsvIwargWOwPiygCYSivB2qSe4m7d0VtS9tObigcCwgpABho7K2N_y6zE0EI9OGg4IBBsFrlGLG6Lv7HXIPRNH66VnBy36jaWMTqS_2pawU="),
-                },
-            },
-        ),
-        Flushed(
-            ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
                     Message {
-                        message: "The tool returned: \"The secret code is: 42\".",
+                        message: "The previous tool call returned: **42**",
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("msg_0c1de93a3a2e8398016a886dad887887d2a8a094078eb417cc"),
+                    "openai_item_id": String("msg_0b9450f9228a3c30016aa1b7a3cca487d288303e14c31cdbd7"),
+                    "openai_phase": String("final_answer"),
                 },
             },
         ),

@@ -762,6 +762,7 @@ fn map_model(model: &LlamacppModel, served_context: Option<u32>) -> Result<Model
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: vec![],
     })
 }
@@ -779,6 +780,21 @@ impl TryFrom<&LlamacppConfig> for Llamacpp {
         })
     }
 }
+
+/// llama.cpp's recorded-test route.
+///
+/// A local server needs no credential, so replay leaves configuration alone.
+#[cfg(test)]
+pub(crate) static TEST_SUPPORT: super::ApiOnlyTestSupport = super::ApiOnlyTestSupport(&API_ROUTE);
+
+#[cfg(test)]
+static API_ROUTE: super::ApiTestRoute = super::ApiTestRoute {
+    id: ProviderId::Llamacpp,
+    base_url: |config| config.llamacpp.base_url.clone(),
+    set_base_url: |config, url| config.llamacpp.base_url = url,
+    use_replay_credentials: |_| {},
+    model: || ModelDetails::empty("llamacpp/unsloth/Qwen3.5-9B-GGUF:Q4_K_M".parse().unwrap()),
+};
 
 #[cfg(test)]
 #[path = "llamacpp_tests.rs"]

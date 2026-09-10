@@ -1,0 +1,65 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Part {
+            index: 0,
+            part: Structured(
+                "",
+            ),
+            metadata: {},
+        },
+        KeepAlive,
+        Part {
+            index: 0,
+            part: Structured(
+                "{\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Structured(
+                "titles\": [\"",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Structured(
+                "Conversation Title",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Structured(
+                " Generation",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Structured(
+                " Request",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Structured(
+                "\"]}",
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

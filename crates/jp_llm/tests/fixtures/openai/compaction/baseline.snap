@@ -3,7 +3,7 @@ source: crates/jp_llm/src/provider/compaction_request_tests.rs
 expression: request
 ---
 {
-  "model": "gpt-5-mini",
+  "model": "gpt-5.6-luna",
   "input": [
     {
       "type": "message",
@@ -66,25 +66,13 @@ expression: request
       "content": "And of Italy?"
     }
   ],
-  "include": null,
-  "instructions": null,
-  "max_output_tokens": null,
-  "metadata": null,
-  "parallel_tool_calls": null,
-  "previous_response_id": null,
   "prompt_cache_key": "jp:conversation:1577836800000000",
   "reasoning": {
-    "effort": "minimal",
+    "effort": "none",
     "summary": "auto"
   },
-  "service_tier": null,
   "store": false,
-  "stream": null,
-  "temperature": null,
-  "text": null,
   "tool_choice": "auto",
   "tools": [],
-  "top_p": null,
-  "truncation": "auto",
-  "user": null
+  "truncation": "auto"
 }

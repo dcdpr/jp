@@ -1,0 +1,25 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "apple",
+                    },
+                ),
+                metadata: {
+                    "openai_item_id": String("msg_0a2fdf7fb5bf7f3d016aa1ba63071487d2a7f62d6cf2a51d75"),
+                    "openai_phase": String("final_answer"),
+                },
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+]

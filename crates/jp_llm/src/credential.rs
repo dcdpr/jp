@@ -9,7 +9,7 @@
 //! recovery today, token exchange and refresh in later phases — live behind
 //! [`ProviderAuth`], dispatched by [`provider_auth`] the same way
 //! [`get_provider`] dispatches chat providers.
-//! The auth CLI (`jp provider auth`) reaches them through this seam; when a
+//! The auth CLI (`jp provider llm auth`) reaches them through this seam; when a
 //! provider moves out of JP core and into a plugin, its `ProviderAuth`
 //! implementation migrates with it.
 //!
@@ -20,7 +20,7 @@ use std::fmt;
 use async_trait::async_trait;
 use jp_config::model::id::ProviderId;
 
-use crate::provider::anthropic;
+use crate::provider::{anthropic, openai};
 
 /// A resolved credential for an LLM provider.
 #[derive(Clone, PartialEq, Eq)]
@@ -29,7 +29,7 @@ pub enum Credential {
     ApiKey(String),
 
     /// A subscription OAuth bearer token, sent as `Authorization: Bearer`
-    /// together with the Claude Code request fingerprint.
+    /// together with whatever request fingerprint the provider requires.
     Bearer(String),
 }
 
@@ -104,6 +104,7 @@ pub trait ProviderAuth: Send + Sync {
 pub fn provider_auth(id: ProviderId) -> Option<Box<dyn ProviderAuth>> {
     match id {
         ProviderId::Anthropic => Some(Box::new(anthropic::auth::AnthropicAuth)),
+        ProviderId::Openai => Some(Box::new(openai::auth::OpenaiAuth)),
         _ => None,
     }
 }

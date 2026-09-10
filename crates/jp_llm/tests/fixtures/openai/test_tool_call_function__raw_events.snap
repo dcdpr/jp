@@ -5,17 +5,17 @@ expression: v
 [
     [
         Part {
-            index: 1,
+            index: 0,
             part: ToolCall(
                 Start {
-                    id: "call_O3ByNtUdUxXx7MatyW9beYgO",
+                    id: "call_VLvqncNSndKQb2OsxMXPRHli",
                     name: "run_me",
                 },
             ),
             metadata: {},
         },
         Part {
-            index: 1,
+            index: 0,
             part: ToolCall(
                 ArgumentChunk(
                     "{\"",
@@ -24,43 +24,7 @@ expression: v
             metadata: {},
         },
         Part {
-            index: 1,
-            part: ToolCall(
-                ArgumentChunk(
-                    "foo",
-                ),
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: ToolCall(
-                ArgumentChunk(
-                    "\":\"",
-                ),
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: ToolCall(
-                ArgumentChunk(
-                    "foo",
-                ),
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: ToolCall(
-                ArgumentChunk(
-                    "\",\"",
-                ),
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
+            index: 0,
             part: ToolCall(
                 ArgumentChunk(
                     "bar",
@@ -69,7 +33,7 @@ expression: v
             metadata: {},
         },
         Part {
-            index: 1,
+            index: 0,
             part: ToolCall(
                 ArgumentChunk(
                     "\":\"",
@@ -78,7 +42,7 @@ expression: v
             metadata: {},
         },
         Part {
-            index: 1,
+            index: 0,
             part: ToolCall(
                 ArgumentChunk(
                     "foo",
@@ -87,16 +51,52 @@ expression: v
             metadata: {},
         },
         Part {
-            index: 1,
+            index: 0,
             part: ToolCall(
                 ArgumentChunk(
-                    "\"}",
+                    "\",\"",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: ToolCall(
+                ArgumentChunk(
+                    "foo",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: ToolCall(
+                ArgumentChunk(
+                    "\":",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: ToolCall(
+                ArgumentChunk(
+                    "null",
+                ),
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: ToolCall(
+                ArgumentChunk(
+                    "}",
                 ),
             ),
             metadata: {},
         },
         Flush {
-            index: 1,
+            index: 0,
             metadata: {},
         },
         Finished(
@@ -105,373 +105,52 @@ expression: v
     ],
     [
         Part {
-            index: 1,
+            index: 0,
             part: Message(
                 "",
             ),
             metadata: {},
         },
         Part {
-            index: 1,
+            index: 0,
             part: Message(
-                "Done",
+                "The",
             ),
             metadata: {},
         },
         Part {
-            index: 1,
+            index: 0,
             part: Message(
-                " —",
+                " tool",
             ),
             metadata: {},
         },
         Part {
-            index: 1,
-            part: Message(
-                " I",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
+            index: 0,
             part: Message(
                 " ran",
             ),
             metadata: {},
         },
         Part {
-            index: 1,
+            index: 0,
             part: Message(
-                " the",
+                " successfully",
             ),
             metadata: {},
         },
         Part {
-            index: 1,
-            part: Message(
-                " tool",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " with",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " the",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " arguments",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " {\"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "foo",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "\":\"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "foo",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "\",\"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "bar",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "\":\"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "foo",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "\"}",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " and",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " it",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " returned",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                ":",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " \"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "working",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "!\"",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " \n\n",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                "If",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " you",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " want",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " me",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " to",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " run",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " it",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " again",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " with",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " different",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " arguments",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " or",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " explain",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " what",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " the",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " tool",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " does",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                ",",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " tell",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " me",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " the",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " parameters",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " you'd",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
-            part: Message(
-                " like",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 1,
+            index: 0,
             part: Message(
                 ".",
             ),
             metadata: {},
         },
         Flush {
-            index: 1,
+            index: 0,
             metadata: {
-                "openai_item_id": String("msg_0fcd6bd7366e725d016a886daa268087d2abca3fa72db89980"),
+                "openai_item_id": String("msg_0ef78511e489edee016aa1b7a1b18887d29031d728d28d3c14"),
+                "openai_phase": String("final_answer"),
             },
         },
         Finished(

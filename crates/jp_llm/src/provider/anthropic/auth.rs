@@ -37,7 +37,7 @@ impl ProviderAuth for AnthropicAuth {
          `sk-ant-oat01-…` value it prints. That command is an interactive session, so it cannot be \
          the source of a pipe: every stage of a pipeline starts at once, so JP would read the \
          stream before a token exists. A non-interactive source pipes fine, e.g. `pbpaste | jp \
-         provider auth login llm.anthropic --setup-token`."
+         provider llm auth login anthropic --setup-token`."
     }
 
     async fn recover_identity(

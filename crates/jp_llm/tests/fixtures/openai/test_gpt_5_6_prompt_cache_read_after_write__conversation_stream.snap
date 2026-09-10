@@ -184,14 +184,23 @@ expression: v
           "beta_headers": []
         },
         "cerebras": {
+          "auth": [
+            "api_key"
+          ],
           "api_key_env": "CEREBRAS_API_KEY",
           "base_url": "https://api.cerebras.ai"
         },
         "deepseek": {
+          "auth": [
+            "api_key"
+          ],
           "api_key_env": "DEEPSEEK_API_KEY",
           "base_url": "https://api.deepseek.com"
         },
         "google": {
+          "auth": [
+            "api_key"
+          ],
           "api_key_env": "GEMINI_API_KEY",
           "base_url": "https://generativelanguage.googleapis.com/v1beta"
         },
@@ -202,11 +211,19 @@ expression: v
           "base_url": "http://localhost:11434"
         },
         "openai": {
+          "auth": [
+            "api_key"
+          ],
           "api_key_env": "OPENAI_API_KEY",
           "base_url": "https://api.openai.com",
-          "base_url_env": "OPENAI_BASE_URL"
+          "base_url_env": "OPENAI_BASE_URL",
+          "codex_base_url": "https://chatgpt.com/backend-api/codex",
+          "codex_base_url_env": "JP_OPENAI_CODEX_BASE_URL"
         },
         "openrouter": {
+          "auth": [
+            "api_key"
+          ],
           "api_key_env": "OPENROUTER_API_KEY",
           "app_name": "JP",
           "base_url": "https://openrouter.ai"
@@ -241,9 +258,9 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "The quick brown fox.",
+      "message": "The fox.",
       "metadata": {
-        "openai_item_id": "bXNnXzA2ZjM3YTdjNTBmZGFkZDkwMTZhODg2ZDc3M2Y3ODg3ZDJhOTk4MzRkN2I1NTc5Yzgz",
+        "openai_item_id": "bXNnXzAxY2VlNzNmYTJkYjYwOWQwMTZhYTFiN2EwYTE4Yzg3ZDJhMTk2NmJmOTA3NjA2Y2Jh",
         "openai_phase": "ZmluYWxfYW5zd2Vy"
       }
     },
@@ -269,9 +286,9 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "The lazy dog.",
+      "message": "The dog.",
       "metadata": {
-        "openai_item_id": "bXNnXzA2ZjM3YTdjNTBmZGFkZDkwMTZhODg2ZDc4NGViNDg3ZDJhMzNmNjdmMzZjMjM1MjRi",
+        "openai_item_id": "bXNnXzAxY2VlNzNmYTJkYjYwOWQwMTZhYTFiN2EyM2Q0Yzg3ZDJiNzFhMDAwN2Q4ZDVmMzM5",
         "openai_phase": "ZmluYWxfYW5zd2Vy"
       }
     }

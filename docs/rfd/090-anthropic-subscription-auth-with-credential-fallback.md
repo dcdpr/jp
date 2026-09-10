@@ -40,8 +40,8 @@ cannot use through JP, and again per token.
 Log in once per subscription account:
 
 ```sh
-jp provider auth login llm.anthropic                   # default profile
-jp provider auth login llm.anthropic --profile work    # named profile
+jp provider auth login llm.anthropic                   # stored as "default"
+jp provider auth login llm.anthropic --name work       # stored as "work"
 ```
 
 The command opens the browser for Anthropic's OAuth consent, captures the
@@ -62,7 +62,7 @@ Inspect and remove stored credentials without touching the store by hand:
 
 ```sh
 jp provider auth list                                  # profiles, accounts, expiry, cooldowns
-jp provider auth logout llm.anthropic --profile work   # remove a profile
+jp provider auth logout llm.anthropic --name work      # remove one
 ```
 
 `jp provider auth list` shows each profile's credential type and state: valid,
@@ -89,21 +89,28 @@ Configure the credential chain, in fallback order:
 
 ```toml
 [providers.llm.anthropic]
-auth = ["profile:personal", "profile:work", "api_key"]
+auth = ["subscription:personal", "subscription:work", "api_key"]
 ```
 
+Each entry names how the request is billed, and optionally which credential of
+that kind to use.
+`api` and `sub` are accepted as shorthand for the two kinds, and both are
+written back in full.
+
 - `api_key` resolves via `api_key_env`, exactly as today.
-- `profile` (bare) resolves the sole configured profile; `profile:<name>` names
-  one.
+  `api_key_env` may map several named keys, which `api_key:<name>` selects
+  between.
+- `subscription` (bare) resolves the sole stored credential;
+  `subscription:<name>` names one.
   Profile names are case-sensitive.
 - A chain entry selects a stored profile; it does not assert the credential's
   mechanism.
   The same entry keeps working when a profile migrates from a static setup token
   to browser OAuth.
-- Bare `profile` with zero or with multiple configured profiles, and
-  `profile:<name>` naming a profile not in the store, are preflight errors
-  naming the fix; an empty `auth` list, duplicate entries, and unrecognized
-  items are config validation errors.
+- A bare kind with zero or with multiple credentials to choose between, and
+  `<kind>:<name>` naming one that does not exist, are preflight errors naming
+  the fix; an empty `auth` list, duplicate entries, and unrecognized items are
+  config validation errors.
 - The default is `["api_key"]`: existing setups behave identically.
 - Across config layers, `auth` replaces as a whole — it never appends.
   Merging two chains element-wise produces an order nobody wrote; replacement
@@ -654,9 +661,9 @@ body, headers).
 Independently reviewable and useful on its own.
 
 **Measured: the complete fingerprint is accepted.** A setup-token credential on
-a single-entry `["profile"]` chain (no fallback to mask a failure) completes a
-turn against `claude-sonnet-5`, with the headers, the OAuth beta set, and the
-Claude Code identity line as inventoried above.
+a single-entry `["subscription"]` chain (no fallback to mask a failure)
+completes a turn against `claude-sonnet-5`, with the headers, the OAuth beta
+set, and the Claude Code identity line as inventoried above.
 The trim runs from there, one element per request, keeping whatever Anthropic
 still accepts without it.
 

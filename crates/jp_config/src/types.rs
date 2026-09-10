@@ -1,5 +1,6 @@
 //! Extended configuration types.
 
+pub mod api_key_env;
 pub mod byte_size;
 pub mod color;
 pub mod command;
