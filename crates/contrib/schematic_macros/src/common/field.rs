@@ -16,6 +16,7 @@ use crate::{
 pub struct FieldSerdeArgs {
     pub alias: Option<String>,
     pub default: bool,
+    pub deserialize_with: Option<String>,
     pub flatten: bool,
     pub rename: Option<String>,
     pub skip: bool,
@@ -328,7 +329,18 @@ impl Field<'_> {
 
             if self.args.skip_deserializing || self.serde_args.skip_deserializing {
                 meta.push(quote! { skip_deserializing });
-            } else if let Some(deserialize_with) = &self.args.deserialize_with {
+            } else if let Some(deserialize_with) = self
+                .args
+                .deserialize_with
+                .as_ref()
+                .or(self.serde_args.deserialize_with.as_ref())
+            {
+                // A field reads the same way in both forms, so the partial
+                // takes the custom deserializer whichever namespace declared
+                // it. Reading only `#[setting]` here would leave a field that
+                // used `#[serde]` parsing one way as a resolved config and
+                // another as a layer.
+                //
                 // `deserialize_with` disables serde's implicit "missing
                 // `Option` field is `None`" handling, so the partial field
                 // needs an explicit default to stay optional.

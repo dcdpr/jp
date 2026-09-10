@@ -2,33 +2,32 @@ use schematic::{Schema, SchemaBuilder, SchemaType};
 
 use super::*;
 
+/// Flatten a schema into the shapes it accepts, one name each.
+fn describe(schema: &Schema, out: &mut Vec<String>) {
+    match &schema.ty {
+        SchemaType::Union(union) => {
+            for variant in &union.variants_types {
+                describe(variant, out);
+            }
+        }
+        SchemaType::Enum(enum_type) => {
+            for value in &enum_type.values {
+                out.push(value.to_string());
+            }
+        }
+        SchemaType::Boolean(_) => out.push("bool".to_owned()),
+        SchemaType::Null => out.push("null".to_owned()),
+        other => panic!("unexpected shape: {other:?}"),
+    }
+}
+
 /// The shapes a named field of a struct schema accepts, flattened.
-///
-/// A union contributes each of its variants; anything else contributes itself.
 fn field_shapes(schema: &Schema, field: &str) -> Vec<String> {
     let SchemaType::Struct(struct_type) = &schema.ty else {
         panic!("expected a struct");
     };
 
     let field = struct_type.fields.get(field).expect("the field exists");
-
-    fn describe(schema: &Schema, out: &mut Vec<String>) {
-        match &schema.ty {
-            SchemaType::Union(union) => {
-                for variant in &union.variants_types {
-                    describe(variant, out);
-                }
-            }
-            SchemaType::Enum(enum_type) => {
-                for value in &enum_type.values {
-                    out.push(value.to_string());
-                }
-            }
-            SchemaType::Boolean(_) => out.push("bool".to_owned()),
-            SchemaType::Null => out.push("null".to_owned()),
-            other => panic!("unexpected shape: {other:?}"),
-        }
-    }
 
     let mut out = Vec::new();
     describe(&field.schema, &mut out);
@@ -51,6 +50,27 @@ fn the_dedup_schema_describes_every_shape_the_parser_takes() {
         "bool",
         "null"
     ]);
+}
+
+/// A layer reads `dedup` the same way a resolved config does.
+///
+/// The custom deserializer is declared in serde's namespace rather than
+/// schematic's, and the generated partial has to pick it up from there too.
+/// Without that, `PartialMergedVec` falls back to a plain `Option<bool>` and
+/// rejects the string forms the resolved type accepts.
+#[test]
+fn the_partial_reads_dedup_the_same_way() {
+    for (input, expected) in [
+        (r#"{"dedup":true}"#, Some(true)),
+        (r#"{"dedup":"true"}"#, Some(true)),
+        (r#"{"dedup":"false"}"#, Some(false)),
+        (r#"{"dedup":"inherit"}"#, None),
+        (r"{}", None),
+    ] {
+        let parsed: PartialMergedVec<String> = serde_json::from_str(input).unwrap();
+
+        assert_eq!(parsed.dedup, expected, "parsing {input}");
+    }
 }
 
 /// Each shape the schema lists has to survive a round trip through the parser.
