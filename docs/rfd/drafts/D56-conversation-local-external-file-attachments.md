@@ -15,18 +15,20 @@
   reconciled — before this draft is promoted, since published RFDs cannot link
   to drafts.
 
-  The `Requires: RFD 031` edge is intentional: this design builds on 031's
-  source-of-truth + projection storage model. It does not block promotion, since
-  031 is Implemented.
+  The `Extends: RFD 031` edge is intentional: this design builds on 031's
+  source-of-truth + projection storage model. It is `Extends` rather than
+  `Requires` because 031 is Implemented — a `Requires` on an Implemented target
+  is redundant and the docs build rejects it — and because the relationship is
+  design lineage worth keeping past implementation.
 -->
 
-# RFD D49: Conversation-Local External File Attachments
+# RFD D56: Conversation-Local External File Attachments
 
 - **Status**: Draft
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-06-04
-- **Requires**: [RFD 031]
+- **Extends**: [RFD 031]
 
 ## Summary
 

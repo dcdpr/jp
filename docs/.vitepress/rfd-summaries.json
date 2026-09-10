@@ -28,7 +28,7 @@
     "summary": "Make CLI tool flags order-sensitive, processing `--tool` and `--no-tools` left-to-right instead of in fixed order."
   },
   "009-stateful-tool-protocol.md": {
-    "hash": "ed9b0e86e1f2a86949ef4f024f3926a1452b5a1d5febd5a24b7d4edb48864b30",
+    "hash": "ae58ecd3b21f3e23368a6579b6a0e0ba6eddeb181974f95272206e6bf6e01704",
     "summary": "Unifies one-shot and long-running tool execution under a stateful protocol enabling multi-step interactive workflows."
   },
   "010-pty-infrastructure-and-interactive-tool-sdk.md": {
@@ -36,7 +36,7 @@
     "summary": "Proposes jp_pty crate and interactive SDK for building stateful tools that wrap interactive CLI programs."
   },
   "011-system-notification-queue.md": {
-    "hash": "4ec4c861ad075f44535c5dfd068a63ffa17fac4b3c29797c0975bb3a11e634dd",
+    "hash": "a7e8ed71bc2b470064a78ccd84452f0c4934500abb49229807adccb96deacc75",
     "summary": "System notification queue delivers asynchronous subsystem notifications to the assistant by embedding them in existing conversation messages."
   },
   "012-typed-llm-streaming-events.md": {
@@ -64,7 +64,7 @@
     "summary": "Wasm plugins export an attachment interface, wrapped in a native Handler adapter for transparent integration."
   },
   "018-typed-prompt-routing-enum.md": {
-    "hash": "9a28dca0d700374a220fe35b3775b86b1cfc836c8e074ff7285cb86df5387944",
+    "hash": "7e0f2012bcfab77ecf1a23212421cbf67f362c82afc63df12191fdec6c3c05b8",
     "summary": "Codify prompt types as `Prompt` enum variants for unified routing, config, and extensibility."
   },
   "019-non-interactive-mode.md": {
@@ -112,7 +112,7 @@
     "summary": "Propose an `rfd` skill configuration enabling JP to assist RFD writing through research, structure, and collaborative editing—not authorship."
   },
   "029-scriptable-structured-output.md": {
-    "hash": "84b3c003134202a73b4b5a08ad03f9964eaac4b5493d863733202d5d1e21d606",
+    "hash": "545a5cdca34ea91fea2fc04d94c4f48c9f3a4c659b379cf67e3b0b6b6bd49fdc",
     "summary": "Make JP scriptable with concise schema DSL and inferred clean JSON output when piping or with --schema flag."
   },
   "030-schema-dsl.md": {
@@ -140,7 +140,7 @@
     "summary": "Extend `--cfg` path resolution to search user-global, workspace, and user-workspace config roots, merging matches."
   },
   "036-conversation-compaction.md": {
-    "hash": "bbee8ea2d52ed097654a805c59d7b37b8320fc0a56a31e164a85912b5269a732",
+    "hash": "064f8869463adff94f41d3113c04e09bbcbd42cf878c558b9e1f196521bac567",
     "summary": "Composable conversation compaction via mechanical strategies, tool-aware deduplication, LLM summarization, and protocol extensions for declarative compaction hints."
   },
   "037-await-tool-for-stateful-handle-synchronization.md": {
@@ -148,7 +148,7 @@
     "summary": "Introduces `await` built-in tool to synchronize on parallel stateful tool handles with `any`/`all` completion modes."
   },
   "039-conversation-trees.md": {
-    "hash": "a40e2fab5d72dfa57e3b4a00affd43e49047dce03286fa3e7239fc46209ed5c2",
+    "hash": "77cc8e7d95ba7481750bb6dc8d7743c6cb81116aa4ebbd82442936dae18fda77",
     "summary": "Add parent-child conversation relationships via metadata field, enabling fork lineage and hierarchical organization without nested directories."
   },
   "040-hidden-conversations-and-tool-context.md": {
@@ -164,7 +164,7 @@
     "summary": "Introduces per-tool options field for static user-defined configuration passed to tools at runtime."
   },
   "043-incremental-tool-call-argument-streaming.md": {
-    "hash": "3f1fb82d32db230153f6a019644fc973caf0655bc810d4016988980e34afc2e2",
+    "hash": "b99c7fdd99dcd0ac17a80f6358922eac72b3b2baf62fd15db08f539b67b96fd4",
     "summary": "Extend EventBuilder to incrementally parse and emit tool call arguments as typed fragments during streaming."
   },
   "044-workspace-initialization.md": {
@@ -184,7 +184,7 @@
     "summary": "Add `jp conversation edit` (opens directory in $EDITOR) and `jp conversation path` (prints conversation filesystem path)."
   },
   "048-four-channel-output-model.md": {
-    "hash": "15db61bc63a8b4d1648ada5b12ebd5d0de5a31a795dcbe9ebf7a21dab32c858a",
+    "hash": "94144211f8d508b95ea635a78528b31eac196e4995bd244f8f673180539d1c0b",
     "summary": "Separate JP output into four channels: stdout for responses, stderr for chrome, /dev/tty for prompts, log file for tracing."
   },
   "049-non-interactive-mode-and-detached-prompt-policy.md": {
@@ -192,8 +192,8 @@
     "summary": "Introduces configurable detached prompt policy, `--non-interactive` flag, and `exclusive` question property for non-interactive environments."
   },
   "050-scripting-ergonomics-for-conversation-management.md": {
-    "hash": "39fd33021bfbdd5463a67d44b3f0b8c145c883f7f2773756fefda1a2712c88f1",
-    "summary": "Adds scripting ergonomics: shared config structs, `conversation new` command, `--no-activate` flag, and `--root-id` ancestry constraint."
+    "hash": "9408ae74d78c65e1c0fb18b8c2b5672a02656b14d77831a23a91f4a795043d85",
+    "summary": "Shared option args, `conversation new` subcommand, `--no-activate` flag for scripting; updated `conversation fork` behavior."
   },
   "051-sub-agent-workflows.md": {
     "hash": "b856f8754bf63da9b1e62d13f33458f3b61380086d59804ed8d50f321e28579e",
@@ -224,7 +224,7 @@
     "summary": "Adds group `overrides` section to enforce tool configuration that outlasts tool-level settings but yields to CLI flags."
   },
   "058-typed-content-blocks-for-tool-responses.md": {
-    "hash": "cd713dc651cc6b71cacee2679f66b0297209e2d2521f95937de1685bd7e28b79",
+    "hash": "74063779fc4ead3ace6f64edfab175c343e021792d5720a47e8801b20c8bc3b4",
     "summary": "Replace opaque tool output strings with typed content blocks (text, resource, question) mirroring MCP's CallToolResult model."
   },
   "059-shell-completions-and-man-pages.md": {
@@ -264,7 +264,7 @@
     "summary": "Detects redundant resource deliveries to LLM via URI and checksum matching, replacing duplicates with brief references."
   },
   "068-forced-tool-retry-without-reasoning.md": {
-    "hash": "6a9b9383263396ac7534462a22c4c691665466fa3af7ca6b4ea3e1c2f1f2e5ea",
+    "hash": "a55cdee5e3c8c6733324e910b2937b6da5fbc9585c3caca5ff39fa0276945610",
     "summary": "Automatically retry forced tool calls with reasoning disabled if the model ignores soft-force directives."
   },
   "069-guard-scoped-persistence-for-conversations.md": {
@@ -272,7 +272,7 @@
     "summary": "Guard-scoped persistence: ConversationMut auto-persists on drop while holding cross-process file lock, with callback-based writes and explicit flush for checkpoints."
   },
   "072-command-plugin-system.md": {
-    "hash": "1e9779043f8226fb259fccf1936bd26957b68f73f7122eb222bd5dd83c052938",
+    "hash": "b79d1e87e7089d48f469164867c28f4ecdc856694b77fea1d3c48ad539f44b0d",
     "summary": "Standalone command plugins communicate with JP via JSON-lines protocol to extend subcommands across languages."
   },
   "073-layered-storage-backend-for-workspaces.md": {
@@ -308,7 +308,7 @@
     "summary": "Adds typed access policy grants for tools to declare and enforce what workspace resources they can access."
   },
   "077-plugin-configuration-and-trust-policy.md": {
-    "hash": "bb995092ac7442f11cef11052ba0555d2cf89944be6058f1dd0dfeaf2ed93eef",
+    "hash": "c45c6a4371ed15c13b0cf00bc6458fa02a4fe1b12fed61dbf42ec88bfeea12cb",
     "summary": "Plugin configuration integration with AppConfig enabling trust policies, checksum pinning, execution policies, and per-plugin options."
   },
   "078-tool-config-mutation.md": {
@@ -340,7 +340,7 @@
     "summary": "Add --explain flag to jp query showing rendered system prompt, tools, attachments, and final request without calling the LLM provider."
   },
   "086-line-oriented-stdin-input-for-cli-arguments.md": {
-    "hash": "9425e7b6fa3fedd4d77f6e9d4466c15368f9a35accb665a4153ac2acdfdfc0eb",
+    "hash": "a8a91732ff548f33c8380db66c5e269c5f4c4f7f34d440b50693be20fb069cd5",
     "summary": "Convention for multi-value CLI arguments: `-` reads line-oriented values from stdin, starting with conversation targeting."
   },
   "087-session-scoped-active-workspace.md": {
@@ -400,8 +400,8 @@
     "summary": "Lightweight markdown-based work items tracked in-repo, displacing GitHub issues from assistant context with kanban board and RFD promotion mechanics."
   },
   "102-collision-resistant-ticket-identifiers.md": {
-    "hash": "5b31c977edb43275206de792a76589c98b8af75f012b4e508a2fedfb9aecbd1a",
-    "summary": "Replace sequential ticket ids with collision-resistant time-bucketed random ids to enable parallel distributed ticket creation."
+    "hash": "9a28ffa9f741bba6c74393757ba557726e3d677d80063020fd5c20ae39f6a5e4",
+    "summary": "Move ticket ids from sequential counters to collision-resistant base-32 time-bucketed random ids."
   },
   "099-native-macos-app-for-browsing-conversations.md": {
     "hash": "4955066abb71a8a098675aa3f9a628aca2ec16511d94cc6da35bcf320a39addc",
@@ -422,5 +422,9 @@
   "105-mid-conversation-operator-directives.md": {
     "hash": "0ac17903569c11f2c6e09ccfc1a349aa708c2762fe815d1cf195a56fbd240726",
     "summary": "Mid-conversation system and tool changes anchored in message stream preserve Anthropic's prompt cache via positional directives."
+  },
+  "107-background-task-infrastructure.md": {
+    "hash": "a959c85b2a886843531a94ecf66fcb13a77c60fd0317a7dd6767aab2a3a16979",
+    "summary": "`jp_task` provides bounded background task primitives for concurrent work that commits to the workspace before exit."
   }
 }

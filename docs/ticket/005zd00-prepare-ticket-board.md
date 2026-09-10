@@ -1,6 +1,6 @@
 # prepare ticket board
 
-- **Status**: In Progress
+- **Status**: Done
 - **Kind**: Chore
 - **Authors**: Jean Mertz
 - **Date**: 2026-08-06

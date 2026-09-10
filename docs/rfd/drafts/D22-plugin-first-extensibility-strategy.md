@@ -535,6 +535,7 @@ signals — informational, not gatekeeping.
 
 [RFD 016]: ../016-wasm-plugin-architecture.md
 [RFD 017]: ../017-wasm-attachment-handlers.md
+[RFD 045]: ../045-layered-interrupt-handler-stack.md
 [RFD 048]: ../048-four-channel-output-model.md
 [RFD 072]: ../072-command-plugin-system.md
 [RFD 077]: ../077-plugin-configuration-and-trust-policy.md

@@ -493,8 +493,8 @@ Composability lets users tailor the operation.
   Compaction must preserve config deltas correctly — removing an event
   shouldn't remove an adjacent config delta that affects later events.
 
-- **Interaction with the knowledge base.** As [RFD 008] notes, subjects learned
-  via tool calls may be compacted away.
+- **Interaction with the knowledge base.** As the knowledge-base design notes,
+  subjects learned via tool calls may be compacted away.
   Should compaction detect `learn` tool calls and preserve them?
   Or is this the user's responsibility?
 

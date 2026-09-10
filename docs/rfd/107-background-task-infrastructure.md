@@ -1,6 +1,6 @@
-# RFD D40: Background Task Infrastructure
+# RFD 107: Background Task Infrastructure
 
-- **Status**: Draft
+- **Status**: Implemented
 - **Category**: Guide
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-22
@@ -242,6 +242,6 @@ New RFDs that depend on this primitive should declare `Requires: RFD NNN` on
 this RFD once it is published.
 That places it in the dependency graph and surfaces a back-link here.
 
-[RFD 028]: ../028-structured-inquiry-system-for-tool-questions.md
-[RFD 053]: ../053-auto-refresh-conversation-titles.md
-[RFD 066]: ../066-content-addressable-blob-store.md
+[RFD 028]: 028-structured-inquiry-system-for-tool-questions.md
+[RFD 053]: 053-auto-refresh-conversation-titles.md
+[RFD 066]: 066-content-addressable-blob-store.md

@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-23
-- **Required by**: [RFD 010], [RFD 011], [RFD 037], [RFD 058]
+- **Required by**: [RFD 010], [RFD 037]
 
 ## Summary
 
@@ -863,7 +863,6 @@ Can be iterated on independently.
 [RFD 011]: 011-system-notification-queue.md
 [RFD 028]: 028-structured-inquiry-system-for-tool-questions.md
 [RFD 037]: 037-await-tool-for-stateful-handle-synchronization.md
-[RFD 058]: 058-typed-content-blocks-for-tool-responses.md
 [\#392]: https://github.com/dcdpr/jp/issues/392
 [`inquiry` system]: ./005-first-class-inquiry-events.md
 [gemini-anyof]: https://github.com/anomalyco/opencode/issues/14509

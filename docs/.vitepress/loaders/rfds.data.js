@@ -12,6 +12,7 @@ import {
     findCycles,
     findDuplicateIds,
     findStrayDraftRefs,
+    findUndefinedRefLinks,
     loadPriority,
 } from './rfd-shared.mjs'
 
@@ -60,6 +61,7 @@ export default {
             checkSummaries(rfdDir, files, summaries),
             findDuplicateIds(files),
             findStrayDraftRefs(rfdDir, files, dnnAllowlist),
+            findUndefinedRefLinks(rfdDir, files),
             checkRelationshipDuplicates(graph),
             checkStatusGate(graph),
             checkRequiresOnImplemented(graph),

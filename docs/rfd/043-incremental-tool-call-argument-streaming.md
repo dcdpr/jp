@@ -27,7 +27,7 @@ Today's flow:
 content_block_start(tool_use{id, name})
   → Event::Part with ToolCallRequest{id, name, arguments: {}}     ← UI shows "Calling tool X"
 content_block_delta(input_json_delta: '{"path":')
-  → swallowed by ToolCallRequestAggregator                        ← silence
+  → appended to IndexBuffer::ToolCall.arguments_json             ← silence
 content_block_delta(input_json_delta: '"src/main.rs","content":')
   → swallowed                                                     ← silence
   ... 8+ seconds of JSON chunks ...
@@ -211,20 +211,18 @@ impl FragmentAggregator {
 
 The `EventBuilder` uses this internally to build the final
 `ToolCallRequest.arguments` map, adding each argument as its `Done` arrives.
-This replaces the `ToolCallRequestAggregator` that currently lives in the
-provider layer.
+This replaces the `arguments_json` string buffer on `IndexBuffer::ToolCall`.
 
 ### Where the parsing lives
 
-The incremental JSON parsing happens inside `EventBuilder`, not in the provider
-layer.
-This is a change from today's architecture, where the provider layer's
-`ToolCallRequestAggregator` buffers raw JSON strings and parses them on
-finalize.
+The incremental JSON parsing happens inside `EventBuilder`, which is already
+where argument accumulation lives.
+Today `IndexBuffer::ToolCall` holds an `arguments_json: String` that every
+`ArgumentChunk` is appended to, and the whole buffer is parsed once on flush —
+which is why nothing can be shown until the last chunk arrives.
 
-With this RFD, argument parsing moves entirely to `EventBuilder` via the
-`IncrementalArgParser` and `FragmentAggregator`.
-The `ToolCallRequestAggregator` is removed.
+With this RFD that buffer is replaced by the `IncrementalArgParser` and
+`FragmentAggregator`, so parsing advances chunk by chunk.
 Providers already emit `ToolCall(ArgumentChunk(chunk))` events via the
 `EventPart` redesign from [RFD 012].
 The `EventBuilder` feeds these chunks to the `IncrementalArgParser`, which emits
@@ -338,10 +336,9 @@ EventPart::ToolCall(ToolCallPart::ArgumentChunk(_)) => {
 
 ### Provider changes
 
-Providers already emit `ToolCall(ArgumentChunk(chunk))` per [RFD 012].
-The only change is that the `ToolCallRequestAggregator` is removed from the
-`EventBuilder` and replaced by the `IncrementalArgParser` + `FragmentAggregator`
-pipeline.
+None.
+Providers already emit `ToolCall(ArgumentChunk(chunk))` per [RFD 012]; the
+change is confined to how `EventBuilder` consumes those chunks.
 
 ### Backwards compatibility
 
@@ -376,25 +373,25 @@ pipeline.
 
 ## Alternatives
 
-### Keep ToolCallRequestAggregator alongside the incremental parser
+### Keep the `arguments_json` buffer alongside the incremental parser
 
-Keep the existing `ToolCallRequestAggregator` in the provider layer as the
-authoritative source for the final `ToolCallRequest`, and treat the incremental
-parser as a best-effort side channel for UI progress.
+Keep the existing buffer-and-parse-on-flush path as the authoritative source for
+the final `ToolCallRequest`, and treat the incremental parser as a best-effort
+side channel for UI progress.
 This provides defense in depth — if the incremental parser has a bug, the
-aggregator still produces correct arguments on flush.
+flush-time parse still produces correct arguments.
 
 Rejected because:
 
-- It means buffering every JSON chunk twice (once in the aggregator, once in the
-  parser) for no functional benefit.
+- It means buffering every JSON chunk twice (once in the string buffer, once in
+  the parser) for no functional benefit.
 - The incremental parser + `FragmentAggregator` already produce the complete
   arguments by flush time.
   A second independent parse path adds complexity without improving correctness
-  — if the parser is buggy, the aggregator would silently mask the bug rather
+  — if the parser is buggy, the fallback would silently mask the bug rather
   than surfacing it.
-- Removing the aggregator simplifies the provider layer: providers just forward
-  chunks and let `EventBuilder` handle parsing.
+- One accumulation path keeps `IndexBuffer::ToolCall` holding one representation
+  of the arguments rather than two that can disagree.
 
 ### Use a streaming JSON parser crate
 
@@ -486,7 +483,7 @@ Rejected because:
 ### Phase 1: StreamFragment types and FragmentAggregator
 
 Define the `Scalar`, `StreamFragment`, and `ToolCallArgumentProgress` types in
-`jp_conversation`.
+`jp_llm`, alongside the `EventPart` / `ToolCallPart` types they accompany.
 Implement `FragmentAggregator` with thorough unit tests.
 These are pure data types with no I/O dependencies.
 
@@ -496,8 +493,8 @@ These are pure data types with no I/O dependencies.
 
 ### Phase 2: Incremental JSON parser
 
-Implement `IncrementalArgParser` as a standalone module in `jp_conversation`
-with thorough unit tests.
+Implement `IncrementalArgParser` as a standalone module in `jp_llm` with
+thorough unit tests.
 This is pure logic with no I/O dependencies.
 
 - Input: `push(&mut self, chunk: &str)`
@@ -512,7 +509,7 @@ This is pure logic with no I/O dependencies.
 
 ### Phase 3: Event plumbing
 
-1. Replace the `ToolCallRequestAggregator` in `EventBuilder` with
+1. Replace `IndexBuffer::ToolCall`'s `arguments_json` buffer with
    `IncrementalArgParser` + `FragmentAggregator` for
    `ToolCall(ArgumentChunk(...))` handling.
 2. Update `EventBuilder::handle_part` to return `Vec<ToolCallArgumentProgress>`
@@ -531,11 +528,11 @@ This is follow-up work and can be scoped in a separate PR or RFD.
 - [RFD 012 (Event Part Redesign)][RFD 012] — prerequisite; introduces
   `EventPart` and `ToolCallPart`
 - [Query Stream Pipeline Architecture]
-- `crates/jp_llm/src/stream/aggregator/tool_call_request.rs` —
-  `ToolCallRequestAggregator` (removed by this RFD)
-- `crates/jp_conversation/src/event_builder.rs` — current `EventBuilder`
+- `crates/jp_llm/src/event_builder.rs` — the `EventBuilder` this RFD changes,
+  and `IndexBuffer::ToolCall`, whose `arguments_json` field is the buffer-then-
+  parse-on-flush behavior being replaced
 - `crates/jp_cli/src/cmd/query/turn/coordinator.rs` — `TurnCoordinator`
-- `crates/jp_cli/src/cmd/query/tool/renderer.rs` — `ToolRenderer`
+- `crates/jp_cli/src/render/tool.rs` — `ToolRenderer`
 
 [Query Stream Pipeline Architecture]: ../architecture/query-stream-pipeline.md
 [RFD 012]: 012-typed-llm-streaming-events.md

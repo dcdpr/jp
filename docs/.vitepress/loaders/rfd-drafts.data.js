@@ -9,6 +9,7 @@ import {
     checkStatusGate,
     findCycles,
     findDuplicateIds,
+    findUndefinedRefLinks,
 } from './rfd-shared.mjs'
 
 const draftsDir = resolve(import.meta.dirname, '../../rfd/drafts')
@@ -45,6 +46,7 @@ export default {
         ])
 
         const warnings = [
+            findUndefinedRefLinks(draftsDir, files),
             checkRelationshipDuplicates(graph),
             checkStatusGate(graph),
             checkRequiresOnImplemented(combined),
