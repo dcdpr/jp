@@ -163,7 +163,17 @@ impl Field<'_> {
             // can carry a wrapper that knows its own merge strategy. The
             // partial holds the via type and `generate_from_partial_value`
             // converts back to the field's own type.
-            FieldValue::value(result.partial_via_ty.as_ref().unwrap_or(result.value))
+            let mut value_type =
+                FieldValue::value(result.partial_via_ty.as_ref().unwrap_or(result.value));
+            if result.partial_via_ty.is_some()
+                && let FieldValue::Value { info, .. } = &mut value_type
+            {
+                let mut field_info = TypeInfo::default();
+                extract_inner_type(result.value, &mut field_info);
+                info.optional = field_info.optional;
+                info.boxed = field_info.boxed;
+            }
+            value_type
         };
 
         result

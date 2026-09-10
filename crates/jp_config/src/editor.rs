@@ -119,7 +119,9 @@ impl AssignKeyValue for PartialEditorConfig {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
             _ if kv.p("cmd") => self.cmd.assign(kv)?,
-            _ if kv.p("envs") => kv.try_some_mergeable_strings(&mut self.envs)?,
+            _ if kv.p("envs") => {
+                kv.try_some_mergeable_strings(&mut self.envs, vec_with_strategy)?;
+            }
             _ if kv.p("inline") => self.inline.assign(kv)?,
             _ => return missing_key(&kv),
         }

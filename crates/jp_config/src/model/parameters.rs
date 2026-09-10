@@ -224,7 +224,9 @@ impl AssignKeyValue for PartialParametersConfig {
             "temperature" => self.temperature = kv.try_some_f32()?,
             "top_p" => self.top_p = kv.try_some_f32()?,
             "top_k" => self.top_k = kv.try_some_u32()?,
-            _ if kv.p("stop_words") => kv.try_some_mergeable_strings(&mut self.stop_words)?,
+            _ if kv.p("stop_words") => {
+                kv.try_some_mergeable_strings(&mut self.stop_words, vec_with_strategy)?;
+            }
             _ if kv.p("reasoning") => self.reasoning.assign(kv)?,
             _ => kv.assign_to_entry(self.other.get_or_insert_default())?,
         }

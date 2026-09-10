@@ -118,7 +118,9 @@ impl AssignKeyValue for PartialAnthropicConfig {
                     value => Err(format!("expected a string, got {value}").into()),
                 })?;
             }
-            _ if kv.p("beta_headers") => kv.try_some_mergeable_strings(&mut self.beta_headers)?,
+            _ if kv.p("beta_headers") => {
+                kv.try_some_mergeable_strings(&mut self.beta_headers, vec_with_strategy)?;
+            }
             _ => return missing_key(&kv),
         }
 

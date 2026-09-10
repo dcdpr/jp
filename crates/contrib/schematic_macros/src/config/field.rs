@@ -170,7 +170,15 @@ impl Field<'_> {
                     let inner = convert(quote! { value });
                     quote! { partial.#key.map(|value| Box::new(#inner)) }
                 } else {
-                    let inner = convert(quote! { partial.#key });
+                    let inner = if !via {
+                        quote! { partial.#key }
+                    } else if self.is_required() {
+                        convert(
+                            quote! { partial.#key.ok_or(schematic::ConfigError::MissingRequired{ fields: { let mut fields = fields.clone(); fields.push(#key_quoted.to_owned()); fields } })? },
+                        )
+                    } else {
+                        convert(quote! { partial.#key.unwrap_or_default() })
+                    };
                     quote! { Box::new(#inner) }
                 }
             } else {

@@ -53,7 +53,13 @@ assistant: AssistantConfig
             exclude?: bool
         |: null
       service_tier: "off" | "flex" | "standard" | "priority" | null
-      stop_words?: [string]
+      stop_words?: MergeableVec
+        |: [string]
+        |: MergedVec
+          dedup?: "inherit" | "true" | "false" | bool | null
+          discard_when_merged?: bool
+          strategy?: "append" | "prepend" | "replace" | null
+          value?: [string]
       temperature: float | null
       top_k: int | null
       top_p: float | null
@@ -91,7 +97,13 @@ assistant: AssistantConfig
           tag: string | null
           title: string | null
   tool_choice?: "auto" | "none" | "required" | string
-config_load_paths: [string]
+config_load_paths: MergeableVec
+  |: [string]
+  |: MergedVec
+    dedup?: "inherit" | "true" | "false" | bool | null
+    discard_when_merged?: bool
+    strategy?: "append" | "prepend" | "replace" | null
+    value?: [string]
 conversation: ConversationConfig
   attachments?: MergeableVec
     |:
@@ -151,7 +163,7 @@ conversation: ConversationConfig
                           exclude?: bool
                       |: null
                     service_tier: "off" | "flex" | "standard" | "priority" | null
-                    stop_words?: [string]
+                    stop_words?: @MergeableVec
                     temperature: float | null
                     top_k: int | null
                     top_p: float | null
@@ -204,7 +216,7 @@ conversation: ConversationConfig
                             exclude?: bool
                         |: null
                       service_tier: "off" | "flex" | "standard" | "priority" | null
-                      stop_words?: [string]
+                      stop_words?: @MergeableVec
                       temperature: float | null
                       top_k: int | null
                       top_p: float | null
@@ -271,7 +283,13 @@ conversation: ConversationConfig
                 exclude?: bool
             |: null
           service_tier: "off" | "flex" | "standard" | "priority" | null
-          stop_words?: [string]
+          stop_words?: MergeableVec
+            |: [string]
+            |: MergedVec
+              dedup?: "inherit" | "true" | "false" | bool | null
+              discard_when_merged?: bool
+              strategy?: "append" | "prepend" | "replace" | null
+              value?: [string]
           temperature: float | null
           top_k: int | null
           top_p: float | null
@@ -378,7 +396,13 @@ conversation: ConversationConfig
                   exclude?: bool
               |: null
             service_tier: "off" | "flex" | "standard" | "priority" | null
-            stop_words?: [string]
+            stop_words?: MergeableVec
+              |: [string]
+              |: MergedVec
+                dedup?: "inherit" | "true" | "false" | bool | null
+                discard_when_merged?: bool
+                strategy?: "append" | "prepend" | "replace" | null
+                value?: [string]
             temperature: float | null
             top_k: int | null
             top_p: float | null
@@ -603,7 +627,15 @@ conversation: ConversationConfig
                               exclude?: bool | null
                           |: null
                         service_tier?: "off" | "flex" | "standard" | "priority" | null
-                        stop_words?: [string] | null
+                        stop_words?:
+                          |: MergeableVec
+                            |: [string]
+                            |: PartialMergedVec
+                              dedup?: "inherit" | "true" | "false" | bool | null | null
+                              discard_when_merged?: bool | null
+                              strategy?: "append" | "prepend" | "replace" | null
+                              value?: [string] | null
+                          |: null
                         temperature?: float | null
                         top_k?: int | null
                         top_p?: float | null
@@ -768,7 +800,13 @@ providers: ProviderConfig
   mcp:
     *: McpProviderConfig
       |: StdioConfig
-        arguments?: [string]
+        arguments?: MergeableVec
+          |: [string]
+          |: MergedVec
+            dedup?: "inherit" | "true" | "false" | bool | null
+            discard_when_merged?: bool
+            strategy?: "append" | "prepend" | "replace" | null
+            value?: [string]
         checksum:
           |: ChecksumConfig
             algorithm?: "sha256" | "sha1"
@@ -778,7 +816,13 @@ providers: ProviderConfig
         optional?: bool
         startup_timeout_secs?: int
         type: "stdio"
-        variables?: [string]
+        variables?: MergeableVec
+          |: [string]
+          |: MergedVec
+            dedup?: "inherit" | "true" | "false" | bool | null
+            discard_when_merged?: bool
+            strategy?: "append" | "prepend" | "replace" | null
+            value?: [string]
 style: StyleConfig
   code: CodeConfig
     color?: bool
@@ -820,7 +864,13 @@ style: StyleConfig
             *: unknown
           reasoning: @ReasoningConfig | null
           service_tier: "off" | "flex" | "standard" | "priority" | null
-          stop_words?: [string]
+          stop_words?: MergeableVec
+            |: [string]
+            |: MergedVec
+              dedup?: "inherit" | "true" | "false" | bool | null
+              discard_when_merged?: bool
+              strategy?: "append" | "prepend" | "replace" | null
+              value?: [string]
           temperature: float | null
           top_k: int | null
           top_p: float | null

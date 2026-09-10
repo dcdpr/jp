@@ -146,8 +146,12 @@ impl AssignKeyValue for PartialStdioConfig {
         match kv.key_string().as_str() {
             "" => kv.try_merge_object(self)?,
             "command" => self.command = kv.try_some_from_str()?,
-            _ if kv.p("arguments") => kv.try_some_mergeable_strings(&mut self.arguments)?,
-            _ if kv.p("variables") => kv.try_some_mergeable_strings(&mut self.variables)?,
+            _ if kv.p("arguments") => {
+                kv.try_some_mergeable_strings(&mut self.arguments, ordered_vec_with_strategy)?;
+            }
+            _ if kv.p("variables") => {
+                kv.try_some_mergeable_strings(&mut self.variables, ordered_vec_with_strategy)?;
+            }
             _ if kv.p("checksum") => self.checksum.assign(kv)?,
             "optional" => self.optional = kv.try_some_bool()?,
             "startup_timeout_secs" => self.startup_timeout_secs = kv.try_some_u32()?,
