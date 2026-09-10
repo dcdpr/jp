@@ -14,7 +14,7 @@
 - **Category**: Design
 - **Authors**: rgrant <rgrant@contract.design>
 - **Date**: 2026-08-10
-- **Requires**: [RFD D59]
+- **Requires**: [RFD D68]
 
 ## Summary
 
@@ -39,7 +39,7 @@ recognize a format can skip it.
 Terms this RFD borrows from the rest of the system:
 
 - **Address**: a reference naming a location in a conversation, defined by [RFD
-  D59].
+  D68].
 - **Thread**: the rendered form of a conversation sent to an LLM provider,
   assembled at query time from the event stream.
 - **Storage root**: either of the two directories a conversation is written to,
@@ -82,7 +82,9 @@ specific location, and stay out of the model's input.
   "target": {
     "entry": "k3m9x2a",
     "pointer": "/content",
-    "quote": { "exact": "empty tables parse fine now" }
+    "quote": {
+      "exact": "empty tables parse fine now"
+    }
   },
   "schema_id": ".jp/schemas/review-note/v1.json",
   "data": {
@@ -98,7 +100,7 @@ specific location, and stay out of the model's input.
 - `target` is an address.
   It names a stream entry, a run of text within one, or a range between two
   points.
-  [RFD D59] defines the shape, including the `start` and `end` form a range
+  [RFD D68] defines the shape, including the `start` and `end` form a range
   takes.
   The quote is stored as written rather than encoded, so `jq` over this file
   shows what was pointed at.
@@ -131,19 +133,37 @@ The file is a flat array, matching the shape of `events.json`:
 
 ```json
 [
-  { "id": "a7k2m9x",
-    "target": { "entry": "k3m9x2a", "pointer": "/content",
-                "quote": { "exact": "empty tables parse fine now" } },
+  {
+    "id": "a7k2m9x",
+    "target": {
+      "entry": "k3m9x2a",
+      "pointer": "/content",
+      "quote": {
+        "exact": "empty tables parse fine now"
+      }
+    },
     "schema_id": ".jp/schemas/review-note/v1.json",
-    "data": { "verdict": "wrong",
-              "note": "still panics on a table holding only a comment" } },
-
-  { "id": "b2p8w4t",
-    "target": { "start": { "entry": "m1v5r7d" },
-                "end": { "entry": "q9t3k6b" } },
+    "data": {
+      "verdict": "wrong",
+      "note": "still panics on a table holding only a comment"
+    }
+  },
+  {
+    "id": "b2p8w4t",
+    "target": {
+      "start": {
+        "entry": "m1v5r7d"
+      },
+      "end": {
+        "entry": "q9t3k6b"
+      }
+    },
     "schema_id": ".jp/schemas/review-note/v1.json",
-    "data": { "verdict": "digression",
-              "note": "abandoned approach, skip this on a reread" } }
+    "data": {
+      "verdict": "digression",
+      "note": "abandoned approach, skip this on a reread"
+    }
+  }
 ]
 ```
 
@@ -201,7 +221,7 @@ survives startup.
 
 ### When an annotation stops pointing at anything
 
-[RFD D59] defines when an address resolves.
+[RFD D68] defines when an address resolves.
 An annotation whose address does not resolve is dropped at load, and each drop
 is logged.
 
@@ -240,7 +260,7 @@ identifier changing.
 The write path is a library API in `jp_conversation`, with the CLI as a shell
 over it.
 
-Addresses quote text from the stored stream, and RFD D59 compares those quotes
+Addresses quote text from the stored stream, and RFD D68 compares those quotes
 exactly, so the library captures the quote from the entry itself.
 A hand-pasted quote may carry different bytes than the stored text and would
 then fail to match text that looks identical.
@@ -275,7 +295,7 @@ field would be wrong for someone.
 `schema_id` gives any tool that wants structure the same benefit, without JP
 owning the vocabulary.
 
-**Conversation-level notes.** Simpler, no addressing, no dependency on RFD D59.
+**Conversation-level notes.** Simpler, no addressing, no dependency on RFD D68.
 Rejected because the value is in the link.
 "This tool result is wrong" is worth recording; "something in this conversation
 was wrong" is not.
@@ -314,7 +334,7 @@ Worth revisiting if plugin or background writes arrive.
 
 `Annotation` in `jp_conversation`, carrying its ID, address, `schema_id` and
 `data`, with serde.
-Depends on RFD D59 for the address type.
+Depends on RFD D68 for the address type.
 Mergeable on its own.
 
 ### Phase 2: storage
@@ -348,10 +368,10 @@ Depends on Phase 3.
 - [RFD 072], the plugin protocol a future write path would extend
 - [RFD 077], plugin trust policy
 - [RFD 097], stable entry identifiers
-- [RFD D59], the addressing scheme `target` uses
+- [RFD D68], the addressing scheme `target` uses
 
 [RFD 064]: ../064-non-destructive-conversation-compaction.md
 [RFD 072]: ../072-command-plugin-system.md
 [RFD 077]: ../077-plugin-configuration-and-trust-policy.md
 [RFD 097]: ../097-stable-event-identifiers.md
-[RFD D59]: D68-text-addressing-within-events.md
+[RFD D68]: D68-text-addressing-within-events.md
