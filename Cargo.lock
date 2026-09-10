@@ -2724,7 +2724,6 @@ dependencies = [
  "camino-tempfile",
  "chrono",
  "datetime_literal",
- "directories",
  "jp_config",
  "jp_conversation",
  "jp_storage",
