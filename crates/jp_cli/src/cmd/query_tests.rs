@@ -39,9 +39,10 @@ use tokio::{runtime::Runtime, sync::broadcast};
 
 use super::*;
 use crate::{
-    Globals, KeyValueOrPath,
+    Cli, Globals, KeyValueOrPath,
     cmd::target::{ConversationTarget, PickerFilter},
     config_pipeline::ConfigPipeline,
+    resolve_config,
     signals::testing::detached_router,
 };
 
@@ -277,7 +278,9 @@ fn build_query_config(
     });
 
     let mut partial = match conversation_partial {
-        Some(conversation_partial) => pipeline.partial_with_conversation(conversation_partial),
+        Some((conversation_partial, unsets)) => {
+            pipeline.partial_with_conversation(conversation_partial, &unsets)
+        }
         None => pipeline.partial_without_conversation(),
     }
     .unwrap();
@@ -1297,6 +1300,69 @@ fn test_bool_disabled_builtin_can_still_be_forced() {
         query.effective_tool_choice(&AppConfig::new_test()),
         ToolChoice::Function("describe_tools".into())
     );
+}
+
+#[test]
+fn resolve_config_keeps_a_cleared_conversation_field_across_invocations() {
+    let tmp = Utf8TempDir::new().unwrap();
+    let mut workspace = Workspace::in_memory(tmp.path());
+    workspace.load_conversation_index();
+    let mut base = AppConfig::new_test();
+    base.assistant.name = Some("Bot".to_owned());
+    let base = Arc::new(base);
+    let conversation_id = make_id(4001);
+    workspace.create_conversation_with_id(
+        conversation_id,
+        Conversation::default(),
+        Arc::clone(&base),
+    );
+    let id = conversation_id.to_string();
+    let cli = Cli::try_parse_from([
+        "jp",
+        "query",
+        "--id",
+        &id,
+        "--cfg",
+        "assistant.name:=null",
+        "hello",
+    ])
+    .unwrap();
+
+    let (first, mut handles, _, _) = resolve_config(
+        &cli.command,
+        || Ok(base.to_partial()),
+        &cli.globals.config,
+        &mut workspace,
+        None,
+        None,
+        false,
+    )
+    .unwrap();
+    assert_eq!(first.assistant.name, None);
+    {
+        let lock = workspace.test_lock(handles.remove(0));
+        let delta = turn_config_delta(&first, &lock).unwrap().unwrap();
+        assert_eq!(delta.unsets, ["assistant.name"]);
+        lock.as_mut()
+            .update_events(|events| events.add_config_delta(delta));
+        assert_eq!(lock.events().config().unwrap().assistant.name, None);
+    }
+
+    let cli = Cli::try_parse_from(["jp", "query", "--id", &id, "hello again"]).unwrap();
+    let (second, mut handles, _, _) = resolve_config(
+        &cli.command,
+        || Ok(base.to_partial()),
+        &cli.globals.config,
+        &mut workspace,
+        None,
+        None,
+        false,
+    )
+    .unwrap();
+    assert_eq!(second.assistant.name, None);
+    let lock = workspace.test_lock(handles.remove(0));
+    assert_eq!(turn_config_delta(&second, &lock).unwrap(), None);
+    assert_eq!(lock.events().config_deltas().count(), 1);
 }
 
 #[test]

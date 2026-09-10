@@ -1052,7 +1052,9 @@ pub(crate) fn resolve_config(
     };
 
     let mut partial = match conversation_partial {
-        Some(conversation_config) => pipeline.partial_with_conversation(conversation_config)?,
+        Some((conversation_config, unsets)) => {
+            pipeline.partial_with_conversation(conversation_config, &unsets)?
+        }
         None => pipeline.partial_without_conversation()?,
     };
 
