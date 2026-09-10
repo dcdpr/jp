@@ -122,13 +122,13 @@ fn collect_variant_tokens(variants: Vec<Variant<'_>>) -> CollectedVariants {
     let mut default_index = None;
 
     for variant in variants {
-        // `FromStr` and `Display` cover every variant so a skipped one stays
-        // constructible in Rust; the schema and `variants()` describe what a
-        // user may write, which is what skipping it takes it out of.
+        // Every parser covers every variant, so a hidden one keeps working;
+        // the schema and `variants()` are what the type advertises, and that
+        // is what hiding takes it out of.
         display_stmts.push(variant.get_display_fmt());
         from_stmts.push(variant.get_from_str());
 
-        if !variant.skipped {
+        if !variant.hidden {
             #[cfg(feature = "schema")]
             if variant.default {
                 default_index = Some(schema_types.len());

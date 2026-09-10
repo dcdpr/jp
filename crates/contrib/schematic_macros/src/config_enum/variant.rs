@@ -24,18 +24,25 @@ pub struct VariantArgs {
     /// The schema keeps the canonical value as the variant's literal and lists
     /// these beside it, so a consumer can offer one and still accept all.
     pub aliases: Vec<syn::LitStr>,
+
+    /// Keep this variant out of the schema and out of `variants()`.
+    ///
+    /// For a variant that works but is not offered: a provider backed by a
+    /// mock, say, which a user should never be shown or steered towards but
+    /// which still has to parse when a test names it.
+    pub hidden: bool,
 }
 
 pub struct Variant<'l> {
     pub args: VariantArgs,
     #[cfg_attr(not(feature = "schema"), allow(dead_code))]
     pub default: bool,
-    /// Whether serde leaves this variant out of the wire vocabulary.
+    /// Whether the variant is left out of what the type advertises.
     ///
-    /// `FromStr` and `Display` still handle it, so a variant reserved for
-    /// internal use stays constructible from a string in Rust while never being
-    /// offered to, or accepted from, a user.
-    pub skipped: bool,
+    /// Every parser still handles it; only the schema and `variants()` leave it
+    /// out, so a variant reserved for internal use keeps working without being
+    /// offered to a user.
+    pub hidden: bool,
     pub serde_args: FieldSerdeArgs,
     pub attrs: Vec<&'l Attribute>,
     pub name: &'l Ident,
@@ -84,7 +91,7 @@ impl Variant<'_> {
             default: attrs
                 .iter()
                 .any(|v| get_meta_path(&v.meta).is_ident("default")),
-            skipped: serde_args.skip,
+            hidden: args.hidden || serde_args.skip,
             attrs,
             name: &variant.ident,
             value,

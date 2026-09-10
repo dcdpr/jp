@@ -566,21 +566,8 @@ impl FromStr for PartialModelIdConfig {
 }
 
 /// The list of supported providers.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Hash,
-    Default,
-    Serialize,
-    Deserialize,
-    ConfigEnum,
-)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, ConfigEnum)]
+#[config(rename_all = "lowercase", serde_as_string)]
 pub enum ProviderId {
     #[default]
     /// Anthropic provider.
@@ -615,7 +602,7 @@ pub enum ProviderId {
 
     /// Test provider for unit and integration tests.
     /// Not a real provider.
-    #[serde(skip)]
+    #[variant(hidden)]
     Test,
 }
 
