@@ -20,12 +20,8 @@ use super::{
     PersistBackend, Projection, SanitizeReport, SessionBackend, TrashedConversation,
 };
 use crate::{
-    CONVERSATIONS_DIR, LoadError, Storage, dir_entries,
-    error::Result,
-    get_expiring_timestamp,
-    load::load_json,
-    load_conversation_id_from_entry,
-    lock::{ConversationFileLock, LockInfo},
+    CONVERSATIONS_DIR, LoadError, Storage, dir_entries, error::Result, get_expiring_timestamp,
+    load::load_json, load_conversation_id_from_entry, lock::LockInfo,
     validate::trash_invalid_conversation,
 };
 
@@ -336,7 +332,7 @@ impl LockBackend for FsStorageBackend {
             .storage
             .try_lock_conversation(conversation_id, session)?
         {
-            Some(lock) => Ok(Some(Box::new(lock))),
+            Some(guard) => Ok(Some(Box::new(guard))),
             None => Ok(None),
         }
     }
@@ -374,8 +370,6 @@ impl SessionBackend for FsStorageBackend {
             .collect()
     }
 }
-
-impl ConversationLockGuard for ConversationFileLock {}
 
 #[cfg(debug_assertions)]
 impl FsStorageBackend {

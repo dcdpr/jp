@@ -3,6 +3,7 @@
 pub mod backend;
 pub mod error;
 pub mod lock;
+pub mod resource_lock;
 pub mod value;
 
 pub mod load;
