@@ -1,6 +1,6 @@
 # Dedup field schemas omit the boolean and `inherit` input shapes
 
-- **Status**: Todo
+- **Status**: Done
 - **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-09-04
