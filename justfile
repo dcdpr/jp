@@ -1763,9 +1763,9 @@ _rfd-link SOURCE TARGET FORWARD INVERSE:
 # Advance an RFD's status: Draft -> Discussion -> Accepted -> Implemented.
 #
 # For drafts (DNN-prefixed files), assigns the next available permanent number
-# and renames the file. When promoting to Accepted, offers to turn each phase of
-# the Implementation Plan into a ticket carrying `Implements: NNN` (prompting on
-# TTY, defaulting to yes in non-interactive runs).
+# and renames the file. When promoting to Accepted, offers to file the RFD's
+# tracking ticket (prompting on TTY, defaulting to yes in non-interactive runs);
+# see `rfd-track`.
 #
 # Renaming a draft rewrites references to its old id across every RFD and every
 # ticket under `docs/ticket/`. Ticket link targets move from
@@ -2069,19 +2069,19 @@ rfd-promote NNN: _install-jp _install-comfort _install-ticket
             echo "Updated ${updated} cross-reference(s) in RFDs and tickets."
         fi
 
-    # --- Discussion -> Accepted: offer to seed phase tickets ---
+    # --- Discussion -> Accepted: offer to file the tracking ticket ---
     elif [ "$current" = "Discussion" ]; then
         sed "s/^- \*\*Status\*\*: Discussion/- **Status**: Accepted/" "$file" > "${file}.tmp"
         mv "${file}.tmp" "$file"
         echo "${file}: Discussion -> Accepted"
 
         # Acceptance records an agreed direction, not a commitment to start
-        # building, so the tickets are offered rather than created. Whoever
-        # accepts reviews them before they land. Non-interactive runs default to
-        # creating them.
+        # building, so the ticket is offered rather than created. Whoever
+        # accepts reviews it before it lands. Non-interactive runs default to
+        # creating it.
         create_tickets=true
         if [ -r /dev/tty ] && [ -w /dev/tty ]; then
-            printf "Create phase tickets for %s? [Y/n] " "$(basename "$file")" > /dev/tty
+            printf "File the tracking ticket for %s? [Y/n] " "$(basename "$file")" > /dev/tty
             if IFS= read -r answer < /dev/tty; then
                 case "$answer" in
                     n|N|no|No|NO) create_tickets=false ;;
@@ -2090,38 +2090,16 @@ rfd-promote NNN: _install-jp _install-comfort _install-ticket
         fi
 
         if [ "$create_tickets" = true ]; then
-            # The phases differ per RFD, so they're read out of the document
-            # rather than templated. Structured output keeps the result parseable.
-            SCHEMA='{"type":"object","properties":{"phases":{"type":"array","description":"One entry per phase of the Implementation Plan, in order","items":{"type":"object","properties":{"title":{"type":"string","description":"Imperative title, at most 60 characters"},"summary":{"type":"string","description":"What the phase delivers, one to three sentences of markdown"}},"required":["title","summary"]}}},"required":["phases"]}'
-            PROMPT="Read the attached RFD and list the phases of its Implementation Plan, in order. Give each a short imperative title and a summary of what it delivers. Return an empty array if the RFD has no Implementation Plan."
-
-            result=$(
-                jp query --new --local --tmp=5m --format=json --no-reasoning --no-tools \
-                    --schema "$SCHEMA" \
-                    --attachment "$file" \
-                    "$PROMPT" \
-                | jq -s '.[-1]' 2>/dev/null
-            ) || true
-
-            count=$(echo "$result" | jq '.phases | length' 2>/dev/null || echo 0)
-            count=${count:-0}
-
-            if [ "$count" -eq 0 ]; then
-                echo "No implementation phases found; no tickets created." >&2
+            # The status is already written, so a ticket that cannot be filed
+            # must not take the promotion down with it. `rfd-track` is
+            # idempotent, so the suggested retry is safe.
+            if ticket=$(just rfd-track "$rfd_id"); then
+                echo "Review ${ticket} before committing it; 'just ticket-list' shows the board."
             else
-                i=0
-                while [ "$i" -lt "$count" ]; do
-                    title=$(echo "$result" | jq -r ".phases[$i].title")
-                    summary=$(echo "$result" | jq -r ".phases[$i].summary")
-                    jp ticket add feature "$title" \
-                        --implements "$rfd_id" \
-                        --body "$summary"
-                    i=$((i + 1))
-                done
-                echo "Review the tickets before committing them; 'just ticket-list' shows the board."
+                echo "Could not file the tracking ticket; run 'just rfd-track ${rfd_id}' to retry." >&2
             fi
         else
-            echo "Skipped phase tickets. File them later with 'just ticket-add'." >&2
+            echo "Skipped the tracking ticket. File it later with 'just rfd-track ${rfd_id}'." >&2
         fi
 
     # --- Accepted -> Implemented ---
@@ -2223,6 +2201,196 @@ rfd-promote NNN: _install-jp _install-comfort _install-ticket
     # consolidate reference-style link definitions at the bottom, matching the
     # markdown formatting CI enforces (`fmt-markdown-ci`).
     comfort --language markdown --format-markdown --reference-links "$final_file"
+
+# File or refresh an RFD's tracking ticket, printing its id on stdout.
+#
+# The tracking ticket stands for the RFD's implementation as a whole: one ticket
+# carrying `Implements: NNN` and the label `type=tracking`, holding the
+# Implementation Plan as its description. A phase that needs its own card is
+# filed separately and carries `Implements: NNN` without the label.
+#
+# Idempotent: an existing tracking ticket is reused, never duplicated. Reading
+# the plan needs a provider, so a run without one files the ticket with a
+# `<!-- rfd-plan: pending -->` marker in place of the plan, and the next run
+# fills it in.
+#
+# Only Accepted and Implemented RFDs carry a tracking ticket; anything earlier
+# is refused.
+[group('rfd')]
+rfd-track NNN: _install-jp _install-ticket
+    #!/usr/bin/env sh
+    set -eu
+
+    out=$(just _rfd-resolve "{{NNN}}") || exit 1
+    rfd_id="${out%% *}"
+    file="${out#* }"
+
+    just _rfd-trackable "$file" || exit 1
+
+    id=$(just _rfd-tracking "$rfd_id")
+
+    if [ -z "$id" ]; then
+        title=$(sed -n 's/^# RFD [0-9A-Z]*: //p' "$file" | head -1)
+        if [ -z "$title" ]; then
+            echo "No heading found in ${file}; cannot title the ticket." >&2
+            exit 1
+        fi
+        # Read into a variable rather than inline: a command substitution in an
+        # argument list keeps its exit status to itself, so an interrupted plan
+        # read would file a ticket with an empty description.
+        plan=$(just _rfd-plan "$rfd_id" "$file")
+        jp ticket add feature "$title" \
+            --implements "$rfd_id" \
+            --label type=tracking \
+            --body "$plan" >&2
+        id=$(just _rfd-tracking "$rfd_id")
+        if [ -z "$id" ]; then
+            echo "Filed a tracking ticket for RFD ${rfd_id} but cannot find it back." >&2
+            exit 1
+        fi
+    else
+        # Only a ticket still carrying the marker is rewritten: the description
+        # is editable by hand, and a later run must not overwrite that.
+        detail=$(jp ticket show "$id" --json)
+        body=$(printf '%s' "$detail" | jq -r '.description')
+        case "$body" in
+            *'<!-- rfd-plan: pending -->'*)
+                plan=$(just _rfd-plan "$rfd_id" "$file")
+                case "$plan" in
+                    *'<!-- rfd-plan: pending -->'*) ;;
+                    *) jp ticket edit "$id" --body "$plan" >&2 ;;
+                esac
+                ;;
+        esac
+    fi
+
+    echo "$id"
+
+# Mark an RFD as in development.
+#
+# Files the RFD's tracking ticket if it has none, then moves that ticket to In
+# Progress — which is what the priority board reports as "in development". This
+# is what the board's checkbox runs, so the first mark on an RFD takes as long
+# as reading its plan (see `rfd-track`).
+[group('rfd')]
+rfd-start NNN:
+    #!/usr/bin/env sh
+    set -eu
+
+    id=$(just rfd-track "{{NNN}}") || exit 1
+    jp ticket edit "$id" --status "In Progress"
+
+# Mark an RFD as no longer in development.
+#
+# Moves the RFD's tracking ticket back to Todo. Phase tickets are left where
+# they are, and an RFD without a tracking ticket is already not in development,
+# so nothing is filed.
+[group('rfd')]
+rfd-stop NNN: _install-jp _install-ticket
+    #!/usr/bin/env sh
+    set -eu
+
+    # Allowed at any status, unlike marking: a mark left behind by an RFD moving
+    # back to Discussion must still be clearable, and stopping files nothing.
+    id=$(just _rfd-tracking "{{NNN}}") || exit 1
+    if [ -z "$id" ]; then
+        echo "RFD {{NNN}} has no tracking ticket; nothing to stop."
+        exit 0
+    fi
+    jp ticket edit "$id" --status Todo
+
+# Internal: refuse an RFD that is not far enough along to be built.
+#
+# Implementation begins at Accepted (see RFD 001), so a tracking ticket does
+# too. Drafts and Discussion RFDs pass `_rfd-resolve`, and get a meaningful
+# "is 'Draft'" error here rather than a filed ticket.
+[private]
+_rfd-trackable FILE:
+    #!/usr/bin/env sh
+    set -eu
+
+    file="{{FILE}}"
+    status=$(sed -n 's/^- \*\*Status\*\*: \([A-Za-z]*\).*/\1/p' "$file" | head -1)
+    case "$status" in
+        Accepted|Implemented) ;;
+        *)
+            echo "Cannot track: $(basename "$file") is '${status}'." >&2
+            echo "Only Accepted or Implemented RFDs carry a tracking ticket." >&2
+            exit 1 ;;
+    esac
+
+# Internal: print an RFD's tracking ticket id, or nothing when it has none.
+#
+# The tracking ticket is the one carrying both `Implements: NNN` and the label
+# `type=tracking`. Phase tickets name the same RFD without the label, so they
+# are never returned here.
+[private]
+_rfd-tracking NNN:
+    #!/usr/bin/env sh
+    set -eu
+
+    out=$(just _rfd-resolve "{{NNN}}") || exit 1
+    rfd_id="${out%% *}"
+
+    # Read into a variable first: in a pipeline, `jq` succeeding on empty input
+    # hides a failure from `jp` and reports the RFD as having no tracking
+    # ticket, which is how a second one gets filed.
+    tickets=$(jp ticket list --json --label type=tracking)
+
+    # The flag has already filtered by label; the selector repeats it so the
+    # whole rule reads in one place.
+    printf '%s' "$tickets" \
+        | jq -r --arg rfd "$rfd_id" '
+            first(
+                .[]
+                | select((.labels.type // []) | index("tracking"))
+                | select(((.implements // "") | sub("^RFD +"; "")) == $rfd)
+                | .id
+            ) // empty'
+
+# Internal: render the description for an RFD's tracking ticket.
+#
+# Prints a link to the RFD followed by its Implementation Plan as a list. The
+# plan is read out of the document by `jp query` rather than templated, because
+# the phases differ per RFD; structured output keeps the result parseable.
+#
+# When the query fails, or the RFD has no Implementation Plan, the marker
+# `<!-- rfd-plan: pending -->` stands in for the plan. `rfd-track` retries while
+# that marker is present.
+[private]
+_rfd-plan NNN FILE:
+    #!/usr/bin/env sh
+    set -eu
+
+    rfd_id="{{NNN}}"
+    file="{{FILE}}"
+
+    # Tickets live one directory over from the RFDs, so their links to an RFD
+    # are `../rfd/<file>`.
+    link="../${file#docs/}"
+    printf 'Tracking ticket for [RFD %s](%s).\n' "$rfd_id" "$link"
+
+    SCHEMA='{"type":"object","properties":{"phases":{"type":"array","description":"One entry per phase of the Implementation Plan, in order","items":{"type":"object","properties":{"title":{"type":"string","description":"Imperative title, at most 60 characters"},"summary":{"type":"string","description":"What the phase delivers, one to three sentences of markdown"}},"required":["title","summary"]}}},"required":["phases"]}'
+    PROMPT="Read the attached RFD and list the phases of its Implementation Plan, in order. Give each a short imperative title and a summary of what it delivers. Return an empty array if the RFD has no Implementation Plan."
+
+    result=$(
+        jp query --new --local --tmp=5m --format=json --no-reasoning --no-tools \
+            --schema "$SCHEMA" \
+            --attachment "$file" \
+            "$PROMPT" \
+        | jq -s '.[-1]' 2>/dev/null
+    ) || true
+
+    count=$(echo "$result" | jq '.phases | length' 2>/dev/null || echo 0)
+    count=${count:-0}
+
+    if [ "$count" -eq 0 ]; then
+        printf '\n<!-- rfd-plan: pending -->\n'
+        exit 0
+    fi
+
+    printf '\n## Implementation plan\n\n'
+    echo "$result" | jq -r '.phases[] | "- **" + .title + "**: " + .summary'
 
 # Renumber an RFD to a new id, updating every cross-reference.
 #
@@ -3324,6 +3492,29 @@ plugin-build-local: _install-jp (plugin-build "")
         chmod +x "${dir}/jp-${id}"
         echo "Installed jp-${id} → ${dir}/jp-${id}"
     done
+
+# Build one command plugin from this checkout and install it onto `$PATH`.
+#
+# PLUGIN is a directory name under `crates/plugins/command/`; run without a
+# valid one to list them. The binary lands in `~/.cargo/bin` as `jp-<plugin>`,
+# where `jp` finds it ahead of a released build.
+#
+# The `_install-*` recipes skip their rebuild whenever the binary is already on
+# `$PATH`, so a plugin built before a source change keeps running until this
+# replaces it.
+[group('plugins')]
+install-plugin PLUGIN:
+    #!/usr/bin/env sh
+    set -eu
+
+    dir="crates/plugins/command/{{PLUGIN}}"
+    if [ ! -f "${dir}/Cargo.toml" ]; then
+        echo "No command plugin named '{{PLUGIN}}'. Available:" >&2
+        ls crates/plugins/command | sed 's/^/  /' >&2
+        exit 1
+    fi
+
+    cargo install {{quiet_flag}} --locked --path "$dir" --debug
 
 # Run all formatting-related tasks
 fmt: (_rustup_component "rustfmt") _install-comfort

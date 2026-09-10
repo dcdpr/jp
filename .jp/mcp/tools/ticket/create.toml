@@ -59,9 +59,13 @@ type = "string"
 required = false
 summary = "The RFD this work comes from, e.g. `045`."
 description = """
-Set this when the ticket is a phase of an accepted RFD's implementation plan.
-An RFD counts as in development while a ticket claiming it sits in the In
-Progress column, so this is what puts it there.
+Set this when the work comes from an accepted RFD, whether the ticket covers the
+whole implementation or one phase of it.
+
+The RFD's *tracking* ticket carries this field together with the label
+`type=tracking`, and that one ticket is what the RFD priority board reports as
+in development. An RFD has at most one, filed by `just rfd-track`, so name
+`type=tracking` here only when the RFD has none.
 """
 
 [conversation.tools.ticket_create.parameters.labels]

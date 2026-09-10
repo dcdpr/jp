@@ -79,6 +79,7 @@ enum = [
   "type=pre-rfd",
   "type=question",
   "type=task",
+  "type=tracking",
 ]
 
 # Includes retired values: see the note above.
@@ -144,6 +145,7 @@ enum = [
   "type=pre-rfd",
   "type=question",
   "type=task",
+  "type=tracking",
 ]
 
 # Includes retired values and bare keys: see the note above.
@@ -214,4 +216,5 @@ enum = [
   "type=pre-rfd",
   "type=question",
   "type=task",
+  "type=tracking",
 ]

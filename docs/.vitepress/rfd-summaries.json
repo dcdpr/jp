@@ -1,6 +1,6 @@
 {
   "001-jp-rfd-process.md": {
-    "hash": "530085202f0a497981e72bffbc56f6cbf4164bb29f1fd45b50335dd4fecfba34",
+    "hash": "9a3a1f2bbaa8b805d56395bb34b5aac8fde84c8359d90cc046cc3d0cd612d65a",
     "summary": "Establishes lightweight Request for Discussion process for proposing and tracking design decisions with clear lifecycle states."
   },
   "002-using-llms.md": {
@@ -396,7 +396,7 @@
     "summary": "Conversations gain configurable key-value labels—static, command-backed, or CLI-set—managed through `jp c label` and used to filter by context like VCS branches."
   },
   "100-in-repo-ticket-tracking.md": {
-    "hash": "fe5755327f6da3db185b61ad49627b6e8196f701d246201dfac5c745f6b3099f",
+    "hash": "2acad9c85b40491156a158871f0d884fd79a12913df1342b6f05f4014e62ec39",
     "summary": "Lightweight markdown-based work items tracked in-repo, displacing GitHub issues from assistant context with kanban board and RFD promotion mechanics."
   },
   "102-collision-resistant-ticket-identifiers.md": {

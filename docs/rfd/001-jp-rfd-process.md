@@ -339,16 +339,16 @@ All categories use the same metadata:
 
 Implementation progress is tracked in [tickets], not in the metadata header.
 When `just rfd-promote` advances an RFD from Discussion to Accepted, it offers
-to turn each phase of the Implementation Plan into a ticket carrying
-`Implements: NNN`.
-The phases are read out of the document by `jp`, so the tickets match the plan
-rather than a fixed template, and whoever accepts the prompt reviews them before
-they land.
+to file the RFD's tracking ticket: one ticket carrying `Implements: NNN` and the
+label `type=tracking`, with the Implementation Plan as its description.
+The plan is read out of the document by `jp`, so the ticket matches the RFD
+rather than a fixed template, and whoever accepts the prompt reviews it before
+it lands.
 
 Accepting an RFD records an agreed direction, not a commitment to start
-building, which is why the tickets are offered rather than created.
-Decline the prompt and file them later with `just ticket-create` when the work
-actually starts.
+building, which is why the ticket is offered rather than created.
+Decline the prompt and file it later with `just rfd-track NNN`, which is also
+what marking the RFD in development on the [priority board] runs.
 
 A handful of older RFDs still carry a `Tracking Issue` field pointing at a
 GitHub issue.
@@ -450,8 +450,8 @@ filled in automatically by `rfd-promote`.
    The promotion is gated on the RFD's `Requires` *and* `Extends` fields: every
    entry in either field must be at status `Accepted`, `Implemented`, or
    `Superseded`.
-2. Accept the prompt to file a ticket per implementation phase, or decline it
-   and file them when the work starts.
+2. Accept the prompt to file the RFD's tracking ticket, or decline it and file
+   it when the work starts.
 3. Merge the pull request.
 
 ### After Acceptance
@@ -483,7 +483,12 @@ Run `just --list --group rfd` to see them.
 | `just rfd-draft CATEGORY TITLE` | Create a new draft under `drafts/`.      |
 | `just rfd-promote NNN`          | Advance status. Draft → Discussion       |
 |                                 | assigns number; Discussion → Accepted    |
-|                                 | offers phase tickets.                    |
+|                                 | offers the tracking ticket.              |
+| `just rfd-track NNN`            | File or refresh the RFD's tracking       |
+|                                 | ticket, printing its id.                 |
+| `just rfd-start NNN`            | Mark the RFD in development: its         |
+|                                 | tracking ticket moves to In Progress.    |
+| `just rfd-stop NNN`             | Move that ticket back to Todo.           |
 | `just rfd-extend NNN MMM`       | Record that RFD MMM extends RFD NNN,     |
 |                                 | updating both. Accepts draft IDs (DNN)   |
 |                                 | on either side.                          |
@@ -607,4 +612,5 @@ The steps are:
 [`000-design-template.md`]: 000-design-template.md
 [`000-guide-template.md`]: 000-guide-template.md
 [`000-process-template.md`]: 000-process-template.md
+[priority board]: priority.md
 [tickets]: 100-in-repo-ticket-tracking.md

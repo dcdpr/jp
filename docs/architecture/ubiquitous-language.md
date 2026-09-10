@@ -349,6 +349,17 @@ Tool calls are events within a Turn.
 The tool itself can be a built-in, a local command, an MCP-provided tool, or a
 plugin.
 
+### Tracking Ticket
+
+The single ticket that stands for an RFD's implementation as a whole, carrying
+its implementation plan as the description.
+It is the ticket whose `Implements` field names the RFD and whose labels include
+`type=tracking`; an RFD has at most one.
+Whether that ticket is In Progress is what "this RFD is in development" means.
+
+**Not the same as** a phase ticket, which names the same RFD in `Implements` but
+carries no `type=tracking` label and covers one slice of the work.
+
 ### Turn
 
 A group of conversation events delimited by a `TurnStart` marker: one user chat
