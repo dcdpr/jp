@@ -961,7 +961,18 @@ impl schematic::Schematic for ToolSource {
     }
 
     fn build_schema(mut schema: schematic::SchemaBuilder) -> schematic::Schema {
-        schema.string(schematic::schema::StringType::default())
+        // The three prefixes are the whole vocabulary, and `mcp` is the only
+        // one that requires a name after it. A bare string would accept
+        // `source = "nonsense"`, which `FromStr` rejects.
+        let mut schema = schema.string(schematic::schema::StringType {
+            pattern: Some(r"^(builtin|local)(\..+)?$|^mcp\.[^.]+(\..+)?$".to_owned()),
+            ..schematic::schema::StringType::default()
+        });
+        schema.set_description(
+            "Where a tool comes from: `builtin[.<tool>]`, `local[.<tool>]`, or \
+             `mcp.<server>[.<tool>]`.",
+        );
+        schema
     }
 }
 

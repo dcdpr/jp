@@ -649,7 +649,7 @@ conversation: ConversationConfig
                 tool_choice?: "auto" | "none" | "required" | string | null
         result: "unattended" | "ask" | "edit" | "skip" | null
         run: "ask" | "unattended" | "edit" | "skip" | null
-        source: string
+        source: string(/^(builtin|local)(\..+)?$|^mcp\.[^.]+(\..+)?$/)
         style:
           |: DisplayStyleConfig
             error: ErrorStyleConfig
