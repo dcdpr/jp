@@ -55,3 +55,33 @@ T-0dd9cpr and RFD 048).
 Out of scope: predicting a substitution before dispatch.
 That would need OpenRouter's per-model endpoint listing on the query path, and
 the provider already resolves the condition server-side and tells us afterwards.
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-09-09T09:54:19Z
+
+Anthropic's `flex` now resolves to the Message Batches API rather than a
+refusal, which adds a case here.
+
+A batched request is billed at 50% of standard rates, and the batch result's
+`usage` object carries token counts but nothing that names the discount.
+So the "which tier actually served this" report cannot be read off the response
+for this route — it has to come from the fact that JP submitted a batch at all.
+
+`jp_llm::provider::anthropic::Transport` is the place that knows, and it is
+already the single point both routes pass through.
+
+-----
+
+- **From**: jp
+- **Date**: 2026-09-09T10:50:49Z
+- **Re**: #1
+
+Withdrawn: the branch that made `flex` resolve to the Message Batches API was
+abandoned, so `flex` on `anthropic` still fails with `UnsupportedServiceTier`
+and this ticket's original scope is unchanged.
+
+Findings from that branch are recorded in T-0g1w1mw.
