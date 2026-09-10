@@ -154,7 +154,17 @@ impl Field<'_> {
             // can carry a wrapper that knows its own merge strategy. The
             // partial holds the via type and `generate_from_partial_value`
             // converts back to the field's own type.
-            FieldValue::value(result.partial_via_ty.as_ref().unwrap_or(result.value))
+            let mut value_type =
+                FieldValue::value(result.partial_via_ty.as_ref().unwrap_or(result.value));
+            if result.partial_via_ty.is_some()
+                && let FieldValue::Value { info, .. } = &mut value_type
+            {
+                let mut field_info = TypeInfo::default();
+                extract_inner_type(result.value, &mut field_info);
+                info.optional = field_info.optional;
+                info.boxed = field_info.boxed;
+            }
+            value_type
         };
 
         result
@@ -361,7 +371,7 @@ impl Field<'_> {
         let deprecated = map_option_field_quote("deprecated", extract_deprecated(&self.attrs));
         let env_var = map_option_field_quote("env_var", self.get_env_var());
 
-        let value = self.value;
+        let value = self.partial_via_ty.as_ref().unwrap_or(self.value);
         let mut inner_schema = if self.is_nested() {
             quote! { schema.infer_as_nested::<#value>() }
         } else {

@@ -75,6 +75,7 @@ use crate::{
     conversation::{ConversationConfig, PartialConversationConfig},
     delta::{delta_opt_mergeable_vec, path as delta_path},
     editor::{EditorConfig, PartialEditorConfig},
+    internal::merge::vec_with_strategy,
     interrupt::{InterruptConfig, PartialInterruptConfig},
     loader::{LoaderConfig, PartialLoaderConfig},
     partial::partial_opt,
@@ -237,7 +238,7 @@ impl AssignKeyValue for PartialAppConfig {
                     _ => type_error(kv.key(), &kv.value, &["string"]).map_err(Into::into),
                 };
 
-                kv.try_some_mergeable_vec(&mut self.config_load_paths, parser)?;
+                kv.try_some_mergeable_vec(&mut self.config_load_paths, parser, vec_with_strategy)?;
             }
             _ if kv.p("assistant") => self.assistant.assign(kv)?,
             _ if kv.p("conversation") => self.conversation.assign(kv)?,
@@ -826,3 +827,7 @@ mod tests;
 #[cfg(test)]
 #[path = "unset_tests.rs"]
 mod unset_tests;
+
+#[cfg(test)]
+#[path = "list_strategy_tests.rs"]
+mod list_strategy_tests;

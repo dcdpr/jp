@@ -54,7 +54,9 @@ impl AssignKeyValue for PartialAnthropicConfig {
             "api_key_env" => self.api_key_env = kv.try_some_string()?,
             "base_url" => self.base_url = kv.try_some_string()?,
             "chain_on_max_tokens" => self.chain_on_max_tokens = kv.try_some_bool()?,
-            "beta_headers" => kv.try_some_mergeable_strings(&mut self.beta_headers)?,
+            "beta_headers" => {
+                kv.try_some_mergeable_strings(&mut self.beta_headers, vec_with_strategy)?;
+            }
             _ => return missing_key(&kv),
         }
 
