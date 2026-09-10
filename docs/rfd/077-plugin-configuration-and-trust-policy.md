@@ -369,29 +369,30 @@ protocol as the future validation layer.
 
 ## Implementation Plan
 
-### Phase 1: Config types and dispatch integration
+- [x] **Phase 1: Config types and dispatch integration**
 
-- Add `PluginsConfig`, `CommandPluginConfig`, and `RunPolicy` to `jp_config`.
-- Wire `plugins` into `AppConfig` with full `AssignKeyValue` /
-  `PartialConfigDelta` / `ToPartial` support.
-- Reuse `ChecksumConfig` from MCP for checksum pinning.
-- Update `resolve_plugin_binary` to read config for policy decisions.
-- Remove the standalone approval file system.
-- Can be merged independently.
+  - Add `PluginsConfig`, `CommandPluginConfig`, and `RunPolicy` to
+        `jp_config`.
+  - Wire `plugins` into `AppConfig` with full `AssignKeyValue` /
+        `PartialConfigDelta` / `ToPartial` support.
+  - Reuse `ChecksumConfig` from MCP for checksum pinning.
+  - Update `resolve_plugin_binary` to read config for policy decisions.
+  - Remove the standalone approval file system.
+  - Can be merged independently.
 
-### Phase 2: Options forwarding
+- [x] **Phase 2: Options forwarding**
 
-- Extract `plugins.command.<name>.options` from the config and include it in the
-  plugin's `init` message in a well-known location.
-- Document the options path for plugin authors.
-- Depends on Phase 1.
+  - Extract `plugins.command.<name>.options` from the config and include it
+        in the plugin's `init` message in a well-known location.
+  - Document the options path for plugin authors.
+  - Depends on Phase 1.
 
-### Phase 3: Plugin kind in registry
+- [ ] **Phase 3: Plugin kind in registry**
 
-- Add `kind` field to `RegistryPlugin` (defaulting to `"command"`).
-- Filter on `kind` in the dispatch pipeline.
-- Update `jp plugin list` to show plugin kind.
-- Can be merged independently of Phase 1.
+  - [x] Add `kind` field to `RegistryPlugin` (defaulting to `"command"`).
+  - [x] Filter on `kind` in the dispatch pipeline.
+  - [ ] Update `jp plugin list` to show plugin kind.
+  - Can be merged independently of Phase 1.
 
 ## References
 

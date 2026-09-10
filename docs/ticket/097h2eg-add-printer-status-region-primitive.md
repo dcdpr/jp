@@ -1,6 +1,6 @@
 # Add printer status region primitive
 
-- **Status**: Todo
+- **Status**: Done
 - **Kind**: Feature
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-08-27

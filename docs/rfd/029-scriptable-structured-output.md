@@ -111,7 +111,7 @@ default.
 | Hide reasoning display              | Always (unless `-r` is passed)         | Structured output; reasoning display   |
 |                                     |                                        | adds nothing                           |
 
-[RFD 019] routes chrome to stderr unconditionally, so stdout is always clean for
+[RFD 048] routes chrome to stderr unconditionally, so stdout is always clean for
 piping.
 The "suppress chrome on stderr" inference goes further: when the user is
 scripting (stdout is not a TTY), chrome on stderr is also noise — progress
@@ -167,7 +167,7 @@ Each can still be overridden.
 
 This is not planned for initial implementation.
 The inference from `--schema` combined with output channel separation ([RFD
-019]) covers the 90% case.
+048]) covers the 90% case.
 
 ### Future: Schema in Named Templates
 
@@ -222,29 +222,17 @@ other CLI tools behave.
 
 ## Risks and Open Questions
 
-### Dependency on RFD 048
+### Inference is the only thing left
 
-The output inference depends on [RFD 048]'s output channel separation (stdout
-for assistant data, stderr for chrome).
-Once chrome is on stderr, stdout is automatically clean for piping.
-The remaining inference — suppressing stderr chrome in scripted contexts and
-suppressing NDJSON event noise — builds on that foundation.
+This RFD originally opened with a phase implementing [RFD 048]'s output channel
+separation, because clean piped stdout is the precondition for everything else
+here.
+RFD 048 is Implemented, so what remains is the inference layer alone — a
+narrower change than the document's framing suggests.
 
 ## Implementation Plan
 
-### Phase 1: Output channel separation (RFD 048)
-
-Implement [RFD 048]'s stdout/stderr split.
-Once chrome goes to stderr, piped structured output is automatically clean on
-stdout.
-This is the architectural foundation for the schema inference behavior.
-
-Also adds the `PrintTarget::Tty` variant and `/dev/tty` integration for
-interactive prompts, and moves tracing logs from stderr to a log file.
-
-### Phase 2: Schema output inference
-
-With output channels separated, add the inference logic:
+Single phase: schema output inference.
 
 - When `--schema` is present and stdout is not a TTY (or `--format json`): only
   emit the structured JSON object to stdout.
@@ -255,7 +243,8 @@ With output channels separated, add the inference logic:
 - When `--schema` is present: default reasoning display to `Hidden` unless the
   user explicitly passes `-r` / `--reasoning`.
 
-Depends on Phase 1.
+The channel separation this builds on ([RFD 048]) and the schema DSL that
+produces the JSON ([RFD 030]) are both Implemented, so this phase stands alone.
 
 ## References
 

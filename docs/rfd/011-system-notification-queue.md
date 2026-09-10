@@ -4,7 +4,6 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-02-23
-- **Requires**: [RFD 009]
 - **Required by**: [RFD 037]
 
 ## Summary
@@ -600,24 +599,28 @@ No behavioral changes.
 Depends on Phase 1.
 All notifications queue normally at this phase — no forced delivery yet.
 
-### Phase 3: Tool handle producer
-
-1. The tool handle registry (from [RFD 009]) writes `SystemNotificationQueued`
-   events when a handle changes state without being polled (`tool.stopped`,
-   `tool.waiting`, `tool.failed`).
-2. Integration tests with a stateful tool that finishes in the background.
-
-Depends on Phase 2 and [RFD 009] Phase 4.
-
-### Phase 4: Configuration
+### Phase 3: Configuration
 
 1. Add `conversation.notifications.kinds` config section with nested source/name
    structure.
 2. Add per-tool `notifications` config (name-level filtering).
 3. Wire configuration into the delivery logic (filter at delivery time).
 
-Depends on Phase 3.
+Depends on Phase 2.
 Can be iterated independently.
+
+### Phase 4 (deferred): Tool handle producer
+
+1. The tool handle registry (from [RFD 009]) writes `SystemNotificationQueued`
+   events when a handle changes state without being polled (`tool.stopped`,
+   `tool.waiting`, `tool.failed`).
+2. Integration tests with a stateful tool that finishes in the background.
+
+Depends on Phase 2 and [RFD 009] Phase 4, so it lands whenever the stateful tool
+protocol does.
+This phase is the only part of this RFD that needs [RFD 009], which is why the
+queue is not gated on it: the delivery mechanism, the config surface, and the
+MCP producers all stand on their own.
 
 ### Phase 5: Critical notification forced delivery
 

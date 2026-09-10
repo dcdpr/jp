@@ -4,7 +4,7 @@
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-15
-- **Requires**: [RFD 009], [RFD 065]
+- **Requires**: [RFD 065]
 - **Required by**: [RFD 066], [RFD 067]
 - **Extended by**: [RFD 094]
 
@@ -844,7 +844,7 @@ Migrate existing `NeedsInput` tools to use `question` blocks.
 
 Depends on Phase 4.
 
-### Phase 6: Stateful response envelope
+### Phase 6 (deferred): Stateful response envelope
 
 Add `_meta."computer.jp/status"` field parsing.
 Integrate with the handle registry and lifecycle management for long-running
@@ -852,7 +852,11 @@ tools.
 This phase bridges the content format (this RFD) with the stateful execution
 model.
 
-Depends on Phase 5.
+Depends on Phase 5 and [RFD 009], so it lands whenever the stateful tool
+protocol does.
+It is the only phase here that touches [RFD 009]: the status field is optional
+and absent means `stopped`, so every one-shot tool — which is all of them today
+— works through Phases 1-5 without it.
 
 ## References
 

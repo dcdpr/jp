@@ -1,6 +1,6 @@
 # Migrate the remaining simple timers
 
-- **Status**: Todo
+- **Status**: Done
 - **Kind**: Feature
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-08-27

@@ -1,4 +1,4 @@
-# RFD D58: Multi-Participant Conversations
+# RFD D58: Multi-Participant Conversations (split origin)
 
 - **Status**: Draft
 - **Category**: Design

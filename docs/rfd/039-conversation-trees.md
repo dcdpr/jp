@@ -5,7 +5,7 @@
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-08
 - **Extended by**: [RFD 046]
-- **Required by**: [RFD 050], [RFD 051]
+- **Required by**: [RFD 051]
 
 ## Summary
 
@@ -593,5 +593,4 @@ Depends on Phase 1.
 [RFD 038]: 038-config-reset-keywords.md
 [RFD 040]: 040-hidden-conversations-and-tool-context.md
 [RFD 046]: 046-nested-workspace-projection.md
-[RFD 050]: 050-scripting-ergonomics-for-conversation-management.md
 [RFD 051]: 051-sub-agent-workflows.md

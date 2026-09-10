@@ -1,6 +1,6 @@
 # RFD 102: Collision-Resistant Ticket Identifiers
 
-- **Status**: Accepted
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-08-15

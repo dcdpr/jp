@@ -317,6 +317,106 @@ export function findStrayDraftRefs(dir, files, allowlist) {
         `\`docs/.vitepress/loaders/rfds.data.js\`.`
 }
 
+// CommonMark link labels are case-insensitive and collapse internal
+// whitespace, so `[RFD 019]` and `[rfd  019]:` are the same label.
+function normalizeLabel(label) {
+    return label.trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+// Blank out fenced code blocks and inline code spans, keeping line numbers
+// intact. Bracket syntax inside code is never a link, and RFDs are full of
+// sample JSON, shell, and Rust that would otherwise look like one.
+function stripCode(content) {
+    let fence = null
+    return content
+        .split('\n')
+        .map((line) => {
+            const marker = line.match(/^ {0,3}(`{3,}|~{3,})/)?.[1]
+            if (fence) {
+                if (marker && marker[0] === fence[0] && marker.length >= fence.length) {
+                    fence = null
+                }
+                return ''
+            }
+            if (marker) {
+                fence = marker
+                return ''
+            }
+            return line.replace(/(`+)[\s\S]*?\1/g, '')
+        })
+        .join('\n')
+}
+
+// Reference-link usages on one line, as `{ label, text }` pairs. `text` is the
+// source form, so the error message shows what the author actually wrote.
+function* referenceUsages(line) {
+    // Full (`[text][label]`) and collapsed (`[label][]`) references. A leading
+    // `!` makes it an image, which resolves its label the same way.
+    for (const m of line.matchAll(/!?\[((?:[^[\]\\]|\\.)*)\]\[((?:[^[\]\\]|\\.)*)\]/g)) {
+        yield { label: m[2].trim() === '' ? m[1] : m[2], text: m[0] }
+    }
+
+    // Shortcut references, restricted to the project's RFD citation form. A
+    // following `[`, `(`, or `:` means it is a full reference, an inline link,
+    // or the definition line itself.
+    for (const m of line.matchAll(/\[(RFD\s+(?:\d{3}|D\d{2}))\](?![[(:])/g)) {
+        yield { label: m[1], text: m[0] }
+    }
+}
+
+// Reject reference-style links whose definition is missing.
+//
+// VitePress's dead-link check cannot see these. CommonMark resolves `[RFD 019]`
+// against the document's link definitions, and when there is none the text is
+// not a link at all — it renders as the literal string `[RFD 019]`. No href is
+// emitted, so nothing downstream has anything to check. The failure is silent
+// by construction, which is how `[RFD 038]` sat unlinked in RFD 050 for months.
+//
+// Two shapes are checked:
+//
+//   - Full and collapsed references (`[text][label]`, `[label][]`). These are
+//     always reference links, so an undefined label is unambiguously a bug.
+//   - Shortcut references of the form `[RFD NNN]` / `[RFD DNN]`. A bare
+//     `[label]` is only a link when the label happens to be defined, so
+//     checking every one would flag ordinary prose (`[!NOTE]`, `[y/n/...]`,
+//     `[c] Continue`). Restricting to the RFD citation form catches the case
+//     that actually recurs, without the false positives.
+export function findUndefinedRefLinks(dir, files) {
+    const broken = []
+    for (const f of files) {
+        const lines = stripCode(readFileSync(resolve(dir, f), 'utf-8')).split('\n')
+
+        const defined = new Set()
+        for (const line of lines) {
+            const label = line.match(/^ {0,3}\[([^\]]+)\]:\s*\S/)?.[1]
+            if (label) defined.add(normalizeLabel(label))
+        }
+
+        const hits = []
+        for (let i = 0; i < lines.length; i++) {
+            for (const { label, text } of referenceUsages(lines[i])) {
+                if (defined.has(normalizeLabel(label))) continue
+                hits.push({ line: i + 1, text })
+            }
+        }
+        if (hits.length > 0) broken.push({ file: f, hits })
+    }
+
+    if (broken.length === 0) return null
+
+    const report = broken
+        .flatMap(({ file, hits }) =>
+            hits.map(({ line, text }) => `  ${file}:${line}: ${text}`)
+        )
+        .join('\n')
+    return `Reference links with no matching definition:\n` +
+        report + '\n\n' +
+        `A reference link whose label is undefined renders as literal text ` +
+        `instead of a link, so the dead-link check never sees it. Add the ` +
+        `matching \`[label]: target\` line at the bottom of the document, or ` +
+        `rewrite the text so it is not a reference.`
+}
+
 // Extract a `- **Field**: ...` line and pull the RFD ids out of it.
 function parseField(content, field) {
     const re = new RegExp(`^- \\*\\*${field}\\*\\*:\\s*(.+)$`, 'm')

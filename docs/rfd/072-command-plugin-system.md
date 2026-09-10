@@ -524,6 +524,16 @@ An invalid path returns an error.
 
 #### Workspace Mutations
 
+> [!NOTE]
+> The shipped protocol replaced this lock-and-push design with task-level
+> operations — `ArchiveConversation`, `SetTitle`, `WriteDraft`, and `Query`
+> (answered by `Created`) — each locking internally for the duration of one
+> message.
+> A plugin never holds a lock across messages and never appends events directly,
+> so the lock tracking, orphan release, and event validation described below do
+> not exist.
+> See [Phase 4](#implementation-plan).
+
 **Lock a conversation:**
 
 ```json
@@ -1008,54 +1018,68 @@ commands for coarse-grained extensions.
 
 ## Implementation Plan
 
-### Phase 1: Protocol core and dispatcher
+- [x] **Phase 1: Protocol core and dispatcher**
 
-- Define the protocol message types in a new `jp_plugin` crate.
-- Implement the parent-side message loop in JP: spawn child, send `init`, relay
-  requests to `Workspace` methods, capture stderr to tracing.
-- Implement unknown-subcommand dispatch: search `$PATH` for `jp-<name>`.
-- Test with a minimal shell script plugin.
-- Can be merged independently.
+  - Define the protocol message types in a new `jp_plugin` crate.
+  - Implement the parent-side message loop in JP: spawn child, send `init`,
+        relay requests to `Workspace` methods, capture stderr to tracing.
+  - Implement unknown-subcommand dispatch: search `$PATH` for `jp-<name>`.
+  - Test with a minimal shell script plugin.
+  - Can be merged independently.
 
-### Phase 2: Web server as external plugin
+- [x] **Phase 2: Web server as external plugin**
 
-- Extract `jp-serve` into a standalone binary crate (`crates/jp_serve/`).
-- Implement the plugin-side protocol client (reads init, sends requests, renders
-  responses).
-- Remove `jp serve` as a built-in command; it becomes a plugin dispatch.
-- Remove `jp_web` dependency from `jp_cli`.
-- Depends on Phase 1.
+  - Extract the web server into a standalone binary crate
+        (`crates/plugins/command/serve-web/`).
+  - Implement the plugin-side protocol client (reads init, sends requests,
+        renders responses).
+  - Remove `jp serve` as a built-in command; it becomes a plugin dispatch.
+  - Remove the `jp_web` dependency from `jp_cli`.
+  - Depends on Phase 1.
 
-### Phase 3: Plugin registry and auto-install
+- [x] **Phase 3: Plugin registry and auto-install**
 
-- Define the registry JSON format.
-- Implement registry fetch, caching, and binary download with checksum
-  validation.
-- Implement the install flow (silent for official, prompted for third-party).
-- Add `jp plugin list`, `jp plugin install`, `jp plugin update` subcommands.
-- Depends on Phase 1.
-  Independent of Phase 2.
+  - Define the registry JSON format.
+  - Implement registry fetch, caching, and binary download with checksum
+        validation.
+  - Implement the install flow (silent for official, prompted for
+        third-party).
+  - Add `jp plugin list`, `jp plugin install`, `jp plugin update`
+        subcommands.
+  - Depends on Phase 1.
+        Independent of Phase 2.
 
-### Phase 4: Write operations
+- [x] **Phase 4: Write operations**
 
-- Add `lock`, `unlock`, `push_events`, and `create_conversation` to the
-  protocol.
-- Implement lock tracking in JP's dispatcher (release on plugin exit/crash).
-- Implement event validation for externally pushed events.
-- Depends on Phase 1.
+  Shipped as task-level operations rather than the lock-and-push primitives
+      originally proposed: `ArchiveConversation`, `SetTitle`, `WriteDraft`, and
+      `Query` (with a `Created` response), each performing its own locking
+      inside the host.
+      A plugin therefore never holds a lock across protocol messages, which
+      removes the lock-tracking and orphan-release problem the original phase
+      carried, and removes the need to validate externally pushed events — no
+      plugin appends to an event stream directly.
+      The cost is that the write surface is closed rather than general: a new
+      write operation needs a new protocol message.
 
-### Phase 5: Command routing and plugin dependencies
+  - Depends on Phase 1.
 
-- Use the `command` field from `Describe` and the registry keys for routing
-  instead of relying solely on binary name conventions.
-- Cache `describe` responses to avoid spawning plugins repeatedly for `jp -h`
-  and routing.
-- Implement `requires` / `suggests` in the registry and install flow.
-- Update `jp plugin install` to resolve and install required dependencies.
-- Implement `command_group` registry entries and help aggregation.
-- Update help rendering to merge suggested sub-plugins (installed and
-  uninstalled) into parent plugin help output.
-- Depends on Phase 3 (registry).
+- [ ] **Phase 5: Command routing and plugin dependencies**
+
+  The data is in place — `DescribeResponse.command`, and `requires` /
+      `suggests` / `command_group` on registry entries — but nothing in
+      `jp_cli` reads it yet: routing still derives the command path from the
+      binary name, and `jp plugin install` installs one plugin at a time.
+
+  - Use the `command` field from `Describe` and the registry keys for
+        routing instead of relying solely on binary name conventions.
+  - Cache `describe` responses to avoid spawning plugins repeatedly for `jp
+        -h` and routing.
+  - Update `jp plugin install` to resolve and install required dependencies.
+  - Implement `command_group` help aggregation.
+  - Update help rendering to merge suggested sub-plugins (installed and
+        uninstalled) into parent plugin help output.
+  - Depends on Phase 3 (registry).
 
 ## References
 

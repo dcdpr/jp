@@ -1,6 +1,6 @@
 # RFD 086: Line-oriented stdin input for CLI arguments
 
-- **Status**: Accepted
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-06-17

@@ -1,6 +1,6 @@
 # RFD 068: Forced tool retry without reasoning
 
-- **Status**: Discussion
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-03-27
@@ -30,6 +30,19 @@ When the model skips this, the downstream commit workflow operates on stale or
 missing data.
 
 ## Design
+
+> [!NOTE]
+> As implemented, the retry lives in the Anthropic provider
+> (`crates/jp_llm/src/provider/anthropic.rs`), not the turn loop this section
+> describes.
+> The provider already holds the two facts the detection needs — the original
+> `tool_choice` and whether thinking was downgraded — so keeping the retry
+> there avoids surfacing an API restriction of one provider to the turn loop.
+>
+> The implementation also went further than this RFD: models that cannot turn
+> thinking off (`claude-fable-5`) get escalating soft-force nudges with thinking
+> left on, because forced `tool_choice` stays rejected for them and the retry
+> described below is unavailable.
 
 The change lives in the turn loop (`turn_loop.rs`), not the provider layer.
 
