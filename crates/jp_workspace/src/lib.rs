@@ -22,14 +22,13 @@ mod state;
 
 use std::{
     collections::HashMap,
-    env,
     sync::{
         Arc, OnceLock,
         atomic::{self, AtomicBool},
     },
 };
 
-use camino::{FromPathBufError, Utf8Path, Utf8PathBuf};
+use camino::{Utf8Path, Utf8PathBuf};
 use conversation_lock::PersistFailures;
 pub use conversation_lock::{ConversationLock, ConversationMut, LockResult};
 pub use error::Error;
@@ -52,8 +51,6 @@ use state::State;
 use tracing::{debug, trace, warn};
 
 use crate::session::Session;
-
-const APPLICATION: &str = "jp";
 
 /// The directory a workspace stores its data in, relative to the workspace
 /// root.
@@ -1186,50 +1183,12 @@ fn maybe_init_events(
     }
 }
 
-/// Environment variable used to override the user data directory.
-///
-/// When set, [`user_data_dir`] returns this path verbatim, taking precedence
-/// over `XDG_DATA_HOME` and the platform default.
-/// The path is JP-specific: no `jp` suffix is appended.
-const USER_DATA_DIR_ENV_VAR: &str = "JP_USER_DATA_DIR";
-
 /// Returns the directory JP stores its per-user data in.
 ///
-/// Resolution order:
-///
-/// 1. `JP_USER_DATA_DIR` if set to a non-empty value (used verbatim).
-///    Empty values are treated as unset to avoid silently redirecting
-///    persistent state into the current working directory when callers join
-///    relative paths onto the result.
-/// 2. `$XDG_DATA_HOME/jp` if `XDG_DATA_HOME` is set to an absolute path.
-///    Honored on all platforms, not just Linux — on macOS and Windows this
-///    lets users who run JP alongside other XDG-aware tools keep their data in
-///    one place rather than under `~/Library/Application Support` or
-///    `%LOCALAPPDATA%`.
-///    Per the XDG Base Directory Specification, empty or relative values are
-///    treated as unset.
-/// 3. The platform default via `directories::ProjectDirs::data_local_dir`.
+/// [`jp_config::fs::user_data_dir`] gives the resolution order; a home
+/// directory that cannot be determined becomes [`Error::MissingHome`].
 pub fn user_data_dir() -> Result<Utf8PathBuf> {
-    if let Ok(path) = env::var(USER_DATA_DIR_ENV_VAR)
-        && !path.is_empty()
-    {
-        return Ok(Utf8PathBuf::from(path));
-    }
-
-    if let Ok(xdg) = env::var("XDG_DATA_HOME") {
-        let xdg = Utf8PathBuf::from(xdg);
-        if xdg.is_absolute() {
-            return Ok(xdg.join(APPLICATION));
-        }
-    }
-
-    directories::ProjectDirs::from("", "", APPLICATION)
-        .ok_or(Error::MissingHome)?
-        .data_local_dir()
-        .to_path_buf()
-        .try_into()
-        .map_err(FromPathBufError::into_io_error)
-        .map_err(Into::into)
+    jp_config::fs::user_data_dir().ok_or(Error::MissingHome)
 }
 
 #[cfg(test)]

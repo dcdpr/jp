@@ -70,6 +70,7 @@ expression: "AppConfig::fields()"
     "providers.llm.cerebras.api_key_env",
     "providers.llm.cerebras.base_url",
     "providers.llm.anthropic.api_key_env",
+    "providers.llm.anthropic.auth",
     "providers.llm.anthropic.base_url",
     "providers.llm.anthropic.beta_headers",
     "providers.llm.anthropic.chain_on_max_tokens",

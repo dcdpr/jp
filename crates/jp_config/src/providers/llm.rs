@@ -10,7 +10,7 @@ pub mod openai;
 pub mod openrouter;
 
 use indexmap::IndexMap;
-use schematic::Config;
+use schematic::{Config, ConfigError};
 
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
@@ -29,6 +29,7 @@ use crate::{
         openrouter::{OpenrouterConfig, PartialOpenrouterConfig},
     },
     util::merge_nested_indexmap,
+    validate::Validator,
 };
 
 /// Provider configuration.
@@ -82,6 +83,12 @@ pub struct LlmProviderConfig {
     /// Openrouter API configuration.
     #[setting(nested)]
     pub openrouter: OpenrouterConfig,
+}
+
+impl Validator for LlmProviderConfig {
+    fn validate(&self) -> Result<(), ConfigError> {
+        self.anthropic.validate()
+    }
 }
 
 impl AssignKeyValue for PartialLlmProviderConfig {

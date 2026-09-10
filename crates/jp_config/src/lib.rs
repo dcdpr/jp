@@ -669,6 +669,7 @@ impl Validator for AppConfig {
     fn validate(&self) -> Result<(), ConfigError> {
         self.assistant.validate()?;
         self.conversation.validate()?;
+        self.providers.validate()?;
         reject_locked_off_tool_choice(self)
     }
 }

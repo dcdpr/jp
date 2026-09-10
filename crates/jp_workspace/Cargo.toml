@@ -20,7 +20,6 @@ jp_storage = { workspace = true }
 camino = { workspace = true, features = ["serde1"] }
 camino-tempfile = { workspace = true }
 chrono = { workspace = true }
-directories = { workspace = true }
 parking_lot = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
