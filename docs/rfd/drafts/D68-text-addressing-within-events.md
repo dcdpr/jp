@@ -8,14 +8,14 @@
   advances to Discussion status.
 -->
 
-# RFD D59: Text Addressing Within Events
+# RFD D68: Text Addressing Within Events
 
 - **Status**: Draft
 - **Category**: Design
 - **Authors**: rgrant <rgrant@contract.design>
 - **Date**: 2026-08-10
-- **Extends**: [RFD 097](../097-stable-event-identifiers.md)
-- **Required by**: [RFD D52](D52-event-annotations.md)
+- **Extends**: [RFD 097]
+- **Required by**: [RFD D52]
 
 ## Summary
 
@@ -313,20 +313,20 @@ JP defines its own storage, so each of those points is fixed here.
 JP addresses are a strict subset of conformant WADM selectors: emitting valid
 WADM is possible, accepting everything WADM permits is not.
 
-| WADM | Here |
-| --- | --- |
-| Range runs to the *beginning* of the end selector, excluding it | Runs to the end of it, inclusive |
-| Start and end selectors SHOULD be the same class | Either end may be a quote or an offset |
-| Multiple matches SHOULD select all of them | Nearest to the offset, or unresolved |
-| Text MUST be normalized (markup stripped) before recording | No normalization; the text is the decoded stored value |
-| A `State` is RECOMMENDED alongside a position selector | No `State`; the quote is the anchor of record |
-| Selections SHOULD NOT split a grapheme cluster | Rejected at creation |
+| WADM                                                            | Here                                                   |
+| --------------------------------------------------------------- | ------------------------------------------------------ |
+| Range runs to the *beginning* of the end selector, excluding it | Runs to the end of it, inclusive                       |
+| Start and end selectors SHOULD be the same class                | Either end may be a quote or an offset                 |
+| Multiple matches SHOULD select all of them                      | Nearest to the offset, or unresolved                   |
+| Text MUST be normalized (markup stripped) before recording      | No normalization; the text is the decoded stored value |
+| A `State` is RECOMMENDED alongside a position selector          | No `State`; the quote is the anchor of record          |
+| Selections SHOULD NOT split a grapheme cluster                  | Rejected at creation                                   |
 
 ## Drawbacks
 
 - **This modifies shipped behavior.** `jp_attachment_internal` currently
   discards the fragment, with a test asserting it.
-  D59 stops being purely additive the moment that changes.
+  D68 stops being purely additive the moment that changes.
 - **A range's extent is position-dependent** and no anchoring fixes it, so
   reordering entries changes what a range covers.
 - **Two offset conventions now exist** in the user-facing surface: `grep --json`
@@ -429,7 +429,7 @@ Depends on Phase 4.
 - [RFC 6901], JSON Pointer
 - `docs/architecture/indexing-conventions.md`, turn positions and counts
 
-[RFD 097]: ../097-stable-event-identifiers.md
-[RFD D52]: D52-event-annotations.md
 [RFC 6901]: https://www.rfc-editor.org/rfc/rfc6901
+[RFD 097]: ../097-stable-event-identifiers.md
+[RFD D52]: D67-event-annotations.md
 [WADM]: https://www.w3.org/TR/annotation-model/

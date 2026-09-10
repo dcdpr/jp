@@ -8,13 +8,13 @@
   advances to Discussion status.
 -->
 
-# RFD D52: Event Annotations
+# RFD D67: Event Annotations
 
 - **Status**: Draft
 - **Category**: Design
 - **Authors**: rgrant <rgrant@contract.design>
 - **Date**: 2026-08-10
-- **Requires**: [RFD D59](D59-text-addressing-within-events.md)
+- **Requires**: [RFD D59]
 
 ## Summary
 
@@ -354,4 +354,4 @@ Depends on Phase 3.
 [RFD 072]: ../072-command-plugin-system.md
 [RFD 077]: ../077-plugin-configuration-and-trust-policy.md
 [RFD 097]: ../097-stable-event-identifiers.md
-[RFD D59]: D59-text-addressing-within-events.md
+[RFD D59]: D68-text-addressing-within-events.md
