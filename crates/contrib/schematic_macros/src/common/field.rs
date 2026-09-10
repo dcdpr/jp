@@ -358,6 +358,44 @@ impl Field<'_> {
         })
     }
 
+    /// The wire type used to infer a field's schema.
+    #[cfg(feature = "schema")]
+    fn schema_value_type(&self) -> TokenStream {
+        // A `partial_via` field is written in the shape of its via type, not of
+        // the type it resolves to: `attachments` holds a `Vec<AttachmentConfig>`
+        // once resolved, but a document writes either a bare list or the merge
+        // wrapper carrying one, and the via type is what describes both.
+        match (&self.partial_via_ty, &self.value_type) {
+            // The adapter carries the element's nested marker through each
+            // wire form without changing its resolved name or field flags.
+            (
+                Some(_),
+                FieldValue::NestedList {
+                    collection, item, ..
+                },
+            ) => {
+                quote! { #collection<schematic::internal::NestedSchema<#item>> }
+            }
+            (
+                Some(_),
+                FieldValue::NestedMap {
+                    collection,
+                    key,
+                    value,
+                    ..
+                },
+            ) => {
+                let key = key.iter();
+                quote! { #collection<#(#key,)* schematic::internal::NestedSchema<#value>> }
+            }
+            _ => self
+                .partial_via_ty
+                .as_ref()
+                .unwrap_or(self.value)
+                .to_token_stream(),
+        }
+    }
+
     #[cfg(feature = "schema")]
     pub fn generate_schema_type(&self, as_field: bool) -> TokenStream {
         use syn::Lit;
@@ -377,19 +415,7 @@ impl Field<'_> {
         let deprecated = map_option_field_quote("deprecated", extract_deprecated(&self.attrs));
         let env_var = map_option_field_quote("env_var", self.get_env_var());
 
-        // A `partial_via` field is written in the shape of its via type, not of
-        // the type it resolves to: `attachments` holds a `Vec<AttachmentConfig>`
-        // once resolved, but a document writes either a bare list or the merge
-        // wrapper carrying one, and the via type is what describes both.
-        let value = if self.partial_via_ty.is_some() && self.is_container() {
-            // Nested collections deserialize partial elements in every wire form.
-            self.value_type.to_token_stream()
-        } else {
-            self.partial_via_ty
-                .as_ref()
-                .unwrap_or(self.value)
-                .to_token_stream()
-        };
+        let value = self.schema_value_type();
         let mut inner_schema = if self.is_nested() {
             quote! { schema.infer_as_nested::<#value>() }
         } else {

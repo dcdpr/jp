@@ -5,39 +5,35 @@ expression: "crate::schema_shape::render(&AppConfig::schema())"
 assistant: AssistantConfig
   instructions?: MergeableVec
     |:
-      []: PartialInstructionsConfig
-        description?: string | null
-        examples?:
-          |:
-            []: PartialExampleConfig
-              |: string
-              |: PartialContrastConfig
-                bad?: string | null
-                good?: string | null
-                reason?: string | null
-          |: null
-        items?: [string] | null
-        position?: int | null
-        title?: string | null
+      []: InstructionsConfig
+        description: string | null
+        examples:
+          []: ExampleConfig
+            |: string
+            |: ContrastConfig
+              bad: string
+              good: string
+              reason: string | null
+        items: [string]
+        position?: int
+        title: string | null
     |: MergedVec
       dedup?: "inherit" | "true" | "false" | bool | null
       discard_when_merged?: bool
       strategy?: "append" | "prepend" | "replace" | null
       value?:
-        []: PartialInstructionsConfig
-          description?: string | null
-          examples?:
-            |:
-              []: PartialExampleConfig
-                |: string
-                |: PartialContrastConfig
-                  bad?: string | null
-                  good?: string | null
-                  reason?: string | null
-            |: null
-          items?: [string] | null
-          position?: int | null
-          title?: string | null
+        []: InstructionsConfig
+          description: string | null
+          examples:
+            []: ExampleConfig
+              |: string
+              |: ContrastConfig
+                bad: string
+                good: string
+                reason: string | null
+          items: [string]
+          position?: int
+          title: string | null
   model: ModelConfig
     id: ModelIdOrAliasConfig
       |: ModelIdConfig
@@ -79,100 +75,90 @@ assistant: AssistantConfig
       value?: string
   system_prompt_sections?: MergeableVec
     |:
-      []: PartialSectionConfig
-        content?: string | null
-        position?: int | null
-        tag?: string | null
-        title?: string | null
+      []: SectionConfig
+        content: string
+        position?: int
+        tag: string | null
+        title: string | null
     |: MergedVec
       dedup?: "inherit" | "true" | "false" | bool | null
       discard_when_merged?: bool
       strategy?: "append" | "prepend" | "replace" | null
       value?:
-        []: PartialSectionConfig
-          content?: string | null
-          position?: int | null
-          tag?: string | null
-          title?: string | null
+        []: SectionConfig
+          content: string
+          position?: int
+          tag: string | null
+          title: string | null
   tool_choice?: "auto" | "none" | "required" | string
 config_load_paths: [string]
 conversation: ConversationConfig
   attachments?: MergeableVec
     |:
-      []: PartialAttachmentConfig
+      []: AttachmentConfig
         |: string
-        |: PartialAttachmentObjectConfig
-          params?:
-            |:
-              *: unknown
-            |: null
-          path?: string | null
-          type?: string | null
+        |: AttachmentObjectConfig
+          params:
+            *: unknown
+          path: string
+          type: string
     |: MergedVec
       dedup?: "inherit" | "true" | "false" | bool | null
       discard_when_merged?: bool
       strategy?: "append" | "prepend" | "replace" | null
       value?:
-        []: PartialAttachmentConfig
+        []: AttachmentConfig
           |: string
-          |: PartialAttachmentObjectConfig
-            params?:
-              |:
-                *: unknown
-              |: null
-            path?: string | null
-            type?: string | null
+          |: AttachmentObjectConfig
+            params:
+              *: unknown
+            path: string
+            type: string
   compaction: CompactionConfig
     rules?: MergeableVec
       |:
-        []: PartialCompactionRuleConfig
-          keep_first?: int | string | null
-          keep_last?: int | string | null
-          reasoning?:
+        []: CompactionRuleConfig
+          keep_first?: int | string
+          keep_last?: int | string
+          reasoning:
             |:
               |: "strip"
               |:
                 over: int | string
                 policy: "strip"
             |: null
-          summary?:
-            |: PartialSummaryConfig
-              context?: string | null
-              instructions?: string | null
-              model?:
-                |: PartialModelConfig
-                  id?:
-                    |: PartialModelIdOrAliasConfig
-                      |: PartialModelIdConfig
-                        name?: string | null
-                        provider?: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "xai" | null
-                      |: string
-                    |: null
-                  parameters?:
-                    |: PartialParametersConfig
-                      max_tokens?: int | null
-                      other?:
-                        |:
-                          *: unknown
-                        |: null
-                      reasoning?:
-                        |: PartialReasoningConfig
-                          |: "off"
-                          |: "auto"
-                          |: PartialCustomReasoningConfig
-                            effort?: "none" | "auto" | "max" | "xhigh" | "high" | "medium" | "low" | "xlow" | string | null
-                            exclude?: bool | null
-                        |: null
-                      service_tier?: "off" | "flex" | "standard" | "priority" | null
-                      stop_words?: [string] | null
-                      temperature?: float | null
-                      top_k?: int | null
-                      top_p?: float | null
-                    |: null
+          summary:
+            |: SummaryConfig
+              context: string | null
+              instructions: string | null
+              model:
+                |: ModelConfig
+                  id: ModelIdOrAliasConfig
+                    |: ModelIdConfig
+                      name: string
+                      provider: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "xai"
+                    |: string
+                  parameters: ParametersConfig
+                    max_tokens: int | null
+                    other?:
+                      *: unknown
+                    reasoning:
+                      |: ReasoningConfig
+                        |: "off"
+                        |: "auto"
+                        |: CustomReasoningConfig
+                          effort?: "none" | "auto" | "max" | "xhigh" | "high" | "medium" | "low" | "xlow" | string
+                          exclude?: bool
+                      |: null
+                    service_tier: "off" | "flex" | "standard" | "priority" | null
+                    stop_words?: [string]
+                    temperature: float | null
+                    top_k: int | null
+                    top_p: float | null
                 |: null
-              text?: string | null
+              text: string | null
             |: null
-          tool_calls?:
+          tool_calls:
             |:
               |: "strip" (aka s) | "strip-responses" (aka strip_responses, sres) | "strip-requests" (aka strip_requests, sreq) | "omit" (aka o)
               |:
@@ -184,54 +170,48 @@ conversation: ConversationConfig
         discard_when_merged?: bool
         strategy?: "append" | "prepend" | "replace" | null
         value?:
-          []: PartialCompactionRuleConfig
-            keep_first?: int | string | null
-            keep_last?: int | string | null
-            reasoning?:
+          []: CompactionRuleConfig
+            keep_first?: int | string
+            keep_last?: int | string
+            reasoning:
               |:
                 |: "strip"
                 |:
                   over: int | string
                   policy: "strip"
               |: null
-            summary?:
-              |: PartialSummaryConfig
-                context?: string | null
-                instructions?: string | null
-                model?:
-                  |: PartialModelConfig
-                    id?:
-                      |: PartialModelIdOrAliasConfig
-                        |: PartialModelIdConfig
-                          name?: string | null
-                          provider?: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "xai" | null
-                        |: string
-                      |: null
-                    parameters?:
-                      |: PartialParametersConfig
-                        max_tokens?: int | null
-                        other?:
-                          |:
-                            *: unknown
-                          |: null
-                        reasoning?:
-                          |: PartialReasoningConfig
-                            |: "off"
-                            |: "auto"
-                            |: PartialCustomReasoningConfig
-                              effort?: "none" | "auto" | "max" | "xhigh" | "high" | "medium" | "low" | "xlow" | string | null
-                              exclude?: bool | null
-                          |: null
-                        service_tier?: "off" | "flex" | "standard" | "priority" | null
-                        stop_words?: [string] | null
-                        temperature?: float | null
-                        top_k?: int | null
-                        top_p?: float | null
-                      |: null
+            summary:
+              |: SummaryConfig
+                context: string | null
+                instructions: string | null
+                model:
+                  |: ModelConfig
+                    id: ModelIdOrAliasConfig
+                      |: ModelIdConfig
+                        name: string
+                        provider: "anthropic" | "cerebras" | "deepseek" | "google" | "llamacpp" | "ollama" | "openai" | "openrouter" | "xai"
+                      |: string
+                    parameters: ParametersConfig
+                      max_tokens: int | null
+                      other?:
+                        *: unknown
+                      reasoning:
+                        |: ReasoningConfig
+                          |: "off"
+                          |: "auto"
+                          |: CustomReasoningConfig
+                            effort?: "none" | "auto" | "max" | "xhigh" | "high" | "medium" | "low" | "xlow" | string
+                            exclude?: bool
+                        |: null
+                      service_tier: "off" | "flex" | "standard" | "priority" | null
+                      stop_words?: [string]
+                      temperature: float | null
+                      top_k: int | null
+                      top_p: float | null
                   |: null
-                text?: string | null
+                text: string | null
               |: null
-            tool_calls?:
+            tool_calls:
               |:
                 |: "strip" (aka s) | "strip-responses" (aka strip_responses, sres) | "strip-requests" (aka strip_requests, sreq) | "omit" (aka o)
                 |:
@@ -243,39 +223,35 @@ conversation: ConversationConfig
     assistant: AssistantConfig
       instructions?: MergeableVec
         |:
-          []: PartialInstructionsConfig
-            description?: string | null
-            examples?:
-              |:
-                []: PartialExampleConfig
-                  |: string
-                  |: PartialContrastConfig
-                    bad?: string | null
-                    good?: string | null
-                    reason?: string | null
-              |: null
-            items?: [string] | null
-            position?: int | null
-            title?: string | null
+          []: InstructionsConfig
+            description: string | null
+            examples:
+              []: ExampleConfig
+                |: string
+                |: ContrastConfig
+                  bad: string
+                  good: string
+                  reason: string | null
+            items: [string]
+            position?: int
+            title: string | null
         |: MergedVec
           dedup?: "inherit" | "true" | "false" | bool | null
           discard_when_merged?: bool
           strategy?: "append" | "prepend" | "replace" | null
           value?:
-            []: PartialInstructionsConfig
-              description?: string | null
-              examples?:
-                |:
-                  []: PartialExampleConfig
-                    |: string
-                    |: PartialContrastConfig
-                      bad?: string | null
-                      good?: string | null
-                      reason?: string | null
-                |: null
-              items?: [string] | null
-              position?: int | null
-              title?: string | null
+            []: InstructionsConfig
+              description: string | null
+              examples:
+                []: ExampleConfig
+                  |: string
+                  |: ContrastConfig
+                    bad: string
+                    good: string
+                    reason: string | null
+              items: [string]
+              position?: int
+              title: string | null
       model: ModelConfig
         id: ModelIdOrAliasConfig
           |: ModelIdConfig
@@ -317,21 +293,21 @@ conversation: ConversationConfig
           value?: string
       system_prompt_sections?: MergeableVec
         |:
-          []: PartialSectionConfig
-            content?: string | null
-            position?: int | null
-            tag?: string | null
-            title?: string | null
+          []: SectionConfig
+            content: string
+            position?: int
+            tag: string | null
+            title: string | null
         |: MergedVec
           dedup?: "inherit" | "true" | "false" | bool | null
           discard_when_merged?: bool
           strategy?: "append" | "prepend" | "replace" | null
           value?:
-            []: PartialSectionConfig
-              content?: string | null
-              position?: int | null
-              tag?: string | null
-              title?: string | null
+            []: SectionConfig
+              content: string
+              position?: int
+              tag: string | null
+              title: string | null
       tool_choice?: "auto" | "none" | "required" | string
   labels: MergeableMap
     |:
@@ -413,42 +389,42 @@ conversation: ConversationConfig
         |: AccessConfig
           env: MergeableVec
             |:
-              []: PartialEnvRuleConfig
-                name?: string | null
-                read?: bool | null
+              []: EnvRuleConfig
+                name: string
+                read: bool | null
             |: MergedVec
               dedup?: "inherit" | "true" | "false" | bool | null
               discard_when_merged?: bool
               strategy?: "append" | "prepend" | "replace" | null
               value?:
-                []: PartialEnvRuleConfig
-                  name?: string | null
-                  read?: bool | null
+                []: EnvRuleConfig
+                  name: string
+                  read: bool | null
           fs: MergeableVec
             |:
-              []: PartialFsRuleConfig
-                create?: bool | null
-                delete?: bool | null
-                execute?: bool | null
-                external?: bool | null
-                path?: string | null
-                read?: bool | null
-                update?: bool | null
-                write?: bool | null
+              []: FsRuleConfig
+                create: bool | null
+                delete: bool | null
+                execute: bool | null
+                external: bool | null
+                path: string
+                read: bool | null
+                update: bool | null
+                write: bool | null
             |: MergedVec
               dedup?: "inherit" | "true" | "false" | bool | null
               discard_when_merged?: bool
               strategy?: "append" | "prepend" | "replace" | null
               value?:
-                []: PartialFsRuleConfig
-                  create?: bool | null
-                  delete?: bool | null
-                  execute?: bool | null
-                  external?: bool | null
-                  path?: string | null
-                  read?: bool | null
-                  update?: bool | null
-                  write?: bool | null
+                []: FsRuleConfig
+                  create: bool | null
+                  delete: bool | null
+                  execute: bool | null
+                  external: bool | null
+                  path: string
+                  read: bool | null
+                  update: bool | null
+                  write: bool | null
         |: null
       cancellation_response?: string
       enable:
@@ -486,42 +462,42 @@ conversation: ConversationConfig
           |: AccessConfig
             env: MergeableVec
               |:
-                []: PartialEnvRuleConfig
-                  name?: string | null
-                  read?: bool | null
+                []: EnvRuleConfig
+                  name: string
+                  read: bool | null
               |: MergedVec
                 dedup?: "inherit" | "true" | "false" | bool | null
                 discard_when_merged?: bool
                 strategy?: "append" | "prepend" | "replace" | null
                 value?:
-                  []: PartialEnvRuleConfig
-                    name?: string | null
-                    read?: bool | null
+                  []: EnvRuleConfig
+                    name: string
+                    read: bool | null
             fs: MergeableVec
               |:
-                []: PartialFsRuleConfig
-                  create?: bool | null
-                  delete?: bool | null
-                  execute?: bool | null
-                  external?: bool | null
-                  path?: string | null
-                  read?: bool | null
-                  update?: bool | null
-                  write?: bool | null
+                []: FsRuleConfig
+                  create: bool | null
+                  delete: bool | null
+                  execute: bool | null
+                  external: bool | null
+                  path: string
+                  read: bool | null
+                  update: bool | null
+                  write: bool | null
               |: MergedVec
                 dedup?: "inherit" | "true" | "false" | bool | null
                 discard_when_merged?: bool
                 strategy?: "append" | "prepend" | "replace" | null
                 value?:
-                  []: PartialFsRuleConfig
-                    create?: bool | null
-                    delete?: bool | null
-                    execute?: bool | null
-                    external?: bool | null
-                    path?: string | null
-                    read?: bool | null
-                    update?: bool | null
-                    write?: bool | null
+                  []: FsRuleConfig
+                    create: bool | null
+                    delete: bool | null
+                    execute: bool | null
+                    external: bool | null
+                    path: string
+                    read: bool | null
+                    update: bool | null
+                    write: bool | null
           |: null
         cancellation_response: string | null
         command:

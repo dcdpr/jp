@@ -1,6 +1,6 @@
-use std::str::FromStr;
+use std::{marker::PhantomData, str::FromStr};
 
-use schematic_types::Schema;
+use schematic_types::{Schema, SchemaBuilder, Schematic};
 
 use crate::config::{ConfigError, HandlerError, MergeError, MergeResult, PartialConfig};
 
@@ -122,6 +122,25 @@ pub fn merge_nested_setting<T: PartialConfig>(
         Ok(next)
     } else {
         Ok(prev)
+    }
+}
+
+/// Retain `T`'s schema and mark it for partialization.
+///
+/// The type name and field flags remain those of `T`.
+/// The nested marker is consumed by [`partialize_schema`].
+#[derive(Debug)]
+pub struct NestedSchema<T>(PhantomData<T>);
+
+impl<T: Schematic> Schematic for NestedSchema<T> {
+    fn schema_name() -> Option<String> {
+        T::schema_name()
+    }
+
+    fn build_schema(schema: SchemaBuilder) -> Schema {
+        let mut schema = T::build_schema(schema);
+        schema.partialize();
+        schema
     }
 }
 

@@ -39,6 +39,59 @@ fn test_app_config_schema_shape() {
 }
 
 #[test]
+fn the_app_schema_keeps_instruction_elements_resolved_in_both_array_forms() {
+    let schema = AppConfig::schema();
+    let SchemaType::Struct(app) = &schema.ty else {
+        panic!("expected the app struct");
+    };
+    let SchemaType::Struct(assistant) = &app.fields["assistant"].schema.ty else {
+        panic!("expected the assistant struct");
+    };
+    let SchemaType::Union(instructions) = &assistant.fields["instructions"].schema.ty else {
+        panic!("expected the merge wrapper union");
+    };
+    let SchemaType::Array(bare) = &instructions.variants_types[0].ty else {
+        panic!("expected the bare array");
+    };
+    let SchemaType::Struct(wrapper) = &instructions.variants_types[1].ty else {
+        panic!("expected the wrapper struct");
+    };
+    let SchemaType::Array(wrapped) = &wrapper.fields["value"].schema.ty else {
+        panic!("expected the wrapped array");
+    };
+
+    for element in [&bare.items_type, &wrapped.items_type] {
+        let SchemaType::Struct(instruction) = &element.ty else {
+            panic!("expected the instruction struct");
+        };
+        let fields: Vec<_> = instruction
+            .fields
+            .iter()
+            .map(|(name, field)| {
+                (
+                    name.as_str(),
+                    field.optional,
+                    field.nullable,
+                    field.schema.nullable,
+                )
+            })
+            .collect();
+        assert_eq!(fields, [
+            ("description", false, true, false),
+            ("examples", false, false, false),
+            ("items", false, false, false),
+            ("position", true, false, false),
+            ("title", false, true, false),
+        ]);
+        assert_eq!(element.name.as_deref(), Some("InstructionsConfig"));
+        assert!(
+            instruction.partial,
+            "the nested marker must survive for the partial schema"
+        );
+    }
+}
+
+#[test]
 fn the_partial_schema_keeps_instruction_elements_partial_in_both_array_forms() {
     for input in [
         r#"{"assistant":{"instructions":[{"title":"Review"}]}}"#,
