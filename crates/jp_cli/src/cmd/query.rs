@@ -2431,10 +2431,15 @@ impl IntoPartialAppConfig for Query {
         partial: PartialAppConfig,
         _: Option<&PartialAppConfig>,
         handle: &ConversationHandle,
-    ) -> std::result::Result<PartialAppConfig, Box<dyn std::error::Error + Send + Sync>> {
-        let config = workspace.events(handle)?.config().map(|c| c.to_partial())?;
+    ) -> std::result::Result<
+        (PartialAppConfig, Vec<String>),
+        Box<dyn std::error::Error + Send + Sync>,
+    > {
+        let events = workspace.events(handle)?;
+        let config = events.config()?.to_partial();
+        let unsets = events.config_unsets()?;
 
-        load_partial(partial, config).map_err(Into::into)
+        Ok((load_partial(partial, config)?, unsets))
     }
 }
 

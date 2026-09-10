@@ -862,6 +862,53 @@ fn resolve_config_applies_the_compact_model_flag() {
     );
 }
 
+#[test]
+fn resolve_config_rejects_a_cleared_model_without_changing_the_conversation() {
+    let tmp = tempdir().unwrap();
+    let mut workspace = Workspace::in_memory(tmp.path());
+    workspace.load_conversation_index();
+    let base = Arc::new(config_with_model(ProviderId::Anthropic, "base-model"));
+    let conversation_id = make_id(4002);
+    workspace.create_conversation_with_id(
+        conversation_id,
+        Conversation::default(),
+        Arc::clone(&base),
+    );
+    let id = conversation_id.to_string();
+    let cli = Cli::try_parse_from([
+        "jp",
+        "query",
+        "--id",
+        &id,
+        "--cfg",
+        "assistant.model.id:=null",
+        "hello",
+    ])
+    .unwrap();
+
+    let error = resolve_config(
+        &cli.command,
+        || Ok(base.to_partial()),
+        &cli.globals.config,
+        &mut workspace,
+        None,
+        None,
+        false,
+    )
+    .unwrap_err();
+
+    let handle = workspace.acquire_conversation(&conversation_id).unwrap();
+    let events = workspace.events(&handle).unwrap();
+    assert_eq!(events.config().unwrap(), *base);
+    assert_eq!(events.config_deltas().count(), 0);
+    let (code, rendered) = parse_error(cmd::Error::from(error), OutputFormat::TextPretty);
+    assert_eq!(code, 1);
+    assert_eq!(
+        rendered,
+        "Config error\n\n    Missing required value for field assistant.model.id.provider."
+    );
+}
+
 fn kv(s: &str) -> KeyValueOrPath {
     KeyValueOrPath::KeyValue(s.parse().unwrap())
 }
