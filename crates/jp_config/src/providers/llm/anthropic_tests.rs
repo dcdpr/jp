@@ -1,3 +1,4 @@
+use schematic::PartialConfig as _;
 use test_log::test;
 
 use super::*;
@@ -118,6 +119,91 @@ fn test_assign_auth_chain_from_comma_separated_string() {
             AuthEntry::ApiKey,
         ])
     );
+}
+
+#[test]
+fn test_assign_auth_chain_null_clears_to_none() {
+    let mut partial = partial_with_auth(&[AuthEntry::ApiKey]);
+
+    let kv: KvAssignment = "auth:=null".parse().unwrap();
+    partial.assign(kv).unwrap();
+
+    // `None` and `Some([])` merge differently: `None` lets a later layer's
+    // chain land verbatim, while an empty chain replaces it with a value
+    // validation then rejects.
+    assert_eq!(partial.auth, None);
+}
+
+/// A chain holding `before`, as one config layer's partial.
+fn partial_with_auth(chain: &[AuthEntry]) -> PartialAnthropicConfig {
+    PartialAnthropicConfig {
+        auth: Some(chain.to_vec()),
+        ..PartialAnthropicConfig::default()
+    }
+}
+
+/// Assert that the delta between two chains folds back onto the first.
+///
+/// Order is part of the assertion: the chain is a fallback order, so a delta
+/// that reproduces the set but not the sequence silently changes which
+/// credential pays for the request.
+fn assert_auth_delta_law(before: &[AuthEntry], after: &[AuthEntry]) {
+    let prev = partial_with_auth(before);
+    let next = partial_with_auth(after);
+
+    let delta = prev.delta(next.clone());
+
+    let mut folded = prev;
+    folded
+        .merge(&(), delta)
+        .expect("folding a delta cannot fail");
+
+    assert_eq!(
+        folded.auth, next.auth,
+        "{before:?} -> {after:?} did not fold back to the new chain"
+    );
+}
+
+#[test]
+fn test_auth_delta_law_holds_for_a_removed_entry() {
+    assert_auth_delta_law(
+        &[
+            AuthEntry::Profile(Some("work".to_owned())),
+            AuthEntry::ApiKey,
+        ],
+        &[AuthEntry::Profile(Some("work".to_owned()))],
+    );
+}
+
+#[test]
+fn test_auth_delta_law_holds_for_a_reordered_chain() {
+    assert_auth_delta_law(
+        &[
+            AuthEntry::Profile(Some("work".to_owned())),
+            AuthEntry::ApiKey,
+        ],
+        &[
+            AuthEntry::ApiKey,
+            AuthEntry::Profile(Some("work".to_owned())),
+        ],
+    );
+}
+
+#[test]
+fn test_auth_delta_law_holds_for_an_added_entry() {
+    assert_auth_delta_law(&[AuthEntry::Profile(Some("work".to_owned()))], &[
+        AuthEntry::Profile(Some("work".to_owned())),
+        AuthEntry::ApiKey,
+    ]);
+}
+
+#[test]
+fn test_auth_delta_is_empty_for_an_unchanged_chain() {
+    let prev = partial_with_auth(&[AuthEntry::ApiKey]);
+
+    let delta = prev.delta(partial_with_auth(&[AuthEntry::ApiKey]));
+
+    assert_eq!(delta.auth, None);
 }
 
 #[test]

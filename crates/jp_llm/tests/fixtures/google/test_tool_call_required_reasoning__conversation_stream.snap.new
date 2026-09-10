@@ -1,0 +1,290 @@
+---
+source: crates/jp_test/src/mock.rs
+assertion_line: 135
+expression: v
+---
+{
+  "base_config": {
+    "inherit": false,
+    "config_load_paths": [],
+    "extends": [
+      "config.d/**/*"
+    ],
+    "assistant": {
+      "system_prompt": "You are a helpful assistant.",
+      "system_prompt_sections": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "instructions": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "tool_choice": "auto",
+      "model": {
+        "id": {
+          "provider": "google",
+          "name": "test"
+        },
+        "parameters": {
+          "reasoning": "off",
+          "stop_words": [],
+          "other": {}
+        }
+      },
+      "request": {
+        "max_retries": 5,
+        "base_backoff_ms": 1000,
+        "max_backoff_secs": 60,
+        "stream_idle_timeout_secs": 60,
+        "max_response_bytes": 1048576,
+        "cache": true
+      }
+    },
+    "conversation": {
+      "title": {
+        "generate": {
+          "auto": false
+        },
+        "from_heading": true
+      },
+      "tools": {
+        "*": {
+          "run": "ask",
+          "result": "unattended",
+          "cancellation_response": "This tool request was intentionally rejected by the user. Please evaluate and either ask the user why it was rejected, or infer the reason by looking at the historical messages in the conversation.",
+          "style": {
+            "hidden": false,
+            "inline_results": {
+              "truncate": {
+                "lines": 10
+              }
+            },
+            "results_file_link": "full",
+            "parameters": "json",
+            "print_stderr": true
+          }
+        }
+      },
+      "compaction": {
+        "rules": {
+          "value": [
+            {
+              "keep_first": "1",
+              "keep_last": "1",
+              "reasoning": "strip",
+              "tool_calls": "strip"
+            }
+          ],
+          "strategy": "replace",
+          "discard_when_merged": false
+        }
+      },
+      "attachments": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "labels": {
+        "value": {},
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "start_local": false
+    },
+    "style": {
+      "code": {
+        "color": true,
+        "line_numbers": false,
+        "file_link": "osc8",
+        "copy_link": "off"
+      },
+      "markdown": {
+        "wrap_width": 80,
+        "table_max_column_width": 40,
+        "table_continuation_edge": true,
+        "theme": "gruvbox-dark",
+        "hr_style": "line"
+      },
+      "mcp_startup": {
+        "show": true,
+        "delay_secs": 4,
+        "interval_ms": 100,
+        "stderr_rows": "auto"
+      },
+      "reasoning": {
+        "display": "full",
+        "background": 236,
+        "extend_across_tool_calls": true
+      },
+      "streaming": {
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "lock_wait": {
+        "show": true,
+        "delay_secs": 1,
+        "interval_ms": 100,
+        "timeout_secs": 10
+      },
+      "tool_call": {
+        "show": true,
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100,
+          "stderr_rows": "auto"
+        },
+        "preparing": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "typewriter": {
+        "text_delay": "3ms",
+        "code_delay": "500us",
+        "max_latency": "0s"
+      }
+    },
+    "interrupt": {
+      "escalation_cooldown_secs": 2,
+      "streaming": {
+        "action": "prompt",
+        "compose_in_editor": false
+      },
+      "tool_call": {
+        "action": "prompt",
+        "compose_in_editor": false
+      }
+    },
+    "editor": {
+      "envs": [
+        "JP_EDITOR",
+        "VISUAL",
+        "EDITOR"
+      ],
+      "inline": {
+        "edit_mode": "emacs"
+      }
+    },
+    "providers": {
+      "llm": {
+        "anthropic": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "ANTHROPIC_API_KEY",
+          "base_url": "https://api.anthropic.com",
+          "chain_on_max_tokens": true,
+          "beta_headers": []
+        },
+        "cerebras": {
+          "api_key_env": "CEREBRAS_API_KEY",
+          "base_url": "https://api.cerebras.ai"
+        },
+        "deepseek": {
+          "api_key_env": "DEEPSEEK_API_KEY",
+          "base_url": "https://api.deepseek.com"
+        },
+        "google": {
+          "api_key_env": "GEMINI_API_KEY",
+          "base_url": "https://generativelanguage.googleapis.com/v1beta"
+        },
+        "llamacpp": {
+          "base_url": "http://127.0.0.1:8080"
+        },
+        "ollama": {
+          "base_url": "http://localhost:11434"
+        },
+        "openai": {
+          "api_key_env": "OPENAI_API_KEY",
+          "base_url": "https://api.openai.com",
+          "base_url_env": "OPENAI_BASE_URL"
+        },
+        "openrouter": {
+          "api_key_env": "OPENROUTER_API_KEY",
+          "app_name": "JP",
+          "base_url": "https://openrouter.ai"
+        }
+      }
+    },
+    "plugins": {
+      "auto_install": true,
+      "shutdown_timeout_secs": 5
+    }
+  },
+  "events": [
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "parameters": {
+              "reasoning": {
+                "effort": "low",
+                "exclude": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "Please run the tool, providing whatever arguments you want."
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "**Considering Tool Arguments**\n\nI'm currently focused on determining the optimal arguments for the `run_me` tool. I'm exploring the options for `foo`, realizing it's optional and defaults to \"foo\".  The more pressing concern is the `bar` argument, which is mandatory and can accept either a string literal ('foo') or a list of strings. I need to make a solid selection to proceed.\n\n\n**Defining Tool Call**\n\nI've decided on the `run_me` tool call structure. Given that `foo` is optional, and `bar` can accept a list, I'm going with `default_api.run_me(bar=[\"foo\", \"bar\"])`. This covers the list case for `bar` and leverages the default for `foo`. I now need to think about potential error handling and what to do if the returned response isn't what is expected.\n\n\n"
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_request",
+      "id": "run_me_1",
+      "name": "run_me",
+      "arguments": {
+        "bar": [
+          "Zm9v",
+          "YmFy"
+        ]
+      },
+      "metadata": {
+        "google_thought_signature": "Q2lRQkVVMHlEelBLTklBbVhKRHJ5L3VWSi85dnltTkl5VUpPNnNuVDExQmdwSExWT1lRS1dnRVJUVElQZ0hoYzNPR1FOY0pYVUZaS3Q2SjBnU1pZczNqYkxaSFNRMEVzcVJlM0xpUU5iVjgyZFRaNVVYL0p6R1V2V1pqclNDbTVPMG54d1JwNXdIb1J2MnJydlU0R1JsWUwyYndpdjVRVjZQWUNIanJIQUEycDZBcmFBUUVSVFRJUFk3T2pZYmtsVUdkSW1UT3V2RHUwdWxDRUpKeEZMa2YzYWk5TnpYNVJTT05SWVFlTkpQak1iREJDZk1TVHBETVJ2Y1ZXbkJzbUx3ZHljQUNaOHZRV1FBTmY1R2VHakpDcmdZb1NWRXJialdEZlpuMkpoeUtFTktUQ3pxYklLWEgvRE5icFAyWmxTY3dsY3ViOEo0dGRFYk0vVnUyR21jMjNneU5ZSGpKUHA0MDVvdmtEbEJYa3FUOWJjUE1ISkIxaGs0RjlsUVpkZHl5ZGtsVFlhS2JjUEZSV2Z3bXBNczM3allqbEh3bndGbFo0S3d5V2lzUGV6NDdZRjZhdlB4QmFSTnFiUElBK2cxY3YyQlh2R1dUdktsUEYxNjJRQ3I4QkFSRk5NZytZcTNrNzB2K1o3TllUT0pOV01wYjBFY2pPL0hnRGZyNXE4TUtOUU90eGlqYUU3RS9aZUNHdUNJZ1VwWWVMb2lSS3dteGtRcFJ2MEgzNzJQbmpWbkZVeTZvczgyckhvVVNtR2FvRWx5eFAwMUJob2p4WHVOaGhuZnBmYUYyMExHbXI1elRCeWZXQldlcGRWL2FIOEFJSUY3N1Rreml2U3o4c2N3RUZzSzZzbXRZUks5NFp1ak1XUExnenVVc3BLbXh4OGxWS1VYOTBpQ0hRcEp4RzhHSVVtWldhV2duTlFsaE03c0g3UmFqOWd3ZnJMaUFRamp1OTd4MEs2UUVCRVUweUQ5YnJGUnZkRGhFS0VFL01TUHhTMnI3bDV0OS8xbjdhRFQ2KzRjRDNYN0FKU2w3b3Z2R1JkVVRaZUhGWHpJN2xSVWE4WlpjL1JpTFh3MnhDaS9uRE05UVhFOUlVSWxQMDBpS0xQNGxSWGlxTmM4WksrZ0cwanBLNFZORGNGWkdsSG5aOGtMNUo0NzR0QUd3NFMvVEV4RGhvUkd4a1o0R1Y5aUt0N2lLMGVMZmhYaWtadWNIR1kyNFBuOWhxNHhSR1FHMnhoTjVDZVhWL3lqQU0wdmJybnp1aHp0Tzk3emM2L0pWaktmVFVvSEdFRVFibnR6LzhlRFBnRitlaVdSY3FqWTFYRTI2cVFqSU9BNkc0QlVjeFNpYXQrMEk2TUtLbVJFd1BZYkdiWjFJUityZittd3BPQVJGTk1nOXo4Vk55MzJrVm1wM3J0TWZmcHBzS1NJR0k1aXgyN2RTMFlOMm9qQkZFVW9PNEJ2VjJmYitKV3JUcTkwdS9tc1V0MjBLamhOcVdYekxDTkY5TFViSVAvbVVzV1FhNDUrNTI="
+      }
+    },
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "parameters": {
+              "reasoning": "off"
+            }
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_response",
+      "id": "run_me_1",
+      "content": "d29ya2luZyE=",
+      "is_error": false
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "The tool ran successfully and returned the following output:\n```json\n{\"run_me_response\": {\"content\": \"working!\"}}\n```"
+    }
+  ]
+}

@@ -1,0 +1,358 @@
+---
+source: crates/jp_test/src/mock.rs
+assertion_line: 135
+expression: v
+---
+{
+  "base_config": {
+    "inherit": false,
+    "config_load_paths": [],
+    "extends": [
+      "config.d/**/*"
+    ],
+    "assistant": {
+      "system_prompt": "You are a helpful assistant.",
+      "system_prompt_sections": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "instructions": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "tool_choice": "auto",
+      "model": {
+        "id": {
+          "provider": "google",
+          "name": "test"
+        },
+        "parameters": {
+          "reasoning": {
+            "effort": "low",
+            "exclude": false
+          },
+          "stop_words": [],
+          "other": {}
+        }
+      },
+      "request": {
+        "max_retries": 5,
+        "base_backoff_ms": 1000,
+        "max_backoff_secs": 60,
+        "stream_idle_timeout_secs": 60,
+        "max_response_bytes": 1048576,
+        "cache": true
+      }
+    },
+    "conversation": {
+      "title": {
+        "generate": {
+          "auto": false
+        },
+        "from_heading": true
+      },
+      "tools": {
+        "*": {
+          "run": "ask",
+          "result": "unattended",
+          "cancellation_response": "This tool request was intentionally rejected by the user. Please evaluate and either ask the user why it was rejected, or infer the reason by looking at the historical messages in the conversation.",
+          "style": {
+            "hidden": false,
+            "inline_results": {
+              "truncate": {
+                "lines": 10
+              }
+            },
+            "results_file_link": "full",
+            "parameters": "json",
+            "print_stderr": true
+          }
+        }
+      },
+      "compaction": {
+        "rules": {
+          "value": [
+            {
+              "keep_first": "1",
+              "keep_last": "1",
+              "reasoning": "strip",
+              "tool_calls": "strip"
+            }
+          ],
+          "strategy": "replace",
+          "discard_when_merged": false
+        }
+      },
+      "attachments": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "labels": {
+        "value": {},
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "start_local": false
+    },
+    "style": {
+      "code": {
+        "color": true,
+        "line_numbers": false,
+        "file_link": "osc8",
+        "copy_link": "off"
+      },
+      "markdown": {
+        "wrap_width": 80,
+        "table_max_column_width": 40,
+        "table_continuation_edge": true,
+        "theme": "gruvbox-dark",
+        "hr_style": "line"
+      },
+      "mcp_startup": {
+        "show": true,
+        "delay_secs": 4,
+        "interval_ms": 100,
+        "stderr_rows": "auto"
+      },
+      "reasoning": {
+        "display": "full",
+        "background": 236,
+        "extend_across_tool_calls": true
+      },
+      "streaming": {
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "lock_wait": {
+        "show": true,
+        "delay_secs": 1,
+        "interval_ms": 100,
+        "timeout_secs": 10
+      },
+      "tool_call": {
+        "show": true,
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100,
+          "stderr_rows": "auto"
+        },
+        "preparing": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "typewriter": {
+        "text_delay": "3ms",
+        "code_delay": "500us",
+        "max_latency": "0s"
+      }
+    },
+    "interrupt": {
+      "escalation_cooldown_secs": 2,
+      "streaming": {
+        "action": "prompt",
+        "compose_in_editor": false
+      },
+      "tool_call": {
+        "action": "prompt",
+        "compose_in_editor": false
+      }
+    },
+    "editor": {
+      "envs": [
+        "JP_EDITOR",
+        "VISUAL",
+        "EDITOR"
+      ],
+      "inline": {
+        "edit_mode": "emacs"
+      }
+    },
+    "providers": {
+      "llm": {
+        "anthropic": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "ANTHROPIC_API_KEY",
+          "base_url": "https://api.anthropic.com",
+          "chain_on_max_tokens": true,
+          "beta_headers": []
+        },
+        "cerebras": {
+          "api_key_env": "CEREBRAS_API_KEY",
+          "base_url": "https://api.cerebras.ai"
+        },
+        "deepseek": {
+          "api_key_env": "DEEPSEEK_API_KEY",
+          "base_url": "https://api.deepseek.com"
+        },
+        "google": {
+          "api_key_env": "GEMINI_API_KEY",
+          "base_url": "https://generativelanguage.googleapis.com/v1beta"
+        },
+        "llamacpp": {
+          "base_url": "http://127.0.0.1:8080"
+        },
+        "ollama": {
+          "base_url": "http://localhost:11434"
+        },
+        "openai": {
+          "api_key_env": "OPENAI_API_KEY",
+          "base_url": "https://api.openai.com",
+          "base_url_env": "OPENAI_BASE_URL"
+        },
+        "openrouter": {
+          "api_key_env": "OPENROUTER_API_KEY",
+          "app_name": "JP",
+          "base_url": "https://openrouter.ai"
+        }
+      }
+    },
+    "plugins": {
+      "auto_install": true,
+      "shutdown_timeout_secs": 5
+    }
+  },
+  "events": [
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "parameters": {
+              "reasoning": "off"
+            }
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "Test message"
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "Test message received!"
+    },
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "parameters": {
+              "reasoning": {
+                "effort": "low",
+                "exclude": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "Repeat my previous message"
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "**Reiterating the Response**\n\nOkay, I've processed the user's initial prompt and correctly identified the need to echo their provided message. My logic determined the required output, and now I'm prepared to provide the specified response. I am ready to implement the request.\n\n\n"
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "Test message"
+    },
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "parameters": {
+              "reasoning": "off"
+            }
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "Please run the tool, providing whatever arguments you want."
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_request",
+      "id": "run_me_0",
+      "name": "run_me",
+      "arguments": {
+        "bar": [
+          "Zm9v",
+          "YmFy"
+        ],
+        "foo": "YmF6"
+      },
+      "metadata": {
+        "google_thought_signature": "Q2k4QkVVMHlEeFJOUUNEVkdZVnZGdFhETXV2NFpuWnR6NERhMklYSWkzYndzRVgvSE84cFpUNG55bEZOc3RpRU5BcGJBUkZOTWcrQjhqcTA2SHp5VmxRcXgwY1JBQjAzS29CdTNVRVFRZXdmSmZYblFwSGtOS3FPQmdvY0NoQkRCMjYvU3l0M28vYVpLZnp6TEpvWEptVVBiZHptRXRWbHVTN3RMb3R0ZVovZVQ2Unp2REtKRk5nT2ppdXc3Z3JIQVFFUlRUSVBTWUdqMU9LZG00SjdMcUhPUVFoMU9IcUR3YmkweHRxMEdHdTkrVm9abTNzcE1haW5xZG92ckpNaFNBa1FURlJlMXVIWXNVNGU3LzJvS0hrRmpzNXhKL1ZCeGI1YzlrVHNRWVF3TnhNVzd6bjBaZFV4b2cvblErSzVkRS94Nlg2TGo2bkVHZkxESXIxaVVCNFBtRVllalNGTS83UUxSM1Jad25tNCthWitySjFpeUpuT2E1NXhYQzkvT0ZXeGhZczJ3L0tFaVNXZHlBWWVOMStsV3o0TnhyWGlSaldRWktXbzZiRHhZdXEzS2FWeEU5U25FbXhRS2V3aDgwTWREcnl6QlN3SzBBRUJFVTB5RDVlNFlDQ0dKY1NKM2Z4WTEwNXdFdllGMGNIRWdST0pWaDFUTm1uZ1U0MFJJYXNsK2xkZkNVbmN2ME1GVENCZUZodGpJaVVnMHhNOGpYSkRndVVNOERiQmJKdmo4TGNhcUZXS08yVFZaajJDa29MOGRXV001cEtBSERZNlBZNC9PRXFaVGlmWFZxRm9XY3NVNCtQK29HOHR0b3JmYlZRVzZOU1RFZ1Q5U2did0hTVkhKWXl0bWVHVGRqSGVpYXlvbDFUZDNNVzVhUHdpZFkzazNYY0NmVGV1ZElyeUk2a09BNUlGWm5pZ0R2cFdlQ1djT1Z0U2ZrQnpMTnVoUmFyVlNqeDBPWFJSSUN1a1pkUzNDc0lCQVJGTk1nL2hNUGFhVXhEaldQeWZjTjA4NkQ1QlpXVWhsTnRPUGR5ejVXcEZyaFJpekNjZXBnc2p2ejgxWUhjRjZUeE5PUkNSZExPVnVGRjZVQ2JJTDNqVmdYckRCd2NjVlhTekQyOE5oK2Q1WkxzaHNjb1FZYlhGY2JvWU9ESkNENWR0NzRseEZ3WEt3SWNsekVkRVlMMGhrWmhEUDQzWXZEKzhlQnh5UVdpeFJIYnZ3aXBrRHJrUjduaVBYOUx4Nmhkb0FVRUFOZ1JBZ0hhWVB6b0lJaXQ5d0MrcXlpQTVWbG9VbjRTbEFGRExXZ3RhU1BjSGJmek1qQk1oTUZSTkd4VUt2d0VCRVUweUR5VndBd3ZJZnRpK3ZBMXhuTDhMd09qTjdXOTEzbWNhZ0hWZEZJeWh6QjNJOXd3RzJXSXQzTmRwbXFvRjlIZXpXTWd3a0N1OHY2Y0ZmSVN5b0R2b3J6czlmRDRCL2k2TVlMK01OYzhvQTJiVWdza1Y3d3NpVmMyRkV5SnJKdlB2QkJ2S2dySU5tNHcreTlpV1IrVmc5RncvR0dTSzhmaFl4cTZFRGU3RTE4WE93TEpUakpZSEU4cnc5OTBLMUs3cjVlN1EzRGpINHRoNml4clBrRVovc1Q1aUhiRklrNHN1VmpFSm9zODBLVTF1djdBcUh4dFZjeW1ZaXdvOUFSRk5NZzh5QStLOXl4bzU2UWQyZ0ZRRkF0Mk0xakZBSVNtNTN5VGlhemw5SkdXM2U0NmdFZnlMZTFWS1BIblZLOVJ4eDlGNTEyWGk2RVVrSVE9PQ=="
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_response",
+      "id": "run_me_0",
+      "content": "VGhlIHNlY3JldCBjb2RlIGlzOiA0Mg==",
+      "is_error": false
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "The secret code is: 42"
+    },
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "parameters": {
+              "reasoning": {
+                "effort": "low",
+                "exclude": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "What was the result of the previous tool call?"
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "**Accessing Recent History**\n\nI'm now zeroing in on retrieving the necessary information. The user's query about the \"previous tool call\" made me realize I need to access my internal state. My goal now is to efficiently retrieve the output of the most recent tool interaction. I need to get this info quickly, so the user has the information they requested promptly.\n\n\n**Pinpointing Past Interactions**\n\nI've successfully identified the relevant previous tool call and its corresponding output from my internal state. Now I'm extracting the pertinent data: the parameters of the tool call and the specific content from the response, which is \"The secret code is: 42\". I'm structuring this information into a concise and direct answer. Finally, I'll formulate a succinct and helpful response for the user.\n\n\n"
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "The result of the previous tool call was: The secret code is: 42"
+    }
+  ]
+}

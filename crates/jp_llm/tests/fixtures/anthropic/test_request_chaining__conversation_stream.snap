@@ -180,6 +180,9 @@ expression: v
     "providers": {
       "llm": {
         "anthropic": {
+          "auth": [
+            "api_key"
+          ],
           "api_key_env": "ANTHROPIC_API_KEY",
           "base_url": "https://api.anthropic.com",
           "chain_on_max_tokens": true,

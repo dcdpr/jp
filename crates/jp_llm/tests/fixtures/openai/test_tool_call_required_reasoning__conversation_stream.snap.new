@@ -1,0 +1,292 @@
+---
+source: crates/jp_test/src/mock.rs
+assertion_line: 135
+expression: v
+---
+{
+  "base_config": {
+    "inherit": false,
+    "config_load_paths": [],
+    "extends": [
+      "config.d/**/*"
+    ],
+    "assistant": {
+      "system_prompt": "You are a helpful assistant.",
+      "system_prompt_sections": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "instructions": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "tool_choice": "auto",
+      "model": {
+        "id": {
+          "provider": "openai",
+          "name": "test"
+        },
+        "parameters": {
+          "reasoning": "off",
+          "stop_words": [],
+          "other": {}
+        }
+      },
+      "request": {
+        "max_retries": 5,
+        "base_backoff_ms": 1000,
+        "max_backoff_secs": 60,
+        "stream_idle_timeout_secs": 60,
+        "max_response_bytes": 1048576,
+        "cache": true
+      }
+    },
+    "conversation": {
+      "title": {
+        "generate": {
+          "auto": false
+        },
+        "from_heading": true
+      },
+      "tools": {
+        "*": {
+          "run": "ask",
+          "result": "unattended",
+          "cancellation_response": "This tool request was intentionally rejected by the user. Please evaluate and either ask the user why it was rejected, or infer the reason by looking at the historical messages in the conversation.",
+          "style": {
+            "hidden": false,
+            "inline_results": {
+              "truncate": {
+                "lines": 10
+              }
+            },
+            "results_file_link": "full",
+            "parameters": "json",
+            "print_stderr": true
+          }
+        }
+      },
+      "compaction": {
+        "rules": {
+          "value": [
+            {
+              "keep_first": "1",
+              "keep_last": "1",
+              "reasoning": "strip",
+              "tool_calls": "strip"
+            }
+          ],
+          "strategy": "replace",
+          "discard_when_merged": false
+        }
+      },
+      "attachments": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "labels": {
+        "value": {},
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "start_local": false
+    },
+    "style": {
+      "code": {
+        "color": true,
+        "line_numbers": false,
+        "file_link": "osc8",
+        "copy_link": "off"
+      },
+      "markdown": {
+        "wrap_width": 80,
+        "table_max_column_width": 40,
+        "table_continuation_edge": true,
+        "theme": "gruvbox-dark",
+        "hr_style": "line"
+      },
+      "mcp_startup": {
+        "show": true,
+        "delay_secs": 4,
+        "interval_ms": 100,
+        "stderr_rows": "auto"
+      },
+      "reasoning": {
+        "display": "full",
+        "background": 236,
+        "extend_across_tool_calls": true
+      },
+      "streaming": {
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "lock_wait": {
+        "show": true,
+        "delay_secs": 1,
+        "interval_ms": 100,
+        "timeout_secs": 10
+      },
+      "tool_call": {
+        "show": true,
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100,
+          "stderr_rows": "auto"
+        },
+        "preparing": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "typewriter": {
+        "text_delay": "3ms",
+        "code_delay": "500us",
+        "max_latency": "0s"
+      }
+    },
+    "interrupt": {
+      "escalation_cooldown_secs": 2,
+      "streaming": {
+        "action": "prompt",
+        "compose_in_editor": false
+      },
+      "tool_call": {
+        "action": "prompt",
+        "compose_in_editor": false
+      }
+    },
+    "editor": {
+      "envs": [
+        "JP_EDITOR",
+        "VISUAL",
+        "EDITOR"
+      ],
+      "inline": {
+        "edit_mode": "emacs"
+      }
+    },
+    "providers": {
+      "llm": {
+        "anthropic": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "ANTHROPIC_API_KEY",
+          "base_url": "https://api.anthropic.com",
+          "chain_on_max_tokens": true,
+          "beta_headers": []
+        },
+        "cerebras": {
+          "api_key_env": "CEREBRAS_API_KEY",
+          "base_url": "https://api.cerebras.ai"
+        },
+        "deepseek": {
+          "api_key_env": "DEEPSEEK_API_KEY",
+          "base_url": "https://api.deepseek.com"
+        },
+        "google": {
+          "api_key_env": "GEMINI_API_KEY",
+          "base_url": "https://generativelanguage.googleapis.com/v1beta"
+        },
+        "llamacpp": {
+          "base_url": "http://127.0.0.1:8080"
+        },
+        "ollama": {
+          "base_url": "http://localhost:11434"
+        },
+        "openai": {
+          "api_key_env": "OPENAI_API_KEY",
+          "base_url": "https://api.openai.com",
+          "base_url_env": "OPENAI_BASE_URL"
+        },
+        "openrouter": {
+          "api_key_env": "OPENROUTER_API_KEY",
+          "app_name": "JP",
+          "base_url": "https://openrouter.ai"
+        }
+      }
+    },
+    "plugins": {
+      "auto_install": true,
+      "shutdown_timeout_secs": 5
+    }
+  },
+  "events": [
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "parameters": {
+              "reasoning": {
+                "effort": "low",
+                "exclude": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "Please run the tool, providing whatever arguments you want."
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "**Analyzing tool call options**\n\nI need to call a tool, specifically functions.run_me, which requires setting the \"bar\" parameter as \"foo,\" but \"foo\" can be null or a string. I’m considering whether to use multi_tool_use.parallel for multiple calls, but it only works for functions tools. Since it seems simpler, I'll just call functions.run_me directly and use the commentary channel for this. My plan is to call it with \"foo\" set to null.",
+      "metadata": {
+        "openai_item_id": "cnNfMDI3MDJhZGM4ZmJiN2EzYTAxNmE4ODZkYWRmODMwODdkMmI2NmYxOWFjNzQyZDRmMjc=",
+        "openai_encrypted_content": "Z0FBQUFBQnFpRzJ4bmFXVEF3Vng3eDA0Y3I1eTZRRFFWT3ZkMGVsWlFUR2kyN0JjRVVyM0JJRzBPYVVyOVZURnFmdWtuem11VU9hdkNlV21jVlRSRU1YLVJRZzVZOFRySXV0UFBHblQ3eUJsYXY0d05ibnQwWUV3X3hmLVRENXBIbGE5Wk1OYU1reEVEa2ZxZkJWcGNfeTIydFNYSzRia3UtTHpBcWRrandYNmRWZWhZWFcwUllTY1lYbjBpeVBOb09iYWQ2a0Q3NGlqemhBVHVUakd0ekgtbDRhWE4yTC03Y1Z5NUhtTm8xNWxtX1hTd3l5eWExTk43X0FvLWk5eWw4QzdyS2k5R3Zad1NzdVQzNGg4Ukw1alJ4aUJ4Ni1wVGlyNjg3ZmFienhZNHloNFh3bm1VRkZuX1ZXYWh3a2xzSF93N0s1YXNfZlQ0TGtEZmZRc1k4eGw5dE1feUFMRDNpUmNvYmVFX0VYR1p2YkJteUM3WDJzMTlRNUxDU1lLTXNXUzE1YzZzWVFOVVNNUUU1ZkN5T0l4cnVKYkR6VEJ3UmRGS005WkFNNVVhWThRWllGWEtwUXBLUS1LbnpTQ3lqN0pGaW9oSE5WbnJHblEwa1JtdE83NTlnUmFoNDl3MXNhaXRfdFkyVUtoUzZEUDE4WERPdzFQbHpuSlROdG9fdUROTFN4TlpnNno4N3didTFqYnVUMkVCZWlQWFFfaFhyUmswSGJGbzZjeDNXOFlkQW9JQkphRlpTLTNvNk5odEhtTGRzdjJ4MnBINTRBWjlWSXoybExTMko1RTVPM2J3S1NSUEFGdThQUEF5S05acnMzb1plNkx4WGJ1cnFiTkR0bl8tOVAyU0VQTHlfTEpMRFRCdG91bXNJM09XaHhJLTItejhZSXpkWGpNMWhxWV9rbGtpX25RRHhSWlRlUkEyUEhUN2lfMG1HRUIybTE2ZklkNEF1TnJSUmV0T19HQlc1NVRxMXBOZGRaVE5yUFZFWDlpVDJDTTVPQjVmSTZtVjlreEFueElzekJNQzhmZnNobzNGVWdUcGR5QmpEbjBSdzZQcERDQmc1NDNDVjJRUl8xckd1anhNVXFnTGR5ZHhUNVZNMFFsbm9pV1M5S2NNWnNzdkNDd2tHdmpYSmpsbHluYk5XdXVLNjJLOUlXWFYzc2tGWFhENXd1YzJMYnpiY3dVY3pEemtlTzBCYnU2ZXQtUDRmUkRkNVp4TUZ6X3V6RTFaSzFNSElwUTBrWF9ERHNGaTFmckR6aVE5eWk0cFhnN2o0UzFJb3lDU1h3cUVRRGY3S1RuVlcxS1U3MEoxU0xORF81ZHhOa19VWkRSVnZISXRCSHd5a0UxdWREaC00eEJfWVVYOWlmV00wTkk2UWtDb0cxSGd3ZFRRWV9sM3J4TERHNElTRTVhcnJfVHc1Q2pmaHBYMTl3QndQaHF0QjNFU2VRSDZ1dGtQa0tnMVoyQTdvdWYyVmJYa1Y2cHJIUjlzTm1PckFlMlJ2WnpxUm9yNGNmdDNUZkhWcC1ldVJLREwzaVBWanJ3TEMtT1ZzSFBHbmlJaVM2VTN3c2RpNjdKREVRckxvcGFyVlRTSU1pM0E4Tk1lZDM3MVVyakxXbEdHZklDR0pQeTZUVjlZSnpReDR6aEZoVE52dWVLQlpyTWx0czhERjlHVktxdjhVRHNmeEVXX3h4SUdrU3dTbDJVam1SemtGRVdMR292LXE1RF9nN18wY0VGQ04yYm8zdWk1QVpJNWx2MTJFb003UDlwYk9SeGg3MWhUMGNuN0dUbTdBdmwxX2xKZGxCaGxTdTEtcFRfaldncEpBdGVtXzZUMHNVckI5a2NndTNqRkpiV2h1RDZLTTFaR18weEIzNUYtdTdVektPMUg0eVZsV1FETVRqZTNPWFp3cEZFN2ZoVndUV0hmYTgwRXJpeUI5WkhLTWRBa05JMGJhZUI1OWxacngxRlB1OVlMeHZ0cDA3OTNLTE00SjdfcUlLSmhwMFpWUjREeHk5VUUxbEluSlVYZXFUTjBtbTV0M2ZCTjZIYXlRanhaLVA1UC1nYlhtOHhVeGdyUDY5UHZkQmIzMkhnZ3M0aHp3MEt3R1JzUkVELW5SX1BWWTVNVEdJTHM3bVZfTWU5RVBMcmlzSmRBcUUwZDNLbTd6cmM2NDNIWTlfcnB1TGlBenF4cjM1WmJQOHB6a0NRbFhveFBCLVphbV9weHE4RUoxUm9YM0JHdWt2b28xRDgzVnVscXNDRlNfeVFwVWF0LW1xNDBuTmZlU3F1SHMwPQ=="
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_request",
+      "id": "call_i95it8x7WlrY7fZeliTs6shY",
+      "name": "run_me",
+      "arguments": {
+        "foo": null,
+        "bar": "Zm9v"
+      }
+    },
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "parameters": {
+              "reasoning": "off"
+            }
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_response",
+      "id": "call_i95it8x7WlrY7fZeliTs6shY",
+      "content": "d29ya2luZyE=",
+      "is_error": false
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "Done — the tool returned: \"working!\"",
+      "metadata": {
+        "openai_item_id": "bXNnXzAyNzAyYWRjOGZiYjdhM2EwMTZhODg2ZGIyY2MzNDg3ZDI5Mzc0MzQ0MGM3ODM3ZTA0"
+      }
+    }
+  ]
+}

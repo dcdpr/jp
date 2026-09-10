@@ -108,12 +108,12 @@ impl AssignKeyValue for PartialAnthropicConfig {
             "api_key_env" => self.api_key_env = kv.try_some_string()?,
             "base_url" => self.base_url = kv.try_some_string()?,
             "chain_on_max_tokens" => self.chain_on_max_tokens = kv.try_some_bool()?,
-            _ if kv.p("auth") => kv.try_vec(self.auth.get_or_insert_default(), |kv| {
-                match kv.value.into_value() {
+            _ if kv.p("auth") => {
+                kv.try_some_vec(&mut self.auth, |kv| match kv.value.into_value() {
                     serde_json::Value::String(s) => s.parse().map_err(Into::into),
                     value => Err(format!("expected a string, got {value}").into()),
-                }
-            })?,
+                })?;
+            }
             _ if kv.p("beta_headers") => kv.try_some_vec_of_strings(&mut self.beta_headers)?,
             _ => return missing_key(&kv),
         }
@@ -125,7 +125,7 @@ impl AssignKeyValue for PartialAnthropicConfig {
 impl PartialConfigDelta for PartialAnthropicConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
-            auth: delta_opt_vec(self.auth.as_ref(), next.auth),
+            auth: delta_opt(self.auth.as_ref(), next.auth),
             api_key_env: delta_opt(self.api_key_env.as_ref(), next.api_key_env),
             base_url: delta_opt(self.base_url.as_ref(), next.base_url),
             chain_on_max_tokens: delta_opt(
@@ -138,6 +138,9 @@ impl PartialConfigDelta for PartialAnthropicConfig {
 
     fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
         Self {
+            // `auth` replaces rather than appends, so the whole of `next` is
+            // reachable by merging and no path needs clearing first.
+            auth: delta_opt(self.auth.as_ref(), next.auth),
             api_key_env: delta_opt(self.api_key_env.as_ref(), next.api_key_env),
             base_url: delta_opt(self.base_url.as_ref(), next.base_url),
             chain_on_max_tokens: delta_opt(

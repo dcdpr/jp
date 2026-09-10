@@ -1,0 +1,249 @@
+---
+source: crates/jp_test/src/mock.rs
+assertion_line: 135
+expression: v
+---
+{
+  "base_config": {
+    "inherit": false,
+    "config_load_paths": [],
+    "extends": [
+      "config.d/**/*"
+    ],
+    "assistant": {
+      "system_prompt": "You are a helpful assistant.",
+      "system_prompt_sections": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "instructions": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "tool_choice": "auto",
+      "model": {
+        "id": {
+          "provider": "openrouter",
+          "name": "test"
+        },
+        "parameters": {
+          "reasoning": "off",
+          "stop_words": [],
+          "other": {}
+        }
+      },
+      "request": {
+        "max_retries": 5,
+        "base_backoff_ms": 1000,
+        "max_backoff_secs": 60,
+        "stream_idle_timeout_secs": 60,
+        "max_response_bytes": 1048576,
+        "cache": true
+      }
+    },
+    "conversation": {
+      "title": {
+        "generate": {
+          "auto": false
+        },
+        "from_heading": true
+      },
+      "tools": {
+        "*": {
+          "run": "ask",
+          "result": "unattended",
+          "cancellation_response": "This tool request was intentionally rejected by the user. Please evaluate and either ask the user why it was rejected, or infer the reason by looking at the historical messages in the conversation.",
+          "style": {
+            "hidden": false,
+            "inline_results": {
+              "truncate": {
+                "lines": 10
+              }
+            },
+            "results_file_link": "full",
+            "parameters": "json",
+            "print_stderr": true
+          }
+        }
+      },
+      "compaction": {
+        "rules": {
+          "value": [
+            {
+              "keep_first": "1",
+              "keep_last": "1",
+              "reasoning": "strip",
+              "tool_calls": "strip"
+            }
+          ],
+          "strategy": "replace",
+          "discard_when_merged": false
+        }
+      },
+      "attachments": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "labels": {
+        "value": {},
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "start_local": false
+    },
+    "style": {
+      "code": {
+        "color": true,
+        "line_numbers": false,
+        "file_link": "osc8",
+        "copy_link": "off"
+      },
+      "markdown": {
+        "wrap_width": 80,
+        "table_max_column_width": 40,
+        "table_continuation_edge": true,
+        "theme": "gruvbox-dark",
+        "hr_style": "line"
+      },
+      "mcp_startup": {
+        "show": true,
+        "delay_secs": 4,
+        "interval_ms": 100,
+        "stderr_rows": "auto"
+      },
+      "reasoning": {
+        "display": "full",
+        "background": 236,
+        "extend_across_tool_calls": true
+      },
+      "streaming": {
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "lock_wait": {
+        "show": true,
+        "delay_secs": 1,
+        "interval_ms": 100,
+        "timeout_secs": 10
+      },
+      "tool_call": {
+        "show": true,
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100,
+          "stderr_rows": "auto"
+        },
+        "preparing": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "typewriter": {
+        "text_delay": "3ms",
+        "code_delay": "500us",
+        "max_latency": "0s"
+      }
+    },
+    "interrupt": {
+      "escalation_cooldown_secs": 2,
+      "streaming": {
+        "action": "prompt",
+        "compose_in_editor": false
+      },
+      "tool_call": {
+        "action": "prompt",
+        "compose_in_editor": false
+      }
+    },
+    "editor": {
+      "envs": [
+        "JP_EDITOR",
+        "VISUAL",
+        "EDITOR"
+      ],
+      "inline": {
+        "edit_mode": "emacs"
+      }
+    },
+    "providers": {
+      "llm": {
+        "anthropic": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "ANTHROPIC_API_KEY",
+          "base_url": "https://api.anthropic.com",
+          "chain_on_max_tokens": true,
+          "beta_headers": []
+        },
+        "cerebras": {
+          "api_key_env": "CEREBRAS_API_KEY",
+          "base_url": "https://api.cerebras.ai"
+        },
+        "deepseek": {
+          "api_key_env": "DEEPSEEK_API_KEY",
+          "base_url": "https://api.deepseek.com"
+        },
+        "google": {
+          "api_key_env": "GEMINI_API_KEY",
+          "base_url": "https://generativelanguage.googleapis.com/v1beta"
+        },
+        "llamacpp": {
+          "base_url": "http://127.0.0.1:8080"
+        },
+        "ollama": {
+          "base_url": "http://localhost:11434"
+        },
+        "openai": {
+          "api_key_env": "OPENAI_API_KEY",
+          "base_url": "https://api.openai.com",
+          "base_url_env": "OPENAI_BASE_URL"
+        },
+        "openrouter": {
+          "api_key_env": "OPENROUTER_API_KEY",
+          "app_name": "JP",
+          "base_url": "https://openrouter.ai"
+        }
+      }
+    },
+    "plugins": {
+      "auto_install": true,
+      "shutdown_timeout_secs": 5
+    }
+  },
+  "events": [
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "What fruit is in this image? Answer with just the fruit name, nothing else."
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "",
+      "metadata": {
+        "openai_encrypted_content": "Z0FBQUFBQnFpRzJ5dFpKcXZ3MGVBN2Z3a3FHVk9QWE4ybHoxaVJwdFZUeXRWMkdzbUJMQUlmVVhiTDd3TXFpMGlKbUp0b2lGUEZKZXItSkowZVJZRndCVVdzRGliUXdGMWU1OEd2UDlTa2Y0eTNGRDVkUWdQNklvemQyazhMZjU3SzhpQ0RYc0FteUN2VXB3ODhiOEE0SkNndmRXUG5XQk1keTJuN0pwSXptbzJoZER5XzVDYnQzWG8ybDUtSng1UFpCckJ4ZEtMLUk2ZzQtLTJqa3oxZWtTTXdaSzZwWlg1MU1EOHdGQzVqZzJ0M3F1VzZ0eEhzWmx2cmE3cmwwbU5YcUt2X0daQXU0cnJ4WFQ4U3NUOThUc2tzbzUxSnpjdlNVSHBPWWpNVXA2YTdTYmJ5VDIwUWE4Y040azllZnRLdEZRb1pkekh4Y0x1ZXRJY0dOZDdyMTFrTW5XRll2M1U1dHRlNi0zWF83eFd4dXUycEo3cElvN0dmb0VWSnhnc0Zpa3R4T1lVLU5Fd3lGNmQ5dE4zWXJPRm9NRUpGMTRra2RJdjJOZ3FhbldEOEhhZmFvc29yYlVkSjdUR0tJN2hET0hUNFB5Z29GZDBhUy1iaHp1c1o5TVh0cWZMS3YxM0N0NGhXN21hOXE5aVJBQlBjZnRuSlFldmFvX0lSdjg3bVNJYjB1cTVIMkx1dlMzNDQ4UHlQMXU2dy1FMUtSUlVRaTQzRGtELWdiZnNzY3oxUzhteUg1Q0VralBhWmpmYWNHZ3VDcVBvNzExUmZHU1hkRFJKT294VUIyUmc2d2Y5bnZkRVQtRGg1TE9qc1R6cHJQMlkwUmFncWVENjY4azg0dVkyUkFrMnF6ZUtlLVh0UG10LXp4ZGVKVHFoUXpoOElEdmRyVEg4MVF2UjJBZy1mUzk2NW9odjFpT00xNldrQ3VVenJGMEF2YWZNVUF4Rkw1NTRmMGxuZ1hLcExqUFBoS2h2SjRUMFE3eV9rRGlJV0VFeUI3akJWdU1Id2tPQlFhbktoYkkxZ1ROUk14Qkl2SGI2OVFTVGhzd0VCc2RwTkwwSmpmYzA0aU9aRjlzdGV2UjlsSWdIdGl2OEhOQldMd1YzYWFNS3VEYjlZOXVLRi1ZV2VRYlNKVE1VTXNxbWhtQ2tjNmRRbFZHMktUd1A0OVliMHhKWXZKS3FGMzJGdU9TakJYSUNyZXI2WFdJTzlnZzV4RGJSQ1VMMU5UMW1taENNU2lHN1JsVlpjdldtTGUwTDkzUmlxeEhwczdPRUE1WGpxdlZQUzZfU1hpUkJMMFRVUzM1YUoyLXQ4STU4dXE1NndqQW44c0g4YzlnOFZ0YlpZN1JQOTNKckNicFVVTjJxUHh4b1dSVTZiNTFHd0VYeTVXWHA4eGFfUUtLQWhkU0g5XzdzN0lmN1h0YjRMdV95eGtnWUFQYTQ2eU8wbHFUTmcxYkx3enpUYWoxUHlIMUFvOEoyckdkb2RvMVU2VXFyZEtNS0pVMnRFT01kTms0VFk4Nl9GRy1HMmotNDhteF94S2NnSUVWVGM5LUhHYWZmWmJWOERhX19rMkcwdnBmNVV6MUctdkJOUzFLeEdEMnFMRHJuSWdmYkVRYllLaHFqaEdERFRNVDM5NkNaazkzRUVVd0oySFFuZnk0bnFubWhmZDhYOFhzQ2xDcEJkLVpMenlLV3NnUy1OeFljOXoycEFOWkVEN1FsUTRBX0VGUkFkZGVFdklZT1BKM3NndFRKdWhoaF9OdEFoa3UzTU5wTmNvaWVRUmpVODEtUU05bV96VGl5OTRHN1EwY0w4T0lObFhHeExaamtfNUNTT1dpckRZdVk1LS1BbzlzYWh2ak9QN3hyZjFiV0FxcEJEeUJ6Z0pHV3Q1VjZha19PLURsdzJGbFVVRG85d2kyemc9PS5leUpsYm1Sd2IybHVkRjl6YkhWbklqb2liM0JsYm1GcEwyZHdkQzAxTFcxcGJta3RNakF5TlMwd09DMHdOM3h2Y0dWdVlXa2lmUQ==",
+        "openrouter_metadata": [
+          {
+            "id": "cnNfMGMyNjI1MGJiOWY1YjA1OTAxNmE4ODZkYjFmZDVjODdkMTkwYjMyNGEyMzFjNmU4OTM=",
+            "index": 0,
+            "field": "b3BlbmFpX2VuY3J5cHRlZF9jb250ZW50"
+          }
+        ]
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "apple"
+    }
+  ]
+}

@@ -1,0 +1,248 @@
+---
+source: crates/jp_test/src/mock.rs
+assertion_line: 135
+expression: v
+---
+{
+  "base_config": {
+    "inherit": false,
+    "config_load_paths": [],
+    "extends": [
+      "config.d/**/*"
+    ],
+    "assistant": {
+      "system_prompt": "You are a helpful assistant.",
+      "system_prompt_sections": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "instructions": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "tool_choice": "auto",
+      "model": {
+        "id": {
+          "provider": "google",
+          "name": "test"
+        },
+        "parameters": {
+          "reasoning": "off",
+          "stop_words": [],
+          "other": {}
+        }
+      },
+      "request": {
+        "max_retries": 5,
+        "base_backoff_ms": 1000,
+        "max_backoff_secs": 60,
+        "stream_idle_timeout_secs": 60,
+        "max_response_bytes": 1048576,
+        "cache": true
+      }
+    },
+    "conversation": {
+      "title": {
+        "generate": {
+          "auto": false
+        },
+        "from_heading": true
+      },
+      "tools": {
+        "*": {
+          "run": "ask",
+          "result": "unattended",
+          "cancellation_response": "This tool request was intentionally rejected by the user. Please evaluate and either ask the user why it was rejected, or infer the reason by looking at the historical messages in the conversation.",
+          "style": {
+            "hidden": false,
+            "inline_results": {
+              "truncate": {
+                "lines": 10
+              }
+            },
+            "results_file_link": "full",
+            "parameters": "json",
+            "print_stderr": true
+          }
+        }
+      },
+      "compaction": {
+        "rules": {
+          "value": [
+            {
+              "keep_first": "1",
+              "keep_last": "1",
+              "reasoning": "strip",
+              "tool_calls": "strip"
+            }
+          ],
+          "strategy": "replace",
+          "discard_when_merged": false
+        }
+      },
+      "attachments": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "labels": {
+        "value": {},
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "start_local": false
+    },
+    "style": {
+      "code": {
+        "color": true,
+        "line_numbers": false,
+        "file_link": "osc8",
+        "copy_link": "off"
+      },
+      "markdown": {
+        "wrap_width": 80,
+        "table_max_column_width": 40,
+        "table_continuation_edge": true,
+        "theme": "gruvbox-dark",
+        "hr_style": "line"
+      },
+      "mcp_startup": {
+        "show": true,
+        "delay_secs": 4,
+        "interval_ms": 100,
+        "stderr_rows": "auto"
+      },
+      "reasoning": {
+        "display": "full",
+        "background": 236,
+        "extend_across_tool_calls": true
+      },
+      "streaming": {
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "lock_wait": {
+        "show": true,
+        "delay_secs": 1,
+        "interval_ms": 100,
+        "timeout_secs": 10
+      },
+      "tool_call": {
+        "show": true,
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100,
+          "stderr_rows": "auto"
+        },
+        "preparing": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "typewriter": {
+        "text_delay": "3ms",
+        "code_delay": "500us",
+        "max_latency": "0s"
+      }
+    },
+    "interrupt": {
+      "escalation_cooldown_secs": 2,
+      "streaming": {
+        "action": "prompt",
+        "compose_in_editor": false
+      },
+      "tool_call": {
+        "action": "prompt",
+        "compose_in_editor": false
+      }
+    },
+    "editor": {
+      "envs": [
+        "JP_EDITOR",
+        "VISUAL",
+        "EDITOR"
+      ],
+      "inline": {
+        "edit_mode": "emacs"
+      }
+    },
+    "providers": {
+      "llm": {
+        "anthropic": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "ANTHROPIC_API_KEY",
+          "base_url": "https://api.anthropic.com",
+          "chain_on_max_tokens": true,
+          "beta_headers": []
+        },
+        "cerebras": {
+          "api_key_env": "CEREBRAS_API_KEY",
+          "base_url": "https://api.cerebras.ai"
+        },
+        "deepseek": {
+          "api_key_env": "DEEPSEEK_API_KEY",
+          "base_url": "https://api.deepseek.com"
+        },
+        "google": {
+          "api_key_env": "GEMINI_API_KEY",
+          "base_url": "https://generativelanguage.googleapis.com/v1beta"
+        },
+        "llamacpp": {
+          "base_url": "http://127.0.0.1:8080"
+        },
+        "ollama": {
+          "base_url": "http://localhost:11434"
+        },
+        "openai": {
+          "api_key_env": "OPENAI_API_KEY",
+          "base_url": "https://api.openai.com",
+          "base_url_env": "OPENAI_BASE_URL"
+        },
+        "openrouter": {
+          "api_key_env": "OPENROUTER_API_KEY",
+          "app_name": "JP",
+          "base_url": "https://openrouter.ai"
+        }
+      }
+    },
+    "plugins": {
+      "auto_install": true,
+      "shutdown_timeout_secs": 5
+    }
+  },
+  "events": [
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "Please run the tool, providing whatever arguments you want."
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_request",
+      "id": "run_me_0",
+      "name": "run_me",
+      "arguments": {
+        "bar": "Zm9v"
+      },
+      "metadata": {
+        "google_thought_signature": "Q2lRQkVVMHlEeVFUOXdUSSt0VUtITG8xWGVQRitRbm43QmZIQktrMVhmNWdwRmVZWWhNS1pRRVJUVElQMEJQR05EekVsYlZyZTJmL2pKbEZISWNHVTkzZnVacXNTazRBTXY4Sm13WEFVZjJnNVpJQUdsa0ZSZk5ZZ3kzaFI5MUNkQmlGZ0hab0FrajhqL29ZMDJqR29TRkwwMkp4Y1dTYWlPdWl5blM2dFdIS0pPWmM0em1DRnVQU0xvMmpDc3dCQVJGTk1nL0VjdHpGeHh5cTdQVXdkcmJIK1FOd2EwclorSU5XdnZ5YzJJZHJ3QnNnZm1MMXpMS2RyV2w5WTBqUTB3ZGd0V1dCdU5tcnhsREc5bEZuZDFFRDh5MUtuZWY2NkpEMnFCUEIxeUVPSHBZcWRDNml6Z1N5dHBTN3VGTUZ2R0NaM0xsblUyNjdzV3N2REt4eHpTdFJ0d2NaRGtGeXNmb1ovMW5NVWsra2FuVzRscnUvNkxFa3o5RFZCNC9EZVZRTHFxdmtUZWJXS2hTMk50MFpOeGpWY1RHK1AxNTkxZzMzbzNLdjVNMUZtaWhkOHcrUUg4NnVHZm9oajFkcHlVRHlXaGF1MFRVRnZISWxDdHNCQVJGTk1nK1pQM1k2SGRJMy9MdEl5WE5ibnUvVnVNeHNGenNLRytuem9Wc1M5Z3dwdGRSTG5NRmJCRmdyUTNKdlVnUENKc0c4aVZISFdrcFBmTUhnc3l5MHFsUGZ4T0RnMnl6RWxlV2ZnVzQ5UnNsS2hHUDYxa0hvNm03aHYwamt4VlE0a3JpLzBCNG1NbDZOWDI2Ymt2YVkvbThKdXp2Vjg4VmlqVXFPNjRJd01aZmNnMTBhMHhzd0ZRNWI3ZWt2ZHcxaDVuMXJqRWpBd1pScGRqaVBYNDR5Qk4vWmFmMDZqTm9QYXQ2VFF2Mm94WXl2RUtjTHhxNmVNQ3dxTzFGU1BqRldRdEtIcU9pNjZyQTFxZzJFaW45YnI1aWFPUTNncCtpR0Nyd0JBUkZOTWc4NXprTVdPTEsvbVVsbFlkVFRnV2lMcElYQ3VrNCtFOFlkRnVNZVUrWWVwdWRUU040dW90V2FCUGxrSDBmaUFZUlF6cGpiOXRYUE9teWcxcE9qNnJpdUNRa2dQK01TUXJLaTZYUitNbVV1SFk4R3hjYlYyMUc2WHdKZlJGV0dUNHdMSzBXcEthTi9jRlZwZEt4UWRvWStSRGo1QlFJZ0xLQ1lsZC9kUzBYcVRkcGNTVkFIN25BZzF0dW04S0xLaXZRRjBkLzBLeWw1TUs3RnVYekRIZk9SRUlaZ2hvYVg3T281THJQNVBQeUVwT1dIWVRJbTgwZ0t2UUVCRVUweUQ4c0xTZnB4aS9mTWRnajR5Q0FRK1RmNUMzakE2cW1HTTNCV25FWWRlQWZ6TXp3aVk1N05kYXk4WDN0bFFWNlpHdnp0K2kyMDhWM1BDOWFBaWFpZ2RpZmV1ak5lRkJ5cFd6RHh2Q3JwdldJQnRvNDdaOUl5em9DejllVW5Fdlk1cURjZjJlL3hHaXVJSERuRVZzeHBWaGhPYUxLTnhxK3g2UHB4b0d1WDRKWElCYUdPdXZNVFFNVktuZ0N3MzdNK1htSi95WHhSUWVpcXE3STVvUUorQmNnM21mZW5YODUwK1FiYkRlVVdLNGZHNHBudzl2TTBFNUlLNndFQkVVMHlENmNpeFZCZktaMGlqTVRISUVyNmhZY1R2TmZkUG83bkZOMjM4aDdSOUg1bWxTaENEaVN5Q1N0M3Y0Lzk1MWtPWEpCMFFRN2FsOXRsS2VzNjBlZzRweGd2SkpiUDMzSjduYk1NU3FUSVpOMVhqSVlhQ1F4dUtBQjhoWHpJODVDZnJONDNST0tlOGljVWNkY0k4dzJJMXU5RE9kbjJvTWdLcUYvSHF2Q1dES3hNelFwWkhSOW50NGFhWlpXTmIvQjdDV1JQdk12V0JsWWppRUtkN0NCOEtFZ29FVlgxZDd3OGFWcGlONXVDV0VIOHRCYjZ1TTNmYk0xTno1ME9PSFFOVGZKWFptWHNZTENjMkJob2pybGFMQWhTaTQ5eG9aUHB5MnNyaFhneWNlRXFiUTh1UVRGOUNsa0JFVTB5RDR4WlRwTUhhMS9wNFdMRXNKMElacVpWWk5SZWVHZGFjT2dvSFRraE95SmczbGQ0Qzk1RGFzMktNS2pBYUlIZkh6V3R0b2prYkpGcW50WEZDOCtxQU5Gd2xibUZSU3RvMXZRTnNWN1F5NEVDcHFrTVZnPT0="
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_response",
+      "id": "run_me_0",
+      "content": "d29ya2luZyE=",
+      "is_error": false
+    }
+  ]
+}

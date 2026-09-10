@@ -1,0 +1,287 @@
+---
+source: crates/jp_test/src/mock.rs
+assertion_line: 135
+expression: v
+---
+{
+  "base_config": {
+    "inherit": false,
+    "config_load_paths": [],
+    "extends": [
+      "config.d/**/*"
+    ],
+    "assistant": {
+      "system_prompt": "You are a helpful assistant.",
+      "system_prompt_sections": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "instructions": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "tool_choice": "auto",
+      "model": {
+        "id": {
+          "provider": "anthropic",
+          "name": "test"
+        },
+        "parameters": {
+          "reasoning": "off",
+          "stop_words": [],
+          "other": {}
+        }
+      },
+      "request": {
+        "max_retries": 5,
+        "base_backoff_ms": 1000,
+        "max_backoff_secs": 60,
+        "stream_idle_timeout_secs": 60,
+        "max_response_bytes": 1048576,
+        "cache": true
+      }
+    },
+    "conversation": {
+      "title": {
+        "generate": {
+          "auto": false
+        },
+        "from_heading": true
+      },
+      "tools": {
+        "*": {
+          "run": "ask",
+          "result": "unattended",
+          "cancellation_response": "This tool request was intentionally rejected by the user. Please evaluate and either ask the user why it was rejected, or infer the reason by looking at the historical messages in the conversation.",
+          "style": {
+            "hidden": false,
+            "inline_results": {
+              "truncate": {
+                "lines": 10
+              }
+            },
+            "results_file_link": "full",
+            "parameters": "json",
+            "print_stderr": true
+          }
+        }
+      },
+      "compaction": {
+        "rules": {
+          "value": [
+            {
+              "keep_first": "1",
+              "keep_last": "1",
+              "reasoning": "strip",
+              "tool_calls": "strip"
+            }
+          ],
+          "strategy": "replace",
+          "discard_when_merged": false
+        }
+      },
+      "attachments": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "labels": {
+        "value": {},
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "start_local": false
+    },
+    "style": {
+      "code": {
+        "color": true,
+        "line_numbers": false,
+        "file_link": "osc8",
+        "copy_link": "off"
+      },
+      "markdown": {
+        "wrap_width": 80,
+        "table_max_column_width": 40,
+        "table_continuation_edge": true,
+        "theme": "gruvbox-dark",
+        "hr_style": "line"
+      },
+      "mcp_startup": {
+        "show": true,
+        "delay_secs": 4,
+        "interval_ms": 100,
+        "stderr_rows": "auto"
+      },
+      "reasoning": {
+        "display": "full",
+        "background": 236,
+        "extend_across_tool_calls": true
+      },
+      "streaming": {
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "lock_wait": {
+        "show": true,
+        "delay_secs": 1,
+        "interval_ms": 100,
+        "timeout_secs": 10
+      },
+      "tool_call": {
+        "show": true,
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100,
+          "stderr_rows": "auto"
+        },
+        "preparing": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "typewriter": {
+        "text_delay": "3ms",
+        "code_delay": "500us",
+        "max_latency": "0s"
+      }
+    },
+    "interrupt": {
+      "escalation_cooldown_secs": 2,
+      "streaming": {
+        "action": "prompt",
+        "compose_in_editor": false
+      },
+      "tool_call": {
+        "action": "prompt",
+        "compose_in_editor": false
+      }
+    },
+    "editor": {
+      "envs": [
+        "JP_EDITOR",
+        "VISUAL",
+        "EDITOR"
+      ],
+      "inline": {
+        "edit_mode": "emacs"
+      }
+    },
+    "providers": {
+      "llm": {
+        "anthropic": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "ANTHROPIC_API_KEY",
+          "base_url": "https://api.anthropic.com",
+          "chain_on_max_tokens": true,
+          "beta_headers": []
+        },
+        "cerebras": {
+          "api_key_env": "CEREBRAS_API_KEY",
+          "base_url": "https://api.cerebras.ai"
+        },
+        "deepseek": {
+          "api_key_env": "DEEPSEEK_API_KEY",
+          "base_url": "https://api.deepseek.com"
+        },
+        "google": {
+          "api_key_env": "GEMINI_API_KEY",
+          "base_url": "https://generativelanguage.googleapis.com/v1beta"
+        },
+        "llamacpp": {
+          "base_url": "http://127.0.0.1:8080"
+        },
+        "ollama": {
+          "base_url": "http://localhost:11434"
+        },
+        "openai": {
+          "api_key_env": "OPENAI_API_KEY",
+          "base_url": "https://api.openai.com",
+          "base_url_env": "OPENAI_BASE_URL"
+        },
+        "openrouter": {
+          "api_key_env": "OPENROUTER_API_KEY",
+          "app_name": "JP",
+          "base_url": "https://openrouter.ai"
+        }
+      }
+    },
+    "plugins": {
+      "auto_install": true,
+      "shutdown_timeout_secs": 5
+    }
+  },
+  "events": [
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "parameters": {
+              "reasoning": {
+                "effort": "low",
+                "exclude": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "Please run the tool, providing whatever arguments you want."
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "The user is asking me to run the \"run_me\" tool with whatever arguments I want. Let me look at the schema:\n\n```json\n{\n  \"name\": \"run_me\",\n  \"parameters\": {\n    \"properties\": {\n      \"bar\": {\n        \"enum\": [\"foo\"],\n        \"items\": {\n          \"enum\": [\"foo\", \"bar\"],\n          \"type\": \"string\"\n        },\n        \"type\": [\"string\", \"array\"]\n      },\n      \"foo\": {\n        \"default\": \"foo\",\n        \"type\": \"string\"\n      }\n    },\n    \"required\": [\"bar\"],\n    \"type\": \"object\"\n  }\n}\n```\n\nSo the parameters are:\n- `bar` (required): This can be either a string or an array. If it's a string, the enum constraint is [\"foo\"]. If it's an array, the items can be [\"foo\", \"bar\"]. Wait, let me re-read this. The \"enum\": [\"foo\"] is at the same level as \"items\", which is a bit confusing. Let me think about this more carefully.\n\nActually, looking at the structure:\n- `bar` has `type: [\"string\", \"array\"]` - so it can be a string OR an array\n- `bar` has `enum: [\"foo\"]` - if it's a string, it must be \"foo\"\n- `bar` has `items: {\"enum\": [\"foo\", \"bar\"], \"type\": \"string\"}` - if it's an array, each item must be \"foo\" or \"bar\"\n\nSo `bar` can be:\n1. The string \"foo\"\n2. An array of strings where each string is either \"foo\" or \"bar\"\n\n- `foo` (optional): A string with default value \"foo\"\n\nSince the user said I can provide whatever arguments I want, I'll just provide reasonable values:\n- For `bar` (required), I'll use \"foo\" since that's the only valid string value\n- I'll skip `foo` and let it default rather than setting it explicitly.\n\nI could also try `bar` as an array, but a plain string keeps things simple, so I'll just go with `bar: \"foo\"`.",
+      "metadata": {
+        "anthropic_thinking_signature": "RXJjUENwb0JDQkVZQWlwQUVXSU45VUg0WHFRSTZ5SCttejdOSjBtN0VqMDhHTzdRbFRNdDc3cklJWE5zcUFyalFYZ0c5MnRFUlhiQ3B5WTFpb3l0bGtWS3MwYzlkTmVqSDZzUnV6SVpZMnhoZFdSbExXaGhhV3QxTFRRdE5TMHlNREkxTVRBd01UZ0FRZ2gwYUdsdWEybHVaMW9rWWpFMFpERXpOMlF0WmpVeE1pMDBNekE1TFRrM05HUXRNMlptTVRNeVlXWXhOVFl5cUFILzJxSFVCaElNWitKOWdyS2JjVFI1RGpKbkdneTB2YUZwMWpRalM2SURoMUlpTUJEZzZSZnR2K2dVV0gzMCtwWnpzNFRnNnEwei9mNGZHYkd3RjRuWWRLZVRWS2E3NUhSTXdVOWM0NkRma2grckJTckpEYUl1ZTl4OXM1bTVKTmk5VVdWMDRrL1FRQUMwWWpKMzE3Z01kbFIvYnpWcHdlUDdWTzFranNENzF6NzFKMTRvamw4ZUp6VDlIYUdTVDVRNHhSSm1VbUFHcm1ON1JqY1hTMmJHblhabVYrK3ZlS3RaZk9VQ1dzL1lCTHV4S3UvQXhwdCtMM2JHYkl2UWNmeHZlbWZyQm1FWnR6S3d5S0VzLzRZYmtSR2NDTmN6QUN6dzM2dUx2ZWZDcGF4bjhPaFVtY1JCWktZd1hDL09TMytFSkZYMnNYellicGtxZU4wTm5TcGUvZFptMThXUXFxb3owQWJSSE5EQmwzbGY5UnZvUThyNmkwdjZ4VzFpUE5vSGRLQWptblFGV3VqZ0hlSnduMlI5Mi9pbkM0Y2FDQ3R5VU9zRjVpNzFTMG5kUGpwcVlBNnlId242QTBtZUlqdjRQOFhFdkpvbGZJQmM3bk5ON2t2dzVqQnAzNW5TYlY0ZmtJVWdFZTB1UGh5bHFlR3NORHJ4WkNaQ01QWlBxNzhwT3hqN3FMaVhDaElIay8rQmFDNXRPZnQrVVowRWxtTXNIZ1RvNWlwMmkrelF1ZUtndi9kampYYWJ2T3RrRFZSYzhyL2QzalZLRmVJVjA5ZFVSdXp3cWcyZGszQ004UG9XY1NHc1NXM0xvNjI0V1UrcU1ZcHBVSHZtbTVPSW9PZEgyYTFobVFXTmsydHVWb3NGdEZmRVd3aExYOEZyVTIrVEJTWEN3ai84aDZ3ZDRHUCtzZEhyT3R2dmVxVUxqaWNmaWVPbENFRGFXVlc5YjJIZUU0Znp4VnlVNW5BRVRhMUlZdmxEOG44c2ZWWFJuMklOMnpFNGZFNFVPRVlGWDZNWVQ4OGI0bEFaYXQ5ejYyM29JQXFvVjk5Ky9LS2VKbmJ6blcvTk5Wejk5NG5sUDRMU0dPN1VPa3RCeGRZL0dyTlFPREFVNmg2S05RdTFEWjFEOElhcEcyZVBzSm9FR3pvKzBwMi9OWCtLMG9XT0dOMENWYnQwRVlMWVRmTzI0YU15YU0zTVQ5S0NnRHQ2TE5Jc1RtY1FMUzY3MTNLbGtPME5uRE13SHlvNnhPbVNTaVJFTlRCTk9DRGMvUHpXNFdOUWRQZnZUNlRqWW5yZVR6YndxOGdlS2xSbUpyMEp1bSt1Z0dIOUdqZGpOWWtiWGIxK2c5ckMvemlNWEFIaG44MjVUSGpkelUrbjRTeTVtVXZTNEVCeXpZWHZUL2VMSE5aUVcwV3cxc1BZUkVHNjJIMlljZ0MrVW1pdy8wRHIzanRrL0FJRld3T2tnazhDUkJZSW9yRG0vZStMMDN1U3BDR0UrU01TSDh3eHpQaUo0ZEJHdHREeVpWUU40SVVDOEFTTGhMK1JtVmZIT2xSZFNQTkhwWUFwdVJEL2lpVU9sSWpuN0FRUkphY3FyL0k2L1NuR25ISXNvODlXek92bkY4RnU0bGN0V29Fc1lDLy94YVNwclZxZk9hUW5TT04yQU1pTVdtNnZDQkY0YzQxb3Z0Wmh4eWdydzEvclltbVc0SW1ER2Jvc2U2VUdZbFZhcmhHaUlIaGJ6YkNXcGRHcXEvNnRCWGtGWk12Q2xrQ21UaEtWQXBDb1kzZEJnZ1k2aTJ3bDRQNUQzODd6UmxFN1R2YnVuckxXOEFyUFRyUHdqWVNCOG4rdjZWa0VXN05mdWoveXRaeC9ZcVRyUmRaTXJDQVJ4aHQya2Z6SWNiNmRtVTJQTjc2eGZoSXFqVUk2RU0wNERwWE10czVQMjdzUFE3ZXVYRG5tdFA3eTk0VHEycmRhTFJPaitNQmVlSXdxeHZNTlh3cWFGY3FVZ1FZTkRJVmg0MVVaK3NUdnEySzZmVmxOd3Q2SURlbnpjWHJXem5zRGhMT09GeDNJMDZQS0gwRC9MZ2VIQTkxN2pMbzlINHZGUFVieGl1SWpzdm45VVFsL0ZSTUxCenpXWTlxUjFCMERwSWJ1N3ZmT2I2UGFYK1pyektzQVpvZkdpc21LUy9zODNYVWhrZVlHN1ZpakZzZXh6Q25xUjNDT2F5a2Ura2pkenZzWVF1ajFzUlc4eUlCKzZOSUo1bFQ2VGVsenkzRExiYUh5Mmh5VTNvRy9VL0hMWnIxMi9Nakd4NVlGdkllZjErK1J3V2NvdnJUZ2svaW1EUGU1MERhbExrMkpoWVArVDVpWFE0L09OaldNUHJrRUZ3RVRqSjZvbUN5SmVvUHVmVmhVUnpUZTUxTlN6UzB3bFExZ2IvcmM4KzdvZXdsdTBsV3VGbXpwcU1WQmRVUk9aUlRaeTBFNzVpUjRrcHVyNTV0S3JjVms4d09OZzFVakVxU2N2bmR5bHNjdHhLeXdkd0o4eGVDTG9xaWx1MFNkaG9JZFRIcGRpWVBDSEJKdmNTQ3R1SHB2Qmc2M0hxMXBaZkU1dFVseFhCQWs4bnR3Mk5XeWJKcjVNS0N6TXRyUituT0pkYVlGbnBleFlWeEhsMnlTMG1MNnZNR1dnbm93VURaQzJuOXhQSmJtUExteHdheHdNbG5EaytYaG04aUphQk43cWlTbkNhR2RxL2xQb1g4azM3NUNHZDVPOTU3ZDlxaDVhbDhQN2o1K0tzdEhRbi8wejY5aFlsRUppWURDRnV2OTAzTStLdTBwL3hrL083RmcxOFk5cWExVUxEK0hlT0tmOEtEM3l3UXZYcWpWRTBVVlVaZk5WbzM5TkxSVUhvcmRTc1VMQmVxQUlWRkMyaXdqODB2YmZKcGtmazFoN3AyWU5zSG9laisxMTN0VDR6bzlhS2tmdk1jcjRlc2hEN2U4UEJpcDJwYjJxYmRLNzdRV0hmU1BBZk1kS25SZ044WTFZYzZ0WVJDYlhQSlUrb1Q1TlFrRW80Vk5TeFIrLzFVb25JVytORjV1RG8zNnNMcjhocm9SWTU5bGZ2Y3NtRkFuM3JuNEhjbEZCRkg3bjhGTUJFajROa0p5MTdJWGttZmNFNllEMWpwMDJodlpoemVhbDlvOHRKMGFpWXVpcE0zWStzNzFhdDkxK1JSeW5heW1JdUxlanRkd3FnN05nQzFGd1h2b2ljOWgveGdC"
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_request",
+      "id": "toolu_01R35dJ1FaGkcNPmGqF2NfSA",
+      "name": "run_me",
+      "arguments": {
+        "bar": "Zm9v"
+      }
+    },
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "parameters": {
+              "reasoning": "off"
+            }
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_response",
+      "id": "toolu_01R35dJ1FaGkcNPmGqF2NfSA",
+      "content": "d29ya2luZyE=",
+      "is_error": false
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "Great! The tool ran successfully. I called `run_me` with `bar` set to `\"foo\"` (which is the only valid string value for that parameter), and it returned `\"working!\"`. The optional `foo` parameter was left to use its default value of `\"foo\"`."
+    }
+  ]
+}
