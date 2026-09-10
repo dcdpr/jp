@@ -1,4 +1,4 @@
-# RFD D46: Interactive Compaction Review
+# RFD D66: Interactive Compaction Review
 
 - **Status**: Draft
 - **Category**: Design
