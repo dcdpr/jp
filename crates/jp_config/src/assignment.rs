@@ -12,7 +12,7 @@ use schematic::PartialConfig;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, from_str};
 
-use crate::{AppConfig, BoxedError};
+use crate::{AppConfig, BoxedError, types::vec::MergeableVec};
 
 /// The result of assigning a key-value pair to a configuration.
 pub type AssignResult = Result<(), BoxedError>;
@@ -1000,23 +1000,6 @@ impl KvAssignment {
         Ok(())
     }
 
-    /// Convenience method for [`Self::try_vec`] that takes an optional target.
-    ///
-    /// A `null` value clears the field to `None` rather than to an empty list;
-    /// the two merge differently.
-    pub(crate) fn try_some_vec<T>(
-        self,
-        vec: &mut Option<Vec<T>>,
-        parser: impl Fn(Self) -> Result<T, BoxedError>,
-    ) -> Result<(), KvAssignmentError> {
-        if self.clears_collection() {
-            *vec = None;
-            return Ok(());
-        }
-
-        self.try_vec(vec.get_or_insert_default(), parser)
-    }
-
     /// Specialized version of [`Self::try_vec`] for parsing a JSON array of
     /// strings.
     pub(crate) fn try_vec_of_strings<T>(self, vec: &mut Vec<T>) -> Result<(), KvAssignmentError>
@@ -1049,6 +1032,62 @@ impl KvAssignment {
         }
 
         self.try_vec_of_strings(vec.get_or_insert_default())
+    }
+
+    /// Assign to a list that carries its own merge strategy.
+    ///
+    /// Accepts either the list itself or a `{ value, strategy }` object, which
+    /// is how the user declares a strategy for the field.
+    /// The two are told apart by shape, the same way [`MergeableVec`]'s own
+    /// deserializer does it: a sequence cannot be a table.
+    pub(crate) fn try_some_mergeable_vec<T>(
+        self,
+        vec: &mut Option<MergeableVec<T>>,
+        parser: impl Fn(Self) -> Result<T, BoxedError>,
+    ) -> Result<(), KvAssignmentError>
+    where
+        T: Clone + DeserializeOwned,
+    {
+        // An absent list and an empty one merge differently: `None` lets a
+        // later layer's value land verbatim, `Some([])` still runs the field's
+        // merge strategy against it.
+        if self.clears_collection() {
+            *vec = None;
+            return Ok(());
+        }
+
+        // An object declares a strategy alongside the value, so it is parsed as
+        // the wrapper rather than element by element.
+        if let KvValue::Json(value @ Value::Object(_)) = self.value.clone() {
+            let merged =
+                serde_json::from_value(value).map_err(|error| kv_error(&self.key, error))?;
+
+            *vec = Some(merged);
+            return Ok(());
+        }
+
+        let mut elements = vec.take().map(MergeableVec::into_vec).unwrap_or_default();
+        self.try_vec(&mut elements, parser)?;
+        *vec = Some(elements.into());
+
+        Ok(())
+    }
+
+    /// Convenience method for [`Self::try_some_mergeable_vec`] whose elements
+    /// are built from strings.
+    pub(crate) fn try_some_mergeable_strings<T>(
+        self,
+        vec: &mut Option<MergeableVec<T>>,
+    ) -> Result<(), KvAssignmentError>
+    where
+        T: Clone + From<String> + DeserializeOwned,
+    {
+        let parser = |kv: Self| match kv.value.clone().into_value() {
+            Value::String(v) => Ok(v.into()),
+            _ => type_error(kv.key(), &kv.value, &["string"]).map_err(Into::into),
+        };
+
+        self.try_some_mergeable_vec(vec, parser)
     }
 
     /// Try to parse the value as a JSON array of partial configs, and set or
