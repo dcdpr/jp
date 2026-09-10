@@ -607,7 +607,7 @@ fn run_inner(cli: Cli, format: OutputFormat) -> Result<()> {
         return output;
     }
 
-    // Credentials are user-global, so `jp provider auth` works anywhere:
+    // Credentials are user-global, so `jp provider llm auth` works anywhere:
     // it bypasses workspace discovery entirely, the same startup exception
     // `jp init` uses.
     if let Commands::Provider(args) = &cli.command {

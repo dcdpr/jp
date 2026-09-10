@@ -335,8 +335,8 @@ fn test_load_cli_cfg_args_merges_global_and_workspace() {
 
     assert_eq!(result.assistant.name.as_deref(), Some("from-global"));
     assert_eq!(
-        result.providers.llm.openrouter.api_key_env.as_deref(),
-        Some("FROM_WS")
+        result.providers.llm.openrouter.api_key_env,
+        Some("FROM_WS".into())
     );
 }
 

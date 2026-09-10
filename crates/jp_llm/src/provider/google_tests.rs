@@ -1283,7 +1283,8 @@ mod service_tier_configuration {
 
     fn google() -> Google {
         Google::try_from(&GoogleConfig {
-            api_key_env: api_key_env(),
+            auth: vec![jp_config::providers::llm::AuthEntry::ApiKey(None)],
+            api_key_env: api_key_env().into(),
             base_url: "https://generativelanguage.googleapis.com/v1beta".into(),
         })
         .unwrap()

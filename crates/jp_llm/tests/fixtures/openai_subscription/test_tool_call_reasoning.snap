@@ -1,0 +1,60 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "**Planning tool execution with valid args**",
+                    },
+                ),
+                metadata: {
+                    "openai_item_id": String("rs_017a820b245c17c1016aa1ba63e9a087d2829e5e5215b118eb"),
+                    "openai_encrypted_content": String("gAAAAABqobqgSbxIE0tUeL1MEc46q-3Ausf4qi42KrR8wUpXJYPjVih6aR6GReKFdgYjONfoYAbSjCeX0l1kazYPSYce-Zt7PqLXbkqfOda16_Ku8-Yc3ndJa8IGcAuRS2DRUvPBCBFvx-S9Gg-QoqHm2xFzIaOFfU3cCj16BGr5PvwWsxG5VwTkZMctn5h8zfO2LvG7PIz1fNhnWouxA3SWYLrps02zgBEG0QMhcv2gCAQzM7wKDNiPX6RwUOCAFuZrblE55E37vNJXuDelYn6O9nQU2mZtacA-Y-E_euudNBGdlWfwV7z5esyQVa1J4kf6hUqG4ZOnP7zFkY50KeACDkc2h67JCvKgYFa8s7DxD5hsz6YP-Qnw4sRQIhOUoz6m6VB_Ci1V0_gL1P3-E_KCv0gF6YN7GOQ-D7odIgp83bRlGi5w6sKIUGxbyWvrnn3aoD69aXtsFeQsV002DqjV5u5WHrerbZ35DBRfM_JHV_yVmlA3ZvRNEtOz5obQ66zSRGns_tiZA-yZT5IpN-yTBUNLY8IGZCidqFCh8gmlCD9KZITKEQrL3nVsXhfJnOKclUJOW0QY9YVOhY0Dx9BT5SwgiWxit8G7SZl9UfmFiAkzhdNfkyNxsPJUB4HAyCKqPVjizK5Iisv2nOCg8MYI__KaTJ7jpOTz7Lqe0TejAEdHLmnczN6cYlvIY16ixYANSfMvu91bwvWU4fjJsXboXq4GH3hPOWLMlaXYvVTS6UwFgjL0L31nolvGlDAmdoIX0HbS0MpAHkSSPTEdmOgn3yhXao7klqaQguIayRIKtOpOQ48D1qgocaN73-n465P-0fezC_rdJ0zBgq2Myrjiifdr3pEZlT4wWPqHx8U5CsBG8mCCNCS71kBK7wlKAMJD-tqpu71TD40nCjcG4ti97KuFXEUf-A0DZHb8XGivLu3VtXQ_LUiY35tb9UBbI_tZUBJorg4cHEI2gzdBt6TrjgAzIQqbjX3oHtPnyvHL0G4ux7LmOSffkq4OkSTyBz4eo_tmASSOU1Fn7Thjw3O35vzj7V5Wabgv6LjTgHdEAUnAUiYdUo9Z6MduCru-hVONpF6fmUhkpHofZEhH3eSY2Hxq9aKuUlasGMw7eZU-eBJlld0TPRSv_tgRyN2QkqtyCGVthAKZRWmsS42RIt54NkiIW88B52aDbBudi5VwS3DD_WpxC9vuJ17nP3NNUuL07cTj4_rb-cijfVDCWeYvmkjIsCutThp-JjoJS-KLIANofJ82QnqwOhdNhn_vv45K75Dc6PLTjA5YFsNgYZ2zeCLgClU08CMT2sTjKgJC26vLS6s8IMzVhXzHi0C_LHTKPrAG41l4fJcQFcfzMp9c6My4snmw3A=="),
+                },
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ToolCallRequest(
+                    ToolCallRequest {
+                        id: "call_YglbHmuPJlMuSG0yVRvvk28n",
+                        name: "run_me",
+                        arguments: {
+                            "bar": String("foo"),
+                            "foo": String("example"),
+                        },
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "The tool ran successfully.",
+                    },
+                ),
+                metadata: {
+                    "openai_item_id": String("msg_017a820b245c17c1016aa1baa6482487d2959af3e0b5dfc877"),
+                    "openai_phase": String("final_answer"),
+                },
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+]

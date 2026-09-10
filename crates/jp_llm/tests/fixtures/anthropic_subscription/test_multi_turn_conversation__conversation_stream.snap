@@ -1,0 +1,456 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+{
+  "base_config": {
+    "inherit": false,
+    "config_load_paths": [],
+    "extends": [
+      "config.d/**/*"
+    ],
+    "assistant": {
+      "system_prompt": "You are a helpful assistant.",
+      "system_prompt_sections": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "instructions": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "tool_choice": "auto",
+      "model": {
+        "id": {
+          "provider": "anthropic",
+          "name": "test"
+        },
+        "parameters": {
+          "reasoning": {
+            "effort": "low",
+            "exclude": false
+          },
+          "stop_words": [],
+          "other": {}
+        }
+      },
+      "request": {
+        "max_retries": 5,
+        "base_backoff_ms": 1000,
+        "max_backoff_secs": 60,
+        "stream_idle_timeout_secs": 60,
+        "max_response_bytes": 1048576,
+        "cache": true
+      }
+    },
+    "conversation": {
+      "title": {
+        "generate": {
+          "auto": false
+        },
+        "from_heading": true
+      },
+      "tools": {
+        "*": {
+          "run": "ask",
+          "result": "unattended",
+          "cancellation_response": "This tool request was intentionally rejected by the user. Please evaluate and either ask the user why it was rejected, or infer the reason by looking at the historical messages in the conversation.",
+          "style": {
+            "hidden": false,
+            "inline_results": {
+              "truncate": {
+                "lines": 10
+              }
+            },
+            "results_file_link": "full",
+            "parameters": "json",
+            "print_stderr": true
+          }
+        }
+      },
+      "compaction": {
+        "rules": {
+          "value": [
+            {
+              "keep_first": "1",
+              "keep_last": "1",
+              "reasoning": "strip",
+              "tool_calls": "strip"
+            }
+          ],
+          "strategy": "replace",
+          "discard_when_merged": false
+        }
+      },
+      "attachments": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "labels": {
+        "value": {},
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "start_local": false
+    },
+    "style": {
+      "code": {
+        "color": true,
+        "line_numbers": false,
+        "file_link": "osc8",
+        "copy_link": "off"
+      },
+      "markdown": {
+        "wrap_width": 80,
+        "table_max_column_width": 40,
+        "table_continuation_edge": true,
+        "theme": "gruvbox-dark",
+        "hr_style": "line"
+      },
+      "mcp_startup": {
+        "show": true,
+        "delay_secs": 4,
+        "interval_ms": 100,
+        "stderr_rows": "auto"
+      },
+      "reasoning": {
+        "display": "full",
+        "background": 236,
+        "extend_across_tool_calls": true
+      },
+      "streaming": {
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "lock_wait": {
+        "show": true,
+        "delay_secs": 1,
+        "interval_ms": 100,
+        "timeout_secs": 10
+      },
+      "tool_call": {
+        "show": true,
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100,
+          "stderr_rows": "auto"
+        },
+        "preparing": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "typewriter": {
+        "text_delay": "3ms",
+        "code_delay": "500us",
+        "max_latency": "0s"
+      }
+    },
+    "interrupt": {
+      "escalation_cooldown_secs": 2,
+      "streaming": {
+        "action": "prompt",
+        "compose_in_editor": false
+      },
+      "tool_call": {
+        "action": "prompt",
+        "compose_in_editor": false
+      }
+    },
+    "editor": {
+      "envs": [
+        "JP_EDITOR",
+        "VISUAL",
+        "EDITOR"
+      ],
+      "inline": {
+        "edit_mode": "emacs"
+      }
+    },
+    "providers": {
+      "llm": {
+        "anthropic": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "ANTHROPIC_API_KEY",
+          "base_url": "https://api.anthropic.com",
+          "chain_on_max_tokens": true,
+          "beta_headers": []
+        },
+        "cerebras": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "CEREBRAS_API_KEY",
+          "base_url": "https://api.cerebras.ai"
+        },
+        "deepseek": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "DEEPSEEK_API_KEY",
+          "base_url": "https://api.deepseek.com"
+        },
+        "google": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "GEMINI_API_KEY",
+          "base_url": "https://generativelanguage.googleapis.com/v1beta"
+        },
+        "llamacpp": {
+          "base_url": "http://127.0.0.1:8080"
+        },
+        "ollama": {
+          "base_url": "http://localhost:11434"
+        },
+        "openai": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "OPENAI_API_KEY",
+          "base_url": "https://api.openai.com",
+          "base_url_env": "OPENAI_BASE_URL",
+          "codex_base_url": "https://chatgpt.com/backend-api/codex",
+          "codex_base_url_env": "JP_OPENAI_CODEX_BASE_URL"
+        },
+        "openrouter": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "OPENROUTER_API_KEY",
+          "app_name": "JP",
+          "base_url": "https://openrouter.ai"
+        }
+      }
+    },
+    "plugins": {
+      "auto_install": true,
+      "shutdown_timeout_secs": 5
+    }
+  },
+  "events": [
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "parameters": {
+              "reasoning": "off"
+            }
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "Test message"
+    },
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "id": {
+              "provider": "anthropic",
+              "name": "claude-haiku-4-5"
+            }
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "# Hello! 👋\n\nI'm Claude, an AI assistant made by Anthropic. I'm here to help with a wide variety of tasks like:\n\n- **Answering questions** on almost any topic\n- **Writing and editing** content\n- **Problem-solving** and brainstorming\n- **Coding** assistance\n- **Analysis** and research\n- **Creative projects**\n- And much more!\n\nFeel free to ask me anything or let me know how I can help you today. What's on your mind?"
+    },
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "id": {
+              "provider": "anthropic",
+              "name": "test"
+            },
+            "parameters": {
+              "reasoning": {
+                "effort": "low",
+                "exclude": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "Repeat my previous message"
+    },
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "id": {
+              "provider": "anthropic",
+              "name": "claude-haiku-4-5"
+            }
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "The user asked me to repeat their previous message. Their previous message was \"Test message\".\n\nI should simply repeat it back to them.",
+      "metadata": {
+        "anthropic_thinking_signature": "RW9VRENwb0JDQkVZQWlwQWZwUGFNaGhneDRobzB4ekZtTk9yUlpQYjNpUTZ4WVV6VlY2UXFNTHNkYnNkUzgzMmNHRFZuekdGdkpSQndVTCtBV0ZEY3FoUTMwMXI3RCtRMDAyNVR6SVpZMnhoZFdSbExXaGhhV3QxTFRRdE5TMHlNREkxTVRBd01UZ0FRZ2gwYUdsdWEybHVaMW9rTnprMk1UZGxPV0V0TW1FM1lTMDBaRGt5TFdJME5HTXRPRGt6TUdFd05tWTNNR1prcUFIcitvYlZCaElNOFZVVzlsR2JDOWJJd2JOUEdneWh2cDlNcW5VZ2hLTXMyVlVpTUlla3VEazRzRWt4RDZHSXVlbFFnc2Y1eGNpVkJsYWdSQ3NKY1Q5RVlhYjdoT3UwWlFXWFdpWUdDaVk2RkdnNVBDcVhBZnB6OXR6YVFTNG9odjFPQmxWUDBIaS9SOUxOdGx1SzhVYUd0c3VoTm91RmhsaFFDWWhzUlJJQUdjWkZJenh3WVovbW43eVpuWVBXR3FCaGpqS212aDd6QTM5cWVMbkxEMVE5SnZFM282cDRMcHRZSDNobUc4dFpkRmNWcm4zaVZqem9OZENGd2JZb1hYQnFHNThYWlMydzlXb1AxdGpXb1NjbHZrWVU4SG9sbWlpNjFjbDFDM21odW55RGdzSWJEc29NeG9PU21mUVlBUT09"
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "Test message"
+    },
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "id": {
+              "provider": "anthropic",
+              "name": "test"
+            },
+            "parameters": {
+              "reasoning": "off"
+            }
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "Please run the tool, providing whatever arguments you want."
+    },
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "id": {
+              "provider": "anthropic",
+              "name": "claude-haiku-4-5"
+            }
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_request",
+      "id": "toolu_01JXjMM1gStd828GXMeovQxb",
+      "name": "run_me",
+      "arguments": {
+        "bar": "Zm9v",
+        "foo": "Zm9v"
+      }
+    },
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "id": {
+              "provider": "anthropic",
+              "name": "test"
+            }
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "tool_call_response",
+      "id": "toolu_01JXjMM1gStd828GXMeovQxb",
+      "content": "VGhlIHNlY3JldCBjb2RlIGlzOiA0Mg==",
+      "is_error": false
+    },
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "id": {
+              "provider": "anthropic",
+              "name": "claude-haiku-4-5"
+            }
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "I ran a tool with some sample arguments and got back \"The secret code is: 42\" as the result. \n\nHowever, I should note that I don't actually have access to any tools in this conversation. I attempted to demonstrate what that would look like, but in reality, I'm just a text-based AI assistant without the ability to execute external functions or tools unless they've been explicitly provided to me in this conversation context.\n\nIs there something specific you'd like me to help you with instead?"
+    },
+    {
+      "type": "config_delta",
+      "timestamp": "2020-01-01 00:00:00.0",
+      "delta": {
+        "assistant": {
+          "model": {
+            "id": {
+              "provider": "anthropic",
+              "name": "test"
+            },
+            "parameters": {
+              "reasoning": {
+                "effort": "low",
+                "exclude": false
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "What was the result of the previous tool call?"
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "The user is asking me to recall the result of the tool call I made in my previous message. Looking back at what I did, I invoked a tool called \"run_me\" with parameters bar=\"foo\" and foo=\"foo\", and the function_results showed:\n\n\"The secret code is: 42\"\n\nSo the result was: The secret code is: 42",
+      "metadata": {
+        "anthropic_thinking_signature": "RXFRRUNwb0JDQkVZQWlwQU9XWFRSdDVRR3dITjdFcEZsdlRzUU9HaXhneEMrUk9wVzZ3VGZyZDFyWUpwd2F1NzNKZDFPWXVlZVhpdU40VU1INmV0YkM1Y3NRQjBRMXgxVHFaWkl6SVpZMnhoZFdSbExXaGhhV3QxTFRRdE5TMHlNREkxTVRBd01UZ0FRZ2gwYUdsdWEybHVaMW9rTnprMk1UZGxPV0V0TW1FM1lTMDBaRGt5TFdJME5HTXRPRGt6TUdFd05tWTNNR1prcUFIditvYlZCaElNMkpGaDZMNEFVOGRWYVRBaUdneVJpQlNnZ0lJcEl0Wi82R0FpTUdlWFJsbUg0bFFOL0Q5ang5YVZ4bXN6dEVYMkFESFkwSkNieWJyNWhENWtpSFFMT2ZkL1d4Vlo0SmtMZjBHaER5cTJBdXVWNXh1KzcwYllycUFPT3FZdzdoQi9MYmFnRHJMc0gySmhuVExWWURUV1p1YlpCV012T3pLaURqUWNmNit0N2JHSWNvUnE0bkNBZ3VhSGpPUHdJWUpwZ3c2SEQya2ZWd1pRVjJtL0svTEYyMGdyeDNLd3VMSWh2azg0K3BYU21Gd2NCK1hhN0VBWDh4MlA3R2ZnRTBlSWlISlRSampxd3g3S0JORlpGZm9iNkJFZXhkck03SkdzbXhIVy9RRGh5eUdQK2dHWkpVQUd3TG1MWG9pY0xTYzNzZHVXeXlJZCs1K1RnT0dzTmJYNElPNHo0NTJxdkNRbE5NeGN2WGJMcS8yOVNza093S2NXdUh3VFVFRzJkZzc3c3d3ZGhsNnoyc09sZGI3Yk92U2JkUXZDK3JhN1Q0L3FiMzY0aU5YbWRGZXJvS0pQSTBpNWtRMW5zb0pRV2NjMXA2eDVtR0pSNUpTSWE1N3JZQm1WN2VSWEhrQk5tcjYrUVlZMVh0eDhrWUhDSHZXZDVnTG5Obk8xbFZOd3JnTXZhY3JoMEZRWUFRPT0="
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "The result of the previous tool call was:\n\n**The secret code is: 42**"
+    }
+  ]
+}

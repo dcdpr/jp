@@ -44,11 +44,11 @@ fn ts() -> DateTime<Utc> {
 fn provider_config() -> LlmProviderConfig {
     let env = if cfg!(windows) { "USERNAME" } else { "USER" }.to_owned();
     let mut config = LlmProviderConfig::default();
-    config.anthropic.api_key_env = env.clone();
-    config.cerebras.api_key_env = env.clone();
-    config.google.api_key_env = env.clone();
-    config.openai.api_key_env = env.clone();
-    config.openrouter.api_key_env = env;
+    config.anthropic.api_key_env = env.clone().into();
+    config.cerebras.api_key_env = env.clone().into();
+    config.google.api_key_env = env.clone().into();
+    config.openai.api_key_env = env.clone().into();
+    config.openrouter.api_key_env = env.into();
     config
 }
 
