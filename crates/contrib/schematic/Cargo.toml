@@ -31,6 +31,11 @@ toml = { workspace = true, optional = true, features = ["parse", "display"] }
 # yaml
 serde_yaml = { workspace = true, optional = true }
 
+# Self-dependency so the crate's own tests can exercise the schema derive,
+# which the default feature set leaves out.
+[dev-dependencies]
+schematic = { path = ".", features = ["schema"] }
+
 [features]
 default = ["config", "env"]
 config = ["dep:serde_path_to_error", "schematic_macros/config"]

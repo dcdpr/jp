@@ -10,7 +10,23 @@ pub mod policy_spec;
 pub mod string;
 pub mod vec;
 
+use schematic::{
+    Schema, SchemaBuilder,
+    schema::{EnumType, LiteralValue},
+};
 use serde::de::{Deserializer, Error as DeError, Visitor};
+
+/// The non-boolean shapes a `dedup` field accepts, for the schema.
+///
+/// The boolean is described by the field's own type; these are the strings
+/// [`deserialize_dedup`] also takes, which the field type cannot express.
+pub(crate) fn dedup_input_shapes(schema: &SchemaBuilder) -> Vec<Schema> {
+    vec![schema.nest().enumerable(EnumType::new([
+        LiteralValue::String("inherit".into()),
+        LiteralValue::String("true".into()),
+        LiteralValue::String("false".into()),
+    ]))]
+}
 
 /// Deserialize a `dedup` field from `true`, `false`, or `"inherit"`.
 ///

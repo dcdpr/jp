@@ -80,9 +80,30 @@ impl Variant<'_> {
         self.args.default
     }
 
+    /// Whether the schema reports this variant as the enum's default.
+    ///
+    /// Reads `#[setting(default)]` and the `#[default]` helper attribute of
+    /// `#[derive(Default)]`, which describe the same thing to a schema reader.
+    /// Only feeds the schema's `default_index`; the variant that
+    /// `PartialConfig::empty` and `default_values` construct is selected by
+    /// [`Self::is_default`] alone, so widening this cannot change what those
+    /// build.
+    #[cfg(feature = "schema")]
+    pub fn is_schema_default(&self) -> bool {
+        self.args.default
+            || self
+                .attrs
+                .iter()
+                .any(|attr| crate::utils::get_meta_path(&attr.meta).is_ident("default"))
+    }
+
+    /// Whether the variant is left out of the generated schema.
+    ///
+    /// A variant serde skips is not part of the wire vocabulary, so listing it
+    /// would advertise input the deserializer rejects.
     #[cfg(feature = "schema")]
     pub fn is_excluded(&self) -> bool {
-        self.args.exclude
+        self.args.exclude || self.args.skip || self.serde_args.skip
     }
 
     pub fn is_nested(&self) -> bool {
@@ -169,6 +190,7 @@ impl Variant<'_> {
             || self.args.untagged
             || self.serde_args.untagged;
         let partial = self.is_nested();
+        let is_unit = matches!(self.value.fields, Fields::Unit);
 
         let inner = self.build_variant_inner(partial, untagged, &name);
         let partial_statement = if partial {
@@ -177,7 +199,14 @@ impl Variant<'_> {
             quote! {}
         };
 
-        wrap_variant_tagged(tagged_format, &name, &inner, &partial_statement, partial)
+        wrap_variant_tagged(
+            tagged_format,
+            &name,
+            &inner,
+            &partial_statement,
+            partial,
+            is_unit,
+        )
     }
 
     #[cfg(feature = "schema")]
@@ -235,6 +264,13 @@ impl Variant<'_> {
     }
 }
 
+/// Wrap a variant's payload schema in the shape serde gives it on the wire.
+///
+/// A unit variant carries no payload, so every tagged form collapses: serde
+/// writes the bare variant name for the externally tagged form, and the tag
+/// alone for the internally and adjacently tagged ones.
+/// The `Unit` format keeps its wrapper regardless, because it carries the
+/// variant name that `EnumType::from_schemas` reads back out.
 #[cfg(feature = "schema")]
 fn wrap_variant_tagged(
     tagged_format: &TaggedFormat,
@@ -242,7 +278,16 @@ fn wrap_variant_tagged(
     inner: &TokenStream,
     partial_statement: &TokenStream,
     partial: bool,
+    is_unit: bool,
 ) -> TokenStream {
+    let tag_only = |tag: &String| {
+        quote! {
+            Schema::structure(StructType::new([
+                (#tag.into(), Schema::literal_value(LiteralValue::String(#name.into()))),
+            ]))
+        }
+    };
+
     match tagged_format {
         TaggedFormat::Unit => quote! {
             Schema {
@@ -252,6 +297,8 @@ fn wrap_variant_tagged(
             }
         },
         TaggedFormat::Untagged => inner.clone(),
+        TaggedFormat::External if is_unit => inner.clone(),
+        TaggedFormat::Internal(tag) | TaggedFormat::Adjacent(tag, _) if is_unit => tag_only(tag),
         TaggedFormat::External => {
             let outer = quote! {
                 Schema::structure(StructType::new([

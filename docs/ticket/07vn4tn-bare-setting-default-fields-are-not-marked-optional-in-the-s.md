@@ -1,6 +1,6 @@
 # Bare `#[setting(default)]` fields are not marked optional in the schema
 
-- **Status**: Todo
+- **Status**: Done
 - **Kind**: Bug
 - **Authors**: jp
 - **Date**: 2026-08-24

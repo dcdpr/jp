@@ -6,13 +6,9 @@ pub mod label;
 pub mod title;
 pub mod tool;
 
-use std::{fmt, str::FromStr};
-
-use schematic::{Config, ConfigError, HandlerError, Schematic};
-use serde::{Deserialize, Serialize};
+use schematic::{Config, ConfigEnum, ConfigError, HandlerError};
 
 use crate::{
-    BoxedError,
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     assistant::{AssistantConfig, PartialAssistantConfig},
     conversation::{
@@ -309,35 +305,28 @@ impl ToPartial for InquiryConfig {
 /// This is read during conversation resolution, before the full config is
 /// built.
 /// It cannot be set per-conversation (circular dependency).
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Schematic)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Default, ConfigEnum)]
+#[config(serde_as_string)]
 pub enum DefaultConversationId {
     /// Show an interactive picker (TTY) or error (non-interactive).
     #[default]
     Ask,
 
     /// Most recently activated conversation (any session).
+    #[variant(aliases("last", "last_activated"))]
     LastActivated,
 
     /// Most recently created conversation.
+    #[variant(aliases("last_created"))]
     LastCreated,
 
     /// Session's previously active conversation.
+    #[variant(aliases("prev"))]
     Previous,
 
     /// A specific conversation ID.
-    #[serde(skip)]
+    #[variant(fallback)]
     Id(String),
-}
-
-impl<'de> Deserialize<'de> for DefaultConversationId {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        s.parse().map_err(serde::de::Error::custom)
-    }
 }
 
 impl DefaultConversationId {
@@ -345,32 +334,6 @@ impl DefaultConversationId {
     #[must_use]
     pub const fn is_ask(&self) -> bool {
         matches!(self, Self::Ask)
-    }
-}
-
-impl FromStr for DefaultConversationId {
-    type Err = BoxedError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "ask" => Ok(Self::Ask),
-            "last" | "last-activated" | "last_activated" => Ok(Self::LastActivated),
-            "last-created" | "last_created" => Ok(Self::LastCreated),
-            "previous" | "prev" => Ok(Self::Previous),
-            _ => Ok(Self::Id(s.to_owned())),
-        }
-    }
-}
-
-impl fmt::Display for DefaultConversationId {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Ask => write!(f, "ask"),
-            Self::LastActivated => write!(f, "last-activated"),
-            Self::LastCreated => write!(f, "last-created"),
-            Self::Previous => write!(f, "previous"),
-            Self::Id(id) => write!(f, "{id}"),
-        }
     }
 }
 

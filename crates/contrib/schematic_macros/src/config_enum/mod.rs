@@ -13,6 +13,16 @@ use crate::{common::ContainerSerdeArgs, config_enum::variant::Variant};
 pub struct ConfigEnumArgs {
     before_parse: Option<String>,
 
+    /// Emit `Serialize` and `Deserialize` that go through `Display` and
+    /// `FromStr`.
+    ///
+    /// The derive already owns the variant list, the accepted spellings and the
+    /// schema; routing serde through the same pair leaves one description of
+    /// what the type accepts instead of two that can disagree.
+    /// Types that derive serde's own impls, or hand-write them to accept shapes
+    /// other than a string, leave this off.
+    serde_as_string: bool,
+
     // serde
     rename: Option<String>,
     rename_all: Option<String>,
@@ -67,6 +77,10 @@ pub fn macro_impl(item: TokenStream) -> TokenStream {
         &from_fallback,
     )];
 
+    if args.serde_as_string {
+        impls.push(emit_serde_as_string_impls(enum_name));
+    }
+
     #[cfg(feature = "schema")]
     impls.push(emit_enum_schematic_impl(
         enum_name,
@@ -107,16 +121,21 @@ fn collect_variant_tokens(variants: Vec<Variant<'_>>) -> CollectedVariants {
     #[cfg(feature = "schema")]
     let mut default_index = None;
 
-    #[cfg_attr(not(feature = "schema"), allow(unused_variables))]
-    for (index, variant) in variants.into_iter().enumerate() {
-        unit_names.push(variant.get_unit_name());
+    for variant in variants {
+        // Every parser covers every variant, so a hidden one keeps working;
+        // the schema and `variants()` are what the type advertises, and that
+        // is what hiding takes it out of.
         display_stmts.push(variant.get_display_fmt());
         from_stmts.push(variant.get_from_str());
-        schema_types.push(variant.get_schema_type());
 
-        #[cfg(feature = "schema")]
-        if variant.default {
-            default_index = Some(index);
+        if !variant.hidden {
+            #[cfg(feature = "schema")]
+            if variant.default {
+                default_index = Some(schema_types.len());
+            }
+
+            unit_names.push(variant.get_unit_name());
+            schema_types.push(variant.get_schema_type());
         }
 
         if variant.args.fallback {
@@ -228,6 +247,38 @@ fn emit_enum_impls(
                 write!(f, "{}", match self {
                     #(#display_stmts)*
                 })
+            }
+        }
+    }
+}
+
+/// Emit `Serialize` and `Deserialize` routed through `Display` and `FromStr`.
+///
+/// The wire form is a string, so a value written in any spelling `FromStr`
+/// accepts round-trips back out in the canonical one.
+fn emit_serde_as_string_impls(enum_name: &syn::Ident) -> proc_macro2::TokenStream {
+    quote! {
+        #[automatically_derived]
+        impl schematic::serde::Serialize for #enum_name {
+            fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+            where
+                S: schematic::serde::Serializer,
+            {
+                serializer.serialize_str(&self.to_string())
+            }
+        }
+
+        #[automatically_derived]
+        impl<'de> schematic::serde::Deserialize<'de> for #enum_name {
+            fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+            where
+                D: schematic::serde::Deserializer<'de>,
+            {
+                use schematic::serde::de::Error as _;
+
+                let value = <String as schematic::serde::Deserialize>::deserialize(deserializer)?;
+
+                <Self as std::str::FromStr>::from_str(&value).map_err(D::Error::custom)
             }
         }
     }

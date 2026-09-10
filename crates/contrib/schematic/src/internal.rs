@@ -174,6 +174,12 @@ pub fn partialize_schema(schema: &mut Schema, force_partial: bool) {
                 partialize_schema(variant, false);
             }
         }
+        // A reference points at a type by name, and the struct arm above
+        // renames what it points at. Renaming both keeps the two in step, so a
+        // consumer resolving a recursive type still finds its target.
+        SchemaType::Reference(inner) if !inner.name.starts_with("Partial") => {
+            inner.name = format!("Partial{}", inner.name);
+        }
         _ => {}
     }
 }

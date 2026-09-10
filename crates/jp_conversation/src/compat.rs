@@ -311,11 +311,11 @@ fn resolve<'a>(reference: &ReferenceType, enclosing: &Enclosing<'a>) -> Option<&
 ///
 /// A union of one type and null is an `Option`, and the value selects that type
 /// by being present at all, whatever shape it arrived in.
-/// That matters for a field declared with `partial_via = MergeableVec`: its
-/// schema says array while the value can be the `{ "value": [...] }` object,
-/// and [`strip_items`] is what knows how to reconcile the two.
 ///
 /// A union with several real variants is separated by shape instead.
+/// A list field written with a merge strategy arrives as the `{ "value": [...],
+/// "strategy": ... }` object, which only the wrapper variant accepts, while a
+/// bare list only matches the array variant.
 /// A table written at `conversation.tools.<name>.enable` can only be the `{
 /// state, allow_toggle }` struct, never the bool or the legacy strings beside
 /// it.
@@ -443,24 +443,13 @@ fn flattened_entry_schema(struct_type: &StructType) -> Option<&Schema> {
 }
 
 /// Walk each element of an array against the item schema.
-///
-/// A vector field declared with `partial_via = MergeableVec` reaches disk
-/// either as a bare array or as `{ "value": [...], "strategy": ... }`; both
-/// carry the same items.
-/// The wrapper's own keys are not part of the field's schema and are left
-/// alone.
 fn strip_items<'a>(
     value: &mut Value,
     items_schema: &'a Schema,
     enclosing: &mut Enclosing<'a>,
 ) -> usize {
-    let items = match value {
-        Value::Array(items) => items,
-        Value::Object(obj) => match obj.get_mut("value") {
-            Some(Value::Array(items)) => items,
-            _ => return 0,
-        },
-        _ => return 0,
+    let Some(items) = value.as_array_mut() else {
+        return 0;
     };
 
     items

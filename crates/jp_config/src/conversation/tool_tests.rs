@@ -1103,11 +1103,46 @@ fn test_tool_config_json_merge_unknown_key_errors() {
     assert!(err.contains("bogus"), "expected 'bogus' in error: {err}");
 }
 
+/// The pattern the schema publishes has to accept exactly what `FromStr`
+/// accepts.
+///
+/// The two are written separately, so only comparing them over real inputs
+/// keeps a change to the parser from leaving the schema behind.
 #[test]
-fn test_tool_source_schema() {
+fn the_tool_source_pattern_agrees_with_the_parser() {
     let schema = SchemaBuilder::build_root::<ToolSource>();
     assert_eq!(schema.name, Some("tool_source".to_owned()));
-    assert_eq!(schema.ty, SchemaType::String(Box::default()));
+
+    let SchemaType::String(string) = &schema.ty else {
+        panic!("expected a string, got {:?}", schema.ty);
+    };
+    let pattern = string.pattern.as_ref().expect("a pattern");
+    let pattern = regex::Regex::new(pattern).expect("a valid pattern");
+
+    for input in [
+        "builtin",
+        "builtin.read_file",
+        "builtin.a.b",
+        "local",
+        "local.fmt",
+        "mcp.bookworm",
+        "mcp.bookworm.crate_readme",
+        "mcp.bookworm.a.b",
+        // Rejected by the parser: no server named, an empty server, or a
+        // prefix that is not a source at all.
+        "mcp",
+        "mcp.",
+        "mcp..tool",
+        "nonsense",
+        "",
+        "builtinx",
+    ] {
+        assert_eq!(
+            pattern.is_match(input),
+            input.parse::<ToolSource>().is_ok(),
+            "the schema and the parser disagree about {input:?}"
+        );
+    }
 }
 
 #[test]

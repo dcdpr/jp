@@ -7,7 +7,7 @@ use syn::{Attribute, Expr, ExprPath, Field as NativeField, Type};
 
 use crate::{
     common::{FieldValue, PartialAttr, TypeInfo, extract_inner_type, macros::ContainerSerdeArgs},
-    utils::{extract_common_attrs, format_case, parse_default},
+    utils::{DefaultAttr, extract_common_attrs, format_case, parse_default},
 };
 
 // #[serde()]
@@ -16,6 +16,7 @@ use crate::{
 pub struct FieldSerdeArgs {
     pub alias: Option<String>,
     pub default: bool,
+    pub deserialize_with: Option<String>,
     pub flatten: bool,
     pub rename: Option<String>,
     pub skip: bool,
@@ -43,7 +44,7 @@ pub struct FieldArgs {
 
     // config
     #[darling(with = parse_default)]
-    pub default: Option<Expr>,
+    pub default: DefaultAttr,
     #[cfg(feature = "env")]
     pub env: Option<String>,
     pub merge: Option<ExprPath>,
@@ -55,6 +56,14 @@ pub struct FieldArgs {
     pub partial: PartialAttr,
     pub is_empty: Option<ExprPath>,
     pub partial_via: Option<ExprPath>,
+
+    // Declare input shapes the field's type does not describe, for a field
+    // whose `deserialize_with` accepts more than the type alone would.
+    //
+    // Names a `fn(&SchemaBuilder) -> Vec<Schema>`. The inferred schema is
+    // unioned with the returned variants and marked as the expanded form, so
+    // the field's own keys stay addressable alongside the extra shapes.
+    pub schema_union_with: Option<ExprPath>,
 
     // serde
     pub alias: Option<String>,
@@ -180,7 +189,7 @@ impl Field<'_> {
 
     #[cfg(feature = "schema")]
     pub fn is_optional(&self) -> bool {
-        self.serde_args.default || self.args.default.is_some()
+        self.serde_args.default || self.args.default.is_declared()
     }
 
     pub fn is_required(&self) -> bool {
@@ -320,7 +329,18 @@ impl Field<'_> {
 
             if self.args.skip_deserializing || self.serde_args.skip_deserializing {
                 meta.push(quote! { skip_deserializing });
-            } else if let Some(deserialize_with) = &self.args.deserialize_with {
+            } else if let Some(deserialize_with) = self
+                .args
+                .deserialize_with
+                .as_ref()
+                .or(self.serde_args.deserialize_with.as_ref())
+            {
+                // A field reads the same way in both forms, so the partial
+                // takes the custom deserializer whichever namespace declared
+                // it. Reading only `#[setting]` here would leave a field that
+                // used `#[serde]` parsing one way as a resolved config and
+                // another as a layer.
+                //
                 // `deserialize_with` disables serde's implicit "missing
                 // `Option` field is `None`" handling, so the partial field
                 // needs an explicit default to stay optional.
@@ -357,14 +377,22 @@ impl Field<'_> {
         let deprecated = map_option_field_quote("deprecated", extract_deprecated(&self.attrs));
         let env_var = map_option_field_quote("env_var", self.get_env_var());
 
-        let value = self.value;
+        // A `partial_via` field is written in the shape of its via type, not of
+        // the type it resolves to: `attachments` holds a `Vec<AttachmentConfig>`
+        // once resolved, but a document writes either a bare list or the merge
+        // wrapper carrying one, and the via type is what describes both.
+        let value = self.partial_via_ty.as_ref().unwrap_or(self.value);
         let mut inner_schema = if self.is_nested() {
             quote! { schema.infer_as_nested::<#value>() }
         } else {
             quote! { schema.infer::<#value>() }
         };
 
-        if let Some(Expr::Lit(lit)) = &self.args.default {
+        if let Some(path) = &self.args.schema_union_with {
+            inner_schema = union_with_declared_shapes(path, &inner_schema);
+        }
+
+        if let Some(Expr::Lit(lit)) = self.args.default.expr() {
             let lit_value = match &lit.lit {
                 Lit::Str(v) => quote! { LiteralValue::String(#v.into()) },
                 Lit::Int(v) => {
@@ -438,6 +466,27 @@ impl Field<'_> {
                     }
                 }
             }
+        }
+    }
+}
+
+/// Union a field's inferred schema with shapes its type cannot describe.
+///
+/// The inferred schema goes last and is marked as the expanded form: the
+/// declared variants are shorthand spellings of it, so a consumer resolving
+/// keys follows the inferred fields.
+#[cfg(feature = "schema")]
+fn union_with_declared_shapes(path: &ExprPath, inner_schema: &TokenStream) -> TokenStream {
+    quote! {
+        {
+            let described = #inner_schema;
+            let mut variants = #path(&schema);
+
+            let expanded = variants.len();
+            variants.push(described);
+
+            let mut nested = schema.nest();
+            nested.union(UnionType::new_any(variants).with_expanded_index(expanded))
         }
     }
 }

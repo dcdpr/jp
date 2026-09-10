@@ -25,6 +25,72 @@ fn test_app_config_fields() {
     insta::assert_debug_snapshot!(AppConfig::fields());
 }
 
+/// The shape every config key accepts, as the schema describes it.
+///
+/// A schema consumer validating a user's config file sees exactly this, so a
+/// diff here is a change to what JP tells the outside world it accepts.
+/// Read it against the parser before accepting one.
+#[test]
+fn test_app_config_schema_shape() {
+    insta::assert_snapshot!(crate::schema_shape::render(&AppConfig::schema()));
+}
+
+/// A reference has to name a type the partial schema still contains.
+///
+/// Partializing renames each named struct to `Partial*`.
+/// A reference left pointing at the old name resolves to nothing, and a
+/// consumer walking a recursive type stops there without saying why.
+#[test]
+fn the_partial_schema_keeps_its_references_resolvable() {
+    /// Collect the name every reference in the tree points at.
+    fn references(schema: &Schema, seen: &mut Vec<String>, out: &mut Vec<String>) {
+        if let Some(name) = &schema.name {
+            if seen.contains(name) {
+                return;
+            }
+            seen.push(name.clone());
+        }
+
+        match &schema.ty {
+            SchemaType::Reference(inner) => out.push(inner.name.clone()),
+            SchemaType::Struct(inner) => {
+                for field in inner.fields.values() {
+                    references(&field.schema, seen, out);
+                }
+            }
+            SchemaType::Object(inner) => references(&inner.value_type, seen, out),
+            SchemaType::Array(inner) => references(&inner.items_type, seen, out),
+            SchemaType::Union(inner) => {
+                for variant in &inner.variants_types {
+                    references(variant, seen, out);
+                }
+            }
+            _ => {}
+        }
+
+        if schema.name.is_some() {
+            seen.pop();
+        }
+    }
+
+    let mut names = Vec::new();
+    references(&PartialAppConfig::schema(), &mut Vec::new(), &mut names);
+
+    // The tool parameter tree is the recursive type that reaches disk, so the
+    // walk has something to check rather than passing over an empty list.
+    assert!(!names.is_empty(), "the walk found no references at all");
+
+    let dangling: Vec<_> = names
+        .iter()
+        .filter(|name| !name.starts_with("Partial"))
+        .collect();
+
+    assert!(
+        dangling.is_empty(),
+        "references left pointing at pre-partial names: {dangling:#?}"
+    );
+}
+
 /// Setting one field in the inquiry request block leaves its siblings
 /// inheriting from the top-level assistant, rather than resolving to `0`.
 #[test]

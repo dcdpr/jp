@@ -47,6 +47,10 @@ pub mod model;
 mod partial;
 pub mod plugins;
 pub mod providers;
+#[cfg(test)]
+mod schema_probe;
+#[cfg(test)]
+mod schema_shape;
 pub mod style;
 pub mod template;
 pub mod types;
@@ -447,9 +451,17 @@ impl AppConfig {
 
     /// Build the schema for the configuration.
     ///
-    /// Returns a [`Schema`] tree describing the structure of `AppConfig`, with
-    /// [`SchemaType::Struct`] at each nested level containing a `fields` map of
-    /// valid field names.
+    /// Returns a [`Schema`] tree describing what a config document may contain,
+    /// with [`SchemaType::Struct`] at each nested level containing a `fields`
+    /// map of valid field names.
+    /// A field written through a merge wrapper is described as accepting both
+    /// the bare value and the wrapper, matching what a file may write rather
+    /// than what the field resolves to.
+    ///
+    /// Every field is described as though it were set.
+    /// Use [`PartialAppConfig::schema`] for the form that also marks each one
+    /// optional and nullable, which is how a single layer arrives before
+    /// merging.
     #[must_use]
     pub fn schema() -> Schema {
         Self::build_schema(SchemaBuilder::default())
@@ -695,6 +707,16 @@ impl PartialAppConfig {
     #[must_use]
     pub fn empty() -> Self {
         <Self as PartialConfig>::empty()
+    }
+
+    /// Build the schema for one config layer.
+    ///
+    /// Describes the same field tree as [`AppConfig::schema`], with every field
+    /// marked optional and nullable: a single file, environment layer or stored
+    /// delta carries only what it states, and merging is what fills the rest.
+    #[must_use]
+    pub fn schema() -> Schema {
+        <Self as Schematic>::build_schema(SchemaBuilder::default())
     }
 
     /// Clear the field at `path`, leaving it unset.

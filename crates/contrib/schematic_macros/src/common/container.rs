@@ -196,7 +196,7 @@ fn generate_enum_schema(
 
         let index = variants_types.len();
 
-        if variant.is_default() {
+        if variant.is_schema_default() {
             default_index = Some(index);
         }
 

@@ -2,6 +2,50 @@ use serde_json::{Value, json};
 
 use super::*;
 
+/// A model id reads the same whether it is written as a string or a table.
+///
+/// The two spellings reach the provider through different code, so only
+/// checking them side by side keeps one from accepting a value the other
+/// rejects.
+#[test]
+fn both_spellings_of_a_model_id_accept_the_same_providers() {
+    for provider in ["anthropic", "openai", "test"] {
+        let string: PartialModelIdConfig =
+            serde_json::from_value(json!(format!("{provider}/some-model"))).unwrap();
+
+        let table: PartialModelIdConfig =
+            serde_json::from_value(json!({ "provider": provider, "name": "some-model" })).unwrap();
+
+        assert_eq!(string, table, "the two spellings disagree about {provider}");
+    }
+}
+
+/// A hidden provider is reachable but never offered.
+///
+/// `jp init` builds its picker from `variants()`, and `test` is backed by a
+/// mock rather than a real API, so it has no business being on that list.
+#[test]
+fn the_variant_list_leaves_out_the_test_provider() {
+    use schematic::ConfigEnum as _;
+
+    let names: Vec<_> = ProviderId::variants()
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+
+    assert_eq!(names, [
+        "anthropic",
+        "cerebras",
+        "deepseek",
+        "google",
+        "llamacpp",
+        "ollama",
+        "openai",
+        "openrouter",
+        "xai"
+    ]);
+}
+
 #[test]
 fn test_model_id_config_deserialize() {
     struct TestCase {

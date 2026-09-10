@@ -71,6 +71,44 @@ fn deserialize_from_toml() {
     assert_eq!(w.id, DefaultConversationId::Id("jp-c17528832001".into()));
 }
 
+/// A conversation ID has to survive being written back out.
+///
+/// The value reaches disk through a config delta and the base config snapshot,
+/// so a variant that parses but cannot serialize fails the moment a user with
+/// `default_id = "jp-c…"` runs a query.
+#[test]
+fn every_variant_round_trips_through_serde() {
+    let cases = [
+        (DefaultConversationId::Ask, "\"ask\""),
+        (DefaultConversationId::LastActivated, "\"last-activated\""),
+        (DefaultConversationId::LastCreated, "\"last-created\""),
+        (DefaultConversationId::Previous, "\"previous\""),
+        (
+            DefaultConversationId::Id("jp-c17528832001".into()),
+            "\"jp-c17528832001\"",
+        ),
+    ];
+
+    for (value, encoded) in cases {
+        assert_eq!(serde_json::to_string(&value).unwrap(), encoded);
+        assert_eq!(
+            serde_json::from_str::<DefaultConversationId>(encoded).unwrap(),
+            value
+        );
+    }
+}
+
+/// An alias is an input spelling, not a second output spelling.
+#[test]
+fn an_alias_serializes_as_its_canonical_value() {
+    let parsed: DefaultConversationId = serde_json::from_str("\"last\"").unwrap();
+
+    assert_eq!(
+        serde_json::to_string(&parsed).unwrap(),
+        "\"last-activated\""
+    );
+}
+
 #[test]
 fn default_is_ask() {
     assert!(DefaultConversationId::default().is_ask());
