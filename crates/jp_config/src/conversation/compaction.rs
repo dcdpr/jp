@@ -87,6 +87,10 @@ impl AssignKeyValue for PartialCompactionConfig {
 impl PartialConfigDelta for PartialCompactionConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
+            // Not `delta_mergeable_vec`: the built-in defaults carry
+            // `discard_when_merged`, so an empty resolved list and the defaults
+            // compare unequal while resolving alike, and a replace-with-empty
+            // delta would be written for no change at all.
             rules: {
                 next.rules
                     .into_iter()

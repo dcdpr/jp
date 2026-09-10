@@ -4,7 +4,7 @@ use schematic::Config;
 
 use crate::{
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
-    delta::{PartialConfigDelta, delta_opt},
+    delta::{PartialConfigDelta, delta_opt, delta_opt_at, path},
     fill::FillDefaults,
     partial::{ToPartial, partial_opts},
 };
@@ -44,6 +44,12 @@ impl PartialConfigDelta for PartialUserConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
             name: delta_opt(self.name.as_ref(), next.name),
+        }
+    }
+
+    fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
+        Self {
+            name: delta_opt_at(&path(prefix, "name"), self.name.as_ref(), next.name, unsets),
         }
     }
 }

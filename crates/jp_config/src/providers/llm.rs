@@ -136,7 +136,11 @@ impl PartialConfigDelta for PartialLlmProviderConfig {
             llamacpp: self.llamacpp.delta(next.llamacpp),
             ollama: self.ollama.delta(next.ollama),
             openai: self.openai.delta(next.openai),
-            openrouter: self.openrouter.delta(next.openrouter),
+            openrouter: self.openrouter.delta_with_unsets(
+                next.openrouter,
+                &path(prefix, "openrouter"),
+                unsets,
+            ),
         }
     }
 }

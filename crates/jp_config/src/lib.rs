@@ -56,7 +56,7 @@ pub(crate) mod validate;
 
 use std::sync::Arc;
 
-pub use delta::PartialConfigDelta;
+pub use delta::{LOAD_TIME_ONLY, PartialConfigDelta};
 pub use error::Error;
 pub use fill::FillDefaults;
 use indexmap::IndexMap;
@@ -255,20 +255,9 @@ impl AssignKeyValue for PartialAppConfig {
 impl PartialConfigDelta for PartialAppConfig {
     fn delta(&self, next: Self) -> Self {
         Self {
-            // Any `extends` paths are interpreted at runtime, so we don't need to
-            // store this information again, since the extended configuration is
-            // already merged into the current one.
+            // See `delta::LOAD_TIME_ONLY` for why these three are dropped.
             extends: None,
-
-            // Any `inherit` value is interpreted at runtime, so we don't need to
-            // store this information again, since the config load logic will
-            // already have stopped the merge process when it encounters an
-            // `inherit` value of `true`.
             inherit: None,
-
-            // Loader metadata is interpreted while the declaring file is
-            // loaded ([RFD 038]): only its *effect* outlives loading, never
-            // the field itself.
             loader: PartialLoaderConfig::default(),
 
             config_load_paths: delta_opt_vec(
@@ -290,6 +279,7 @@ impl PartialConfigDelta for PartialAppConfig {
 
     fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
         Self {
+            // See `delta::LOAD_TIME_ONLY`.
             extends: None,
             inherit: None,
             loader: PartialLoaderConfig::default(),
@@ -327,7 +317,9 @@ impl PartialConfigDelta for PartialAppConfig {
                 unsets,
             ),
             plugins: self.plugins.delta(next.plugins),
-            user: self.user.delta(next.user),
+            user: self
+                .user
+                .delta_with_unsets(next.user, &delta_path(prefix, "user"), unsets),
         }
     }
 }

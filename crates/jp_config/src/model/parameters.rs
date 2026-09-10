@@ -10,7 +10,8 @@ use crate::{
     BoxedError,
     assignment::{AssignKeyValue, AssignResult, KvAssignment, missing_key},
     delta::{
-        PartialConfigDelta, delta_opt, delta_opt_partial, delta_opt_vec, delta_opt_vec_at, path,
+        PartialConfigDelta, delta_opt, delta_opt_at, delta_opt_partial, delta_opt_partial_at,
+        delta_opt_vec, delta_opt_vec_at, path,
     },
     fill::{FillDefaults, fill_opt},
     partial::{ToPartial, partial_opt, partial_opt_config, partial_opts},
@@ -243,19 +244,54 @@ impl PartialConfigDelta for PartialParametersConfig {
 
     fn delta_with_unsets(&self, next: Self, prefix: &str, unsets: &mut Vec<String>) -> Self {
         Self {
-            max_tokens: delta_opt(self.max_tokens.as_ref(), next.max_tokens),
-            reasoning: delta_opt_partial(self.reasoning.as_ref(), next.reasoning),
-            service_tier: delta_opt(self.service_tier.as_ref(), next.service_tier),
-            temperature: delta_opt(self.temperature.as_ref(), next.temperature),
-            top_p: delta_opt(self.top_p.as_ref(), next.top_p),
-            top_k: delta_opt(self.top_k.as_ref(), next.top_k),
+            max_tokens: delta_opt_at(
+                &path(prefix, "max_tokens"),
+                self.max_tokens.as_ref(),
+                next.max_tokens,
+                unsets,
+            ),
+            reasoning: delta_opt_partial_at(
+                &path(prefix, "reasoning"),
+                self.reasoning.as_ref(),
+                next.reasoning,
+                unsets,
+            ),
+            service_tier: delta_opt_at(
+                &path(prefix, "service_tier"),
+                self.service_tier.as_ref(),
+                next.service_tier,
+                unsets,
+            ),
+            temperature: delta_opt_at(
+                &path(prefix, "temperature"),
+                self.temperature.as_ref(),
+                next.temperature,
+                unsets,
+            ),
+            top_p: delta_opt_at(
+                &path(prefix, "top_p"),
+                self.top_p.as_ref(),
+                next.top_p,
+                unsets,
+            ),
+            top_k: delta_opt_at(
+                &path(prefix, "top_k"),
+                self.top_k.as_ref(),
+                next.top_k,
+                unsets,
+            ),
             stop_words: delta_opt_vec_at(
                 &path(prefix, "stop_words"),
                 self.stop_words.as_ref(),
                 next.stop_words,
                 unsets,
             ),
-            other: delta_opt(self.other.as_ref(), next.other),
+            other: delta_opt_at(
+                &path(prefix, "other"),
+                self.other.as_ref(),
+                next.other,
+                unsets,
+            ),
         }
     }
 }

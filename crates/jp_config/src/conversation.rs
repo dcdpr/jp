@@ -22,7 +22,7 @@ use crate::{
         title::{PartialTitleConfig, TitleConfig},
         tool::{PartialToolsConfig, ToolsConfig},
     },
-    delta::{PartialConfigDelta, delta_opt, path},
+    delta::{PartialConfigDelta, delta_mergeable_vec, delta_opt, delta_opt_at, path},
     fill::FillDefaults,
     internal::merge::{map_with_strategy, vec_with_strategy},
     partial::{ToPartial, partial_opt},
@@ -137,18 +137,6 @@ impl AssignKeyValue for PartialConversationConfig {
 }
 
 impl PartialConversationConfig {
-    /// The attachments `next` adds.
-    fn attachments_delta(
-        &self,
-        next: &MergeableVec<PartialAttachmentConfig>,
-    ) -> MergeableVec<PartialAttachmentConfig> {
-        next.iter()
-            .filter(|v| !self.attachments.contains(v))
-            .cloned()
-            .collect::<Vec<_>>()
-            .into()
-    }
-
     /// The label rules `next` changes.
     fn labels_delta(
         &self,
@@ -189,7 +177,7 @@ impl PartialConfigDelta for PartialConversationConfig {
             title: self.title.delta(next.title),
             tools: self.tools.delta(next.tools),
             compaction: self.compaction.delta(next.compaction),
-            attachments: self.attachments_delta(&next.attachments),
+            attachments: delta_mergeable_vec(&self.attachments, next.attachments),
             inquiry: self.inquiry.delta(next.inquiry),
             start_local: delta_opt(self.start_local.as_ref(), next.start_local),
             default_id: delta_opt(self.default_id.as_ref(), next.default_id),
@@ -204,12 +192,17 @@ impl PartialConfigDelta for PartialConversationConfig {
                 .delta_with_unsets(next.title, &path(prefix, "title"), unsets),
             tools: self.tools.delta(next.tools),
             compaction: self.compaction.delta(next.compaction),
-            attachments: self.attachments_delta(&next.attachments),
+            attachments: delta_mergeable_vec(&self.attachments, next.attachments),
             inquiry: self
                 .inquiry
                 .delta_with_unsets(next.inquiry, &path(prefix, "inquiry"), unsets),
             start_local: delta_opt(self.start_local.as_ref(), next.start_local),
-            default_id: delta_opt(self.default_id.as_ref(), next.default_id),
+            default_id: delta_opt_at(
+                &path(prefix, "default_id"),
+                self.default_id.as_ref(),
+                next.default_id,
+                unsets,
+            ),
             labels: self.labels_delta(next.labels),
         }
     }
