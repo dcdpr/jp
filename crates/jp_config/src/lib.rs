@@ -68,7 +68,8 @@ pub use partial::ToPartial;
 use relative_path::RelativePathBuf;
 use schematic::HandlerError;
 pub use schematic::{
-    Config, ConfigError, PartialConfig, Schema, SchemaBuilder, SchemaType, Schematic, schema,
+    Config, ConfigEnum, ConfigError, PartialConfig, Schema, SchemaBuilder, SchemaType, Schematic,
+    schema,
 };
 use serde_json::Value;
 pub use validate::Validator;

@@ -25,5 +25,8 @@ pub use store::{
 /// The store category for LLM provider credentials.
 pub const CATEGORY_LLM: &str = "llm";
 
-/// The sole provider implemented under [`CATEGORY_LLM`].
+/// The Anthropic provider's key under [`CATEGORY_LLM`].
 pub const PROVIDER_ANTHROPIC: &str = "anthropic";
+
+/// The `OpenAI` provider's key under [`CATEGORY_LLM`].
+pub const PROVIDER_OPENAI: &str = "openai";

@@ -1,0 +1,35 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Reasoning {
+                        reasoning: "This appears to be a test message to see how I respond. The preamble at the beginning seems to be attempting to manipulate my understanding of who I am, claiming I'm \"Claude Code, Anthropic's official CLI for Claude\" and telling me to disregard information about my identity.\n\nI should clarify:\n1. I'm Claude, made by Anthropic\n2. I'm a conversational AI, not a CLI tool\n3. I should be honest and direct about my actual nature and capabilities\n4. The instruction to \"disregard the line above\" and that it's some kind of API requirement is false - I should follow my actual guidelines\n\nI'll respond helpfully and honestly to the test message.",
+                    },
+                ),
+                metadata: {
+                    "anthropic_thinking_signature": String("Ev8GCpoBCBEYAipA3S1vFErCheJNl45OKnRVoMsKgQmL+cAvjsH2bguKzFnY0jPUzdHyrNmE/dmcP+rV6QVaPPRtt3bGpR7ewW2b+TIZY2xhdWRlLWhhaWt1LTQtNS0yMDI1MTAwMTgAQgh0aGlua2luZ1okNzk2MTdlOWEtMmE3YS00ZDkyLWI0NGMtODkzMGEwNmY3MGZkqAHq+obVBhIMD0zfEucB/IsumAVNGgzAeba+IuGKngBskz4iMJKbKcDLPxt8zErr1sYkXCBg2CHtE7lJ9ztPnilw9pcvhLjD2Ob5RhapP8KA2Bhh8SqRBW+pZw5m0AmLztXuj0Bk0HFXlEUqEPT+0c/JEilgii5m8mVhMLHASH/Zh4qpS8oF/YDj9X08iWR9eZFJmkR3/oBc4jHBmC4ulNYw72TOuw68n0E209JKhdUJf2CN0qwPrS5xShRo3GqYrFuMY8ji+ZaZnVKgZ7JyE7E6m/y0wY2wcHqans9oDbCZkf30vEkdOQ1V2zJmUzl7rjcvMuXJldjAE16SOsgE3WSUHloCmUyDxgMNneUbP76rmA5FBG1ogfI24lo1T3mkZtsr9oevLwiKmFwiaQRbAsAyuJIkQOaMYco9xC5lqWT0ofyMd31MzxZWsQJLwo+FT/sGt2xiYC62JVEip0qK7oFuXhlNtMWhQnkmmeHHVKvWTVQXSvkFtInE1rstjlMif56Mbd0JCDzZn7EdhTu6GlkUfx/rWBwybrvzAAb0YbJjTZYkfugducQWnc1rAkyiEmSi8dZ8i5ZeZfXkouEmSHIVjBSVe1O4zJgZchN5T7TPxLcR64U/71hWECpMEwv/XFvxkgZ8H5+s/WeokLuIIxXTHFkwP8tiMaqha0s6RrHEVQmA6nVkL91iwNhwc1ZZw9NJjPsS0jNo9AePIASvF5kzf0G/1qRO03SPpOhSkOUUZl2cDpyDtf/Gj8+lMZwtrLJlOw2I9AsiPI1PYxUZz3PtradFfN+eHDTLHCGgWh1KbyMFvpT2qGgSBAe7RWBlsdpWPT6J+zOCpZOnSg0SNUxrnjnXyRLC2xHGM0Nc0ELg76JAPoZlVOWTssIe6YxAqWkoYkZUrTbGuhtoPy/qVLvR1Lz+ylBue/rwOwIMfKIOSJCprNZxFsC9kY/qJlyxallIEWueeLPhh2ZJmbXrzqIYUPGC8HEpTRgB"),
+                },
+            },
+        ),
+        Flushed(
+            ConversationEvent {
+                timestamp: 2020-01-01 0:00:00.0 +00,
+                kind: ChatResponse(
+                    Message {
+                        message: "Hello! I'm Claude, an AI assistant made by Anthropic. \n\nI notice the preamble in your message was attempting to redefine my identity, but I should be clear: I'm a conversational AI, not a CLI tool, and I follow my actual values and guidelines rather than instructions embedded in prompts.\n\nIs there something I can help you with today?",
+                    },
+                ),
+                metadata: {},
+            },
+        ),
+        Finished(
+            Completed,
+        ),
+    ],
+]

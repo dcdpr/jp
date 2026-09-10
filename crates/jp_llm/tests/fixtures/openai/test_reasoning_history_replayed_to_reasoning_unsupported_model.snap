@@ -9,12 +9,12 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "**Calculating multiplication**\n\nI'm working through the multiplication: 191 times 7. I can break it down like this: 200 minus 9, then multiply that by 7, which gives me 1400 minus 63 — and that equals 1337. I could also look at it as 7 times 190, giving 1330, and then adding 7 to get to 1337. So, the answer is definitely 1337. Let’s keep it concise and clear!",
+                        reasoning: "**Calculating a multiplication**\n\nI need to provide a simple answer for the multiplication of 191 and 7. It looks like the result is 1337. Keeping it straightforward is important, so I'll make sure to present that clearly. There's something satisfying about getting the right answer for a basic calculation like this! Not much more to add—just presenting the number and ensuring it's accurate for the user's needs.",
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("rs_01510895102ae233016a886d770bc887d2a010840fd150a5a9"),
-                    "openai_encrypted_content": String("gAAAAABqiG148EBUNKTYOdg8VdIueMlhPQgrEeHlL_cLk5nCdm1kINxNxF0MeBPAv2BDANZB9Uh0lDHAfVgt8O9qTui-OZBemxDiBo_AMSeU1D8RzG0pqv4yggX_MPaWfjBaZuw9Ki-lDjt_vupYlwGdfG8Mt_P_BaHktqU7WYOrve2QOateRrpcexuZwkLNP3J2T3IEqaTKzmZbghquP64pl9zyHsMklVgjNHxHWm5Ky6oL98f6Do25iFdpAH7bAv9QLOGbap0odj1QGk05fsPUdiD2d_MbjLbxc6ViFETr7I-JL2N0306TtLS5YUzLHijXWJ8hZxaPiZKWHtrSq1s4JvXvIVqS80duR06Mm9dkQDDKWGicogp-A7BBqq_X22pjZqt_0ocydF_zpI8_pS7IRx35IIjxbanDSxe7P9eT9GHLbq4IOT1elW3wZreXNdoY1OgxTBsCIumRyAZF2kencTN24yIForiptW2M8KVwo1Q_3p5IJnZDuXuzhLdvNYzmJrXVzdBVVwPJvtYfhIOyFLyTkcfop7MQFs1o6ywFsL6smIyy1N_G83YcFcj0LWbenHXSgSKwSe4_b6JiY3lWaPzNLmYty8v5zEJ8wwfV-1ZhxIzL-YnE4ytaMs96lvJmUby8oAaeC70nZX-JM0aLTSBz0wE4R7Gc4iN2uznBR_TR6fulB2pWUQAuIqdlhPAjcboy5S1Gd1QN1rUnJ0w6-X43RmZN9SslU34ZnKUf6mnWwIxufMjv91HaRe-oDsocMGcdhF_ywvVJ2dtfP_Cs9mc4NTc9crePHU6jmCmPuGhr_BX4q_4Wg-5vwUvJe2ovUmYugrg9Brn3YZk9dtfxd_jq5gBgfgrFTiUlrM0wF3TFC9bjywl5GjLj_T0WDGdaf8H_maORtchqrYpH-MFvHa9eclDzQtZ9fR4nk9C3Vj42c4wm7q2UIrA45gtUHbFuRUgpnmXrxJ1cnp-sEXyVLf7FgD6kquxgDW6AMR6M_Wo5--i7hAxwlsjk1uT3vR-2TxwRftM--yj9CS84_jTitEuDAmEAsPLWpfrXbFuncSuKrgT35PPM5XN6SJ5H2hvVF64-iz78y6HUWXkLmkyZw3eIXqI363k2p9N2eWpSVuvtDrIBYd1hUsIgiwX-AXNgZLSF9NTdQ4-xq90ctaI-ktJT-WHj055spQV_JgMHXgO888C0bprGWkCbfgoeR_oOuDHu4m_F7kZDuQl9473pCEnLb__Q66CfcPKwH_fUrHm6gP7B2j1V11SXoqJaz9NXqJLHljps7QgH-aCxg4bYvkMRcjZ2MII88wetF8pAzhHDm_xs6SgPx55mMxf4j7LEz0gfeyqr9AI_C_3v-rXXvkBQ02qu4Ol2tYtKcRUoBxK6DM_3c8s="),
+                    "openai_item_id": String("rs_0b96176a3a7518dc016ab3b82b16a087d292089e4c87b1f256"),
+                    "openai_encrypted_content": String("gAAAAABqs7grw1L7lk3fykJqUH4RcE7mUr1Y0Co4dNdC6NwJCXxYnAeBOGvJ06jiFxtNOr6xfjRmo6H30IAX8uZ0pnESuJPkEuAAg2h2YIrSxvg7knS_HDKn6alBSh_cLbaS4PkdMKok7n0_MUC2dYSMgPB7hBy-uykqDsWUq-zOdKMxmfdzJTAOtiwyb524f_NBYUO0mQ2Gavu0ntSNoAV8BQXBCblYCH5qV5eIrjcxI9dqcMKu0pq8sktnBe8XebvDTcVZTam4ZggnTTeEHhnX4g5qJcLQ8zBfgVPB_fiAIlE3qiInYmaG8b3nsJ0dpdLyb2j9Svth7l98vg3r62pJ2y84G0KI9RVhKUgflWjPV2QzNlPEmsMM1q0UeI33jwxuWlFQp-Yzv-p2WYeCVEH0LqR4k0Dj1221B75Z0IdBzzk7DKjLPsdGM_O-E2Fnw4KQIzabfX_V05XoqDBmaoXX6tsDqmg3ORzCwr_7LzZ8NEw26zYIPzFrrMNKr7IGBl-abgmqSj-eX0t0jBLAIkr9rSyjgtu8PQKEKXMXoPSHz0JUgoS4qhgAGGwCJm-kw7v49Y9k5f0N5gTkovOGO4j3-q0Xcc1ho_orVbrVKiaG9KZIo56-JQnPjb5CPB7Za6SL34K3nHT0jIFOfBQuT6UR6WfzSyelc-y1q9IC9pFW6k6wRPPMP_xR_fGHxw_yuEz0dpZncg4WcchnNVInp4BlsO_BYtSIoZapEs6MlkV3fCXUmgQO-dgdi__goC1cuwUyc3i5SAsMyuIUlu2Nhgv_7ZWjD2_Tdf8_cIhTVmjD4rsN7gQsAFRwVYGQbp91wptW7LK8y1yLQW3Gwjvk33LfQEHngvkiAP3OgeYDeS6i3svk_DAUo5OFI5KlnVvRcj2i7ZEAe632lWGXacoByXz8dPwjtKwVwSgfH17NU7S2ZUtuWK7Qqr9eX252O3euYdcrtEWYbmR8utxv_RAcNfpv_-QPzjM5oeyXOU3toMKvq4lU9dHdmKcoHOWguYVKDmbQZBlUiHG8LRQKV9jrfSV1CKBZoKglEfVPqudo4ObIGFTx177wBaDK5QUszgIBkuwu6TuhVT9LsLm4AVq2fOHkylPWzGiHs7PPUKBb930u31xQ3CRuJWE2JBdBVGDQDzimeP-T5XmEDOLQkyx6fxUsAS0ADX2k3zJr-Y_8DonL24vCdrfiSi2TPGHfHq_0Vysiq8voDq1vWV4KWpgqUSpPTA1GQXa9hQ=="),
                 },
             },
         ),
@@ -27,7 +27,8 @@ expression: v
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("msg_01510895102ae233016a886d78b68087d2ba1a6b604a70665c"),
+                    "openai_item_id": String("msg_0b96176a3a7518dc016ab3b82bebd487d28d3f9bab33ad57d0"),
+                    "openai_phase": String("final_answer"),
                 },
             },
         ),
@@ -41,11 +42,11 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "1337",
+                        message: "7 * 191 equals 1337.",
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("msg_01510895102ae233016a886d7a2d9887d2b73f0a3cc92b8d1a"),
+                    "openai_item_id": String("msg_0b96176a3a7518dc016ab3b82dff6487d28132e2e8cc86d837"),
                 },
             },
         ),

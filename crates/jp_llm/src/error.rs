@@ -305,7 +305,32 @@ impl StreamError {
                 let headers = response.headers().clone();
                 let body = response.text().await.unwrap_or_default();
 
-                let api_msg = extract_api_error_body(&body);
+                Self::from_http(status, &headers, &body)
+            }
+            // A stream that "ended" without our having seen a terminal event
+            // is the disconnect case (the connection dropped mid-response).
+            // Treat it as transient so the retry layer rebuilds the stream.
+            error @ Error::StreamEnded => Self::transient(error.to_string()).with_source(error),
+            error @ (Error::Utf8(_)
+            | Error::Parser(_)
+            | Error::InvalidContentType(_, _)
+            | Error::InvalidLastEventId(_)) => Self::other(error.to_string()).with_source(error),
+        }
+    }
+
+    /// Classify a non-success HTTP response into a [`StreamError`].
+    ///
+    /// Takes the parts rather than the response, so a provider that reads the
+    /// body itself reaches the same classification as one that hands over a
+    /// `reqwest_eventsource::Error`.
+    pub(crate) fn from_http(
+        status: reqwest::StatusCode,
+        headers: &reqwest::header::HeaderMap,
+        body: &str,
+    ) -> Self {
+        {
+            {
+                let api_msg = extract_api_error_body(body);
                 let display = api_msg.as_deref().map_or_else(
                     || format!("HTTP {status}"),
                     |msg| format!("{msg} (HTTP {status})"),
@@ -319,7 +344,7 @@ impl StreamError {
                     );
                 }
 
-                let retry_after = extract_retry_after(&headers);
+                let retry_after = extract_retry_after(headers);
                 let code = status.as_u16();
 
                 // A 429 is an authoritative rate-limit signal, so only a marker
@@ -328,9 +353,9 @@ impl StreamError {
                 // and reading one as fatal ends the turn instead of waiting out
                 // a bucket that refills seconds later.
                 let out_of_quota = if code == 429 {
-                    looks_like_billing_exhaustion(&body)
+                    looks_like_billing_exhaustion(body)
                 } else {
-                    looks_like_quota_error(&body)
+                    looks_like_quota_error(body)
                 };
 
                 if out_of_quota {
@@ -342,13 +367,13 @@ impl StreamError {
                 // exempt: it is an authoritative rate-limit signal, and
                 // token-per-minute limits are phrased close enough to a window
                 // overflow that the text check would misread them as fatal.
-                if code != 429 && looks_like_context_window_error(&body) {
+                if code != 429 && looks_like_context_window_error(body) {
                     return Self::context_window_exceeded(display);
                 }
 
                 // Non-standard `x-should-retry` header overrides
                 // status-code heuristics.
-                let retryable = match header_str(&headers, "x-should-retry") {
+                let retryable = match header_str(headers, "x-should-retry") {
                     Some("true") => true,
                     Some("false") => false,
                     // Timeout, conflict, rate limit, and any server error.
@@ -370,14 +395,6 @@ impl StreamError {
                     }
                 }
             }
-            // A stream that "ended" without our having seen a terminal event
-            // is the disconnect case (the connection dropped mid-response).
-            // Treat it as transient so the retry layer rebuilds the stream.
-            error @ Error::StreamEnded => Self::transient(error.to_string()).with_source(error),
-            error @ (Error::Utf8(_)
-            | Error::Parser(_)
-            | Error::InvalidContentType(_, _)
-            | Error::InvalidLastEventId(_)) => Self::other(error.to_string()).with_source(error),
         }
     }
 }
@@ -561,6 +578,21 @@ pub enum Error {
     /// The provider's credential chain produced no usable credential.
     #[error(transparent)]
     CredentialChain(crate::provider::anthropic::resolve::ResolveError),
+
+    /// The `OpenAI` credential chain produced no usable credential.
+    #[error(transparent)]
+    OpenaiCredentialChain(crate::provider::openai::resolve::ResolveError),
+
+    /// The resolved credential cannot serve the requested operation.
+    ///
+    /// Distinct from a refused credential: the credential is valid, but the
+    /// endpoint it authenticates against does not offer what was asked for.
+    #[error("{0}")]
+    UnsupportedForCredential(String),
+
+    /// An API-key-only provider's chain resolved nothing.
+    #[error(transparent)]
+    ApiKeyChain(crate::provider::api_key_chain::ChainError),
 }
 
 #[cfg(test)]
@@ -654,6 +686,32 @@ pub enum ToolError {
 impl From<jp_conversation::StreamError> for Error {
     fn from(error: jp_conversation::StreamError) -> Self {
         Self::Conversation(error.into())
+    }
+}
+
+impl From<crate::provider::openai::resolve::ResolveError> for Error {
+    fn from(error: crate::provider::openai::resolve::ResolveError) -> Self {
+        use crate::provider::openai::resolve::ResolveError;
+
+        // The single-entry `["api_key"]` chain fails the same way it did
+        // before credential chains existed.
+        match error {
+            ResolveError::MissingEnv(var) => Self::MissingEnv(var),
+            error => Self::OpenaiCredentialChain(error),
+        }
+    }
+}
+
+impl From<crate::provider::api_key_chain::ChainError> for Error {
+    fn from(error: crate::provider::api_key_chain::ChainError) -> Self {
+        use crate::provider::api_key_chain::ChainError;
+
+        // The single-entry `["api_key"]` chain fails the same way it did
+        // before credential chains existed.
+        match error {
+            ChainError::MissingEnv(var) => Self::MissingEnv(var),
+            error => Self::ApiKeyChain(error),
+        }
     }
 }
 

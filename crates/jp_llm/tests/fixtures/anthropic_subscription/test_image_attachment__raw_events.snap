@@ -1,0 +1,23 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+[
+    [
+        KeepAlive,
+        Part {
+            index: 0,
+            part: Message(
+                "Apple",
+            ),
+            metadata: {},
+        },
+        Flush {
+            index: 0,
+            metadata: {},
+        },
+        Finished(
+            Completed,
+        ),
+    ],
+]

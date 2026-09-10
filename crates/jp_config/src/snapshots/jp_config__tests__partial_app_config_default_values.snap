@@ -455,11 +455,15 @@ Ok(
                     anthropic: PartialAnthropicConfig {
                         auth: Some(
                             [
-                                ApiKey,
+                                ApiKey(
+                                    None,
+                                ),
                             ],
                         ),
                         api_key_env: Some(
-                            "ANTHROPIC_API_KEY",
+                            One(
+                                "ANTHROPIC_API_KEY",
+                            ),
                         ),
                         base_url: Some(
                             "https://api.anthropic.com",
@@ -474,24 +478,51 @@ Ok(
                         ),
                     },
                     cerebras: PartialCerebrasConfig {
+                        auth: Some(
+                            [
+                                ApiKey(
+                                    None,
+                                ),
+                            ],
+                        ),
                         api_key_env: Some(
-                            "CEREBRAS_API_KEY",
+                            One(
+                                "CEREBRAS_API_KEY",
+                            ),
                         ),
                         base_url: Some(
                             "https://api.cerebras.ai",
                         ),
                     },
                     deepseek: PartialDeepseekConfig {
+                        auth: Some(
+                            [
+                                ApiKey(
+                                    None,
+                                ),
+                            ],
+                        ),
                         api_key_env: Some(
-                            "DEEPSEEK_API_KEY",
+                            One(
+                                "DEEPSEEK_API_KEY",
+                            ),
                         ),
                         base_url: Some(
                             "https://api.deepseek.com",
                         ),
                     },
                     google: PartialGoogleConfig {
+                        auth: Some(
+                            [
+                                ApiKey(
+                                    None,
+                                ),
+                            ],
+                        ),
                         api_key_env: Some(
-                            "GEMINI_API_KEY",
+                            One(
+                                "GEMINI_API_KEY",
+                            ),
                         ),
                         base_url: Some(
                             "https://generativelanguage.googleapis.com/v1beta",
@@ -508,8 +539,17 @@ Ok(
                         ),
                     },
                     openai: PartialOpenaiConfig {
+                        auth: Some(
+                            [
+                                ApiKey(
+                                    None,
+                                ),
+                            ],
+                        ),
                         api_key_env: Some(
-                            "OPENAI_API_KEY",
+                            One(
+                                "OPENAI_API_KEY",
+                            ),
                         ),
                         base_url: Some(
                             "https://api.openai.com",
@@ -517,10 +557,25 @@ Ok(
                         base_url_env: Some(
                             "OPENAI_BASE_URL",
                         ),
+                        codex_base_url: Some(
+                            "https://chatgpt.com/backend-api/codex",
+                        ),
+                        codex_base_url_env: Some(
+                            "JP_OPENAI_CODEX_BASE_URL",
+                        ),
                     },
                     openrouter: PartialOpenrouterConfig {
+                        auth: Some(
+                            [
+                                ApiKey(
+                                    None,
+                                ),
+                            ],
+                        ),
                         api_key_env: Some(
-                            "OPENROUTER_API_KEY",
+                            One(
+                                "OPENROUTER_API_KEY",
+                            ),
                         ),
                         app_name: Some(
                             "JP",
@@ -531,8 +586,17 @@ Ok(
                         ),
                     },
                     vllm: PartialVllmConfig {
+                        auth: Some(
+                            [
+                                ApiKey(
+                                    None,
+                                ),
+                            ],
+                        ),
                         api_key_env: Some(
-                            "VLLM_API_KEY",
+                            One(
+                                "VLLM_API_KEY",
+                            ),
                         ),
                         base_url: Some(
                             "http://127.0.0.1:8000",

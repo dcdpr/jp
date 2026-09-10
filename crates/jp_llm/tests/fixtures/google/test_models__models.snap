@@ -43,6 +43,7 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -85,6 +86,7 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -110,6 +112,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -135,6 +138,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -158,6 +162,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -181,6 +186,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -220,6 +226,7 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -262,6 +269,7 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -301,6 +309,7 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -343,6 +352,7 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -368,6 +378,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -407,6 +418,7 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -446,6 +458,7 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -485,6 +498,7 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -508,6 +522,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -531,6 +546,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -554,6 +570,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -577,6 +594,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -600,6 +618,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -623,6 +642,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -646,6 +666,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -669,6 +690,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -692,6 +714,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -715,6 +738,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -738,6 +762,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -761,6 +786,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -784,6 +810,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -809,6 +836,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -834,6 +862,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -857,6 +886,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -880,6 +910,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -903,6 +934,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -926,6 +958,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -951,6 +984,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -974,6 +1008,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -997,6 +1032,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -1020,6 +1056,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -1045,6 +1082,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -1070,6 +1108,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -1095,6 +1134,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -1120,6 +1160,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -1145,6 +1186,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -1170,6 +1212,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -1195,6 +1238,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -1218,6 +1262,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -1241,6 +1286,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -1264,6 +1310,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -1289,6 +1336,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -1314,6 +1362,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -1339,6 +1388,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
 ]

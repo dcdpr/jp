@@ -9,12 +9,12 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Reasoning {
-                        reasoning: "**Calculating stepwise**\n\nOkay, I want to address this step-by-step. I’m thinking about how to approach the problem effectively. The note about possibly documenting something irrelevant isn't what I need to focus on. And hey, doing the math, 191 times 7 equals 1337. I want to ensure I'm clear with all these details while getting to the right answer efficiently! Let’s keep refining this process.",
+                        reasoning: "**Calculating step by step**\n\nI need to tackle this calculation step by step. I’ll compute 191 multiplied by 7. A quick way to do this is by breaking it down: I can think of it as (200 - 9) multiplied by 7. So that gives me 200 times 7, which is 1400, and then I subtract 63 (which is 9 times 7) from that. This brings me to a total of 1337.",
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("rs_023419931c2572d9016a886d7a3b2087d2b735df7c081b55ea"),
-                    "openai_encrypted_content": String("gAAAAABqiG17IiPjgKLBCF3ep2XxUUE8OCRhf-A5Xt1UDvUiaVE1hq4CR1QjQDJEKq2MtSh9DYx6AKkjod-oCU_444Lewu0CAZJzmGtZ9G5XbYSVpXlW4ZE3g80hie8lA7VK1kwWuNhYp7xNxNb9efh_efoKgKGtmiYHeS9yZ09WABATljwYzv675nd_wRipOBbB5aAEuBTfx-LXjmvFGL-T9fApMrNV7oBh2UZv0gnAOkcFswdpPlxfvQdu4iPtUj_wjL0RWnlfN8YE1mv6He6LnPu2XlagYTbl77NMyhdHnP0Ua3-hP21assO8NUMd9MtuE4N9QYolQDuA8a9Wd3xNGlG7UwZLqKIL_-zP5K2uigSUmNqx8UcRlMVEKFwEQ6528sfFMWjXCHbfYTMkXwOiB7A2gEhMnr-VwrGl7XaZv-HWLKPiTUATqj9LyOmIMAs9M2FpEz_wwJl-wGeJCqBjjRttc9vMjcE7uVUUu3x8vNvkQoUeg7Vu5TUzWNdzhjsrfJdDLlpXjTyEKmRfRhtPnwUGx46d4_qWJ2H2JXZJn-IJevpd_GeQW-K24xAuEhtlbiYeD68e4jVmp9G8HK2c2MXsg8jZTIFq2i23S97edEpIB7DSV_NoAFuzlCw2HHWpAq-1-CCzW19jKzi3U3_gy9U7B-B4d11zn8-61-bw5nuKU_ytw1Ml4rTiMPGQrWE9yv0kwZHFU8s2WHBPDDXS1F0_j3BPRDydRukmx9Yn5uy24Xq2Vf2e1TGNWwSLG0LtBTe_-znbeU7k-wa0hPCAmv9rHxinVyhL2x333nWaRC0YnzWRyiVpoX2h6ay1Ie_ZxElfyXCd8Yk-MyR2nMeN3oMGB-ov0e6Op_NzKiH7flpwNLCNo6IP5qZWvkms15PY62icisHBCM9GogENfL0EvwVg189he850eFmN3YmBejTjgbaIi8brONPHMUipoDKUUZx5V9NW0zyWWQqRnbZmjnf884f7auZm6yUSiGCh33J5CYn77mL6WukjOZjwXv8cWZyJlpIZS0bAlJljLF-TEGjKy12x-Uel4YkxMh9ZGy7nNGCElExxVasawQDBdcQzF8PCrhguDA2y69l9iI5tZGbMfZxCe1AcmrlD7FsQCXfC27ZGivIwuA1u2cs4pcnHkQmMiZsto9sUmFgJbGwFTFv2BUCf1SJQykuHWN3T13pAf8SPr64WzGJ9U0JmyCtxHUpz8ctPCr9w_xMxdYu6B0r3Qj02mN-0K2tUbMSRsIyKMZLbmPyh4mgmOtN6pmh4wbqNZt_oRDVgQvWLeCeXMR9b1v7zrw=="),
+                    "openai_item_id": String("rs_042a8752e6de9dcb016ab3b82e8be087d2b785ab8aea96f3e0"),
+                    "openai_encrypted_content": String("gAAAAABqs7gv7mflhv9KtueBXTir4R-qvDG1vGwN26TTq_6mAUr4vtHAkDcaI4uSNXKNuaKm5IOchMBPazeqv_67ezkRZNcod6ar59wmC2MlxoZyOn_bj9H5Nii--npZOut8biVKbxaCQeEzjg7ZvbsRczGO6KhQg_JTCGVI4kgO7c8ZPxq2uZQubCQ5CkOB8W70ACVvD2eKSPp8oIm4omvMlreAp3X0L3RTzmLXFXh2WPG5658MGvpNbAeQSiQMsQxjj90CCwnPhaKuwP_A-Q5aRzxrQuMIn2xybxRK2K9WmEP-adelLLH_pj9c0SFcb6wq2quikudMqJGlTn6CFzGNeuLzjsdOwIx0WMfTMsBV-PCdRfI0M_4ASU4xh45hYjmqphpBnfuyltE4Isp2sCKMQD5L28E46zXzWsXiczT7VzmHaYpBJeQLZoyw2lPkgTG95d-5_yf3cqLMDMGhE4hogPMb9ZqIJiYR-k1WXIedm--Ax1LdClCRWXfbbjt4831j5fcYnIhzulOAQogqOj_9BptVJWV9PSbFbLRWkTmIrpa0sfyCVcRSOpYLOyL4HDDIA85m7Ks5OFwGjLloss29Dp8qWywC3r1zbGtHAPqLyWWx8XIO5PL5YkxYahF9sUXQday06oDgxnw638xSsTbDKp2QQQCfsHUekSHj2tRN2N7ERGSyjb9QF2FrtTBOPKx3tfWUIgABrOJeQ7egKVnFEeIDF9myxg_tNysZMYGRKnevGJNUyYk-T_azh2PLUszzuMlhdZtZGyAFiNav1GNdfVxcc6dglmr6fN5N_Zwga8FHKm29mxNp7KUcwmDDHOgfWFH9W7ynvfn7w1pZZZDyQ_jJGXTGaKiPLU2ZKU2ADrZx7Ey0J1sLnZrW4AdXs77nodxK-ruXUTod_w3jveaFwKgB3tqVNkyQMiFmAt4Jg-keM0Yl-jTr0p6lD5msE1OZBx0xBqMhPLM1XwLKkHzy0shXbiR3oHRlBsRFu-lXzHr35A8QXKTed1XhSsOq3WtjtsfkNP3EtAsuRC-9rPT97-j3s-0D3XKUPTxLYgaLKXu0bpkbLtn8jSPxWSYPoTs5zFaHq-n4zIhWUQ_8u3Wtxe6cy9_hkkFWwp7bk1F6iUY9O8462BnCKb8N4IXumi5UsB_IZuB9k44gNqjBg_ysxrr-BR5z6HpOLf6boILHrfbgdLV3vmqoST095DRUq13FndpGpQ2WCrJL_jhao9jFAd0gDUUelUJ3Go8Cxpjc0-ZXlias8vSM-zR59d85--Sv47fVkspn3m0eeeu7rfyQsuxzx40oJA=="),
                 },
             },
         ),
@@ -23,11 +23,11 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "\\(191 \\times 7 = (190 \\times 7) + (1 \\times 7) = 1330 + 7 = \\boxed{1337}\\)",
+                        message: "\\(7 \\times 191 = 7 \\times (200 - 9) = 1400 - 63 = \\boxed{1337}\\).",
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("msg_023419931c2572d9016a886d7b474887d2b66284d2a49efb63"),
+                    "openai_item_id": String("msg_042a8752e6de9dcb016ab3b82f53f087d2a73746ab1fc9020a"),
                     "openai_phase": String("final_answer"),
                 },
             },
@@ -42,11 +42,11 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "\\(191 \\times 7 = (190 \\times 7) + (1 \\times 7) = 1330 + 7 = \\boxed{1337}\\)",
+                        message: "\\(7 \\times 191 = 7 \\times (200 - 9) = 1400 - 63 = \\boxed{1337}\\).",
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("msg_023419931c2572d9016a886d7ea90487d2b3055d01cf5694b9"),
+                    "openai_item_id": String("msg_042a8752e6de9dcb016ab3b83272ac87d297670ed53a75f64b"),
                     "openai_phase": String("final_answer"),
                 },
             },

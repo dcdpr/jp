@@ -46,6 +46,17 @@ pub struct ModelDetails {
     /// `None` means the provider reports nothing either way.
     pub prefill: Option<bool>,
 
+    /// Whether the provider's subscription plans serve this model.
+    ///
+    /// A provider selling both metered API access and a subscription reaches a
+    /// different model set through each.
+    /// `Some(false)` means the model exists but only the API serves it, which
+    /// is what lets a request name it and be refused before it is sent.
+    ///
+    /// `None` means the provider reports nothing either way, which is every
+    /// provider billed a single way.
+    pub subscription: Option<bool>,
+
     /// Provider-specific features.
     ///
     /// Reserved for capabilities read only by the provider that declares them.
@@ -66,8 +77,19 @@ impl ModelDetails {
             deprecated: None,
             structured_output: None,
             prefill: None,
+            subscription: None,
             features: vec![],
         }
+    }
+
+    /// Returns `true` if a subscription credential is known to serve this
+    /// model.
+    ///
+    /// Unknown support reads as `false`, so this answers "may I assume a
+    /// subscription can serve this?" rather than "is it worth attempting?".
+    #[must_use]
+    pub fn served_by_subscription(&self) -> bool {
+        self.subscription.unwrap_or(false)
     }
 
     /// Returns `true` if the model is known to support structured output.

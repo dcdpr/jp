@@ -5,15 +5,15 @@ use super::*;
 
 #[test]
 fn test_provider_auth_dispatch() {
-    // Anthropic is the only provider with stored-credential support.
-    assert!(provider_auth(ProviderId::Anthropic).is_some());
+    for id in [ProviderId::Anthropic, ProviderId::Openai] {
+        assert!(provider_auth(id).is_some(), "provider: {id}");
+    }
 
     for id in [
         ProviderId::Cerebras,
         ProviderId::Google,
         ProviderId::Llamacpp,
         ProviderId::Ollama,
-        ProviderId::Openai,
         ProviderId::Openrouter,
         ProviderId::Test,
     ] {

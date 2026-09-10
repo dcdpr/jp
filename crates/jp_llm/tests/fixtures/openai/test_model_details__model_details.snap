@@ -7,42 +7,47 @@ expression: v
         id: ModelIdConfig {
             provider: Openai,
             name: Name(
-                "gpt-5-mini",
+                "gpt-5.6-luna",
             ),
         },
         display_name: Some(
-            "GPT-5 mini",
+            "GPT-5.6 Luna",
         ),
         context_window: Some(
-            400000,
+            1050000,
         ),
         max_output_tokens: Some(
             128000,
         ),
         reasoning: Some(
             Supported {
-                mode: Budgetted {
-                    min_tokens: 0,
-                    max_tokens: None,
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: true,
                 },
                 can_disable: true,
             },
         ),
         knowledge_cutoff: Some(
-            2024-05-31,
+            2026-02-16,
         ),
         deprecated: Some(
-            Deprecated {
-                note: "recommended replacement: gpt-5.4-mini",
-                retire_at: Some(
-                    2026-12-11,
-                ),
-            },
+            Active,
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            true,
+        ),
         features: [
             "temp_requires_no_reasoning",
+            "reasoning_pro_mode",
+            "persisted_reasoning",
+            "explicit_prompt_caching",
         ],
     },
 ]

@@ -11,13 +11,14 @@ expression: v
                     Structured {
                         data: Object {
                             "titles": Array [
-                                String("Generate a title for this conversation"),
+                                String("Conversation Title Generation"),
                             ],
                         },
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("msg_088c41056f971fe1016a886da6f56887d2980995f33da10a61"),
+                    "openai_item_id": String("msg_0c428b720e2c6cac016ab3b82abd4487d2a5ddf2e116432419"),
+                    "openai_phase": String("final_answer"),
                 },
             },
         ),
