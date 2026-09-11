@@ -12,6 +12,7 @@ use two_face::syntax;
 
 use crate::{
     ansi::{self, AnsiState, Segment},
+    references,
     render::{self, HrOptions, RenderOptions},
     table::TableOptions,
     theme,
@@ -262,6 +263,10 @@ impl Formatter {
     /// This injects ANSI escape codes into the text, to make certain markdown
     /// elements reflect their style (strong, italics, code, color, etc.).
     ///
+    /// Link reference definitions remain visible as literal Markdown, including
+    /// unused definitions.
+    /// Only references defined within `text` are resolved.
+    ///
     /// # Errors
     ///
     /// Returns an error if `fmt::Error` is returned when formatting the
@@ -299,6 +304,7 @@ impl Formatter {
         let comrak_options = self.parse_options();
         let arena = Arena::new();
         let ast = comrak::parse_document(&arena, text, &comrak_options);
+        references::restore(&arena, ast, text, &comrak_options);
         let table_options = TableOptions::new(self.table_max_column_width)
             .continuation_edge(self.table_continuation_edge);
         let hr_options = HrOptions {

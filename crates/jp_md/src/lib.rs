@@ -31,6 +31,7 @@ mod ansi;
 pub mod buffer;
 pub mod format;
 pub mod heading;
+mod references;
 mod render;
 pub mod shade;
 mod table;

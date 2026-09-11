@@ -18,6 +18,10 @@
 //! non-streaming buffering emits, so a consumer that re-renders the accumulated
 //! source produces byte-identical output.
 //!
+//! Reference-definition candidates wait for a block boundary so multiline
+//! labels and titles stay together.
+//! This also applies inside blockquotes.
+//!
 //! GFM tables do not stream: their column widths depend on later rows, so a
 //! table is kept whole, detected by the leading pipe on its header row.
 //!
@@ -266,6 +270,9 @@ impl Buffer {
     /// With it disabled the buffer emits each paragraph as a single
     /// [`Event::Block`] once a terminator is seen, never an
     /// [`Event::ParagraphChunk`].
+    ///
+    /// Potential reference definitions wait for a block boundary even when
+    /// streaming is enabled, since their labels and titles may span lines.
     ///
     /// Streamed output is byte-identical to whole-paragraph buffering except
     /// for two edge cases, neither produced by assistant output: an
@@ -549,11 +556,6 @@ impl Buffer {
             return (Some(Event::block(block)), State::AtBoundary); // Stay at boundary
         }
 
-        if indent_len <= 3 && is_link_ref_def(line_content) {
-            let block: String = self.data.drain(..=first_line_end).collect();
-            return (Some(Event::block(block)), State::AtBoundary); // Stay at boundary
-        }
-
         // Check for "Container Blocks" that change our state. Per spec, these
         // blocks may also be preceded by up to 3 spaces of indentation
         if indent_len <= 3
@@ -669,11 +671,12 @@ impl Buffer {
             return self.flush_paragraph(flush_len, setext_split);
         }
 
-        // No terminator yet. Once the paragraph is too long to be a short
-        // setext heading, stream the largest inline-safe prefix of its
-        // not-yet-emitted source — unless the block is a GFM table (a pipe-led
-        // header), whose column widths make its rendering prefix-unstable.
-        if self.streaming && self.data.len() >= SETEXT_STREAM_THRESHOLD && !self.is_table() {
+        // Later table rows or definition titles can change the rendered prefix.
+        if self.streaming
+            && self.data.len() >= SETEXT_STREAM_THRESHOLD
+            && !self.is_table()
+            && !self.may_start_reference_definition()
+        {
             // Commit only confirmed paragraph lines: never past the last
             // newline, since the in-progress line could still become a block
             // starter. The sole exception is the first line, which is the
@@ -692,6 +695,30 @@ impl Buffer {
         }
 
         (None, State::BufferingParagraph)
+    }
+
+    /// Whether the buffered prefix can still begin a reference definition.
+    ///
+    /// Incomplete labels and a closing bracket at the buffer edge remain
+    /// candidates.
+    /// Leading quote markers are ignored; destinations and titles are not
+    /// validated.
+    fn may_start_reference_definition(&self) -> bool {
+        let source = self.data.trim_start_matches([' ', '\t', '>']);
+        let Some(label) = source.strip_prefix('[') else {
+            return false;
+        };
+        let mut chars = label.chars().peekable();
+        while let Some(ch) = chars.next() {
+            match ch {
+                '\\' => {
+                    chars.next();
+                }
+                ']' => return chars.peek().is_none_or(|ch| *ch == ':'),
+                _ => {}
+            }
+        }
+        true
     }
 
     /// Whether this block is a GFM table, which must never stream.
@@ -1674,17 +1701,6 @@ fn is_fenced_code_start(line: &str) -> Option<(FenceType, usize, String)> {
     }
 
     Some((fence_type, fence_len, info_string.to_string()))
-}
-
-/// Checks if a line (without indent) is a Link Reference Definition
-fn is_link_ref_def(line: &str) -> bool {
-    // This is a simplified check. A full one can be added later. We just check
-    // for the `[label]: url` structure.
-    if !line.starts_with('[') {
-        return false;
-    }
-    line.find("]:")
-        .is_some_and(|label_end| !line[label_end + 2..].trim_start().is_empty())
 }
 
 /// Checks if a line (without indent) is a Setext Underline
