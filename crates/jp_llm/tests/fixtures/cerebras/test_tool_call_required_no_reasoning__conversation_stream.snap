@@ -220,16 +220,19 @@ expression: v
   },
   "events": [
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "Please run the tool, providing whatever arguments you want."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "reasoning": "The user wants the tool to be run, providing whatever arguments we want. The tool is run_me with parameters foo (optional, default \"foo\") and bar (required string or array). We need to call the function. The prompt says \"providing whatever arguments you want.\" So we can choose arguments. Let's provide a simple test: foo: \"test\", bar: \"example\". We'll call the function."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
       "id": "9ad7c9ddd",
@@ -240,6 +243,7 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
       "id": "9ad7c9ddd",
@@ -247,11 +251,13 @@ expression: v
       "is_error": false
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "reasoning": "The user wants the assistant to \"run the tool, providing whatever arguments you want.\" The tool is a function named run_me, with some kind of \"commentary\" maybe. We already executed a function run_me with arguments {\"foo\":\"test\",\"bar\":\"example\"} and got a response \"working!\". So the tool responded. The user might expect the assistant to interpret that output. The system says \"Please run the tool, providing whatever arguments you want.\" We already did. The answer likely should be something acknowledging the tool run. Maybe we should explain what happened. There's no further instruction. It might be a test. We can respond that the tool executed successfully, returned \"working!\". If needed, we can ask if they want something else. Let's respond accordingly."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "I ran the `run_me` function with the arguments you gave it (`{\"foo\":\"test\",\"bar\":\"example\"}`). The function completed successfully and returned the message:\n\n**“working!”**\n\nLet me know if you’d like to try a different set of arguments, call another function, or explore anything else!"

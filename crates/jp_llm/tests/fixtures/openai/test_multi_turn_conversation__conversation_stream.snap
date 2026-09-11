@@ -223,6 +223,7 @@ expression: v
   },
   "events": [
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -236,11 +237,13 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "Test message"
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "Received your test message — everything's working. Anything you'd like to try or ask?",
@@ -249,6 +252,7 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -265,11 +269,13 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "Repeat my previous message"
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "reasoning": "**Repeating message clearly**\n\nThe user has asked me to repeat my previous message, which was \"Test message.\" I want to keep it concise and clear, so I’ll just repeat that exactly. It’s important to ensure that I deliver what they requested straightforwardly and without adding anything unnecessary. Okay, I’m ready to respond with the exact quote. Here goes: \"Test message.\"",
@@ -279,6 +285,7 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "Test message",
@@ -287,6 +294,7 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -300,11 +308,13 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "Please run the tool, providing whatever arguments you want."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
       "id": "call_aGqFUSwEmeqvj7EMW7rPrTsW",
@@ -315,6 +325,7 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
       "id": "call_aGqFUSwEmeqvj7EMW7rPrTsW",
@@ -322,6 +333,7 @@ expression: v
       "is_error": false
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "I ran the tool with arguments {\"foo\":\"anything\",\"bar\":\"foo\"} and it returned: \"The secret code is: 42\". Do you want me to run it again with different arguments or do something with that code?",
@@ -330,6 +342,7 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -346,11 +359,13 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "What was the result of the previous tool call?"
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "reasoning": "**Responding to tool call result**\n\nThe user asked about the result of a previous tool call. I remember that I previously mentioned it returned, \"The secret code is: 42.\" I think the best response would be to keep it simple and state that the result was indeed \"The secret code is: 42.\" I might also want to add that this came from running the tool with specific arguments, but I’ll keep it concise to avoid any confusion.",
@@ -360,6 +375,7 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "The tool returned: \"The secret code is: 42\".",

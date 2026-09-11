@@ -220,6 +220,7 @@ expression: v
   },
   "events": [
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -236,16 +237,19 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "Please run the tool, providing whatever arguments you want."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "reasoning": "User wants tool run with any arguments. We'll call run_me with some arguments."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
       "id": "f8afbdfcc",
@@ -260,6 +264,7 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -273,6 +278,7 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
       "id": "f8afbdfcc",
@@ -280,11 +286,13 @@ expression: v
       "is_error": false
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "reasoning": "User asks \"Please run the tool, providing whatever arguments you want.\" The assistant already called the tool with arguments {\"foo\":\"test\",\"bar\":[\"a\",\"b\",\"c\"]} and got response \"working!\". Now need to produce final answer. The user likely expects that we ran a tool and got response. So we can respond with the result and maybe ask if they need something else."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "I ran the tool with a sample payload (`{\"foo\":\"test\",\"bar\":[\"a\",\"b\",\"c\"]}`) and the tool responded:\n\n**“working!”**\n\nLet me know if you’d like the tool to be invoked with different arguments or if there’s anything else I can help with!"

@@ -220,6 +220,7 @@ expression: v
   },
   "events": [
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -236,16 +237,19 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "Please run the tool, providing whatever arguments you want."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "reasoning": "The user is asking me to run the tool with whatever arguments I want. I need to use the run_me function. Let me check the parameters:\n\n- foo: required, type can be \"string\" or \"null\", default is \"foo\"\n- bar: required, type is \"array\", enum values are [\"foo\", \"bar\"], so each item must be \"foo\" or \"bar\"\n\nI should provide valid arguments. Let me use the default for foo (\"foo\") and provide a valid array for bar with at least one valid value (\"foo\").\n"
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
       "id": "qCRtO6khmonFfDo1uuz8gSBVczLWJhCp",
@@ -256,6 +260,7 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -269,6 +274,7 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
       "id": "qCRtO6khmonFfDo1uuz8gSBVczLWJhCp",
@@ -276,6 +282,7 @@ expression: v
       "is_error": false
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "The tool ran successfully with the arguments provided! It returned `working!`. Is there anything specific you'd like to test or explore further?"

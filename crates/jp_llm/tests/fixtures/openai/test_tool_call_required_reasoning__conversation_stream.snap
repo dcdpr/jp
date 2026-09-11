@@ -220,6 +220,7 @@ expression: v
   },
   "events": [
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -236,11 +237,13 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "Please run the tool, providing whatever arguments you want."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "reasoning": "**Analyzing tool call options**\n\nI need to call a tool, specifically functions.run_me, which requires setting the \"bar\" parameter as \"foo,\" but \"foo\" can be null or a string. I’m considering whether to use multi_tool_use.parallel for multiple calls, but it only works for functions tools. Since it seems simpler, I'll just call functions.run_me directly and use the commentary channel for this. My plan is to call it with \"foo\" set to null.",
@@ -250,6 +253,7 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
       "id": "call_i95it8x7WlrY7fZeliTs6shY",
@@ -260,6 +264,7 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -273,6 +278,7 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
       "id": "call_i95it8x7WlrY7fZeliTs6shY",
@@ -280,6 +286,7 @@ expression: v
       "is_error": false
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "Done — the tool returned: \"working!\"",

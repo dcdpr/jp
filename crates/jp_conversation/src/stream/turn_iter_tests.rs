@@ -26,7 +26,10 @@ fn turn_indices(stream: &ConversationStream) -> (Vec<usize>, Vec<usize>) {
         .iter_turns()
         .flat_map(|turn| turn.iter().map(|_| turn.index()).collect::<Vec<_>>())
         .collect();
-    let direct = stream.iter_events_by_turn().map(|(turn, _)| turn).collect();
+    let direct = stream
+        .iter_events_by_turn()
+        .map(|(turn, _, _)| turn)
+        .collect();
 
     (via_turns, direct)
 }

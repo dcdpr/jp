@@ -223,6 +223,7 @@ expression: v
   },
   "events": [
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -236,16 +237,19 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "Test message"
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "Hello! How can I assist you today?"
     },
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -262,21 +266,25 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "Repeat my previous message"
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "reasoning": "Thinking Process:\n\n1.  **Analyze the Request:** The user is asking me to \"Repeat my previous message\".\n2.  **Identify the Previous Message:** Looking at the conversation history, the user's first message was \"Test message\", and the second message (which is the current request) is \"Repeat my previous message\".\n3.  **Determine the \"Previous Message\":** The message immediately preceding the current one is \"Test message\".\n4.  **Formulate the Response:** I need to output the text \"Test message\".\n5.  **Check Constraints:** There are no special constraints (like \"don't repeat it\" or \"only repeat if...\"). Just a direct command.\n6.  **Final Output:** \"Test message\".\n\n*Self-Correction/Refinement:* Wait, let me double-check the conversation flow.\n- User Turn 1: \"Test message\"\n- Model Turn 1: \"Hello! How can I assist you today?\"\n- User Turn 2: \"Repeat my previous message\"\n\nThe \"previous message\" from the user's perspective is Turn 1 (\"Test message\").\nSo I should repeat \"Test message\".\n\n*Action:* Output \"Test message\".\n"
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "Test message"
     },
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -290,11 +298,13 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "Please run the tool, providing whatever arguments you want."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
       "id": "3025kzfSjn1Q76fmpkjrrvhmMOFjumOt",
@@ -305,6 +315,7 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
       "id": "3025kzfSjn1Q76fmpkjrrvhmMOFjumOt",
@@ -312,11 +323,13 @@ expression: v
       "is_error": false
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "The secret code is: 42"
     },
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -333,16 +346,19 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "What was the result of the previous tool call?"
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "reasoning": "The user is asking about the result of the previous tool call. Looking at the conversation history, I can see that I previously ran a tool using the `<function=run_me>` block, and the result was:\n\n\"The secret code is: 42\"\n\nI should provide this information clearly to the user.\n"
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "The result of the previous tool call was:\n\n**The secret code is: 42**"

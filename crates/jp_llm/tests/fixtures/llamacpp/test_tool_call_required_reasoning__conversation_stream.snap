@@ -220,6 +220,7 @@ expression: v
   },
   "events": [
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -236,16 +237,19 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "Please run the tool, providing whatever arguments you want."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "reasoning": "The user is asking me to run a tool, but they haven't specified which tool or what arguments they want. Looking at the available function, I have \"run_me\" which takes two required parameters:\n- foo: string or null (default: \"foo\")\n- bar: string or array, must be \"foo\" or \"bar\" (enum)\n\nSince the user said \"whatever arguments you want\", I can choose any valid combination. Let me pick some reasonable values:\n- foo: I'll use \"test\" as a string value\n- bar: I'll use [\"foo\", \"bar\"] as an array with valid enum values\n\nThis should satisfy the requirements while demonstrating the function works.\n"
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
       "id": "n19Zg7uRIClo8uT6BobGdBU6pPoBmbMu",
@@ -256,6 +260,7 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -269,6 +274,7 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
       "id": "n19Zg7uRIClo8uT6BobGdBU6pPoBmbMu",
@@ -276,6 +282,7 @@ expression: v
       "is_error": false
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "The tool ran successfully with the provided arguments. The result indicates the operation completed without errors.\n\nIf you'd like to try different arguments or a specific tool, feel free to ask!"

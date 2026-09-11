@@ -415,7 +415,7 @@ impl Grep {
 
         // `iter_events_by_turn` rather than `iter_turns`: the latter resolves and
         // clones a `PartialAppConfig` per event, which grep never reads.
-        for (index, event) in events.iter_events_by_turn() {
+        for (index, _, event) in events.iter_events_by_turn() {
             if budget.is_exhausted() {
                 return group;
             }

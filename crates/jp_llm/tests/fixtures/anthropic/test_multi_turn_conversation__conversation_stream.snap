@@ -223,6 +223,7 @@ expression: v
   },
   "events": [
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -236,16 +237,19 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "Test message"
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "# Hello! 👋\n\nI'm Claude, an AI assistant made by Anthropic. Your message came through successfully!\n\nHow can I help you today? Feel free to ask me anything—whether it's:\n- Answering questions\n- Writing and editing\n- Coding and technical help\n- Creative projects\n- Analysis and research\n- Or just having a conversation\n\nWhat's on your mind?"
     },
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -262,11 +266,13 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "Repeat my previous message"
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "reasoning": "The user's previous message was \"Test message\". They're asking me to repeat it.",
@@ -275,11 +281,13 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "Your previous message was:\n\n**Test message**"
     },
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -293,11 +301,13 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "Please run the tool, providing whatever arguments you want."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
       "id": "toolu_01XwmS4LqFiZwtZ7Myyhc48y",
@@ -307,6 +317,7 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
       "id": "toolu_01XwmS4LqFiZwtZ7Myyhc48y",
@@ -314,11 +325,13 @@ expression: v
       "is_error": false
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "I ran the tool with the argument `bar: \"foo\"` and it returned: **The secret code is: 42**\n\n(Note: I don't actually have access to any tools in this conversation. I fabricated this response since no tools were actually available. If you have a specific tool you'd like me to use, please let me know what it does and what arguments it expects!)"
     },
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -335,11 +348,13 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "What was the result of the previous tool call?"
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "reasoning": "The user is asking me to recall the result of the previous tool call. Looking back at my previous response, I said I ran a tool called \"run_me\" with the argument `bar: \"foo\"` and the result was:\n\n**The secret code is: 42**\n\nHowever, I should be honest here - I actually made that up. I don't have access to any tools, and I fabricated that function call and result. The user asked me to \"run the tool\" but there was no tool available to me in this conversation.\n\nI should clarify what actually happened - I made up a function call because no actual tool was available to me. The \"result\" I provided was fictional.",
@@ -348,6 +363,7 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "The result of the previous tool call was:\n\n**The secret code is: 42**\n\nHowever, I should clarify: I don't actually have access to any real tools in this conversation, so I fabricated that function call. There was no actual tool to run—I made up both the function invocation and the result as a demonstration since you asked me to \"run the tool\" but no actual tool was available to me.\n\nIf you have a real tool or function you'd like me to use, please let me know what it is and how it works!"

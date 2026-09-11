@@ -17,6 +17,9 @@ doc-valid-idents = [
 allow-unwrap-in-tests = true
 allow-print-in-tests = true
 allowed-duplicate-crates = [
+    # `ring` uses 0.2; `rand_core` and event IDs use 0.3. Remove this once the
+    # transitive dependencies converge on one version.
+    "getrandom",
     # `thiserror-impl` 2.0.20 parses with `syn` 3 while the rest of the
     # proc-macro ecosystem is still on 2, so the graph carries both. Nothing in
     # the workspace can collapse it: we pin `syn` 2, and moving to 3 would only

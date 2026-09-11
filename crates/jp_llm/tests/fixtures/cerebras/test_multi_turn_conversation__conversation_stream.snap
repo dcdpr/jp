@@ -223,6 +223,7 @@ expression: v
   },
   "events": [
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -236,21 +237,25 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "Test message"
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "reasoning": "The user says \"Test message\". Likely they just want a response acknowledging. Could be they are checking connectivity. In such cases respond politely \"Message received\" etc."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "Message received—everything looks good! Let me know if there's anything I can help you with."
     },
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -267,21 +272,25 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "Repeat my previous message"
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "reasoning": "User wants to repeat previous message: \"Test message\". Provide that."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "Test message"
     },
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -295,16 +304,19 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "Please run the tool, providing whatever arguments you want."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "reasoning": "The user asks: \"Please run the tool, providing whatever arguments you want.\"\n\nWe have a tool defined: functions.run_me with arguments: foo optional (default \"foo\") and bar required, type string or array.\n\nWe can choose arbitrary arguments. We need to call the function via the tool channel. Since user wants us to run the tool with whatever arguments we want, we can choose something. Let's provide bar: \"example\" and maybe foo omitted so default.\n\nWe need to call functions.run_me with proper JSON, and no other output besides the tool result.\n\nThus we will invoke the function."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
       "id": "0bb7d840a",
@@ -314,6 +326,7 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
       "id": "0bb7d840a",
@@ -321,16 +334,19 @@ expression: v
       "is_error": false
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "reasoning": "We need to respond as ChatGPT. The user asks: \"Please run the tool, providing whatever arguments you want.\" The tool is defined with input schema containing bar string. The user says \"run the tool, providing whatever arguments you want.\" They presumably want us to call the tool. The tool returns a comment: \"The secret code is: 42\". The system says to be mindful of tool usage. We have just run the tool. Now we need to produce a response to the user. Perhaps we should explain the result. Since the tool returned \"The secret code is: 42\". We'll respond with that.\n\nWe should not claim we have no info. Provide the output.\n\nThus answer: \"The tool returned: The secret code is: 42.\"\n\nLet's do that."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "I ran the tool with a sample argument (`{\"bar\":\"example\"}`) and it returned:\n\n**“The secret code is: 42.”**"
     },
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -347,16 +363,19 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "What was the result of the previous tool call?"
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "reasoning": "The tool returned \"The secret code is: 42.\""
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "The tool call returned:\n\n**“The secret code is: 42.”**"

@@ -2,8 +2,36 @@ use std::{fs, time::Duration};
 
 use camino::Utf8PathBuf;
 use camino_tempfile::tempdir;
+use clap::{Parser as _, error::ErrorKind};
 
 use super::{Edit, ExpirationDuration};
+use crate::Cli;
+
+#[test]
+fn events_help_explains_stable_ids_and_duplicate_repair() {
+    let Err(error) = Cli::try_parse_from(["jp", "conversation", "edit", "--help"]) else {
+        panic!("expected help output");
+    };
+    assert_eq!(error.kind(), ErrorKind::DisplayHelp);
+    let help = error
+        .to_string()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    assert!(help.contains("Each entry has an `event_id`. Keep it when editing content."));
+    assert!(help.contains(
+        "On the next load, the first occurrence of a duplicated ID keeps it; later occurrences \
+         receive new IDs."
+    ));
+    assert!(help.contains(
+        "A reference to a duplicated ID is ambiguous and must be treated as unresolved."
+    ));
+    assert!(help.contains(
+        "Missing or empty IDs also receive new IDs on load. Assigned IDs are persisted on the \
+         next save."
+    ));
+}
 
 #[test]
 fn parse_now() {
