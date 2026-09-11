@@ -223,6 +223,7 @@ expression: v
   },
   "events": [
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -237,16 +238,19 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "Test message"
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "reasoning": "Hmm, the user has simply sent \"Test message\" without any additional context. This is clearly a test to check the AI's response mechanism. \n\nOkay, the user might be verifying if the system is working or just experimenting with the interface. Since they didn't specify a request, I should confirm the system is operational in a friendly yet professional way. \n\nI notice the user's message is extremely minimal, so I should keep the response concise but still offer help - leaving the door open for further interaction. The response should be warm but not overly enthusiastic, matching the neutral tone of their input. \n\nThe best approach is to acknowledge their test message, confirm everything is working, and invite them to share a real question if they have one. This balances responsiveness with professionalism."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "Hello! This is a simple test message. I can confirm that I'm working and ready to help with your questions or requests. Please feel free to ask me anything you'd like! 😊"

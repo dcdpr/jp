@@ -223,6 +223,7 @@ expression: v
   },
   "events": [
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -237,16 +238,19 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "Call both list_items and search_items in parallel. Do not answer with text before calling both tools."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "I'll call both tools in parallel now."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
       "id": "toolu_01Uo9BabQqLmAaDofViBHLT3",
@@ -254,6 +258,7 @@ expression: v
       "arguments": {}
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
       "id": "toolu_01KpNDwzcdeVXYC3VR9x8Rcu",
@@ -261,6 +266,7 @@ expression: v
       "arguments": {}
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
       "id": "toolu_01Uo9BabQqLmAaDofViBHLT3",
@@ -268,6 +274,7 @@ expression: v
       "is_error": false
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
       "id": "toolu_01KpNDwzcdeVXYC3VR9x8Rcu",
@@ -275,6 +282,7 @@ expression: v
       "is_error": false
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "I called both tools in parallel as requested. Here are the results:\n\n- **list_items**: completed\n- **search_items**: completed\n\nBoth returned only completion confirmations without any item data, so there's nothing further to report. If you'd like, let me know what parameters or filters to use and I can run them again with more specific inputs."

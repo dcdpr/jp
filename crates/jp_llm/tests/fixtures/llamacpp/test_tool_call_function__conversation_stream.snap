@@ -220,11 +220,13 @@ expression: v
   },
   "events": [
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "Please run the tool, providing whatever arguments you want."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
       "id": "10C5kzdXGxswu3Mf4kc59YGXJwe2Wh6Q",
@@ -235,6 +237,7 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
       "id": "10C5kzdXGxswu3Mf4kc59YGXJwe2Wh6Q",
@@ -242,6 +245,7 @@ expression: v
       "is_error": false
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "The tool has run successfully with the provided arguments. The output indicates that everything is working as expected. Let me know if you'd like to try different arguments or explore other tools!"

@@ -19,6 +19,7 @@ jp_id = { workspace = true }
 
 base64 = { workspace = true, features = ["std"] }
 chrono = { workspace = true }
+getrandom = { workspace = true }
 indexmap = { workspace = true, features = ["serde"] }
 jp_label = { workspace = true }
 quick-xml = { workspace = true, features = ["serialize"] }

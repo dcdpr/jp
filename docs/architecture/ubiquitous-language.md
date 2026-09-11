@@ -29,6 +29,7 @@ In disagreements between code and docs, the code is authoritative.
     - [Conversation](#conversation)
     - [Conversation Event](#conversation-event)
     - [EditorBackend](#editorbackend)
+    - [Event ID](#event-id)
     - [Event Overlay](#event-overlay)
     - [InlineReply](#inlinereply)
     - [Inquiry](#inquiry)
@@ -182,6 +183,25 @@ as a local process via `EditorConfig::command()`, and `MockEditorBackend`
 scripts outcomes for tests.
 Defined as the `EditorBackend` trait in `jp_editor`; call sites obtain one
 through `build_editor_backend` in `jp_cli`.
+
+### Event ID
+
+The opaque identity of a stored conversation-stream entry, unique within that
+stream.
+Implemented as `EventId` in `jp_conversation`, owned by the `InternalEvent`
+wrapper and persisted as `event_id`.
+It identifies conversation events, config deltas, compactions, patch overlays,
+and unknown entries alike.
+
+Editing content or reordering an entry preserves its Event ID.
+Duplicate IDs are repaired on load, but references to the duplicated ID remain
+ambiguous and must be treated as unresolved.
+An Event ID carries no ordering, content-addressing, or cross-stream uniqueness
+promise.
+It is distinct from the payload `id` that pairs tool calls or inquiries.
+Projection-generated entries have ephemeral IDs, not stable references into the
+stored stream.
+See [RFD-097].
 
 ### Event Overlay
 
@@ -407,4 +427,5 @@ See [RFD-031].
 [RFD-031]: ../rfd/031-durable-conversation-storage-with-workspace-projection.md
 [RFD-064]: ../rfd/064-non-destructive-conversation-compaction.md
 [RFD-087]: ../rfd/087-session-scoped-active-workspace.md
+[RFD-097]: ../rfd/097-stable-event-identifiers.md
 [`shlex::split`]: https://docs.rs/shlex

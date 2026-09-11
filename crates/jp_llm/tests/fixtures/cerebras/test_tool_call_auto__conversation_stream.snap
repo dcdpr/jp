@@ -220,16 +220,19 @@ expression: v
   },
   "events": [
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "Please run the tool, providing whatever arguments you want."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "reasoning": "The user asks to run the tool, providing whatever arguments we want. The tool definition is functions.run_me with parameters foo optional default \"foo\", and bar which is string or array, required. We can call it with some data. Let's choose a simple bar: \"hello\". Maybe also supply foo. We'll call."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
       "id": "ad7b0fd0d",
@@ -240,6 +243,7 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
       "id": "ad7b0fd0d",
@@ -247,11 +251,13 @@ expression: v
       "is_error": false
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "reasoning": "The user asks: \"Please run the tool, providing whatever arguments you want.\" There is a tool \"run_me\" with function comment. The user wants me to run the tool with whatever arguments I choose. I (assistant) already called run_me with arguments {\"foo\":\"test\",\"bar\":\"hello\"} and got response \"working!\". That is presumably the response from the tool. The user likely wants me to display the result or comment. I should output something like \"The tool executed with arguments ... and returned: working!\". Also maybe ask if they need anything else. So produce final answer."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "I ran the **run_me** tool with the arguments you gave (​`{\"foo\":\"test\",\"bar\":\"hello\"}`​) and it responded:\n\n**“working!”**\n\nLet me know if you’d like to try different arguments or need anything else!"

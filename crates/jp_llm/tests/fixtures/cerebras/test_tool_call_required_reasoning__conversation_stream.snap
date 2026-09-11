@@ -220,6 +220,7 @@ expression: v
   },
   "events": [
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -236,16 +237,19 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "Please run the tool, providing whatever arguments you want."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "reasoning": "We need to call function run_me with some arguments. Provide any."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
       "id": "885f4bbdf",
@@ -256,6 +260,7 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -269,6 +274,7 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
       "id": "885f4bbdf",
@@ -276,11 +282,13 @@ expression: v
       "is_error": false
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "reasoning": "The user says: \"Please run the tool, providing whatever arguments you want.\"\n\nWe have a tool called run_me. The user is asking to run the tool, providing whatever arguments we want. So we need to invoke the tool with some arguments. The tool returns \"working!\" as we saw. The earlier conversation: The user requested to run the tool. We already invoked it with {\"foo\":\"example\",\"bar\":123}. The tool responded \"working!\".\n\nNow we should respond appropriately. Based on the tool's purpose? The tool is \"run_me\" which when called returns \"working!\". We might want to ask the user if they need something else. Or maybe we should show the output of the tool.\n\nOur prior call gave us \"working!\" output. So we can respond with that output as part of answer: \"The tool responded: working!\". Or ask if they have specific arguments.\n\nThus final answer: Provide the tool output."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "I ran the tool with a sample set of arguments (`{\"foo\":\"example\",\"bar\":123}`) and it returned:\n\n**working!**\n\nLet me know if you’d like to try different arguments or need anything else!"

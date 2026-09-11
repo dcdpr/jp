@@ -1,6 +1,6 @@
 # RFD 097: Stable Event Identifiers
 
-- **Status**: Discussion
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-03
@@ -269,13 +269,27 @@ any other ID.
 ### Projection views
 
 `event_id` stability is a property of the persisted raw stream.
+Its IDs can be used as stable references to entries in `events.json`.
 Compaction projection builds an ephemeral provider view by transforming a copy
-of the stream, injecting synthetic entries (for example the summary
-`ChatRequest` / `ChatResponse` pair) that exist only in that view.
-Those entries are wrapped like any other and receive fresh IDs, but the IDs are
+of the stream; it does not remove the original entries from the persisted raw
+stream.
+
+An existing entry retained in the projected view keeps its original `event_id`,
+including when a mechanical policy changes its projected content.
+That ID still identifies the original entry in `events.json`, not a separate
+stored version of the projected content.
+
+Entries synthesized for the projection, such as the summary `TurnStart` and
+`ChatRequest` / `ChatResponse` pair, exist only in that view.
+They have no corresponding entries in `events.json`.
+They are wrapped like any other entry and receive fresh IDs, but those IDs are
 ephemeral: they carry no stability contract across projections, are never
 persisted or exposed through storage or plugin APIs, and MUST NOT be used as
 references into `events.json`.
+
+Both stored entries and projection-only entries use `EventId`.
+The ID value alone does not indicate whether a corresponding stored entry
+exists.
 
 ### Dependency
 

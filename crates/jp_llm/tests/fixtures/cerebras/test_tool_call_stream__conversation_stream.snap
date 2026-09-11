@@ -220,16 +220,19 @@ expression: v
   },
   "events": [
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "Please run the tool, providing whatever arguments you want."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "reasoning": "The user asks to run the tool, providing whatever arguments you want. There's a function run_me with parameters foo (optional default \"foo\") and bar (string or array). We need to call the function with some arguments. Since they said \"whatever arguments you want,\" we can choose. Let's call with foo as \"test\" and bar as an array e.g., [\"a\",\"b\"].\n\nWe need to output via the function call."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
       "id": "08d59c72f",
@@ -243,6 +246,7 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
       "id": "08d59c72f",
@@ -250,11 +254,13 @@ expression: v
       "is_error": false
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "reasoning": "The user asks: \"Please run the tool, providing whatever arguments you want.\"\n\nWe have a tool called \"run_me\" that takes a JSON argument. In the previous usage, the assistant used {\"foo\":\"test\",\"bar\":[\"a\",\"b\"]} and function returned \"working!\". We need to respond accordingly. Likely they want us to demonstrate usage. We can run with some arbitrary arguments. We already did. The function returned \"working!\". Now we need to produce a final answer. Should we explain the result? Probably a short response stating that the tool was run and result returned \"working!\". Let's respond."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "I invoked the tool with a sample payload (`{\"foo\":\"test\",\"bar\":[\"a\",\"b\"]}`) and it responded:\n\n**“working!”**."

@@ -92,7 +92,7 @@ pub(crate) fn project_turns(stream: &ConversationStream) -> Vec<DisplayTurn> {
     // `iter_events_by_turn` rather than `iter_turns`: the latter resolves and
     // clones the accumulated config for every event and materializes the whole
     // stream up front, and none of that is read here.
-    for (index, event) in stream.iter_events_by_turn() {
+    for (index, _, event) in stream.iter_events_by_turn() {
         let continues_run = in_message_run;
         in_message_run = matches!(
             &event.kind,

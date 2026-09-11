@@ -668,11 +668,16 @@ pub async fn run_chat_completion(
 
                                         all_events[index].push(TestEvent::Flushed(event.clone()));
 
+                                        stream.extend([event.clone()]);
                                         history.push(ConversationEventWithConfig {
-                                            event: event.clone(),
+                                            event_id: stream
+                                                .last()
+                                                .expect("event was appended")
+                                                .event_id
+                                                .clone(),
+                                            event,
                                             config: config.clone(),
                                         });
-                                        stream.extend(std::iter::once(event));
                                     }
                                 }
                                 Event::Patch(_) | Event::KeepAlive => {}
@@ -683,11 +688,16 @@ pub async fn run_chat_completion(
 
                                         all_events[index].push(TestEvent::Flushed(event.clone()));
 
+                                        stream.extend([event.clone()]);
                                         history.push(ConversationEventWithConfig {
-                                            event: event.clone(),
+                                            event_id: stream
+                                                .last()
+                                                .expect("event was appended")
+                                                .event_id
+                                                .clone(),
+                                            event,
                                             config: config.clone(),
                                         });
-                                        stream.extend(std::iter::once(event));
                                     }
 
                                     all_events[index].push(TestEvent::Finished(reason));
@@ -727,7 +737,11 @@ pub async fn run_chat_completion(
                         // ConversationStream doesn't implement Serialize directly;
                         // decompose it via to_parts for the snapshot.
                         let snap_value = conversation_stream.as_ref().map(|s| {
-                            let (config, events) = s.to_parts().unwrap();
+                            let (config, mut events) = s.to_parts().unwrap();
+                            // IDs are host-assigned randomness, not provider output.
+                            for event in &mut events {
+                                event["event_id"] = "[event_id]".into();
+                            }
                             serde_json::json!({ "base_config": config, "events": events })
                         });
                         Snap::json(snap_value)

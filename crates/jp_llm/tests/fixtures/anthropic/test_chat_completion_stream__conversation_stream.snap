@@ -223,11 +223,13 @@ expression: v
   },
   "events": [
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "Test message"
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "reasoning": "The user has sent a simple test message. This is likely to check if I'm working and responding. I should respond in a friendly, helpful way that confirms I'm here and ready to assist.",
@@ -236,6 +238,7 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "Hello! I'm here and ready to help. How can I assist you today?"

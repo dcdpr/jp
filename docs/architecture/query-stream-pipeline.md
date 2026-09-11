@@ -227,7 +227,7 @@ The architecture uses existing types from the codebase:
 
 ```rust
 pub struct ConversationEvent {
-    pub timestamp: UtcDateTime,
+    pub timestamp: DateTime<Utc>,
     pub kind: EventKind,
     pub metadata: Map<String, Value>,
 }
@@ -256,10 +256,71 @@ pub enum ChatResponse {
 ```rust
 pub struct ConversationStream {
     base_config: Arc<AppConfig>,
-    events: Vec<InternalEvent>,  // ConfigDelta or ConversationEvent
-    pub created_at: UtcDateTime,
+    events: Vec<InternalEvent>,
+    duplicated_event_ids: HashSet<EventId>,
+    pub created_at: DateTime<Utc>,
+}
+
+struct InternalEvent {
+    event_id: EventId,
+    payload: EventPayload,
+}
+
+enum EventPayload {
+    Event(Box<ConversationEvent>),
+    ConfigDelta(ConfigDelta),
+    Compaction(Compaction),
+    Overlay(EventOverlay),
+    Unknown(Value),
 }
 ```
+
+Each stored entry has an [Event ID](ubiquitous-language.md#event-id), including
+config deltas, compactions, patch overlays, and unknown entries.
+The stream assigns IDs at insertion and checks uniqueness against every entry
+already in that stream.
+The timestamp stays on the payload: it comes from the event's producer, and
+synthetic repair events preserve their source timestamps.
+
+The wrapper and payload serialize into one object in `events.json`:
+
+```json
+{"event_id":"k3m9x2a","timestamp":"2026-05-03 12:00:00.0","type":"chat_request","content":"Hello"}
+```
+
+`event_id` is distinct from the payload's `id` used to pair tool calls and
+inquiries.
+Editing content or reordering an entry keeps its ID.
+The ID is opaque: it conveys neither order nor content, and uniqueness is scoped
+to the containing stream.
+The generated format is internal and unstable; any non-empty hand-edited string
+is accepted unchanged.
+
+`from_parts` repairs missing, empty, and duplicate IDs during loading;
+`from_legacy_events` delegates to that path.
+For duplicates, the first occurrence keeps its ID and later occurrences receive
+fresh IDs, with a warning for each replacement.
+Assigned IDs are persisted on the next save.
+Until a legacy stream is saved, separate loads can assign different IDs to the
+same entry.
+This repair is separate from `sanitize()`.
+
+`duplicated_event_ids` records ambiguity for the load cycle and is not serialized
+or publicly exposed.
+A future reference-bearing feature must treat a reference to a duplicated or
+missing ID as unresolved, resolving or dropping such references before saving,
+or refusing the write.
+Saving repaired IDs without handling those references would lose the ambiguity
+signal on reload.
+
+Conversation-event iteration exposes the entry ID alongside the event.
+Other payload kinds remain ID-addressable through stored JSON, without a public
+raw-entry ID accessor.
+Compaction projection preserves IDs on retained entries and assigns fresh,
+ephemeral IDs to injected entries.
+Those synthetic IDs have no stability across projections and must not be used as
+references into `events.json`.
+See [RFD 097](../rfd/097-stable-event-identifiers.md).
 
 **`Thread`** (`jp_conversation::thread`):
 
@@ -274,7 +335,8 @@ pub struct Thread {
 
 The pipeline builds `ConversationEvent` instances and pushes them to
 `ConversationStream`.
-Persistence serializes `ConversationStream` to disk.
+`ConversationStream::to_parts` provides the base configuration and serialized
+entries for storage in `base_config.json` and `events.json`, respectively.
 
 -----
 

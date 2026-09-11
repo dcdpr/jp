@@ -223,6 +223,7 @@ expression: v
   },
   "events": [
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -236,16 +237,19 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "Test message"
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "Test message received!"
     },
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -262,21 +266,25 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "Repeat my previous message"
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "reasoning": "**Reiterating the Response**\n\nOkay, I've processed the user's initial prompt and correctly identified the need to echo their provided message. My logic determined the required output, and now I'm prepared to provide the specified response. I am ready to implement the request.\n\n\n"
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "Test message"
     },
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -290,11 +298,13 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "Please run the tool, providing whatever arguments you want."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
       "id": "run_me_0",
@@ -311,6 +321,7 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
       "id": "run_me_0",
@@ -318,11 +329,13 @@ expression: v
       "is_error": false
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "The secret code is: 42"
     },
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -339,16 +352,19 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "What was the result of the previous tool call?"
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "reasoning": "**Accessing Recent History**\n\nI'm now zeroing in on retrieving the necessary information. The user's query about the \"previous tool call\" made me realize I need to access my internal state. My goal now is to efficiently retrieve the output of the most recent tool interaction. I need to get this info quickly, so the user has the information they requested promptly.\n\n\n**Pinpointing Past Interactions**\n\nI've successfully identified the relevant previous tool call and its corresponding output from my internal state. Now I'm extracting the pertinent data: the parameters of the tool call and the specific content from the response, which is \"The secret code is: 42\". I'm structuring this information into a concise and direct answer. Finally, I'll formulate a succinct and helpful response for the user.\n\n\n"
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "The result of the previous tool call was: The secret code is: 42"

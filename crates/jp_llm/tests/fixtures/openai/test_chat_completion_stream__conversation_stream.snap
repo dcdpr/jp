@@ -223,11 +223,13 @@ expression: v
   },
   "events": [
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "Test message"
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "reasoning": "**Acknowledging user message**\n\nThe user wrote, \"Test message,\" which seems like they might just want a quick acknowledgment. I think it’s good to keep my response concise, just confirming that I see their message. I can also ask if they need anything specific or if there's any way I can help. It’s essential to be helpful and open to their needs!",
@@ -237,6 +239,7 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "Received your test message. How can I help you today?",

@@ -73,6 +73,17 @@ pub(crate) struct Edit {
     no_title: bool,
 
     /// Open `events.json` in `$EDITOR`.
+    ///
+    /// Each entry has an `event_id`.
+    /// Keep it when editing content.
+    ///
+    /// On the next load, the first occurrence of a duplicated ID keeps it;
+    /// later occurrences receive new IDs.
+    /// A reference to a duplicated ID is ambiguous and must be treated as
+    /// unresolved.
+    ///
+    /// Missing or empty IDs also receive new IDs on load.
+    /// Assigned IDs are persisted on the next save.
     #[arg(long, short = 'e', group = "file", conflicts_with = "property")]
     events: bool,
 

@@ -220,6 +220,7 @@ expression: v
   },
   "events": [
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -236,16 +237,19 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "Please run the tool, providing whatever arguments you want."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "reasoning": "**Analyzing Tool Parameters**\n\nI've been examining the `run_me` tool's parameters, specifically `bar` and `foo`. It seems `bar` is mandatory and accepts either the string 'foo' or a list including 'foo' or 'bar'. I'm currently formulating how to handle various argument inputs and validate them correctly.\n\n\n**Validating Input Now**\n\nNow I'm focusing on crafting a simple, correct call to `default_api.run_me()`. I've decided to provide `'foo'` for `bar` to fulfill its requirement. I'm omitting `foo` to utilize its default value. So the call will be `default_api.run_me(bar='foo')`, and I will print the output.\n\n\n"
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
       "id": "run_me_1",
@@ -258,6 +262,7 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -271,6 +276,7 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
       "id": "run_me_1",

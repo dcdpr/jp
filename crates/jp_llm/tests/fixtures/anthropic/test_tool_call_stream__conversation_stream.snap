@@ -220,11 +220,13 @@ expression: v
   },
   "events": [
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "Please run the tool, providing whatever arguments you want."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
       "id": "toolu_0133DM77y4tmYgkWRtGNPpxa",
@@ -235,6 +237,7 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
       "id": "toolu_0133DM77y4tmYgkWRtGNPpxa",
@@ -242,6 +245,7 @@ expression: v
       "is_error": false
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "Great! I ran the tool with:\n- `bar`: \"foo\"\n- `foo`: \"foo\"\n\nAnd it returned `working!` — so the tool executed successfully. Would you like me to try different arguments or do something else with it?"

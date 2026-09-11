@@ -23,6 +23,18 @@ use crate::{
     cmd::{compact_flag::CompactFlag, conversation_id::PositionalIds},
 };
 
+/// Compare stream content without requiring cross-conversation ID equality.
+fn assert_same_stream_content(left: &ConversationStream, right: &ConversationStream) {
+    assert_eq!(left.base_config(), right.base_config());
+    assert_eq!(left.created_at, right.created_at);
+    let (_, mut left_events) = left.to_parts().unwrap();
+    let (_, mut right_events) = right.to_parts().unwrap();
+    for event in left_events.iter_mut().chain(&mut right_events) {
+        event.as_object_mut().unwrap().shift_remove("event_id");
+    }
+    assert_eq!(left_events, right_events);
+}
+
 /// Parse a [`TurnSelection`] from the flags a user would pass to `jp c fork`.
 ///
 /// Going through clap keeps these cases pinned to the real flag surface rather
@@ -173,7 +185,7 @@ fn test_conversation_fork() {
                 assert!(convs[0].0.timestamp() < convs[1].0.timestamp());
                 assert_eq!(convs[0].1, convs[1].1);
                 convs[0].2.sanitize();
-                assert_eq!(convs[0].2, convs[1].2);
+                assert_same_stream_content(&convs[0].2, &convs[1].2);
             },
         }),
         ("no turns keeps config but drops every turn", TestCase {
@@ -282,7 +294,7 @@ fn test_conversation_fork() {
                 assert!(convs[0].0.timestamp() < convs[1].0.timestamp());
                 assert_eq!(convs[0].1, convs[1].1);
                 convs[0].2.sanitize();
-                assert_eq!(convs[0].2, convs[1].2);
+                assert_same_stream_content(&convs[0].2, &convs[1].2);
             },
         }),
         ("with from", TestCase {

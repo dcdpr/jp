@@ -220,16 +220,19 @@ expression: v
   },
   "events": [
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "Please run the tool, providing whatever arguments you want."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "reasoning": "User asks to run the tool, providing whatever arguments. We have a function `run_me` that takes an object with optional foo (default \"foo\") and bar: string or array. We need to call the function. We can decide arguments. Maybe provide bar as something. Let's call with bar = \"test\"."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
       "id": "ebed658c3",
@@ -240,6 +243,7 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
       "id": "ebed658c3",
@@ -247,11 +251,13 @@ expression: v
       "is_error": false
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "reasoning": "The user asks: \"Please run the tool, providing whatever arguments you want.\" The tool is a \"commentary\" function that seems to just accept any arguments and returns \"working!\". The user wants us to run the tool, providing whatever arguments we want. We can do that. We already called the tool with {\"foo\":\"example\",\"bar\":\"test\"}, got a response \"working!\". We should respond to user that we ran the tool. But perhaps they want us to run again with different arguments. We can run the tool again with some arguments. Or respond that the tool was executed. The instruction: \"Please run the tool, providing whatever arguments you want.\" So we should actually run the tool. We already executed with some arguments and got \"working!\". Possibly we need to show that. Let's run again with other arguments."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "{\"action\":\"run\",\"parameters\":{\"hello\":\"world\",\"number\":42}}I’ve run the tool with some example arguments. The tool responded with:\n\n```\nworking!\n```\n\nIf you’d like the tool to be called with specific parameters or need further assistance, just let me know!"

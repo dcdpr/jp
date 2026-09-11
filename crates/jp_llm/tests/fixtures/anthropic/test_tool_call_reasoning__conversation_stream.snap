@@ -220,6 +220,7 @@ expression: v
   },
   "events": [
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -236,11 +237,13 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_request",
       "content": "Please run the tool, providing whatever arguments you want."
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "reasoning": "The user is asking me to run the \"run_me\" tool with whatever arguments I want. Let me look at the schema:\n\n```json\n{\n  \"name\": \"run_me\",\n  \"parameters\": {\n    \"properties\": {\n      \"bar\": {\n        \"enum\": [\"foo\"],\n        \"items\": {\n          \"enum\": [\"foo\", \"bar\"],\n          \"type\": \"string\"\n        },\n        \"type\": [\"string\", \"array\"]\n      },\n      \"foo\": {\n        \"default\": \"foo\",\n        \"type\": \"string\"\n      }\n    },\n    \"required\": [\"bar\"],\n    \"type\": \"object\"\n  }\n}\n```\n\nSo the parameters are:\n- `bar` (required): This can be either a string or an array. If it's a string, the enum constraint is [\"foo\"]. If it's an array, the items can be [\"foo\", \"bar\"]. Wait, let me re-read this. The \"enum\": [\"foo\"] is at the same level as \"items\", which is a bit confusing. Let me think about this more carefully.\n\nActually, looking at the structure:\n- `bar` has `type: [\"string\", \"array\"]` - so it can be a string OR an array\n- `bar` has `enum: [\"foo\"]` - if it's a string, it must be \"foo\"\n- `bar` has `items: {\"enum\": [\"foo\", \"bar\"], \"type\": \"string\"}` - if it's an array, each item must be \"foo\" or \"bar\"\n\nSo `bar` can be:\n1. The string \"foo\"\n2. An array of strings where each string is either \"foo\" or \"bar\"\n\n- `foo` (optional): A string with default value \"foo\"\n\nSince the user said I can provide whatever arguments I want, I'll just provide reasonable values:\n- For `bar` (required), I'll use \"foo\" since that's the only valid string value\n- I'll skip `foo` and let it default rather than setting it explicitly.\n\nI could also try `bar` as an array, but a plain string keeps things simple, so I'll just go with `bar: \"foo\"`.",
@@ -249,6 +252,7 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_request",
       "id": "toolu_01R35dJ1FaGkcNPmGqF2NfSA",
@@ -258,6 +262,7 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "type": "config_delta",
       "timestamp": "2020-01-01 00:00:00.0",
       "delta": {
@@ -271,6 +276,7 @@ expression: v
       }
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "tool_call_response",
       "id": "toolu_01R35dJ1FaGkcNPmGqF2NfSA",
@@ -278,6 +284,7 @@ expression: v
       "is_error": false
     },
     {
+      "event_id": "[event_id]",
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
       "message": "Great! The tool ran successfully. I called `run_me` with `bar` set to `\"foo\"` (which is the only valid string value for that parameter), and it returned `\"working!\"`. The optional `foo` parameter was left to use its default value of `\"foo\"`."

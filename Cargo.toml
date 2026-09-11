@@ -78,6 +78,7 @@ eventsource-stream = { version = "0.2", default-features = false }
 fancy-regex = { version = "0.19", default-features = false }
 futures = { version = "0.3", default-features = false }
 gemini_client_rs = { git = "https://github.com/JeanMertz/gemini-client", default-features = false } # <https://github.com/Adriftdev/gemini-client/pull/16>
+getrandom = { version = "0.3", default-features = false }
 gimli = { version = "0.33" }
 glob = { version = "0.3", default-features = false }
 grep-matcher = { version = "0.1", default-features = false }
