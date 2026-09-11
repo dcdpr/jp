@@ -110,8 +110,8 @@ This keeps `jp --help` clean of developer-only knobs.
 
 | Variable                  | Purpose                                  | Default                              |
 | ------------------------- | ---------------------------------------- | ------------------------------------ |
-| `JP_DEBUG=1`              | Developer mode. Prints log file path at  | off                                  |
-|                           | end of run.                              |                                      |
+| `JP_DEBUG=1`              | Prints the log path before execution.    | off                                  |
+|                           | Repeats it after five minutes.           |                                      |
 | `JP_LOG=<filter>`         | Mirrors tracing to stderr with the given | off                                  |
 |                           | `EnvFilter` expression. Setting it       |                                      |
 |                           | enables the mirror.                      |                                      |
@@ -139,7 +139,8 @@ Examples:
 # Regular user: chrome only, complete log in background
 jp query "fix the bug"
 
-# User with JP_DEBUG always set: same, but prints log path at end
+# User with JP_DEBUG always set: prints the log path before execution
+# and repeats it when the run lasts at least five minutes
 JP_DEBUG=1 jp query "fix the bug"
 
 # Developer wants live tracing for a specific run

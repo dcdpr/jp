@@ -24,21 +24,29 @@ use super::*;
 use crate::env_testing::EnvVarGuard;
 
 #[test]
-fn a_successful_run_announces_its_trace_log_only_under_jp_debug() {
-    // `JP_DEBUG` is the whole question for a run that did what was asked. The
-    // report names a file a developer went looking for, so a redirected or
-    // piped stdout does not withdraw it.
-    assert!(should_report_trace_log(RunOutcome::AsExpected, true));
-    assert!(!should_report_trace_log(RunOutcome::AsExpected, false));
+fn a_successful_run_keeps_its_trace_log_only_under_jp_debug() {
+    assert!(should_persist_trace_log(RunOutcome::AsExpected, true));
+    assert!(!should_persist_trace_log(RunOutcome::AsExpected, false));
 }
 
 #[test]
-fn a_failed_run_always_announces_its_trace_log() {
-    // Diagnosing a failure beats keeping the stream clean, so `JP_DEBUG` has no
-    // say. A command that exits non-zero to report a result (`grep` finding
-    // nothing) is `AsExpected`, not `Failed`, and takes the rule above instead.
-    assert!(should_report_trace_log(RunOutcome::Failed, false));
-    assert!(should_report_trace_log(RunOutcome::Failed, true));
+fn a_failed_run_always_keeps_its_trace_log() {
+    // A command that exits non-zero to report a result (`grep` finding nothing)
+    // is `AsExpected`, not `Failed`, and takes the rule above instead.
+    assert!(should_persist_trace_log(RunOutcome::Failed, false));
+    assert!(should_persist_trace_log(RunOutcome::Failed, true));
+}
+
+#[test]
+fn a_run_just_under_five_minutes_does_not_repeat_the_trace_log_notice() {
+    assert!(!should_repeat_trace_log_notice(
+        Duration::from_mins(5) - Duration::from_nanos(1)
+    ));
+}
+
+#[test]
+fn a_five_minute_run_repeats_the_trace_log_notice() {
+    assert!(should_repeat_trace_log_notice(Duration::from_mins(5)));
 }
 
 // The flag has to reach the printer to mean anything: it names a policy the
@@ -239,6 +247,17 @@ fn a_background_task_persist_failure_is_recorded_after_the_command_finished() {
     let error = cmd::fold_persist_failure(Ok(()), Some(recorded))
         .expect_err("an unsaved conversation must not exit zero");
     assert_eq!(error.message.as_deref(), Some("No space left on device"));
+}
+
+#[test]
+fn tracing_guard_exposes_temp_file_path_before_persisting() {
+    let file = NamedUtf8TempFile::new().unwrap();
+    let path = file.path().to_owned();
+    let guard = TracingGuard {
+        sink: Some(TraceSink::Temp(file)),
+    };
+
+    assert_eq!(guard.path(), Some(path.as_path()));
 }
 
 #[test]

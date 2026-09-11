@@ -2,12 +2,11 @@
 //!
 //! Launches `jp` inside the sandbox with `JP_DEBUG=1` set and `--log-file`
 //! pointing at a path in the real workspace, so the trace log lands at a known
-//! location that survives sandbox cleanup — even when jp is force-killed,
-//! since the file layer writes events as they happen.
+//! location that survives sandbox cleanup, even when jp is force-killed, since
+//! the file layer writes events as they happen.
 //! When the file is missing (jp exited before logging was configured), we fall
-//! back to the path jp announces on stderr at exit: a `Full trace log written
-//! to: <path>` line (text output) or a `{"trace_log": "<path>"}` object (JSON
-//! output).
+//! back to the path jp announces on stderr: a `Streaming trace logs to: <path>`
+//! line (text output) or a `{"trace_log": "<path>"}` object (JSON output).
 //! The events are then filtered by level/target/grep and rendered in a compact
 //! logfmt-like format.
 
@@ -410,9 +409,9 @@ fn run_one(
     let launch_result = launcher.run(&launch_spec, timeouts, &mut |_| {})?;
 
     // Fallback: jp exited before creating `trace_dst` (or ignored the flag).
-    // Locate the trace via the path jp announces on stderr at exit — a text
-    // marker line or a `trace_log` JSON field, depending on `--format` — and
-    // copy it out of the system temp dir into the real workspace.
+    // Locate the trace via the path jp announces on stderr, as a text marker
+    // line or a `trace_log` JSON field depending on `--format`, and copy it out
+    // of the system temp dir into the real workspace.
     if !trace_dst.exists() {
         let Some(trace_path) = trace::extract_trace_path(&launch_result.stderr) else {
             let note = launch_result
