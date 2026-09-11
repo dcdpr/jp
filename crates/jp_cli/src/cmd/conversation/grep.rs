@@ -415,7 +415,7 @@ impl Grep {
 
         // `iter_events_by_turn` rather than `iter_turns`: the latter resolves and
         // clones a `PartialAppConfig` per event, which grep never reads.
-        for (index, event) in events.iter_events_by_turn() {
+        for event in events.iter_events_by_turn() {
             if budget.is_exhausted() {
                 return group;
             }
@@ -434,7 +434,7 @@ impl Grep {
                 &mut group.hits,
                 // 1-based to match the `--turn` selector and the headers `print`
                 // renders.
-                Some(index + 1),
+                Some(event.turn + 1),
                 scope,
                 Some(event.timestamp),
                 &line_refs,

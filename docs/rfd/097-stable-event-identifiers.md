@@ -1,6 +1,6 @@
 # RFD 097: Stable Event Identifiers
 
-- **Status**: Discussion
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-03
@@ -221,36 +221,67 @@ The event constructors are unchanged: `ConversationEvent::new(kind, ts)`,
 `ConversationEvent::now(kind)`, and the `ConfigDelta` constructors keep their
 current signatures and gain no ID argument.
 
-The mutation entry points that append to the stream generate the ID:
+The stream holds the set of IDs it has handed out, and that set is the one place
+"unique within its stream" is enforced:
 
 ```rust
-impl ConversationStream {
-    fn wrap(&self, payload: EventPayload) -> InternalEvent {
-        InternalEvent { event_id: self.fresh_event_id(), payload }
-    }
+/// The entry IDs one conversation stream has handed out.
+struct EventIds(HashSet<EventId>);
 
-    /// A random `EventId` that does not collide with any entry already in the
-    /// stream.
-    /// The stream knows the existing IDs, so this is where "unique within its
-    /// stream" is enforced.
-    fn fresh_event_id(&self) -> EventId { /* retry random() until unused */ }
+impl EventIds {
+    /// Take `preferred`, or a generated ID when this set already holds it.
+    fn claim(&mut self, preferred: EventId) -> EventId;
+
+    /// A generated ID this set has not handed out.
+    fn fresh(&mut self) -> EventId;
+}
+
+impl ConversationStream {
+    /// Append a payload, returning the ID the stream assigned it.
+    fn append(&mut self, payload: EventPayload) -> EventId;
+
+    /// Append an entry from another stream, keeping its ID when free.
+    fn adopt(&mut self, entry: InternalEvent) -> EventId;
 }
 ```
 
-The invariant: every path that creates or inserts an `InternalEvent` goes
-through this wrap constructor; deserialization is the only path that preserves
-an existing ID.
+Insertion returns the assigned ID, so a caller that needs to refer to the entry
+it just wrote does not have to read it back out of the stream.
+
+The invariant: every path that adds an `InternalEvent` to a stream goes through
+the stream, which owns the set of IDs it has handed out.
 The known call sites are `push`, `add_config_delta`, `add_compaction`, `extend`,
-`TurnMut::build`, `start_turn`, the synthetic insertions in
+`append_stream`, `TurnMut::build`, `start_turn`, the synthetic insertions in
 `normalize_turn_starts` and `sanitize_orphaned_tool_calls`, and projection's
 injected entries (ephemeral; see [Projection views](#projection-views)).
 Because generation happens where stream context exists, "unique within its
 stream" holds at insertion, not merely after a load-time pass.
-A fixture or test that needs a deterministic ID constructs the `InternalEvent`
-wrapper directly with a fixed `EventId`; live and synthetic insertion paths let
-the stream assign one.
-There is no thread-local RNG and no test/prod plumbing inside the event
-constructors.
+
+An ID is retired with the entry that held it: the stream does not hand out an ID
+again after the entry holding it is removed.
+Otherwise a reference to a deleted entry could silently rebind to a later,
+unrelated one — the positional aliasing this RFD exists to remove, reintroduced
+through the ID.
+
+**An entry arriving from another stream keeps its ID.** Uniqueness is scoped to
+a single stream (see [Non-Goals](#non-goals)), so an entry copied between
+streams can carry its identity with it, and a reference resolved against the
+source resolves against the copy.
+Only a collision with an ID the destination has already handed out forces a new
+one.
+This is what makes `jp conversation fork` produce a stream whose entries are
+still addressable by the IDs the user saw in the source.
+
+One case is not a copy and does not preserve: the config deltas
+`Extend<ConversationEventWithConfig>` writes are *recomputed* against the
+destination's running config state rather than carried over, so they are new
+entries and are assigned new IDs.
+
+A fixture or test that needs a deterministic ID builds the `InternalEvent`
+wrappers and hands them to the stream, which registers their IDs; live and
+synthetic insertion paths let the stream assign one.
+There is no thread-local RNG, and no generator argument on any production
+signature.
 
 Synthetic stream entries that must keep a specific timestamp (for example, a
 `TurnStart` that adopts the first chat request's time, or a synthetic
@@ -269,13 +300,33 @@ any other ID.
 ### Projection views
 
 `event_id` stability is a property of the persisted raw stream.
+Its IDs can be used as stable references to entries in `events.json`.
 Compaction projection builds an ephemeral provider view by transforming a copy
-of the stream, injecting synthetic entries (for example the summary
-`ChatRequest` / `ChatResponse` pair) that exist only in that view.
-Those entries are wrapped like any other and receive fresh IDs, but the IDs are
+of the stream; it does not remove the original entries from the persisted raw
+stream.
+
+An existing entry retained in the projected view keeps its original `event_id`,
+including when a mechanical policy changes its projected content.
+That ID still identifies the original entry in `events.json`, not a separate
+stored version of the projected content.
+
+Entries synthesized for the projection, such as the summary `TurnStart` and
+`ChatRequest` / `ChatResponse` pair, exist only in that view.
+They have no corresponding entries in `events.json`.
+They are wrapped like any other entry and receive fresh IDs, but those IDs are
 ephemeral: they carry no stability contract across projections, are never
 persisted or exposed through storage or plugin APIs, and MUST NOT be used as
 references into `events.json`.
+
+The synthetic IDs are drawn from the projected stream's own ID set, not from a
+set local to projection.
+That keeps two properties at once: a synthetic entry cannot take the ID of an
+entry projection carried through, and the stream is left holding every ID its
+entries carry, so a later insertion cannot hand out one of them again.
+
+Both stored entries and projection-only entries use `EventId`.
+The ID value alone does not indicate whether a corresponding stored entry
+exists.
 
 ### Dependency
 
@@ -300,17 +351,36 @@ The append APIs stay infallible.
 
 ### Storage-layer repair
 
-ID-uniqueness repair runs inside `ConversationStream::from_parts` and
-`from_legacy_events`, immediately after deserialization, before the stream is
-returned.
-It is **not** part of `ConversationStream::sanitize()`, which is reserved for
-higher-level stream mutations (orphaned tool responses, orphaned inquiry
-responses, leading non-user events, turn-start normalization).
+A stored entry's `event_id` is read as *optional*: a legacy entry has none, and
+a hand-edited file can give two entries the same one.
+The wire form (`StoredEvent`) therefore carries `Option<EventId>`, and
+`ConversationStream::from_parts` settles every entry's identity as it builds the
+stream, before it is returned.
+`from_legacy_events` delegates to `from_parts`.
+
+Making the wire form's ID optional is what keeps "unique within its stream" a
+property of the type rather than of a pass that has to be remembered: an
+`InternalEvent` only exists inside a stream, and its ID is one that stream
+handed out.
+A future load path cannot skip the step, because there is nothing else that
+turns a `StoredEvent` into a stream entry.
 
 ```txt
-collect ids; for each duplicate id, regenerate it on the later occurrence(s)
-so the stream again has unique ids; record which ids were duplicated.
+reserve every id the file carries;
+for each entry, in order:
+  no id            -> assign a generated one
+  id not seen yet  -> keep it
+  id already seen  -> assign a generated one, and record the id as duplicated
 ```
+
+Reserving the whole file first is what stops a generated ID taking one that
+belongs to an entry further down the file.
+
+This is **not** part of `ConversationStream::sanitize()`, which is reserved for
+higher-level stream mutations (orphaned tool responses, orphaned inquiry
+responses, leading non-user events, turn-start normalization).
+`sanitize` also could not do the job: it sees a stream whose IDs are already
+settled, not the IDs a file carried.
 
 Repair restores the *uniqueness* invariant, but it cannot restore reference
 *intent*.
@@ -331,13 +401,11 @@ This is what makes the Motivation's claim hold: a copy, reorder, or delete
 produces a *detectable* mismatch, never a silent positional rebind to the wrong
 entry.
 
-The set of duplicated IDs is retained as private, load-scoped state on
-`ConversationStream`, populated by the repair pass and consulted by future
-reference resolution to classify a reference as ambiguous.
+The set of duplicated IDs is load-scoped state on `ConversationStream`, recorded
+as the IDs are settled and read through `duplicated_event_ids()` by reference
+resolution to classify a reference as ambiguous.
 Once the repaired stream is saved and reloaded, the file has unique IDs and the
 set is empty.
-No public accessor is added until a consumer exists, consistent with the
-`event_ids()` stance below.
 
 RFDs that introduce reference-bearing entries must consume this recorded
 ambiguity in the same load cycle, before the stream is persisted: resolve or
@@ -361,11 +429,13 @@ if overlay.anchor_id was duplicated at load, or
    overlay.anchor_id ∉ { id of every stream entry } { drop overlay }
 ```
 
-This RFD does not add a public `event_ids()` accessor; there is no consumer yet.
-The ID set is an internal notion the repair pass already computes, and the
-public API can grow an accessor when a real consumer (compaction, future
-sub-agent provenance features, plugin subscriptions, interactive editing)
-defines the shape it needs.
+This RFD does not add a public accessor for the *set of live entry IDs*; there
+is no consumer yet.
+The stream computes it to enforce uniqueness, and the public API can grow an
+accessor when a real consumer (compaction, future sub-agent provenance features,
+plugin subscriptions, interactive editing) defines the shape it needs.
+`duplicated_event_ids()` is public because the ambiguity it reports has a
+deadline: it must be read in the same load cycle, before a save discards it.
 
 ### Storage
 
@@ -535,10 +605,12 @@ Mergeable on its own.
   Confirm a byte-for-byte round-trip against existing fixtures, modulo the new
   key.
 - Assign `event_id` on insertion: route every `InternalEvent` creation through
-  the wrap constructor (`push`, `add_config_delta`, `add_compaction`, `extend`,
-  `TurnMut::build`, `start_turn`, and the synthetic insertions in
-  `normalize_turn_starts` / `sanitize_orphaned_tool_calls`), backed by a
-  `fresh_event_id()` that avoids collision with IDs already in the stream.
+  the stream (`push`, `add_config_delta`, `add_compaction`, `extend`,
+  `append_stream`, `TurnMut::build`, `start_turn`, and the synthetic insertions
+  in `normalize_turn_starts` / `sanitize_orphaned_tool_calls`), backed by an ID
+  set the stream owns.
+  An entry arriving from another stream keeps its ID unless the destination has
+  already handed that ID out.
 - Expose `event_id` on the iteration views, for the `ConversationEvent`s they
   already yield; config deltas, compactions, and unknown entries gain no new
   programmatic surface (they remain ID-addressable in the persisted JSON).
@@ -554,18 +626,19 @@ part.
 
 ### Phase 3 — Storage-layer uniqueness repair
 
-- Add `ensure_unique_event_ids` in `ConversationStream`, recording which IDs
-  were duplicated in a private, load-scoped field on the stream (no public
-  accessor until a consumer exists).
-- Call it from `from_parts` and `from_legacy_events` after deserialization,
-  before the stream is returned.
+- Give the wire form (`StoredEvent`) an `Option<EventId>`, so an entry read from
+  storage has no identity until a stream settles it.
+- Settle every entry's ID in `from_parts` as the stream is built, recording the
+  duplicated values in a load-scoped field read through
+  `duplicated_event_ids()`.
+  `from_legacy_events` delegates to `from_parts`.
   **Not** part of `sanitize()`.
-- Test: a stream with two entries sharing an explicit fixed ID; repair
-  regenerates the later occurrence and the in-memory stream has unique IDs.
+- Test: a stream with two entries sharing an explicit fixed ID; the first keeps
+  it, the second is reassigned, and the value is reported as duplicated.
 - Test: a legacy file with no `event_id` fields; entries get IDs assigned at
   load.
-- Test: a live insertion path never exposes a duplicate ID; force a collision in
-  `fresh_event_id` and verify it retries.
+- Test: a scripted generator forced to repeat an ID the stream holds; the draw
+  retries.
 
 Depends on Phase 2.
 

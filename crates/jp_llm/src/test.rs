@@ -669,10 +669,10 @@ pub async fn run_chat_completion(
                                         all_events[index].push(TestEvent::Flushed(event.clone()));
 
                                         history.push(ConversationEventWithConfig {
-                                            event: event.clone(),
+                                            event_id: stream.push_event(event.clone()),
+                                            event,
                                             config: config.clone(),
                                         });
-                                        stream.extend(std::iter::once(event));
                                     }
                                 }
                                 Event::Patch(_) | Event::KeepAlive => {}
@@ -684,10 +684,10 @@ pub async fn run_chat_completion(
                                         all_events[index].push(TestEvent::Flushed(event.clone()));
 
                                         history.push(ConversationEventWithConfig {
-                                            event: event.clone(),
+                                            event_id: stream.push_event(event.clone()),
+                                            event,
                                             config: config.clone(),
                                         });
-                                        stream.extend(std::iter::once(event));
                                     }
 
                                     all_events[index].push(TestEvent::Finished(reason));
@@ -727,7 +727,29 @@ pub async fn run_chat_completion(
                         // ConversationStream doesn't implement Serialize directly;
                         // decompose it via to_parts for the snapshot.
                         let snap_value = conversation_stream.as_ref().map(|s| {
-                            let (config, events) = s.to_parts().unwrap();
+                            let (config, mut events) = s.to_parts().unwrap();
+                            // An entry ID is host-assigned randomness rather than
+                            // anything the provider returned, so it is dropped
+                            // instead of recorded: a placeholder would add a line
+                            // per entry that only ever reads `[event_id]`.
+                            //
+                            // What the snapshot would have checked is asserted
+                            // here instead, which is stricter than a placeholder
+                            // — the redaction that produced one could not tell a
+                            // missing key from a present one.
+                            for event in &mut events {
+                                let event =
+                                    event.as_object_mut().expect("stored entry is an object");
+                                let event_id = event.shift_remove("event_id");
+                                assert!(
+                                    event_id
+                                        .as_ref()
+                                        .and_then(|id| id.as_str())
+                                        .is_some_and(|id| !id.is_empty()),
+                                    "every stored entry carries a non-empty `event_id`, got \
+                                     {event_id:?}"
+                                );
+                            }
                             serde_json::json!({ "base_config": config, "events": events })
                         });
                         Snap::json(snap_value)

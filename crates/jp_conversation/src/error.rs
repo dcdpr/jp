@@ -16,6 +16,14 @@ pub enum Error {
     #[error("Invalid ID format: {0}")]
     InvalidIdFormat(String),
 
+    /// An event ID was empty.
+    ///
+    /// A stream entry's identity cannot be the empty string: an absent ID is
+    /// assigned one at load, so an empty one reaching this far is a caller
+    /// error rather than a legacy file.
+    #[error("Event ID must not be empty.")]
+    EmptyEventId,
+
     /// Invalid ID.
     #[error("Invalid ID: {0}")]
     Id(#[from] jp_id::Error),

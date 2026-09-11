@@ -2,8 +2,28 @@ use std::{fs, time::Duration};
 
 use camino::Utf8PathBuf;
 use camino_tempfile::tempdir;
+use clap::{Parser as _, error::ErrorKind};
 
 use super::{Edit, ExpirationDuration};
+use crate::Cli;
+
+/// Someone editing `events.json` by hand needs to know `event_id` is there and
+/// what it is for, or they will strip it or copy it onto a second entry.
+///
+/// Matched on the field name rather than the sentence around it: the wording is
+/// free to change, the subject is not.
+#[test]
+fn events_help_documents_the_entry_id() {
+    let Err(error) = Cli::try_parse_from(["jp", "conversation", "edit", "--help"]) else {
+        panic!("expected help output");
+    };
+    assert_eq!(error.kind(), ErrorKind::DisplayHelp);
+
+    assert!(
+        error.to_string().contains("event_id"),
+        "`--events` help does not mention `event_id`"
+    );
+}
 
 #[test]
 fn parse_now() {

@@ -15,6 +15,7 @@ use jp_conversation::{
 use jp_printer::{OutputFormat, Printer};
 use jp_storage::backend::{FsStorageBackend, Projection};
 use jp_workspace::Workspace;
+use serde_json::Value;
 use tokio::runtime::Runtime;
 
 use super::*;
@@ -22,6 +23,42 @@ use crate::{
     Globals,
     cmd::{compact_flag::CompactFlag, conversation_id::PositionalIds},
 };
+
+/// Assert a fork reproduces its source, entry IDs included.
+///
+/// A fork copies the source's entries rather than rebuilding them, so each one
+/// keeps its ID and a reference into the source resolves against the fork.
+///
+/// The leading `TurnStart` is the exception, and is compared by payload alone:
+/// neither stream stored one, so `sanitize` synthesized a separate entry on
+/// each side.
+/// Two independently created entries are two entries, and their IDs are meant
+/// to differ.
+fn assert_forked_stream_matches(source: &ConversationStream, fork: &ConversationStream) {
+    let stored_ids = |stream: &ConversationStream| -> Vec<String> {
+        stream
+            .iter()
+            .filter(|event| !event.is_turn_start())
+            .map(|event| event.event_id.to_string())
+            .collect()
+    };
+    assert_eq!(
+        stored_ids(source),
+        stored_ids(fork),
+        "a forked entry must keep the ID it had in the source"
+    );
+
+    let payloads = |stream: &ConversationStream| -> Vec<Value> {
+        let (_, mut events) = stream.to_parts().unwrap();
+        for event in &mut events {
+            event.as_object_mut().unwrap().shift_remove("event_id");
+        }
+        events
+    };
+    assert_eq!(payloads(source), payloads(fork));
+    assert_eq!(source.base_config(), fork.base_config());
+    assert_eq!(source.created_at, fork.created_at);
+}
 
 /// Parse a [`TurnSelection`] from the flags a user would pass to `jp c fork`.
 ///
@@ -173,7 +210,7 @@ fn test_conversation_fork() {
                 assert!(convs[0].0.timestamp() < convs[1].0.timestamp());
                 assert_eq!(convs[0].1, convs[1].1);
                 convs[0].2.sanitize();
-                assert_eq!(convs[0].2, convs[1].2);
+                assert_forked_stream_matches(&convs[0].2, &convs[1].2);
             },
         }),
         ("no turns keeps config but drops every turn", TestCase {
@@ -282,7 +319,7 @@ fn test_conversation_fork() {
                 assert!(convs[0].0.timestamp() < convs[1].0.timestamp());
                 assert_eq!(convs[0].1, convs[1].1);
                 convs[0].2.sanitize();
-                assert_eq!(convs[0].2, convs[1].2);
+                assert_forked_stream_matches(&convs[0].2, &convs[1].2);
             },
         }),
         ("with from", TestCase {
