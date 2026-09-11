@@ -77,7 +77,7 @@ fn request_body(
     reasoning: Option<jp_config::model::parameters::PartialReasoningConfig>,
 ) -> serde_json::Value {
     let details = ModelDetails::empty((PROVIDER, "Qwen3.5-9B-GGUF").try_into().unwrap());
-    let (request, _) = create_request(&details, reasoning_query(reasoning)).unwrap();
+    let (request, ..) = create_request(&details, reasoning_query(reasoning)).unwrap();
 
     request
 }

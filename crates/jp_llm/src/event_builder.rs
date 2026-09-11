@@ -31,7 +31,10 @@
 //!   arrives.
 //!   The Flush after the last chunk marks the tool call as complete.
 
-use std::collections::{HashMap, hash_map::Entry};
+use std::{
+    collections::{HashMap, hash_map::Entry},
+    sync::Arc,
+};
 
 use jp_conversation::{
     ConversationEvent,
@@ -40,7 +43,10 @@ use jp_conversation::{
 use serde_json::{Map, Value};
 use tracing::warn;
 
-use crate::event::{Event, EventPart, ToolCallPart};
+use crate::{
+    event::{Event, EventPart, ToolCallPart},
+    tool::decoding::ArgumentDecoding,
+};
 
 /// Extract the structured JSON payload from a completed list of stream events.
 ///
@@ -163,14 +169,16 @@ impl EventBuilder {
                 Entry::Occupied(mut e) => e.get_mut().merge_tool_call_part(tool_call_part),
                 Entry::Vacant(e) => {
                     let buffer = match tool_call_part {
-                        ToolCallPart::Start { id, name } => IndexBuffer::ToolCall {
+                        ToolCallPart::Start { id, name, decoding } => IndexBuffer::ToolCall {
                             id,
                             name,
+                            decoding,
                             arguments_json: String::new(),
                         },
                         ToolCallPart::ArgumentChunk(json) => IndexBuffer::ToolCall {
                             id: String::new(),
                             name: String::new(),
+                            decoding: None,
                             arguments_json: json,
                         },
                     };
@@ -217,8 +225,9 @@ impl EventBuilder {
                 id,
                 name,
                 arguments_json,
+                decoding,
             } => {
-                let arguments = if arguments_json.trim().is_empty() {
+                let mut arguments = if arguments_json.trim().is_empty() {
                     serde_json::Map::new()
                 } else {
                     serde_json::from_str(&arguments_json).unwrap_or_else(|e| {
@@ -226,6 +235,9 @@ impl EventBuilder {
                         serde_json::Map::new()
                     })
                 };
+                if let Some(decoding) = decoding {
+                    decoding.apply(&mut arguments);
+                }
                 ConversationEvent::now(ToolCallRequest {
                     id,
                     name,
@@ -361,6 +373,8 @@ enum IndexBuffer {
         name: String,
         /// Raw JSON arguments accumulated from chunks.
         arguments_json: String,
+        /// Decoding chosen by the first non-empty tool name.
+        decoding: Option<Arc<ArgumentDecoding>>,
     },
     /// Accumulates streamed JSON chunks for a structured response.
     ///
@@ -380,6 +394,7 @@ impl IndexBuffer {
             id,
             name,
             arguments_json,
+            decoding,
         } = self
         else {
             warn!(
@@ -393,12 +408,14 @@ impl IndexBuffer {
             ToolCallPart::Start {
                 id: incoming_id,
                 name: incoming_name,
+                decoding: incoming_decoding,
             } => {
                 if id.is_empty() && !incoming_id.is_empty() {
                     *id = incoming_id;
                 }
                 if name.is_empty() && !incoming_name.is_empty() {
                     *name = incoming_name;
+                    *decoding = incoming_decoding;
                 }
             }
             ToolCallPart::ArgumentChunk(json) => {

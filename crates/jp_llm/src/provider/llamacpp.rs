@@ -24,7 +24,7 @@ use tracing::{debug, trace, warn};
 
 use super::{
     EventStream, ModelDetails,
-    openai::parameters_with_strict_mode,
+    openai::parameters_with_decoding,
     openai_compat::{merge_consecutive_assistant_messages, parse_chunk},
 };
 use crate::{
@@ -33,7 +33,7 @@ use crate::{
     provider::Provider,
     query::ChatQuery,
     stream::{aggregator::reasoning::ReasoningExtractor, with_tool_call_keepalive},
-    tool::ToolDefinition,
+    tool::{ToolDefinition, decoding::ArgumentDecoders},
 };
 
 static PROVIDER: ProviderId = ProviderId::Llamacpp;
@@ -93,7 +93,7 @@ impl Provider for Llamacpp {
             "Starting Llamacpp chat completion stream."
         );
 
-        let (body, is_structured) = create_request(model, query)?;
+        let (body, is_structured, decoders) = create_request(model, query)?;
 
         trace!(
             body = serde_json::to_string(&body).unwrap_or_default(),
@@ -113,10 +113,10 @@ impl Provider for Llamacpp {
         // silently re-issuing the request.
         es.set_retry_policy(Box::new(Never));
 
-        Ok(with_tool_call_keepalive(
+        Ok(decoders.attach(with_tool_call_keepalive(
             assemble_event_stream(es, is_structured),
             TOOL_CALL_KEEPALIVE_INTERVAL,
-        ))
+        )))
     }
 }
 
@@ -414,7 +414,7 @@ impl Llamacpp {
         model: &ModelDetails,
         query: ChatQuery,
     ) -> Result<serde_json::Value, Error> {
-        let (request, _) = create_request(model, query)?;
+        let (request, ..) = create_request(model, query)?;
         Ok(request)
     }
 }
@@ -422,8 +422,12 @@ impl Llamacpp {
 /// Build the JSON request body for the llama.cpp `/v1/chat/completions`
 /// endpoint.
 ///
-/// Returns `(body, is_structured)`.
-fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Value, bool), Error> {
+/// Returns the request, structured-output flag, and tool argument decoding
+/// plans.
+fn create_request(
+    model: &ModelDetails,
+    query: ChatQuery,
+) -> Result<(Value, bool, ArgumentDecoders), Error> {
     let ChatQuery {
         thread,
         tools,
@@ -483,7 +487,7 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Value, bool
     }
 
     messages.extend(convert_events(parts.events));
-    let converted_tools = convert_tools(tools, &tool_choice);
+    let (converted_tools, decoders) = convert_tools(tools, &tool_choice);
     let tool_choice_val = convert_tool_choice(&tool_choice);
 
     trace!(
@@ -543,7 +547,7 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Value, bool
         });
     }
 
-    Ok((body, is_structured))
+    Ok((body, is_structured, decoders))
 }
 
 /// Convert system prompt parts into a list of JSON message values.
@@ -608,25 +612,32 @@ fn convert_events(events: ConversationStream) -> Vec<Value> {
 /// If [`ToolChoice::Function`] is set, only include the named tool. llama.cpp
 /// doesn't support calling a specific tool by name, but it supports `required`
 /// mode, so we limit the tool list instead.
-fn convert_tools(tools: Vec<ToolDefinition>, tool_choice: &ToolChoice) -> Vec<Value> {
-    tools
+fn convert_tools(
+    tools: Vec<ToolDefinition>,
+    tool_choice: &ToolChoice,
+) -> (Vec<Value>, ArgumentDecoders) {
+    let mut decoders = ArgumentDecoders::default();
+    let tools = tools
         .into_iter()
+        .filter(|tool| match tool_choice {
+            ToolChoice::Function(req) => &tool.name == req,
+            _ => true,
+        })
         .map(|tool| {
+            let (parameters, decoding) = parameters_with_decoding(&tool.parameters, true);
+            decoders.insert(&tool.name, decoding);
             json!({
                 "type": "function",
                 "function": {
                     "name": tool.name,
                     "description": tool.docs.schema_description().unwrap_or_default(),
-                    "parameters": parameters_with_strict_mode(&tool.parameters, true),
+                    "parameters": parameters,
                     "strict": true,
                 },
             })
         })
-        .filter(|tool| match tool_choice {
-            ToolChoice::Function(req) => tool["function"]["name"].as_str() == Some(req.as_str()),
-            _ => true,
-        })
-        .collect()
+        .collect();
+    (tools, decoders)
 }
 
 fn convert_tool_choice(choice: &ToolChoice) -> &str {
