@@ -9,11 +9,11 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ToolCallRequest(
                     ToolCallRequest {
-                        id: "call_2euwcbzEr77g3RSU0MNmSRmG",
+                        id: "call_tDA39nOhtC0WU3Bbg2LVggmd",
                         name: "run_me",
                         arguments: {
                             "bar": String("foo"),
-                            "foo": Null,
+                            "foo": String("user-request"),
                         },
                     },
                 ),
@@ -34,7 +34,7 @@ expression: v
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("msg_0e606b98cab73957016ab3b82e4b8487d2922589a20af9f6ce"),
+                    "openai_item_id": String("msg_06f8ec4a355b6d55016ab65d2d9e0487d2bd2c43a984cc385b"),
                     "openai_phase": String("final_answer"),
                 },
             },

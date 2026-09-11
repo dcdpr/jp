@@ -124,7 +124,7 @@ when:
         },
         {
           "type": "function_call",
-          "arguments": "{\"bar\":\"foo\",\"foo\":null}",
+          "arguments": "{\"bar\":\"foo\"}",
           "call_id": "call_yHDWZ3ju9GaGhZkaZxeyY20Z",
           "id": null,
           "name": "run_me",

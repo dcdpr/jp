@@ -45,6 +45,7 @@ fn test_handles_tool_call() {
         EventPart::ToolCall(ToolCallPart::Start {
             id: "call_1".into(),
             name: "test_tool".into(),
+            decoding: None,
         }),
         Map::new(),
     );
@@ -68,6 +69,7 @@ fn test_incomplete_tool_calls_skips_unnamed_buffers() {
         EventPart::ToolCall(ToolCallPart::Start {
             id: "call_1".into(),
             name: "fs_modify_file".into(),
+            decoding: None,
         }),
         Map::new(),
     );
@@ -95,6 +97,7 @@ fn test_merges_multi_part_tool_call() {
         EventPart::ToolCall(ToolCallPart::Start {
             id: "call_42".into(),
             name: "fs_create_file".into(),
+            decoding: None,
         }),
         Map::new(),
     );
@@ -128,6 +131,7 @@ fn test_multi_part_tool_call_first_write_wins_for_id_and_name() {
         EventPart::ToolCall(ToolCallPart::Start {
             id: "first_id".into(),
             name: "first_name".into(),
+            decoding: None,
         }),
         Map::new(),
     );
@@ -138,6 +142,7 @@ fn test_multi_part_tool_call_first_write_wins_for_id_and_name() {
         EventPart::ToolCall(ToolCallPart::Start {
             id: "second_id".into(),
             name: "second_name".into(),
+            decoding: None,
         }),
         Map::new(),
     );
@@ -437,6 +442,7 @@ fn drain_drops_incomplete_tool_call_but_keeps_partial_text() {
         EventPart::ToolCall(ToolCallPart::Start {
             id: "toolu_incomplete".into(),
             name: "some_tool".into(),
+            decoding: None,
         }),
         Map::new(),
     );

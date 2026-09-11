@@ -171,7 +171,7 @@ fn request_preserves_integer_tool_parameter_type() -> Result {
         unreachable!();
     };
 
-    let (request, _, _) = create_request(&model, query)?;
+    let (request, ..) = create_request(&model, query)?;
     let request = serde_json::to_value(request)?;
 
     assert_eq!(
@@ -370,7 +370,7 @@ fn forced_tool_request(
     };
     model.reasoning = Some(reasoning);
 
-    let (request, _, fallback) = create_request(&model, query).unwrap();
+    let (request, _, fallback, _) = create_request(&model, query).unwrap();
     (request, fallback)
 }
 

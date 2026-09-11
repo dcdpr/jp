@@ -10,6 +10,15 @@ expression: v
                 Start {
                     id: "call_xY7B3PcNMld7ETybgynrdE0X",
                     name: "run_me",
+                    decoding: Some(
+                        ArgumentDecoding {
+                            omit_null: [
+                                "foo",
+                            ],
+                            properties: {},
+                            items: None,
+                        },
+                    ),
                 },
             ),
             metadata: {},

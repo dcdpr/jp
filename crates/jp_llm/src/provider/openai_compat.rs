@@ -34,8 +34,9 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use tracing::{debug, trace, warn};
 
-use super::{EventStream, openai::parameters_with_strict_mode};
+use super::{EventStream, openai::parameters_with_decoding};
 use crate::{
+    decoding::ArgumentDecoders,
     error::StreamError,
     event::{Event, FinishReason},
     stream::aggregator::reasoning::ReasoningExtractor,
@@ -258,25 +259,32 @@ pub(crate) fn convert_events(events: ConversationStream) -> Vec<Value> {
 /// doesn't support naming a tool in `tool_choice`, so the list is narrowed to
 /// one tool and paired with `required` mode instead, which reaches the same
 /// outcome on every server speaking this dialect.
-pub(crate) fn convert_tools(tools: Vec<ToolDefinition>, tool_choice: &ToolChoice) -> Vec<Value> {
-    tools
+pub(crate) fn convert_tools(
+    tools: Vec<ToolDefinition>,
+    tool_choice: &ToolChoice,
+) -> (Vec<Value>, ArgumentDecoders) {
+    let mut decoders = ArgumentDecoders::default();
+    let tools = tools
         .into_iter()
+        .filter(|tool| match tool_choice {
+            ToolChoice::Function(req) => &tool.name == req,
+            _ => true,
+        })
         .map(|tool| {
+            let (parameters, decoding) = parameters_with_decoding(&tool.parameters, true);
+            decoders.insert(&tool.name, decoding);
             json!({
                 "type": "function",
                 "function": {
                     "name": tool.name,
                     "description": tool.docs.schema_description().unwrap_or_default(),
-                    "parameters": parameters_with_strict_mode(&tool.parameters, true),
+                    "parameters": parameters,
                     "strict": true,
                 },
             })
         })
-        .filter(|tool| match tool_choice {
-            ToolChoice::Function(req) => tool["function"]["name"].as_str() == Some(req.as_str()),
-            _ => true,
-        })
-        .collect()
+        .collect();
+    (tools, decoders)
 }
 
 pub(crate) fn convert_tool_choice(choice: &ToolChoice) -> &'static str {

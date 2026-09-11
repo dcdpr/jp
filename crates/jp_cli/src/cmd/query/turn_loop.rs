@@ -599,7 +599,7 @@ pub(super) async fn run_turn_loop(
                             // buffer first so buffered text appears before the
                             // "Calling tool" line (fixes Issue 1).
                             if let Event::Part {
-                                part: EventPart::ToolCall(ToolCallPart::Start { id, name }),
+                                part: EventPart::ToolCall(ToolCallPart::Start { id, name, .. }),
                                 ..
                             }
                             | Event::ToolCallPending { id, name } = &event

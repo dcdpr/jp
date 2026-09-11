@@ -55,7 +55,7 @@ fn create_request_plain_message() {
     // Thinking is off because the test config carries no reasoning setting.
     let events = ConversationStream::new_test().with_turn("Hello");
 
-    let (body, is_structured) = create_request(&qwen_details(), query(events, vec![])).unwrap();
+    let (body, is_structured, _) = create_request(&qwen_details(), query(events, vec![])).unwrap();
 
     assert!(!is_structured);
     assert_eq!(
@@ -88,7 +88,7 @@ fn create_request_joins_system_parts_into_one_message() {
         truncation: Truncation::default(),
     };
 
-    let (body, _) = create_request(&qwen_details(), query).unwrap();
+    let (body, ..) = create_request(&qwen_details(), query).unwrap();
 
     assert_eq!(
         body["messages"],
@@ -111,7 +111,7 @@ fn create_request_forwards_sampling_parameters() {
     delta.assistant.model.parameters.max_tokens = Some(256);
     events.add_config_delta(delta);
 
-    let (body, _) = create_request(&qwen_details(), query(events, vec![])).unwrap();
+    let (body, ..) = create_request(&qwen_details(), query(events, vec![])).unwrap();
 
     assert_eq!(
         body,
@@ -135,7 +135,7 @@ fn create_request_asks_the_template_to_think_when_reasoning_is_on() {
     delta.assistant.model.parameters.reasoning = Some(PartialReasoningConfig::Auto);
     events.add_config_delta(delta);
 
-    let (body, _) = create_request(&qwen_details(), query(events, vec![])).unwrap();
+    let (body, ..) = create_request(&qwen_details(), query(events, vec![])).unwrap();
 
     assert_eq!(
         body["chat_template_kwargs"],
@@ -175,7 +175,7 @@ fn create_request_tool_call_round_trip() {
         }),
     };
 
-    let (body, _) = create_request(&qwen_details(), query(events, vec![tool])).unwrap();
+    let (body, ..) = create_request(&qwen_details(), query(events, vec![tool])).unwrap();
 
     assert_eq!(
         body["messages"],
@@ -225,7 +225,7 @@ fn create_request_structured_schema() {
         author: None,
     });
 
-    let (body, is_structured) = create_request(&qwen_details(), query(events, vec![])).unwrap();
+    let (body, is_structured, _) = create_request(&qwen_details(), query(events, vec![])).unwrap();
 
     assert!(is_structured);
     assert_eq!(
@@ -250,7 +250,7 @@ fn create_request_keeps_assistant_history() {
     events.extend([ConversationEvent::now(ChatResponse::message("Hello!"))]);
     let events = events.with_turn("Again");
 
-    let (body, _) = create_request(&qwen_details(), query(events, vec![])).unwrap();
+    let (body, ..) = create_request(&qwen_details(), query(events, vec![])).unwrap();
 
     assert_eq!(
         body["messages"],

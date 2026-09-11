@@ -474,6 +474,10 @@ pub(crate) fn provider_test_support(id: ProviderId) -> &'static dyn ProviderTest
 }
 
 #[cfg(test)]
+#[path = "provider/tool_decoding_tests.rs"]
+mod tool_decoding_tests;
+
+#[cfg(test)]
 #[path = "provider_tests.rs"]
 mod tests;
 

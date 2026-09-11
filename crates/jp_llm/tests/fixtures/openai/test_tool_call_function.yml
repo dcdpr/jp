@@ -140,7 +140,7 @@ when:
         },
         {
           "type": "function_call",
-          "arguments": "{\"bar\":\"foo\",\"foo\":null}",
+          "arguments": "{\"bar\":\"foo\"}",
           "call_id": "call_k1aQ5FWRSWz5hRS1bGVOAyQa",
           "id": null,
           "name": "run_me",

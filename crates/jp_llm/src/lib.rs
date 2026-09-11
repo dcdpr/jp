@@ -1,4 +1,5 @@
 pub mod credential;
+pub mod decoding;
 pub mod error;
 pub mod event;
 pub mod event_builder;
