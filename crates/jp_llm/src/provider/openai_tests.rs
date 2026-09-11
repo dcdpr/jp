@@ -1531,7 +1531,7 @@ mod synthesize_non_streaming_output_item_events {
     use serde_json::{Map, json};
 
     use super::super::{
-        ENCRYPTED_CONTENT_KEY, ITEM_ID_KEY, PHASE_KEY, map_event,
+        ENCRYPTED_CONTENT_KEY, ITEM_ID_KEY, PHASE_KEY, ReasoningState, map_event,
         synthesize_non_streaming_output_item_events,
     };
     use crate::event::Event;
@@ -1546,9 +1546,10 @@ mod synthesize_non_streaming_output_item_events {
         is_structured: bool,
         reasoning_enabled: bool,
     ) -> Vec<Event> {
+        let mut reasoning = ReasoningState::default();
         synthesize_non_streaming_output_item_events(index, item)
             .into_iter()
-            .flat_map(|event| map_event(event, is_structured, reasoning_enabled))
+            .flat_map(|event| map_event(event, is_structured, reasoning_enabled, &mut reasoning))
             .collect::<std::result::Result<Vec<_>, _>>()
             .unwrap()
     }
@@ -1718,17 +1719,33 @@ mod synthesize_non_streaming_output_item_events {
 }
 
 mod map_event {
+    use jp_conversation::event::ChatResponse;
     use openai_responses::types;
-    use serde_json::json;
+    use serde_json::{Map, json};
 
-    use super::super::map_event;
-    use crate::event::Event;
+    use super::super::{ENCRYPTED_CONTENT_KEY, ITEM_ID_KEY, ReasoningState, map_event};
+    use crate::{event::Event, event_builder::EventBuilder};
 
     fn collect(event: types::Event) -> Vec<Event> {
-        map_event(event, false, true)
+        collect_sequence([event])
+    }
+
+    fn collect_sequence(events: impl IntoIterator<Item = types::Event>) -> Vec<Event> {
+        let mut reasoning = ReasoningState::default();
+        events
             .into_iter()
-            .map(Result::unwrap)
-            .collect()
+            .flat_map(|event| map_event(event, false, true, &mut reasoning))
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    fn reasoning_delta(index: u64, text: &str) -> types::Event {
+        types::Event::ReasoningSummaryTextDelta {
+            output_index: index,
+            item_id: format!("rs_{index}"),
+            summary_index: 0,
+            delta: text.to_owned(),
+        }
     }
 
     #[test]
@@ -1782,6 +1799,217 @@ mod map_event {
     }
 
     #[test]
+    fn consecutive_reasoning_items_preserve_separators_in_stored_content() {
+        let wire_events: Vec<types::Event> = serde_json::from_value(json!([
+            {"type": "response.output_item.added", "output_index": 0,
+             "item": {"type": "reasoning", "id": "rs_123", "summary": []}},
+            {"type": "response.reasoning_summary_part.added", "output_index": 0,
+             "item_id": "rs_123", "summary_index": 0,
+             "part": {"type": "summary_text", "text": ""}},
+            {"type": "response.reasoning_summary_text.delta", "output_index": 0,
+             "item_id": "rs_123", "summary_index": 0, "delta": "**First"},
+            {"type": "response.reasoning_summary_text.delta", "output_index": 0,
+             "item_id": "rs_123", "summary_index": 0, "delta": " section**"},
+            {"type": "response.reasoning_summary_part.added", "output_index": 0,
+             "item_id": "rs_123", "summary_index": 1,
+             "part": {"type": "summary_text", "text": ""}},
+            {"type": "response.reasoning_summary_text.delta", "output_index": 0,
+             "item_id": "rs_123", "summary_index": 1, "delta": "**Second section**"},
+            {"type": "response.reasoning_summary_text.done", "output_index": 0,
+             "item_id": "rs_123", "summary_index": 1, "text": "**Second section**"},
+            {"type": "response.reasoning_summary_part.done", "output_index": 0,
+             "item_id": "rs_123", "summary_index": 1,
+             "part": {"type": "summary_text", "text": "**Second section**"}},
+            {"type": "response.output_item.done", "output_index": 0,
+             "item": {"type": "reasoning", "id": "rs_123", "encrypted_content": "enc1",
+                      "summary": [{"type": "summary_text", "text": "**First section**"},
+                                  {"type": "summary_text", "text": "**Second section**"}]}},
+            {"type": "response.output_item.added", "output_index": 1,
+             "item": {"type": "reasoning", "id": "rs_456", "summary": []}},
+            {"type": "response.reasoning_summary_part.added", "output_index": 1,
+             "item_id": "rs_456", "summary_index": 0,
+             "part": {"type": "summary_text", "text": ""}},
+            {"type": "response.reasoning_summary_text.delta", "output_index": 1,
+             "item_id": "rs_456", "summary_index": 0, "delta": "**Third section**"},
+            {"type": "response.output_item.done", "output_index": 1,
+             "item": {"type": "reasoning", "id": "rs_456", "encrypted_content": "enc2",
+                      "summary": [{"type": "summary_text", "text": "**Third section**"}]}}
+        ]))
+        .unwrap();
+        let events = collect_sequence(wire_events);
+
+        assert_eq!(events, vec![
+            Event::reasoning(0, ""),
+            Event::reasoning(0, "**First"),
+            Event::reasoning(0, " section**"),
+            Event::reasoning(0, "\n\n"),
+            Event::reasoning(0, "**Second section**"),
+            Event::flush_with_metadata(
+                0,
+                Map::from_iter([
+                    (ITEM_ID_KEY.to_owned(), "rs_123".into()),
+                    (ENCRYPTED_CONTENT_KEY.to_owned(), "enc1".into()),
+                ])
+            ),
+            Event::reasoning(1, ""),
+            Event::reasoning(1, "\n\n**Third section**"),
+            Event::flush_with_metadata(
+                1,
+                Map::from_iter([
+                    (ITEM_ID_KEY.to_owned(), "rs_456".into()),
+                    (ENCRYPTED_CONTENT_KEY.to_owned(), "enc2".into()),
+                ])
+            ),
+        ]);
+
+        let mut builder = EventBuilder::new();
+        let mut stored = vec![];
+        for event in events {
+            match event {
+                Event::Part {
+                    index,
+                    part,
+                    metadata,
+                } => builder.handle_part(index, part, metadata),
+                Event::Flush { index, metadata } => {
+                    stored.push(
+                        builder
+                            .handle_flush(index, metadata)
+                            .unwrap()
+                            .into_chat_response()
+                            .unwrap(),
+                    );
+                }
+                event => panic!("Unexpected event: {event:?}"),
+            }
+        }
+        assert_eq!(stored, vec![
+            ChatResponse::reasoning("**First section**\n\n**Second section**"),
+            ChatResponse::reasoning("\n\n**Third section**"),
+        ]);
+    }
+
+    #[test]
+    fn cross_item_separator_accounts_for_existing_newlines() {
+        for (first, next, expected) in [
+            ("First", "Next", "\n\nNext"),
+            ("First\n", "Next", "\nNext"),
+            ("First\n\n", "Next", "Next"),
+            ("First", "\nNext", "\n\nNext"),
+            ("First\n", "\nNext", "\nNext"),
+            ("First", "\n\nNext", "\n\nNext"),
+            ("First\r\n\r\n", "Next", "Next"),
+            ("First\n \n", "Next", "Next"),
+        ] {
+            let events = collect_sequence([reasoning_delta(0, first), reasoning_delta(1, next)]);
+            assert_eq!(events, vec![
+                Event::reasoning(0, first),
+                Event::reasoning(1, expected)
+            ]);
+        }
+    }
+
+    #[test]
+    fn cross_item_separator_survives_empty_items_and_split_whitespace() {
+        let events = collect_sequence([
+            reasoning_delta(0, "First"),
+            reasoning_delta(1, ""),
+            reasoning_delta(2, "\n"),
+            reasoning_delta(2, ""),
+            reasoning_delta(2, "Next"),
+            reasoning_delta(2, " chunk"),
+            reasoning_delta(3, "\n"),
+            reasoning_delta(3, "\n"),
+            reasoning_delta(3, "Last"),
+        ]);
+        assert_eq!(events, vec![
+            Event::reasoning(0, "First"),
+            Event::reasoning(1, ""),
+            Event::reasoning(2, "\n"),
+            Event::reasoning(2, ""),
+            Event::reasoning(2, "\nNext"),
+            Event::reasoning(2, " chunk"),
+            Event::reasoning(3, "\n"),
+            Event::reasoning(3, "\n"),
+            Event::reasoning(3, "Last"),
+        ]);
+    }
+
+    #[test]
+    fn message_and_tool_boundaries_discard_pending_reasoning_separation() {
+        for (item, expected) in [
+            (
+                json!({
+                    "type": "message", "id": "msg_123", "status": "in_progress",
+                    "role": "assistant", "content": []
+                }),
+                Event::message(1, ""),
+            ),
+            (
+                json!({
+                    "type": "function_call", "id": "fc_123", "call_id": "call_123",
+                    "name": "run_me", "arguments": "", "status": "in_progress"
+                }),
+                Event::tool_call_start(1, "call_123", "run_me"),
+            ),
+        ] {
+            let events = collect_sequence([
+                reasoning_delta(0, "First"),
+                types::Event::OutputItemAdded {
+                    output_index: 1,
+                    item: serde_json::from_value(item).unwrap(),
+                },
+                reasoning_delta(2, "Next"),
+            ]);
+            assert_eq!(events, vec![
+                Event::reasoning(0, "First"),
+                expected,
+                Event::reasoning(2, "Next")
+            ]);
+        }
+    }
+
+    #[test]
+    fn reasoning_item_done_emits_only_flush() {
+        for text in ["**Heading**", "**Heading**\n", "**Heading**\n\n", "", " \n"] {
+            let events = collect(types::Event::OutputItemDone {
+                output_index: 0,
+                item: serde_json::from_value(json!({
+                    "type": "reasoning", "id": "rs_123", "encrypted_content": "enc",
+                    "summary": [{"type": "summary_text", "text": text}]
+                }))
+                .unwrap(),
+            });
+            let expected = vec![Event::flush_with_metadata(
+                0,
+                Map::from_iter([
+                    (ITEM_ID_KEY.to_owned(), "rs_123".into()),
+                    (ENCRYPTED_CONTENT_KEY.to_owned(), "enc".into()),
+                ]),
+            )];
+            assert_eq!(events, expected, "summary text: {text:?}");
+        }
+    }
+
+    #[test]
+    fn reasoning_item_done_is_skipped_when_reasoning_is_disabled() {
+        let events = map_event(
+            types::Event::OutputItemDone {
+                output_index: 0,
+                item: serde_json::from_value(json!({
+                    "type": "reasoning", "id": "rs_123", "encrypted_content": "enc",
+                    "summary": [{"type": "summary_text", "text": "**Heading**"}]
+                }))
+                .unwrap(),
+            },
+            false,
+            false,
+            &mut ReasoningState::default(),
+        );
+        assert!(events.is_empty());
+    }
+
+    #[test]
     fn first_reasoning_summary_part_emits_no_break() {
         let events = collect(types::Event::ReasoningSummaryPartAdded {
             item_id: "rs_123".to_owned(),
@@ -1804,6 +2032,7 @@ mod map_event {
             },
             false,
             false,
+            &mut ReasoningState::default(),
         );
 
         assert!(events.is_empty());
@@ -1825,6 +2054,91 @@ mod map_event {
         });
 
         assert_eq!(events, vec![Event::flush(2)]);
+    }
+}
+
+mod map_non_streaming_response {
+    use openai_responses::types::{self, response::Response};
+    use serde_json::{Map, json};
+
+    use super::super::{
+        ENCRYPTED_CONTENT_KEY, ITEM_ID_KEY, ReasoningState, map_event, map_non_streaming_response,
+    };
+    use crate::event::{Event, FinishReason};
+
+    fn response() -> Response {
+        serde_json::from_value(json!({
+            "id": "resp_123", "created_at": 1_577_836_800, "status": "completed",
+            "model": "gpt-6-astra", "metadata": {}, "parallel_tool_calls": true,
+            "reasoning": {}, "temperature": 1.0, "text": {"format": {"type": "text"}},
+            "tool_choice": "auto", "tools": [], "top_p": 1.0, "truncation": "disabled", "store": false,
+            "output": [
+                {"type": "reasoning", "id": "rs_0", "encrypted_content": "enc0",
+                 "summary": [{"type": "summary_text", "text": "First"}]},
+                {"type": "reasoning", "id": "rs_1", "encrypted_content": "enc1", "summary": []},
+                {"type": "reasoning", "id": "rs_2", "encrypted_content": "enc2",
+                 "summary": [{"type": "summary_text", "text": "Next"}]}
+            ]
+        })).unwrap()
+    }
+
+    #[test]
+    fn consecutive_items_share_state_across_non_streaming_output() {
+        let events = map_non_streaming_response(response(), false, true).unwrap();
+        assert_eq!(events, vec![
+            Event::reasoning(0, ""),
+            Event::reasoning(0, "First"),
+            Event::flush_with_metadata(
+                0,
+                Map::from_iter([
+                    (ITEM_ID_KEY.to_owned(), "rs_0".into()),
+                    (ENCRYPTED_CONTENT_KEY.to_owned(), "enc0".into()),
+                ])
+            ),
+            Event::reasoning(1, ""),
+            Event::flush_with_metadata(
+                1,
+                Map::from_iter([
+                    (ITEM_ID_KEY.to_owned(), "rs_1".into()),
+                    (ENCRYPTED_CONTENT_KEY.to_owned(), "enc1".into()),
+                ])
+            ),
+            Event::reasoning(2, ""),
+            Event::reasoning(2, "\n\nNext"),
+            Event::flush_with_metadata(
+                2,
+                Map::from_iter([
+                    (ITEM_ID_KEY.to_owned(), "rs_2".into()),
+                    (ENCRYPTED_CONTENT_KEY.to_owned(), "enc2".into()),
+                ])
+            ),
+            Event::Finished(FinishReason::Completed),
+        ]);
+    }
+
+    #[test]
+    fn terminal_event_discards_pending_reasoning_separation() {
+        let mut reasoning = ReasoningState::default();
+        assert_eq!(
+            reasoning.delta(0, "First".into()),
+            Event::reasoning(0, "First")
+        );
+        let events = map_event(
+            types::Event::ResponseCompleted {
+                response: response(),
+            },
+            false,
+            true,
+            &mut reasoning,
+        );
+        assert_eq!(
+            events.into_iter().collect::<Result<Vec<_>, _>>().unwrap(),
+            vec![Event::Finished(FinishReason::Completed)]
+        );
+        assert_eq!(
+            reasoning.delta(1, "Next".into()),
+            Event::reasoning(1, "Next")
+        );
     }
 }
 

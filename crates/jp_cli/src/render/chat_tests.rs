@@ -562,6 +562,110 @@ fn test_consecutive_reasoning_events_form_one_region() {
     );
 }
 
+#[test]
+fn reasoning_terminator_does_not_add_spacing_at_end_of_stream() {
+    for (terminator, background) in [
+        ("", None),
+        ("\n\n", None),
+        ("", Some(Color::Ansi256(236))),
+        ("\n\n", Some(Color::Ansi256(236))),
+    ] {
+        let mut config = AppConfig::new_test();
+        config.style.reasoning.display = ReasoningDisplayConfig::Full;
+        config.style.reasoning.background = background;
+        let (mut renderer, out, err) = create_renderer_with_config(config);
+
+        renderer.render_response(&ChatResponse::reasoning("**Heading**\n\nBody."));
+        renderer.render_response(&ChatResponse::reasoning(terminator));
+        renderer.flush();
+        renderer.printer.flush();
+
+        assert_eq!(strip_ansi(&out.lock()), "**Heading**\n\nBody.\n\n");
+        assert_eq!(*err.lock(), "");
+    }
+}
+
+#[test]
+fn reasoning_terminator_does_not_add_spacing_before_message() {
+    for (terminator, background) in [
+        ("", None),
+        ("\n\n", None),
+        ("", Some(Color::Ansi256(236))),
+        ("\n\n", Some(Color::Ansi256(236))),
+    ] {
+        let mut config = AppConfig::new_test();
+        config.style.reasoning.display = ReasoningDisplayConfig::Full;
+        config.style.reasoning.background = background;
+        let (mut renderer, out, err) = create_renderer_with_config(config);
+
+        renderer.render_response(&ChatResponse::reasoning("**Heading**\n\nBody."));
+        renderer.render_response(&ChatResponse::reasoning(terminator));
+        renderer.render_response(&ChatResponse::message("Answer."));
+        renderer.flush();
+        renderer.printer.flush();
+
+        assert_eq!(
+            strip_ansi(&out.lock()),
+            "**Heading**\n\nBody.\n\nAnswer.\n\n"
+        );
+        assert_eq!(*err.lock(), "");
+    }
+}
+
+#[test]
+fn reasoning_terminator_does_not_add_spacing_at_tool_boundary() {
+    for (terminator, background) in [
+        ("", None),
+        ("\n\n", None),
+        ("", Some(Color::Ansi256(236))),
+        ("\n\n", Some(Color::Ansi256(236))),
+    ] {
+        let mut config = AppConfig::new_test();
+        config.style.reasoning.display = ReasoningDisplayConfig::Full;
+        config.style.reasoning.background = background;
+        let (mut renderer, out, err) = create_renderer_with_config(config);
+
+        renderer.render_response(&ChatResponse::reasoning("**Heading**\n\nBody."));
+        renderer.render_response(&ChatResponse::reasoning(terminator));
+        renderer.enter_tool_call();
+        renderer.flush();
+        renderer.printer.flush();
+
+        assert_eq!(strip_ansi(&out.lock()), "**Heading**\n\nBody.\n\n");
+        assert_eq!(*err.lock(), "");
+    }
+}
+
+#[test]
+fn reasoning_terminator_consumes_truncation_budget() {
+    // The renderer counts all input characters, including provider-inserted
+    // newlines. Adding a terminator can exhaust the budget even when the
+    // visible text fits; the renderer cannot distinguish it from model text.
+    for (terminator, expected) in [
+        ("", "Think\n\nAnswer.\n\n"),
+        ("\n\n", "Think ...\n\nAnswer.\n\n"),
+    ] {
+        let mut config = AppConfig::new_test();
+        config.style.reasoning.display =
+            ReasoningDisplayConfig::Truncate(TruncateChars { characters: 6 });
+        config.style.reasoning.background = None;
+        let (mut renderer, out, err) = create_renderer_with_config(config);
+
+        renderer.render_response(&ChatResponse::reasoning("Think"));
+        renderer.render_response(&ChatResponse::reasoning(terminator));
+        renderer.render_response(&ChatResponse::message("Answer."));
+        renderer.flush();
+        renderer.printer.flush();
+
+        assert_eq!(
+            strip_ansi(&out.lock()),
+            expected,
+            "terminator: {terminator:?}"
+        );
+        assert_eq!(*err.lock(), "");
+    }
+}
+
 /// A provider-supplied blank line splits one reasoning region into two blocks.
 ///
 /// This is the channel a provider uses to segment reasoning it delivers as one
