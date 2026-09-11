@@ -1,5 +1,6 @@
 ---
 source: crates/jp_test/src/mock.rs
+assertion_line: 134
 expression: v
 ---
 [
@@ -24,6 +25,7 @@ expression: v
                 Start {
                     id: "toolu_01Uo9BabQqLmAaDofViBHLT3",
                     name: "list_items",
+                    decoding: None,
                 },
             ),
             metadata: {},
@@ -61,6 +63,7 @@ expression: v
                 Start {
                     id: "toolu_01KpNDwzcdeVXYC3VR9x8Rcu",
                     name: "search_items",
+                    decoding: None,
                 },
             ),
             metadata: {},

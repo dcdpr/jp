@@ -38,7 +38,11 @@ use crate::{
     provider::trace_to_tmpfile,
     query::ChatQuery,
     stream::with_tool_call_keepalive,
-    tool::{ToolDefinition, json_schema},
+    tool::{
+        ToolDefinition,
+        decoding::{ArgumentDecoders, ArgumentDecoding},
+        json_schema,
+    },
 };
 
 static PROVIDER: ProviderId = ProviderId::Openai;
@@ -123,13 +127,15 @@ impl Provider for Openai {
         model: &ModelDetails,
         query: ChatQuery,
     ) -> Result<EventStream> {
-        let (request, is_structured, reasoning_enabled) = create_request(model, query)?;
+        let (request, is_structured, reasoning_enabled, decoders) = create_request(model, query)?;
 
         if model.features.contains(&STREAMING_UNSUPPORTED) {
             let response = self.client.create(request).await??;
             let events = map_non_streaming_response(response, is_structured, reasoning_enabled)?;
 
-            return Ok(stream::iter(events.into_iter().map(Ok::<_, StreamError>)).boxed());
+            return Ok(
+                decoders.attach(stream::iter(events.into_iter().map(Ok::<_, StreamError>)).boxed())
+            );
         }
 
         let raw_stream = self
@@ -141,10 +147,10 @@ impl Provider for Openai {
             .try_flatten()
             .boxed();
 
-        Ok(with_tool_call_keepalive(
+        Ok(decoders.attach(with_tool_call_keepalive(
             raw_stream,
             TOOL_CALL_KEEPALIVE_INTERVAL,
-        ))
+        )))
     }
 }
 
@@ -346,9 +352,13 @@ impl Openai {
 
 /// Create a request for the given model and query details.
 ///
-/// Returns `(request, is_structured, reasoning_enabled)`.
+/// Returns the request, structured-output and reasoning flags, and tool
+/// argument decoding plans.
 #[expect(clippy::too_many_lines)]
-fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bool, bool)> {
+fn create_request(
+    model: &ModelDetails,
+    query: ChatQuery,
+) -> Result<(Request, bool, bool, ArgumentDecoders)> {
     let ChatQuery {
         thread,
         tools,
@@ -572,13 +582,14 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bo
     };
 
     messages.extend(convert_events(parts.events));
+    let (tools, decoders) = convert_tools(tools);
     let request = Request {
         model: types::Model::Other(model.id.name.to_string()),
         input: types::Input::List(messages),
         include: reasoning_enabled.then_some(vec![Include::ReasoningEncryptedContent]),
         store: Some(false),
         tool_choice: Some(convert_tool_choice(tool_choice)),
-        tools: Some(convert_tools(tools)),
+        tools: Some(tools),
         temperature,
         reasoning,
         max_output_tokens: parameters.max_tokens.map(Into::into),
@@ -614,7 +625,7 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bo
         "Request payload."
     );
 
-    Ok((request, is_structured, reasoning_enabled))
+    Ok((request, is_structured, reasoning_enabled, decoders))
 }
 
 #[expect(clippy::too_many_lines)]
@@ -1687,10 +1698,22 @@ fn ensure_strict_schema(schema: &mut Value) {
     process_strict(schema, &root);
 }
 
-fn process_strict(schema: &mut Value, root: &Value) {
+#[expect(
+    clippy::too_many_lines,
+    reason = "schema rewriting and its decoding instructions share one traversal"
+)]
+fn process_strict(schema: &mut Value, root: &Value) -> ArgumentDecoding {
     let Value::Object(map) = schema else {
-        return;
+        return ArgumentDecoding::default();
     };
+    let mut decoding = ArgumentDecoding::default();
+    // Decoding references and general composition needs a branch-aware schema
+    // walk (T-0h28vbn). Leave those arguments untouched to avoid deleting nulls
+    // accepted by the source schema.
+    let skip_decoding = ["$ref", "allOf", "oneOf"]
+        .iter()
+        .any(|key| map.contains_key(*key))
+        || map.get("anyOf").is_some_and(|v| !is_nullable_pair(v));
 
     // 1. Recurse into $defs / definitions.
     for key in ["$defs", "definitions"] {
@@ -1734,7 +1757,12 @@ fn process_strict(schema: &mut Value, root: &Value) {
             if let Some(Value::Object(props)) = map.get_mut("properties") {
                 for key in &newly_required {
                     if let Some(prop_schema) = props.get_mut(key) {
-                        make_schema_nullable(prop_schema);
+                        let can_decode = ["$ref", "allOf", "anyOf", "oneOf"]
+                            .iter()
+                            .all(|key| prop_schema.get(*key).is_none());
+                        if make_schema_nullable(prop_schema) && can_decode {
+                            decoding.omit_null.push(key.clone());
+                        }
                     }
                 }
             }
@@ -1743,16 +1771,27 @@ fn process_strict(schema: &mut Value, root: &Value) {
 
     // 3. Recurse into property values, items, and anyOf variants.
     if let Some(Value::Object(props)) = map.get_mut("properties") {
-        for prop_schema in props.values_mut() {
-            process_strict(prop_schema, root);
+        for (name, prop_schema) in props {
+            let plan = process_strict(prop_schema, root);
+            if !plan.is_empty() {
+                decoding.properties.insert(name.clone(), plan);
+            }
         }
     }
     if let Some(items) = map.get_mut("items") {
-        process_strict(items, root);
+        let plan = process_strict(items, root);
+        if !plan.is_empty() {
+            decoding.items = Some(Box::new(plan));
+        }
     }
     if let Some(Value::Array(variants)) = map.get_mut("anyOf") {
         for variant in variants.iter_mut() {
-            process_strict(variant, root);
+            let plan = process_strict(variant, root);
+            if !skip_decoding {
+                decoding.omit_null.extend(plan.omit_null);
+                decoding.properties.extend(plan.properties);
+                decoding.items = decoding.items.or(plan.items);
+            }
         }
     }
 
@@ -1792,11 +1831,29 @@ fn process_strict(schema: &mut Value, root: &Value) {
             *map = merged;
             // Re-run on the inlined result.
             process_strict(schema, root);
-            return;
+            return ArgumentDecoding::default();
         }
         // Failed to resolve — put it back.
         map.insert("$ref".to_owned(), Value::String(ref_path));
     }
+    if skip_decoding {
+        return ArgumentDecoding::default();
+    }
+    decoding
+}
+
+// A schema paired with bare null needs no branch selection for object or array
+// values. This includes the wrappers introduced by make_schema_nullable.
+fn is_nullable_pair(value: &Value) -> bool {
+    let Some(variants) = value.as_array() else {
+        return false;
+    };
+    variants.len() == 2
+        && variants.iter().any(|v| {
+            v.as_object().is_some_and(|m| {
+                m.len() == 1 && m.get("type").and_then(Value::as_str) == Some("null")
+            })
+        })
 }
 
 /// Resolve a JSON pointer against the root schema.
@@ -1834,6 +1891,14 @@ fn convert_tool_choice(choice: ToolChoice) -> types::ToolChoice {
 ///
 /// See: <https://platform.openai.com/docs/guides/function-calling#strict-mode>
 pub(crate) fn parameters_with_strict_mode(parameters: &Value, strict: bool) -> Map<String, Value> {
+    parameters_with_decoding(parameters, strict).0
+}
+
+/// Encode parameters and retain the instructions for restoring omissions.
+pub(crate) fn parameters_with_decoding(
+    parameters: &Value,
+    strict: bool,
+) -> (Map<String, Value>, ArgumentDecoding) {
     let mut document = parameters.as_object().cloned().unwrap_or_default();
 
     document.insert("type".to_owned(), "object".into());
@@ -1846,12 +1911,13 @@ pub(crate) fn parameters_with_strict_mode(parameters: &Value, strict: bool) -> M
     document.insert("additionalProperties".to_owned(), (!strict).into());
 
     if !strict {
-        return document;
+        return (document, ArgumentDecoding::default());
     }
 
     let mut document = Value::Object(document);
-    ensure_strict_schema(&mut document);
-    document.as_object().cloned().unwrap_or_default()
+    let root = document.clone();
+    let decoding = process_strict(&mut document, &root);
+    (document.as_object().cloned().unwrap_or_default(), decoding)
 }
 
 /// Check whether a JSON schema `type` value includes `"object"`.
@@ -1891,15 +1957,16 @@ const NULLABLE_OUTER_KEYS: &[&str] = &["description", "title", "default", "examp
 ///
 /// Idempotent: a schema that's already nullable (via either encoding) is
 /// returned unchanged.
-fn make_schema_nullable(schema: &mut Value) {
+/// Returns whether nullability was injected.
+fn make_schema_nullable(schema: &mut Value) -> bool {
     let Value::Object(map) = schema else {
-        return;
+        return false;
     };
 
     let Some(type_val) = map.get("type").cloned() else {
         // No `type` key — could be `anyOf` (already nullable) or `$ref`.
         // Nothing for us to inject here.
-        return;
+        return false;
     };
 
     let already_nullable = match &type_val {
@@ -1908,7 +1975,7 @@ fn make_schema_nullable(schema: &mut Value) {
         _ => false,
     };
     if already_nullable {
-        return;
+        return false;
     }
 
     let is_structured = |t: &str| matches!(t, "array" | "object");
@@ -1930,9 +1997,9 @@ fn make_schema_nullable(schema: &mut Value) {
                 arr.push("null".into());
                 map.insert("type".to_owned(), Value::Array(arr));
             }
-            _ => {}
+            _ => return false,
         }
-        return;
+        return true;
     }
 
     // Structured: split the schema into a typed variant (everything
@@ -1951,10 +2018,12 @@ fn make_schema_nullable(schema: &mut Value) {
             Value::Object(Map::from_iter([("type".to_owned(), "null".into())])),
         ]),
     );
+    true
 }
 
-fn convert_tools(tools: Vec<ToolDefinition>) -> Vec<types::Tool> {
-    tools
+fn convert_tools(tools: Vec<ToolDefinition>) -> (Vec<types::Tool>, ArgumentDecoders) {
+    let mut decoders = ArgumentDecoders::default();
+    let tools = tools
         .into_iter()
         .map(|tool| {
             // The strict subset requires a type on every property, which a
@@ -1963,15 +2032,18 @@ fn convert_tools(tools: Vec<ToolDefinition>) -> Vec<types::Tool> {
             // sending it strict costs the whole request, and every other tool
             // in it.
             let strict = !json_schema::has_unconstrained_node(&tool.parameters);
+            let (parameters, decoding) = parameters_with_decoding(&tool.parameters, strict);
+            decoders.insert(&tool.name, decoding);
 
             types::Tool::Function {
                 name: tool.name,
                 strict,
                 description: tool.docs.schema_description().map(str::to_owned),
-                parameters: parameters_with_strict_mode(&tool.parameters, strict).into(),
+                parameters: parameters.into(),
             }
         })
-        .collect()
+        .collect();
+    (tools, decoders)
 }
 
 /// Parse an OpenAI reasoning execution mode value (`standard` or `pro`).

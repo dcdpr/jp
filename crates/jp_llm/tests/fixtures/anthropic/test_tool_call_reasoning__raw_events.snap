@@ -1,5 +1,6 @@
 ---
 source: crates/jp_test/src/mock.rs
+assertion_line: 134
 expression: v
 ---
 [
@@ -129,6 +130,7 @@ expression: v
                 Start {
                     id: "toolu_01R35dJ1FaGkcNPmGqF2NfSA",
                     name: "run_me",
+                    decoding: None,
                 },
             ),
             metadata: {},

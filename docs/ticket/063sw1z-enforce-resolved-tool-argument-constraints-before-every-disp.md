@@ -39,3 +39,25 @@ Acceptance criteria:
 - Add tests using invalid calls taken from the Cerebras, Google, and llama.cpp
   fixtures.
 - Add tests proving MCP and built-in parameter overrides are enforced.
+
+## Comments
+
+-----
+
+- **From**: jp
+- **Date**: 2026-09-11T09:24:02Z
+
+Implemented the strict-provider omission-decoding portion in the working tree:
+request-local plans are produced by schema conversion, attached to transient
+tool-call starts, and consumed by EventBuilder before constructing
+ToolCallRequest.
+OpenAI (streaming and non-streaming), OpenRouter, and llama.cpp are wired.
+Source-nullable values and required properties are preserved; no generic null
+repair or MCP default injection was added.
+
+Reference and general composition decoding remains explicitly deferred to
+T-0h28vbn.
+Shared dispatch validation and default-policy work in this ticket remain open.
+
+The new decoding tests were observed failing before the fix and pass after it.
+Existing strict-schema, event-builder, and CLI turn-loop tests pass.

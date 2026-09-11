@@ -328,7 +328,7 @@ mod convert_tools {
 
     /// One converted tool, as it goes on the wire.
     fn converted(parameters: serde_json::Value) -> serde_json::Value {
-        let tools = convert_tools(vec![ToolDefinition {
+        let (tools, _) = convert_tools(vec![ToolDefinition {
             name: "store".to_owned(),
             docs: ToolDocs::default(),
             parameters,
