@@ -19,7 +19,7 @@ description: "Source: doc-inline"
         content: "Subscripts such as H~2~O and superscripts such as x^2^ round out the inline set\nthat this renderer has enabled, and they should survive word-wrapping intact.\n\n",
         indent: 0,
     },
-    Block {
+    Flush {
         content: "[gfm]: https://github.github.com/gfm/\n",
         indent: 0,
     },
