@@ -96,10 +96,15 @@ impl Snapshot {
     /// The spent window, if either is spent.
     #[must_use]
     pub fn spent(&self) -> Option<&Window> {
+        self.spent_windows().next()
+    }
+
+    /// Every spent window of this family, in report order.
+    pub fn spent_windows(&self) -> impl Iterator<Item = &Window> {
         [self.primary.as_ref(), self.secondary.as_ref()]
             .into_iter()
             .flatten()
-            .find(|window| window.is_spent())
+            .filter(|window| window.is_spent())
     }
 
     /// The fullest window worth warning about, if any.
@@ -135,6 +140,7 @@ pub fn apply(error: &mut StreamError, headers: &HeaderMap) {
     error.kind = StreamErrorKind::SubscriptionExhausted;
     error.quota_scope = Some(snapshot.scope());
     error.quota_reset = window.resets_at;
+    error.quota_spent_windows = snapshot.spent_windows().count();
 }
 
 /// The account-wide cooldown scope.

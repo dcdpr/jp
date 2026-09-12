@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, sync::Arc};
 
 use chrono::TimeZone as _;
-use jp_credentials::{InMemoryCredentialBackend, MAX_COOLDOWN};
+use jp_credentials::{DEFAULT_COOLDOWN, InMemoryCredentialBackend, MAX_COOLDOWN};
 use jp_storage::resource_lock::InMemoryResourceLocker;
 
 use super::*;
@@ -38,6 +38,18 @@ fn token_credential(token: &str) -> StoredCredential {
         cooldowns: BTreeMap::new(),
         needs_relogin: false,
     }
+}
+
+/// The profile's account-scoped cooldown, as stored.
+fn cooldown(store: &CredentialStore, profile: &str) -> Option<DateTime<Utc>> {
+    store
+        .load()
+        .unwrap()
+        .profiles(CATEGORY_LLM, PROVIDER_OPENAI)?
+        .get(profile)?
+        .cooldowns
+        .get(SCOPE_ACCOUNT)
+        .copied()
 }
 
 fn insert(store: &CredentialStore, profile: &str, credential: &StoredCredential) {
@@ -416,6 +428,7 @@ async fn test_advance_without_a_selected_entry_is_terminal() {
         &StreamError::auth_rejected("refused"),
         "gpt-5.6",
         now(),
+        false,
     )
     .await;
 
@@ -439,6 +452,7 @@ async fn test_advance_records_relogin_and_moves_to_the_next_entry() {
         &StreamError::auth_rejected("token revoked"),
         "gpt-5.6",
         now(),
+        false,
     )
     .await
     .unwrap();
@@ -479,6 +493,7 @@ async fn test_advance_records_a_cooldown_for_an_exhausted_profile() {
         &StreamError::new(StreamErrorKind::SubscriptionExhausted, "limit reached"),
         "gpt-5.6",
         now(),
+        false,
     )
     .await
     .unwrap();
@@ -497,6 +512,86 @@ async fn test_advance_records_a_cooldown_for_an_exhausted_profile() {
         stored.cooldowns
     );
     assert!(!stored.needs_relogin);
+}
+
+/// Without a redemption, the reported reset is the best evidence there is, so
+/// the profile stays out until the window it names reopens.
+#[tokio::test]
+async fn test_advance_records_the_reported_reset_for_an_exhausted_window() {
+    let store = store();
+    insert(&store, "only", &token_credential("bearer-1"));
+
+    let reset = now() + chrono::TimeDelta::hours(5);
+    let mut error = StreamError::new(StreamErrorKind::SubscriptionExhausted, "limit reached");
+    error.quota_reset = Some(reset);
+
+    advance(
+        &config(vec![AuthEntry::Subscription(Some("only".to_owned()))]),
+        Some(&store),
+        &AuthEntry::Subscription(Some("only".to_owned())),
+        &error,
+        "gpt-5.6",
+        now(),
+        false,
+    )
+    .await;
+
+    assert_eq!(cooldown(&store, "only"), Some(reset));
+}
+
+/// The turn already spent a reset credit against this profile, so the usage
+/// state these headers describe is one JP itself just changed.
+/// Recording their reset timing would retire a profile the user can still reach
+/// for the full length of the window they named — a week, at the cap.
+#[tokio::test]
+async fn test_advance_after_a_redemption_records_only_the_short_default() {
+    let store = store();
+    insert(&store, "only", &token_credential("bearer-1"));
+
+    let mut error = StreamError::new(StreamErrorKind::SubscriptionExhausted, "limit reached");
+    error.quota_reset = Some(now() + chrono::TimeDelta::days(30));
+
+    advance(
+        &config(vec![AuthEntry::Subscription(Some("only".to_owned()))]),
+        Some(&store),
+        &AuthEntry::Subscription(Some("only".to_owned())),
+        &error,
+        "gpt-5.6",
+        now(),
+        true,
+    )
+    .await;
+
+    assert_eq!(cooldown(&store, "only"), Some(now() + DEFAULT_COOLDOWN));
+}
+
+/// A shortened cooldown must still take the spent profile out of the walk, or
+/// the chain would hand the same refused credential back.
+#[tokio::test]
+async fn test_advance_after_a_redemption_still_reaches_the_next_entry() {
+    let store = store();
+    insert(&store, "first", &token_credential("bearer-1"));
+    insert(&store, "second", &token_credential("bearer-2"));
+
+    let mut error = StreamError::new(StreamErrorKind::SubscriptionExhausted, "limit reached");
+    error.quota_reset = Some(now() + chrono::TimeDelta::days(30));
+
+    let next = advance(
+        &config(vec![
+            AuthEntry::Subscription(Some("first".to_owned())),
+            AuthEntry::Subscription(Some("second".to_owned())),
+        ]),
+        Some(&store),
+        &AuthEntry::Subscription(Some("first".to_owned())),
+        &error,
+        "gpt-5.6",
+        now(),
+        true,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(next.credential, Credential::Bearer("bearer-2".to_owned()));
 }
 
 #[tokio::test]
@@ -518,6 +613,7 @@ async fn test_advance_records_nothing_for_a_malformed_request() {
         &StreamError::other("System messages are not allowed (HTTP 400)"),
         "gpt-5.6",
         now(),
+        false,
     )
     .await;
 
@@ -548,6 +644,7 @@ async fn test_advance_records_nothing_for_a_context_window_overflow() {
         &StreamError::context_window_exceeded("prompt too long"),
         "gpt-5.6",
         now(),
+        false,
     )
     .await;
 
@@ -574,6 +671,7 @@ async fn test_advance_is_terminal_when_the_chain_has_nothing_left() {
         &StreamError::auth_rejected("token revoked"),
         "gpt-5.6",
         now(),
+        false,
     )
     .await;
 

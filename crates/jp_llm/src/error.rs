@@ -39,6 +39,16 @@ pub struct StreamError {
     /// account-wide.
     pub quota_scope: Option<String>,
 
+    /// How many of the exhausted limit's usage windows the provider reported as
+    /// spent.
+    ///
+    /// A subscription limit reports a short window and a long one.
+    /// A reset credit reopens one of them, so a request stays refused while
+    /// more than one is spent.
+    ///
+    /// `0` when the provider reported no window state at all.
+    pub quota_spent_windows: usize,
+
     /// Human-readable error message.
     message: String,
 
@@ -59,6 +69,7 @@ impl StreamError {
             retry_after: None,
             quota_reset: None,
             quota_scope: None,
+            quota_spent_windows: 0,
             source: None,
         }
     }
