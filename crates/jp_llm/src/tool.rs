@@ -17,40 +17,40 @@ use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use jp_config::conversation::tool::{RunMode, ToolConfigWithDefaults, ToolSource};
 use jp_conversation::event::{InquirySource, ToolCallRequest, ToolCallResponse};
-use jp_mcp::{Client, server::StderrSink};
+use jp_mcp::{
+    Client,
+    server::{StderrSink, service::FormatterError},
+};
 use jp_tool::{Question, ToolDefinition};
 use serde_json::{Map, Value};
 use tokio_util::sync::CancellationToken;
 
-/// Trait for tool execution, enabling mock implementations for testing.
+#[path = "tool_error.rs"]
+mod error;
+pub use error::ExecutorError;
+
+/// The MCP Host's view of a logical tool call.
 ///
-/// This trait abstracts the execution of a single tool call, allowing the
-/// `ToolCoordinator` to work with both real and mock executors.
-///
-/// # Design
-///
-/// The executor is intentionally simple - it just executes tools with given
-/// answers.
-/// All decision-making about question targets, static answers, and how to
-/// handle `NeedsInput` is done by the coordinator, which has access to the tool
-/// configuration.
+/// Preparation and approval precede release.
+/// Input and completed results return control to the Host for inquiry routing,
+/// result review, and recording.
 #[async_trait]
 pub trait Executor: Send + Sync {
     /// Prepare an invocation, or return a response resolved without execution.
     async fn prepare(
         &mut self,
         _render_arguments: bool,
-    ) -> Result<Option<ToolCallResponse>, String> {
+    ) -> Result<Option<ToolCallResponse>, ExecutorError> {
         Ok(None)
     }
 
     /// Apply Host approval and wait until the invocation is ready for release.
-    async fn approve(&mut self) -> Result<(), String> {
+    async fn approve(&mut self) -> Result<(), ExecutorError> {
         Ok(())
     }
 
     /// Custom argument rendering provided by the execution service.
-    fn formatted_arguments(&self) -> Option<&Result<String, String>> {
+    fn formatted_arguments(&self) -> Option<&Result<String, FormatterError>> {
         None
     }
 
@@ -121,13 +121,10 @@ pub trait Executor: Send + Sync {
     ) -> ExecutorResult;
 }
 
-/// Abstraction over how executors are created for tool calls.
-///
-/// This trait enables dependency injection of executor creation, allowing tests
-/// to use mock executors without executing real shell commands.
+/// Creates Host-facing tool calls and acknowledges their recorded responses.
 pub trait ExecutorSource: Send + Sync {
     /// Release a final delivery barrier after the response has been recorded.
-    fn acknowledge(&self, _response: ToolCallResponse) -> BoxFuture<'_, Result<(), String>> {
+    fn acknowledge(&self, _response: ToolCallResponse) -> BoxFuture<'_, Result<(), ExecutorError>> {
         Box::pin(async { Ok(()) })
     }
 

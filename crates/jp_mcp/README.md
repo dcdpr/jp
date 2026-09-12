@@ -35,7 +35,12 @@ Upstream stdio calls carry trusted execution context and accumulated answers
 under `_meta["computer.jp/tool"]` and `_meta["computer.jp/context"]`.
 Single text results are recognized as legacy `Outcome` envelopes when their
 shape matches.
-Mixed native content and result metadata are retained for forwarding.
+Mixed native content and result metadata are retained in `jp_tool::ToolResult`.
+Execution, Host review, and recording carry that ordered representation; the
+HTTP handler converts it back to MCP content after recording is acknowledged.
+The CLI explicitly projects it to the existing text/error conversation format.
+An unchanged review retains resources, annotations, structured content, and
+metadata; a text edit replaces the delivered content.
 
 The ordinary CLI query runner submits calls through the HTTP endpoint.
 Its executor adapter holds pending Host replies across preparation, release,
@@ -46,6 +51,10 @@ acknowledges final delivery and consumes the MCP response.
 The Host connection disables environment proxies, redirects, and transparent
 session reinitialization.
 It does not resubmit a tool call on transport failure.
+`http_client` implements rmcp's HTTP-client trait using the workspace Reqwest
+version.
+The rmcp worker owns MCP sessions and SSE resumption; the adapter does not
+implement another request retry loop.
 The HTTP endpoint has no authentication; its loopback binding and header checks
 are not a claim that the caller is a particular local application.
 

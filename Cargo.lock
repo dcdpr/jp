@@ -2613,6 +2613,7 @@ dependencies = [
  "assert_matches",
  "async-trait",
  "axum",
+ "base64",
  "camino",
  "camino-tempfile",
  "futures",

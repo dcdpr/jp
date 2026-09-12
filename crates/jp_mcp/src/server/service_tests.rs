@@ -2,6 +2,7 @@
 use std::fs;
 use std::{
     future::pending,
+    io,
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -152,17 +153,20 @@ async fn preparation_release_input_and_delivery_use_distinct_acknowledgements() 
     };
     assert_eq!(
         result,
-        Ok(r#"{"arguments":{"path":"edited"},"answer":true}"#.into())
+        ToolResult::text(r#"{"arguments":{"path":"edited"},"answer":true}"#)
     );
     assert_eq!(count.load(Ordering::SeqCst), 2);
-    reply.send(Ok(Ok("edited result".into()))).unwrap();
+    reply.send(Ok(ToolResult::text("edited result"))).unwrap();
     let Interaction::Record { result, reply, .. } = next(&mut host).await.interaction else {
         panic!("expected recording")
     };
-    assert_eq!(result, Ok("edited result".into()));
+    assert_eq!(result, ToolResult::text("edited result"));
     assert!(!call.is_finished());
     reply.send(Ok(())).unwrap();
-    assert_eq!(call.finish().await.unwrap(), Ok("edited result".into()));
+    assert_eq!(
+        call.finish().await.unwrap(),
+        ToolResult::text("edited result")
+    );
     service.shutdown().await.unwrap();
 }
 
@@ -181,9 +185,9 @@ async fn denied_call_never_executes() {
     let Interaction::Record { reply, result, .. } = next(&mut host).await.interaction else {
         panic!("expected recording")
     };
-    assert_eq!(result, Ok("denied".into()));
+    assert_eq!(result, ToolResult::text("denied"));
     reply.send(Ok(())).unwrap();
-    assert_eq!(call.finish().await.unwrap(), Ok("denied".into()));
+    assert_eq!(call.finish().await.unwrap(), ToolResult::text("denied"));
     assert_eq!(count.load(Ordering::SeqCst), 0);
 }
 
@@ -272,9 +276,13 @@ async fn failed_recording_prevents_result_delivery() {
     let Interaction::Record { reply, .. } = next(&mut host).await.interaction else {
         panic!("expected recording")
     };
-    reply.send(Err(HostError("disk full".into()))).unwrap();
+    reply
+        .send(Err(HostError::Recording(Arc::new(io::Error::other(
+            "disk full",
+        )))))
+        .unwrap();
     assert!(
-        matches!(call.finish().await, Err(ServiceError::Host(HostError(reason))) if reason == "disk full")
+        matches!(call.finish().await, Err(ServiceError::Host(HostError::Recording(source))) if source.to_string() == "disk full")
     );
     assert_eq!(count.load(Ordering::SeqCst), 2);
 }
@@ -303,7 +311,7 @@ async fn current_call_cancellation_does_not_poison_later_calls() {
     reply.send(Ok(())).unwrap();
     assert_eq!(
         second.finish().await.unwrap(),
-        Ok(r#"{"arguments":{"path":"original"},"answer":false}"#.into())
+        ToolResult::text(r#"{"arguments":{"path":"original"},"answer":false}"#)
     );
     assert_eq!(count.load(Ordering::SeqCst), 3);
 }
@@ -345,7 +353,7 @@ async fn identical_calls_have_independent_answers_and_out_of_order_delivery() {
     reply.send(Ok(())).unwrap();
     assert_eq!(
         second.finish().await.unwrap(),
-        Ok(r#"{"arguments":{"path":"original"},"answer":false}"#.into())
+        ToolResult::text(r#"{"arguments":{"path":"original"},"answer":false}"#)
     );
     assert!(!first.is_finished());
     first_answer.send(Ok(json!(true).into())).unwrap();
@@ -357,7 +365,7 @@ async fn identical_calls_have_independent_answers_and_out_of_order_delivery() {
     reply.send(Ok(())).unwrap();
     assert_eq!(
         first.finish().await.unwrap(),
-        Ok(r#"{"arguments":{"path":"original"},"answer":true}"#.into())
+        ToolResult::text(r#"{"arguments":{"path":"original"},"answer":true}"#)
     );
     assert_eq!(count.load(Ordering::SeqCst), 4);
 }
@@ -376,7 +384,7 @@ async fn configured_skip_never_requests_execution_release() {
     reply.send(Ok(())).unwrap();
     assert_eq!(
         call.finish().await.unwrap(),
-        Ok("Tool execution skipped by configuration.".into())
+        ToolResult::text("Tool execution skipped by configuration.")
     );
     assert_eq!(count.load(Ordering::SeqCst), 0);
 }
@@ -401,18 +409,18 @@ async fn skipped_delivery_records_original_without_delivering_it() {
     };
     assert_eq!(
         raw_result,
-        Some(Ok(
-            r#"{"arguments":{"path":"original"},"answer":true}"#.into()
+        Some(ToolResult::text(
+            r#"{"arguments":{"path":"original"},"answer":true}"#
         ))
     );
     assert_eq!(
         result,
-        Ok("Result delivery skipped by configuration.".into())
+        ToolResult::text("Result delivery skipped by configuration.")
     );
     reply.send(Ok(())).unwrap();
     assert_eq!(
         call.finish().await.unwrap(),
-        Ok("Result delivery skipped by configuration.".into())
+        ToolResult::text("Result delivery skipped by configuration.")
     );
     assert_eq!(count.load(Ordering::SeqCst), 2);
 }
@@ -472,7 +480,7 @@ async fn local_inquiry_exits_and_runs_a_new_process_with_the_answer() {
         "run\nrun\n"
     );
     reply.send(Ok(())).unwrap();
-    assert_eq!(call.finish().await.unwrap(), Ok("true".into()));
+    assert_eq!(call.finish().await.unwrap(), ToolResult::text("true"));
 }
 
 #[tokio::test]
@@ -582,7 +590,7 @@ async fn formatter_asks_for_visibility_and_waits_for_approval() {
     else {
         panic!("expected approval")
     };
-    assert_eq!(formatted_arguments, None);
+    assert!(formatted_arguments.is_none());
     assert!(!root.path().join("formatter-ran").exists());
     reply
         .send(Ok(Admission::Run {
@@ -598,7 +606,7 @@ async fn formatter_asks_for_visibility_and_waits_for_approval() {
         panic!("expected release")
     };
     assert_eq!(
-        formatted_arguments,
+        formatted_arguments.map(|result| result.map_err(|error| error.to_string())),
         Some(Ok("format_arguments:original".into()))
     );
     assert_eq!(
@@ -627,7 +635,7 @@ async fn unattended_formatter_is_available_before_approval() {
         panic!("expected preparation")
     };
     assert_eq!(
-        formatted_arguments,
+        formatted_arguments.map(|result| result.map_err(|error| error.to_string())),
         Some(Ok("format_arguments:original".into()))
     );
     assert!(root.path().join("formatter-ran").exists());
@@ -652,7 +660,7 @@ async fn hidden_presentation_never_executes_formatter() {
     else {
         panic!("expected preparation")
     };
-    assert_eq!(formatted_arguments, None);
+    assert!(formatted_arguments.is_none());
     reply
         .send(Ok(Admission::Skip {
             reason: "denied".into(),
@@ -662,6 +670,6 @@ async fn hidden_presentation_never_executes_formatter() {
         panic!("expected recording")
     };
     reply.send(Ok(())).unwrap();
-    assert_eq!(call.finish().await.unwrap(), Ok("denied".into()));
+    assert_eq!(call.finish().await.unwrap(), ToolResult::text("denied"));
     assert!(!root.path().join("formatter-ran").exists());
 }

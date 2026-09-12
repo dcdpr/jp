@@ -1,10 +1,9 @@
 # RFD 109: In-Process JP MCP Server
 
-- **Status**: Accepted
+- **Status**: Implemented
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-09-12
-- **Required by**: [RFD 110]
 
 ## Summary
 

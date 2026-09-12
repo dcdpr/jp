@@ -24,6 +24,7 @@ server = [
     "client",
     "dep:async-trait",
     "dep:axum",
+    "dep:base64",
     "dep:camino",
     "dep:futures",
     "dep:jp_tool",
@@ -42,6 +43,7 @@ jp_tool = { workspace = true, optional = true }
 
 async-trait = { workspace = true, optional = true }
 axum = { workspace = true, optional = true, features = ["http1", "tokio"] }
+base64 = { workspace = true, optional = true, features = ["std"] }
 camino = { workspace = true, optional = true }
 futures = { workspace = true, optional = true }
 indexmap = { workspace = true }
@@ -52,7 +54,7 @@ minijinja = { workspace = true, optional = true, features = [
     "serde",
     "unicode",
 ] }
-reqwest = { workspace = true, optional = true, features = ["stream"] }
+reqwest = { workspace = true, optional = true, features = ["json", "stream"] }
 rmcp = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["preserve_order"] }

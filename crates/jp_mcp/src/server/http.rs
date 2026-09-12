@@ -4,8 +4,6 @@
 //! The private Host receiver returned when constructing the service remains
 //! with the MCP Host.
 
-mod client;
-
 use std::{
     error::Error as StdError,
     io,
@@ -14,9 +12,7 @@ use std::{
 };
 
 use axum::Router;
-use client::LoopbackClient;
 use jp_tool::Error as ToolError;
-use reqwest::{Client as HttpClient, redirect::Policy};
 use rmcp::{
     ErrorData, ServerHandler, ServiceExt as _,
     model::{
@@ -39,7 +35,10 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 
-use super::service::{CallRequest, Service, ServiceError};
+use super::{
+    http_client::LoopbackClient,
+    service::{CallRequest, Service, ServiceError},
+};
 
 /// Failure starting, connecting to, or stopping the in-process endpoint.
 #[derive(Debug, thiserror::Error)]
@@ -113,19 +112,13 @@ impl Endpoint {
 
     /// Establish the MCP Host's ordinary HTTP connection to this endpoint.
     pub async fn connect(&self) -> Result<RunningService<RoleClient, ()>, EndpointError> {
-        let client = HttpClient::builder()
-            .no_proxy()
-            .redirect(Policy::none())
-            .build()
-            .map_err(|error| EndpointError::Connect(Box::new(error)))?;
+        let client =
+            LoopbackClient::new().map_err(|error| EndpointError::Connect(Box::new(error)))?;
         let config = StreamableHttpClientTransportConfig::with_uri(self.url.clone())
             .reinit_on_expired_session(false);
-        ().serve(StreamableHttpClientTransport::with_client(
-            LoopbackClient(client),
-            config,
-        ))
-        .await
-        .map_err(|error| EndpointError::Connect(Box::new(error)))
+        ().serve(StreamableHttpClientTransport::with_client(client, config))
+            .await
+            .map_err(|error| EndpointError::Connect(Box::new(error)))
     }
 
     /// Private in-process control for the MCP Host, not exposed through HTTP.

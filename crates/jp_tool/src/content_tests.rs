@@ -20,8 +20,9 @@ fn a_successful_outcome_becomes_one_text_block() {
 
     assert_eq!(result, ToolResult {
         content: vec![ContentBlock::text("done")],
-        is_error: false,
-        error: None,
+        status: ToolStatus::Success,
+        structured_content: None,
+        metadata: None,
     });
 }
 
@@ -34,9 +35,12 @@ fn a_failed_outcome_keeps_its_trace_and_transience() {
     });
 
     assert_eq!(result, ToolResult {
-        content: vec![ContentBlock::text("File not found: foo.rs")],
-        is_error: true,
-        error: Some(ErrorDetails {
+        content: vec![ContentBlock::text(
+            "File not found: foo.rs\n\nTrace:\nio error: No such file or directory"
+        )],
+        structured_content: None,
+        metadata: None,
+        status: ToolStatus::Error(ErrorDetails {
             transient: true,
             trace: vec!["io error: No such file or directory".to_owned()],
         }),
@@ -51,12 +55,21 @@ fn a_needs_input_outcome_is_not_an_error() {
         question: question("target", AnswerType::Text),
     });
 
-    assert!(!result.is_error);
-    assert_eq!(result.error, None);
+    assert!(!result.is_error());
+    assert_eq!(result.error_details(), None);
     assert_eq!(
         result.input_request().map(|r| r.id.as_str()),
         Some("target")
     );
+}
+
+#[test]
+fn outcome_conversion_preserves_question_context() {
+    let result = ToolResult::from(Outcome::NeedsInput {
+        question: question("target", AnswerType::Text),
+    });
+    assert_eq!(result.to_text(), "A preamble the request does not carry.");
+    assert_eq!(result.content.len(), 2);
 }
 
 #[test]
@@ -113,8 +126,9 @@ fn flattening_joins_blocks_in_order_with_a_blank_line() {
             ContentBlock::Resource(Resource::text("file:///a.rs", "second")),
             ContentBlock::text("third"),
         ],
-        is_error: false,
-        error: None,
+        status: ToolStatus::Success,
+        structured_content: None,
+        metadata: None,
     };
 
     assert_eq!(result.to_text(), "first\n\nsecond\n\nthird");
@@ -129,8 +143,9 @@ fn flattening_names_a_binary_resource_by_its_uri() {
             content: ResourceContent::Blob(vec![0x89, 0x50, 0x4e, 0x47]),
             ..Resource::text("file:///shot.png", "")
         })],
-        is_error: false,
-        error: None,
+        status: ToolStatus::Success,
+        structured_content: None,
+        metadata: None,
     };
 
     assert_eq!(result.to_text(), "file:///shot.png");
@@ -145,15 +160,16 @@ fn flattening_omits_a_question_but_keeps_its_context() {
             ContentBlock::text("Two hunks remain."),
             ContentBlock::Question(InputRequest::from(question("stage", AnswerType::Boolean))),
         ],
-        is_error: false,
-        error: None,
+        status: ToolStatus::Success,
+        structured_content: None,
+        metadata: None,
     };
 
     assert_eq!(result.to_text(), "Two hunks remain.");
 }
 
 #[test]
-fn flattening_an_error_appends_its_trace() {
+fn outcome_error_trace_is_rendered_once() {
     let result = ToolResult::from(Outcome::Error {
         message: "failed".to_owned(),
         trace: vec!["inner".to_owned(), "innermost".to_owned()],
