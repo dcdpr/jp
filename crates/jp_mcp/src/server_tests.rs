@@ -21,11 +21,27 @@ impl BuiltinTool for EchoArguments {
 }
 
 #[test]
+fn command_error_keeps_details_and_its_conversation_projection() {
+    let output = br#"{"type":"error","message":"busy","trace":["upstream"],"transient":true}"#;
+    let result = parse_command_output(output, b"", false).into_tool_result("test");
+    assert_eq!(
+        result.status,
+        ToolStatus::Error(ErrorDetails {
+            transient: true,
+            trace: vec!["upstream".into()],
+        })
+    );
+    assert_eq!(
+        to_legacy(&result),
+        Err(r#"{"message":"busy","trace":["upstream"]}"#.into())
+    );
+}
+
+#[test]
 fn test_execution_outcome_id() {
     let completed = ExecutionOutcome::Completed {
-        native: None,
         id: "id1".to_string(),
-        result: Ok(String::new()),
+        result: ToolResult::text(""),
     };
     assert_eq!(completed.id(), "id1");
 
@@ -44,18 +60,16 @@ fn test_execution_outcome_id() {
 #[test]
 fn test_execution_outcome_helper_methods() {
     let success = ExecutionOutcome::Completed {
-        native: None,
         id: "1".to_string(),
-        result: Ok("output".to_string()),
+        result: ToolResult::text("output"),
     };
     assert!(success.is_success());
     assert!(!success.needs_input());
     assert!(!success.is_cancelled());
 
     let failure = ExecutionOutcome::Completed {
-        native: None,
         id: "2".to_string(),
-        result: Err("error".to_string()),
+        result: ToolResult::error("error"),
     };
     assert!(!failure.is_success());
     assert!(!failure.needs_input());
@@ -95,7 +109,7 @@ fn parse_command_output_dotted_question_id_is_invalid_inquiry() {
         CommandResult::InvalidInquiry { ref question_id } if question_id == "a.b"
     ));
     // Renders as a tool-level error, not raw text.
-    assert!(result.into_tool_result("t").is_err());
+    assert!(result.into_tool_result("t").is_error());
 }
 
 #[test]
@@ -106,7 +120,7 @@ fn parse_command_output_empty_question_id_is_invalid_inquiry() {
         result,
         CommandResult::InvalidInquiry { ref question_id } if question_id.is_empty()
     ));
-    assert!(result.into_tool_result("t").is_err());
+    assert!(result.into_tool_result("t").is_error());
 }
 
 #[test]
@@ -123,7 +137,7 @@ fn parse_command_output_legacy_answer_type_shape_is_malformed_inquiry() {
         "expected MalformedInquiry, got {result:?}"
     );
     // Renders as a tool-level error, not raw text.
-    assert!(result.into_tool_result("fs_modify_file").is_err());
+    assert!(result.into_tool_result("fs_modify_file").is_error());
 }
 
 #[test]
@@ -136,7 +150,7 @@ fn parse_command_output_needs_input_missing_field_is_malformed_inquiry() {
         matches!(result, CommandResult::MalformedInquiry { .. }),
         "expected MalformedInquiry, got {result:?}"
     );
-    assert!(result.into_tool_result("t").is_err());
+    assert!(result.into_tool_result("t").is_error());
 }
 
 #[test]
@@ -251,7 +265,7 @@ async fn execute_coerces_json_strings_before_calling_tool() {
         panic!("expected completed tool call");
     };
     assert_eq!(id, "call_1");
-    assert_eq!(result, Ok(r#"{"start_line":1}"#.to_owned()));
+    assert_eq!(result, ToolResult::text(r#"{"start_line":1}"#));
 }
 
 /// Regression: `{{tool}}` must render as valid JSON, including `null` for null
@@ -505,14 +519,9 @@ async fn test_execute_local_exposes_invocation_ids_in_context() {
     .expect("execution succeeds");
 
     match outcome {
-        ExecutionOutcome::Completed {
-            native: None,
-            result: Ok(out),
-            ..
-        } => assert!(
-            out.contains("ws-abc-conv-xyz"),
-            "expected workspace/conversation IDs in tool output, got: {out:?}"
-        ),
+        ExecutionOutcome::Completed { result, .. } => {
+            assert_eq!(result, ToolResult::text("ws-abc-conv-xyz\n"));
+        }
         other => panic!("expected completed success, got: {other:?}"),
     }
 }
@@ -574,11 +583,9 @@ async fn test_execute_builtin_dispatches_on_source_name() {
     .expect("execution succeeds");
 
     match outcome {
-        ExecutionOutcome::Completed {
-            native: None,
-            result: Ok(out),
-            ..
-        } => assert_eq!(out, "reached"),
+        ExecutionOutcome::Completed { result, .. } => {
+            assert_eq!(result, ToolResult::text("reached"));
+        }
         other => panic!("expected completed success, got: {other:?}"),
     }
 }

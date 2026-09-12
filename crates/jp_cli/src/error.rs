@@ -2,6 +2,7 @@ use std::io;
 
 use camino::Utf8PathBuf;
 use jp_conversation::ConversationId;
+use jp_llm::tool::ExecutorError;
 use jp_mcp::server::http::EndpointError;
 use url::Url;
 
@@ -70,7 +71,7 @@ pub(crate) enum Error {
     McpEndpoint(#[from] EndpointError),
 
     #[error("MCP Host recording failed: {0}")]
-    McpRecording(String),
+    McpRecording(#[source] ExecutorError),
 
     #[error("LLM error")]
     Llm(#[from] jp_llm::Error),

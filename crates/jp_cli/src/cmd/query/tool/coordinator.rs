@@ -101,7 +101,7 @@ use jp_conversation::{
 };
 use jp_editor::EditorBackend;
 use jp_inquire::{ReplyEditMode, prompt::PromptBackend};
-use jp_llm::tool::{Executor, ExecutorResult, ExecutorSource, PermissionInfo};
+use jp_llm::tool::{Executor, ExecutorError, ExecutorResult, ExecutorSource, PermissionInfo};
 use jp_mcp::{Client, server::StderrSink};
 use jp_printer::Printer;
 use jp_tool::{AnswerType, Question};
@@ -576,7 +576,7 @@ impl ToolCoordinator {
                 self.set_tool_state(executor.tool_id(), ToolCallState::Completed);
                 return ToolCallDecision::Failed(ToolCallResponse {
                     id: executor.tool_id().into(),
-                    result: Err(error),
+                    result: Err(error.to_string()),
                 });
             }
         }
@@ -640,7 +640,7 @@ impl ToolCoordinator {
             self.set_tool_state(executor.tool_id(), ToolCallState::Completed);
             return ToolCallDecision::Failed(ToolCallResponse {
                 id: executor.tool_id().into(),
-                result: Err(error),
+                result: Err(error.to_string()),
             });
         }
 
@@ -709,7 +709,8 @@ impl ToolCoordinator {
                 executor
                     .formatted_arguments()
                     .cloned()
-                    .unwrap_or_else(|| Ok(String::new())),
+                    .unwrap_or_else(|| Ok(String::new()))
+                    .map_err(|error| error.to_string()),
             );
         }
         self.render_approved_tool(name, executor.arguments(), renderer)
@@ -720,7 +721,7 @@ impl ToolCoordinator {
     pub async fn acknowledge_responses(
         &self,
         responses: Vec<ToolCallResponse>,
-    ) -> Result<(), String> {
+    ) -> Result<(), ExecutorError> {
         for response in responses {
             self.executor_source.acknowledge(response).await?;
         }

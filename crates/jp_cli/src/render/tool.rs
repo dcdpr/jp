@@ -867,7 +867,7 @@ async fn format_args_custom(
             );
             Err(detail)
         }
-        CommandResult::FatalError(raw) => {
+        CommandResult::FatalError { raw, .. } => {
             warn!(
                 command = %cmd,
                 "Custom parameters formatter returned fatal error"
