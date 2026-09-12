@@ -1,7 +1,6 @@
 use jp_config::assistant::tool_choice::ToolChoice;
 use jp_conversation::thread::Thread;
-
-use crate::tool::ToolDefinition;
+use jp_tool::ToolDefinition;
 
 #[derive(Debug, Clone)]
 pub struct ChatQuery {

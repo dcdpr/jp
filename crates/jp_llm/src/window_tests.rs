@@ -1,8 +1,8 @@
 use jp_config::{PartialAppConfig, assistant::request::CachePolicy};
 use jp_conversation::{Compaction, ConversationStream, SummaryPolicy, event::ChatResponse};
+use jp_tool::ToolDocs;
 
 use super::*;
-use crate::tool::ToolDocs;
 
 fn tool(name: &str, summary: Option<&str>) -> ToolDefinition {
     ToolDefinition {

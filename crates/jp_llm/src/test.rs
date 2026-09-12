@@ -20,6 +20,7 @@ use jp_conversation::{
     thread::{Thread, ThreadBuilder},
 };
 use jp_test::mock::{Snap, Vcr};
+use jp_tool::{ToolDefinition, ToolDocs};
 
 use crate::{
     event::{Event, FinishReason},
@@ -27,7 +28,6 @@ use crate::{
     model::ModelDetails,
     provider::{ProviderTestRoute, provider_test_support},
     query::ChatQuery,
-    tool::{ToolDefinition, ToolDocs},
 };
 
 /// Fail when a model calls a tool with arguments its schema does not declare.

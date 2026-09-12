@@ -31,10 +31,9 @@ use jp_llm::{
     model::ModelDetails,
     query::ChatQuery,
     retry::{RetryConfig, collect_with_retry},
-    tool::ToolDefinition,
     window,
 };
-use jp_tool::{AnswerType, Question};
+use jp_tool::{AnswerType, Question, ToolDefinition};
 use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
 use tracing::info;

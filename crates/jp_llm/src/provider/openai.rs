@@ -22,6 +22,7 @@ use jp_conversation::{
     thread::text_attachments_to_xml,
 };
 use jp_credentials::CredentialStore;
+use jp_tool::ToolDefinition;
 use openai_responses::{
     Client, CreateError, StreamError as OpenaiStreamError,
     types::{self, Include, Request, SummaryConfig},
@@ -44,7 +45,6 @@ use crate::{
     provider::trace_to_tmpfile,
     query::ChatQuery,
     stream::with_tool_call_keepalive,
-    tool::{ToolDefinition, json_schema},
 };
 
 pub mod auth;
@@ -2911,7 +2911,7 @@ fn convert_tools(tools: Vec<ToolDefinition>) -> Vec<types::Tool> {
             // strict mode for that one tool costs its adherence guarantee;
             // sending it strict costs the whole request, and every other tool
             // in it.
-            let strict = !json_schema::has_unconstrained_node(&tool.parameters);
+            let strict = !jp_tool::schema::has_unconstrained_node(&tool.parameters);
 
             types::Tool::Function {
                 name: tool.name,

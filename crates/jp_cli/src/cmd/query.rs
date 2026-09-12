@@ -103,9 +103,9 @@ use jp_conversation::{
 };
 use jp_inquire::prompt::{PromptBackend, TerminalPromptBackend};
 use jp_llm::{
-    ToolError, provider,
+    provider,
     tool::{
-        InvocationContext, ToolDefinition, ToolDocs,
+        InvocationContext,
         builtin::{BuiltinExecutors, describe_tools::DescribeTools},
         tool_definitions,
     },
@@ -116,6 +116,7 @@ use jp_printer::{LineSink, PrintableExt as _, Printer, RegionStyle, StatusRegion
 use jp_storage::backend::{FsStorageBackend, Projection};
 use jp_task::task::TitleGeneratorTask;
 use jp_term::width::{display_width, truncate_to_width};
+use jp_tool::{Error as ToolError, ToolDefinition, ToolDocs};
 use jp_workspace::{ConversationHandle, ConversationLock, Id as WorkspaceId, Workspace};
 use minijinja::{Environment, UndefinedBehavior};
 use strip_ansi_escapes::strip_str;
