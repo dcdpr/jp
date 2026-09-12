@@ -6,7 +6,6 @@ use jp_attachment::{
     Attachment, BoxedHandler, HANDLERS, Handler, distributed_slice, linkme, percent_decode_str,
     percent_encode_str, typetag,
 };
-use jp_mcp::Client;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -106,11 +105,7 @@ impl Handler for Commands {
         Ok(commands)
     }
 
-    async fn get(
-        &self,
-        root: &Utf8Path,
-        _: Client,
-    ) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
+    async fn get(&self, root: &Utf8Path) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
         let mut attachments = vec![];
         for command in &self.0 {
             let cmd_line = std::iter::once(command.cmd.clone())
