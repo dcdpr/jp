@@ -5,10 +5,16 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 mod access;
+pub mod definition;
+mod error;
+pub mod schema;
+
 pub use access::{
     AccessPolicy, Capability, EnvRule, FsAccessError, FsRule, NetRule,
     canonicalize_workspace_target, lexical_workspace_relative,
 };
+pub use definition::{ParameterDocs, ToolDefinition, ToolDocs};
+pub use error::Error;
 
 /// The result of a tool call.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]

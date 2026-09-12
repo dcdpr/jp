@@ -15,6 +15,7 @@ use jp_conversation::{
     event::{ChatResponse, EventKind, ToolCallResponse},
     thread::text_attachments_to_xml,
 };
+use jp_tool::ToolDefinition;
 use reqwest::header::{self, HeaderMap, HeaderValue};
 use reqwest_eventsource::{Event as SseEvent, EventSource, retry::Never};
 use serde::Deserialize;
@@ -33,7 +34,6 @@ use crate::{
     provider::trace_to_tmpfile,
     query::ChatQuery,
     stream::with_tool_call_keepalive,
-    tool::ToolDefinition,
 };
 
 static PROVIDER: ProviderId = ProviderId::Cerebras;

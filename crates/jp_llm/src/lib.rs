@@ -19,7 +19,7 @@ pub(crate) mod test;
 mod cross_route_tests;
 
 pub use credential::{AccountIdentity, Credential, ProviderAuth, provider_auth};
-pub use error::{Error, StreamError, StreamErrorKind, ToolError};
+pub use error::{Error, StreamError, StreamErrorKind};
 pub use provider::Provider;
 pub use retry::{exponential_backoff, retry_delay};
 pub use stream::{

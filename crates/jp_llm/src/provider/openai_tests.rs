@@ -321,10 +321,10 @@ mod parameters_with_strict_mode {
 }
 
 mod convert_tools {
+    use jp_tool::{ToolDefinition, ToolDocs};
     use serde_json::json;
 
     use super::super::convert_tools;
-    use crate::tool::{ToolDefinition, ToolDocs};
 
     /// One converted tool, as it goes on the wire.
     fn converted(parameters: serde_json::Value) -> serde_json::Value {

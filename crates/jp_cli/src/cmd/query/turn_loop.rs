@@ -36,10 +36,11 @@ use jp_llm::{
     model::ModelDetails,
     provider::get_provider,
     query::ChatQuery,
-    tool::{InvocationContext, ToolDefinition, executor::Executor},
+    tool::{InvocationContext, executor::Executor},
     with_idle_timeout, with_output_limit,
 };
 use jp_printer::{ErrChannel, Printer, RegionStyle, StatusRegion};
+use jp_tool::ToolDefinition;
 use jp_workspace::{ConversationLock, ConversationMut};
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, info, warn};

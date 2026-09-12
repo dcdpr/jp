@@ -17,6 +17,7 @@ use jp_conversation::{
     event::{ChatResponse, EventKind, ToolCallResponse},
     thread::text_attachments_to_xml,
 };
+use jp_tool::ToolDefinition;
 use reqwest_eventsource::{Event as SseEvent, EventSource, retry::Never};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -33,7 +34,6 @@ use crate::{
     provider::Provider,
     query::ChatQuery,
     stream::{aggregator::reasoning::ReasoningExtractor, with_tool_call_keepalive},
-    tool::ToolDefinition,
 };
 
 static PROVIDER: ProviderId = ProviderId::Llamacpp;

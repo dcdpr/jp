@@ -7,7 +7,6 @@ use async_anthropic::errors::AnthropicError;
 use chrono::{DateTime, Utc};
 use jp_config::model::{id::ProviderId, parameters::ServiceTier};
 use reqwest::header::{HeaderMap, RETRY_AFTER};
-use serde_json::Value;
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
@@ -618,82 +617,6 @@ impl PartialEq for Error {
     }
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum ToolError {
-    #[error("Tool not found: {name}")]
-    NotFound { name: String },
-
-    #[error("Tools not found: {}", names.join(", "))]
-    NotFoundN { names: Vec<String> },
-
-    #[error("Disabled in configuration")]
-    Disabled,
-
-    #[error("Command is only supported for local tools")]
-    UnexpectedCommand,
-
-    #[error("Command missing for local tool")]
-    MissingCommand,
-
-    #[error("Failed to fetch tool from MCP client")]
-    McpGetToolError(#[source] jp_mcp::Error),
-
-    #[error("Failed to run tool from MCP client")]
-    McpRunToolError(#[source] jp_mcp::Error),
-
-    #[error("Failed to serialize tool arguments")]
-    SerializeArgumentsError {
-        arguments: Value,
-        #[source]
-        error: serde_json::Error,
-    },
-
-    #[error("Tool call failed: {0}")]
-    ToolCallFailed(String),
-
-    #[error("Failed to spawn command: {command}")]
-    SpawnError {
-        command: String,
-        #[source]
-        error: std::io::Error,
-    },
-
-    #[error("Failed to edit tool call")]
-    EditArgumentsError {
-        arguments: Value,
-        #[source]
-        error: serde_json::Error,
-    },
-
-    #[error("Template error")]
-    TemplateError {
-        data: String,
-        #[source]
-        error: minijinja::Error,
-    },
-
-    #[error("Invalid schema at `{path}`: {message}")]
-    InvalidSchema { path: String, message: String },
-
-    #[error("Needs input: {question:?}")]
-    NeedsInput { question: jp_tool::Question },
-
-    #[error("Skipped tool execution")]
-    Skipped { reason: Option<String> },
-
-    #[error("Serialization error")]
-    Serde(#[from] serde_json::Error),
-
-    #[error("Invalid arguments (missing: {missing:?}, unknown: {unknown:?})")]
-    Arguments {
-        /// Required arguments that were missing.
-        missing: Vec<String>,
-
-        /// Unknown arguments that were provided.
-        unknown: Vec<String>,
-    },
-}
-
 impl From<jp_conversation::StreamError> for Error {
     fn from(error: jp_conversation::StreamError) -> Self {
         Self::Conversation(error.into())
@@ -736,18 +659,6 @@ impl From<crate::provider::anthropic::resolve::ResolveError> for Error {
             ResolveError::MissingEnv(var) => Self::MissingEnv(var),
             error => Self::CredentialChain(error),
         }
-    }
-}
-
-#[cfg(test)]
-impl PartialEq for ToolError {
-    fn eq(&self, other: &Self) -> bool {
-        if std::mem::discriminant(self) != std::mem::discriminant(other) {
-            return false;
-        }
-
-        // Good enough for testing purposes
-        format!("{self:?}") == format!("{other:?}")
     }
 }
 

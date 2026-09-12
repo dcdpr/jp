@@ -37,6 +37,7 @@ use jp_conversation::{
     event::{ChatResponse, ConversationEvent, EventKind},
 };
 use jp_credentials::CredentialStore;
+use jp_tool::ToolDefinition;
 use serde_json::{Map, Value, json};
 use tracing::{debug, info, trace, warn};
 
@@ -52,7 +53,6 @@ use crate::{
     model::{ModelDeprecation, ModelDetails, ReasoningDetails, ReasoningMode},
     query::ChatQuery,
     stream::{EventStream, chain::find_merge_point, with_tool_call_keepalive},
-    tool::ToolDefinition,
 };
 
 static PROVIDER: ProviderId = ProviderId::Anthropic;
