@@ -41,6 +41,9 @@ pub struct ConfiguredTool {
     /// Compiled access grants supplied by the MCP Host, never by an MCP caller.
     /// A compilation failure is delivered as a tool error without execution.
     pub access: Result<Option<AccessPolicy>, String>,
+    /// Opaque Host-supplied metadata advertised on this tool's MCP description.
+    /// It does not change execution policy or interpret vendor-specific hints.
+    pub metadata: Map<String, Value>,
 }
 
 /// An invocation received by the MCP handler.
@@ -398,6 +401,15 @@ impl Service {
     /// Advertised definitions in their configured order.
     pub fn definitions(&self) -> impl Iterator<Item = &ToolDefinition> {
         self.inner.tools.values().map(|tool| &tool.definition)
+    }
+
+    /// Metadata supplied by the Host; empty maps are omitted from descriptions.
+    pub(super) fn tool_metadata(&self, name: &str) -> Option<&Map<String, Value>> {
+        self.inner
+            .tools
+            .get(name)
+            .map(|tool| &tool.metadata)
+            .filter(|meta| !meta.is_empty())
     }
 
     /// Subscribe to stderr progress without slowing execution or Host replies.

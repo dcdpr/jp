@@ -54,6 +54,7 @@ fn setup() -> (Service, HostReceiver, Arc<AtomicUsize>) {
             },
             config: cfg.conversation.tools.get("count").unwrap(),
             access: Ok(None),
+            metadata: Map::new(),
         }],
         Client::default(),
         BuiltinExecutors::new().register("count", Count(count.clone())),
@@ -70,6 +71,7 @@ async fn http_call_waits_for_host_release_and_records_edited_result() {
     let endpoint = Endpoint::start(service).await.unwrap();
     let client = endpoint.connect().await.unwrap();
     let tools = client.peer().list_all_tools().await.unwrap();
+    assert_eq!(tools[0].meta, None);
     assert_eq!(
         tools
             .iter()
