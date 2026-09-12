@@ -8,6 +8,7 @@
 
 use std::{
     collections::HashMap,
+    error::Error as StdError,
     sync::{Arc, Mutex, MutexGuard, PoisonError},
 };
 
@@ -17,7 +18,8 @@ use jp_config::conversation::tool::{
     FormatMode, ResultMode, RunMode, ToolConfigWithDefaults, ToolSource, style::ParametersStyle,
 };
 use jp_tool::{
-    AccessPolicy, Action, ContentBlock, Error as ToolError, InputRequest, ToolDefinition,
+    AccessPolicy, Action, ContentBlock, Error as ToolError, InputRequest, QuestionId,
+    ToolDefinition, ToolResult,
     definition::{apply_parameter_defaults, validate_tool_arguments},
     schema::Node,
 };
@@ -26,10 +28,13 @@ use tokio::sync::{Notify, broadcast, mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    CommandResult, ExecutionOutcome, InvocationContext, builtin::BuiltinExecutors, execute,
+    CommandResult, ExecutionOutcome, InvocationContext,
+    builtin::BuiltinExecutors,
+    execute,
+    result::{ResultError, to_mcp},
     run_tool_command, tool_context,
 };
-use crate::{CallToolResult, Client, Content};
+use crate::{CallToolResult, Client};
 
 /// A tool resolved under trusted MCP Host configuration.
 #[derive(Clone, Debug)]
@@ -40,7 +45,7 @@ pub struct ConfiguredTool {
     pub config: ToolConfigWithDefaults,
     /// Compiled access grants supplied by the MCP Host, never by an MCP caller.
     /// A compilation failure is delivered as a tool error without execution.
-    pub access: Result<Option<AccessPolicy>, String>,
+    pub access: Result<Option<AccessPolicy>, AccessPolicyError>,
     /// Opaque Host-supplied metadata advertised on this tool's MCP description.
     /// It does not change execution policy or interpret vendor-specific hints.
     pub metadata: Map<String, Value>,
@@ -91,8 +96,39 @@ pub type HostReply<T> = Result<T, HostError>;
 
 /// A failure reported by the MCP Host, without a persisted conversation type.
 #[derive(Debug, Clone, thiserror::Error)]
-#[error("MCP Host operation failed: {0}")]
-pub struct HostError(pub String);
+pub enum HostError {
+    /// The Host could not record the event under its persistence policy.
+    #[error("MCP Host operation failed: {0}")]
+    Recording(#[source] Arc<dyn StdError + Send + Sync>),
+}
+
+/// Compilation failed before a call could obtain its access policy.
+#[derive(Debug, Clone, thiserror::Error)]
+#[error("invalid access policy for tool '{tool}': {source}")]
+pub struct AccessPolicyError {
+    /// The configured tool whose policy failed.
+    pub tool: String,
+    /// The original compiler error, retained for diagnostics.
+    #[source]
+    pub source: Arc<dyn StdError + Send + Sync>,
+}
+
+/// An argument formatter failed without producing presentation text.
+#[derive(Debug, Clone, thiserror::Error)]
+pub enum FormatterError {
+    /// The command could not execute.
+    #[error("{0}")]
+    Execution(#[source] Arc<ToolError>),
+    /// Formatters cannot invoke an inquiry cycle.
+    #[error("Custom arguments formatter requested input.")]
+    InputRequired,
+    /// The formatter ran and reported a tool error.
+    #[error("{message}")]
+    Reported {
+        /// Formatter diagnostic text, including any tool-supplied trace.
+        message: String,
+    },
+}
 
 /// Whether the Host approved execution, and which edited arguments to use.
 #[derive(Debug)]
@@ -105,7 +141,7 @@ pub enum Admission {
     Skip { reason: String },
     /// Resolve a call without execution, preserving an error response if
     /// needed.
-    Complete { result: Result<String, String> },
+    Complete { result: ToolResult },
 }
 
 /// The Host may answer a question or resolve the call without another attempt.
@@ -114,7 +150,7 @@ pub enum InputAnswer {
     /// Validated by the service before another execution attempt.
     Answer(Value),
     /// A declined or cancelled inquiry resolves the logical call.
-    Complete { result: Result<String, String> },
+    Complete { result: ToolResult },
 }
 
 impl From<Value> for InputAnswer {
@@ -129,7 +165,7 @@ pub enum ReleaseDecision {
     /// Begin execution with the approved arguments.
     Execute,
     /// Preparation failed or the Host stopped the call before execution.
-    Complete { result: Result<String, String> },
+    Complete { result: ToolResult },
 }
 
 /// Host-only services needed by the per-call execution state machine.
@@ -150,7 +186,7 @@ pub enum Interaction {
         arguments: Map<String, Value>,
         /// Custom formatter output, if formatting was permitted before
         /// approval.
-        formatted_arguments: Option<Result<String, String>>,
+        formatted_arguments: Option<Result<String, FormatterError>>,
         /// One reply for this preparation operation.
         reply: oneshot::Sender<HostReply<Admission>>,
     },
@@ -159,7 +195,7 @@ pub enum Interaction {
         /// Validated arguments that will actually execute.
         arguments: Map<String, Value>,
         /// Custom representation of the approved arguments, if requested.
-        formatted_arguments: Option<Result<String, String>>,
+        formatted_arguments: Option<Result<String, FormatterError>>,
         /// Permission to execute, or a final response without execution.
         reply: oneshot::Sender<HostReply<ReleaseDecision>>,
     },
@@ -180,18 +216,18 @@ pub enum Interaction {
         /// The required delivery interaction.
         mode: ResultMode,
         /// Unedited execution result.
-        result: Result<String, String>,
+        result: ToolResult,
         /// The content approved for delivery, including skip explanations.
-        reply: oneshot::Sender<HostReply<Result<String, String>>>,
+        reply: oneshot::Sender<HostReply<ToolResult>>,
     },
     /// Acknowledge final recording before returning the result to the caller.
     Record {
         /// Post-edit execution arguments, separate from `CallInfo::request`.
         arguments: Map<String, Value>,
         /// Original completed result; absent for skipped calls.
-        raw_result: Option<Result<String, String>>,
+        raw_result: Option<ToolResult>,
         /// Content approved for delivery.
-        result: Result<String, String>,
+        result: ToolResult,
         /// Acknowledges the Host's configured persistence policy, not an
         /// unconditional disk write.
         reply: oneshot::Sender<HostReply<()>>,
@@ -223,12 +259,18 @@ pub enum ServiceError {
     /// The Host declined an operation, including failed recording.
     #[error(transparent)]
     Host(#[from] HostError),
+    /// Access policy compilation failed before formatting or execution.
+    #[error(transparent)]
+    Access(#[from] AccessPolicyError),
+    /// A final result cannot be represented by the MCP transport.
+    #[error(transparent)]
+    Result(#[from] ResultError),
     /// Tool lookup, validation, or execution failed.
     #[error(transparent)]
     Tool(#[from] ToolError),
     /// The Host returned data outside the tool's requested answer shape.
     #[error("Invalid answer for tool question `{0}`")]
-    InvalidAnswer(String),
+    InvalidAnswer(QuestionId),
     /// An argument violates the schema's type or enumeration.
     #[error("Invalid tool argument at `{path}`: value violates its type or enum")]
     InvalidArgument { path: String },
@@ -278,18 +320,17 @@ impl Call {
     }
 
     /// Wait for execution and the final Host recording acknowledgement.
-    pub async fn finish(self) -> Result<Result<String, String>, ServiceError> {
+    pub async fn finish(self) -> Result<ToolResult, ServiceError> {
         self.result
             .await
             .map_err(|_| ServiceError::TaskLost)?
-            .map(|output| output.text)
+            .map(|output| output.result)
     }
 }
 
 #[derive(Debug)]
 struct CallOutput {
-    text: Result<String, String>,
-    native: Option<CallToolResult>,
+    result: ToolResult,
     delivery_decided: bool,
 }
 
@@ -297,10 +338,7 @@ impl Call {
     /// Receive the complete MCP result, retaining unedited upstream content.
     pub async fn finish_mcp(self) -> Result<CallToolResult, ServiceError> {
         let output = self.result.await.map_err(|_| ServiceError::TaskLost)??;
-        Ok(output.native.unwrap_or_else(|| match output.text {
-            Ok(text) => CallToolResult::success(vec![Content::text(text)]),
-            Err(text) => CallToolResult::error(vec![Content::text(text)]),
-        }))
+        Ok(to_mcp(output.result)?)
     }
 }
 
@@ -609,7 +647,9 @@ async fn run_call(
         .await?
     };
     let admission = match admission {
-        Admission::Skip { reason } => Admission::Complete { result: Ok(reason) },
+        Admission::Skip { reason } => Admission::Complete {
+            result: ToolResult::text(reason),
+        },
         other => other,
     };
     arguments = match admission {
@@ -623,8 +663,7 @@ async fn run_call(
             })
             .await?;
             return Ok(CallOutput {
-                text: result,
-                native: None,
+                result,
                 delivery_decided: true,
             });
         }
@@ -647,8 +686,7 @@ async fn run_call(
         ),
         ReleaseDecision::Complete { result } => (
             CallOutput {
-                text: result,
-                native: None,
+                result,
                 delivery_decided: true,
             },
             false,
@@ -666,15 +704,14 @@ async fn deliver_result(
     executed: bool,
 ) -> Result<CallOutput, ServiceError> {
     let CallOutput {
-        text: raw_result,
-        native,
+        result: raw_result,
         delivery_decided,
     } = output;
     let result = if delivery_decided {
         raw_result.clone()
     } else {
         match tool.config.result() {
-            ResultMode::Skip => Ok("Result delivery skipped by configuration.".into()),
+            ResultMode::Skip => ToolResult::text("Result delivery skipped by configuration."),
             ResultMode::Unattended => raw_result.clone(),
             mode @ (ResultMode::Ask | ResultMode::Edit) => {
                 ask(inner, call, |reply| Interaction::Review {
@@ -686,8 +723,6 @@ async fn deliver_result(
             }
         }
     };
-    let native =
-        native.filter(|_| result == raw_result && tool.config.result() != ResultMode::Skip);
     ask(inner, call, |reply| Interaction::Record {
         arguments,
         raw_result: (executed && !delivery_decided).then_some(raw_result),
@@ -696,8 +731,7 @@ async fn deliver_result(
     })
     .await?;
     Ok(CallOutput {
-        text: result,
-        native,
+        result,
         delivery_decided: true,
     })
 }
@@ -713,8 +747,7 @@ async fn execute_with_answers(
         Ok(access) => access.as_ref(),
         Err(error) => {
             return Ok(CallOutput {
-                text: Err(error.clone()),
-                native: None,
+                result: ToolResult::error(error.to_string()),
                 delivery_decided: false,
             });
         }
@@ -746,10 +779,9 @@ async fn execute_with_answers(
         .await?;
         match outcome {
             ExecutionOutcome::Cancelled { .. } => return Err(ServiceError::Cancelled),
-            ExecutionOutcome::Completed { result, native, .. } => {
+            ExecutionOutcome::Completed { result, .. } => {
                 return Ok(CallOutput {
-                    text: result,
-                    native,
+                    result,
                     delivery_decided: false,
                 });
             }
@@ -772,14 +804,13 @@ async fn execute_with_answers(
                     InputAnswer::Answer(answer) => answer,
                     InputAnswer::Complete { result } => {
                         return Ok(CallOutput {
-                            text: result,
-                            native: None,
+                            result,
                             delivery_decided: true,
                         });
                     }
                 };
                 if !Node::root(&Value::Object(request.schema)).permits(&answer) {
-                    return Err(ServiceError::InvalidAnswer(request.id.to_string()));
+                    return Err(ServiceError::InvalidAnswer(request.id.clone()));
                 }
                 answers.insert(request.id.to_string(), answer);
             }
@@ -792,7 +823,7 @@ async fn format_arguments(
     tool: &ConfiguredTool,
     arguments: &Map<String, Value>,
     cancellation: &CancellationToken,
-) -> Result<Result<String, String>, ServiceError> {
+) -> Result<Result<String, FormatterError>, ServiceError> {
     let ParametersStyle::Custom(command) = &tool.config.style().parameters else {
         return Ok(Ok(String::new()));
     };
@@ -808,10 +839,7 @@ async fn format_arguments(
         &tool.config,
         &inner.root,
         &Action::FormatArguments,
-        tool.access
-            .as_ref()
-            .map_err(|error| ServiceError::Host(HostError(error.clone())))?
-            .as_ref(),
+        tool.access.as_ref().map_err(Clone::clone)?.as_ref(),
         &inner.invocation,
     );
     let result = match run_tool_command(
@@ -824,18 +852,29 @@ async fn format_arguments(
     .await
     {
         Ok(result) => result,
-        Err(error) => return Ok(Err(error.to_string())),
+        Err(error) => return Ok(Err(FormatterError::Execution(Arc::new(error)))),
     };
     match result {
-        CommandResult::NeedsInput(_) => {
-            Ok(Err("Custom arguments formatter requested input.".into()))
-        }
+        CommandResult::NeedsInput(_) => Ok(Err(FormatterError::InputRequired)),
         CommandResult::Cancelled => Err(ServiceError::Cancelled),
         CommandResult::Success(text) => Ok(Ok(text.trim().into())),
-        CommandResult::TransientError { message, trace } => {
-            Ok(Err(CommandResult::format_error(&message, &trace)))
+        CommandResult::TransientError { message, trace } => Ok(Err(FormatterError::Reported {
+            message: CommandResult::format_error(&message, &trace),
+        })),
+        other => {
+            let result = other.into_tool_result(name);
+            let message = result
+                .content
+                .iter()
+                .filter_map(ContentBlock::as_text)
+                .collect::<Vec<_>>()
+                .join("\n\n");
+            if result.is_error() {
+                Ok(Err(FormatterError::Reported { message }))
+            } else {
+                Ok(Ok(message.trim().into()))
+            }
         }
-        other => Ok(other.into_tool_result(name).map(|text| text.trim().into())),
     }
 }
 

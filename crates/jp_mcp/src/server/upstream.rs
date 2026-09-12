@@ -4,7 +4,7 @@ use jp_tool::Outcome;
 use serde_json::Value;
 use tracing::warn;
 
-use crate::{CallToolResult, RawContent, ResourceContents};
+use crate::{CallToolResult, RawContent};
 
 pub(super) enum UpstreamResult {
     Outcome {
@@ -59,32 +59,6 @@ pub(super) fn replace_envelope(
     }
     response.is_error = Some(is_error);
     response
-}
-
-/// Project an MCP result for the existing text-only conversation format.
-///
-/// Text and embedded resource content contribute to the result.
-/// Image, audio, and resource-link blocks remain available only in the original
-/// MCP result.
-pub fn text_result(result: &CallToolResult) -> Result<String, String> {
-    let text = result
-        .content
-        .iter()
-        .filter_map(|content| match &content.raw {
-            RawContent::Text(text) => Some(text.text.as_str()),
-            RawContent::Resource(resource) => match &resource.resource {
-                ResourceContents::TextResourceContents { text, .. } => Some(text.as_str()),
-                ResourceContents::BlobResourceContents { blob, .. } => Some(blob.as_str()),
-            },
-            RawContent::Image(_) | RawContent::Audio(_) | RawContent::ResourceLink(_) => None,
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n");
-    if result.is_error.unwrap_or_default() {
-        Err(text)
-    } else {
-        Ok(text)
-    }
 }
 
 #[cfg(test)]

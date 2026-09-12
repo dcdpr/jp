@@ -3,9 +3,8 @@
 //! A [`ToolDefinition`] is the resolved description of one tool, whatever its
 //! source: a local command, a built-in implementation, or a tool a configured
 //! MCP server declares.
-//! Building one reads configuration, so that belongs with the configuration
-//! types; this module holds the resolved shape and the argument handling that
-//! reads its schema.
+//! Definition resolution lives in `jp_mcp::server`; this module holds the
+//! resolved shape and the argument handling that reads its schema.
 
 use indexmap::IndexMap;
 use serde_json::{Map, Value};
@@ -15,12 +14,16 @@ use crate::{Error, schema::Node};
 /// Documentation for a single tool parameter.
 #[derive(Debug, Clone)]
 pub struct ParameterDocs {
+    /// Short description included in the provider's parameter schema.
     pub summary: Option<String>,
+    /// Expanded documentation returned by tool discovery.
     pub description: Option<String>,
+    /// Usage examples supplied by the tool configuration.
     pub examples: Option<String>,
 }
 
 impl ParameterDocs {
+    /// Whether expanded documentation is absent, irrespective of the summary.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.description.is_none() && self.examples.is_none()
@@ -30,13 +33,18 @@ impl ParameterDocs {
 /// Documentation for a single tool.
 #[derive(Debug, Clone, Default)]
 pub struct ToolDocs {
+    /// Short description included in the provider's tool schema.
     pub summary: Option<String>,
+    /// Expanded tool documentation.
     pub description: Option<String>,
+    /// Usage examples supplied by the tool configuration.
     pub examples: Option<String>,
+    /// Parameter documentation in declaration order.
     pub parameters: IndexMap<String, ParameterDocs>,
 }
 
 impl ToolDocs {
+    /// Whether expanded tool and parameter documentation is absent.
     #[must_use]
     pub fn is_empty(&self) -> bool {
         self.description.is_none()
@@ -56,7 +64,9 @@ impl ToolDocs {
 /// The definition of a tool.
 #[derive(Debug, Clone)]
 pub struct ToolDefinition {
+    /// Advertised name, which may differ from the upstream implementation name.
     pub name: String,
+    /// Descriptions used by providers and tool discovery.
     pub docs: ToolDocs,
 
     /// JSON Schema for the tool's arguments, as its source declared it, with

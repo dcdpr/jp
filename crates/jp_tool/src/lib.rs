@@ -214,16 +214,26 @@ pub struct Question {
 }
 
 impl Question {
+    /// Construct a question with an already validated identifier.
+    #[must_use]
+    pub fn new(id: QuestionId, text: impl Into<String>, answer_type: AnswerType) -> Self {
+        Self {
+            id,
+            text: text.into(),
+            answer_type,
+            pre_amble: None,
+            default: None,
+        }
+    }
+
     /// Create a new text question.
     /// Fails if `id` is empty or contains a `.`.
     pub fn text(id: impl Into<String>, text: impl Into<String>) -> Result<Self, InvalidQuestionId> {
-        Ok(Self {
-            id: QuestionId::try_from(id.into())?,
-            text: text.into(),
-            pre_amble: None,
-            answer_type: AnswerType::Text,
-            default: None,
-        })
+        Ok(Self::new(
+            QuestionId::try_from(id.into())?,
+            text,
+            AnswerType::Text,
+        ))
     }
 
     /// Create a new boolean question.

@@ -11,7 +11,9 @@
 
 pub mod builtin;
 pub mod http;
+mod http_client;
 pub mod json_schema;
+pub mod result;
 pub mod service;
 mod upstream;
 use std::{convert::identity, ffi::OsStr, fmt, process::Stdio, sync::Arc};
@@ -25,23 +27,24 @@ use jp_config::{
 };
 use jp_tool::{
     AccessPolicy, Action, Error as ToolError, Outcome, ParameterDocs, Question, ToolDefinition,
-    ToolDocs,
+    ToolDocs, ToolResult,
+    content::{ErrorDetails, ToolStatus},
     definition::{apply_parameter_defaults, split_description, validate_tool_arguments},
     schema::{Node, merge_description},
 };
 use minijinja::{Environment, ErrorKind as MinijinjaErrorKind, value::ValueKind};
-use serde_json::{Map, Value, json};
+use result::{from_mcp, to_legacy};
+use serde_json::{Error as JsonError, Map, Value, json};
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, BufReader},
     process::Command,
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, trace, warn};
-pub use upstream::text_result;
 use upstream::{UpstreamResult, decode_result, replace_envelope};
 
 use crate::{
-    CallToolResult, Client,
+    Client,
     id::{McpServerId, McpToolId},
 };
 
@@ -108,30 +111,6 @@ fn tool_docs_from_config(config: &ToolConfigWithDefaults) -> ToolDocs {
 /// 2. Handling [`ExecutionOutcome::NeedsInput`] by prompting the user or
 ///    assistant.
 /// 3. Handling result editing **after** receiving the outcome.
-///
-/// # Example Flow
-///
-/// ```text
-/// host                                     execute()
-/// ─────────────────────                    ──────────────────────
-///        │
-///        ├── [AwaitingPermission]
-///        │   prompt_permission()
-///        │
-///        ├── [Running]
-///        │   ────────────────────────────► execute()
-///        │                                      │
-///        │   ◄──────────────────────────── ExecutionOutcome
-///        ├── [AwaitingInput] (if NeedsInput)
-///        │   prompt_question()
-///        │   ────────────────────────────► execute() (with answer)
-///        │                                      │
-///        │   ◄──────────────────────────── ExecutionOutcome
-///        ├── [AwaitingResultEdit]
-///        │   prompt_result_edit()
-///        │
-///        └── [Completed]
-/// ```
 #[derive(Debug)]
 pub enum ExecutionOutcome {
     /// Tool executed and produced a result.
@@ -142,9 +121,7 @@ pub enum ExecutionOutcome {
         /// The execution result.
         ///
         /// If an error occurred, it means the tool ran, but reported an error.
-        result: Result<String, String>,
-        /// Full upstream MCP result before the Host's compatibility projection.
-        native: Option<CallToolResult>,
+        result: ToolResult,
     },
 
     /// Tool needs additional input before it can complete.
@@ -197,7 +174,7 @@ impl ExecutionOutcome {
     /// result.
     #[must_use]
     pub fn is_success(&self) -> bool {
-        matches!(self, Self::Completed { result: Ok(_), .. })
+        matches!(self, Self::Completed { result, .. } if !result.is_error())
     }
 }
 
@@ -221,7 +198,13 @@ pub enum CommandResult {
     },
 
     /// Tool reported a fatal error.
-    FatalError(String),
+    FatalError {
+        /// Original error envelope, retained for the current conversation
+        /// format.
+        raw: String,
+        /// Source chain reported by the tool.
+        trace: Vec<String>,
+    },
 
     /// Tool needs additional input before it can continue.
     NeedsInput(Question),
@@ -267,7 +250,7 @@ pub enum CommandResult {
     MalformedInquiry {
         /// The deserialization error, for the diagnostic trace and the
         /// model-facing message.
-        detail: String,
+        detail: JsonError,
     },
 }
 
@@ -286,38 +269,48 @@ impl CommandResult {
         }
     }
 
-    /// Convert to a `Result<String, String>` suitable for tool call responses.
+    /// Convert command output to ordered content with a typed status.
     ///
-    /// - `Success` → `Ok(content)`
-    /// - `TransientError` → `Err(json with message + trace)`
-    /// - `FatalError` → `Err(raw json)`
-    /// - `NeedsInput` → handled separately by callers (this panics)
-    /// - `Cancelled` → `Ok(cancellation message)`
-    /// - `RawOutput` → `Ok(stdout)` if success, `Err(json)` if failure
-    pub fn into_tool_result(self, name: &str) -> Result<String, String> {
+    /// # Panics
+    ///
+    /// Panics on `NeedsInput`, which must be handled before final delivery.
+    pub fn into_tool_result(self, name: &str) -> ToolResult {
         match self {
-            Self::Success(content) => Ok(content),
-            Self::TransientError { message, trace } => Err(json!({
-                "message": message,
-                "trace": trace,
-            })
-            .to_string()),
-            Self::FatalError(raw) => Err(raw),
-            Self::Cancelled => Ok("Tool execution cancelled by user.".to_string()),
+            Self::Success(content) => ToolResult::text(content),
+            Self::TransientError { message, trace } => {
+                let mut result =
+                    ToolResult::error(json!({"message": message, "trace": trace}).to_string());
+                result.status = ToolStatus::Error(ErrorDetails {
+                    transient: true,
+                    trace,
+                });
+                result
+            }
+            Self::FatalError { raw, trace } => {
+                let mut result = ToolResult::error(raw);
+                result.status = ToolStatus::Error(ErrorDetails {
+                    transient: false,
+                    trace,
+                });
+                result
+            }
+            Self::Cancelled => ToolResult::text("Tool execution cancelled by user."),
             Self::RawOutput {
                 stdout,
                 stderr,
                 success,
             } => {
                 if success {
-                    Ok(stdout)
+                    ToolResult::text(stdout)
                 } else {
-                    Err(json!({
-                        "message": format!("Tool '{name}' execution failed."),
-                        "stderr": stderr,
-                        "stdout": stdout,
-                    })
-                    .to_string())
+                    ToolResult::error(
+                        json!({
+                            "message": format!("Tool '{name}' execution failed."),
+                            "stderr": stderr,
+                            "stdout": stdout,
+                        })
+                        .to_string(),
+                    )
                 }
             }
             Self::InvalidInquiry { question_id } => {
@@ -327,7 +320,7 @@ impl CommandResult {
                     "tool produced an invalid inquiry: question id must be non-empty and must not \
                      contain '.'"
                 );
-                Err(
+                ToolResult::error(
                     "tool produced an invalid inquiry: question id must be non-empty and must not \
                      contain '.'"
                         .to_owned(),
@@ -339,7 +332,7 @@ impl CommandResult {
                     %detail,
                     "tool produced a malformed inquiry that could not be parsed"
                 );
-                Err(format!(
+                ToolResult::error(format!(
                     "tool '{name}' produced a malformed inquiry that could not be parsed: {detail}"
                 ))
             }
@@ -606,7 +599,10 @@ fn parse_command_output(stdout: &[u8], stderr: &[u8], success: bool) -> CommandR
             if transient {
                 CommandResult::TransientError { message, trace }
             } else {
-                CommandResult::FatalError(stdout_str.into_owned())
+                CommandResult::FatalError {
+                    raw: stdout_str.into_owned(),
+                    trace,
+                }
             }
         }
         Ok(Outcome::NeedsInput { question }) => CommandResult::NeedsInput(question),
@@ -648,9 +644,7 @@ fn parse_command_output(stdout: &[u8], stderr: &[u8], success: bool) -> CommandR
                 },
                 // Some other field failed to parse (wrong shape, missing
                 // field, protocol skew).
-                _ => CommandResult::MalformedInquiry {
-                    detail: error.to_string(),
-                },
+                _ => CommandResult::MalformedInquiry { detail: error },
             }
         }
     }
@@ -818,9 +812,8 @@ async fn execute_local(
 
         if let Err(error) = validate_tool_arguments(args, &definition.parameters) {
             return Ok(ExecutionOutcome::Completed {
-                native: None,
                 id,
-                result: Err(format!(
+                result: ToolResult::error(format!(
                     "Invalid arguments: {error}\n\nYou can call `describe_tools(tools: \
                      [\"{name}\"])` to learn more about how to use the tool correctly."
                 )),
@@ -851,14 +844,12 @@ async fn execute_local(
 
     match run_tool_command(command, ctx, root, cancellation_token, Some(trace_as)).await? {
         CommandResult::Success(content) => Ok(ExecutionOutcome::Completed {
-            native: None,
             id,
-            result: Ok(content),
+            result: ToolResult::text(content),
         }),
         CommandResult::NeedsInput(question) => Ok(ExecutionOutcome::NeedsInput { id, question }),
         CommandResult::Cancelled => Ok(ExecutionOutcome::Cancelled { id }),
         other => Ok(ExecutionOutcome::Completed {
-            native: None,
             id,
             result: other.into_tool_result(name),
         }),
@@ -902,36 +893,44 @@ async fn execute_mcp(
     ]);
     let call_future = mcp_client.call_tool(name, server, &arguments, Some(meta));
 
-    tokio::select! {
+    let response = tokio::select! {
         biased;
         () = cancellation_token.cancelled() => {
             info!(tool = %definition.name, "MCP tool call cancelled");
-            Ok(ExecutionOutcome::Cancelled { id })
+            return Ok(ExecutionOutcome::Cancelled { id });
         }
-        result = call_future => {
-            let result = result
-                .map_err(|error| ToolError::McpRunToolError(Box::new(error)))?;
+        result = call_future => result.map_err(|error| ToolError::McpRunToolError(Box::new(error)))?,
+    };
 
-            let result = match decode_result(result).map_err(ToolError::MalformedOutput)? {
-                UpstreamResult::Outcome { outcome, response } => return Ok(match outcome {
-                    Outcome::Success {content} => ExecutionOutcome::Completed {id, native:Some(replace_envelope(response, &content, false)), result:Ok(content)},
-                    Outcome::NeedsInput {question} => ExecutionOutcome::NeedsInput {id, question},
-                    Outcome::Error {message, trace, transient} => {
-                        let text = if transient {
-                            json!({"message":message, "trace":trace}).to_string()
-                        } else {
-                            text_result(&response).unwrap_or_else(identity)
-                        };
-                        let native = Some(replace_envelope(response, &text, true));
-                        ExecutionOutcome::Completed {id, result:Err(text), native}
-                    }
-                }),
-                UpstreamResult::Native(result) => result,
-            };
-            let text = text_result(&result);
-            Ok(ExecutionOutcome::Completed { id, result: text, native: Some(result) })
+    let result = match decode_result(response).map_err(ToolError::MalformedOutput)? {
+        UpstreamResult::Native(response) => {
+            from_mcp(response).map_err(ToolError::MalformedOutput)?
         }
-    }
+        UpstreamResult::Outcome { outcome, response } => match outcome {
+            Outcome::NeedsInput { question } => {
+                return Ok(ExecutionOutcome::NeedsInput { id, question });
+            }
+            Outcome::Success { content } => from_mcp(replace_envelope(response, &content, false))
+                .map_err(ToolError::MalformedOutput)?,
+            Outcome::Error {
+                message,
+                trace,
+                transient,
+            } => {
+                let text = if transient {
+                    json!({"message":message, "trace":trace}).to_string()
+                } else {
+                    to_legacy(&from_mcp(response.clone()).map_err(ToolError::MalformedOutput)?)
+                        .unwrap_or_else(identity)
+                };
+                let mut result = from_mcp(replace_envelope(response, &text, true))
+                    .map_err(ToolError::MalformedOutput)?;
+                result.status = ToolStatus::Error(ErrorDetails { transient, trace });
+                result
+            }
+        },
+    };
+    Ok(ExecutionOutcome::Completed { id, result })
 }
 
 /// Execute a builtin tool and return the outcome.
@@ -958,26 +957,13 @@ async fn execute_builtin(
 
     Ok(match outcome {
         Outcome::Success { content } => ExecutionOutcome::Completed {
-            native: None,
             id,
-            result: Ok(content),
+            result: ToolResult::text(content),
         },
-        Outcome::Error {
-            message,
-            trace,
-            transient: _,
-        } => {
-            let error_msg = if trace.is_empty() {
-                message
-            } else {
-                format!("{message}\n\nTrace:\n{}", trace.join("\n"))
-            };
-            ExecutionOutcome::Completed {
-                native: None,
-                id,
-                result: Err(error_msg),
-            }
-        }
+        outcome @ Outcome::Error { .. } => ExecutionOutcome::Completed {
+            id,
+            result: outcome.into(),
+        },
         Outcome::NeedsInput { question } => ExecutionOutcome::NeedsInput { id, question },
     })
 }

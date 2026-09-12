@@ -9,7 +9,7 @@ use jp_config::{
     conversation::tool::{PartialToolConfig, ToolConfig},
     providers::mcp::{McpProviderConfig, StdioConfig},
 };
-use jp_tool::{Outcome, Question, ToolDefinition, ToolDocs};
+use jp_tool::{ContentBlock, Outcome, Question, ToolDefinition, ToolDocs};
 use rmcp::{
     ErrorData, ServerHandler,
     model::{
@@ -34,7 +34,7 @@ use crate::{
         execute,
         http::Endpoint,
         service::{Admission, ConfiguredTool, Interaction, ReleaseDecision, Service},
-        text_result, tool_definitions,
+        tool_definitions,
     },
 };
 
@@ -143,14 +143,12 @@ async fn upstream_receives_context_options_and_accumulated_answers() {
     )
     .await
     .unwrap();
-    let ExecutionOutcome::Completed { result, native, .. } = second else {
+    let ExecutionOutcome::Completed { result, .. } = second else {
         panic!("expected final result")
     };
-    let native = native.expect("unwrapped text retains native metadata");
-    assert_eq!(native.is_error, Some(false));
-    assert_eq!(text_result(&native), result);
+    assert!(!result.is_error());
     assert_eq!(
-        serde_json::from_str::<Value>(&result.unwrap()).unwrap(),
+        serde_json::from_str::<Value>(&result.to_text()).unwrap(),
         json!({
             "computer.jp/tool":{"name":"actual_tool", "arguments":{"value":"edited"}, "answers":{"confirm":true}, "options":{"limit":7}},
             "computer.jp/context":{"action":"run", "root":"/work", "access":null, "workspace_id":"workspace-1", "conversation_id":"conversation-1"},
@@ -220,7 +218,7 @@ async fn native_upstream_result_survives_host_projection_and_http_delivery() {
         }))]));
         upstream.services.write().await.insert(McpServerId::new("upstream"), running);
         let mut cfg = AppConfig::new_test();
-        let partial: PartialToolConfig = serde_json::from_value(json!({"source":"mcp.upstream.native","run":"unattended","result":"unattended"})).unwrap();
+        let partial: PartialToolConfig = serde_json::from_value(json!({"source":"mcp.upstream.native","run":"unattended","result":"ask"})).unwrap();
         cfg.conversation.tools.insert("alias".into(), ToolConfig::from_partial(partial, vec![]).unwrap());
         let definitions = tool_definitions(cfg.conversation.tools.iter(), &upstream, None).await.unwrap();
         let configured = definitions.into_iter().map(|definition| ConfiguredTool {config:cfg.conversation.tools.get(&definition.name).unwrap(), definition, access:Ok(None), metadata:Map::new()}).collect();
@@ -233,8 +231,15 @@ async fn native_upstream_result_survives_host_projection_and_http_delivery() {
         reply.send(Ok(Admission::Run {arguments})).unwrap();
         let Interaction::Release {reply,..} = host.recv().await.unwrap().interaction else {panic!("expected release")};
         reply.send(Ok(ReleaseDecision::Execute)).unwrap();
-        let Interaction::Record {result:projected,reply,..} = host.recv().await.unwrap().interaction else {panic!("expected recording")};
-        assert_eq!(projected, Ok("alpha\n\nresource".into()));
+        let Interaction::Review {result: reviewed, reply, ..} = host.recv().await.unwrap().interaction else {panic!("expected review")};
+        assert!(matches!(&reviewed.content[1], ContentBlock::Image(image) if image.data == "AA==" && image.mime_type == "image/png"));
+        assert_eq!(reviewed.structured_content, Some(json!({"answer":42})));
+        assert_eq!(reviewed.metadata, Some(json!({"fixture/source":"upstream"}).as_object().unwrap().clone()));
+        reply.send(Ok(reviewed.clone())).unwrap();
+        let Interaction::Record {result:projected,raw_result,reply,..} = host.recv().await.unwrap().interaction else {panic!("expected recording")};
+        assert_eq!(projected, reviewed);
+        assert_eq!(raw_result, Some(reviewed));
+        assert_eq!(projected.to_text(), "alpha\n\nresource");
         assert!(!reply.is_closed());
         reply.send(Ok(())).unwrap();
         assert_eq!(serde_json::to_value(result.await.unwrap()).unwrap(), json!({

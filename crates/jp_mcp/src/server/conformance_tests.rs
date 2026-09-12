@@ -2,9 +2,12 @@
 
 #[cfg(unix)]
 use std::fs;
-use std::sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
+use std::{
+    io,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
 use async_trait::async_trait;
@@ -14,8 +17,8 @@ use jp_config::{
     AppConfig, Config as _,
     conversation::tool::{PartialToolConfig, ToolConfig},
 };
-use jp_tool::{Outcome, Question};
-use reqwest_mcp::{Client as HttpClient, Response, redirect::Policy};
+use jp_tool::{Outcome, Question, ToolResult};
+use reqwest::{Client as HttpClient, Response, redirect::Policy};
 use rmcp::model::{CallToolRequestParams, Meta};
 use serde_json::{Map, Value, json};
 use tokio::{
@@ -379,7 +382,8 @@ async fn external_inquiry_reexecutes_with_host_answers_and_records_edited_output
     let Interaction::Review { result, reply, .. } = pending.interaction else {
         panic!("expected review")
     };
-    let raw = result.unwrap();
+    assert!(!result.is_error());
+    let raw = result.to_text();
     assert_eq!(
         serde_json::from_str::<Value>(&raw).unwrap(),
         json!({"value":"edited","answer":false,"action":"run","workspace":"workspace-1","conversation":"conversation-1","marker":"configured"})
@@ -389,7 +393,7 @@ async fn external_inquiry_reexecutes_with_host_answers_and_records_edited_output
         "attempt\nattempt\n"
     );
     assert!(!attacker.join("attempts").exists());
-    reply.send(Ok(Ok("approved output".into()))).unwrap();
+    reply.send(Ok(ToolResult::text("approved output"))).unwrap();
     let pending = next(&mut fixture.host).await;
     assert_eq!(pending.call.id, id);
     assert_eq!(
@@ -409,8 +413,8 @@ async fn external_inquiry_reexecutes_with_host_answers_and_records_edited_output
         arguments,
         json!({"value":"edited"}).as_object().unwrap().clone()
     );
-    assert_eq!(raw_result, Some(Ok(raw)));
-    assert_eq!(result, Ok("approved output".into()));
+    assert_eq!(raw_result, Some(ToolResult::text(raw)));
+    assert_eq!(result, ToolResult::text("approved output"));
     let mut returned = tokio::spawn(response.reply(11));
     assert!(
         timeout(Duration::from_millis(40), &mut returned)
@@ -418,7 +422,7 @@ async fn external_inquiry_reexecutes_with_host_answers_and_records_edited_output
             .is_err()
     );
     assert!(!reply.is_closed());
-    fs::write(fixture.root.path().join("record.json"), serde_json::to_vec(&json!({"requested":pending.call.request.arguments,"executed":arguments,"result":result.unwrap()})).unwrap()).unwrap();
+    fs::write(fixture.root.path().join("record.json"), serde_json::to_vec(&json!({"requested":pending.call.request.arguments,"executed":arguments,"result":result.to_text()})).unwrap()).unwrap();
     reply.send(Ok(())).unwrap();
     assert_eq!(
         returned.await.unwrap(),
@@ -506,8 +510,8 @@ async fn host_and_external_client_share_handlers_without_sharing_call_identity()
     let Interaction::Review { result, reply, .. } = review.interaction else {
         panic!("expected second review")
     };
-    assert_eq!(result, Ok("execution-1".into()));
-    reply.send(Ok(Ok("external result".into()))).unwrap();
+    assert_eq!(result, ToolResult::text("execution-1"));
+    reply.send(Ok(ToolResult::text("external result"))).unwrap();
     let record = next(&mut fixture.host).await;
     assert_eq!(record.call.id, second_id);
     let Interaction::Record { reply, .. } = record.interaction else {
@@ -536,8 +540,8 @@ async fn host_and_external_client_share_handlers_without_sharing_call_identity()
     let Interaction::Review { result, reply, .. } = review.interaction else {
         panic!("expected first review")
     };
-    assert_eq!(result, Ok("execution-2".into()));
-    reply.send(Ok(Ok("host result".into()))).unwrap();
+    assert_eq!(result, ToolResult::text("execution-2"));
+    reply.send(Ok(ToolResult::text("host result"))).unwrap();
     let record = next(&mut fixture.host).await;
     assert_eq!(record.call.id, first_id);
     let Interaction::Record { reply, .. } = record.interaction else {
@@ -580,8 +584,8 @@ async fn disconnected_response_resumes_without_reexecuting_tool() {
     else {
         panic!("expected review")
     };
-    assert_eq!(result, Ok("execution-1".into()));
-    reply.send(Ok(Ok("recorded result".into()))).unwrap();
+    assert_eq!(result, ToolResult::text("execution-1"));
+    reply.send(Ok(ToolResult::text("recorded result"))).unwrap();
     let record = next(&mut fixture.host).await;
     assert_eq!(record.call.id, id);
     let Interaction::Record { reply, .. } = record.interaction else {
@@ -625,11 +629,15 @@ async fn failed_recording_returns_error_instead_of_the_tool_result() {
     let Interaction::Review { reply, .. } = next(&mut fixture.host).await.interaction else {
         panic!("expected review")
     };
-    reply.send(Ok(Ok("approved result".into()))).unwrap();
+    reply.send(Ok(ToolResult::text("approved result"))).unwrap();
     let Interaction::Record { reply, .. } = next(&mut fixture.host).await.interaction else {
         panic!("expected recording")
     };
-    reply.send(Err(HostError("disk full".into()))).unwrap();
+    reply
+        .send(Err(HostError::Recording(Arc::new(io::Error::other(
+            "disk full",
+        )))))
+        .unwrap();
     assert_eq!(
         response.reply(23).await,
         json!({"jsonrpc":"2.0","id":23,"error":{"code":-32603,"message":"MCP Host operation failed: disk full"}})
@@ -783,7 +791,7 @@ async fn cancellation_is_scoped_to_the_requesting_client_session() {
     let Interaction::Record { result, reply, .. } = record.interaction else {
         panic!("expected only the second result")
     };
-    assert_eq!(result, Ok("answered".into()));
+    assert_eq!(result, ToolResult::text("answered"));
     reply.send(Ok(())).unwrap();
     assert_eq!(
         second_response.reply(31).await,
@@ -824,7 +832,7 @@ async fn large_result_reaches_external_client_byte_for_byte() {
     else {
         panic!("expected record")
     };
-    assert_eq!(result, Ok(payload.clone()));
+    assert_eq!(result, ToolResult::text(payload.clone()));
     reply.send(Ok(())).unwrap();
     let result = response.reply(33).await;
     assert_eq!(

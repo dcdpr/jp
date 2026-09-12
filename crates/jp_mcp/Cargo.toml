@@ -24,14 +24,17 @@ server = [
     "client",
     "dep:async-trait",
     "dep:axum",
+    "dep:base64",
     "dep:camino",
+    "dep:futures",
     "dep:jp_tool",
     "dep:minijinja",
-    "dep:reqwest_mcp",
+    "dep:reqwest",
+    "dep:sse-stream",
     "dep:tokio-util",
     "rmcp/server",
     "rmcp/transport-streamable-http-server",
-    "rmcp/transport-streamable-http-client-reqwest",
+    "rmcp/transport-streamable-http-client",
 ]
 
 [dependencies]
@@ -40,7 +43,9 @@ jp_tool = { workspace = true, optional = true }
 
 async-trait = { workspace = true, optional = true }
 axum = { workspace = true, optional = true, features = ["http1", "tokio"] }
+base64 = { workspace = true, optional = true, features = ["std"] }
 camino = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
 indexmap = { workspace = true }
 minijinja = { workspace = true, optional = true, features = [
     "builtins",
@@ -49,12 +54,13 @@ minijinja = { workspace = true, optional = true, features = [
     "serde",
     "unicode",
 ] }
+reqwest = { workspace = true, optional = true, features = ["json", "stream"] }
 rmcp = { workspace = true }
-reqwest_mcp = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["preserve_order"] }
 sha1 = { workspace = true }
 sha2 = { workspace = true }
+sse-stream = { workspace = true, optional = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true, optional = true }

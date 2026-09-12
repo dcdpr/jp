@@ -9,7 +9,8 @@ use jp_config::{
     AppConfig, Config as _,
     conversation::tool::{PartialToolConfig, ToolConfig},
 };
-use jp_tool::{Outcome, ToolDefinition, ToolDocs};
+use jp_tool::{Outcome, ToolDefinition, ToolDocs, ToolResult};
+use reqwest::Client as HttpClient;
 use rmcp::model::CallToolRequestParams;
 use serde_json::{Map, Value, json};
 use tokio::time::{Duration, timeout};
@@ -102,12 +103,12 @@ async fn http_call_waits_for_host_release_and_records_edited_result() {
     let Interaction::Review { result, reply, .. } = host.recv().await.unwrap().interaction else {
         panic!("expected review")
     };
-    assert_eq!(result, Ok("raw".into()));
-    reply.send(Ok(Ok("edited".into()))).unwrap();
+    assert_eq!(result, ToolResult::text("raw"));
+    reply.send(Ok(ToolResult::text("edited"))).unwrap();
     let Interaction::Record { result, reply, .. } = host.recv().await.unwrap().interaction else {
         panic!("expected record")
     };
-    assert_eq!(result, Ok("edited".into()));
+    assert_eq!(result, ToolResult::text("edited"));
     assert!(!task.is_finished());
     reply.send(Ok(())).unwrap();
     let result = timeout(Duration::from_secs(2), task)
