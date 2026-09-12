@@ -1,6 +1,6 @@
-# RFD D31: Transitional JP Protocol Bridge for MCP Tools
+# RFD 108: Transitional JP Protocol Bridge for MCP Tools
 
-- **Status**: Draft
+- **Status**: Discussion
 - **Category**: Design
 - **Authors**: Jean Mertz <git@jeanmertz.com>
 - **Date**: 2026-05-15
@@ -301,9 +301,8 @@ pattern.
 - **Stateful tool protocol status.** Out of scope; see [RFD 009] and the
   `computer.jp/status` field defined in [RFD 058].
 - **Restructuring the three-way dispatch in `ToolDefinition::execute`.** Out of
-  scope; see [RFD D10].
-  This RFD modifies `execute_mcp` in place; if [RFD D10] lands first the same
-  logic moves into `McpRuntime::execute`.
+  scope.
+  This RFD modifies `execute_mcp` in place.
 - **Promoting the transitional protocol to a permanent JP feature.** This RFD is
   explicitly transitional.
   If [RFD 058] is later rejected and the project decides to keep `Outcome` as
@@ -340,21 +339,6 @@ The transitional markers (loud `--jp` `--help`, README notices, architecture doc
 disclaimer) are the primary mitigation, but they're not enforceable.
 Whether this is a problem depends on how aggressively external authors adopt the
 protocol before [RFD 058] is ready.
-
-### Interaction with [RFD D10]
-
-[RFD D10] proposes extracting the three execute paths into a `ToolRuntime`
-trait.
-This RFD modifies `execute_mcp` directly.
-Sequencing options:
-
-- This RFD lands first; [RFD D10] moves the logic into `McpRuntime::execute`.
-- [RFD D10] lands first; this RFD adds the logic to the new
-  `McpRuntime::execute`.
-- Both land in parallel; whoever merges second pays a small merge cost.
-
-None of these is harmful; they just need coordination in the implementation plan
-if both are active.
 
 ## Implementation Plan
 
@@ -442,17 +426,14 @@ This is the dogfooding check that proves the protocol is wired correctly.
   on [RFD 058]; out of scope here.
 - [RFD 009]: Stateful Tool Protocol (Accepted) — the stateful tool lifecycle is
   layered above the single-execution model this RFD touches.
-- [RFD D10]: Unified Tool Execution Model (Draft) — structural refactor at the
-  dispatch layer; coordination noted in Risks.
 - [SEP-1319]: MCP request-params `_meta` field — the protocol surface this RFD
   attaches metadata to.
 
-[RFD 009]: ../009-stateful-tool-protocol.md
-[RFD 028]: ../028-structured-inquiry-system-for-tool-questions.md
-[RFD 042]: ../042-tool-options.md
-[RFD 058]: ../058-typed-content-blocks-for-tool-responses.md
-[RFD 065]: ../065-typed-resource-model-for-attachments.md
-[RFD 066]: ../066-content-addressable-blob-store.md
-[RFD 067]: ../067-resource-deduplication-for-token-efficiency.md
-[RFD D10]: D10-unified-tool-execution-model.md
+[RFD 009]: 009-stateful-tool-protocol.md
+[RFD 028]: 028-structured-inquiry-system-for-tool-questions.md
+[RFD 042]: 042-tool-options.md
+[RFD 058]: 058-typed-content-blocks-for-tool-responses.md
+[RFD 065]: 065-typed-resource-model-for-attachments.md
+[RFD 066]: 066-content-addressable-blob-store.md
+[RFD 067]: 067-resource-deduplication-for-token-efficiency.md
 [SEP-1319]: https://github.com/modelcontextprotocol/modelcontextprotocol/pull/1319

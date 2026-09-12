@@ -337,7 +337,7 @@ async fn an_interrupt_during_mcp_startup_stops_the_turn_before_it_runs() {
         mcp_client: jp_mcp::Client::default(),
         workspace_root: tmp.path().to_path_buf(),
         interactive: false,
-        attachments: PendingAttachments { slots: vec![] },
+        attachments: vec![],
         printer: Arc::new(printer),
         approvals: Arc::new(crate::access::approvals::ApprovalStore::default()),
         chat_request: ChatRequest::from("hello"),
@@ -1896,66 +1896,6 @@ fn cleanup_any_removes_a_replaced_draft() {
     cleanup_query_message_file(Some(&fs), &id, DraftRemoval::Any);
 
     assert!(!path.exists());
-}
-
-fn attachment(source: &str) -> Attachment {
-    Attachment {
-        source: source.to_owned(),
-        description: None,
-        content: jp_attachment::AttachmentContent::Text(String::new()),
-    }
-}
-
-/// An MCP attachment resolves later than the rest, but the assistant has to see
-/// every attachment in the order the conversation declares them: each one is
-/// sent as a document numbered by its position.
-#[test]
-fn attachments_keep_their_configured_order_across_deferral() {
-    let mcp = Url::parse("mcp+server+res://one").unwrap();
-
-    // Declared as `[mcp, file, mcp, file]`, so both MCP slots resolve after the
-    // two around them and every one of them has to land back in place.
-    let slots = vec![
-        AttachmentSlot::Deferred(mcp.clone()),
-        AttachmentSlot::Ready(vec![attachment("file://second")]),
-        AttachmentSlot::Deferred(mcp),
-        AttachmentSlot::Ready(vec![attachment("file://fourth")]),
-    ];
-
-    let resolved = vec![vec![attachment("mcp://first")], vec![attachment(
-        "mcp://third",
-    )]];
-
-    let sources: Vec<String> = splice(slots, resolved)
-        .into_iter()
-        .map(|attachment| attachment.source)
-        .collect();
-
-    assert_eq!(sources, [
-        "mcp://first",
-        "file://second",
-        "mcp://third",
-        "file://fourth"
-    ]);
-}
-
-/// One URL can yield several attachments, so a slot holds a group rather than a
-/// single item and the whole group belongs at the slot's position.
-#[test]
-fn a_deferred_slot_keeps_its_whole_group_together() {
-    let slots = vec![
-        AttachmentSlot::Deferred(Url::parse("mcp+server+res://dir").unwrap()),
-        AttachmentSlot::Ready(vec![attachment("file://last")]),
-    ];
-
-    let resolved = vec![vec![attachment("mcp://a"), attachment("mcp://b")]];
-
-    let sources: Vec<String> = splice(slots, resolved)
-        .into_iter()
-        .map(|attachment| attachment.source)
-        .collect();
-
-    assert_eq!(sources, ["mcp://a", "mcp://b", "file://last"]);
 }
 
 fn lock_with_title(

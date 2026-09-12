@@ -55,8 +55,8 @@ In disagreements between code and docs, the code is authoritative.
 ### Attachment
 
 External content attached to a conversation to provide context: a file, URL
-contents, command output, Bear note, MCP resource, etc. Implemented as
-`Attachment` in `jp_attachment`.
+contents, command output, Bear note, etc. Implemented as `Attachment` in
+`jp_attachment`.
 Each attachment kind is a separate crate (`jp_attachment_file_content`,
 `jp_attachment_cmd_output`, and so on).
 

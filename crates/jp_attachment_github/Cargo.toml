@@ -15,7 +15,6 @@ version.workspace = true
 [dependencies]
 jp_attachment = { workspace = true }
 jp_github = { workspace = true }
-jp_mcp = { workspace = true }
 
 async-trait = { workspace = true }
 camino = { workspace = true }
