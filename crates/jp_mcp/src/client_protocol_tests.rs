@@ -7,22 +7,34 @@ use indexmap::IndexMap;
 use jp_config::{
     AppConfig, Config as _,
     conversation::tool::{PartialToolConfig, ToolConfig},
+    providers::mcp::{McpProviderConfig, StdioConfig},
 };
 use jp_tool::{Outcome, Question, ToolDefinition, ToolDocs};
 use rmcp::{
     ErrorData, ServerHandler,
-    model::{CallToolRequestParams, CallToolResult, ServerCapabilities, ServerInfo},
+    model::{
+        CallToolRequestParams, CallToolResult, ListToolsResult, PaginatedRequestParams,
+        ServerCapabilities, ServerInfo, Tool,
+    },
     service::{RequestContext, RoleServer, ServiceExt as _},
 };
-use serde_json::{Value, json};
-use tokio::io::duplex;
+use serde_json::{Map, Value, json};
+use tokio::{
+    io::duplex,
+    time::{Duration, timeout},
+};
 use tokio_util::sync::CancellationToken;
 
 use super::{Client, McpServerId};
 use crate::{
     Content,
     server::{
-        ExecutionOutcome, InvocationContext, builtin::BuiltinExecutors, execute, text_result,
+        ExecutionOutcome, InvocationContext,
+        builtin::BuiltinExecutors,
+        execute,
+        http::Endpoint,
+        service::{Admission, ConfiguredTool, Interaction, ReleaseDecision, Service},
+        text_result, tool_definitions,
     },
 };
 
@@ -148,4 +160,90 @@ async fn upstream_receives_context_options_and_accumulated_answers() {
     assert_eq!(count.load(Ordering::SeqCst), 2);
     client.shutdown().await;
     server.cancel().await.unwrap();
+}
+
+struct NativeUpstream(Arc<AtomicUsize>);
+
+impl ServerHandler for NativeUpstream {
+    fn get_info(&self) -> ServerInfo {
+        let mut info = ServerInfo::default();
+        info.capabilities = ServerCapabilities::builder().enable_tools().build();
+        info
+    }
+
+    async fn list_tools(
+        &self,
+        _: Option<PaginatedRequestParams>,
+        _: RequestContext<RoleServer>,
+    ) -> Result<ListToolsResult, ErrorData> {
+        Ok(ListToolsResult {
+            tools: vec![Tool::new(
+                "native",
+                "Native result",
+                Arc::new(
+                    json!({"type":"object","properties":{}})
+                        .as_object()
+                        .unwrap()
+                        .clone(),
+                ),
+            )],
+            ..Default::default()
+        })
+    }
+
+    async fn call_tool(
+        &self,
+        request: CallToolRequestParams,
+        _: RequestContext<RoleServer>,
+    ) -> Result<CallToolResult, ErrorData> {
+        assert_eq!(request.name, "native");
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Ok(serde_json::from_value(json!({
+            "content":[{"type":"text","text":"alpha"},{"type":"image","data":"AA==","mimeType":"image/png"},{"type":"resource","resource":{"uri":"fixture:///resource","text":"resource","mimeType":"text/plain"}}],
+            "isError":false,"structuredContent":{"answer":42},"_meta":{"fixture/source":"upstream"}
+        })).unwrap())
+    }
+}
+
+#[tokio::test]
+async fn native_upstream_result_survives_host_projection_and_http_delivery() {
+    timeout(Duration::from_secs(10), async {
+        let count = Arc::new(AtomicUsize::new(0));
+        // Use the stdio codec without starting an extra fixture executable.
+        let (client_transport, server_transport) = duplex(8192);
+        let handler = NativeUpstream(count.clone());
+        let server = tokio::spawn(async move {handler.serve(server_transport).await.unwrap()});
+        let running = ().serve(client_transport).await.unwrap();
+        let server = server.await.unwrap();
+        let upstream = Client::new(IndexMap::from_iter([("upstream".into(), McpProviderConfig::Stdio(StdioConfig {
+            command:"unused-fixture".into(), arguments:vec![], variables:vec![], checksum:None, optional:false, startup_timeout_secs:60,
+        }))]));
+        upstream.services.write().await.insert(McpServerId::new("upstream"), running);
+        let mut cfg = AppConfig::new_test();
+        let partial: PartialToolConfig = serde_json::from_value(json!({"source":"mcp.upstream.native","run":"unattended","result":"unattended"})).unwrap();
+        cfg.conversation.tools.insert("alias".into(), ToolConfig::from_partial(partial, vec![]).unwrap());
+        let definitions = tool_definitions(cfg.conversation.tools.iter(), &upstream, None).await.unwrap();
+        let configured = definitions.into_iter().map(|definition| ConfiguredTool {config:cfg.conversation.tools.get(&definition.name).unwrap(), definition, access:Ok(None), metadata:Map::new()}).collect();
+        let (service, mut host) = Service::new(configured, upstream, BuiltinExecutors::new(), "/work".into(), InvocationContext::default()).unwrap();
+        let endpoint = Endpoint::start(service).await.unwrap();
+        let client = endpoint.connect().await.unwrap();
+        let peer = client.peer().clone();
+        let result = tokio::spawn(async move {peer.call_tool(CallToolRequestParams::new("alias")).await.unwrap()});
+        let Interaction::Prepare {arguments,reply,..} = host.recv().await.unwrap().interaction else {panic!("expected preparation")};
+        reply.send(Ok(Admission::Run {arguments})).unwrap();
+        let Interaction::Release {reply,..} = host.recv().await.unwrap().interaction else {panic!("expected release")};
+        reply.send(Ok(ReleaseDecision::Execute)).unwrap();
+        let Interaction::Record {result:projected,reply,..} = host.recv().await.unwrap().interaction else {panic!("expected recording")};
+        assert_eq!(projected, Ok("alpha\n\nresource".into()));
+        assert!(!reply.is_closed());
+        reply.send(Ok(())).unwrap();
+        assert_eq!(serde_json::to_value(result.await.unwrap()).unwrap(), json!({
+            "content":[{"type":"text","text":"alpha"},{"type":"image","data":"AA==","mimeType":"image/png"},{"type":"resource","resource":{"uri":"fixture:///resource","text":"resource","mimeType":"text/plain"}}],
+            "isError":false,"structuredContent":{"answer":42},"_meta":{"fixture/source":"upstream"}
+        }));
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+        client.cancel().await.unwrap();
+        endpoint.shutdown().await.unwrap();
+        server.cancel().await.unwrap();
+    }).await.unwrap();
 }

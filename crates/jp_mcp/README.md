@@ -25,6 +25,12 @@ It validates Host and supplied Origin headers.
 Its `connect` method creates an ordinary MCP client connection through that HTTP
 endpoint; the private Host channel remains separate.
 
+The MCP Host can set `ConfiguredTool.metadata` before starting the service.
+It is advertised as each tool's `_meta` object, including opaque result-size
+hints for external clients.
+Incoming call metadata remains correlation data; it cannot change these
+descriptions, execution context, options, or answers.
+
 Upstream stdio calls carry trusted execution context and accumulated answers
 under `_meta["computer.jp/tool"]` and `_meta["computer.jp/context"]`.
 Single text results are recognized as legacy `Outcome` envelopes when their
@@ -42,3 +48,20 @@ session reinitialization.
 It does not resubmit a tool call on transport failure.
 The HTTP endpoint has no authentication; its loopback binding and header checks
 are not a claim that the caller is a particular local application.
+
+## Conformance checks
+
+The server tests include an independent JSON-RPC/SSE client, without using
+`Endpoint::connect` for third-party calls.
+A scripted MCP Host handles approval, input, result editing, and recording
+through the private channel.
+The tests exercise concurrent callers, scoped cancellation, failed recording,
+large results, and resumption through `Last-Event-ID` after dropping an HTTP
+response.
+They also check that an upstream result's native content and metadata survive
+the Host's text projection.
+
+These tests do not launch Claude Code, consume subscription quota, or guarantee
+exactly-once execution after a process crash.
+Agent-specific correlation and configuration belong to the integration consuming
+this service.

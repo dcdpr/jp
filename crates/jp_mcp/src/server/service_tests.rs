@@ -60,6 +60,7 @@ fn fixture(run: &str, result: &str) -> (Service, HostReceiver, Arc<AtomicUsize>)
         },
         config: config.conversation.tools.get("count").unwrap(),
         access: Ok(None),
+        metadata: Map::new(),
     };
     let (service, host) = Service::new(
         vec![tool],
@@ -437,6 +438,7 @@ async fn local_inquiry_exits_and_runs_a_new_process_with_the_answer() {
         },
         config: cfg.conversation.tools.get("local").unwrap(),
         access: Ok(None),
+        metadata: Map::new(),
     };
     let (service, mut host) = Service::new(
         vec![tool],
