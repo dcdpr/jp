@@ -20,12 +20,11 @@ use jp_conversation::{
     event::{ChatRequest, ChatResponse},
 };
 use jp_inquire::prompt::MockPromptBackend;
-use jp_llm::{
-    Provider,
-    provider::mock::MockProvider,
-    tool::{InvocationContext, builtin::BuiltinExecutors, executor::ExecutorSource},
+use jp_llm::{Provider, provider::mock::MockProvider, tool::ExecutorSource};
+use jp_mcp::{
+    Startup, StderrLine,
+    server::{InvocationContext, builtin::BuiltinExecutors},
 };
-use jp_mcp::{Startup, StderrLine};
 use jp_printer::{OutputFormat, Printer, SharedBuffer, TerminalCapability};
 use jp_storage::backend::FsStorageBackend;
 use jp_term::width::display_width;

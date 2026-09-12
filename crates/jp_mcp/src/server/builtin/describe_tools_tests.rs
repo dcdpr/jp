@@ -1,9 +1,8 @@
 use indexmap::IndexMap;
-use jp_tool::Outcome;
+use jp_tool::{Outcome, ParameterDocs, ToolDocs};
 use serde_json::{Value, json};
 
 use super::*;
-use crate::tool::{ParameterDocs, ToolDocs};
 
 fn empty_tool_docs() -> ToolDocs {
     ToolDocs {

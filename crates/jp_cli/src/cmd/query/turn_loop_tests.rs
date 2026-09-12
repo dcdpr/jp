@@ -51,14 +51,10 @@ use jp_llm::{
     provider::mock::MockProvider,
     query::ChatQuery,
     tool::{
-        InvocationContext,
-        builtin::BuiltinExecutors,
-        executor::{
-            Executor, ExecutorResult, ExecutorSource, MockExecutor, PermissionInfo,
-            TestExecutorSource,
-        },
+        Executor, ExecutorResult, ExecutorSource, MockExecutor, PermissionInfo, TestExecutorSource,
     },
 };
+use jp_mcp::server::{InvocationContext, builtin::BuiltinExecutors};
 use jp_printer::{OutputFormat, Printer, TerminalCapability};
 use jp_storage::backend::FsStorageBackend;
 use jp_tool::Question;
@@ -1264,7 +1260,7 @@ impl Executor for SleepingExecutor {
         _mcp_client: &jp_mcp::Client,
         _root: &Utf8Path,
         cancellation_token: CancellationToken,
-        _stderr: Option<jp_llm::tool::StderrSink>,
+        _stderr: Option<jp_mcp::server::StderrSink>,
     ) -> ExecutorResult {
         if let Some(started) = &self.started {
             started.notify_one();
@@ -4894,7 +4890,7 @@ impl Executor for TalkingExecutor {
         _mcp_client: &jp_mcp::Client,
         _root: &Utf8Path,
         _cancellation_token: CancellationToken,
-        stderr: Option<jp_llm::tool::StderrSink>,
+        stderr: Option<jp_mcp::server::StderrSink>,
     ) -> ExecutorResult {
         if let Some(sink) = stderr {
             self.got_sink.store(true, Ordering::Relaxed);
@@ -5835,7 +5831,7 @@ impl Executor for AskingTalkingExecutor {
         _mcp_client: &jp_mcp::Client,
         _root: &Utf8Path,
         _cancellation_token: CancellationToken,
-        stderr: Option<jp_llm::tool::StderrSink>,
+        stderr: Option<jp_mcp::server::StderrSink>,
     ) -> ExecutorResult {
         if answers.contains_key("which") {
             if let Some(sink) = stderr {
@@ -5909,7 +5905,7 @@ impl Executor for InquiryMockExecutor {
         _mcp_client: &jp_mcp::Client,
         _root: &camino::Utf8Path,
         _cancellation_token: tokio_util::sync::CancellationToken,
-        _stderr: Option<jp_llm::tool::StderrSink>,
+        _stderr: Option<jp_mcp::server::StderrSink>,
     ) -> ExecutorResult {
         for q in &self.questions {
             if !answers.contains_key(q.id.as_str()) {

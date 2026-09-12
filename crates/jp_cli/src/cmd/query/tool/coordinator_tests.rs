@@ -2,19 +2,19 @@ use async_trait::async_trait;
 use camino_tempfile::Utf8TempDir;
 use jp_config::conversation::tool::{ToolConfig, ToolSource, style::PartialDisplayStyleConfig};
 use jp_inquire::{ReplyOutcome, prompt::MockPromptBackend};
-use jp_llm::tool::executor::MockExecutor;
+use jp_llm::tool::MockExecutor;
 use jp_printer::{ErrChannel, OutputFormat, Printer};
 use schematic::Config as _;
 
 use super::{super::executor::TerminalExecutorSource, *};
 use crate::render::tool::ToolRenderer;
 
-fn empty_executor_source() -> Box<dyn jp_llm::tool::executor::ExecutorSource> {
+fn empty_executor_source() -> Box<dyn jp_llm::tool::ExecutorSource> {
     Box::new(TerminalExecutorSource::new(
-        jp_llm::tool::builtin::BuiltinExecutors::new(),
+        jp_mcp::server::builtin::BuiltinExecutors::new(),
         &[],
         std::sync::Arc::new(crate::access::approvals::ApprovalStore::default()),
-        jp_llm::tool::InvocationContext::default(),
+        jp_mcp::server::InvocationContext::default(),
     ))
 }
 
@@ -298,7 +298,7 @@ async fn test_pre_render_for_prompt_function_call_fires_before_approval() {
         ErrChannel::new(printer.clone()),
         style_config,
         root.path().to_owned(),
-        jp_llm::tool::InvocationContext::default(),
+        jp_mcp::server::InvocationContext::default(),
     );
 
     let mut args = Map::new();
@@ -363,7 +363,7 @@ async fn test_pre_render_for_prompt_custom_ask_defers_rendering() {
         ErrChannel::new(printer.clone()),
         style_config,
         root.path().to_owned(),
-        jp_llm::tool::InvocationContext::default(),
+        jp_mcp::server::InvocationContext::default(),
     );
 
     let result = coordinator
@@ -420,7 +420,7 @@ impl Executor for EditableExecutor {
         _mcp_client: &jp_mcp::Client,
         _root: &camino::Utf8Path,
         _cancellation_token: tokio_util::sync::CancellationToken,
-        _stderr: Option<jp_llm::tool::StderrSink>,
+        _stderr: Option<jp_mcp::server::StderrSink>,
     ) -> ExecutorResult {
         unreachable!("resolve_tool_call_decision does not invoke execute()")
     }
@@ -462,7 +462,7 @@ async fn test_resolve_tool_call_decision_invalidates_prerender_on_edit() {
         ErrChannel::new(printer.clone()),
         style_config,
         root.path().to_owned(),
-        jp_llm::tool::InvocationContext::default(),
+        jp_mcp::server::InvocationContext::default(),
     );
 
     let mut pre_edit_args = Map::new();
@@ -815,7 +815,7 @@ async fn custom_formatter_receives_the_invoked_tool_name() {
         ErrChannel::new(printer.clone()),
         jp_config::AppConfig::new_test().style,
         root.path().to_owned(),
-        jp_llm::tool::InvocationContext::default(),
+        jp_mcp::server::InvocationContext::default(),
     );
 
     let outcome = coordinator

@@ -102,15 +102,16 @@ use jp_conversation::{
     thread::{Thread, ThreadBuilder},
 };
 use jp_inquire::prompt::{PromptBackend, TerminalPromptBackend};
-use jp_llm::{
-    provider,
-    tool::{
+use jp_llm::provider;
+use jp_mcp::{
+    StartupSet,
+    id::McpServerId,
+    server::{
         InvocationContext,
         builtin::{BuiltinExecutors, describe_tools::DescribeTools},
         tool_definitions,
     },
 };
-use jp_mcp::{StartupSet, id::McpServerId};
 use jp_md::format::Formatter;
 use jp_printer::{LineSink, PrintableExt as _, Printer, RegionStyle, StatusRegion};
 use jp_storage::backend::{FsStorageBackend, Projection};

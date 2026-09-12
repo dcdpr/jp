@@ -36,9 +36,10 @@ use jp_llm::{
     model::ModelDetails,
     provider::get_provider,
     query::ChatQuery,
-    tool::{InvocationContext, executor::Executor},
+    tool::Executor,
     with_idle_timeout, with_output_limit,
 };
+use jp_mcp::server::InvocationContext;
 use jp_printer::{ErrChannel, Printer, RegionStyle, StatusRegion};
 use jp_tool::ToolDefinition;
 use jp_workspace::{ConversationLock, ConversationMut};

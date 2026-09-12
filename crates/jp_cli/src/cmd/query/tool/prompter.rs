@@ -21,7 +21,7 @@ use jp_config::conversation::tool::{RunMode, ToolSource};
 use jp_conversation::event::SelectOption;
 use jp_editor::{EditOutcome, EditorBackend};
 use jp_inquire::{InlineOption, ReplyEditMode, ReplyOutcome, prompt::PromptBackend};
-use jp_llm::tool::executor::PermissionInfo;
+use jp_llm::tool::PermissionInfo;
 use jp_md::{format::DefaultBackground, shade::ShadedWriter};
 use jp_printer::{Printer, PromptWriter};
 use jp_tool::AnswerType;

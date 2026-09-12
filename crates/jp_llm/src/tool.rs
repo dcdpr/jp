@@ -1,1149 +1,371 @@
-//! Tool call utilities.
+//! The seam a turn loop runs one tool call through.
+//!
+//! [`Executor`] is one execution attempt: it runs the tool and reports what
+//! came back, without deciding whether the call may run or who answers a
+//! question it asks.
+//! [`ExecutorSource`] builds one per tool call, so a test can supply
+//! [`MockExecutor`] where production supplies a real one.
+//!
+//! The execution itself lives in [`jp_mcp::server`].
 
-pub mod builtin;
-pub mod executor;
-pub mod json_schema;
+use std::sync::Mutex;
 
-use std::{ffi::OsStr, fmt, process::Stdio, sync::Arc};
-
-pub use builtin::BuiltinTool;
+use async_trait::async_trait;
 use camino::Utf8Path;
 use indexmap::IndexMap;
-use jp_config::{
-    conversation::tool::{CommandConfig, ToolConfigWithDefaults, ToolSource},
-    types::command::shell_command_line,
-};
-use jp_conversation::event::ToolCallResponse;
-use jp_mcp::{
-    RawContent, ResourceContents,
-    id::{McpServerId, McpToolId},
-};
-use jp_tool::{
-    Action, Error as ToolError, Outcome, ParameterDocs, Question, ToolDefinition, ToolDocs,
-    definition::{apply_parameter_defaults, split_description, validate_tool_arguments},
-    schema::{Node, merge_description},
-};
-use minijinja::{Environment, ErrorKind as MinijinjaErrorKind, value::ValueKind};
-use serde_json::{Value, json};
-use tokio::{
-    io::{AsyncBufReadExt, AsyncReadExt, BufReader},
-    process::Command,
-};
+use jp_config::conversation::tool::{RunMode, ToolConfigWithDefaults, ToolSource};
+use jp_conversation::event::{InquirySource, ToolCallRequest, ToolCallResponse};
+use jp_mcp::{Client, server::StderrSink};
+use jp_tool::{Question, ToolDefinition};
+use serde_json::{Map, Value};
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, trace, warn};
 
-/// Read a tool's documentation out of its configuration.
-fn tool_docs_from_config(config: &ToolConfigWithDefaults) -> ToolDocs {
-    let parameters = config
-        .parameters()
-        .iter()
-        .filter_map(|(param_name, param_cfg)| {
-            let summary = param_cfg
-                .summary
-                .as_deref()
-                .or(param_cfg.description.as_deref())
-                .map(str::to_owned);
-            let desc = param_cfg.description.as_deref().map(str::to_owned);
-            let ex = param_cfg.examples.as_deref().map(str::to_owned);
-
-            if summary.is_none() && desc.is_none() && ex.is_none() {
-                return None;
-            }
-
-            Some((param_name.to_owned(), ParameterDocs {
-                summary,
-                description: desc,
-                examples: ex,
-            }))
-        })
-        .collect();
-
-    ToolDocs {
-        summary: config.summary().map(str::to_owned),
-        description: config.description().map(str::to_owned),
-        examples: config.examples().map(str::to_owned),
-        parameters,
-    }
-}
-
-/// The outcome of a tool execution.
+/// Trait for tool execution, enabling mock implementations for testing.
 ///
-/// This type represents the possible results of executing a tool's underlying
-/// command or MCP call, without any interactive prompts.
-/// The caller is responsible for:
+/// This trait abstracts the execution of a single tool call, allowing the
+/// `ToolCoordinator` to work with both real and mock executors.
 ///
-/// 1. Handling permission prompts **before** calling [`execute()`].
-/// 2. Handling [`ExecutionOutcome::NeedsInput`] by prompting the user or
-///    assistant.
-/// 3. Handling result editing **after** receiving the outcome.
+/// # Design
 ///
-/// # Example Flow
-///
-/// ```text
-/// ToolExecutor (jp_cli)                    execute() (jp_llm)
-/// ─────────────────────                    ──────────────────────
-///        │
-///        ├── [AwaitingPermission]
-///        │   prompt_permission()
-///        │
-///        ├── [Running]
-///        │   ────────────────────────────► execute()
-///        │                                      │
-///        │   ◄──────────────────────────── ExecutionOutcome
-///        ├── [AwaitingInput] (if NeedsInput)
-///        │   prompt_question()
-///        │   ────────────────────────────► execute() (with answer)
-///        │                                      │
-///        │   ◄──────────────────────────── ExecutionOutcome
-///        ├── [AwaitingResultEdit]
-///        │   prompt_result_edit()
-///        │
-///        └── [Completed]
-/// ```
-#[derive(Debug)]
-pub enum ExecutionOutcome {
-    /// Tool executed and produced a result.
-    Completed {
-        /// The tool call ID (for correlation with the request).
-        id: String,
-
-        /// The execution result.
-        ///
-        /// If an error occurred, it means the tool ran, but reported an error.
-        result: Result<String, String>,
-    },
-
-    /// Tool needs additional input before it can complete.
-    ///
-    /// The caller should:
-    ///
-    /// 1. Present the question to the user (or delegate to the assistant)
-    /// 2. Collect the answer
-    /// 3. Call [`execute()`] again with the answer in `answers`
-    NeedsInput {
-        /// The tool call ID.
-        id: String,
-
-        /// The question to ask.
-        question: Question,
-    },
-
-    /// Tool execution was cancelled via the cancellation token.
-    ///
-    /// This occurs when the user interrupts tool execution (e.g., Ctrl+C during
-    /// a long-running command).
-    Cancelled {
-        /// The tool call ID.
-        id: String,
-    },
-}
-
-impl ExecutionOutcome {
-    /// Convert the outcome to a [`ToolCallResponse`].
-    ///
-    /// This is useful for building the final response to send to the LLM after
-    /// any post-processing (e.g., result editing) is complete.
-    ///
-    /// # Note
-    ///
-    /// For [`ExecutionOutcome::NeedsInput`], this returns a placeholder
-    /// response.
-    /// The caller should typically handle `NeedsInput` specially rather than
-    /// converting it directly to a response.
-    #[must_use]
-    pub fn into_response(self) -> ToolCallResponse {
-        match self {
-            Self::Completed { id, result } => ToolCallResponse { id, result },
-            Self::NeedsInput { id, question } => ToolCallResponse {
-                id,
-                result: Ok(format!("Tool requires additional input: {}", question.text)),
-            },
-            Self::Cancelled { id } => ToolCallResponse {
-                id,
-                result: Ok("Tool execution cancelled by user.".to_string()),
-            },
-        }
-    }
-
+/// The executor is intentionally simple - it just executes tools with given
+/// answers.
+/// All decision-making about question targets, static answers, and how to
+/// handle `NeedsInput` is done by the coordinator, which has access to the tool
+/// configuration.
+#[async_trait]
+pub trait Executor: Send + Sync {
     /// Returns the tool call ID.
-    #[must_use]
-    pub fn id(&self) -> &str {
-        match self {
-            Self::Completed { id, .. } | Self::NeedsInput { id, .. } | Self::Cancelled { id } => id,
-        }
-    }
+    fn tool_id(&self) -> &str;
 
-    /// Returns `true` if this is a `NeedsInput` outcome.
-    #[must_use]
-    pub fn needs_input(&self) -> bool {
-        matches!(self, Self::NeedsInput { .. })
-    }
+    /// Returns the tool name.
+    fn tool_name(&self) -> &str;
 
-    /// Returns `true` if this is a `Cancelled` outcome.
-    #[must_use]
-    pub fn is_cancelled(&self) -> bool {
-        matches!(self, Self::Cancelled { .. })
-    }
+    /// Returns the tool call arguments.
+    ///
+    /// This is separate from [`permission_info()`] because arguments are always
+    /// available, while permission info is only present for tools that require
+    /// a permission prompt.
+    ///
+    /// [`permission_info()`]: Self::permission_info
+    fn arguments(&self) -> &Map<String, Value>;
 
-    /// Returns `true` if this is a `Completed` outcome with a successful
-    /// result.
-    #[must_use]
-    pub fn is_success(&self) -> bool {
-        matches!(self, Self::Completed { result: Ok(_), .. })
-    }
+    /// Returns information needed for permission prompting.
+    ///
+    /// Returns `None` if the tool doesn't need a permission prompt (e.g.,
+    /// `RunMode::Unattended` or `RunMode::Skip`).
+    fn permission_info(&self) -> Option<PermissionInfo>;
+
+    /// Updates the arguments to use for execution.
+    ///
+    /// This is called after permission prompting if the user edited the
+    /// arguments (via `RunMode::Edit`).
+    /// The new arguments replace the original arguments from the tool call
+    /// request.
+    fn set_arguments(&mut self, args: Value);
+
+    /// Executes the tool once with the given answers.
+    ///
+    /// This method performs a single execution pass.
+    /// If the tool needs additional input, it returns
+    /// `ExecutorResult::NeedsInput` and the coordinator handles prompting and
+    /// retrying.
+    ///
+    /// The executor doesn't know how questions should be answered - it just
+    /// reports that input is needed.
+    /// The coordinator looks up the tool configuration to determine whether to
+    /// prompt the user or ask the LLM.
+    ///
+    /// # Arguments
+    ///
+    /// - `answers` - Accumulated answers from previous `NeedsInput` responses
+    /// - `mcp_client` - MCP client for remote tool execution
+    /// - `root` - Project root directory
+    /// - `cancellation_token` - Token to cancel execution
+    /// - `stderr` - Receives the tool's stderr lines as they arrive, for a
+    ///   caller showing progress while it runs.
+    ///   `None` when nothing is watching; the lines still reach tracing and the
+    ///   accumulated buffer either way.
+    async fn execute(
+        &self,
+        answers: &IndexMap<String, Value>,
+        mcp_client: &Client,
+        root: &Utf8Path,
+        cancellation_token: CancellationToken,
+        stderr: Option<StderrSink>,
+    ) -> ExecutorResult;
 }
 
-/// Result of running a tool command.
+/// Abstraction over how executors are created for tool calls.
 ///
-/// This is the single parsing point for all tool command output.
-/// Both tool execution and argument formatting go through this type, ensuring
-/// consistent handling of `Outcome` variants (including error traces).
+/// This trait enables dependency injection of executor creation, allowing tests
+/// to use mock executors without executing real shell commands.
+pub trait ExecutorSource: Send + Sync {
+    /// Creates an executor for the given tool call request.
+    ///
+    /// Returns `None` if the tool cannot be resolved (e.g. missing from the
+    /// definitions).
+    fn create(
+        &self,
+        request: ToolCallRequest,
+        config: ToolConfigWithDefaults,
+    ) -> Option<Box<dyn Executor>>;
+}
+
+/// Result of a tool execution attempt.
+///
+/// Tools may need multiple rounds of execution if they require additional
+/// input.
+/// This enum allows the executor to return control to the coordinator, which
+/// decides how to handle the `NeedsInput` case by looking up the question
+/// configuration.
 #[derive(Debug)]
-pub enum CommandResult {
-    /// Tool produced content.
-    Success(String),
-
-    /// Tool reported a transient error (can be retried).
-    TransientError {
-        /// The error message.
-        message: String,
-
-        /// The error trace (source chain from the tool process).
-        trace: Vec<String>,
-    },
-
-    /// Tool reported a fatal error.
-    FatalError(String),
+#[allow(clippy::large_enum_variant)] // NeedsInput variant is larger but rarely used
+pub enum ExecutorResult {
+    /// Tool completed (success or error).
+    Completed(ToolCallResponse),
 
     /// Tool needs additional input before it can continue.
-    NeedsInput(Question),
-
-    /// Tool was cancelled via the cancellation token.
-    Cancelled,
-
-    /// stdout wasn't valid `Outcome` JSON.
     ///
-    /// Falls back to treating stdout as plain text.
-    /// The `success` flag indicates the process exit status.
-    RawOutput {
-        /// Raw stdout content.
-        stdout: String,
-
-        /// Raw stderr content.
-        stderr: String,
-
-        /// Whether the process exited successfully.
-        success: bool,
-    },
-
-    /// Tool emitted a well-formed `needs_input` whose question id is invalid
-    /// (empty, or contains a `.`, which is reserved as the inquiry-id
-    /// separator).
+    /// The executor doesn't know who should answer - it just reports that input
+    /// is needed.
+    /// The coordinator looks up the question configuration to determine the
+    /// target:
     ///
-    /// Surfaced as a tool-level error so the malformed inquiry is dropped
-    /// before any inquiry event is constructed.
-    InvalidInquiry {
-        /// The offending question id, for the diagnostic trace.
-        question_id: String,
-    },
+    /// - `User`: Prompt the user interactively, then restart the tool
+    /// - `Assistant`: Format a response asking the LLM to re-run with answers
+    NeedsInput {
+        /// Tool call ID.
+        tool_id: String,
 
-    /// Tool emitted a payload shaped like a `needs_input` outcome (top-level
-    /// `"type": "needs_input"`) that failed to deserialize for a reason other
-    /// than an invalid question id: a field with the wrong shape, a missing
-    /// field, or a local-tool binary emitting an older wire protocol than this
-    /// build parses.
-    ///
-    /// Surfaced as a tool-level error rather than [`Self::RawOutput`] so a
-    /// protocol mismatch is loud, instead of silently handing the raw JSON to
-    /// the model as tool output.
-    MalformedInquiry {
-        /// The deserialization error, for the diagnostic trace and the
-        /// model-facing message.
-        detail: String,
+        /// Tool name (for persisting answers).
+        tool_name: String,
+
+        /// The question that needs to be answered.
+        question: Question,
+
+        /// Resolved provenance for the persisted `InquiryRequest`.
+        source: InquirySource,
+
+        /// Accumulated answers so far (for retry).
+        accumulated_answers: IndexMap<String, Value>,
     },
 }
 
-impl CommandResult {
-    /// Format a transient error message including trace details.
-    ///
-    /// If the trace is empty, returns just the message.
-    /// Otherwise appends the trace entries so the LLM (or user) can see the
-    /// root cause.
-    #[must_use]
-    pub fn format_error(message: &str, trace: &[String]) -> String {
-        if trace.is_empty() {
-            message.to_owned()
-        } else {
-            format!("{message}\n\nTrace:\n{}", trace.join("\n"))
-        }
-    }
-
-    /// Convert to a `Result<String, String>` suitable for tool call responses.
-    ///
-    /// - `Success` → `Ok(content)`
-    /// - `TransientError` → `Err(json with message + trace)`
-    /// - `FatalError` → `Err(raw json)`
-    /// - `NeedsInput` → handled separately by callers (this panics)
-    /// - `Cancelled` → `Ok(cancellation message)`
-    /// - `RawOutput` → `Ok(stdout)` if success, `Err(json)` if failure
-    pub fn into_tool_result(self, name: &str) -> Result<String, String> {
-        match self {
-            Self::Success(content) => Ok(content),
-            Self::TransientError { message, trace } => Err(json!({
-                "message": message,
-                "trace": trace,
-            })
-            .to_string()),
-            Self::FatalError(raw) => Err(raw),
-            Self::Cancelled => Ok("Tool execution cancelled by user.".to_string()),
-            Self::RawOutput {
-                stdout,
-                stderr,
-                success,
-            } => {
-                if success {
-                    Ok(stdout)
-                } else {
-                    Err(json!({
-                        "message": format!("Tool '{name}' execution failed."),
-                        "stderr": stderr,
-                        "stdout": stdout,
-                    })
-                    .to_string())
-                }
-            }
-            Self::InvalidInquiry { question_id } => {
-                error!(
-                    tool = name,
-                    question_id = %question_id,
-                    "tool produced an invalid inquiry: question id must be non-empty and must not \
-                     contain '.'"
-                );
-                Err(
-                    "tool produced an invalid inquiry: question id must be non-empty and must not \
-                     contain '.'"
-                        .to_owned(),
-                )
-            }
-            Self::MalformedInquiry { detail } => {
-                error!(
-                    tool = name,
-                    %detail,
-                    "tool produced a malformed inquiry that could not be parsed"
-                );
-                Err(format!(
-                    "tool '{name}' produced a malformed inquiry that could not be parsed: {detail}"
-                ))
-            }
-            Self::NeedsInput(_) => {
-                unreachable!("NeedsInput should be handled by the caller")
-            }
-        }
-    }
-}
-
-/// Receives a running tool's stderr lines as they arrive.
+/// A mock executor for testing that returns pre-configured results.
 ///
-/// Called from the forwarder's read loop, so it must not block: the loop has to
-/// keep draining or the child fills its pipe and the tool call never completes.
-/// A consumer that falls behind drops rather than stalls.
-pub type StderrSink = Arc<dyn Fn(&str) + Send + Sync>;
-
-/// Identity of a tool invocation, used to tag stderr lines forwarded to
-/// tracing.
-///
-/// Pass `None` to disable stderr forwarding (e.g. for argument-formatting
-/// invocations where stderr is not meaningful to the user).
-#[derive(Clone)]
-pub struct ToolTrace<'a> {
-    pub id: &'a str,
-    pub name: &'a str,
-
-    /// Where to send each line for display, in addition to tracing.
-    ///
-    /// `None` when nothing is watching, which is the common case: tracing and
-    /// the accumulated buffer are unaffected either way.
-    pub stderr: Option<StderrSink>,
-}
-
-impl fmt::Debug for ToolTrace<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ToolTrace")
-            .field("id", &self.id)
-            .field("name", &self.name)
-            .field("stderr", &self.stderr.is_some())
-            .finish()
-    }
-}
-
-/// Custom minijinja formatter used by [`run_tool_command`].
-///
-/// Scalars (strings, numbers, booleans) render raw — a template like
-/// `{{tool.arguments.title}}` produces the bare string, not a JSON-quoted one.
-/// Composites (sequences, maps, other iterables) serialize as JSON, so
-/// `{{tool}}` and `{{context}}` produce valid JSON blobs without needing an
-/// explicit `| tojson` filter at every call site.
-/// `null`/undefined render as the literal `null`, matching the JSON convention
-/// used by tool authors.
-///
-/// Safe strings (e.g. the output of the `tojson` filter) pass through unchanged
-/// so explicit opt-in JSON rendering continues to work.
-fn format_tool_template_value(
-    out: &mut minijinja::Output<'_>,
-    _state: &minijinja::State<'_, '_>,
-    value: &minijinja::value::Value,
-) -> Result<(), minijinja::Error> {
-    if value.is_safe() {
-        return write!(out, "{value}").map_err(Into::into);
-    }
-
-    match value.kind() {
-        ValueKind::None | ValueKind::Undefined => write!(out, "null").map_err(Into::into),
-        ValueKind::String | ValueKind::Bool | ValueKind::Number => {
-            write!(out, "{value}").map_err(Into::into)
-        }
-        // Composites serialize as JSON so tool authors don't have to remember
-        // `| tojson` for every `{{tool}}` / `{{context}}` interpolation.
-        _ => {
-            let json = serde_json::to_string(value).map_err(|error| {
-                minijinja::Error::new(
-                    MinijinjaErrorKind::BadSerialization,
-                    "failed to serialize value as JSON",
-                )
-                .with_source(error)
-            })?;
-            out.write_str(&json).map_err(Into::into)
-        }
-    }
-}
-
-/// Run a tool command asynchronously with cancellation support.
-///
-/// This is the **single entry point** for running tool commands (both execution
-/// and argument formatting).
-/// It handles:
-///
-/// 1. Template rendering via [`minijinja`]
-/// 2. Process spawning via Tokio's [`Command`]
-/// 3. Cancellation via [`CancellationToken`]
-/// 4. Parsing stdout as [`jp_tool::Outcome`]
-/// 5. Forwarding the child's stderr to tracing (when `trace_as` is `Some`)
-///
-/// # Panics
-///
-/// Panics if tokio fails to attach the piped stdout/stderr handles to the
-/// spawned child.
-/// Both are requested via `Stdio::piped()`, so this is not expected to happen
-/// in practice.
-pub async fn run_tool_command(
-    command: CommandConfig,
-    ctx: Value,
-    root: &Utf8Path,
-    cancellation_token: CancellationToken,
-    trace_as: Option<ToolTrace<'_>>,
-) -> Result<CommandResult, ToolError> {
-    let CommandConfig {
-        program,
-        args,
-        shell,
-    } = command;
-
-    let mut env = Environment::new();
-    env.set_formatter(format_tool_template_value);
-    let tmpl = Arc::new(env);
-
-    let program = tmpl
-        .render_str(&program, &ctx)
-        .map_err(|error| ToolError::TemplateError {
-            data: program.clone(),
-            error: Box::new(error),
-        })?;
-
-    let args = args
-        .iter()
-        .map(|s| tmpl.render_str(s, &ctx))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|error| ToolError::TemplateError {
-            data: args.join(" "),
-            error: Box::new(error),
-        })?;
-
-    let mut cmd = if shell {
-        // `program` is shell syntax and used verbatim; `args` are shell-quoted
-        // so multi-word arguments keep their boundaries.
-        let shell_cmd = shell_command_line(&program, &args);
-
-        let mut cmd = Command::new("sh");
-        cmd.arg("-c").arg(&shell_cmd);
-        cmd
-    } else {
-        let mut cmd = Command::new(&program);
-        cmd.args(&args);
-        cmd
-    };
-
-    // Isolate the child from JP's process group so terminal signals
-    // (Ctrl+C / SIGINT) don't kill it. JP manages tool lifecycle via
-    // the cancellation token, not Unix signals.
-    #[cfg(unix)]
-    cmd.process_group(0);
-
-    // Ensure the child is killed when the tokio task is aborted on
-    // cancellation. Without this the process would be orphaned.
-    cmd.kill_on_drop(true);
-
-    let mut child = cmd
-        .current_dir(root.as_std_path())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| ToolError::SpawnError {
-            command: format!(
-                "{} {}",
-                cmd.as_std().get_program().to_string_lossy(),
-                cmd.as_std()
-                    .get_args()
-                    .filter_map(OsStr::to_str)
-                    .collect::<Vec<_>>()
-                    .join(" ")
-            ),
-            error,
-        })?;
-
-    let stdout = child.stdout.take().expect("stdout piped");
-    let stderr = child.stderr.take().expect("stderr piped");
-
-    let run = async {
-        tokio::try_join!(
-            read_all(stdout),
-            forward_stderr(stderr, trace_as),
-            child.wait(),
-        )
-    };
-
-    tokio::select! {
-        biased;
-        () = cancellation_token.cancelled() => Ok(CommandResult::Cancelled),
-        result = run => Ok(match result {
-            Ok((stdout, stderr, status)) => {
-                parse_command_output(&stdout, &stderr, status.success())
-            }
-            Err(error) => CommandResult::RawOutput {
-                stdout: String::new(),
-                stderr: error.to_string(),
-                success: false,
-            },
-        }),
-    }
-}
-
-/// Drain a child pipe into a byte buffer.
-async fn read_all(mut pipe: impl tokio::io::AsyncRead + Unpin) -> std::io::Result<Vec<u8>> {
-    let mut buf = Vec::new();
-    pipe.read_to_end(&mut buf).await?;
-    Ok(buf)
-}
-
-/// Drain a child's stderr into a byte buffer, optionally forwarding each line
-/// to tracing as it arrives.
-///
-/// Uses byte-level line reading so non-UTF-8 stderr doesn't terminate the
-/// forwarder.
-async fn forward_stderr(
-    pipe: impl tokio::io::AsyncRead + Unpin,
-    trace_as: Option<ToolTrace<'_>>,
-) -> std::io::Result<Vec<u8>> {
-    let mut reader = BufReader::new(pipe);
-    let mut all = Vec::new();
-    let mut line = Vec::new();
-
-    loop {
-        line.clear();
-        if reader.read_until(b'\n', &mut line).await? == 0 {
-            break;
-        }
-
-        if let Some(ToolTrace { id, name, stderr }) = &trace_as {
-            let text = String::from_utf8_lossy(&line);
-            let trimmed = text.trim_end_matches(['\n', '\r']);
-            if !trimmed.is_empty() {
-                trace!(target: "tool::stderr", tool_id = id, tool_name = name, "{trimmed}");
-
-                if let Some(sink) = stderr {
-                    sink(trimmed);
-                }
-            }
-        }
-
-        all.extend_from_slice(&line);
-    }
-
-    Ok(all)
-}
-
-/// Parse raw command output into a [`CommandResult`].
-///
-/// Tries to deserialize stdout as [`jp_tool::Outcome`].
-/// If that fails, falls back to [`CommandResult::RawOutput`].
-fn parse_command_output(stdout: &[u8], stderr: &[u8], success: bool) -> CommandResult {
-    let stdout_str = String::from_utf8_lossy(stdout);
-
-    match serde_json::from_str::<Outcome>(&stdout_str) {
-        Ok(Outcome::Success { content }) => CommandResult::Success(content),
-        Ok(Outcome::Error {
-            transient,
-            message,
-            trace,
-        }) => {
-            if transient {
-                CommandResult::TransientError { message, trace }
-            } else {
-                CommandResult::FatalError(stdout_str.into_owned())
-            }
-        }
-        Ok(Outcome::NeedsInput { question }) => CommandResult::NeedsInput(question),
-        // A payload shaped like a `needs_input` outcome that fails to
-        // deserialize must become a tool-level error, not `RawOutput`:
-        // silently handing the raw JSON to the model hides the failure (a
-        // stale local-tool binary emitting an older wire shape than this build
-        // parses, an invalid question id, a missing field) and leaves the
-        // model to invent an explanation. Output that is not an `Outcome` at
-        // all stays `RawOutput`.
-        Err(error) => {
-            let value = serde_json::from_str::<Value>(&stdout_str).ok();
-            let is_needs_input = value
-                .as_ref()
-                .and_then(|v| v.get("type"))
-                .and_then(Value::as_str)
-                == Some("needs_input");
-
-            if !is_needs_input {
-                return CommandResult::RawOutput {
-                    stdout: stdout_str.into_owned(),
-                    stderr: String::from_utf8_lossy(stderr).into_owned(),
-                    success,
-                };
-            }
-
-            let question_id = value
-                .as_ref()
-                .and_then(|v| v.get("question"))
-                .and_then(|q| q.get("id"))
-                .and_then(Value::as_str);
-
-            match question_id {
-                // The id itself is the problem: empty, or containing the `.`
-                // reserved as the inquiry-id separator (`QuestionId` rejects
-                // both).
-                Some(id) if id.is_empty() || id.contains('.') => CommandResult::InvalidInquiry {
-                    question_id: id.to_owned(),
-                },
-                // Some other field failed to parse (wrong shape, missing
-                // field, protocol skew).
-                _ => CommandResult::MalformedInquiry {
-                    detail: error.to_string(),
-                },
-            }
-        }
-    }
-}
-
-/// Identity of the conversation an invocation belongs to.
-///
-/// Surfaced to local tools through the rendered template `context` (as
-/// `context.workspace_id` and `context.conversation_id`) so a tool can scope
-/// any state it persists to the originating workspace and conversation.
-#[derive(Debug, Clone, Default)]
-pub struct InvocationContext {
-    pub workspace_id: String,
-    pub conversation_id: String,
-}
-
-/// Execute a tool without any interactive prompts.
-///
-/// This is a pure execution path that runs the tool's underlying command or MCP
-/// call and returns an [`ExecutionOutcome`].
-/// All interactive decisions (permission prompts, result editing, question
-/// handling) are the caller's responsibility.
-///
-/// # Arguments
-///
-/// - `id` - The tool call ID for correlation with the request
-/// - `arguments` - The tool arguments (caller is responsible for any
-///   pre-processing)
-/// - `answers` - Pre-provided answers to tool questions (from previous
-///   `NeedsInput`)
-/// - `config` - Tool configuration
-/// - `mcp_client` - MCP client for MCP tool execution
-/// - `root` - Working directory for local tool execution
-/// - `cancellation_token` - Token to cancel long-running execution
-/// - `builtin_executors` - Registry of builtin tools
-///
-/// # Returns
-///
-/// - [`ExecutionOutcome::Completed`] - Tool finished (check inner `Result` for
-///   success/error)
-/// - [`ExecutionOutcome::NeedsInput`] - Tool needs user input to continue
-/// - [`ExecutionOutcome::Cancelled`] - Execution was cancelled via the token
-///
-/// # Errors
-///
-/// Returns [`ToolError`] for infrastructure errors (spawn failure, missing
-/// command, etc.).
-/// Tool-level errors (command returned non-zero) are returned as
-/// `Ok(ExecutionOutcome::Completed { result: Err(...) })`.
+/// This executor doesn't execute any real commands - it simply returns whatever
+/// result is configured, making it ideal for testing tool coordination flows
+/// without side effects.
 ///
 /// # Example
 ///
 /// ```ignore
-/// loop {
-///     match execute(&definition, id, args, &answers, ...).await? {
-///         ExecutionOutcome::Completed { result, .. } => {
-///             // Handle success or tool error
-///             break result;
-///         }
-///         ExecutionOutcome::NeedsInput { question, .. } => {
-///             // Prompt user for input
-///             let answer = prompt_user(&question)?;
-///             answers.insert(question.id, answer);
-///             // Loop to retry with answer
-///         }
-///         ExecutionOutcome::Cancelled { .. } => {
-///             break Ok("Cancelled".into());
-///         }
-///     }
-/// }
+/// let executor = MockExecutor::completed("call_1", "my_tool", "success output");
+/// let result = executor.execute(&answers, &client, &root, token).await;
+/// assert!(result.is_completed());
 /// ```
-#[expect(clippy::too_many_arguments)]
-pub async fn execute(
-    definition: &ToolDefinition,
-    id: String,
-    arguments: Value,
-    answers: &IndexMap<String, Value>,
-    config: &ToolConfigWithDefaults,
-    mcp_client: &jp_mcp::Client,
-    root: &Utf8Path,
-    cancellation_token: CancellationToken,
-    builtin_executors: &builtin::BuiltinExecutors,
-    access: Option<&jp_tool::AccessPolicy>,
-    invocation: &InvocationContext,
-    stderr: Option<StderrSink>,
-) -> Result<ExecutionOutcome, ToolError> {
-    let mut arguments = arguments;
-    if let Some(arguments) = arguments.as_object_mut() {
-        definition.coerce_arguments(arguments);
-    }
-    info!(tool = %definition.name, arguments = ?arguments, "Executing tool.");
-
-    match config.source() {
-        ToolSource::Local { tool } => {
-            execute_local(
-                definition,
-                id,
-                arguments,
-                answers,
-                config,
-                tool.as_deref(),
-                root,
-                cancellation_token,
-                access,
-                invocation,
-                stderr,
-            )
-            .await
-        }
-        ToolSource::Mcp { server, tool } => {
-            execute_mcp(
-                definition,
-                id,
-                arguments,
-                mcp_client,
-                server,
-                tool.as_deref(),
-                cancellation_token,
-            )
-            .await
-        }
-        ToolSource::Builtin { tool } => {
-            execute_builtin(
-                definition,
-                id,
-                &arguments,
-                answers,
-                tool.as_deref(),
-                builtin_executors,
-            )
-            .await
-        }
-    }
+pub struct MockExecutor {
+    tool_id: String,
+    tool_name: String,
+    arguments: Map<String, Value>,
+    permission_info: Option<PermissionInfo>,
+    result: Mutex<Option<ExecutorResult>>,
 }
 
-/// Execute a local tool and return the outcome.
-///
-/// This is the pure execution path for local tools.
-/// It validates arguments, runs the command, and converts the result to an
-/// `ExecutionOutcome`.
-#[expect(clippy::too_many_arguments)]
-async fn execute_local(
-    definition: &ToolDefinition,
-    id: String,
-    mut arguments: Value,
-    answers: &IndexMap<String, Value>,
-    config: &ToolConfigWithDefaults,
-    tool: Option<&str>,
-    root: &Utf8Path,
-    cancellation_token: CancellationToken,
-    access: Option<&jp_tool::AccessPolicy>,
-    invocation: &InvocationContext,
-    stderr: Option<StderrSink>,
-) -> Result<ExecutionOutcome, ToolError> {
-    let name = tool.unwrap_or(&definition.name);
-
-    // Apply configured defaults for missing parameters, then validate.
-    if let Some(args) = arguments.as_object_mut() {
-        apply_parameter_defaults(args, &definition.parameters);
-
-        if let Err(error) = validate_tool_arguments(args, &definition.parameters) {
-            return Ok(ExecutionOutcome::Completed {
-                id,
-                result: Err(format!(
-                    "Invalid arguments: {error}\n\nYou can call `describe_tools(tools: \
-                     [\"{name}\"])` to learn more about how to use the tool correctly."
-                )),
-            });
+impl MockExecutor {
+    /// Creates a mock executor that returns a successful completion.
+    #[must_use]
+    pub fn completed(tool_id: &str, tool_name: &str, output: &str) -> Self {
+        Self {
+            tool_id: tool_id.to_string(),
+            tool_name: tool_name.to_string(),
+            arguments: Map::new(),
+            permission_info: None,
+            result: Mutex::new(Some(ExecutorResult::Completed(ToolCallResponse {
+                id: tool_id.to_string(),
+                result: Ok(output.to_string()),
+            }))),
         }
     }
 
-    let ctx = json!({
-        "tool": {
-            "name": name,
-            "arguments": &arguments,
-            "answers": answers,
-            "options": config.options(),
-        },
-        "context": {
-            "action": Action::Run,
-            "root": root.as_str(),
-            "access": access,
-            "workspace_id": &invocation.workspace_id,
-            "conversation_id": &invocation.conversation_id,
-        },
-    });
+    /// Creates a mock executor that returns an error.
+    #[must_use]
+    pub fn error(tool_id: &str, tool_name: &str, error: &str) -> Self {
+        Self {
+            tool_id: tool_id.to_string(),
+            tool_name: tool_name.to_string(),
+            arguments: Map::new(),
+            permission_info: None,
+            result: Mutex::new(Some(ExecutorResult::Completed(ToolCallResponse {
+                id: tool_id.to_string(),
+                result: Err(error.to_string()),
+            }))),
+        }
+    }
 
-    let Some(command) = config.command() else {
-        return Err(ToolError::MissingCommand);
-    };
+    /// Sets the arguments for this executor.
+    #[must_use]
+    pub fn with_arguments(mut self, args: Map<String, Value>) -> Self {
+        self.arguments = args;
+        self
+    }
 
-    let trace_as = ToolTrace {
-        id: &id,
-        name,
-        stderr,
-    };
+    /// Sets the permission info for this executor.
+    ///
+    /// If set, the executor will require permission prompting based on the
+    /// configured `RunMode`.
+    #[must_use]
+    pub fn with_permission_info(mut self, info: PermissionInfo) -> Self {
+        self.permission_info = Some(info);
+        self
+    }
 
-    match run_tool_command(command, ctx, root, cancellation_token, Some(trace_as)).await? {
-        CommandResult::Success(content) => Ok(ExecutionOutcome::Completed {
-            id,
-            result: Ok(content),
-        }),
-        CommandResult::NeedsInput(question) => Ok(ExecutionOutcome::NeedsInput { id, question }),
-        CommandResult::Cancelled => Ok(ExecutionOutcome::Cancelled { id }),
-        other => Ok(ExecutionOutcome::Completed {
-            id,
-            result: other.into_tool_result(name),
-        }),
+    /// Sets a custom result for this executor.
+    #[must_use]
+    pub fn with_result(mut self, result: ExecutorResult) -> Self {
+        self.result = Mutex::new(Some(result));
+        self
     }
 }
 
-/// Execute an MCP tool and return the outcome.
-///
-/// This is the pure execution path for MCP tools.
-/// It calls the MCP server and converts the result to an `ExecutionOutcome`.
-async fn execute_mcp(
-    definition: &ToolDefinition,
-    id: String,
-    arguments: Value,
-    mcp_client: &jp_mcp::Client,
-    server: &str,
-    tool: Option<&str>,
-    cancellation_token: CancellationToken,
-) -> Result<ExecutionOutcome, ToolError> {
-    let name = tool.unwrap_or(&definition.name);
-
-    let call_future = mcp_client.call_tool(name, server, &arguments);
-
-    tokio::select! {
-        biased;
-        () = cancellation_token.cancelled() => {
-            info!(tool = %definition.name, "MCP tool call cancelled");
-            Ok(ExecutionOutcome::Cancelled { id })
-        }
-        result = call_future => {
-            let result = result
-                .map_err(|error| ToolError::McpRunToolError(Box::new(error)))?;
-
-            let content = result
-                .content
-                .into_iter()
-                .filter_map(|v| match v.raw {
-                    RawContent::Text(v) => Some(v.text),
-                    RawContent::Resource(v) => match v.resource {
-                        ResourceContents::TextResourceContents { text, .. } => Some(text),
-                        ResourceContents::BlobResourceContents { blob, .. } => Some(blob),
-                    },
-                    RawContent::Image(_) | RawContent::Audio(_) | RawContent::ResourceLink(_) => None,
-                })
-                .collect::<Vec<_>>()
-                .join("\n\n");
-
-            let result = if result.is_error.unwrap_or_default() {
-                Err(content)
-            } else {
-                Ok(content)
-            };
-
-            Ok(ExecutionOutcome::Completed { id, result })
-        }
-    }
-}
-
-/// Execute a builtin tool and return the outcome.
-///
-/// `source_name` is the implementation named by `source = "builtin.<name>"`,
-/// which the registry is keyed on.
-/// When absent, the implementation shares the tool's own name.
-async fn execute_builtin(
-    definition: &ToolDefinition,
-    id: String,
-    arguments: &Value,
-    answers: &IndexMap<String, Value>,
-    source_name: Option<&str>,
-    builtin_executors: &builtin::BuiltinExecutors,
-) -> Result<ExecutionOutcome, ToolError> {
-    let name = source_name.unwrap_or(&definition.name);
-    let executor = builtin_executors
-        .get(name)
-        .ok_or_else(|| ToolError::NotFound {
-            name: name.to_owned(),
-        })?;
-
-    let outcome = executor.execute(arguments, answers).await;
-
-    Ok(match outcome {
-        Outcome::Success { content } => ExecutionOutcome::Completed {
-            id,
-            result: Ok(content),
-        },
-        Outcome::Error {
-            message,
-            trace,
-            transient: _,
-        } => {
-            let error_msg = if trace.is_empty() {
-                message
-            } else {
-                format!("{message}\n\nTrace:\n{}", trace.join("\n"))
-            };
-            ExecutionOutcome::Completed {
-                id,
-                result: Err(error_msg),
-            }
-        }
-        Outcome::NeedsInput { question } => ExecutionOutcome::NeedsInput { id, question },
-    })
-}
-
-/// Resolve all enabled tool definitions from config.
-///
-/// If `forced_tool` is provided (e.g. from `ToolChoice::Function`), that tool
-/// is included even when it is disabled, preventing a mismatch between
-/// `tool_choice` and the declared tools list that some providers (notably
-/// Google/Gemini) reject outright.
-///
-/// A locked-off tool (`state = false`, `allow_toggle = never`) is the
-/// exception: it is always dropped, even when named by `forced_tool`.
-pub async fn tool_definitions(
-    configs: impl Iterator<Item = (&str, ToolConfigWithDefaults)>,
-    mcp_client: &jp_mcp::Client,
-    forced_tool: Option<&str>,
-) -> Result<Vec<ToolDefinition>, ToolError> {
-    let mut definitions = Vec::new();
-
-    for (name, config) in configs {
-        let enable = config.effective_enable();
-        let forced = forced_tool.is_some_and(|f| f == name);
-        // Drop disabled tools, but keep a forced tool unless it is locked-off.
-        if !enable.is_enabled() && (!forced || enable.is_locked()) {
-            continue;
-        }
-
-        // Drop MCP-backed tools whose server failed to start while marked
-        // optional. The server is absent from the running services map, and
-        // we don't want to hand the LLM a tool it cannot invoke.
-        if let ToolSource::Mcp { server, .. } = config.source() {
-            let server_id = McpServerId::new(server);
-            if !mcp_client.is_running(&server_id).await {
-                warn!(
-                    tool = name,
-                    server = %server,
-                    "Skipping MCP tool: backing server is not running."
-                );
-                continue;
-            }
-        }
-
-        // A tool JP cannot describe to the provider is dropped rather than
-        // failing the query, matching the unavailable-server case above. A tool
-        // the caller named explicitly is the exception: silently omitting it
-        // would leave `tool_choice` pointing at a tool the provider never saw.
-        let definition = match resolve_tool(name, &config, mcp_client).await {
-            Ok(definition) => definition,
-            Err(error) if !forced => {
-                warn!(
-                    tool = name,
-                    %error,
-                    "Skipping tool: its parameter schema could not be resolved."
-                );
-                continue;
-            }
-            Err(error) => return Err(error),
-        };
-        definitions.push(definition);
+#[async_trait]
+impl Executor for MockExecutor {
+    fn tool_id(&self) -> &str {
+        &self.tool_id
     }
 
-    Ok(definitions)
-}
+    fn tool_name(&self) -> &str {
+        &self.tool_name
+    }
 
-/// Resolve a single tool definition and its documentation.
-async fn resolve_tool(
-    name: &str,
-    config: &ToolConfigWithDefaults,
-    mcp_client: &jp_mcp::Client,
-) -> Result<ToolDefinition, ToolError> {
-    let path = format!("conversation.tools.{name}.parameters");
-    let definition = match config.source() {
-        ToolSource::Local { .. } | ToolSource::Builtin { .. } => ToolDefinition {
-            name: name.to_owned(),
-            docs: tool_docs_from_config(config),
-            parameters: json_schema::from_config(&path, config.parameters())?,
-        },
-        ToolSource::Mcp { server, tool } => {
-            resolve_mcp_tool(server, name, tool.as_deref(), config, mcp_client).await?
-        }
-    };
+    fn arguments(&self) -> &Map<String, Value> {
+        &self.arguments
+    }
 
-    jp_tool::schema::validate(&path, &definition.parameters)?;
+    fn permission_info(&self) -> Option<PermissionInfo> {
+        self.permission_info.clone()
+    }
 
-    Ok(definition)
-}
+    fn set_arguments(&mut self, _args: Value) {
+        // No-op for mock executor - arguments don't affect the pre-configured
+        // result
+    }
 
-/// Resolve an MCP tool: fetch from server, merge config overrides, auto-split
-/// descriptions into summary + detail.
-async fn resolve_mcp_tool(
-    server: &str,
-    name: &str,
-    source_name: Option<&str>,
-    config: &ToolConfigWithDefaults,
-    mcp_client: &jp_mcp::Client,
-) -> Result<ToolDefinition, ToolError> {
-    let mcp_tool = {
-        trace!(server = %server, tool = %name, "Fetching tool from MCP server");
-
-        let server_id = McpServerId::new(server);
-        mcp_client
-            .get_tool(&McpToolId::new(source_name.unwrap_or(name)), &server_id)
-            .await
-            .map_err(|error| ToolError::McpGetToolError(Box::new(error)))
-    }?;
-
-    let user_overrides = config.parameters();
-
-    // Merge tool-level description.
-    let merged_description = merge_description(
-        config.description().map(str::to_owned),
-        mcp_tool.description.as_deref(),
-    );
-
-    // The server's document is the source of truth; configuration may narrow
-    // it, and nothing else touches it.
-    let source = Value::Object(mcp_tool.input_schema.as_ref().clone());
-    let parameters = json_schema::with_overrides(
-        &format!("conversation.tools.{name}.parameters"),
-        &source,
-        user_overrides,
-    )?;
-
-    // Build docs with auto-split heuristic.
-    let has_user_summary = config.summary().is_some();
-
-    let (summary, description) = if has_user_summary {
-        // User provided explicit summary -- use config fields as-is.
-        (
-            config.summary().map(str::to_owned),
-            config.description().map(str::to_owned),
-        )
-    } else if let Some(ref desc) = merged_description {
-        let (s, d) = split_description(desc);
-        (Some(s), d)
-    } else {
-        (None, None)
-    };
-
-    let examples = config.examples().map(str::to_owned);
-
-    // Per-parameter docs: auto-split MCP descriptions when user didn't override.
-    let param_docs = Node::root(&parameters)
-        .properties()
-        .into_iter()
-        .filter_map(|(pname, pnode)| {
-            let user_override = user_overrides.get(&pname);
-            let has_user_param_summary = user_override.and_then(|o| o.summary.as_ref()).is_some();
-
-            let (summary, desc) = if has_user_param_summary {
-                let summary = user_override
-                    .and_then(|o| o.summary.as_deref())
-                    .or(user_override.and_then(|o| o.description.as_deref()))
-                    .map(str::to_owned);
-                let desc = user_override
-                    .and_then(|o| o.description.as_deref())
-                    .map(str::to_owned);
-                (summary, desc)
-            } else if let Some(resolved) = pnode.description() {
-                let (s, d) = split_description(resolved);
-                (Some(s), d)
-            } else {
-                (None, None)
-            };
-
-            let ex = user_override
-                .and_then(|o| o.examples.as_deref())
-                .map(str::to_owned);
-
-            if summary.is_none() && desc.is_none() && ex.is_none() {
-                return None;
-            }
-
-            Some((pname, ParameterDocs {
-                summary,
-                description: desc,
-                examples: ex,
-            }))
+    async fn execute(
+        &self,
+        _answers: &IndexMap<String, Value>,
+        _mcp_client: &Client,
+        _root: &Utf8Path,
+        _cancellation_token: CancellationToken,
+        _stderr: Option<StderrSink>,
+    ) -> ExecutorResult {
+        self.result.lock().unwrap().take().unwrap_or_else(|| {
+            ExecutorResult::Completed(ToolCallResponse {
+                id: self.tool_id.clone(),
+                result: Err("MockExecutor: result already consumed".to_string()),
+            })
         })
-        .collect();
-
-    let docs = ToolDocs {
-        summary,
-        description,
-        examples,
-        parameters: param_docs,
-    };
-
-    Ok(ToolDefinition {
-        name: name.to_owned(),
-        docs,
-        parameters,
-    })
+    }
 }
 
-#[cfg(test)]
-#[path = "tool_tests.rs"]
-mod tests;
+/// An executor source for testing that returns pre-registered mock executors.
+///
+/// This allows tests to inject mock executors for specific tool names without
+/// executing any real shell commands.
+///
+/// # Example
+///
+/// ```ignore
+/// let source = TestExecutorSource::new()
+///     .with_executor("my_tool", |req| {
+///         Box::new(MockExecutor::completed(&req.id, &req.name, "mock output"))
+///     });
+///
+/// let coordinator = ToolCoordinator::new(tools_config, Arc::new(source));
+/// ```
+pub struct TestExecutorSource {
+    #[allow(clippy::type_complexity)]
+    factories: std::collections::HashMap<
+        String,
+        Box<dyn Fn(ToolCallRequest) -> Box<dyn Executor> + Send + Sync>,
+    >,
+}
+
+impl TestExecutorSource {
+    /// Creates a new empty test executor source.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            factories: std::collections::HashMap::new(),
+        }
+    }
+
+    /// Registers a factory function for a tool name.
+    ///
+    /// When `create()` is called for this tool name, the factory will be
+    /// invoked to create the executor.
+    #[must_use]
+    pub fn with_executor<F>(mut self, tool_name: &str, factory: F) -> Self
+    where
+        F: Fn(ToolCallRequest) -> Box<dyn Executor> + Send + Sync + 'static,
+    {
+        self.factories
+            .insert(tool_name.to_string(), Box::new(factory));
+        self
+    }
+
+    /// Returns stub [`ToolDefinition`]s for all registered tool names.
+    ///
+    /// Useful for passing to `run_turn_loop` so the availability check accepts
+    /// the tools this source can handle.
+    #[must_use]
+    pub fn tool_definitions(&self) -> Vec<ToolDefinition> {
+        self.factories
+            .keys()
+            .map(|name| ToolDefinition {
+                name: name.clone(),
+                docs: jp_tool::ToolDocs::default(),
+                parameters: serde_json::json!({ "type": "object", "properties": {} }),
+            })
+            .collect()
+    }
+}
+
+impl Default for TestExecutorSource {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ExecutorSource for TestExecutorSource {
+    fn create(
+        &self,
+        request: ToolCallRequest,
+        _config: ToolConfigWithDefaults,
+    ) -> Option<Box<dyn Executor>> {
+        let factory = self.factories.get(&request.name)?;
+        Some(factory(request))
+    }
+}
+
+/// Information needed to prompt for tool execution permission.
+///
+/// This struct contains all the data the `ToolPrompter` needs to show a
+/// permission prompt to the user.
+#[derive(Debug, Clone)]
+pub struct PermissionInfo {
+    /// The tool call ID.
+    pub tool_id: String,
+
+    /// The tool name.
+    pub tool_name: String,
+
+    /// The tool source (builtin, local, MCP).
+    pub tool_source: ToolSource,
+
+    /// The configured run mode.
+    pub run_mode: RunMode,
+
+    /// The arguments to pass to the tool.
+    pub arguments: Value,
+}
