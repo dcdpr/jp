@@ -31,7 +31,7 @@ jp_id = { workspace = true }
 jp_inquire = { workspace = true }
 jp_llm = { workspace = true }
 jp_macro = { workspace = true }
-jp_mcp = { workspace = true }
+jp_mcp = { workspace = true, features = ["server"] }
 jp_md = { workspace = true }
 jp_openrouter = { workspace = true }
 jp_plugin = { workspace = true }

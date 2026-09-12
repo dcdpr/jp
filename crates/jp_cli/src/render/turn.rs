@@ -23,7 +23,7 @@ use jp_conversation::{
     EventKind,
     stream::{TurnOrigin, turn_iter::Turn},
 };
-use jp_llm::tool::InvocationContext;
+use jp_mcp::server::InvocationContext;
 use jp_printer::{ErrChannel, Printer};
 use tracing::warn;
 

@@ -101,11 +101,8 @@ use jp_conversation::{
 };
 use jp_editor::EditorBackend;
 use jp_inquire::{ReplyEditMode, prompt::PromptBackend};
-use jp_llm::tool::{
-    StderrSink,
-    executor::{Executor, ExecutorResult, ExecutorSource, PermissionInfo},
-};
-use jp_mcp::Client;
+use jp_llm::tool::{Executor, ExecutorResult, ExecutorSource, PermissionInfo};
+use jp_mcp::{Client, server::StderrSink};
 use jp_printer::Printer;
 use jp_tool::{AnswerType, Question};
 use jp_workspace::ConversationMut;

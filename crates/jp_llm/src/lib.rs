@@ -25,4 +25,3 @@ pub use retry::{exponential_backoff, retry_delay};
 pub use stream::{
     EventStream, chain::EventChain, with_idle_timeout, with_output_limit, with_tool_call_keepalive,
 };
-pub use tool::{CommandResult, ExecutionOutcome, ToolTrace, run_tool_command};

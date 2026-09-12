@@ -2579,7 +2579,6 @@ dependencies = [
  "jp_storage",
  "jp_test",
  "jp_tool",
- "minijinja",
  "ollama-rs",
  "openai_responses",
  "paste",
@@ -2608,15 +2607,24 @@ version = "0.1.0"
 name = "jp_mcp"
 version = "0.1.0"
 dependencies = [
+ "assert_matches",
+ "async-trait",
+ "camino",
+ "camino-tempfile",
  "indexmap",
  "jp_config",
+ "jp_test",
+ "jp_tool",
+ "minijinja",
  "rmcp",
  "serde",
  "serde_json",
  "sha1",
  "sha2",
+ "test-log",
  "thiserror 2.0.20",
  "tokio",
+ "tokio-util",
  "tracing",
  "which",
 ]

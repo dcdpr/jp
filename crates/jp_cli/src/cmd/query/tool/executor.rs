@@ -40,24 +40,20 @@
 //! The [`Executor`] trait allows for mock implementations in tests.
 //! See [`MockExecutor`] for testing parallel execution behavior.
 //!
-//! [`MockExecutor`]: jp_llm::tool::executor::MockExecutor
+//! [`MockExecutor`]: jp_llm::tool::MockExecutor
 
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use camino::Utf8Path;
 use indexmap::IndexMap;
-use jp_config::conversation::tool::{RunMode, ToolConfigWithDefaults, ToolSource};
+use jp_config::conversation::tool::{RunMode, ToolConfigWithDefaults};
 use jp_conversation::event::{InquirySource, ToolCallRequest, ToolCallResponse};
-use jp_llm::{
-    ExecutionOutcome,
-    tool::{
-        InvocationContext, StderrSink,
-        builtin::BuiltinExecutors,
-        executor::{Executor, ExecutorResult, ExecutorSource, PermissionInfo},
-    },
+use jp_llm::tool::{Executor, ExecutorResult, ExecutorSource, PermissionInfo};
+use jp_mcp::{
+    Client,
+    server::{ExecutionOutcome, InvocationContext, StderrSink, builtin::BuiltinExecutors, execute},
 };
-use jp_mcp::Client;
 use jp_tool::ToolDefinition;
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
@@ -150,26 +146,6 @@ impl ToolExecutor {
             invocation,
         }
     }
-
-    /// Resolve the persisted `InquirySource` recorded for a question this tool
-    /// emits.
-    ///
-    /// Built-in tools may override their source via
-    /// `BuiltinTool::inquiry_source`; local and MCP tools always attribute the
-    /// question to the tool by name.
-    fn inquiry_source(&self) -> InquirySource {
-        match self.config.source() {
-            ToolSource::Builtin { .. } => {
-                self.builtin_executors.get(&self.request.name).map_or_else(
-                    || InquirySource::tool(self.request.name.as_str()),
-                    |tool| tool.inquiry_source(&self.request.name),
-                )
-            }
-            ToolSource::Local { .. } | ToolSource::Mcp { .. } => {
-                InquirySource::tool(self.request.name.as_str())
-            }
-        }
-    }
 }
 
 #[async_trait]
@@ -235,7 +211,7 @@ impl Executor for ToolExecutor {
             }
         };
 
-        let result = jp_llm::tool::execute(
+        let result = execute(
             &self.definition,
             self.request.id.clone(),
             Value::Object(self.request.arguments.clone()),
@@ -263,7 +239,7 @@ impl Executor for ToolExecutor {
                 tool_id: self.request.id.clone(),
                 tool_name: self.request.name.clone(),
                 question,
-                source: self.inquiry_source(),
+                source: InquirySource::tool(self.request.name.as_str()),
                 accumulated_answers: answers.clone(),
             },
             Err(e) => ExecutorResult::Completed(ToolCallResponse {
