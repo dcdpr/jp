@@ -103,11 +103,10 @@ use jp_conversation::{
 };
 use jp_inquire::prompt::{PromptBackend, TerminalPromptBackend};
 use jp_llm::{
-    ToolError,
     event::NoticeSink,
     provider,
     tool::{
-        InvocationContext, ToolDefinition, ToolDocs,
+        InvocationContext,
         builtin::{BuiltinExecutors, describe_tools::DescribeTools},
         tool_definitions,
     },
@@ -121,6 +120,7 @@ use jp_term::width::{display_width, truncate_to_width};
 use jp_workspace::{
     ConversationHandle, ConversationLock, ConversationMut, Id as WorkspaceId, Workspace,
 };
+use jp_tool::{Error as ToolError, ToolDefinition, ToolDocs};
 use minijinja::{Environment, UndefinedBehavior};
 use strip_ansi_escapes::strip_str;
 use tokio::sync::broadcast::error::RecvError;

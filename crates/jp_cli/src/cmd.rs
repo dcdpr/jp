@@ -719,7 +719,7 @@ impl_from_error!(jp_storage::LoadError, "Storage load error");
 impl_from_error!(jp_config::ConfigError, "Config error");
 impl_from_error!(jp_config::fs::ConfigLoaderError, "Config loader error");
 impl_from_error!(jp_conversation::Error, "Conversation error");
-impl_from_error!(jp_llm::ToolError, "Tool error");
+impl_from_error!(jp_tool::Error, "Tool error");
 impl_from_error!(jp_mcp::Error, "MCP error");
 impl_from_error!(minijinja::Error, "Template error");
 impl_from_error!(quick_xml::SeError, "XML serialization error");

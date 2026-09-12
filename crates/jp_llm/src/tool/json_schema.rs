@@ -1,43 +1,35 @@
-//! JSON Schema for tool parameters: construction, validation, and reading.
+//! Building a tool's parameter schema from configuration.
 //!
-//! A tool's parameters are one JSON Schema object, held exactly as its source
-//! declared it.
+//! A tool's parameters are one JSON Schema object.
 //! For an MCP tool that is the server's `inputSchema` with the user's
 //! configured overrides applied; for a local or built-in tool it is generated
-//! from configuration.
-//! Nothing else rewrites it: adapting a schema to what a given API accepts is
-//! the responsibility of that provider.
+//! from configuration alone.
 //!
-//! [`Node`] is the read-only view used by argument handling and validation.
-//! It follows same-document `$ref` pointers while reading, so a referenced enum
-//! or nested object answers questions the same way an inline one does.
-
-use std::borrow::Cow;
+//! Reading and validating the result lives in [`jp_tool::schema`], which knows
+//! nothing about configuration.
 
 use indexmap::IndexMap;
 use jp_config::conversation::tool::{OneOrManyTypes, ToolParameterConfig};
+use jp_tool::{
+    Error,
+    schema::{Node, format_types, merge_description, required_names, validate_types},
+};
 use serde_json::{Map, Value, json};
-
-use crate::error::ToolError;
-
-/// JSON types a tool parameter may declare.
-const SUPPORTED_TYPES: &[&str] = &[
-    "array", "boolean", "integer", "null", "number", "object", "string",
-];
-
-/// Bound on `$ref` expansion while reading, so a self-referential schema
-/// terminates.
-const MAX_REF_HOPS: usize = 32;
 
 /// Build the parameters schema for a tool whose shape is defined entirely in
 /// configuration.
 ///
 /// Local and built-in tools have no upstream schema, so every parameter must
 /// declare a type.
+///
+/// # Errors
+///
+/// Returns [`Error::InvalidSchema`] when a parameter declares no type, or one
+/// the schema cannot carry.
 pub fn from_config(
     path: &str,
     parameters: &IndexMap<String, ToolParameterConfig>,
-) -> Result<Value, ToolError> {
+) -> Result<Value, Error> {
     let mut properties = Map::new();
     let mut required = vec![];
 
@@ -57,11 +49,16 @@ pub fn from_config(
 /// The server's document is preserved, including any `$defs` block.
 /// An override may narrow a parameter, but may not contradict the type the
 /// server declared.
+///
+/// # Errors
+///
+/// Returns [`Error::InvalidSchema`] when an override contradicts the type the
+/// server declared, or declares one the schema cannot carry.
 pub fn with_overrides(
     path: &str,
     source: &Value,
     overrides: &IndexMap<String, ToolParameterConfig>,
-) -> Result<Value, ToolError> {
+) -> Result<Value, Error> {
     let mut schema = source.as_object().cloned().unwrap_or_default();
     let source_required = required_names(source);
 
@@ -98,545 +95,6 @@ pub fn with_overrides(
     Ok(Value::Object(schema))
 }
 
-/// Validate a tool's parameters schema.
-///
-/// Rejects the shapes that no provider can act on, and the ones that contradict
-/// themselves: unusable types, arrays with no item schema, `items` or
-/// `properties` on a type that cannot carry them, duplicate or ill-typed enum
-/// values, and defaults the schema itself forbids.
-pub fn validate(path: &str, schema: &Value) -> Result<(), ToolError> {
-    let root = Node::root(schema);
-    for (name, property) in root.properties() {
-        validate_node(&format!("{path}.{name}"), &property, &mut vec![])?;
-    }
-
-    Ok(())
-}
-
-/// Validate one node, tracking which definitions the walk is already inside.
-///
-/// A recursive schema is legal, and providers that reject it say so themselves.
-/// Re-entering a definition already on the path adds nothing, so the walk stops
-/// there instead of expanding forever.
-fn validate_node(path: &str, node: &Node<'_>, visiting: &mut Vec<String>) -> Result<(), ToolError> {
-    if let Some(origin) = node.origin() {
-        if visiting.iter().any(|seen| seen == origin) {
-            return Ok(());
-        }
-        visiting.push(origin.to_owned());
-    }
-
-    let result = validate_node_inner(path, node, visiting);
-
-    if node.origin().is_some() {
-        visiting.pop();
-    }
-
-    result
-}
-
-fn validate_node_inner(
-    path: &str,
-    node: &Node<'_>,
-    visiting: &mut Vec<String>,
-) -> Result<(), ToolError> {
-    let types = node.types();
-    // A schema with no `type` keyword accepts any value, and constrains
-    // nothing that could contradict its `items`, `properties`, `enum` or
-    // `default`. A `type` that is present but empty or unrecognised, and a
-    // `$ref` that could not be followed, remain malformed.
-    let unconstrained = node.is_unconstrained();
-    if !unconstrained {
-        validate_types(path, &types)?;
-    }
-
-    let items = node.items();
-    if types.iter().any(|type_| type_ == "array") && items.is_none() {
-        return Err(ToolError::InvalidSchema {
-            path: format!("{path}.items"),
-            message: "array schemas must declare an item schema".to_owned(),
-        });
-    }
-
-    if let Some(items) = &items {
-        if !unconstrained && !types.iter().any(|type_| type_ == "array") {
-            return Err(ToolError::InvalidSchema {
-                path: format!("{path}.items"),
-                message: format!(
-                    "`items` requires an array type, but the schema requires {}",
-                    format_types(&types)
-                ),
-            });
-        }
-        validate_node(&format!("{path}.items"), items, visiting)?;
-    }
-
-    let properties = node.properties();
-    if !unconstrained && !properties.is_empty() && !types.iter().any(|type_| type_ == "object") {
-        return Err(ToolError::InvalidSchema {
-            path: format!("{path}.properties"),
-            message: format!(
-                "`properties` requires an object type, but the schema requires {}",
-                format_types(&types)
-            ),
-        });
-    }
-    for (name, property) in properties {
-        validate_node(&format!("{path}.properties.{name}"), &property, visiting)?;
-    }
-
-    let enumeration = node.enumeration();
-    for (index, value) in enumeration.iter().enumerate() {
-        if enumeration[..index].contains(value) {
-            return Err(ToolError::InvalidSchema {
-                path: format!("{path}.enum"),
-                message: format!("enum values must be unique; duplicate value {value}"),
-            });
-        }
-
-        if node.accepts_type(value) {
-            validate_value(&format!("{path}.enum[{index}]"), value, node, "enum value")?;
-            continue;
-        }
-
-        let hint = if types.iter().any(|type_| type_ == "array") && !value.is_array() {
-            format!("; use `{path}.items.enum` to constrain array elements")
-        } else {
-            String::new()
-        };
-        return Err(ToolError::InvalidSchema {
-            path: format!("{path}.enum"),
-            message: format!(
-                "enum value {value} has type {}, but the schema requires {}{hint}",
-                value_type(value),
-                format_types(&types),
-            ),
-        });
-    }
-
-    if let Some(default) = node.default() {
-        validate_value(&format!("{path}.default"), default, node, "default value")?;
-    }
-
-    Ok(())
-}
-
-/// Validate a schema-declared value against the node it appears in.
-///
-/// Applies the node's type and `enum`, then recurses into array elements and
-/// object properties so nested constraints are enforced at every depth.
-/// `subject` names what is being checked (`default value`, `enum value`) for
-/// the error message.
-fn validate_value(
-    path: &str,
-    value: &Value,
-    node: &Node<'_>,
-    subject: &str,
-) -> Result<(), ToolError> {
-    if !node.accepts_type(value) {
-        return Err(ToolError::InvalidSchema {
-            path: path.to_owned(),
-            message: format!(
-                "{subject} {value} has type {}, but the schema requires {}",
-                value_type(value),
-                format_types(&node.types())
-            ),
-        });
-    }
-
-    let enumeration = node.enumeration();
-    if !enumeration.is_empty() && !enumeration.contains(value) {
-        return Err(ToolError::InvalidSchema {
-            path: path.to_owned(),
-            message: format!("{subject} {value} is not allowed by the enum"),
-        });
-    }
-
-    if let (Value::Array(values), Some(items)) = (value, node.items()) {
-        for (index, value) in values.iter().enumerate() {
-            validate_value(&format!("{path}[{index}]"), value, &items, subject)?;
-        }
-    }
-
-    if let Value::Object(values) = value {
-        for (name, property) in node.properties() {
-            let Some(value) = values.get(&name) else {
-                if node.is_required(&name) {
-                    return Err(ToolError::InvalidSchema {
-                        path: format!("{path}.{name}"),
-                        message: format!("{subject} is missing required property `{name}`"),
-                    });
-                }
-                continue;
-            };
-            validate_value(&format!("{path}.{name}"), value, &property, subject)?;
-        }
-    }
-
-    Ok(())
-}
-
-fn validate_types(path: &str, types: &[String]) -> Result<(), ToolError> {
-    if types.is_empty() {
-        return Err(ToolError::InvalidSchema {
-            path: format!("{path}.type"),
-            message: "schema does not declare a supported type".to_owned(),
-        });
-    }
-
-    for (index, type_) in types.iter().enumerate() {
-        if !SUPPORTED_TYPES.contains(&type_.as_str()) {
-            return Err(ToolError::InvalidSchema {
-                path: format!("{path}.type"),
-                message: format!("unsupported JSON type `{type_}`"),
-            });
-        }
-        if types[..index].contains(type_) {
-            return Err(ToolError::InvalidSchema {
-                path: format!("{path}.type"),
-                message: format!("type values must be unique; duplicate type `{type_}`"),
-            });
-        }
-    }
-
-    Ok(())
-}
-
-/// Whether any node in the document leaves the JSON type of its value open.
-///
-/// Walks properties and array items, reading through `$ref` the way [`Node`]
-/// does, and stops at a definition already on the path so a recursive schema
-/// terminates.
-#[must_use]
-pub fn has_unconstrained_node(schema: &Value) -> bool {
-    Node::root(schema)
-        .properties()
-        .iter()
-        .any(|(_, property)| is_open(property, &mut vec![]))
-}
-
-fn is_open(node: &Node<'_>, visiting: &mut Vec<String>) -> bool {
-    if let Some(origin) = node.origin() {
-        if visiting.iter().any(|seen| seen == origin) {
-            return false;
-        }
-        visiting.push(origin.to_owned());
-    }
-
-    let open = node.is_unconstrained()
-        || node.items().is_some_and(|items| is_open(&items, visiting))
-        || node
-            .properties()
-            .iter()
-            .any(|(_, property)| is_open(property, visiting));
-
-    if node.origin().is_some() {
-        visiting.pop();
-    }
-
-    open
-}
-
-/// Expand every same-document `$ref` and drop the definitions block.
-///
-/// For providers that cannot follow references.
-/// A reference that cannot be resolved, or one that revisits a definition
-/// already being expanded, is left in place: a recursive type has no finite
-/// expansion, and dropping the node would be worse than forwarding something
-/// the API can reject.
-#[must_use]
-pub fn inline(schema: &Value) -> Value {
-    let mut inlined = inline_node(schema, schema, &mut vec![]);
-    if let Some(object) = inlined.as_object_mut() {
-        object.remove("$defs");
-        object.remove("definitions");
-    }
-
-    inlined
-}
-
-fn inline_node(node: &Value, root: &Value, expanding: &mut Vec<String>) -> Value {
-    let pointer = pointer_of(node);
-    if let Some(pointer) = &pointer {
-        if expanding.contains(pointer) {
-            return node.clone();
-        }
-        expanding.push(pointer.clone());
-    }
-
-    let resolved = resolve(node, root);
-    let expanded = match resolved.as_object() {
-        Some(object) => Value::Object(
-            object
-                .iter()
-                .map(|(key, value)| {
-                    let value = match value {
-                        Value::Object(_) => inline_node(value, root, expanding),
-                        Value::Array(values) => Value::Array(
-                            values
-                                .iter()
-                                .map(|value| inline_node(value, root, expanding))
-                                .collect(),
-                        ),
-                        other => other.clone(),
-                    };
-                    (key.clone(), value)
-                })
-                .collect(),
-        ),
-        None => resolved.into_owned(),
-    };
-
-    if pointer.is_some() {
-        expanding.pop();
-    }
-
-    expanded
-}
-
-/// A read-only view of one schema node, resolving `$ref` as it reads.
-#[derive(Debug, Clone)]
-pub struct Node<'a> {
-    root: &'a Value,
-    node: Cow<'a, Value>,
-    origin: Option<String>,
-}
-
-impl<'a> Node<'a> {
-    /// View a whole parameters schema, where `$ref` pointers resolve against
-    /// the same document.
-    #[must_use]
-    pub fn root(schema: &'a Value) -> Self {
-        Self {
-            root: schema,
-            node: resolve(schema, schema),
-            origin: pointer_of(schema),
-        }
-    }
-
-    /// The `$ref` pointer this node was reached through, when it was one.
-    #[must_use]
-    pub fn origin(&self) -> Option<&str> {
-        self.origin.as_deref()
-    }
-
-    /// View a nested node, resolving it against the same document.
-    ///
-    /// The node is cloned because resolving a `$ref` produces a new value that
-    /// cannot borrow from the parent.
-    fn child(&self, node: &Value) -> Node<'a> {
-        Node {
-            root: self.root,
-            node: Cow::Owned(resolve(node, self.root).into_owned()),
-            origin: pointer_of(node),
-        }
-    }
-
-    /// JSON types this node accepts.
-    #[must_use]
-    pub fn types(&self) -> Vec<String> {
-        match self.node.get("type") {
-            Some(Value::String(type_)) => vec![type_.clone()],
-            Some(Value::Array(types)) => types
-                .iter()
-                .filter_map(Value::as_str)
-                .map(str::to_owned)
-                .collect(),
-            _ => vec![],
-        }
-    }
-
-    /// Whether this node leaves the JSON type of its value open.
-    ///
-    /// A schema object with no `type` keyword accepts any value, which is how a
-    /// server declares a free-form parameter.
-    /// Anything else that reads as declaring no type is not open, because what
-    /// it declares is unknown rather than unrestricted: a `$ref` that could not
-    /// be followed, a boolean schema, or a non-schema value such as a `null`
-    /// left in a `properties` map.
-    #[must_use]
-    pub fn is_unconstrained(&self) -> bool {
-        self.node.is_object() && self.node.get("type").is_none() && self.node.get("$ref").is_none()
-    }
-
-    /// Whether a value satisfies this node's declared types.
-    ///
-    /// Ignores every other constraint the node carries; [`permits`] applies
-    /// those too.
-    /// A node that declares no type accepts every value.
-    ///
-    /// [`permits`]: Self::permits
-    #[must_use]
-    pub fn accepts_type(&self, value: &Value) -> bool {
-        if self.is_unconstrained() {
-            return true;
-        }
-
-        let types = self.types();
-        let has = |type_: &str| types.iter().any(|candidate| candidate == type_);
-
-        match value {
-            Value::Null => has("null"),
-            Value::Bool(_) => has("boolean"),
-            Value::Number(number) => {
-                has("number") || (has("integer") && (number.is_i64() || number.is_u64()))
-            }
-            Value::String(_) => has("string"),
-            Value::Array(_) => has("array"),
-            Value::Object(_) => has("object"),
-        }
-    }
-
-    /// Whether a value satisfies every constraint this node declares.
-    ///
-    /// A value must match the declared types, and appear in the `enum` when
-    /// there is one.
-    #[must_use]
-    pub fn permits(&self, value: &Value) -> bool {
-        if !self.accepts_type(value) {
-            return false;
-        }
-
-        let enumeration = self.enumeration();
-        enumeration.is_empty() || enumeration.contains(value)
-    }
-
-    /// The value inserted when the argument is omitted.
-    #[must_use]
-    pub fn default(&self) -> Option<&Value> {
-        // The borrow has to come from the node itself, which `Cow` owns when a
-        // `$ref` was inlined, so match rather than returning through the Cow.
-        match &self.node {
-            Cow::Borrowed(node) => node.get("default"),
-            Cow::Owned(node) => node.get("default"),
-        }
-    }
-
-    /// Values this node accepts, empty when unconstrained.
-    #[must_use]
-    pub fn enumeration(&self) -> Vec<Value> {
-        self.node
-            .get("enum")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default()
-    }
-
-    /// The schema applied to each array element.
-    #[must_use]
-    pub fn items(&self) -> Option<Node<'a>> {
-        self.node.get("items").map(|items| self.child(items))
-    }
-
-    /// The schemas for this node's object properties, in declaration order.
-    #[must_use]
-    pub fn properties(&self) -> Vec<(String, Node<'a>)> {
-        self.node
-            .get("properties")
-            .and_then(Value::as_object)
-            .map(|properties| {
-                properties
-                    .iter()
-                    .map(|(name, node)| (name.clone(), self.child(node)))
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
-
-    /// Whether this node lists `name` among its required properties.
-    #[must_use]
-    pub fn is_required(&self, name: &str) -> bool {
-        required_names(&self.node).contains(&name)
-    }
-
-    /// The description sent to the model for this node.
-    #[must_use]
-    pub fn description(&self) -> Option<&str> {
-        match &self.node {
-            Cow::Borrowed(node) => node.get("description"),
-            Cow::Owned(node) => node.get("description"),
-        }
-        .and_then(Value::as_str)
-    }
-
-    /// Whether this node declares any property.
-    #[must_use]
-    pub fn has_properties(&self) -> bool {
-        self.node
-            .get("properties")
-            .and_then(Value::as_object)
-            .is_some_and(|properties| !properties.is_empty())
-    }
-}
-
-impl PartialEq for Node<'_> {
-    fn eq(&self, other: &Self) -> bool {
-        self.node == other.node
-    }
-}
-
-/// Follow same-document `$ref` pointers, merging sibling keys over the target.
-///
-/// Sibling keys win, per JSON Schema 2020-12.
-/// A pointer that leaves the document or revisits one already followed is left
-/// in place, so reading degrades to "this node declares nothing" rather than
-/// looping.
-fn resolve<'a>(node: &'a Value, root: &Value) -> Cow<'a, Value> {
-    let mut current = Cow::Borrowed(node);
-    let mut seen: Vec<String> = vec![];
-
-    while let Some(pointer) = current.get("$ref").and_then(Value::as_str) {
-        let pointer = pointer.to_owned();
-        if seen.len() >= MAX_REF_HOPS || seen.contains(&pointer) {
-            break;
-        }
-
-        let Some(target) = follow_pointer(&pointer, root) else {
-            break;
-        };
-
-        let mut merged = target;
-        for (key, value) in current.as_object().into_iter().flatten() {
-            if key != "$ref" {
-                merged.insert(key.clone(), value.clone());
-            }
-        }
-
-        seen.push(pointer);
-        current = Cow::Owned(Value::Object(merged));
-    }
-
-    current
-}
-
-fn pointer_of(node: &Value) -> Option<String> {
-    node.get("$ref").and_then(Value::as_str).map(str::to_owned)
-}
-
-/// Look up a same-document JSON pointer, such as `#/$defs/EntryType`.
-fn follow_pointer(pointer: &str, root: &Value) -> Option<Map<String, Value>> {
-    if pointer == "#" {
-        return root.as_object().cloned();
-    }
-
-    let mut current = root;
-    for segment in pointer.strip_prefix("#/")?.split('/') {
-        current = current.get(segment.replace("~1", "/").replace("~0", "~"))?;
-    }
-
-    current.as_object().cloned()
-}
-
-fn required_names(schema: &Value) -> Vec<&str> {
-    schema
-        .get("required")
-        .and_then(Value::as_array)
-        .into_iter()
-        .flatten()
-        .filter_map(Value::as_str)
-        .collect()
-}
-
 fn object_schema(properties: Map<String, Value>, required: Vec<Value>) -> Value {
     json!({
         "type": "object",
@@ -646,14 +104,11 @@ fn object_schema(properties: Map<String, Value>, required: Vec<Value>) -> Value 
 }
 
 /// Build one schema node from configuration alone.
-fn node_from_config(path: &str, config: &ToolParameterConfig) -> Result<Value, ToolError> {
-    let kind = config
-        .kind
-        .as_ref()
-        .ok_or_else(|| ToolError::InvalidSchema {
-            path: format!("{path}.type"),
-            message: "local and built-in tool parameters must declare a type".to_owned(),
-        })?;
+fn node_from_config(path: &str, config: &ToolParameterConfig) -> Result<Value, Error> {
+    let kind = config.kind.as_ref().ok_or_else(|| Error::InvalidSchema {
+        path: format!("{path}.type"),
+        message: "local and built-in tool parameters must declare a type".to_owned(),
+    })?;
 
     let mut node = Map::new();
     node.insert("type".to_owned(), types_to_json(kind));
@@ -668,7 +123,7 @@ fn node_with_override(
     source: &Value,
     root: &Value,
     config: &ToolParameterConfig,
-) -> Result<Value, ToolError> {
+) -> Result<Value, Error> {
     let mut node = source.as_object().cloned().unwrap_or_default();
 
     if let Some(kind) = &config.kind {
@@ -677,7 +132,7 @@ fn node_with_override(
         // against the document is what lets a referenced type be compared.
         let declared = Node::root(root).child(source).types();
         if !declared.is_empty() && !types_match(&declared, kind) {
-            return Err(ToolError::InvalidSchema {
+            return Err(Error::InvalidSchema {
                 path: format!("{path}.type"),
                 message: format!(
                     "MCP declares {}, but the configuration declares {}",
@@ -706,7 +161,7 @@ fn apply_config_fields(
     node: &mut Map<String, Value>,
     root: &Value,
     config: &ToolParameterConfig,
-) -> Result<(), ToolError> {
+) -> Result<(), Error> {
     if let Some(default) = &config.default {
         node.insert("default".to_owned(), default.clone());
     }
@@ -797,38 +252,6 @@ fn types_match(left: &[String], right: &OneOrManyTypes) -> bool {
     };
 
     normalize(left.to_vec()) == normalize(type_names(right))
-}
-
-/// Merge a user-provided description with the one the source declared.
-///
-/// A user description containing `{{description}}` has the source's text
-/// substituted in; otherwise the user's text wins outright.
-/// With no user description the source's is kept as-is.
-#[must_use]
-pub fn merge_description(user: Option<String>, source: Option<&str>) -> Option<String> {
-    match (user, source) {
-        (None, Some(source)) => Some(source.to_owned()),
-        // TODO: should use `minijinja` instead of raw string replacement.
-        (Some(user), Some(source)) => Some(user.replace("{{description}}", source)),
-        (Some(user), None) => Some(user),
-        (None, None) => None,
-    }
-}
-
-fn value_type(value: &Value) -> &'static str {
-    match value {
-        Value::Null => "null",
-        Value::Bool(_) => "boolean",
-        Value::Number(number) if number.is_i64() || number.is_u64() => "integer",
-        Value::Number(_) => "number",
-        Value::String(_) => "string",
-        Value::Array(_) => "array",
-        Value::Object(_) => "object",
-    }
-}
-
-fn format_types(types: &[String]) -> String {
-    types.join(" or ")
 }
 
 #[cfg(test)]

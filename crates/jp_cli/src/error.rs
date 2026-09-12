@@ -118,7 +118,7 @@ pub(crate) enum Error {
     Url(#[from] url::ParseError),
 
     #[error("Tool error")]
-    Tool(#[from] jp_llm::ToolError),
+    Tool(#[from] jp_tool::Error),
 
     #[error("Syntax highlighting error")]
     SyntaxHighlight(#[from] syntect::Error),

@@ -52,12 +52,13 @@ use jp_conversation::event::{InquirySource, ToolCallRequest, ToolCallResponse};
 use jp_llm::{
     ExecutionOutcome,
     tool::{
-        InvocationContext, StderrSink, ToolDefinition,
+        InvocationContext, StderrSink,
         builtin::BuiltinExecutors,
         executor::{Executor, ExecutorResult, ExecutorSource, PermissionInfo},
     },
 };
 use jp_mcp::Client;
+use jp_tool::ToolDefinition;
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
@@ -117,14 +118,11 @@ impl ExecutorSource for TerminalExecutorSource {
 
 /// Executes a single tool call.
 ///
-/// The executor handles the execution lifecycle including permission prompts,
-/// input questions, and result formatting.
-///
-/// # Note
-///
-/// Interactive prompts currently happen inside `ToolDefinition::call()`.
-/// In the future, prompts will be driven by the `ToolCoordinator`, and the
-/// executor will only handle pure execution.
+/// Each [`Executor::execute`] call is one execution attempt: it runs the tool
+/// and reports what came back.
+/// Permission prompts, question answering, and result editing are the
+/// `ToolCoordinator`'s, which calls this again with accumulated answers when a
+/// tool asks for input.
 pub struct ToolExecutor {
     request: ToolCallRequest,
     config: ToolConfigWithDefaults,
@@ -237,22 +235,21 @@ impl Executor for ToolExecutor {
             }
         };
 
-        let result = self
-            .definition
-            .execute(
-                self.request.id.clone(),
-                Value::Object(self.request.arguments.clone()),
-                answers,
-                &self.config,
-                mcp_client,
-                root,
-                cancellation_token,
-                &self.builtin_executors,
-                access.as_ref(),
-                &self.invocation,
-                stderr,
-            )
-            .await;
+        let result = jp_llm::tool::execute(
+            &self.definition,
+            self.request.id.clone(),
+            Value::Object(self.request.arguments.clone()),
+            answers,
+            &self.config,
+            mcp_client,
+            root,
+            cancellation_token,
+            &self.builtin_executors,
+            access.as_ref(),
+            &self.invocation,
+            stderr,
+        )
+        .await;
 
         match result {
             Ok(ExecutionOutcome::Completed { id, result }) => {

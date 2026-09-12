@@ -18,10 +18,13 @@ use jp_mcp::{
     RawContent, ResourceContents,
     id::{McpServerId, McpToolId},
 };
-use jp_tool::{Action, Outcome, Question};
-use json_schema::{Node, merge_description};
+use jp_tool::{
+    Action, Error as ToolError, Outcome, ParameterDocs, Question, ToolDefinition, ToolDocs,
+    definition::{apply_parameter_defaults, split_description, validate_tool_arguments},
+    schema::{Node, merge_description},
+};
 use minijinja::{Environment, ErrorKind as MinijinjaErrorKind, value::ValueKind};
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, BufReader},
     process::Command,
@@ -29,85 +32,37 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, trace, warn};
 
-use crate::error::ToolError;
+/// Read a tool's documentation out of its configuration.
+fn tool_docs_from_config(config: &ToolConfigWithDefaults) -> ToolDocs {
+    let parameters = config
+        .parameters()
+        .iter()
+        .filter_map(|(param_name, param_cfg)| {
+            let summary = param_cfg
+                .summary
+                .as_deref()
+                .or(param_cfg.description.as_deref())
+                .map(str::to_owned);
+            let desc = param_cfg.description.as_deref().map(str::to_owned);
+            let ex = param_cfg.examples.as_deref().map(str::to_owned);
 
-/// Documentation for a single tool parameter.
-#[derive(Debug, Clone)]
-pub struct ParameterDocs {
-    pub summary: Option<String>,
-    pub description: Option<String>,
-    pub examples: Option<String>,
-}
+            if summary.is_none() && desc.is_none() && ex.is_none() {
+                return None;
+            }
 
-impl ParameterDocs {
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.description.is_none() && self.examples.is_none()
-    }
-}
+            Some((param_name.to_owned(), ParameterDocs {
+                summary,
+                description: desc,
+                examples: ex,
+            }))
+        })
+        .collect();
 
-/// Documentation for a single tool.
-#[derive(Debug, Clone, Default)]
-pub struct ToolDocs {
-    pub summary: Option<String>,
-    pub description: Option<String>,
-    pub examples: Option<String>,
-    pub parameters: IndexMap<String, ParameterDocs>,
-}
-
-impl ToolDocs {
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.description.is_none()
-            && self.examples.is_none()
-            && self.parameters.values().all(ParameterDocs::is_empty)
-    }
-
-    /// The short description used for the tool schema sent to the LLM.
-    ///
-    /// Returns `summary` if set, otherwise falls back to `description`.
-    #[must_use]
-    pub fn schema_description(&self) -> Option<&str> {
-        self.summary.as_deref().or(self.description.as_deref())
-    }
-
-    /// Build `ToolDocs` from a tool's configuration.
-    #[must_use]
-    pub fn from_config(config: &ToolConfigWithDefaults) -> Self {
-        let summary = config.summary().map(str::to_owned);
-        let description = config.description().map(str::to_owned);
-        let examples = config.examples().map(str::to_owned);
-
-        let parameters = config
-            .parameters()
-            .iter()
-            .filter_map(|(param_name, param_cfg)| {
-                let summary = param_cfg
-                    .summary
-                    .as_deref()
-                    .or(param_cfg.description.as_deref())
-                    .map(str::to_owned);
-                let desc = param_cfg.description.as_deref().map(str::to_owned);
-                let ex = param_cfg.examples.as_deref().map(str::to_owned);
-
-                if summary.is_none() && desc.is_none() && ex.is_none() {
-                    return None;
-                }
-
-                Some((param_name.to_owned(), ParameterDocs {
-                    summary,
-                    description: desc,
-                    examples: ex,
-                }))
-            })
-            .collect();
-
-        Self {
-            summary,
-            description,
-            examples,
-            parameters,
-        }
+    ToolDocs {
+        summary: config.summary().map(str::to_owned),
+        description: config.description().map(str::to_owned),
+        examples: config.examples().map(str::to_owned),
+        parameters,
     }
 }
 
@@ -117,8 +72,7 @@ impl ToolDocs {
 /// command or MCP call, without any interactive prompts.
 /// The caller is responsible for:
 ///
-/// 1. Handling permission prompts **before** calling
-///    [`ToolDefinition::execute()`].
+/// 1. Handling permission prompts **before** calling [`execute()`].
 /// 2. Handling [`ExecutionOutcome::NeedsInput`] by prompting the user or
 ///    assistant.
 /// 3. Handling result editing **after** receiving the outcome.
@@ -126,7 +80,7 @@ impl ToolDocs {
 /// # Example Flow
 ///
 /// ```text
-/// ToolExecutor (jp_cli)                    ToolDefinition (jp_llm)
+/// ToolExecutor (jp_cli)                    execute() (jp_llm)
 /// ─────────────────────                    ──────────────────────
 ///        │
 ///        ├── [AwaitingPermission]
@@ -165,7 +119,7 @@ pub enum ExecutionOutcome {
     ///
     /// 1. Present the question to the user (or delegate to the assistant)
     /// 2. Collect the answer
-    /// 3. Call [`ToolDefinition::execute()`] again with the answer in `answers`
+    /// 3. Call [`execute()`] again with the answer in `answers`
     NeedsInput {
         /// The tool call ID.
         id: String,
@@ -502,7 +456,7 @@ pub async fn run_tool_command(
         .render_str(&program, &ctx)
         .map_err(|error| ToolError::TemplateError {
             data: program.clone(),
-            error,
+            error: Box::new(error),
         })?;
 
     let args = args
@@ -511,7 +465,7 @@ pub async fn run_tool_command(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| ToolError::TemplateError {
             data: args.join(" "),
-            error,
+            error: Box::new(error),
         })?;
 
     let mut cmd = if shell {
@@ -705,533 +659,297 @@ pub struct InvocationContext {
     pub conversation_id: String,
 }
 
-/// The definition of a tool.
+/// Execute a tool without any interactive prompts.
 ///
-/// The definition source is either a [`ToolConfig`] for `local` tools, or a
-/// combination of `ToolConfig` and MCP server information for `mcp` tools, or
-/// hard-coded for definitions `builtin` tools.
+/// This is a pure execution path that runs the tool's underlying command or MCP
+/// call and returns an [`ExecutionOutcome`].
+/// All interactive decisions (permission prompts, result editing, question
+/// handling) are the caller's responsibility.
 ///
-/// [`ToolConfig`]: jp_config::conversation::tool::ToolConfig
-#[derive(Debug, Clone)]
-pub struct ToolDefinition {
-    pub name: String,
-    pub docs: ToolDocs,
-
-    /// JSON Schema for the tool's arguments, as its source declared it, with
-    /// configuration overrides applied.
-    ///
-    /// Adapting this to what a given API accepts belongs to that provider.
-    pub parameters: Value,
-}
-
-impl ToolDefinition {
-    /// Coerce JSON-encoded argument strings to non-string schema types.
-    ///
-    /// Strings stay unchanged when the schema accepts strings or their contents
-    /// do not parse to a declared type.
-    pub fn coerce_arguments(&self, arguments: &mut Map<String, Value>) {
-        coerce_arguments_to_schema(arguments, &self.parameters);
+/// # Arguments
+///
+/// - `id` - The tool call ID for correlation with the request
+/// - `arguments` - The tool arguments (caller is responsible for any
+///   pre-processing)
+/// - `answers` - Pre-provided answers to tool questions (from previous
+///   `NeedsInput`)
+/// - `config` - Tool configuration
+/// - `mcp_client` - MCP client for MCP tool execution
+/// - `root` - Working directory for local tool execution
+/// - `cancellation_token` - Token to cancel long-running execution
+/// - `builtin_executors` - Registry of builtin tools
+///
+/// # Returns
+///
+/// - [`ExecutionOutcome::Completed`] - Tool finished (check inner `Result` for
+///   success/error)
+/// - [`ExecutionOutcome::NeedsInput`] - Tool needs user input to continue
+/// - [`ExecutionOutcome::Cancelled`] - Execution was cancelled via the token
+///
+/// # Errors
+///
+/// Returns [`ToolError`] for infrastructure errors (spawn failure, missing
+/// command, etc.).
+/// Tool-level errors (command returned non-zero) are returned as
+/// `Ok(ExecutionOutcome::Completed { result: Err(...) })`.
+///
+/// # Example
+///
+/// ```ignore
+/// loop {
+///     match execute(&definition, id, args, &answers, ...).await? {
+///         ExecutionOutcome::Completed { result, .. } => {
+///             // Handle success or tool error
+///             break result;
+///         }
+///         ExecutionOutcome::NeedsInput { question, .. } => {
+///             // Prompt user for input
+///             let answer = prompt_user(&question)?;
+///             answers.insert(question.id, answer);
+///             // Loop to retry with answer
+///         }
+///         ExecutionOutcome::Cancelled { .. } => {
+///             break Ok("Cancelled".into());
+///         }
+///     }
+/// }
+/// ```
+#[expect(clippy::too_many_arguments)]
+pub async fn execute(
+    definition: &ToolDefinition,
+    id: String,
+    arguments: Value,
+    answers: &IndexMap<String, Value>,
+    config: &ToolConfigWithDefaults,
+    mcp_client: &jp_mcp::Client,
+    root: &Utf8Path,
+    cancellation_token: CancellationToken,
+    builtin_executors: &builtin::BuiltinExecutors,
+    access: Option<&jp_tool::AccessPolicy>,
+    invocation: &InvocationContext,
+    stderr: Option<StderrSink>,
+) -> Result<ExecutionOutcome, ToolError> {
+    let mut arguments = arguments;
+    if let Some(arguments) = arguments.as_object_mut() {
+        definition.coerce_arguments(arguments);
     }
+    info!(tool = %definition.name, arguments = ?arguments, "Executing tool.");
 
-    /// Execute the tool without any interactive prompts.
-    ///
-    /// This is a pure execution method that runs the tool's underlying command
-    /// or MCP call and returns an [`ExecutionOutcome`].
-    /// All interactive decisions (permission prompts, result editing, question
-    /// handling) are the caller's responsibility.
-    ///
-    /// # Arguments
-    ///
-    /// - `id` - The tool call ID for correlation with the request
-    /// - `arguments` - The tool arguments (caller is responsible for any
-    ///   pre-processing)
-    /// - `answers` - Pre-provided answers to tool questions (from previous
-    ///   `NeedsInput`)
-    /// - `config` - Tool configuration
-    /// - `mcp_client` - MCP client for MCP tool execution
-    /// - `root` - Working directory for local tool execution
-    /// - `cancellation_token` - Token to cancel long-running execution
-    /// - `builtin_executors` - Registry of builtin tools
-    ///
-    /// # Returns
-    ///
-    /// - [`ExecutionOutcome::Completed`] - Tool finished (check inner `Result`
-    ///   for success/error)
-    /// - [`ExecutionOutcome::NeedsInput`] - Tool needs user input to continue
-    /// - [`ExecutionOutcome::Cancelled`] - Execution was cancelled via the
-    ///   token
-    ///
-    /// # Errors
-    ///
-    /// Returns [`ToolError`] for infrastructure errors (spawn failure, missing
-    /// command, etc.).
-    /// Tool-level errors (command returned non-zero) are returned as
-    /// `Ok(ExecutionOutcome::Completed { result: Err(...) })`.
-    ///
-    /// # Example
-    ///
-    /// ```ignore
-    /// loop {
-    ///     match definition.execute(id, &args, &answers, ...).await? {
-    ///         ExecutionOutcome::Completed { result, .. } => {
-    ///             // Handle success or tool error
-    ///             break result;
-    ///         }
-    ///         ExecutionOutcome::NeedsInput { question, .. } => {
-    ///             // Prompt user for input
-    ///             let answer = prompt_user(&question)?;
-    ///             answers.insert(question.id, answer);
-    ///             // Loop to retry with answer
-    ///         }
-    ///         ExecutionOutcome::Cancelled { .. } => {
-    ///             break Ok("Cancelled".into());
-    ///         }
-    ///     }
-    /// }
-    /// ```
-    #[expect(clippy::too_many_arguments)]
-    pub async fn execute(
-        &self,
-        id: String,
-        arguments: Value,
-        answers: &IndexMap<String, Value>,
-        config: &ToolConfigWithDefaults,
-        mcp_client: &jp_mcp::Client,
-        root: &Utf8Path,
-        cancellation_token: CancellationToken,
-        builtin_executors: &builtin::BuiltinExecutors,
-        access: Option<&jp_tool::AccessPolicy>,
-        invocation: &InvocationContext,
-        stderr: Option<StderrSink>,
-    ) -> Result<ExecutionOutcome, ToolError> {
-        let mut arguments = arguments;
-        if let Some(arguments) = arguments.as_object_mut() {
-            self.coerce_arguments(arguments);
-        }
-        info!(tool = %self.name, arguments = ?arguments, "Executing tool.");
-
-        match config.source() {
-            ToolSource::Local { tool } => {
-                self.execute_local(
-                    id,
-                    arguments,
-                    answers,
-                    config,
-                    tool.as_deref(),
-                    root,
-                    cancellation_token,
-                    access,
-                    invocation,
-                    stderr,
-                )
-                .await
-            }
-            ToolSource::Mcp { server, tool } => {
-                self.execute_mcp(
-                    id,
-                    arguments,
-                    mcp_client,
-                    server,
-                    tool.as_deref(),
-                    cancellation_token,
-                )
-                .await
-            }
-            ToolSource::Builtin { tool } => {
-                self.execute_builtin(id, &arguments, answers, tool.as_deref(), builtin_executors)
-                    .await
-            }
-        }
-    }
-
-    /// Execute a local tool and return the outcome.
-    ///
-    /// This is the pure execution path for local tools.
-    /// It validates arguments, runs the command, and converts the result to an
-    /// `ExecutionOutcome`.
-    #[expect(clippy::too_many_arguments)]
-    async fn execute_local(
-        &self,
-        id: String,
-        mut arguments: Value,
-        answers: &IndexMap<String, Value>,
-        config: &ToolConfigWithDefaults,
-        tool: Option<&str>,
-        root: &Utf8Path,
-        cancellation_token: CancellationToken,
-        access: Option<&jp_tool::AccessPolicy>,
-        invocation: &InvocationContext,
-        stderr: Option<StderrSink>,
-    ) -> Result<ExecutionOutcome, ToolError> {
-        let name = tool.unwrap_or(&self.name);
-
-        // Apply configured defaults for missing parameters, then validate.
-        if let Some(args) = arguments.as_object_mut() {
-            apply_parameter_defaults(args, &self.parameters);
-
-            if let Err(error) = validate_tool_arguments(args, &self.parameters) {
-                return Ok(ExecutionOutcome::Completed {
-                    id,
-                    result: Err(format!(
-                        "Invalid arguments: {error}\n\nYou can call `describe_tools(tools: \
-                         [\"{name}\"])` to learn more about how to use the tool correctly."
-                    )),
-                });
-            }
-        }
-
-        let ctx = json!({
-            "tool": {
-                "name": name,
-                "arguments": &arguments,
-                "answers": answers,
-                "options": config.options(),
-            },
-            "context": {
-                "action": Action::Run,
-                "root": root.as_str(),
-                "access": access,
-                "workspace_id": &invocation.workspace_id,
-                "conversation_id": &invocation.conversation_id,
-            },
-        });
-
-        let Some(command) = config.command() else {
-            return Err(ToolError::MissingCommand);
-        };
-
-        let trace_as = ToolTrace {
-            id: &id,
-            name,
-            stderr,
-        };
-
-        match run_tool_command(command, ctx, root, cancellation_token, Some(trace_as)).await? {
-            CommandResult::Success(content) => Ok(ExecutionOutcome::Completed {
+    match config.source() {
+        ToolSource::Local { tool } => {
+            execute_local(
+                definition,
                 id,
-                result: Ok(content),
-            }),
-            CommandResult::NeedsInput(question) => {
-                Ok(ExecutionOutcome::NeedsInput { id, question })
-            }
-            CommandResult::Cancelled => Ok(ExecutionOutcome::Cancelled { id }),
-            other => Ok(ExecutionOutcome::Completed {
+                arguments,
+                answers,
+                config,
+                tool.as_deref(),
+                root,
+                cancellation_token,
+                access,
+                invocation,
+                stderr,
+            )
+            .await
+        }
+        ToolSource::Mcp { server, tool } => {
+            execute_mcp(
+                definition,
                 id,
-                result: other.into_tool_result(name),
-            }),
+                arguments,
+                mcp_client,
+                server,
+                tool.as_deref(),
+                cancellation_token,
+            )
+            .await
         }
-    }
-
-    /// Execute an MCP tool and return the outcome.
-    ///
-    /// This is the pure execution path for MCP tools.
-    /// It calls the MCP server and converts the result to an
-    /// `ExecutionOutcome`.
-    async fn execute_mcp(
-        &self,
-        id: String,
-        arguments: Value,
-        mcp_client: &jp_mcp::Client,
-        server: &str,
-        tool: Option<&str>,
-        cancellation_token: CancellationToken,
-    ) -> Result<ExecutionOutcome, ToolError> {
-        let name = tool.unwrap_or(&self.name);
-
-        let call_future = mcp_client.call_tool(name, server, &arguments);
-
-        tokio::select! {
-            biased;
-            () = cancellation_token.cancelled() => {
-                info!(tool = %self.name, "MCP tool call cancelled");
-                Ok(ExecutionOutcome::Cancelled { id })
-            }
-            result = call_future => {
-                let result = result.map_err(ToolError::McpRunToolError)?;
-
-                let content = result
-                    .content
-                    .into_iter()
-                    .filter_map(|v| match v.raw {
-                        RawContent::Text(v) => Some(v.text),
-                        RawContent::Resource(v) => match v.resource {
-                            ResourceContents::TextResourceContents { text, .. } => Some(text),
-                            ResourceContents::BlobResourceContents { blob, .. } => Some(blob),
-                        },
-                        RawContent::Image(_) | RawContent::Audio(_) | RawContent::ResourceLink(_) => None,
-                    })
-                    .collect::<Vec<_>>()
-                    .join("\n\n");
-
-                let result = if result.is_error.unwrap_or_default() {
-                    Err(content)
-                } else {
-                    Ok(content)
-                };
-
-                Ok(ExecutionOutcome::Completed { id, result })
-            }
-        }
-    }
-
-    /// Execute a builtin tool and return the outcome.
-    ///
-    /// `source_name` is the implementation named by `source =
-    /// "builtin.<name>"`, which the registry is keyed on.
-    /// When absent, the implementation shares the tool's own name.
-    async fn execute_builtin(
-        &self,
-        id: String,
-        arguments: &Value,
-        answers: &IndexMap<String, Value>,
-        source_name: Option<&str>,
-        builtin_executors: &builtin::BuiltinExecutors,
-    ) -> Result<ExecutionOutcome, ToolError> {
-        let name = source_name.unwrap_or(&self.name);
-        let executor = builtin_executors
-            .get(name)
-            .ok_or_else(|| ToolError::NotFound {
-                name: name.to_owned(),
-            })?;
-
-        let outcome = executor.execute(arguments, answers).await;
-
-        Ok(match outcome {
-            jp_tool::Outcome::Success { content } => ExecutionOutcome::Completed {
+        ToolSource::Builtin { tool } => {
+            execute_builtin(
+                definition,
                 id,
-                result: Ok(content),
-            },
-            jp_tool::Outcome::Error {
-                message,
-                trace,
-                transient: _,
-            } => {
-                let error_msg = if trace.is_empty() {
-                    message
-                } else {
-                    format!("{message}\n\nTrace:\n{}", trace.join("\n"))
-                };
-                ExecutionOutcome::Completed {
-                    id,
-                    result: Err(error_msg),
-                }
-            }
-            jp_tool::Outcome::NeedsInput { question } => {
-                ExecutionOutcome::NeedsInput { id, question }
-            }
-        })
-    }
-
-    /// Return the JSON Schema for the tool's parameters.
-    #[must_use]
-    pub fn to_parameters_schema(&self) -> Value {
-        self.parameters.clone()
+                &arguments,
+                answers,
+                tool.as_deref(),
+                builtin_executors,
+            )
+            .await
+        }
     }
 }
 
-/// Split a description string into a short summary and remaining detail.
+/// Execute a local tool and return the outcome.
 ///
-/// If the text is short (single line, ≤120 chars), it is returned as the
-/// summary with no remaining description.
+/// This is the pure execution path for local tools.
+/// It validates arguments, runs the command, and converts the result to an
+/// `ExecutionOutcome`.
+#[expect(clippy::too_many_arguments)]
+async fn execute_local(
+    definition: &ToolDefinition,
+    id: String,
+    mut arguments: Value,
+    answers: &IndexMap<String, Value>,
+    config: &ToolConfigWithDefaults,
+    tool: Option<&str>,
+    root: &Utf8Path,
+    cancellation_token: CancellationToken,
+    access: Option<&jp_tool::AccessPolicy>,
+    invocation: &InvocationContext,
+    stderr: Option<StderrSink>,
+) -> Result<ExecutionOutcome, ToolError> {
+    let name = tool.unwrap_or(&definition.name);
+
+    // Apply configured defaults for missing parameters, then validate.
+    if let Some(args) = arguments.as_object_mut() {
+        apply_parameter_defaults(args, &definition.parameters);
+
+        if let Err(error) = validate_tool_arguments(args, &definition.parameters) {
+            return Ok(ExecutionOutcome::Completed {
+                id,
+                result: Err(format!(
+                    "Invalid arguments: {error}\n\nYou can call `describe_tools(tools: \
+                     [\"{name}\"])` to learn more about how to use the tool correctly."
+                )),
+            });
+        }
+    }
+
+    let ctx = json!({
+        "tool": {
+            "name": name,
+            "arguments": &arguments,
+            "answers": answers,
+            "options": config.options(),
+        },
+        "context": {
+            "action": Action::Run,
+            "root": root.as_str(),
+            "access": access,
+            "workspace_id": &invocation.workspace_id,
+            "conversation_id": &invocation.conversation_id,
+        },
+    });
+
+    let Some(command) = config.command() else {
+        return Err(ToolError::MissingCommand);
+    };
+
+    let trace_as = ToolTrace {
+        id: &id,
+        name,
+        stderr,
+    };
+
+    match run_tool_command(command, ctx, root, cancellation_token, Some(trace_as)).await? {
+        CommandResult::Success(content) => Ok(ExecutionOutcome::Completed {
+            id,
+            result: Ok(content),
+        }),
+        CommandResult::NeedsInput(question) => Ok(ExecutionOutcome::NeedsInput { id, question }),
+        CommandResult::Cancelled => Ok(ExecutionOutcome::Cancelled { id }),
+        other => Ok(ExecutionOutcome::Completed {
+            id,
+            result: other.into_tool_result(name),
+        }),
+    }
+}
+
+/// Execute an MCP tool and return the outcome.
 ///
-/// Otherwise, the first sentence is extracted as the summary.
-/// A sentence ends at ` .  ` or `.\n`.
-/// The remainder becomes the description.
-pub(crate) fn split_description(text: &str) -> (String, Option<String>) {
-    let text = text.trim();
+/// This is the pure execution path for MCP tools.
+/// It calls the MCP server and converts the result to an `ExecutionOutcome`.
+async fn execute_mcp(
+    definition: &ToolDefinition,
+    id: String,
+    arguments: Value,
+    mcp_client: &jp_mcp::Client,
+    server: &str,
+    tool: Option<&str>,
+    cancellation_token: CancellationToken,
+) -> Result<ExecutionOutcome, ToolError> {
+    let name = tool.unwrap_or(&definition.name);
 
-    // Find the first sentence boundary.
-    // Look for ". " or ".\n" — a period followed by whitespace.
-    for (i, _) in text.match_indices('.') {
-        let after = i + 1;
-        if after >= text.len() {
-            // Period at end of string — the whole text is one sentence.
-            break;
+    let call_future = mcp_client.call_tool(name, server, &arguments);
+
+    tokio::select! {
+        biased;
+        () = cancellation_token.cancelled() => {
+            info!(tool = %definition.name, "MCP tool call cancelled");
+            Ok(ExecutionOutcome::Cancelled { id })
         }
+        result = call_future => {
+            let result = result
+                .map_err(|error| ToolError::McpRunToolError(Box::new(error)))?;
 
-        let next_byte = text.as_bytes()[after];
-        if next_byte == b'\n' {
-            // Period followed by newline is always a sentence boundary.
-        } else if next_byte == b' ' {
-            // Period followed by space: only split if the next non-space
-            // character is uppercase (heuristic to skip abbreviations
-            // like "e.g. foo").
-            let rest_after_space = text[after..].trim_start();
-            if rest_after_space.is_empty()
-                || !rest_after_space
-                    .chars()
-                    .next()
-                    .is_some_and(char::is_uppercase)
-            {
-                continue;
-            }
-        } else {
-            continue;
-        }
+            let content = result
+                .content
+                .into_iter()
+                .filter_map(|v| match v.raw {
+                    RawContent::Text(v) => Some(v.text),
+                    RawContent::Resource(v) => match v.resource {
+                        ResourceContents::TextResourceContents { text, .. } => Some(text),
+                        ResourceContents::BlobResourceContents { blob, .. } => Some(blob),
+                    },
+                    RawContent::Image(_) | RawContent::Audio(_) | RawContent::ResourceLink(_) => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n\n");
 
-        {
-            let summary = text[..=i].trim().to_owned();
-            let rest = text[after..].trim();
-
-            if rest.is_empty() {
-                return (summary, None);
-            }
-
-            return (summary, Some(rest.to_owned()));
-        }
-    }
-
-    // No sentence boundary found — take the first line.
-    if let Some(nl) = text.find('\n') {
-        let summary = text[..nl].trim().to_owned();
-        let rest = text[nl..].trim();
-
-        if rest.is_empty() {
-            return (summary, None);
-        }
-
-        return (summary, Some(rest.to_owned()));
-    }
-
-    // Single long line, no period — return as-is.
-    (text.to_owned(), None)
-}
-
-/// Coerce JSON-encoded argument strings to the types the schema declares.
-fn coerce_arguments_to_schema(arguments: &mut Map<String, Value>, schema: &Value) {
-    coerce_object(arguments, &Node::root(schema));
-}
-
-fn coerce_object(arguments: &mut Map<String, Value>, node: &Node<'_>) {
-    for (name, property) in node.properties() {
-        if let Some(value) = arguments.get_mut(&name) {
-            coerce_value(value, &property);
-        }
-    }
-}
-
-fn coerce_value(value: &mut Value, node: &Node<'_>) {
-    // Coercion repairs an argument the schema cannot take as written. A
-    // parameter that permits the string has nothing to repair, so parsing it
-    // would hand the tool a number or an object where the model sent text.
-    if let Value::String(raw) = &*value
-        && !node.permits(value)
-        && let Ok(parsed) = serde_json::from_str::<Value>(raw)
-        && node.permits(&parsed)
-    {
-        *value = parsed;
-    }
-
-    match value {
-        Value::Object(arguments) => coerce_object(arguments, node),
-        Value::Array(values) => {
-            let Some(items) = node.items() else {
-                return;
+            let result = if result.is_error.unwrap_or_default() {
+                Err(content)
+            } else {
+                Ok(content)
             };
-            for value in values {
-                coerce_value(value, &items);
-            }
+
+            Ok(ExecutionOutcome::Completed { id, result })
         }
-        _ => {}
     }
 }
 
-/// Fill in configured default values for missing parameters.
+/// Execute a builtin tool and return the outcome.
 ///
-/// LLMs commonly omit parameters that have a `default` in the JSON schema, even
-/// when those parameters are marked `required`.
-/// This function patches the arguments map before validation so that such
-/// omissions don't cause spurious "missing argument" errors and unnecessary LLM
-/// retries.
-fn apply_parameter_defaults(arguments: &mut Map<String, Value>, schema: &Value) {
-    apply_defaults_to(arguments, &Node::root(schema));
-}
+/// `source_name` is the implementation named by `source = "builtin.<name>"`,
+/// which the registry is keyed on.
+/// When absent, the implementation shares the tool's own name.
+async fn execute_builtin(
+    definition: &ToolDefinition,
+    id: String,
+    arguments: &Value,
+    answers: &IndexMap<String, Value>,
+    source_name: Option<&str>,
+    builtin_executors: &builtin::BuiltinExecutors,
+) -> Result<ExecutionOutcome, ToolError> {
+    let name = source_name.unwrap_or(&definition.name);
+    let executor = builtin_executors
+        .get(name)
+        .ok_or_else(|| ToolError::NotFound {
+            name: name.to_owned(),
+        })?;
 
-fn apply_defaults_to(arguments: &mut Map<String, Value>, node: &Node<'_>) {
-    for (name, property) in node.properties() {
-        if !arguments.contains_key(&name) {
-            if let Some(default) = property.default() {
-                let default = default.clone();
-                arguments.insert(name, default);
-            }
-            continue;
-        }
+    let outcome = executor.execute(arguments, answers).await;
 
-        // Recurse into object fields.
-        if property.has_properties()
-            && let Some(object) = arguments.get_mut(&name).and_then(Value::as_object_mut)
-        {
-            apply_defaults_to(object, &property);
-        }
-
-        // Recurse into array elements.
-        if let Some(items) = property.items()
-            && items.has_properties()
-            && let Some(values) = arguments.get_mut(&name).and_then(Value::as_array_mut)
-        {
-            for value in values.iter_mut() {
-                if let Some(object) = value.as_object_mut() {
-                    apply_defaults_to(object, &items);
-                }
-            }
-        }
-    }
-}
-
-fn validate_tool_arguments(
-    arguments: &Map<String, Value>,
-    schema: &Value,
-) -> Result<(), ToolError> {
-    validate_arguments_against(arguments, &Node::root(schema))
-}
-
-fn validate_arguments_against(
-    arguments: &Map<String, Value>,
-    node: &Node<'_>,
-) -> Result<(), ToolError> {
-    let properties = node.properties();
-
-    let unknown = arguments
-        .keys()
-        .filter(|name| !properties.iter().any(|(known, _)| known == *name))
-        .cloned()
-        .collect::<Vec<_>>();
-
-    let missing = properties
-        .iter()
-        .filter(|(name, _)| node.is_required(name) && !arguments.contains_key(name))
-        .map(|(name, _)| name.clone())
-        .collect::<Vec<_>>();
-
-    if !missing.is_empty() || !unknown.is_empty() {
-        return Err(ToolError::Arguments { missing, unknown });
-    }
-
-    // Recurse into nested structures.
-    for (name, property) in properties {
-        let Some(value) = arguments.get(&name) else {
-            continue;
-        };
-
-        if let Some(object) = value.as_object()
-            && property.has_properties()
-        {
-            validate_arguments_against(object, &property)?;
-        }
-
-        if let Some(items) = property.items()
-            && items.has_properties()
-            && let Some(values) = value.as_array()
-        {
-            for value in values {
-                if let Some(object) = value.as_object() {
-                    validate_arguments_against(object, &items)?;
-                }
+    Ok(match outcome {
+        Outcome::Success { content } => ExecutionOutcome::Completed {
+            id,
+            result: Ok(content),
+        },
+        Outcome::Error {
+            message,
+            trace,
+            transient: _,
+        } => {
+            let error_msg = if trace.is_empty() {
+                message
+            } else {
+                format!("{message}\n\nTrace:\n{}", trace.join("\n"))
+            };
+            ExecutionOutcome::Completed {
+                id,
+                result: Err(error_msg),
             }
         }
-    }
-
-    Ok(())
+        Outcome::NeedsInput { question } => ExecutionOutcome::NeedsInput { id, question },
+    })
 }
 
 /// Resolve all enabled tool definitions from config.
@@ -1305,7 +1023,7 @@ async fn resolve_tool(
     let definition = match config.source() {
         ToolSource::Local { .. } | ToolSource::Builtin { .. } => ToolDefinition {
             name: name.to_owned(),
-            docs: ToolDocs::from_config(config),
+            docs: tool_docs_from_config(config),
             parameters: json_schema::from_config(&path, config.parameters())?,
         },
         ToolSource::Mcp { server, tool } => {
@@ -1313,7 +1031,7 @@ async fn resolve_tool(
         }
     };
 
-    json_schema::validate(&path, &definition.parameters)?;
+    jp_tool::schema::validate(&path, &definition.parameters)?;
 
     Ok(definition)
 }
@@ -1334,7 +1052,7 @@ async fn resolve_mcp_tool(
         mcp_client
             .get_tool(&McpToolId::new(source_name.unwrap_or(name)), &server_id)
             .await
-            .map_err(ToolError::McpGetToolError)
+            .map_err(|error| ToolError::McpGetToolError(Box::new(error)))
     }?;
 
     let user_overrides = config.parameters();
