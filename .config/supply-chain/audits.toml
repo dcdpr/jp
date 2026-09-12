@@ -81,6 +81,11 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 version = "0.1.5"
 
+[[audits.getrandom]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.4.2 -> 0.4.3"
+
 [[audits.hashlink]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
@@ -195,6 +200,11 @@ delta = "0.38.4 -> 0.39.2"
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.39.2 -> 0.41.0"
+
+[[audits.r-efi]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "5.3.0 -> 6.0.0"
 
 [[audits.ra-ap-rustc_lexer]]
 who = "Jean Mertz <git@jeanmertz.com>"
@@ -320,6 +330,11 @@ version = "1.0.2"
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 version = "0.5.2"
+
+[[audits.sse-stream]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+version = "0.2.6"
 
 [[audits.string_cache]]
 who = "Jean Mertz <git@jeanmertz.com>"
@@ -533,6 +548,12 @@ trusted-publisher = "github:rust-lang/cc-rs"
 start = "2025-09-01"
 end = "2027-03-04"
 
+[[trusted.chacha20]]
+criteria = "safe-to-deploy"
+trusted-publisher = "github:RustCrypto/stream-ciphers"
+start = "2026-02-06"
+end = "2027-09-23"
+
 [[trusted.clap]]
 criteria = "safe-to-deploy"
 user-id = 6743 # Ed Page (epage)
@@ -574,6 +595,12 @@ criteria = "safe-to-deploy"
 user-id = 696 # Nick Fitzgerald (fitzgen)
 start = "2019-07-30"
 end = "2027-08-19"
+
+[[trusted.cpufeatures]]
+criteria = "safe-to-deploy"
+user-id = 267 # Tony Arcieri (tarcieri)
+start = "2021-04-26"
+end = "2027-09-23"
 
 [[trusted.dtoa]]
 criteria = "safe-to-deploy"
@@ -922,6 +949,18 @@ criteria = "safe-to-deploy"
 user-id = 3618 # David Tolnay (dtolnay)
 start = "2019-04-09"
 end = "2027-02-13"
+
+[[trusted.rand]]
+criteria = "safe-to-deploy"
+trusted-publisher = "github:rust-random/rand"
+start = "2026-01-26"
+end = "2027-09-23"
+
+[[trusted.rand_core]]
+criteria = "safe-to-deploy"
+trusted-publisher = "github:rust-random/rand_core"
+start = "2026-01-20"
+end = "2027-09-23"
 
 [[trusted.ref-cast]]
 criteria = "safe-to-deploy"

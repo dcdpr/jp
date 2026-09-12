@@ -117,10 +117,10 @@ use jp_printer::{LineSink, PrintableExt as _, Printer, RegionStyle, StatusRegion
 use jp_storage::backend::{FsStorageBackend, Projection};
 use jp_task::task::TitleGeneratorTask;
 use jp_term::width::{display_width, truncate_to_width};
+use jp_tool::{Error as ToolError, ToolDefinition, ToolDocs};
 use jp_workspace::{
     ConversationHandle, ConversationLock, ConversationMut, Id as WorkspaceId, Workspace,
 };
-use jp_tool::{Error as ToolError, ToolDefinition, ToolDocs};
 use minijinja::{Environment, UndefinedBehavior};
 use strip_ansi_escapes::strip_str;
 use tokio::sync::broadcast::error::RecvError;
@@ -1170,14 +1170,22 @@ impl Query {
             .collect();
         let builtin_executors =
             BuiltinExecutors::new().register("describe_tools", DescribeTools::new(docs_map));
-        let executor_source =
-            TerminalExecutorSource::new(builtin_executors, tools, approvals, invocation.clone());
+        let (executor_source, execution_owner) = TerminalExecutorSource::start(
+            builtin_executors,
+            tools,
+            &cfg.conversation.tools,
+            approvals,
+            invocation.clone(),
+            mcp_client,
+            root.clone(),
+        )
+        .await?;
         let tool_coordinator =
             ToolCoordinator::new(cfg.conversation.tools.clone(), Box::new(executor_source))
                 .with_interrupt(cfg.interrupt.tool_call.clone());
         let prompt_backend = Arc::new(TerminalPromptBackend);
 
-        run_turn_loop(
+        let result = run_turn_loop(
             provider,
             &model,
             cfg,
@@ -1197,7 +1205,14 @@ impl Query {
             pending_trim,
             turn_interrupt,
         )
-        .await
+        .await;
+        if let Err(error) = execution_owner.shutdown().await {
+            if result.is_ok() {
+                return Err(error.into());
+            }
+            warn!(%error, "MCP execution service cleanup failed");
+        }
+        result
     }
 
     /// Whether the chat request should be echoed to the terminal before the

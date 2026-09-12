@@ -23,6 +23,7 @@ impl BuiltinTool for EchoArguments {
 #[test]
 fn test_execution_outcome_id() {
     let completed = ExecutionOutcome::Completed {
+        native: None,
         id: "id1".to_string(),
         result: Ok(String::new()),
     };
@@ -43,6 +44,7 @@ fn test_execution_outcome_id() {
 #[test]
 fn test_execution_outcome_helper_methods() {
     let success = ExecutionOutcome::Completed {
+        native: None,
         id: "1".to_string(),
         result: Ok("output".to_string()),
     };
@@ -51,6 +53,7 @@ fn test_execution_outcome_helper_methods() {
     assert!(!success.is_cancelled());
 
     let failure = ExecutionOutcome::Completed {
+        native: None,
         id: "2".to_string(),
         result: Err("error".to_string()),
     };
@@ -244,7 +247,7 @@ async fn execute_coerces_json_strings_before_calling_tool() {
     .await
     .unwrap();
 
-    let ExecutionOutcome::Completed { id, result } = outcome else {
+    let ExecutionOutcome::Completed { id, result, .. } = outcome else {
         panic!("expected completed tool call");
     };
     assert_eq!(id, "call_1");
@@ -503,7 +506,9 @@ async fn test_execute_local_exposes_invocation_ids_in_context() {
 
     match outcome {
         ExecutionOutcome::Completed {
-            result: Ok(out), ..
+            native: None,
+            result: Ok(out),
+            ..
         } => assert!(
             out.contains("ws-abc-conv-xyz"),
             "expected workspace/conversation IDs in tool output, got: {out:?}"
@@ -570,7 +575,9 @@ async fn test_execute_builtin_dispatches_on_source_name() {
 
     match outcome {
         ExecutionOutcome::Completed {
-            result: Ok(out), ..
+            native: None,
+            result: Ok(out),
+            ..
         } => assert_eq!(out, "reached"),
         other => panic!("expected completed success, got: {other:?}"),
     }

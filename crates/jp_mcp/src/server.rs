@@ -1,19 +1,20 @@
-//! Running the tools JP makes available.
+//! JP tool execution and MCP serving.
 //!
-//! Resolves a tool from configuration into a [`ToolDefinition`], then runs it:
-//! a local command, a built-in Rust implementation, or a call to one of the
-//! configured MCP servers, dispatched through the [`Client`] this crate already
-//! owns.
+//! [`service::Service`] coordinates tool execution with the MCP Host through
+//! private interaction channels.
+//! [`http::Endpoint`] exposes that service over loopback Streamable HTTP.
 //!
-//! Each call to [`execute`] runs one execution attempt.
-//! The caller handles approvals, input requests, result editing, and
-//! conversation recording.
+//! [`tool_definitions`] resolves the configured catalog.
+//! [`execute`] runs one attempt of a local command, built-in implementation, or
+//! upstream stdio MCP tool; the service handles input-driven re-execution and
+//! delivery barriers.
 
 pub mod builtin;
+pub mod http;
 pub mod json_schema;
 pub mod service;
-
-use std::{ffi::OsStr, fmt, process::Stdio, sync::Arc};
+mod upstream;
+use std::{convert::identity, ffi::OsStr, fmt, process::Stdio, sync::Arc};
 
 pub use builtin::BuiltinTool;
 use camino::Utf8Path;
@@ -23,23 +24,45 @@ use jp_config::{
     types::command::shell_command_line,
 };
 use jp_tool::{
-    Action, Error as ToolError, Outcome, ParameterDocs, Question, ToolDefinition, ToolDocs,
+    AccessPolicy, Action, Error as ToolError, Outcome, ParameterDocs, Question, ToolDefinition,
+    ToolDocs,
     definition::{apply_parameter_defaults, split_description, validate_tool_arguments},
     schema::{Node, merge_description},
 };
 use minijinja::{Environment, ErrorKind as MinijinjaErrorKind, value::ValueKind};
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, BufReader},
     process::Command,
 };
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, trace, warn};
+pub use upstream::text_result;
+use upstream::{UpstreamResult, decode_result, replace_envelope};
 
 use crate::{
-    Client, RawContent, ResourceContents,
+    CallToolResult, Client,
     id::{McpServerId, McpToolId},
 };
+
+/// Build trusted execution context for local templates and upstream MCP
+/// metadata.
+pub(crate) fn tool_context(
+    name: &str,
+    arguments: &Value,
+    answers: &IndexMap<String, Value>,
+    config: &ToolConfigWithDefaults,
+    root: &Utf8Path,
+    action: &Action,
+    access: Option<&AccessPolicy>,
+    invocation: &InvocationContext,
+) -> Value {
+    json!({
+        "tool": { "name":name, "arguments":arguments, "answers":answers, "options":config.options() },
+        "context": { "action":action, "root":root.as_str(), "access":access,
+            "workspace_id":invocation.workspace_id, "conversation_id":invocation.conversation_id }
+    })
+}
 
 /// Read a tool's documentation out of its configuration.
 fn tool_docs_from_config(config: &ToolConfigWithDefaults) -> ToolDocs {
@@ -120,6 +143,8 @@ pub enum ExecutionOutcome {
         ///
         /// If an error occurred, it means the tool ran, but reported an error.
         result: Result<String, String>,
+        /// Full upstream MCP result before the Host's compatibility projection.
+        native: Option<CallToolResult>,
     },
 
     /// Tool needs additional input before it can complete.
@@ -743,6 +768,11 @@ pub async fn execute(
                 mcp_client,
                 server,
                 tool.as_deref(),
+                answers,
+                config,
+                root,
+                access,
+                invocation,
                 cancellation_token,
             )
             .await
@@ -788,6 +818,7 @@ async fn execute_local(
 
         if let Err(error) = validate_tool_arguments(args, &definition.parameters) {
             return Ok(ExecutionOutcome::Completed {
+                native: None,
                 id,
                 result: Err(format!(
                     "Invalid arguments: {error}\n\nYou can call `describe_tools(tools: \
@@ -797,21 +828,16 @@ async fn execute_local(
         }
     }
 
-    let ctx = json!({
-        "tool": {
-            "name": name,
-            "arguments": &arguments,
-            "answers": answers,
-            "options": config.options(),
-        },
-        "context": {
-            "action": Action::Run,
-            "root": root.as_str(),
-            "access": access,
-            "workspace_id": &invocation.workspace_id,
-            "conversation_id": &invocation.conversation_id,
-        },
-    });
+    let ctx = tool_context(
+        name,
+        &arguments,
+        answers,
+        config,
+        root,
+        &Action::Run,
+        access,
+        invocation,
+    );
 
     let Some(command) = config.command() else {
         return Err(ToolError::MissingCommand);
@@ -825,12 +851,14 @@ async fn execute_local(
 
     match run_tool_command(command, ctx, root, cancellation_token, Some(trace_as)).await? {
         CommandResult::Success(content) => Ok(ExecutionOutcome::Completed {
+            native: None,
             id,
             result: Ok(content),
         }),
         CommandResult::NeedsInput(question) => Ok(ExecutionOutcome::NeedsInput { id, question }),
         CommandResult::Cancelled => Ok(ExecutionOutcome::Cancelled { id }),
         other => Ok(ExecutionOutcome::Completed {
+            native: None,
             id,
             result: other.into_tool_result(name),
         }),
@@ -841,6 +869,7 @@ async fn execute_local(
 ///
 /// Runs one upstream MCP call.
 /// It calls the MCP server and converts the result to an `ExecutionOutcome`.
+#[expect(clippy::too_many_arguments)]
 async fn execute_mcp(
     definition: &ToolDefinition,
     id: String,
@@ -848,11 +877,30 @@ async fn execute_mcp(
     mcp_client: &Client,
     server: &str,
     tool: Option<&str>,
+    answers: &IndexMap<String, Value>,
+    config: &ToolConfigWithDefaults,
+    root: &Utf8Path,
+    access: Option<&AccessPolicy>,
+    invocation: &InvocationContext,
     cancellation_token: CancellationToken,
 ) -> Result<ExecutionOutcome, ToolError> {
     let name = tool.unwrap_or(&definition.name);
 
-    let call_future = mcp_client.call_tool(name, server, &arguments);
+    let context = tool_context(
+        name,
+        &arguments,
+        answers,
+        config,
+        root,
+        &Action::Run,
+        access,
+        invocation,
+    );
+    let meta = Map::from_iter([
+        ("computer.jp/tool".into(), context["tool"].clone()),
+        ("computer.jp/context".into(), context["context"].clone()),
+    ]);
+    let call_future = mcp_client.call_tool(name, server, &arguments, Some(meta));
 
     tokio::select! {
         biased;
@@ -864,27 +912,24 @@ async fn execute_mcp(
             let result = result
                 .map_err(|error| ToolError::McpRunToolError(Box::new(error)))?;
 
-            let content = result
-                .content
-                .into_iter()
-                .filter_map(|v| match v.raw {
-                    RawContent::Text(v) => Some(v.text),
-                    RawContent::Resource(v) => match v.resource {
-                        ResourceContents::TextResourceContents { text, .. } => Some(text),
-                        ResourceContents::BlobResourceContents { blob, .. } => Some(blob),
-                    },
-                    RawContent::Image(_) | RawContent::Audio(_) | RawContent::ResourceLink(_) => None,
-                })
-                .collect::<Vec<_>>()
-                .join("\n\n");
-
-            let result = if result.is_error.unwrap_or_default() {
-                Err(content)
-            } else {
-                Ok(content)
+            let result = match decode_result(result).map_err(ToolError::MalformedOutput)? {
+                UpstreamResult::Outcome { outcome, response } => return Ok(match outcome {
+                    Outcome::Success {content} => ExecutionOutcome::Completed {id, native:Some(replace_envelope(response, &content, false)), result:Ok(content)},
+                    Outcome::NeedsInput {question} => ExecutionOutcome::NeedsInput {id, question},
+                    Outcome::Error {message, trace, transient} => {
+                        let text = if transient {
+                            json!({"message":message, "trace":trace}).to_string()
+                        } else {
+                            text_result(&response).unwrap_or_else(identity)
+                        };
+                        let native = Some(replace_envelope(response, &text, true));
+                        ExecutionOutcome::Completed {id, result:Err(text), native}
+                    }
+                }),
+                UpstreamResult::Native(result) => result,
             };
-
-            Ok(ExecutionOutcome::Completed { id, result })
+            let text = text_result(&result);
+            Ok(ExecutionOutcome::Completed { id, result: text, native: Some(result) })
         }
     }
 }
@@ -913,6 +958,7 @@ async fn execute_builtin(
 
     Ok(match outcome {
         Outcome::Success { content } => ExecutionOutcome::Completed {
+            native: None,
             id,
             result: Ok(content),
         },
@@ -927,6 +973,7 @@ async fn execute_builtin(
                 format!("{message}\n\nTrace:\n{}", trace.join("\n"))
             };
             ExecutionOutcome::Completed {
+                native: None,
                 id,
                 result: Err(error_msg),
             }
