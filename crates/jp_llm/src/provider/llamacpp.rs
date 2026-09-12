@@ -284,6 +284,21 @@ fn handle_sse_event_sync(
                 }
 
                 // Tool calls
+                if delta.tool_calls.is_some() {
+                    // A tool call terminates this message's content. Release
+                    // any extractor-held tail now, before the tool-call parts
+                    // are emitted: downstream drains the in-progress markdown
+                    // paragraph at the tool-call boundary, so a tail released
+                    // afterwards would land in a fresh paragraph and render as
+                    // a mid-word blank-line split.
+                    state.extractor.finalize();
+                    events.extend(
+                        drain_extractor(&mut state.extractor, state.is_structured)
+                            .into_iter()
+                            .map(Ok),
+                    );
+                }
+
                 if let Some(tool_calls) = &delta.tool_calls {
                     flush_reasoning_if_needed(&mut events, &mut state.reasoning_flushed);
 

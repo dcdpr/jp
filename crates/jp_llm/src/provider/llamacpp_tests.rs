@@ -4,7 +4,7 @@ use jp_conversation::ConversationEvent;
 use reqwest_eventsource::Error as SseError;
 
 use super::*;
-use crate::provider::openai_compat::StreamChunk;
+use crate::{event::EventPart, provider::openai_compat::StreamChunk};
 
 fn qwen_model() -> LlamacppModel {
     serde_json::from_value(serde_json::json!({
@@ -453,5 +453,122 @@ fn length_finish_reason_drops_pending_tool_calls() {
     assert!(
         matches!(last, Event::Finished(FinishReason::MaxTokens)),
         "expected Finished(MaxTokens), got {last:?}"
+    );
+}
+
+/// A tool-call frame must release the extractor's held-back tail before
+/// emitting any tool-call parts.
+///
+/// The `ReasoningExtractor` withholds the last bytes of content (one less than
+/// the `<think>\n` opener) in case a tag is split across frames.
+/// Downstream drains the in-progress markdown paragraph at the tool-call
+/// boundary, so if the tail were released after `ToolCallPart::Start`, it would
+/// land in a fresh paragraph and render as a mid-word blank-line split (e.g.
+/// `…directo` then a blank line then `ries.`).
+#[test]
+fn tool_call_frame_releases_extractor_tail_before_tool_call_parts() {
+    let mut state = StreamState {
+        extractor: ReasoningExtractor::default(),
+        tool_call_indices: Vec::new(),
+        reasoning_flushed: false,
+        message_flushed: false,
+        finished: false,
+        finish_reason: None,
+        is_structured: false,
+    };
+
+    // A full paragraph in one frame, ending in a word long enough that the
+    // hold-back window splits it.
+    let content =
+        "Let me first check what tools are available to me for reading files and directories.\n\n";
+    let content_chunk = serde_json::json!({
+        "choices": [{
+            "delta": { "content": content },
+            "index": 0,
+            "finish_reason": null
+        }]
+    });
+    let content_events =
+        handle_sse_event_sync(Ok(sse_message(&content_chunk.to_string())), &mut state).unwrap();
+
+    // The content frame withholds the tail while tag detection stays armed.
+    let content_emitted: String = content_events
+        .iter()
+        .filter_map(|e| match e.as_ref().ok() {
+            Some(Event::Part {
+                part: EventPart::Message(text),
+                ..
+            }) => Some(text.clone()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        !content_emitted.ends_with("directories.\n\n"),
+        "the tail should still be held back after the content frame: {content_emitted:?}"
+    );
+
+    // The tool-call frame releases the tail...
+    let tool_chunk = serde_json::json!({
+        "choices": [{
+            "delta": {
+                "tool_calls": [{
+                    "index": 0,
+                    "id": "call_1",
+                    "function": { "name": "describe_tools", "arguments": "{}" }
+                }]
+            },
+            "index": 0,
+            "finish_reason": "tool_calls"
+        }]
+    });
+    let tool_events =
+        handle_sse_event_sync(Ok(sse_message(&tool_chunk.to_string())), &mut state).unwrap();
+
+    let tail: String = tool_events
+        .iter()
+        .filter_map(|e| match e.as_ref().ok() {
+            Some(Event::Part {
+                part: EventPart::Message(text),
+                ..
+            }) => Some(text.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        format!("{content_emitted}{tail}"),
+        content,
+        "content must be preserved across the tool-call boundary"
+    );
+
+    // ...and it must precede every tool-call part in the emitted order, so the
+    // downstream paragraph drain at the tool-call boundary sees the complete
+    // paragraph.
+    let first_tool_call = tool_events
+        .iter()
+        .position(|e| {
+            matches!(
+                e.as_ref().ok(),
+                Some(Event::Part {
+                    part: EventPart::ToolCall(_),
+                    ..
+                })
+            )
+        })
+        .unwrap();
+    let last_message = tool_events
+        .iter()
+        .rposition(|e| {
+            matches!(
+                e.as_ref().ok(),
+                Some(Event::Part {
+                    part: EventPart::Message(_),
+                    ..
+                })
+            )
+        })
+        .unwrap();
+    assert!(
+        last_message < first_tool_call,
+        "the extractor tail must be emitted before the tool-call parts, got {tool_events:?}"
     );
 }

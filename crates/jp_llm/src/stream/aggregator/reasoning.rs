@@ -126,3 +126,7 @@ impl ReasoningExtractor {
         self.buffer.clear();
     }
 }
+
+#[cfg(test)]
+#[path = "reasoning_tests.rs"]
+mod tests;
