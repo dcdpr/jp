@@ -20,13 +20,26 @@ client = ["rmcp/client", "rmcp/transport-child-process", "rmcp/transport-io"]
 
 # Run JP's tools: local commands, built-ins, and the tools those MCP servers
 # declare. Implies `client`, because running an MCP tool means calling one.
-server = ["client", "dep:async-trait", "dep:camino", "dep:jp_tool", "dep:minijinja", "dep:tokio-util"]
+server = [
+    "client",
+    "dep:async-trait",
+    "dep:axum",
+    "dep:camino",
+    "dep:jp_tool",
+    "dep:minijinja",
+    "dep:reqwest_mcp",
+    "dep:tokio-util",
+    "rmcp/server",
+    "rmcp/transport-streamable-http-server",
+    "rmcp/transport-streamable-http-client-reqwest",
+]
 
 [dependencies]
 jp_config = { workspace = true }
 jp_tool = { workspace = true, optional = true }
 
 async-trait = { workspace = true, optional = true }
+axum = { workspace = true, optional = true, features = ["http1", "tokio"] }
 camino = { workspace = true, optional = true }
 indexmap = { workspace = true }
 minijinja = { workspace = true, optional = true, features = [
@@ -37,6 +50,7 @@ minijinja = { workspace = true, optional = true, features = [
     "unicode",
 ] }
 rmcp = { workspace = true }
+reqwest_mcp = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["preserve_order"] }
 sha1 = { workspace = true }

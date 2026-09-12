@@ -7,6 +7,10 @@
 /// [`Outcome::Error`]: crate::Outcome::Error
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// A recognized tool-result envelope is malformed.
+    #[error("Malformed tool output: {0}")]
+    MalformedOutput(#[source] serde_json::Error),
+
     #[error("Tool not found: {name}")]
     NotFound { name: String },
 

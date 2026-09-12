@@ -21,15 +21,15 @@ use jp_tool::{
     definition::{apply_parameter_defaults, validate_tool_arguments},
     schema::Node,
 };
-use serde_json::{Map, Value, json};
+use serde_json::{Map, Value};
 use tokio::sync::{Notify, broadcast, mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use super::{
     CommandResult, ExecutionOutcome, InvocationContext, builtin::BuiltinExecutors, execute,
-    run_tool_command,
+    run_tool_command, tool_context,
 };
-use crate::Client;
+use crate::{CallToolResult, Client, Content};
 
 /// A tool resolved under trusted MCP Host configuration.
 #[derive(Clone, Debug)]
@@ -39,7 +39,8 @@ pub struct ConfiguredTool {
     /// Execution and interaction requirements, including source selection.
     pub config: ToolConfigWithDefaults,
     /// Compiled access grants supplied by the MCP Host, never by an MCP caller.
-    pub access: Option<AccessPolicy>,
+    /// A compilation failure is delivered as a tool error without execution.
+    pub access: Result<Option<AccessPolicy>, String>,
 }
 
 /// An invocation received by the MCP handler.
@@ -99,6 +100,33 @@ pub enum Admission {
     /// Do not execute.
     /// Deliver and record this explanation.
     Skip { reason: String },
+    /// Resolve a call without execution, preserving an error response if
+    /// needed.
+    Complete { result: Result<String, String> },
+}
+
+/// The Host may answer a question or resolve the call without another attempt.
+#[derive(Debug)]
+pub enum InputAnswer {
+    /// Validated by the service before another execution attempt.
+    Answer(Value),
+    /// A declined or cancelled inquiry resolves the logical call.
+    Complete { result: Result<String, String> },
+}
+
+impl From<Value> for InputAnswer {
+    fn from(value: Value) -> Self {
+        Self::Answer(value)
+    }
+}
+
+/// The Host releases a prepared call or resolves it without execution.
+#[derive(Debug)]
+pub enum ReleaseDecision {
+    /// Begin execution with the approved arguments.
+    Execute,
+    /// Preparation failed or the Host stopped the call before execution.
+    Complete { result: Result<String, String> },
 }
 
 /// Host-only services needed by the per-call execution state machine.
@@ -129,8 +157,8 @@ pub enum Interaction {
         arguments: Map<String, Value>,
         /// Custom representation of the approved arguments, if requested.
         formatted_arguments: Option<Result<String, String>>,
-        /// Acknowledgement permitting the first execution attempt.
-        reply: oneshot::Sender<HostReply<()>>,
+        /// Permission to execute, or a final response without execution.
+        reply: oneshot::Sender<HostReply<ReleaseDecision>>,
     },
     /// Obtain and record input before the next execution attempt.
     Input {
@@ -142,7 +170,7 @@ pub enum Interaction {
         /// These may contain secrets and must not be logged.
         answers: IndexMap<String, Value>,
         /// The answer, after Host routing and recording/redaction.
-        reply: oneshot::Sender<HostReply<Value>>,
+        reply: oneshot::Sender<HostReply<InputAnswer>>,
     },
     /// Review/edit a completed result under the configured delivery policy.
     Review {
@@ -221,7 +249,7 @@ pub enum ServiceError {
 pub struct Call {
     id: InvocationId,
     cancellation: CancellationToken,
-    result: oneshot::Receiver<Result<Result<String, String>, ServiceError>>,
+    result: oneshot::Receiver<Result<CallOutput, ServiceError>>,
 }
 
 impl Call {
@@ -237,6 +265,10 @@ impl Call {
         !self.result.is_empty() || self.result.is_terminated()
     }
 
+    pub(super) fn cancellation_token(&self) -> CancellationToken {
+        self.cancellation.clone()
+    }
+
     /// Cancel this invocation, including a pending Host interaction.
     pub fn cancel(&self) {
         self.cancellation.cancel();
@@ -244,7 +276,28 @@ impl Call {
 
     /// Wait for execution and the final Host recording acknowledgement.
     pub async fn finish(self) -> Result<Result<String, String>, ServiceError> {
-        self.result.await.map_err(|_| ServiceError::TaskLost)?
+        self.result
+            .await
+            .map_err(|_| ServiceError::TaskLost)?
+            .map(|output| output.text)
+    }
+}
+
+#[derive(Debug)]
+struct CallOutput {
+    text: Result<String, String>,
+    native: Option<CallToolResult>,
+    delivery_decided: bool,
+}
+
+impl Call {
+    /// Receive the complete MCP result, retaining unedited upstream content.
+    pub async fn finish_mcp(self) -> Result<CallToolResult, ServiceError> {
+        let output = self.result.await.map_err(|_| ServiceError::TaskLost)??;
+        Ok(output.native.unwrap_or_else(|| match output.text {
+            Ok(text) => CallToolResult::success(vec![Content::text(text)]),
+            Err(text) => CallToolResult::error(vec![Content::text(text)]),
+        }))
     }
 }
 
@@ -261,7 +314,7 @@ pub struct Service {
 }
 
 struct Inner {
-    tools: HashMap<String, ConfiguredTool>,
+    tools: IndexMap<String, ConfiguredTool>,
     upstream: Client,
     builtins: BuiltinExecutors,
     root: Utf8PathBuf,
@@ -312,9 +365,9 @@ impl Service {
         root: Utf8PathBuf,
         invocation: InvocationContext,
     ) -> Result<(Self, HostReceiver), ServiceError> {
-        let mut catalog = HashMap::new();
+        let mut catalog = IndexMap::new();
         for tool in tools {
-            if tool.config.access().is_some() && tool.access.is_none() {
+            if tool.config.access().is_some() && matches!(tool.access, Ok(None)) {
                 return Err(ServiceError::MissingAccessPolicy(tool.definition.name));
             }
             let name = tool.definition.name.clone();
@@ -340,6 +393,11 @@ impl Service {
             },
             receiver,
         ))
+    }
+
+    /// Advertised definitions in their configured order.
+    pub fn definitions(&self) -> impl Iterator<Item = &ToolDefinition> {
+        self.inner.tools.values().map(|tool| &tool.definition)
     }
 
     /// Subscribe to stderr progress without slowing execution or Host replies.
@@ -400,9 +458,25 @@ impl Service {
         })
     }
 
+    /// Cancel an invocation identified through the private Host channel.
+    pub fn cancel_call(&self, id: InvocationId) {
+        if let Some(token) = self.inner.state().active.get(&id) {
+            token.cancel();
+        }
+    }
+
     /// Stop current calls without preventing admission of later work.
     pub fn cancel_current(&self) {
         for token in self.inner.state().active.values() {
+            token.cancel();
+        }
+    }
+
+    /// Stop admission and signal cancellation without waiting for cleanup.
+    pub fn stop(&self) {
+        let mut state = self.inner.state();
+        state.stopped = true;
+        for token in state.active.values() {
             token.cancel();
         }
     }
@@ -411,13 +485,7 @@ impl Service {
     /// close owned upstream services.
     /// Safe to call more than once.
     pub async fn shutdown(&self) -> Result<(), ServiceError> {
-        {
-            let mut state = self.inner.state();
-            state.stopped = true;
-            for token in state.active.values() {
-                token.cancel();
-            }
-        }
+        self.stop();
         loop {
             let idle = self.inner.idle.notified();
             tokio::pin!(idle);
@@ -434,11 +502,7 @@ impl Service {
 
 impl Drop for Service {
     fn drop(&mut self) {
-        let mut state = self.inner.state();
-        state.stopped = true;
-        for token in state.active.values() {
-            token.cancel();
-        }
+        self.stop();
     }
 }
 
@@ -501,7 +565,7 @@ async fn run_call(
     call: &CallInfo,
     tool: ConfiguredTool,
     cancellation: &CancellationToken,
-) -> Result<Result<String, String>, ServiceError> {
+) -> Result<CallOutput, ServiceError> {
     let mut arguments = call.request.arguments.clone();
     validate_arguments(&tool, &mut arguments)?;
     let wants_format = if tool.config.run() != RunMode::Skip
@@ -532,10 +596,13 @@ async fn run_call(
         })
         .await?
     };
+    let admission = match admission {
+        Admission::Skip { reason } => Admission::Complete { result: Ok(reason) },
+        other => other,
+    };
     arguments = match admission {
         Admission::Run { arguments } => arguments,
-        Admission::Skip { reason } => {
-            let result = Ok(reason);
+        Admission::Complete { result } => {
             ask(inner, call, |reply| Interaction::Record {
                 arguments,
                 raw_result: None,
@@ -543,40 +610,84 @@ async fn run_call(
                 reply,
             })
             .await?;
-            return Ok(result);
+            return Ok(CallOutput {
+                text: result,
+                native: None,
+                delivery_decided: true,
+            });
         }
+        Admission::Skip { .. } => unreachable!("skip was normalized above"),
     };
     validate_arguments(&tool, &mut arguments)?;
     if wants_format && (formatted_arguments.is_none() || arguments != original_arguments) {
         formatted_arguments = Some(format_arguments(inner, &tool, &arguments, cancellation).await?);
     }
-    ask(inner, call, |reply| Interaction::Release {
+    let release = ask(inner, call, |reply| Interaction::Release {
         arguments: arguments.clone(),
         formatted_arguments,
         reply,
     })
     .await?;
-    let raw_result = execute_with_answers(inner, call, &tool, &arguments, cancellation).await?;
-    let result = match tool.config.result() {
-        ResultMode::Skip => Ok("Result delivery skipped by configuration.".into()),
-        ResultMode::Unattended => raw_result.clone(),
-        mode @ (ResultMode::Ask | ResultMode::Edit) => {
-            ask(inner, call, |reply| Interaction::Review {
-                mode,
-                result: raw_result.clone(),
-                reply,
-            })
-            .await?
+    let (output, executed) = match release {
+        ReleaseDecision::Execute => (
+            execute_with_answers(inner, call, &tool, &arguments, cancellation).await?,
+            true,
+        ),
+        ReleaseDecision::Complete { result } => (
+            CallOutput {
+                text: result,
+                native: None,
+                delivery_decided: true,
+            },
+            false,
+        ),
+    };
+    deliver_result(inner, call, &tool, arguments, output, executed).await
+}
+
+async fn deliver_result(
+    inner: &Inner,
+    call: &CallInfo,
+    tool: &ConfiguredTool,
+    arguments: Map<String, Value>,
+    output: CallOutput,
+    executed: bool,
+) -> Result<CallOutput, ServiceError> {
+    let CallOutput {
+        text: raw_result,
+        native,
+        delivery_decided,
+    } = output;
+    let result = if delivery_decided {
+        raw_result.clone()
+    } else {
+        match tool.config.result() {
+            ResultMode::Skip => Ok("Result delivery skipped by configuration.".into()),
+            ResultMode::Unattended => raw_result.clone(),
+            mode @ (ResultMode::Ask | ResultMode::Edit) => {
+                ask(inner, call, |reply| Interaction::Review {
+                    mode,
+                    result: raw_result.clone(),
+                    reply,
+                })
+                .await?
+            }
         }
     };
+    let native =
+        native.filter(|_| result == raw_result && tool.config.result() != ResultMode::Skip);
     ask(inner, call, |reply| Interaction::Record {
         arguments,
-        raw_result: Some(raw_result),
+        raw_result: (executed && !delivery_decided).then_some(raw_result),
         result: result.clone(),
         reply,
     })
     .await?;
-    Ok(result)
+    Ok(CallOutput {
+        text: result,
+        native,
+        delivery_decided: true,
+    })
 }
 
 async fn execute_with_answers(
@@ -585,7 +696,17 @@ async fn execute_with_answers(
     tool: &ConfiguredTool,
     arguments: &Map<String, Value>,
     cancellation: &CancellationToken,
-) -> Result<Result<String, String>, ServiceError> {
+) -> Result<CallOutput, ServiceError> {
+    let access = match &tool.access {
+        Ok(access) => access.as_ref(),
+        Err(error) => {
+            return Ok(CallOutput {
+                text: Err(error.clone()),
+                native: None,
+                delivery_decided: false,
+            });
+        }
+    };
     let mut answers = IndexMap::new();
     loop {
         let progress = inner.progress.clone();
@@ -606,14 +727,20 @@ async fn execute_with_answers(
             &inner.root,
             cancellation.clone(),
             &inner.builtins,
-            tool.access.as_ref(),
+            access,
             &inner.invocation,
             Some(stderr),
         )
         .await?;
         match outcome {
             ExecutionOutcome::Cancelled { .. } => return Err(ServiceError::Cancelled),
-            ExecutionOutcome::Completed { result, .. } => return Ok(result),
+            ExecutionOutcome::Completed { result, native, .. } => {
+                return Ok(CallOutput {
+                    text: result,
+                    native,
+                    delivery_decided: false,
+                });
+            }
             ExecutionOutcome::NeedsInput { mut question, .. } => {
                 let supporting = question
                     .pre_amble
@@ -629,6 +756,16 @@ async fn execute_with_answers(
                     reply,
                 })
                 .await?;
+                let answer = match answer {
+                    InputAnswer::Answer(answer) => answer,
+                    InputAnswer::Complete { result } => {
+                        return Ok(CallOutput {
+                            text: result,
+                            native: None,
+                            delivery_decided: true,
+                        });
+                    }
+                };
                 if !Node::root(&Value::Object(request.schema)).permits(&answer) {
                     return Err(ServiceError::InvalidAnswer(request.id.to_string()));
                 }
@@ -652,10 +789,19 @@ async fn format_arguments(
         | ToolSource::Builtin { tool: name }
         | ToolSource::Mcp { tool: name, .. } => name.as_deref().unwrap_or(&tool.definition.name),
     };
-    let context = json!({
-        "tool": {"name":name, "arguments":arguments, "options":tool.config.options()},
-        "context": {"action":Action::FormatArguments, "root":inner.root, "workspace_id":inner.invocation.workspace_id, "conversation_id":inner.invocation.conversation_id, "access":tool.access},
-    });
+    let context = tool_context(
+        name,
+        &Value::Object(arguments.clone()),
+        &IndexMap::new(),
+        &tool.config,
+        &inner.root,
+        &Action::FormatArguments,
+        tool.access
+            .as_ref()
+            .map_err(|error| ServiceError::Host(HostError(error.clone())))?
+            .as_ref(),
+        &inner.invocation,
+    );
     let result = match run_tool_command(
         command.clone().command(),
         context,

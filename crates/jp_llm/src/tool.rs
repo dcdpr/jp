@@ -1,8 +1,9 @@
 //! The seam a turn loop runs one tool call through.
 //!
-//! [`Executor`] is one execution attempt: it runs the tool and reports what
-//! came back, without deciding whether the call may run or who answers a
-//! question it asks.
+//! [`Executor`] is the Host-facing view of a tool call.
+//! Preparation and approval precede execution release.
+//! An input request returns control to the Host; supplying an answer advances
+//! the same logical call.
 //! [`ExecutorSource`] builds one per tool call, so a test can supply
 //! [`MockExecutor`] where production supplies a real one.
 //!
@@ -12,6 +13,7 @@ use std::sync::Mutex;
 
 use async_trait::async_trait;
 use camino::Utf8Path;
+use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use jp_config::conversation::tool::{RunMode, ToolConfigWithDefaults, ToolSource};
 use jp_conversation::event::{InquirySource, ToolCallRequest, ToolCallResponse};
@@ -34,6 +36,29 @@ use tokio_util::sync::CancellationToken;
 /// configuration.
 #[async_trait]
 pub trait Executor: Send + Sync {
+    /// Prepare an invocation, or return a response resolved without execution.
+    async fn prepare(
+        &mut self,
+        _render_arguments: bool,
+    ) -> Result<Option<ToolCallResponse>, String> {
+        Ok(None)
+    }
+
+    /// Apply Host approval and wait until the invocation is ready for release.
+    async fn approve(&mut self) -> Result<(), String> {
+        Ok(())
+    }
+
+    /// Custom argument rendering provided by the execution service.
+    fn formatted_arguments(&self) -> Option<&Result<String, String>> {
+        None
+    }
+
+    /// Whether custom formatting is owned by the execution service.
+    fn formats_arguments(&self) -> bool {
+        false
+    }
+
     /// Returns the tool call ID.
     fn tool_id(&self) -> &str;
 
@@ -63,12 +88,13 @@ pub trait Executor: Send + Sync {
     /// request.
     fn set_arguments(&mut self, args: Value);
 
-    /// Executes the tool once with the given answers.
+    /// Advance the call to its next input request or result.
     ///
-    /// This method performs a single execution pass.
-    /// If the tool needs additional input, it returns
-    /// `ExecutorResult::NeedsInput` and the coordinator handles prompting and
-    /// retrying.
+    /// An MCP-backed executor releases prepared work or answers the pending
+    /// inquiry on its existing MCP call.
+    /// The server re-executes a tool that returned `NeedsInput`; the executor
+    /// does not submit another MCP call.
+    /// The result remains subject to Host review and recording.
     ///
     /// The executor doesn't know how questions should be answered - it just
     /// reports that input is needed.
@@ -100,6 +126,11 @@ pub trait Executor: Send + Sync {
 /// This trait enables dependency injection of executor creation, allowing tests
 /// to use mock executors without executing real shell commands.
 pub trait ExecutorSource: Send + Sync {
+    /// Release a final delivery barrier after the response has been recorded.
+    fn acknowledge(&self, _response: ToolCallResponse) -> BoxFuture<'_, Result<(), String>> {
+        Box::pin(async { Ok(()) })
+    }
+
     /// Creates an executor for the given tool call request.
     ///
     /// Returns `None` if the tool cannot be resolved (e.g. missing from the

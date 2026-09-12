@@ -72,10 +72,12 @@ indoc = { workspace = true }
 inquire = { workspace = true, features = ["crossterm"] }
 minijinja = { workspace = true }
 quick-xml = { workspace = true, features = ["serialize"] }
+rand = { workspace = true, features = ["thread_rng"] }
 rayon = { workspace = true }
 regex = { workspace = true, features = ["perf", "std", "unicode"] }
 relative-path = { workspace = true }
 reqwest = { workspace = true }
+rmcp = { workspace = true, features = ["client"] }
 schemars = { workspace = true }
 schematic = { workspace = true, features = ["schema_serde", "renderer_template", "toml"] }
 serde = { workspace = true }
@@ -125,6 +127,7 @@ insta = { workspace = true }
 pretty_assertions = { workspace = true, features = ["std"] }
 serial_test = { workspace = true }
 test-log = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true
