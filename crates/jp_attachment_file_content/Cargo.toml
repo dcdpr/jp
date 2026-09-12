@@ -14,7 +14,6 @@ version.workspace = true
 
 [dependencies]
 jp_attachment = { workspace = true }
-jp_mcp = { workspace = true }
 
 async-trait = { workspace = true }
 camino = { workspace = true }
@@ -29,7 +28,6 @@ url = { workspace = true }
 
 [dev-dependencies]
 camino-tempfile = { workspace = true }
-indexmap = { workspace = true }
 test-log = { workspace = true }
 
 [lints]

@@ -8,7 +8,6 @@ use async_trait::async_trait;
 use camino::Utf8Path;
 use dyn_clone::DynClone;
 use dyn_hash::DynHash;
-use jp_mcp::Client;
 pub use linkme::{self, distributed_slice};
 use serde::{Deserialize, Serialize};
 pub use typetag;
@@ -139,14 +138,7 @@ pub trait Handler: std::fmt::Debug + DynClone + DynHash + Send + Sync {
     ///
     /// The `cwd` parameter is the current working directory, and can be used to
     /// resolve relative paths.
-    ///
-    /// The `mcp_client` parameter is the MCP client to use for fetching
-    /// resources from MCP servers, if needed.
-    async fn get(
-        &self,
-        cwd: &Utf8Path,
-        mcp_client: Client,
-    ) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>>;
+    async fn get(&self, cwd: &Utf8Path) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>>;
 }
 
 dyn_clone::clone_trait_object!(Handler);

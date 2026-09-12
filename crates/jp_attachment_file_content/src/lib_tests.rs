@@ -1,6 +1,5 @@
 use camino_tempfile::tempdir;
 use glob::Pattern;
-use indexmap::IndexMap;
 use url::Url;
 
 use super::*;
@@ -134,8 +133,7 @@ async fn test_file_get() -> Result<(), Box<dyn Error + Send + Sync>> {
         .add(&Url::parse("file:/file.txt")?, tmp.path())
         .await?;
 
-    let client = Client::new(IndexMap::default());
-    let attachments = handler.get(tmp.path(), client).await?;
+    let attachments = handler.get(tmp.path()).await?;
     assert_eq!(attachments.len(), 1);
     assert_eq!(attachments[0].source, "file.txt");
     assert_eq!(attachments[0].as_text(), Some("content"));
@@ -156,8 +154,7 @@ async fn test_file_get_image_png() -> Result<(), Box<dyn Error + Send + Sync>> {
         .add(&Url::parse("file:/screenshot.png")?, tmp.path())
         .await?;
 
-    let client = Client::new(IndexMap::default());
-    let attachments = handler.get(tmp.path(), client).await?;
+    let attachments = handler.get(tmp.path()).await?;
     assert_eq!(attachments.len(), 1);
     assert_eq!(attachments[0].source, "screenshot.png");
     assert!(attachments[0].is_binary());
@@ -186,8 +183,7 @@ async fn test_file_get_image_jpeg() -> Result<(), Box<dyn Error + Send + Sync>> 
         .add(&Url::parse("file:/photo.jpg")?, tmp.path())
         .await?;
 
-    let client = Client::new(IndexMap::default());
-    let attachments = handler.get(tmp.path(), client).await?;
+    let attachments = handler.get(tmp.path()).await?;
     assert_eq!(attachments.len(), 1);
 
     match &attachments[0].content {
@@ -214,8 +210,7 @@ async fn test_file_get_pdf() -> Result<(), Box<dyn Error + Send + Sync>> {
         .add(&Url::parse("file:/doc.pdf")?, tmp.path())
         .await?;
 
-    let client = Client::new(IndexMap::default());
-    let attachments = handler.get(tmp.path(), client).await?;
+    let attachments = handler.get(tmp.path()).await?;
     assert_eq!(attachments.len(), 1);
     assert!(attachments[0].is_binary());
 
@@ -249,8 +244,7 @@ async fn test_file_get_mixed_text_and_binary() -> Result<(), Box<dyn Error + Sen
         .add(&Url::parse("file:/logo.webp")?, tmp.path())
         .await?;
 
-    let client = Client::new(IndexMap::default());
-    let attachments = handler.get(tmp.path(), client).await?;
+    let attachments = handler.get(tmp.path()).await?;
     assert_eq!(attachments.len(), 2);
 
     let text_count = attachments.iter().filter(|a| a.is_text()).count();
@@ -275,8 +269,7 @@ async fn test_file_get_wrong_extension_detected_by_magic_bytes()
         .add(&Url::parse("file:/not_text.txt")?, tmp.path())
         .await?;
 
-    let client = Client::new(IndexMap::default());
-    let attachments = handler.get(tmp.path(), client).await?;
+    let attachments = handler.get(tmp.path()).await?;
     assert_eq!(attachments.len(), 1);
     assert!(attachments[0].is_binary());
 

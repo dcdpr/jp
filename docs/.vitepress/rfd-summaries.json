@@ -356,7 +356,7 @@
     "summary": "Stream paragraphs incrementally while guaranteeing byte-identical output to non-streaming, with four guards managing block-start ambiguity, setext reinterpretation, inline spans, and wrap-in-progress stability."
   },
   "090-anthropic-subscription-auth-with-credential-fallback.md": {
-    "hash": "c2ee3e30697c1a3a5c6cbe3a10ab69fe27d88f2514edcd8f5ce732fc5d4c2085",
+    "hash": "56466368aacfc4026d68d1086097ecf4f95a9e6e0fb0f13d41700d3775706c5e",
     "summary": "OAuth subscription auth for Anthropic with automatic fallback chain, credential store, and scoped cooldown tracking across profiles."
   },
   "091-printer-owned-status-region.md": {
@@ -426,5 +426,17 @@
   "107-background-task-infrastructure.md": {
     "hash": "a959c85b2a886843531a94ecf66fcb13a77c60fd0317a7dd6767aab2a3a16979",
     "summary": "`jp_task` provides bounded background task primitives for concurrent work that commits to the workspace before exit."
+  },
+  "108-transitional-jp-protocol-bridge-for-mcp-tools.md": {
+    "hash": "776c8c281520a1b79bc805e2d22a6831e4eed5177d24ca72bd352d71dede050f",
+    "summary": "Bridge MCP tools into JP semantics via speculative Outcome unwrap and _meta context attachment, pending RFD 058."
+  },
+  "109-in-process-jp-mcp-server.md": {
+    "hash": "7f753e8a90b0cb174ed549fa8bfa1c2f7bcb76bf19963694533d6521563b24e3",
+    "summary": "Extract tool execution into an in-process MCP server accessible via HTTP, unifying invocation paths for JP and external clients."
+  },
+  "110-anthropic-subscription-queries-via-acp.md": {
+    "hash": "2d1e7552db739baf36a0e623f9b0b8168e2c04be8bb7659e4d3f742728b08a24",
+    "summary": "ACP subscription flow for Anthropic provider using Claude Code runtime instead of direct credential extraction."
   }
 }
