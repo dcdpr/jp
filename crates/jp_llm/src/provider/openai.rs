@@ -255,11 +255,16 @@ impl Openai {
     ///
     /// Returns `None` when there is no chain to advance or nothing further in
     /// it, which the caller surfaces as the original, now-terminal error.
+    ///
+    /// `after_redemption` reports whether this turn already spent a reset
+    /// credit on the attempt's profile, which is what the recorded cooldown
+    /// depends on.
     async fn advance(
         &self,
         attempt: &resolve::Attempt,
         error: &StreamError,
         model: &str,
+        after_redemption: bool,
     ) -> Option<resolve::Attempt> {
         resolve::advance(
             &self.config,
@@ -268,6 +273,7 @@ impl Openai {
             error,
             model,
             Utc::now(),
+            after_redemption,
         )
         .await
     }
@@ -599,9 +605,14 @@ impl Provider for Openai {
                         // subscription the user already paid for, instead of
                         // falling through to per-token billing with allowance
                         // still on the account.
+                        // One credit reopens one window, so a limit reporting
+                        // more than one spent window stays closed after the
+                        // redemption. Spending a credit there buys nothing and
+                        // the account has few to spend.
                         if subscription
                             && error.kind == StreamErrorKind::SubscriptionExhausted
                             && !redeemed
+                            && error.quota_spent_windows <= 1
                             && let Some(notice) =
                                 this.redeem_reset_credit(&attempt, &session).await
                         {
@@ -613,7 +624,9 @@ impl Provider for Openai {
                             continue;
                         }
 
-                        if let Some(mut next) = this.advance(&attempt, &error, &name).await {
+                        if let Some(mut next) =
+                            this.advance(&attempt, &error, &name, redeemed).await
+                        {
                             next.notices.splice(..0, notices);
                             attempt = next;
                         } else {

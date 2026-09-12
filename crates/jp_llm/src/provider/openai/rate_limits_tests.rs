@@ -1,6 +1,7 @@
 use reqwest::header::{HeaderName, HeaderValue};
 
 use super::*;
+use crate::StreamErrorKind;
 
 /// The header set a real `200` from the subscription endpoint carries.
 ///
@@ -128,6 +129,61 @@ fn test_apply_leaves_a_non_limit_error_alone() {
         assert_eq!(error.kind, kind);
         assert_eq!(error.quota_scope, None);
     }
+}
+
+/// A reset credit reopens one window, so the count is what tells the caller
+/// whether spending one can unblock the request at all.
+#[test]
+fn test_apply_counts_every_spent_window_of_the_family_it_records() {
+    let mut error = StreamError::rate_limit(None);
+
+    apply(
+        &mut error,
+        &headers(&[
+            ("x-codex-primary-used-percent", "100"),
+            ("x-codex-primary-window-minutes", "300"),
+            ("x-codex-primary-reset-after-seconds", "1800"),
+            ("x-codex-secondary-used-percent", "100"),
+            ("x-codex-secondary-window-minutes", "10080"),
+            ("x-codex-secondary-reset-after-seconds", "604800"),
+        ]),
+        "gpt-5.6-luna",
+    );
+
+    assert_eq!(error.kind, StreamErrorKind::SubscriptionExhausted);
+    assert_eq!(error.quota_spent_windows, 2);
+}
+
+#[test]
+fn test_apply_counts_a_single_spent_window() {
+    let mut error = StreamError::rate_limit(None);
+
+    apply(
+        &mut error,
+        &headers(&[
+            ("x-codex-primary-used-percent", "100"),
+            ("x-codex-primary-window-minutes", "10080"),
+            ("x-codex-primary-reset-after-seconds", "604800"),
+            ("x-codex-secondary-used-percent", "0"),
+            ("x-codex-secondary-window-minutes", "0"),
+            ("x-codex-secondary-reset-after-seconds", "0"),
+        ]),
+        "gpt-5.6-luna",
+    );
+
+    assert_eq!(error.kind, StreamErrorKind::SubscriptionExhausted);
+    assert_eq!(error.quota_spent_windows, 1);
+}
+
+/// Headers reporting nothing spent leave the error alone, count included.
+#[test]
+fn test_apply_counts_nothing_when_no_window_is_spent() {
+    let mut error = StreamError::rate_limit(None);
+
+    apply(&mut error, &headers(LIVE_HEADERS), "gpt-5.6-luna");
+
+    assert_eq!(error.kind, StreamErrorKind::RateLimit);
+    assert_eq!(error.quota_spent_windows, 0);
 }
 
 #[test]
