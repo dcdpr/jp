@@ -1,11 +1,10 @@
 use super::*;
 
-/// The holdback invariant the llamacpp provider relies on: with no tag
-/// present, `handle` releases everything except a tail of `tag_len - 1`
-/// bytes (in case a tag opener straddles the next chunk), and `finalize`
-/// releases the remainder. Consumers must treat the unreleased tail as
-/// still-pending: releasing it only after a tool-call boundary would split
-/// the final word across paragraphs.
+/// The holdback invariant the llamacpp provider relies on: with no tag present,
+/// `handle` releases everything except a tail of `tag_len - 1` bytes (in case a
+/// tag opener straddles the next chunk), and `finalize` releases the remainder.
+/// Consumers must treat the unreleased tail as still-pending: releasing it only
+/// after a tool-call boundary would split the final word across paragraphs.
 #[test]
 fn idle_holds_back_seven_byte_tail() {
     let mut x = ReasoningExtractor::default();
@@ -18,8 +17,8 @@ fn idle_holds_back_seven_byte_tail() {
     assert_eq!(x.reasoning, "");
 }
 
-/// A complete open/close tag pair segments the stream into the
-/// `other` / `reasoning` / `other` buckets.
+/// A complete open/close tag pair segments the stream into the `other` /
+/// `reasoning` / `other` buckets.
 #[test]
 fn complete_tags_split_buckets() {
     let mut x = ReasoningExtractor::default();
@@ -30,8 +29,8 @@ fn complete_tags_split_buckets() {
     assert_eq!(x.reasoning, "x");
 }
 
-/// The case the holdback exists for: an opener tag straddling a chunk
-/// boundary. Nothing may be emitted until the tag is resolved.
+/// The case the holdback exists for: an opener tag straddling a chunk boundary.
+/// Nothing may be emitted until the tag is resolved.
 #[test]
 fn opener_split_across_chunks() {
     let mut x = ReasoningExtractor::default();
@@ -45,8 +44,8 @@ fn opener_split_across_chunks() {
     assert_eq!(x.reasoning, "x");
 }
 
-/// A stream that ends inside an open block: `finalize` treats the
-/// remainder as reasoning (no closer present).
+/// A stream that ends inside an open block: `finalize` treats the remainder as
+/// reasoning (no closer present).
 #[test]
 fn finalize_with_unclosed_block() {
     let mut x = ReasoningExtractor::default();

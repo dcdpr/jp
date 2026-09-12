@@ -459,12 +459,12 @@ fn length_finish_reason_drops_pending_tool_calls() {
 /// A tool-call frame must release the extractor's held-back tail before
 /// emitting any tool-call parts.
 ///
-/// The `ReasoningExtractor` withholds the last bytes of content (one less
-/// than the `<think>\n` opener) in case a tag is split across frames.
+/// The `ReasoningExtractor` withholds the last bytes of content (one less than
+/// the `<think>\n` opener) in case a tag is split across frames.
 /// Downstream drains the in-progress markdown paragraph at the tool-call
-/// boundary, so if the tail were released after `ToolCallPart::Start`, it
-/// would land in a fresh paragraph and render as a mid-word blank-line split
-/// (e.g. `…directo` then a blank line then `ries.`).
+/// boundary, so if the tail were released after `ToolCallPart::Start`, it would
+/// land in a fresh paragraph and render as a mid-word blank-line split (e.g.
+/// `…directo` then a blank line then `ries.`).
 #[test]
 fn tool_call_frame_releases_extractor_tail_before_tool_call_parts() {
     let mut state = StreamState {
