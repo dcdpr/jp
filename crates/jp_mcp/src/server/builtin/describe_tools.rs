@@ -2,10 +2,10 @@
 
 use async_trait::async_trait;
 use indexmap::IndexMap;
-use jp_tool::Outcome;
+use jp_tool::{Outcome, ToolDocs};
 use serde_json::Value;
 
-use crate::tool::{BuiltinTool, ToolDocs};
+use crate::server::BuiltinTool;
 
 pub struct DescribeTools {
     docs: IndexMap<String, ToolDocs>,

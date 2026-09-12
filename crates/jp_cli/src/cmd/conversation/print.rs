@@ -5,7 +5,7 @@ use jp_config::{
     style::{reasoning::ReasoningDisplayConfig, typewriter::DelayDuration},
 };
 use jp_conversation::stream::TurnOrigin;
-use jp_llm::tool::InvocationContext;
+use jp_mcp::server::InvocationContext;
 use jp_workspace::ConversationHandle;
 
 use crate::{

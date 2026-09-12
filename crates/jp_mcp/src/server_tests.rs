@@ -3,11 +3,11 @@ use jp_config::{
     AppConfig, Config as _,
     conversation::tool::{PartialToolConfig, ToolConfig},
 };
-use jp_mcp::Client;
 use jp_tool::{Outcome, ToolDefinition, ToolDocs};
 use serde_json::Map;
 
 use super::*;
+use crate::Client;
 
 struct EchoArguments;
 
@@ -18,62 +18,6 @@ impl BuiltinTool for EchoArguments {
             content: arguments.to_string(),
         }
     }
-}
-
-#[test]
-fn test_execution_outcome_completed_success_into_response() {
-    let outcome = ExecutionOutcome::Completed {
-        id: "call_123".to_string(),
-        result: Ok("Tool output".to_string()),
-    };
-
-    let response = outcome.into_response();
-    assert_eq!(response.id, "call_123");
-    assert_eq!(response.result, Ok("Tool output".to_string()));
-}
-
-#[test]
-fn test_execution_outcome_completed_error_into_response() {
-    let outcome = ExecutionOutcome::Completed {
-        id: "call_456".to_string(),
-        result: Err("Tool failed".to_string()),
-    };
-
-    let response = outcome.into_response();
-    assert_eq!(response.id, "call_456");
-    assert_eq!(response.result, Err("Tool failed".to_string()));
-}
-
-#[test]
-fn test_execution_outcome_needs_input_into_response() {
-    let question = Question::text("q1", "What is your name?").unwrap();
-
-    let outcome = ExecutionOutcome::NeedsInput {
-        id: "call_789".to_string(),
-        question,
-    };
-
-    let response = outcome.into_response();
-    assert_eq!(response.id, "call_789");
-    assert!(response.result.is_ok());
-    assert!(
-        response
-            .result
-            .unwrap()
-            .contains("requires additional input")
-    );
-}
-
-#[test]
-fn test_execution_outcome_cancelled_into_response() {
-    let outcome = ExecutionOutcome::Cancelled {
-        id: "call_abc".to_string(),
-    };
-
-    let response = outcome.into_response();
-    assert_eq!(response.id, "call_abc");
-    assert!(response.result.is_ok());
-    assert!(response.result.unwrap().contains("cancelled"));
 }
 
 #[test]

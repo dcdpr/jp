@@ -92,7 +92,7 @@ fn create_renderer() -> (ToolRenderer, SharedBuffer, SharedBuffer) {
         ErrChannel::new(Arc::new(printer)),
         config,
         "/tmp".into(),
-        jp_llm::tool::InvocationContext::default(),
+        jp_mcp::server::InvocationContext::default(),
     );
     (renderer, err, out)
 }
@@ -117,7 +117,7 @@ fn create_renderer_with_show(show: bool) -> (ToolRenderer, SharedBuffer) {
         ErrChannel::new(Arc::new(printer)),
         config,
         "/tmp".into(),
-        jp_llm::tool::InvocationContext::default(),
+        jp_mcp::server::InvocationContext::default(),
     );
     (renderer, err)
 }
@@ -192,7 +192,7 @@ async fn test_render_custom_arguments_after_approval() {
         ErrChannel::new(Arc::new(printer)),
         config,
         root.path().to_owned(),
-        jp_llm::tool::InvocationContext::default(),
+        jp_mcp::server::InvocationContext::default(),
     );
 
     let mut args = Map::new();
@@ -409,7 +409,7 @@ fn progress_window_is_off_without_print_stderr() {
         ErrChannel::new(Arc::new(printer)),
         config,
         "/tmp".into(),
-        jp_llm::tool::InvocationContext::default(),
+        jp_mcp::server::InvocationContext::default(),
     );
 
     assert!(renderer.progress_source("cargo_test").is_none());
@@ -530,7 +530,7 @@ fn test_completing_one_pending_tool_does_not_collide_with_header() {
         ErrChannel::new(Arc::new(printer)),
         config,
         "/tmp".into(),
-        jp_llm::tool::InvocationContext::default(),
+        jp_mcp::server::InvocationContext::default(),
     );
 
     renderer.register("id1", "fs_read_file");
@@ -606,7 +606,7 @@ fn test_show_false_suppresses_preparing_output() {
         ErrChannel::new(Arc::new(Printer::sink())),
         config,
         "/tmp".into(),
-        jp_llm::tool::InvocationContext::default(),
+        jp_mcp::server::InvocationContext::default(),
     );
     renderer.register("id1", "tool_a");
 
@@ -622,7 +622,7 @@ fn test_tool_call_show_false_suppresses_output() {
         ErrChannel::new(Arc::new(Printer::sink())),
         config,
         "/tmp".into(),
-        jp_llm::tool::InvocationContext::default(),
+        jp_mcp::server::InvocationContext::default(),
     );
     let mut args = Map::new();
     args.insert("key".into(), Value::String("value".into()));
@@ -678,7 +678,7 @@ async fn test_format_custom_content_returns_raw_content() {
         &args,
         cmd,
         root.path(),
-        &jp_llm::tool::InvocationContext::default(),
+        &jp_mcp::server::InvocationContext::default(),
     )
     .await
     .unwrap();
@@ -699,7 +699,7 @@ async fn test_format_args_custom_exposes_invocation_ids() {
         "echo {{context.workspace_id}}/{{context.conversation_id}}".into(),
     )
     .command();
-    let invocation = jp_llm::tool::InvocationContext {
+    let invocation = jp_mcp::server::InvocationContext {
         workspace_id: "ws-abc".into(),
         conversation_id: "conv-xyz".into(),
     };

@@ -21,7 +21,7 @@ use jp_config::{
     style::{StyleConfig, stderr_rows::StderrRows},
 };
 use jp_conversation::event::ToolCallResponse;
-use jp_llm::{CommandResult, run_tool_command, tool::InvocationContext};
+use jp_mcp::server::{CommandResult, InvocationContext, run_tool_command};
 use jp_md::format::Formatter;
 use jp_printer::{ErrChannel, LineSink, OutputLines, RegionStyle, StatusRegion};
 use jp_term::{background::DefaultBackground, osc::hyperlink, shade::ShadedWriter};

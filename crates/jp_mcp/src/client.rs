@@ -260,6 +260,26 @@ impl Client {
             .contents)
     }
 
+    /// Close the owned upstream connections and wait for their service tasks.
+    ///
+    /// Callers must stop admitting work before shutdown.
+    /// All clones share these connections, so this also disconnects users of a
+    /// cloned client.
+    pub async fn shutdown(&self) {
+        let services = {
+            let mut services = self.services.write().await;
+            services
+                .drain()
+                .map(|(_, service)| service)
+                .collect::<Vec<_>>()
+        };
+        for service in services {
+            if let Err(error) = service.cancel().await {
+                warn!(%error, "MCP service failed during shutdown");
+            }
+        }
+    }
+
     pub async fn run_services(
         &mut self,
         server_ids: HashSet<McpServerId>,
