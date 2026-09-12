@@ -131,6 +131,7 @@ impl TerminalExecutorSource {
                     definition: definition.clone(),
                     config,
                     access,
+                    metadata: Map::new(),
                 })
             })
             .collect();

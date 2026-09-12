@@ -20,7 +20,7 @@ use reqwest::{Client as HttpClient, redirect::Policy};
 use rmcp::{
     ErrorData, ServerHandler, ServiceExt as _,
     model::{
-        CallToolRequestParams, CallToolResult, ListToolsResult, PaginatedRequestParams,
+        CallToolRequestParams, CallToolResult, ListToolsResult, Meta, PaginatedRequestParams,
         ServerCapabilities, ServerInfo, Tool,
     },
     service::{RequestContext, RoleClient, RoleServer, RunningService},
@@ -180,7 +180,7 @@ impl ServerHandler for Handler {
             .service
             .definitions()
             .map(|definition| {
-                Tool::new(
+                let mut tool = Tool::new(
                     definition.name.clone(),
                     definition
                         .docs
@@ -194,7 +194,13 @@ impl ServerHandler for Handler {
                             .cloned()
                             .unwrap_or_default(),
                     ),
-                )
+                );
+                tool.meta = self
+                    .service
+                    .tool_metadata(&definition.name)
+                    .cloned()
+                    .map(Meta);
+                tool
             })
             .collect();
         Ok(ListToolsResult {
@@ -252,3 +258,7 @@ fn protocol_error(error: ServiceError) -> ErrorData {
 #[cfg(test)]
 #[path = "http_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "conformance_tests.rs"]
+mod conformance_tests;
