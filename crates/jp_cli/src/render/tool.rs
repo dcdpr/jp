@@ -322,7 +322,18 @@ impl ToolRenderer {
         arguments: &Map<String, Value>,
         cmd: CommandConfig,
     ) -> RenderOutcome {
-        match format_args_custom(invoked_name, arguments, cmd, &self.root, &self.invocation).await {
+        let result =
+            format_args_custom(invoked_name, arguments, cmd, &self.root, &self.invocation).await;
+        self.render_custom_result(name, result)
+    }
+
+    /// Render custom arguments already formatted by the execution service.
+    pub(crate) fn render_custom_result(
+        &self,
+        name: &str,
+        result: Result<String, String>,
+    ) -> RenderOutcome {
+        match result {
             Ok(content) if !content.is_empty() => {
                 let styled_name = name.yellow().bold();
                 self.write_chrome(self.current_region.as_ref(), |w| {

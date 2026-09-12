@@ -59,7 +59,7 @@ fn fixture(run: &str, result: &str) -> (Service, HostReceiver, Arc<AtomicUsize>)
             parameters: json!({"type":"object", "properties":{"path":{"type":"string"}}, "required":["path"]}),
         },
         config: config.conversation.tools.get("count").unwrap(),
-        access: None,
+        access: Ok(None),
     };
     let (service, host) = Service::new(
         vec![tool],
@@ -83,7 +83,7 @@ async fn release(host: &mut HostReceiver) {
     let Interaction::Release { reply, .. } = next(host).await.interaction else {
         panic!("expected release")
     };
-    reply.send(Ok(())).unwrap();
+    reply.send(Ok(ReleaseDecision::Execute)).unwrap();
 }
 
 async fn next(host: &mut HostReceiver) -> HostRequest {
@@ -129,7 +129,7 @@ async fn preparation_release_input_and_delivery_use_distinct_acknowledgements() 
     };
     assert_eq!(arguments["path"], "edited");
     assert_eq!(count.load(Ordering::SeqCst), 0);
-    reply.send(Ok(())).unwrap();
+    reply.send(Ok(ReleaseDecision::Execute)).unwrap();
     let Interaction::Input {
         request,
         supporting,
@@ -145,7 +145,7 @@ async fn preparation_release_input_and_delivery_use_distinct_acknowledgements() 
     )]);
     assert!(answers.is_empty());
     assert_eq!(count.load(Ordering::SeqCst), 1);
-    reply.send(Ok(json!(true))).unwrap();
+    reply.send(Ok(json!(true).into())).unwrap();
     let Interaction::Review { result, reply, .. } = next(&mut host).await.interaction else {
         panic!("expected review")
     };
@@ -236,7 +236,7 @@ async fn shutdown_cancels_pending_release_and_rejects_late_reply() {
         .await
         .unwrap()
         .unwrap();
-    assert!(reply.send(Ok(())).is_err());
+    assert!(reply.send(Ok(ReleaseDecision::Execute)).is_err());
     assert!(matches!(call.finish().await, Err(ServiceError::Cancelled)));
     assert!(matches!(
         service.start_call(request()),
@@ -254,7 +254,7 @@ async fn invalid_answer_prevents_a_second_attempt() {
         panic!("expected input")
     };
     assert_eq!(count.load(Ordering::SeqCst), 1);
-    reply.send(Ok(json!("not a boolean"))).unwrap();
+    reply.send(Ok(json!("not a boolean").into())).unwrap();
     assert!(matches!(call.finish().await, Err(ServiceError::InvalidAnswer(id)) if id == "confirm"));
     assert_eq!(count.load(Ordering::SeqCst), 1);
 }
@@ -267,7 +267,7 @@ async fn failed_recording_prevents_result_delivery() {
     let Interaction::Input { reply, .. } = next(&mut host).await.interaction else {
         panic!("expected input")
     };
-    reply.send(Ok(json!(true))).unwrap();
+    reply.send(Ok(json!(true).into())).unwrap();
     let Interaction::Record { reply, .. } = next(&mut host).await.interaction else {
         panic!("expected recording")
     };
@@ -288,14 +288,14 @@ async fn current_call_cancellation_does_not_poison_later_calls() {
     };
     service.cancel_current();
     assert!(matches!(first.finish().await, Err(ServiceError::Cancelled)));
-    assert!(stale.send(Ok(json!(true))).is_err());
+    assert!(stale.send(Ok(json!(true).into())).is_err());
     let second = service.start_call(request()).unwrap();
     release(&mut host).await;
     let Interaction::Input { answers, reply, .. } = next(&mut host).await.interaction else {
         panic!("expected fresh input")
     };
     assert!(answers.is_empty());
-    reply.send(Ok(json!(false))).unwrap();
+    reply.send(Ok(json!(false).into())).unwrap();
     let Interaction::Record { reply, .. } = next(&mut host).await.interaction else {
         panic!("expected recording")
     };
@@ -335,7 +335,7 @@ async fn identical_calls_have_independent_answers_and_out_of_order_delivery() {
         panic!("expected second input")
     };
     assert!(answers.is_empty());
-    second_answer.send(Ok(json!(false))).unwrap();
+    second_answer.send(Ok(json!(false).into())).unwrap();
     let record = next(&mut host).await;
     assert_eq!(record.call.id, second.id());
     let Interaction::Record { reply, .. } = record.interaction else {
@@ -347,7 +347,7 @@ async fn identical_calls_have_independent_answers_and_out_of_order_delivery() {
         Ok(r#"{"arguments":{"path":"original"},"answer":false}"#.into())
     );
     assert!(!first.is_finished());
-    first_answer.send(Ok(json!(true))).unwrap();
+    first_answer.send(Ok(json!(true).into())).unwrap();
     let record = next(&mut host).await;
     assert_eq!(record.call.id, first.id());
     let Interaction::Record { reply, .. } = record.interaction else {
@@ -388,7 +388,7 @@ async fn skipped_delivery_records_original_without_delivering_it() {
     let Interaction::Input { reply, .. } = next(&mut host).await.interaction else {
         panic!("expected input")
     };
-    reply.send(Ok(json!(true))).unwrap();
+    reply.send(Ok(json!(true).into())).unwrap();
     let Interaction::Record {
         reply,
         raw_result,
@@ -436,7 +436,7 @@ async fn local_inquiry_exits_and_runs_a_new_process_with_the_answer() {
             parameters: json!({"type":"object","properties":{}}),
         },
         config: cfg.conversation.tools.get("local").unwrap(),
-        access: None,
+        access: Ok(None),
     };
     let (service, mut host) = Service::new(
         vec![tool],
@@ -461,7 +461,7 @@ async fn local_inquiry_exits_and_runs_a_new_process_with_the_answer() {
         fs::read_to_string(root.path().join("attempts")).unwrap(),
         "run\n"
     );
-    reply.send(Ok(json!(true))).unwrap();
+    reply.send(Ok(json!(true).into())).unwrap();
     let Interaction::Record { reply, .. } = next(&mut host).await.interaction else {
         panic!("expected recording")
     };
@@ -535,7 +535,7 @@ async fn dropping_result_receiver_does_not_cancel_or_reexecute() {
         panic!("expected input")
     };
     drop(call);
-    reply.send(Ok(json!(true))).unwrap();
+    reply.send(Ok(json!(true).into())).unwrap();
     let Interaction::Record { reply, .. } = next(&mut host).await.interaction else {
         panic!("expected recording")
     };
@@ -605,7 +605,7 @@ async fn formatter_asks_for_visibility_and_waits_for_approval() {
     );
     call.cancel();
     assert!(matches!(call.finish().await, Err(ServiceError::Cancelled)));
-    assert!(reply.send(Ok(())).is_err());
+    assert!(reply.send(Ok(ReleaseDecision::Execute)).is_err());
 }
 
 #[tokio::test]

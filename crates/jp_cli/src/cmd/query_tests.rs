@@ -20,11 +20,12 @@ use jp_conversation::{
     event::{ChatRequest, ChatResponse},
 };
 use jp_inquire::prompt::MockPromptBackend;
-use jp_llm::{Provider, provider::mock::MockProvider, tool::ExecutorSource};
-use jp_mcp::{
-    Startup, StderrLine,
-    server::{InvocationContext, builtin::BuiltinExecutors},
+use jp_llm::{
+    Provider,
+    provider::mock::MockProvider,
+    tool::{ExecutorSource, TestExecutorSource},
 };
+use jp_mcp::{Startup, StderrLine, server::InvocationContext};
 use jp_printer::{OutputFormat, Printer, SharedBuffer, TerminalCapability};
 use jp_storage::backend::FsStorageBackend;
 use jp_term::width::display_width;
@@ -252,12 +253,7 @@ fn config_with_model(provider: ProviderId, name: &str) -> AppConfig {
 }
 
 fn empty_executor_source() -> Box<dyn ExecutorSource> {
-    Box::new(tool::executor::TerminalExecutorSource::new(
-        BuiltinExecutors::new(),
-        &[],
-        std::sync::Arc::new(crate::access::approvals::ApprovalStore::default()),
-        InvocationContext::default(),
-    ))
+    Box::new(TestExecutorSource::new())
 }
 
 fn build_query_config(

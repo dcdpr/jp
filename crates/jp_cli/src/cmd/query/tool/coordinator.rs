@@ -545,7 +545,7 @@ impl ToolCoordinator {
     /// 4. Return [`ToolCallDecision::Approved`], `Skipped`, or `Failed`.
     pub(crate) async fn resolve_tool_call_decision(
         &mut self,
-        executor: Box<dyn Executor>,
+        mut executor: Box<dyn Executor>,
         prompter: &ToolPrompter,
         interactive: bool,
         turn_state: &mut TurnState,
@@ -558,13 +558,36 @@ impl ToolCoordinator {
         // it.
         prompter.set_background(tool_renderer.current_region());
 
+        let remembered_denial = interactive
+            && executor.permission_info().is_some_and(|info| {
+                turn_state
+                    .remembered_permission_decisions
+                    .get(&PermissionCacheKey::new(&info.tool_name))
+                    == Some(&false)
+            });
+        let render_arguments = !self.is_hidden(executor.tool_name()) && !remembered_denial;
+        match executor.prepare(render_arguments).await {
+            Ok(Some(response)) => {
+                self.set_tool_state(&response.id, ToolCallState::Completed);
+                return ToolCallDecision::Skipped(response);
+            }
+            Ok(None) => {}
+            Err(error) => {
+                self.set_tool_state(executor.tool_id(), ToolCallState::Completed);
+                return ToolCallDecision::Failed(ToolCallResponse {
+                    id: executor.tool_id().into(),
+                    result: Err(error),
+                });
+            }
+        }
+
         // Step 1: decide.
         let decision = self.decide_permission(executor, interactive, turn_state);
 
         // Step 2: handle prompt path. After this match, `executor` is
         // approved and `pre_rendered` is `Some(content)` if pre-rendering
         // already happened, `None` if a post-render is still needed.
-        let (executor, pre_rendered) = match decision {
+        let (mut executor, pre_rendered) = match decision {
             PermissionDecision::Approved(executor) => (executor, None),
             PermissionDecision::Skipped(response) => {
                 return ToolCallDecision::Skipped(response);
@@ -578,7 +601,7 @@ impl ToolCoordinator {
                 // formatters are gated on `format = "unattended"`
                 // because they shell out to a user-controlled command.
                 let pre = match self
-                    .pre_render_for_prompt(&info.tool_name, executor.arguments(), tool_renderer)
+                    .pre_render_executor_for_prompt(executor.as_ref(), tool_renderer)
                     .await
                 {
                     Ok(maybe_content) => maybe_content,
@@ -613,16 +636,20 @@ impl ToolCoordinator {
             }
         };
 
+        if let Err(error) = executor.approve().await {
+            self.set_tool_state(executor.tool_id(), ToolCallState::Completed);
+            return ToolCallDecision::Failed(ToolCallResponse {
+                id: executor.tool_id().into(),
+                result: Err(error),
+            });
+        }
+
         // Step 3: render. If pre-rendered, use that; otherwise render now.
         let rendered_arguments = if let Some(pre) = pre_rendered {
             pre
         } else {
             let tool_name = executor.tool_name().to_owned();
-            let args = executor.arguments().clone();
-            match self
-                .render_approved_tool(&tool_name, &args, tool_renderer)
-                .await
-            {
+            match self.render_executor(executor.as_ref(), tool_renderer).await {
                 RenderOutcome::Rendered { content } => content,
                 RenderOutcome::Suppressed { error } => {
                     let id = executor.tool_id().to_owned();
@@ -639,6 +666,65 @@ impl ToolCoordinator {
             executor,
             rendered_arguments,
         }
+    }
+
+    async fn pre_render_executor_for_prompt(
+        &self,
+        executor: &dyn Executor,
+        renderer: &ToolRenderer,
+    ) -> Result<Option<Option<String>>, String> {
+        if !executor.formats_arguments()
+            || !matches!(
+                self.parameter_style(executor.tool_name()),
+                ParametersStyle::Custom(_)
+            )
+        {
+            return self
+                .pre_render_for_prompt(executor.tool_name(), executor.arguments(), renderer)
+                .await;
+        }
+        if executor.formatted_arguments().is_none() {
+            return Ok(None);
+        }
+        match self.render_executor(executor, renderer).await {
+            RenderOutcome::Rendered { content } => Ok(Some(content)),
+            RenderOutcome::Suppressed { error } => Err(error),
+        }
+    }
+
+    async fn render_executor(
+        &self,
+        executor: &dyn Executor,
+        renderer: &ToolRenderer,
+    ) -> RenderOutcome {
+        let name = executor.tool_name();
+        if self.is_hidden(name) {
+            return RenderOutcome::Rendered { content: None };
+        }
+        if executor.formats_arguments()
+            && matches!(self.parameter_style(name), ParametersStyle::Custom(_))
+        {
+            return renderer.render_custom_result(
+                name,
+                executor
+                    .formatted_arguments()
+                    .cloned()
+                    .unwrap_or_else(|| Ok(String::new())),
+            );
+        }
+        self.render_approved_tool(name, executor.arguments(), renderer)
+            .await
+    }
+
+    /// Acknowledge the execution service after the conversation owner flushes.
+    pub async fn acknowledge_responses(
+        &self,
+        responses: Vec<ToolCallResponse>,
+    ) -> Result<(), String> {
+        for response in responses {
+            self.executor_source.acknowledge(response).await?;
+        }
+        Ok(())
     }
 
     pub fn question_target(&self, tool_name: &str, question_id: &str) -> Option<QuestionTarget> {

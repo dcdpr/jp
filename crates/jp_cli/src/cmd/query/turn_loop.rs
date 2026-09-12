@@ -885,7 +885,8 @@ pub(super) async fn run_turn_loop(
                             &mut tool_coordinator,
                             &mut turn_coordinator,
                             &mut conv,
-                        )?;
+                        )
+                        .await?;
                         return Err(cmd::Error::interrupted().into());
                     }
 
@@ -902,7 +903,8 @@ pub(super) async fn run_turn_loop(
                             &mut tool_coordinator,
                             &mut turn_coordinator,
                             &mut conv,
-                        )?;
+                        )
+                        .await?;
                         break;
                     }
 
@@ -919,7 +921,9 @@ pub(super) async fn run_turn_loop(
                             &mut tool_coordinator,
                             &mut turn_coordinator,
                             &mut conv,
-                        )? {
+                        )
+                        .await?
+                        {
                             tool_choice = ToolChoice::Auto;
                         }
                     }
@@ -1144,7 +1148,7 @@ async fn build_inquiry_overrides(
 ///
 /// Returns `true` if a follow-up LLM cycle is needed (i.e. tool responses were
 /// added and the coordinator wants to continue).
-fn commit_tool_responses(
+async fn commit_tool_responses(
     result: ExecutionResult,
     pre_resolved: Vec<(usize, ToolCallResponse)>,
     tool: &mut ToolCoordinator,
@@ -1163,8 +1167,12 @@ fn commit_tool_responses(
     indexed.sort_by_key(|(idx, _)| *idx);
     let responses: Vec<_> = indexed.into_iter().map(|(_, r)| r).collect();
 
+    let recorded = responses.clone();
     let action = conv.update_events(|stream| turn.handle_tool_responses(stream, responses));
     conv.flush()?;
+    tool.acknowledge_responses(recorded)
+        .await
+        .map_err(Error::McpRecording)?;
 
     Ok(matches!(action, Action::SendFollowUp))
 }

@@ -16,13 +16,14 @@ use futures::{StreamExt as _, stream};
 use indexmap::IndexMap;
 use inquire::InquireError;
 use jp_config::{
-    AppConfig, PartialAppConfig,
+    AppConfig, Config as _, PartialAppConfig,
     assistant::{
         PartialAssistantConfig,
         request::{CachePolicy, MaxResponseBytes, PartialRequestConfig},
     },
     conversation::tool::{
-        CommandConfigOrString, QuestionConfig, QuestionTarget, RunMode, ToolConfig, ToolSource,
+        CommandConfigOrString, PartialToolConfig, QuestionConfig, QuestionTarget, RunMode,
+        ToolConfig, ToolSource,
         style::{
             DisplayStyleConfig, ErrorStyleConfig, InlineResults, LinkStyle, ParametersStyle,
             TruncateLines,
@@ -54,10 +55,16 @@ use jp_llm::{
         Executor, ExecutorResult, ExecutorSource, MockExecutor, PermissionInfo, TestExecutorSource,
     },
 };
-use jp_mcp::server::{InvocationContext, builtin::BuiltinExecutors};
+use jp_mcp::{
+    Client,
+    server::{
+        InvocationContext,
+        builtin::{BuiltinExecutors, BuiltinTool},
+    },
+};
 use jp_printer::{OutputFormat, Printer, TerminalCapability};
 use jp_storage::backend::FsStorageBackend;
-use jp_tool::Question;
+use jp_tool::{Outcome, Question, ToolDocs};
 use jp_workspace::Workspace;
 use serde_json::{Map, Value, json};
 use tokio::{sync::Notify, time::timeout};
@@ -65,6 +72,7 @@ use tokio_util::sync::CancellationToken;
 
 use super::*;
 use crate::{
+    access::approvals::ApprovalStore,
     cmd::query::{
         stream::retry::MAX_CONSECUTIVE_REBUILDS,
         tool::{ToolCoordinator, executor::TerminalExecutorSource},
@@ -73,12 +81,7 @@ use crate::{
 };
 
 fn empty_executor_source() -> Box<dyn ExecutorSource> {
-    Box::new(TerminalExecutorSource::new(
-        BuiltinExecutors::new(),
-        &[],
-        std::sync::Arc::new(crate::access::approvals::ApprovalStore::default()),
-        InvocationContext::default(),
-    ))
+    Box::new(TestExecutorSource::new())
 }
 
 /// A mock provider that returns different responses on each call.
@@ -8357,4 +8360,132 @@ async fn test_refused_rebuild_persists_streamed_content() {
         content.contains("partial answer"),
         "streamed content must survive the abort.\nFile contents:\n{content}"
     );
+}
+
+struct HttpInquiryTool(Arc<AtomicUsize>);
+
+#[async_trait]
+impl BuiltinTool for HttpInquiryTool {
+    async fn execute(&self, _: &Value, answers: &IndexMap<String, Value>) -> Outcome {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        if answers.get("confirm") == Some(&json!(true)) {
+            return "confirmed".into();
+        }
+        Question::boolean("confirm", "Continue?").unwrap().into()
+    }
+}
+
+#[tokio::test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "Keep the end-to-end setup and persisted assertions in one scenario"
+)]
+async fn http_tool_cycle_persists_inquiry_and_response_before_followup() {
+    timeout(Duration::from_secs(10), async {
+        let tmp = tempdir().unwrap();
+        let root = tmp.path();
+        let mut config = AppConfig::new_test();
+        let partial: PartialToolConfig = serde_json::from_value(json!({
+            "source":"builtin", "run":"unattended", "style":{"hidden":true},
+            "questions":{"confirm":{"answer":true}}
+        }))
+        .unwrap();
+        config.conversation.tools.insert(
+            "http_tool".into(),
+            ToolConfig::from_partial(partial, vec![]).unwrap(),
+        );
+        let storage = Arc::new(FsStorageBackend::new(&root.join(".jp")).unwrap());
+        let mut workspace = Workspace::in_memory(root).with_backend(storage.clone());
+        let lock = workspace
+            .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
+            .unwrap();
+        let definitions = vec![ToolDefinition {
+            name: "http_tool".into(),
+            docs: ToolDocs::default(),
+            parameters: json!({"type":"object","properties":{}}),
+        }];
+        let count = Arc::new(AtomicUsize::new(0));
+        let client = Client::default();
+        let (source, owner) = TerminalExecutorSource::start(
+            BuiltinExecutors::new().register("http_tool", HttpInquiryTool(count.clone())),
+            &definitions,
+            &config.conversation.tools,
+            Arc::new(ApprovalStore::default()),
+            InvocationContext::default(),
+            &client,
+            root.to_owned(),
+        )
+        .await
+        .unwrap();
+        let provider = Arc::new(SequentialMockProvider::with_tool_then_message(
+            "http-call",
+            "http_tool",
+            "Finished.",
+        ));
+        let model = provider
+            .model_details(&"test-model".parse().unwrap())
+            .await
+            .unwrap();
+        let router = detached_router();
+        let (printer, output, chrome) = Printer::memory(OutputFormat::TextPretty);
+        let printer = Arc::new(printer);
+        run_turn_loop(
+            provider.clone(),
+            &model,
+            &config,
+            &router,
+            &client,
+            root,
+            false,
+            &[],
+            &lock,
+            ToolChoice::Auto,
+            &definitions,
+            printer.clone(),
+            Arc::new(MockPromptBackend::new()),
+            ToolCoordinator::new(config.conversation.tools.clone(), Box::new(source)),
+            ChatRequest::from("Run the tool."),
+            InvocationContext::default(),
+            PendingStreamTrim::default(),
+            router.turn_interrupt(lock.id()),
+        )
+        .await
+        .unwrap();
+        // Storage encodes tool content; use the production decoder before
+        // comparing domain events rather than deserializing individual records.
+        let stored =
+            serde_json::from_str(&storage.read_test_events_raw(&lock.id()).unwrap()).unwrap();
+        let events =
+            ConversationStream::from_parts(json!({}), stored, &config.clone().into()).unwrap();
+        let responses = events
+            .iter()
+            .filter_map(|event| event.event.as_tool_call_response())
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(responses, vec![ToolCallResponse {
+            id: "http-call".into(),
+            result: Ok("confirmed".into())
+        }]);
+        let answers = events
+            .iter()
+            .filter_map(|event| event.event.as_inquiry_response())
+            .filter_map(|answer| match answer {
+                InquiryResponse::Answered { answer, .. } => Some(answer.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(answers, vec![json!(true)]);
+        assert_eq!(count.load(Ordering::SeqCst), 2);
+        assert_eq!(provider.call_index.load(Ordering::SeqCst), 2);
+        printer.flush();
+        assert_eq!(output.lock().as_str(), "Finished.\n\n");
+        assert_eq!(
+            chrome.lock().as_str(),
+            "\n── \x1b[1mjp\x1b[0m \x1b[2m(anthropic/test)\x1b[0m \
+             ─────────────────────────────────────────────────────────\n\n"
+        );
+        owner.shutdown().await.unwrap();
+    })
+    .await
+    .unwrap();
 }
