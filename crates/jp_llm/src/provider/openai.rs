@@ -29,6 +29,7 @@ use openai_responses::{
 use reqwest::header::{self, HeaderMap, HeaderName, HeaderValue};
 use serde::Deserialize;
 use serde_json::{Map, Value};
+use tokio::time::{Instant, sleep};
 use tracing::{debug, trace, warn};
 
 use super::{EventStream, ModelDetails, Provider};
@@ -61,6 +62,10 @@ mod fold_tests;
 #[cfg(test)]
 #[path = "openai/latency_tests.rs"]
 mod latency_tests;
+
+#[cfg(test)]
+#[path = "openai/redeem_tests.rs"]
+mod redeem_tests;
 
 #[cfg(test)]
 #[path = "openai/switchable_tests.rs"]
@@ -104,6 +109,25 @@ const PERSISTED_REASONING: &str = "persisted_reasoning";
 /// when the flag is present.
 const EXPLICIT_PROMPT_CACHING: &str = "explicit_prompt_caching";
 
+/// How long to keep retrying after a redeemed usage reset before giving up on
+/// it.
+///
+/// A redemption the account confirmed does not reach the responses host
+/// instantly, so the request that prompted it is refused again for a short
+/// while afterwards.
+/// The credit is already spent by then, and the turn is unfinished: waiting it
+/// out is what the user paid for, where abandoning the turn wastes both.
+///
+/// Bounded because the alternative explanation — a window the credit does not
+/// cover — looks identical from here, and that one never resolves.
+const RESET_PROPAGATION_BUDGET: Duration = Duration::from_mins(1);
+
+/// How long to wait between attempts while a redeemed reset propagates.
+///
+/// Fixed rather than backed off: the wait is already short, and every attempt
+/// is an admission-stage rejection that bills nothing.
+const RESET_RETRY_INTERVAL: Duration = Duration::from_secs(5);
+
 /// How often to inject a synthetic keep-alive while a tool call is streaming.
 ///
 /// OpenAI emits the `function_call_arguments` deltas for a large tool call as a
@@ -135,6 +159,15 @@ pub struct Openai {
 
     /// Where subscription requests go, after the environment override.
     codex_base_url: String,
+
+    /// How long a redeemed usage reset is given to reach the responses host.
+    ///
+    /// A field rather than a constant so a test can shrink the wait it is
+    /// pinning; production always takes [`RESET_PROPAGATION_BUDGET`].
+    reset_budget: Duration,
+
+    /// How long to wait between attempts while that reset propagates.
+    reset_interval: Duration,
 
     /// The clients built for the most recently resolved credential and session.
     ///
@@ -181,6 +214,8 @@ impl Openai {
             fixed_credential: None,
             base_url: env_override(&config.base_url_env, &config.base_url),
             codex_base_url: env_override(&config.codex_base_url_env, &config.codex_base_url),
+            reset_budget: RESET_PROPAGATION_BUDGET,
+            reset_interval: RESET_RETRY_INTERVAL,
             client_cache: Arc::new(Mutex::new(None)),
         };
 
@@ -202,8 +237,19 @@ impl Openai {
             fixed_credential: Some((credential, resolve::Attribution::default())),
             base_url: config.base_url.clone(),
             codex_base_url: config.codex_base_url.clone(),
+            reset_budget: RESET_PROPAGATION_BUDGET,
+            reset_interval: RESET_RETRY_INTERVAL,
             client_cache: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Shorten the wait for a redeemed reset, so a test pinning it runs in
+    /// milliseconds rather than the minute production allows.
+    #[cfg(test)]
+    pub(crate) fn with_reset_timing(mut self, budget: Duration, interval: Duration) -> Self {
+        self.reset_budget = budget;
+        self.reset_interval = interval;
+        self
     }
 
     /// Build a provider around an explicit subscription credential.
@@ -245,11 +291,16 @@ impl Openai {
     ///
     /// Returns `None` when there is no chain to advance or nothing further in
     /// it, which the caller surfaces as the original, now-terminal error.
+    ///
+    /// `after_redemption` reports whether this turn already spent a reset
+    /// credit on the attempt's profile, which is what the recorded cooldown
+    /// depends on.
     async fn advance(
         &self,
         attempt: &resolve::Attempt,
         error: &StreamError,
         model: &str,
+        after_redemption: bool,
     ) -> Option<resolve::Attempt> {
         let spent = attempt.selected.as_ref()?;
 
@@ -260,6 +311,7 @@ impl Openai {
             error,
             model,
             Utc::now(),
+            after_redemption,
         )
         .await
     }
@@ -512,7 +564,10 @@ impl Provider for Openai {
             // One redemption per turn. A plan holds few credits, and a window
             // that closes again right after being reopened is not a window a
             // second credit would fix.
-            let mut redeemed = false;
+            //
+            // The deadline is how long the reopened window is given to reach
+            // the responses host before the turn stops waiting on it.
+            let mut reopened_until: Option<Instant> = None;
 
             // A credential refused or spent at admission is not a failure of
             // the request: the next entry in the chain can serve it. Each pass
@@ -577,13 +632,18 @@ impl Provider for Openai {
                         // subscription the user already paid for, instead of
                         // falling through to per-token billing with allowance
                         // still on the account.
+                        // One credit reopens one window, so a limit reporting
+                        // more than one spent window stays closed after the
+                        // redemption. Spending a credit there buys nothing and
+                        // the account has few to spend.
                         if subscription
                             && error.kind == StreamErrorKind::SubscriptionExhausted
-                            && !redeemed
+                            && reopened_until.is_none()
+                            && error.quota_spent_windows <= 1
                             && let Some(notice) =
                                 this.redeem_reset_credit(&attempt, &session).await
                         {
-                            redeemed = true;
+                            reopened_until = Some(Instant::now() + this.reset_budget);
                             for notice in notices {
                                 yield Ok(Event::Notice(notice));
                             }
@@ -591,7 +651,26 @@ impl Provider for Openai {
                             continue;
                         }
 
-                        if let Some(mut next) = this.advance(&attempt, &error, &name).await {
+                        // The window this turn reopened has not reached the
+                        // host yet. The turn is unfinished and the credit is
+                        // already spent, so it waits rather than falling
+                        // through to per-token billing or abandoning the turn
+                        // outright.
+                        if subscription
+                            && error.kind == StreamErrorKind::SubscriptionExhausted
+                            && reopened_until.is_some_and(|until| Instant::now() < until)
+                        {
+                            for notice in notices {
+                                yield Ok(Event::Notice(notice));
+                            }
+                            sleep(this.reset_interval).await;
+                            continue;
+                        }
+
+                        if let Some(mut next) = this
+                            .advance(&attempt, &error, &name, reopened_until.is_some())
+                            .await
+                        {
                             next.notices.splice(..0, notices);
                             attempt = next;
                         } else {

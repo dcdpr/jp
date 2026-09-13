@@ -288,8 +288,9 @@ pub(super) async fn advance(
     error: &StreamError,
     model: &str,
     now: DateTime<Utc>,
+    after_redemption: bool,
 ) -> Option<Attempt> {
-    record_outcome(store, spent, error, now);
+    record_outcome(store, spent, error, now, after_redemption);
 
     // Re-resolution reads the state just recorded against the same instant, so
     // a cooldown that starts now is already in effect for this walk.
@@ -403,11 +404,16 @@ fn holds_refresh_token(credential: &StoredCredential, token: &str) -> bool {
 /// A cooldown takes a profile out of use for up to seven days and a re-login
 /// marker until the user acts, and a failure that says nothing about the
 /// credential earns neither.
+///
+/// `after_redemption` says whether a reset credit was spent on this profile
+/// earlier in the same turn, which changes how far the reported reset timing
+/// can be trusted.
 fn record_outcome(
     store: Option<&CredentialStore>,
     spent: &AuthEntry,
     error: &StreamError,
     now: DateTime<Utc>,
+    after_redemption: bool,
 ) {
     // Only a stored profile has state to record against.
     let AuthEntry::Subscription(Some(profile)) = spent else {
@@ -424,7 +430,20 @@ fn record_outcome(
         }
         StreamErrorKind::SubscriptionExhausted | StreamErrorKind::InsufficientQuota => {
             let scope = error.quota_scope.as_deref().unwrap_or(SCOPE_ACCOUNT);
-            let until = cooldown_until(error.quota_reset, now);
+
+            // A reset credit spent this turn reopened one of the limit's
+            // windows, so these headers describe a usage state JP itself just
+            // changed, and the window they report may not be the one the credit
+            // reopened. Taking their reset timing at face value can retire a
+            // profile for a week over a long window the user is not actually
+            // blocked on. The short default applies instead: it expires on its
+            // own, and the next request asks the provider rather than a guess.
+            let reported = if after_redemption {
+                None
+            } else {
+                error.quota_reset
+            };
+            let until = cooldown_until(reported, now);
             debug!(profile, scope, %until, "Recording quota cooldown.");
             store.record_cooldown(CATEGORY_LLM, PROVIDER_OPENAI, profile, scope, until)
         }
