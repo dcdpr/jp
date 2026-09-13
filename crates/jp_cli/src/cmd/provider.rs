@@ -673,9 +673,6 @@ fn configured_api_keys(printer: &Printer) -> Vec<(String, String, String)> {
 /// Reads the user-global config and the `.jp.toml` chain, but not a workspace's
 /// own config: the command runs before workspace discovery, since credentials
 /// are user-global.
-///
-/// Reads the partial rather than a built [`AppConfig`], so a validation error
-/// anywhere else in the config does not erase every row.
 fn read_api_keys() -> Result<Vec<(String, String, String)>, crate::Error> {
     let cwd = env::current_dir().map_err(|error| {
         crate::Error::CliConfig(format!("cannot read the current directory: {error}"))
