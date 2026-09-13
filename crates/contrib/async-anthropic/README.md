@@ -1,9 +1,16 @@
 > [!NOTE]
-> Originally the client was forked from [`anthropic-sdk`](https://github.com/Mixpeal/anthropic-sdk) which no longer seems to be maintained. There might still be some references, even though the code has been rewritten from scratch.
+> Originally the client was forked from [`anthropic-sdk`] which no longer seems
+> to be maintained.
+> There might still be some references, even though the code has been rewritten
+> from scratch.
 
 ## async-anthropic
 
-A client for the anthropic messages api, written in Rust. There are plenty of clients on crates.io, but we figured we needed another one. Specifically, a straightforward builder api, robust error handling, and room to grow. Tests are also nice.
+A client for the anthropic messages api, written in Rust.
+There are plenty of clients on crates.io, but we figured we needed another one.
+Specifically, a straightforward builder api, robust error handling, and room to
+grow.
+Tests are also nice.
 
 ### Features
 
@@ -11,7 +18,7 @@ A client for the anthropic messages api, written in Rust. There are plenty of cl
 - [x] Models API
 - [x] Tool use
 - [x] Support all API parameters
-- [x] Automatic [backoff](https://crates.io/crates/backoff)
+- [x] Automatic [backoff]
 - [x] Tracing
 - [x] Streaming
 - [ ] Non-text messages
@@ -52,4 +59,10 @@ See `/examples` for more examples.
 
 ### Contributing
 
-Contributions are welcome! This project was quickly drafted together to add anthropic support to other bosun projects, and several features are missing. If you'd like to contribute, please open an issue or a pull request.
+Contributions are welcome!
+This project was quickly drafted together to add anthropic support to other
+bosun projects, and several features are missing.
+If you'd like to contribute, please open an issue or a pull request.
+
+[`anthropic-sdk`]: https://github.com/Mixpeal/anthropic-sdk
+[backoff]: https://crates.io/crates/backoff
