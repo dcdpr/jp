@@ -71,6 +71,12 @@ enum OutputFormat<'a> {
 struct Settings {
     disable_all_hooks: bool,
     auto_memory_enabled: bool,
+    permissions: Permissions,
+}
+
+#[derive(Serialize)]
+struct Permissions {
+    ask: [&'static str; 1],
 }
 
 pub(super) fn metadata(
@@ -102,6 +108,11 @@ pub(super) fn metadata(
                 settings: Settings {
                     disable_all_hooks: true,
                     auto_memory_enabled: false,
+                    // Even unattended JP tools need the adapter callback for
+                    // correlation; the JP MCP Host decides whether to prompt.
+                    permissions: Permissions {
+                        ask: ["mcp__jp__*"],
+                    },
                 },
                 persist_session: !prepared.history.is_empty(),
                 env,

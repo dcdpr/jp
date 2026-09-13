@@ -31,7 +31,7 @@ ACP compatibility checks require `claude-agent-acp` 0.76.0 with Claude Code
 2.1.257 and an active Pro or Max login:
 
 ```sh
-npm install --global @agentclientprotocol/claude-agent-acp@0.76.0
+npm install --global --include=optional @agentclientprotocol/claude-agent-acp@0.76.0
 claude-agent-acp --cli auth login --claudeai
 ```
 
@@ -59,7 +59,16 @@ preparation rejects working directories whose encoded names exceed 200 bytes.
 Temperature, top-p, top-k, service tiers other than `off`, and custom model
 parameters have no ACP mapping and are rejected when set.
 Compatibility failures do not switch to `direct` or to paid API access.
-Workflow parity and live release qualification remain RFD 110 follow-up phases.
+If Claude Code substitutes a `<persisted-output>` file reference for a tool
+result, JP reports the loss instead of accepting it silently.
+There is no automatic file read-back or reconstruction for that case in v0.1;
+request a smaller tool result.
+The size hints preserve the measured large-result case, not arbitrarily large
+results or batches.
+
+The reconstructed-history path has tests for provider switching, selected-turn
+forks, replay, compaction, and changed instructions, schemas, and tool results.
+Live runtime and cache qualification remain follow-up work.
 
 Existing direct subscription users must opt in explicitly:
 

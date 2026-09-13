@@ -118,6 +118,46 @@ fn sdk_tool_observation_is_not_an_execution_request() {
 }
 
 #[test]
+fn synthetic_error_reports_the_reason_not_a_model_mismatch() {
+    let mut state = state();
+    let error = state.sdk(notification(json!({"type":"assistant","error":"rate_limit","message":{"model":"<synthetic>","content":[{"type":"text","text":"Subscription allowance exhausted."}]}}))).unwrap_err();
+    assert_eq!(
+        error.message(),
+        "Claude Code rate_limit: Subscription allowance exhausted."
+    );
+}
+
+#[test]
+fn sdk_failure_preserves_the_reported_details() {
+    let mut state = state();
+    let error = state.sdk(notification(json!({"type":"result","subtype":"error_during_execution","is_error":true,"errors":["Adapter disconnected."]}))).unwrap_err();
+    assert_eq!(
+        error.message(),
+        "Claude Code request failed (error_during_execution): Adapter disconnected."
+    );
+}
+
+#[test]
+fn token_limit_is_not_reported_as_completion() {
+    let mut state = state();
+    state.sdk(notification(json!({"type":"result","subtype":"success","is_error":false,"stop_reason":"max_tokens"}))).unwrap();
+    assert_eq!(state.final_events.take().unwrap(), vec![Event::Finished(
+        FinishReason::MaxTokens
+    )]);
+}
+
+#[test]
+fn persisted_tool_output_is_reported_instead_of_silently_accepted() {
+    let mut state = state();
+    let error = state.sdk(notification(json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tool-fixed","content":"<persisted-output>\nOutput too large. Full output saved to: /tmp/result.txt\n</persisted-output>"}]}}))).unwrap_err();
+    assert_eq!(
+        error.message(),
+        "Claude Code replaced tool result tool-fixed with a file reference; the ACP flow cannot \
+         preserve this result inline"
+    );
+}
+
+#[test]
 fn successful_subtype_does_not_hide_refusal() {
     let mut state = state();
     state.sdk(notification(json!({"type":"result","subtype":"success","is_error":true,"stop_reason":"refusal","refusal":{"category":"test","explanation":"Refused fixture"}}))).unwrap();

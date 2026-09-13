@@ -42,6 +42,16 @@ fn notification(message: Value) -> SdkNotification {
     }
 }
 
+#[test]
+fn jp_tool_permissions_always_return_to_the_host() {
+    let prepared = prepared();
+    let metadata = options::metadata(&prepared, &BTreeMap::new()).unwrap();
+    assert_eq!(
+        metadata["claudeCode"]["options"]["settings"]["permissions"],
+        json!({"ask":["mcp__jp__*"]})
+    );
+}
+
 #[tokio::test]
 async fn real_protocol_driver_loads_history_and_emits_only_live_output() {
     let agent = Agent.builder()

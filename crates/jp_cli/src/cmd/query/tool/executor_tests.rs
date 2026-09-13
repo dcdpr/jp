@@ -249,6 +249,85 @@ async fn external_http_call_is_attached_not_resubmitted() {
 }
 
 #[tokio::test]
+async fn external_call_cancellation_does_not_rerun_an_inquiry() {
+    let (source, owner, unused, count) = fixture("unattended").await;
+    drop(unused);
+    source
+        .set_execution(ToolExecution::Agent {
+            correlation_key: "test/toolId",
+        })
+        .unwrap();
+    let client = owner.endpoint.as_ref().unwrap().connect().await.unwrap();
+    let partial: PartialToolConfig =
+        serde_json::from_value(json!({"source":"builtin","run":"ask","result":"unattended"}))
+            .unwrap();
+    let mut tools = AppConfig::new_test().conversation.tools;
+    tools.insert(
+        "example".into(),
+        ToolConfig::from_partial(partial, vec![]).unwrap(),
+    );
+    let mut executor = source
+        .create(
+            ToolCallRequest {
+                id: "cancel-call".into(),
+                name: "example".into(),
+                arguments: Map::new(),
+            },
+            tools.get("example").unwrap(),
+        )
+        .unwrap();
+    let peer = client.peer().clone();
+    let mut params = CallToolRequestParams::new("example");
+    params.meta = Some(Meta(Map::from_iter([(
+        "test/toolId".into(),
+        "cancel-call".into(),
+    )])));
+    let call = tokio::spawn(async move { peer.call_tool(params).await });
+    timeout(Duration::from_secs(2), executor.prepare(false))
+        .await
+        .unwrap()
+        .unwrap();
+    executor.approve().await.unwrap();
+    let result = executor
+        .execute(
+            &IndexMap::new(),
+            &Client::default(),
+            "/tmp".into(),
+            CancellationToken::new(),
+            None,
+        )
+        .await;
+    assert!(matches!(result, ExecutorResult::NeedsInput { .. }));
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+    let cancellation = CancellationToken::new();
+    cancellation.cancel();
+    let result = executor
+        .execute(
+            &IndexMap::from_iter([("confirm".into(), json!(true))]),
+            &Client::default(),
+            "/tmp".into(),
+            cancellation,
+            None,
+        )
+        .await;
+    let ExecutorResult::Completed(response) = result else {
+        panic!("expected cancellation response")
+    };
+    assert_eq!(response.result, Err("Tool execution cancelled.".into()));
+    source.acknowledge(response).await.unwrap();
+    assert!(
+        timeout(Duration::from_secs(2), call)
+            .await
+            .unwrap()
+            .unwrap()
+            .is_err()
+    );
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+    client.cancel().await.unwrap();
+    owner.shutdown().await.unwrap();
+}
+
+#[tokio::test]
 async fn denied_http_call_never_reaches_execution() {
     let (source, owner, mut executor, count) = fixture("unattended").await;
     executor.prepare(false).await.unwrap();

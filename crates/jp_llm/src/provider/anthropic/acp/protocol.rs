@@ -77,11 +77,15 @@ pub(super) enum SdkMessage {
     Assistant {
         message: CreateMessagesResponse,
         #[serde(default)]
+        error: Option<String>,
+        #[serde(default)]
         parent_tool_use_id: Option<String>,
     },
     Result {
         subtype: String,
         is_error: bool,
+        #[serde(default)]
+        errors: Vec<String>,
         #[serde(default)]
         structured_output: Option<Value>,
         #[serde(default)]
@@ -110,9 +114,40 @@ enum UserContent {
 enum UserBlock {
     ToolResult {
         tool_use_id: String,
+        #[serde(default)]
+        content: Option<ResultContent>,
     },
     #[serde(other)]
     Other,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+enum ResultContent {
+    Text(String),
+    Blocks(Vec<ResultBlock>),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum ResultBlock {
+    Text {
+        text: String,
+    },
+    #[serde(other)]
+    Other,
+}
+
+impl ResultContent {
+    fn is_file_reference(&self) -> bool {
+        let persisted = |text: &str| text.trim_start().starts_with("<persisted-output>");
+        match self {
+            Self::Text(text) => persisted(text),
+            Self::Blocks(blocks) => blocks
+                .iter()
+                .any(|block| matches!(block, ResultBlock::Text { text } if persisted(text))),
+        }
+    }
 }
 
 /// One request's translation state.
@@ -262,6 +297,10 @@ impl State {
         }
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "Keep SDK message variants and their state updates in one dispatch point"
+    )]
     pub(super) fn sdk(&mut self, notification: SdkNotification) -> Result<Vec<Event>, StreamError> {
         if !self.live || self.session.as_ref() != Some(&notification.session_id) {
             return Ok(vec![]);
@@ -285,7 +324,20 @@ impl State {
             SdkMessage::User { message } => {
                 if let UserContent::Blocks(blocks) = message.content {
                     for block in blocks {
-                        if let UserBlock::ToolResult { tool_use_id } = block {
+                        if let UserBlock::ToolResult {
+                            tool_use_id,
+                            content,
+                        } = block
+                        {
+                            if content
+                                .as_ref()
+                                .is_some_and(ResultContent::is_file_reference)
+                            {
+                                return Err(StreamError::other(format!(
+                                    "Claude Code replaced tool result {tool_use_id} with a file \
+                                     reference; the ACP flow cannot preserve this result inline"
+                                )));
+                            }
                             self.pending_tools.remove(&tool_use_id);
                         }
                     }
@@ -294,8 +346,21 @@ impl State {
             }
             SdkMessage::Assistant {
                 message,
+                error,
                 parent_tool_use_id: None,
             } => {
+                if let Some(error) = error {
+                    let detail = message
+                        .content
+                        .iter()
+                        .filter_map(|block| match block {
+                            MessageContent::Text(text) => Some(text.text.as_str()),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    return Err(StreamError::other(format!("Claude Code {error}: {detail}")));
+                }
                 if message.model.as_deref() != Some(&self.model) {
                     return Err(StreamError::other(
                         "Claude Code answered with a different or unreported model",
@@ -310,15 +375,11 @@ impl State {
             SdkMessage::Result {
                 subtype,
                 is_error,
+                errors,
                 structured_output,
                 stop_reason,
                 refusal,
             } => {
-                if !self.inventory_checked {
-                    return Err(StreamError::other(
-                        "Claude Code did not report its tool inventory",
-                    ));
-                }
                 let mut events = vec![];
                 let finish = if stop_reason.as_deref() == Some("refusal") {
                     FinishReason::Refused {
@@ -333,11 +394,21 @@ impl State {
                             .and_then(Value::as_str)
                             .map(str::to_owned),
                     }
+                } else if stop_reason.as_deref() == Some("max_tokens") {
+                    FinishReason::MaxTokens
                 } else if is_error || subtype != "success" {
-                    return Err(StreamError::other(format!(
-                        "Claude Code request failed: {subtype}"
-                    )));
+                    let detail = errors.join("\n");
+                    return Err(StreamError::other(if detail.is_empty() {
+                        format!("Claude Code request failed: {subtype}")
+                    } else {
+                        format!("Claude Code request failed ({subtype}): {detail}")
+                    }));
                 } else {
+                    if !self.inventory_checked {
+                        return Err(StreamError::other(
+                            "Claude Code did not report its tool inventory",
+                        ));
+                    }
                     if self.structured {
                         let data = structured_output.ok_or_else(|| {
                             StreamError::other("Claude Code returned no structured result")

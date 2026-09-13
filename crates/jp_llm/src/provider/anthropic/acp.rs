@@ -323,5 +323,9 @@ async fn read_output(command: &mut Command, check: Check) -> Result<Vec<u8>, Err
 }
 
 #[cfg(test)]
+#[path = "acp/workflow_tests.rs"]
+mod workflow_tests;
+
+#[cfg(test)]
 #[path = "acp_tests.rs"]
 mod tests;

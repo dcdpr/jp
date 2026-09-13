@@ -18,7 +18,12 @@ expression: request.meta
       "settingSources": [],
       "settings": {
         "disableAllHooks": true,
-        "autoMemoryEnabled": false
+        "autoMemoryEnabled": false,
+        "permissions": {
+          "ask": [
+            "mcp__jp__*"
+          ]
+        }
       },
       "persistSession": true,
       "env": {

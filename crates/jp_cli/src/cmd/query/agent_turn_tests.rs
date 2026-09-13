@@ -105,12 +105,25 @@ impl Provider for AgentProvider {
             yield Ok(Event::Finished(FinishReason::Completed));
             let result = call.await.unwrap().unwrap();
             assert_eq!(to_legacy(&from_mcp(result).unwrap()), Ok("confirmed".into()));
+            let mut second = CallToolRequestParams::new("http_tool");
+            second.meta = Some(Meta(Map::from_iter([("test/agentId".into(), "agent-call-2".into())])));
+            let peer = client.peer().clone();
+            let call = tokio::spawn(async move { peer.call_tool(second).await });
+            yield Ok(Event::Part { index: 1, part: EventPart::ToolCall(ToolCallPart::Start { id: "agent-call-2".into(), name: "http_tool".into() }), metadata: Map::new() });
+            yield Ok(Event::Part { index: 1, part: EventPart::ToolCall(ToolCallPart::ArgumentChunk("{}".into())), metadata: Map::new() });
+            yield Ok(Event::flush(1));
+            yield Ok(Event::Finished(FinishReason::Completed));
+            let result = call.await.unwrap().unwrap();
+            assert_eq!(to_legacy(&from_mcp(result).unwrap()), Ok("confirmed".into()));
             let stored = serde_json::from_str(&storage.read_test_events_raw(&id).unwrap()).unwrap();
             let events = ConversationStream::from_parts(json!({}), stored, &config.into()).unwrap();
             let responses = events.iter().filter_map(|event| event.event.as_tool_call_response()).cloned().collect::<Vec<_>>();
-            assert_eq!(responses, vec![ToolCallResponse { id: "agent-call".into(), result: Ok("confirmed".into()) }]);
-            yield Ok(Event::Part { index: 1, part: EventPart::Message("Finished.".into()), metadata: Map::new() });
-            yield Ok(Event::flush(1));
+            assert_eq!(responses, vec![
+                ToolCallResponse { id: "agent-call".into(), result: Ok("confirmed".into()) },
+                ToolCallResponse { id: "agent-call-2".into(), result: Ok("confirmed".into()) },
+            ]);
+            yield Ok(Event::Part { index: 2, part: EventPart::Message("Finished.".into()), metadata: Map::new() });
+            yield Ok(Event::flush(2));
             client.cancel().await.unwrap();
             yield Ok(Event::Finished(FinishReason::Completed));
         };
@@ -148,8 +161,8 @@ async fn agent_continuation_waits_for_host_recording_without_resubmission() {
         let printer = Arc::new(printer);
         run_turn_loop(provider.clone(), &model, &config, &router, &client, root, false, &[], &lock, ToolChoice::Auto, &definitions, printer.clone(), Arc::new(MockPromptBackend::new()), ToolCoordinator::new(config.conversation.tools.clone(), Box::new(source)), ChatRequest::from("Run the tool."), InvocationContext::default(), PendingStreamTrim::default(), router.turn_interrupt(lock.id())).await.unwrap();
         let answers = lock.events().iter().filter_map(|event| event.event.as_inquiry_response()).filter_map(|answer| match answer { InquiryResponse::Answered { answer, .. } => Some(answer.clone()), _ => None }).collect::<Vec<_>>();
-        assert_eq!(answers, vec![json!(true)]);
-        assert_eq!(count.load(Ordering::SeqCst), 2);
+        assert_eq!(answers, vec![json!(true), json!(true)]);
+        assert_eq!(count.load(Ordering::SeqCst), 4);
         assert_eq!(provider.starts.load(Ordering::SeqCst), 1);
         printer.flush();
         assert_eq!(output.lock().as_str(), "Finished.\n\n");
