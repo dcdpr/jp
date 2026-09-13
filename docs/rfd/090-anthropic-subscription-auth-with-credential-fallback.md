@@ -132,12 +132,12 @@ allowance.
 The notice is chrome on stderr per [RFD 048]; under `--format json` it renders
 as NDJSON on stderr like all chrome.
 
-The auth commands are provider-owned UX: they migrate with the provider into
-its command plugin (as `jp anthropic login`, `list`, `logout`) once the
+The auth commands are provider-owned UX: they migrate with the provider into its
+command plugin (as `jp anthropic login`, `list`, `logout`) once the
 command-plugin protocol supports running without a workspace and prompting for
 input.
-Until then they live in `jp_cli`; their behavior is the contract, their
-location is not.
+Until then they live in `jp_cli`; their behavior is the contract, their location
+is not.
 
 ### Credential store
 
@@ -204,14 +204,13 @@ crash mid-refresh cannot lose a rotated refresh token.
 The lock-mutate-persist cycle lives in the `jp_credentials` crate:
 `CredentialStore` owns the semantics every backend shares — the document
 encoding, the schema-version check, and the mutation cycle — while storage
-backends implement the `keyring-core` store interface, holding the document as
-a single entry.
+backends implement the `keyring-core` store interface, holding the document as a
+single entry.
 A file-based store is the baseline backend, and the macOS keyring (Phase 4)
 swaps in behind the same interface.
-A file-based backend must replace its file atomically (temp file and rename)
-and create it with `0600` permissions; if `keyring-core`'s bundled file store
-does not provide both, JP's file persistence implements the store interface
-itself.
+A file-based backend must replace its file atomically (temp file and rename) and
+create it with `0600` permissions; if `keyring-core`'s bundled file store does
+not provide both, JP's file persistence implements the store interface itself.
 The mutation lock is a `ResourceLocker` (`jp_storage`), the same file-based
 locking primitive conversation locks are built on, and stays file-based for
 every store backend, since keyring stores provide no locking.
@@ -241,9 +240,9 @@ Resolution is a provider concern.
 The Anthropic provider owns its credential policy: it reads the `auth` chain
 from its config, walks it per request, refreshes expired access tokens, and
 decides when an entry is skipped, retried, or abandoned.
-Core owns none of that vocabulary — every provider is constructed the same
-way, from its config alone, and the turn loop, tasks, and every other call
-site are credential-unaware.
+Core owns none of that vocabulary — every provider is constructed the same way,
+from its config alone, and the turn loop, tasks, and every other call site are
+credential-unaware.
 What core owns is the credential store (see Credential store): the provider
 loads profiles and records outcomes — cooldowns, re-login markers, recovered
 identity — through the `jp_credentials` API.
@@ -264,8 +263,8 @@ Resolution runs in two stages, both inside the provider:
    Walks the chain, skips entries per the table below, refreshes an expired
    access token, and sends the request with the credential it lands on: an API
    key or a bearer token.
-   The construction snapshot serves preflight only; a refresh re-reads the
-   store under the lock before acting (see Credential store).
+   The construction snapshot serves preflight only; a refresh re-reads the store
+   under the lock before acting (see Credential store).
 
 Every credential condition has exactly one outcome:
 
@@ -312,11 +311,10 @@ When recovery fails, the profile is non-resolvable: skipped with a notice naming
 the exact `jp provider auth login` command while another entry remains, terminal
 when the chain exhausts.
 
-Because the provider resolves per request, every request a turn issues —
-across tool-execution cycles, and equally for title generation, summarization,
-or any other purpose — lands on a usable credential, and an access token
-expiring between requests is absorbed by a refresh rather than surfacing as an
-error.
+Because the provider resolves per request, every request a turn issues — across
+tool-execution cycles, and equally for title generation, summarization, or any
+other purpose — lands on a usable credential, and an access token expiring
+between requests is absorbed by a refresh rather than surfacing as an error.
 An expiry surfacing mid-stream is a refresh-and-retry on the same credential,
 not a chain advance.
 A task whose provider fails preflight skips its work softly, exactly as title
@@ -329,8 +327,7 @@ authentication), the resolved profile's account UUID is request data the
 provider embeds in `metadata.user_id`.
 Resolution outcomes a user must see — a skipped profile, a credential switch —
 are emitted as notice events on the provider's event stream, generic stream
-vocabulary any provider can use, and rendered as chrome on stderr per
-[RFD 048].
+vocabulary any provider can use, and rendered as chrome on stderr per [RFD 048].
 
 Credential policy travels with the provider: when a provider moves out of core
 into a plugin, its resolution logic, wire mechanics, and login UX move with it,
@@ -362,17 +359,17 @@ the same status and an opaque body.
 
 The headers also carry what the cooldown needs:
 
-| Header                                             | Use                                                          |
-| -------------------------------------------------- | ------------------------------------------------------------ |
-| `anthropic-ratelimit-unified-status`               | `allowed`, `allowed_warning`, `rejected`                     |
+| Header                                             | Use                                                                                  |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `anthropic-ratelimit-unified-status`               | `allowed`, `allowed_warning`, `rejected`                                             |
 | `anthropic-ratelimit-unified-representative-claim` | the exhausted window: `five_hour`, `seven_day`, `seven_day_opus`, `seven_day_sonnet` |
-| `anthropic-ratelimit-unified-reset`                | when that window resets, as Unix seconds                     |
-| `anthropic-ratelimit-unified-overage-status`       | whether paid spillover can serve the request                 |
-| `retry-after`                                      | present only when rejected with no overage available         |
+| `anthropic-ratelimit-unified-reset`                | when that window resets, as Unix seconds                                             |
+| `anthropic-ratelimit-unified-overage-status`       | whether paid spillover can serve the request                                         |
+| `retry-after`                                      | present only when rejected with no overage available                                 |
 
 JP never chooses paid spillover.
-A quota rejection is treated the same whether `overage-status` says spillover
-is available or exhausted: the cooldown is recorded and the chain advances.
+A quota rejection is treated the same whether `overage-status` says spillover is
+available or exhausted: the cooldown is recorded and the chain advances.
 Paid usage happens only because the user listed `api_key` in the chain, which
 keeps one consent model rather than two.
 The limit of that guarantee: extra usage is an account-level setting, so an
@@ -380,8 +377,8 @@ account with it enabled may have requests served past the window and billed as
 overage without any rejection for JP to react to.
 JP cannot prevent that; it only refuses to select it.
 
-A `401` or `403` is the other credential-scoped failure: the credential
-itself was refused, so no amount of retrying helps.
+A `401` or `403` is the other credential-scoped failure: the credential itself
+was refused, so no amount of retrying helps.
 Anthropic distinguishes two cases worth naming, both of which mark the profile
 as needing re-login: `OAuth token has been revoked`, and `OAuth authentication
 is currently not allowed for this organization`.
@@ -410,8 +407,8 @@ Exhaustion becomes conditionally retryable via credential switch:
    notice as an event.
    The recorded cooldown is what routes the next resolution past the spent
    profile, so a mid-turn switch and a fresh invocation share one code path.
-3. The provider re-resolves the chain and re-sends the request immediately —
-   no backoff sleep; this is not a transient error, and the new credential is
+3. The provider re-resolves the chain and re-sends the request immediately — no
+   backoff sleep; this is not a transient error, and the new credential is
    usable now.
    Model metadata (context sizes, structural details) is retained across the
    switch; access is not guaranteed, and a model authorization or unknown-model
@@ -430,8 +427,8 @@ doomed request whenever a model name is simply wrong.
 The switch is invisible to the turn loop: it receives a provider and a stream,
 and the notice event is the only trace a switch leaves in the event flow.
 
-Fallback applies to every request the provider sends: the query streaming
-loop, conversation edit and summarize, inquiry collection, title generation.
+Fallback applies to every request the provider sends: the query streaming loop,
+conversation edit and summarize, inquiry collection, title generation.
 Persisted cooldowns route any invocation past exhausted profiles, and an
 admission-time rejection advances the chain wherever it occurs — there is no
 separate in-flight machinery to scope.
@@ -467,9 +464,9 @@ pinned oh-my-pi revision, the provider module sends for OAuth tokens:
   line, plus a billing block whose `cch` attestation is a hash computed over the
   serialized request body.
   The identity line is enforced (Phase 1), so JP sends it and immediately
-  follows it with a block naming it as a transport artifact and pointing at
-  JP's own prompt, which keeps a foreign identity from standing as an
-  instruction; the attestation is not sent at all.
+  follows it with a block naming it as a transport artifact and pointing at JP's
+  own prompt, which keeps a foreign identity from standing as an instruction;
+  the attestation is not sent at all.
 - **Behavioral constraints**: an output-token clamp (64k) applied to OAuth
   requests even when the model's ceiling is higher.
 
@@ -548,8 +545,8 @@ server, browser opening, and store I/O form the thin imperative shell around it.
   `0600` limits exposure on Unix; Windows relies on default user-profile ACLs,
   matching what Claude Code does there.
   On macOS the file is a regression against Claude Code, which uses the
-  Keychain; the Phase 4 keyring backend closes that gap, gating other
-  processes' access behind Keychain ACLs.
+  Keychain; the Phase 4 keyring backend closes that gap, gating other processes'
+  access behind Keychain ACLs.
 - **Maintenance of an undocumented flow.** The OAuth endpoints, client ID, and
   headers are Claude Code implementation details, not published API.
   Anthropic can change them without notice, and JP owns the breakage.
@@ -585,18 +582,20 @@ server, browser opening, and store I/O form the thin imperative shell around it.
 
   The store API is provider-agnostic — categories, providers, and profiles are
   just keys — while credential policy is provider-owned by construction: each
-  provider's chain semantics, refresh flow, and error vocabulary live in its
-  own module and move with it into a plugin.
+  provider's chain semantics, refresh flow, and error vocabulary live in its own
+  module and move with it into a plugin.
   The second provider adds its own policy without touching shared code; the
   store API is the only shared surface, and it is the same one plugins consume.
+
 - **Multi-account routing UX.** Ordering in the `auth` chain is the only routing
   mechanism.
   Per-conversation account pinning, usage-based routing, and similar are out of
   scope.
+
 - **Keyring backends beyond macOS.** Phase 4 adds the macOS keyring backend.
   Linux secret-service and Windows Credential Manager stores exist behind the
-  same `keyring-core` interface and can follow, but are not part of this
-  design.
+  same `keyring-core` interface and can follow, but are not part of this design.
+
 - **Sharing tokens with Claude Code.** JP's login is independent.
   Users who log the same account into both tools may see one tool's session
   invalidated by the other's refresh; that is inherent to Anthropic's token
@@ -617,8 +616,8 @@ server, browser opening, and store I/O form the thin imperative shell around it.
   follows.
   Measured: the enforcement check tolerates that insertion, and the model then
   identifies as JP without remarking on the contradiction.
-  The residual risk is that this is a prompt-level mitigation, not a guarantee —
-  a future model may weigh the identity line differently — and that API key
+  The residual risk is that this is a prompt-level mitigation, not a guarantee
+  — a future model may weigh the identity line differently — and that API key
   requests carry neither block, so the same conversation can behave differently
   across a credential switch.
 - **Thinking signatures across accounts.** Signatures minted under one account
@@ -639,13 +638,12 @@ server, browser opening, and store I/O form the thin imperative shell around it.
 ### Phase 1: bearer auth, store, and setup-token login
 
 Bearer mode in the `async-anthropic` fork; the credential store with file
-locking, versioned schema, and tagged credential variants; chain preflight
-and resolution in the `jp_credentials` crate;
-`jp provider auth login llm.anthropic --setup-token` reading a long-lived
-token from `claude setup-token` on stdin, stored as a static `token`
-credential, with identity recovery attempted at login and the profile stored
-unverified when it fails; `jp provider auth list` and `jp provider auth
-logout`, so the store is never manageable only by hand-editing.
+locking, versioned schema, and tagged credential variants; chain preflight and
+resolution in the `jp_credentials` crate; `jp provider auth login llm.anthropic
+--setup-token` reading a long-lived token from `claude setup-token` on stdin,
+stored as a static `token` credential, with identity recovery attempted at login
+and the profile stored unverified when it fails; `jp provider auth list` and `jp
+provider auth logout`, so the store is never manageable only by hand-editing.
 Phase 1 carries three measurement deliverables the rest of the design is fixed
 against: the minimum request fingerprint Anthropic accepts, measured top-down
 from the complete inventory in Request authentication (headers, identity
@@ -669,9 +667,9 @@ a block that names it as a transport artifact (see Request authentication).
 The check tolerates that insertion, and the model identifies as JP rather than
 as Claude Code.
 
-The rejection does not identify itself: Anthropic answers `429
-rate_limit_error` with an opaque `"message": "Error"` body, not a `401` and not
-a message naming the check.
+The rejection does not identify itself: Anthropic answers `429 rate_limit_error`
+with an opaque `"message": "Error"` body, not a `401` and not a message naming
+the check.
 The remaining trims are read against that signature, because a rejected
 fingerprint is otherwise indistinguishable from ordinary throttling, and a
 subscription window that expires mid-campaign would read as a trim result.
@@ -702,14 +700,14 @@ the first real limit JP sees.
 
 A `429` is a quota rejection only when it carries
 `anthropic-ratelimit-unified-representative-claim` or
-`anthropic-ratelimit-unified-overage-status`; Claude Code treats a `429`
-without them as "not a quota limit" and surfaces whatever the API said.
+`anthropic-ratelimit-unified-overage-status`; Claude Code treats a `429` without
+them as "not a quota limit" and surfaces whatever the API said.
 That predicate is what separates exhaustion from capacity throttling and from
 the fingerprint rejection measured above, all three of which are `429`
 `rate_limit_error`.
-The `representative-claim` values are the cooldown scopes the store records,
-and `anthropic-ratelimit-unified-reset` carries the reset instant as Unix
-seconds, so reset timing needs no separate usage endpoint.
+The `representative-claim` values are the cooldown scopes the store records, and
+`anthropic-ratelimit-unified-reset` carries the reset instant as Unix seconds,
+so reset timing needs no separate usage endpoint.
 `seven_day` is the longest window, which is where the seven-day cooldown cap
 comes from.
 
@@ -732,8 +730,8 @@ the core-owned API described in Credential store.
 Chain preflight and resolution move from `jp_credentials` into the provider;
 in-flight switching moves from the CLI's stream-retry path into the provider's
 request admission; the switch notice becomes a provider-emitted notice event;
-provider construction returns to config-only, uniform across providers; and
-the shell's per-call-site credential resolution is deleted.
+provider construction returns to config-only, uniform across providers; and the
+shell's per-call-site credential resolution is deleted.
 The store adopts the `keyring-core` store interface behind the existing
 lock-mutate-persist cycle.
 User-visible behavior is unchanged, except that fallback now applies to every
@@ -746,13 +744,13 @@ build on it.
 ### Phase 2b: subscription-state awareness
 
 Phase 2 reacts to a spent allowance after a request fails.
-The same headers Anthropic sends on *every* response carry enough to act
-before that, and Claude Code's client shows which of them are load-bearing:
+The same headers Anthropic sends on *every* response carry enough to act before
+that, and Claude Code's client shows which of them are load-bearing:
 
 - **Warning states.** `anthropic-ratelimit-unified-status` reports
   `allowed_warning` alongside the window that is filling up, and separate
-  `-5h-utilization` / `-7d-utilization` headers carry the fraction consumed
-  with a `-surpassed-threshold` marker.
+  `-5h-utilization` / `-7d-utilization` headers carry the fraction consumed with
+  a `-surpassed-threshold` marker.
   Surfacing that as chrome tells the user their allowance is nearly gone while
   they can still choose what to spend it on — far better than discovering it
   mid-turn.
@@ -764,8 +762,8 @@ before that, and Claude Code's client shows which of them are load-bearing:
   This reports on spillover; it does not select it (see Quota fallback).
 - **Recording state from successful responses.** Cooldowns are written today
   only when a request fails.
-  Reading the same headers off a `200` lets JP record a window's utilization
-  and reset without burning a rejected request to discover it.
+  Reading the same headers off a `200` lets JP record a window's utilization and
+  reset without burning a rejected request to discover it.
 
 This phase is optional in the sense that Phase 2 is correct without it, and
 valuable because it converts the subscription from something JP reacts to into
@@ -776,10 +774,10 @@ Depends on Phases 2 and 2c.
 
 **Measured: the header names, from Claude Code's own client.** The per-window
 headers are abbreviated where the window names elsewhere are spelled out:
-`anthropic-ratelimit-unified-{5h,7d}-utilization` carries the fraction
-consumed, `-{5h,7d}-reset` the per-window reset (distinct from the top-level
-`-reset`), and `-{5h,7d,overage}-surpassed-threshold` marks a crossed warning
-threshold — its presence is the signal, its value the threshold.
+`anthropic-ratelimit-unified-{5h,7d}-utilization` carries the fraction consumed,
+`-{5h,7d}-reset` the per-window reset (distinct from the top-level `-reset`),
+and `-{5h,7d,overage}-surpassed-threshold` marks a crossed warning threshold —
+its presence is the signal, its value the threshold.
 `-overage-disabled-reason` reports one of thirteen enumerated reasons
 (`out_of_credits`, `org_level_disabled`, `seat_tier_zero_credit_limit`, …).
 JP normalizes the abbreviations to the spelled-out window names so one
@@ -787,35 +785,37 @@ vocabulary reaches the user.
 
 The client also computes a *time-relative* early warning of its own when the
 server sends no threshold (warn at 90% utilization within 72% of the 5-hour
-window, and three tiers for the weekly one). JP does not: that is client-side
-policy layered on the provider's own signal, and surfacing only what the
-provider flags keeps the notice trustworthy.
+window, and three tiers for the weekly one).
+JP does not: that is client-side policy layered on the provider's own signal,
+and surfacing only what the provider flags keeps the notice trustworthy.
 
 **A spent window is readable from a response that succeeded.** `status:
 rejected` accompanies a `200` whenever paid extra usage covered the request, so
 the drawback this design records as unpreventable — usage billed past the
 window with no rejection to react to — is detectable one request after it
-starts. JP records the scoped cooldown at that point, so the next resolution
-moves off the profile instead of billing against it again, and surfaces a
-notice naming the window. The request that revealed it is still billed; that
-part is unavoidable.
+starts.
+JP records the scoped cooldown at that point, so the next resolution moves off
+the profile instead of billing against it again, and surfaces a notice naming
+the window.
+The request that revealed it is still billed; that part is unavoidable.
 
 ### Transport: reading a successful response's headers
 
-The quota headers ride on every response, but JP's Anthropic client reached
-them only on failures: `reqwest-eventsource` yields a unit `Open` event and
-exposes the `Response` only in its error variants. Phase 2b therefore rests on
-a transport change, made as its own step: the streaming path issues the request
-directly and parses the body with `eventsource-stream` (the SSE parser
-`reqwest-eventsource` itself wraps), which makes the response — and its headers
-— available on success.
+The quota headers ride on every response, but JP's Anthropic client reached them
+only on failures: `reqwest-eventsource` yields a unit `Open` event and exposes
+the `Response` only in its error variants.
+Phase 2b therefore rests on a transport change, made as its own step: the
+streaming path issues the request directly and parses the body with
+`eventsource-stream` (the SSE parser `reqwest-eventsource` itself wraps), which
+makes the response — and its headers — available on success.
 
-The change drops SSE-level reconnection, deliberately. Anthropic's message
-endpoint sends no SSE event ids, so a reconnect cannot resume: it issues a
-fresh completion whose content restarts from the beginning, which is the wrong
-operation at that layer. Nothing consumed it in practice — every error was
-yielded to the caller, which abandoned the stream — while the orphaned
-reconnect still fired 15 seconds later and paid for a completion nobody read.
+The change drops SSE-level reconnection, deliberately.
+Anthropic's message endpoint sends no SSE event ids, so a reconnect cannot
+resume: it issues a fresh completion whose content restarts from the beginning,
+which is the wrong operation at that layer.
+Nothing consumed it in practice — every error was yielded to the caller, which
+abandoned the stream — while the orphaned reconnect still fired 15 seconds
+later and paid for a completion nobody read.
 Recovery stays where it belongs: the turn loop flushes partial content, rebuilds
 the thread with it as assistant prefill, and continues on a fresh stream.
 The `cerebras` and `llamacpp` providers had already reached the same conclusion
@@ -823,20 +823,20 @@ and configure `retry::Never`.
 
 One related fix: the buffered `get`/`post` paths retried *every* `429` with a
 15-second floor, including quota rejections, so a spent subscription stalled for
-the better part of a minute before the credential switch could act. They now
-retry only capacity throttling.
+the better part of a minute before the credential switch could act.
+They now retry only capacity throttling.
 
 ### Phase 3: PKCE browser login
 
-The full browser login flow: PKCE, browser, localhost callback, paste
-fallback, refresh-on-expiry.
+The full browser login flow: PKCE, browser, localhost callback, paste fallback,
+refresh-on-expiry.
 The phase lands in two halves.
-The token exchange and refresh logic is pure library code in the provider's
-auth module and lands first: refresh-on-expiry is what per-request resolution
-needs for `oauth` profiles, however the tokens were obtained.
-The login command ships in the provider's command plugin (`jp anthropic
-login`), which waits on two command-plugin protocol capabilities specified
-separately: running without a workspace, and prompting for input.
+The token exchange and refresh logic is pure library code in the provider's auth
+module and lands first: refresh-on-expiry is what per-request resolution needs
+for `oauth` profiles, however the tokens were obtained.
+The login command ships in the provider's command plugin (`jp anthropic login`),
+which waits on two command-plugin protocol capabilities specified separately:
+running without a workspace, and prompting for input.
 Until the plugin ships, setup-token login through the in-core CLI remains the
 login path.
 Phase 3 measures whether the authorize endpoint grants the reduced
@@ -860,19 +860,18 @@ keeps one from lapsing between being resolved and being used; JP uses the same
 buffer.
 
 **Still unmeasured: whether the reduced scope set is granted.** That needs a
-live authorize round-trip, which arrives with the browser flow. Until then the
-reduced set is what JP requests and the full-set fallback remains the
-documented contingency.
+live authorize round-trip, which arrives with the browser flow.
+Until then the reduced set is what JP requests and the full-set fallback remains
+the documented contingency.
 
 ### Phase 4: macOS keyring store backend
 
 The macOS Keychain behind the `keyring-core` store interface
-(`apple-native-keyring-store`), replacing the file store on macOS and
-restoring parity for users migrating from Claude Code there.
+(`apple-native-keyring-store`), replacing the file store on macOS and restoring
+parity for users migrating from Claude Code there.
 The backend stores the same versioned JSON document as a single entry, so
-cooldowns and re-login state move with the secrets; the store's
-`ResourceLocker` lock file keeps serializing mutations, since the Keychain
-provides no locking.
+cooldowns and re-login state move with the secrets; the store's `ResourceLocker`
+lock file keeps serializing mutations, since the Keychain provides no locking.
 
 Existing stores migrate once, under the file lock: read the file store, write
 the Keychain item, read it back and verify, switch the backend marker, then
