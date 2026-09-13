@@ -8,6 +8,8 @@ use chrono::{DateTime, Utc};
 use jp_config::model::{id::ProviderId, parameters::ServiceTier};
 use reqwest::header::{HeaderMap, RETRY_AFTER};
 
+use crate::provider::anthropic::acp::Error as AnthropicAcpError;
+
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
 /// A provider-agnostic streaming error.
@@ -564,6 +566,10 @@ pub enum Error {
 
     #[error("Request error: {0}")]
     Request(#[from] reqwest::Error),
+
+    /// The Claude Code subscription flow failed its compatibility checks.
+    #[error(transparent)]
+    AnthropicAcp(#[from] AnthropicAcpError),
 
     #[error("Anthropic error: {0}")]
     Anthropic(#[from] AnthropicError),

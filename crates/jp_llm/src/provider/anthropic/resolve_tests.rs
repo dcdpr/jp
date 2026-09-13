@@ -22,6 +22,7 @@ const MODEL: &str = "claude-opus-4-6";
 
 fn anthropic_config(auth: &[&str], api_key_env: &str) -> AnthropicConfig {
     let mut config = jp_config::AppConfig::new_test().providers.llm.anthropic;
+    config.subscription_flow = SubscriptionFlow::Direct;
     config.auth = auth.iter().map(|s| s.parse().unwrap()).collect();
     config.api_key_env = api_key_env.to_owned().into();
     config
@@ -69,10 +70,38 @@ fn profile(name: &str) -> AuthEntry {
 fn ready(landing: Landing) -> Credential {
     match landing {
         Landing::Ready(credential) => credential,
+        Landing::Acp => panic!("expected an explicit direct subscription flow"),
         Landing::Stale { profile, .. } => {
             panic!("subscription:{profile} unexpectedly needs a refresh")
         }
     }
+}
+
+#[test]
+fn acp_subscription_does_not_require_stored_tokens() {
+    let mut config = anthropic_config(&["subscription"], UNSET_ENV_VAR);
+    config.subscription_flow = SubscriptionFlow::Acp;
+    let (landing, selected, notices) = walk_chain(&config, None, MODEL, NOW()).unwrap();
+    assert_matches!(landing, Landing::Acp);
+    assert_eq!(selected, AuthEntry::Subscription(None));
+    assert_eq!(notices, Vec::<String>::new());
+}
+
+#[test]
+fn acp_rejects_named_subscription_without_paid_fallback() {
+    let mut config = anthropic_config(&["subscription:personal", "api_key"], SET_ENV_VAR);
+    config.subscription_flow = SubscriptionFlow::Acp;
+    let error = walk_chain(&config, None, MODEL, NOW()).unwrap_err();
+    assert_matches!(error, ResolveError::Acp(AcpError::NamedSubscription { name }) if name == "personal");
+}
+
+#[test]
+fn api_entry_before_acp_keeps_its_route() {
+    let mut config = anthropic_config(&["api_key", "subscription"], SET_ENV_VAR);
+    config.subscription_flow = SubscriptionFlow::Acp;
+    let (landing, selected, _) = walk_chain(&config, None, MODEL, NOW()).unwrap();
+    assert_matches!(landing, Landing::Ready(Credential::ApiKey(_)));
+    assert_eq!(selected, AuthEntry::ApiKey(None));
 }
 
 #[test]
@@ -386,7 +415,7 @@ async fn test_advance_records_scoped_cooldown_and_moves_to_next_profile() {
     .expect("the chain has a second profile to fall to");
 
     assert_eq!(next.selected, Some(profile("work")));
-    assert_eq!(next.credential, Credential::Bearer("sk-work".to_owned()));
+    assert_matches!(next.route, Route::Http(Credential::Bearer(token)) if token == "sk-work");
     assert_eq!(
         next.notices.last().unwrap(),
         "subscription (personal) limit reached, continuing with subscription (work)"

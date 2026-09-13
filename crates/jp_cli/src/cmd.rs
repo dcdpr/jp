@@ -794,6 +794,7 @@ impl From<jp_llm::Error> for Error {
                 ("response", response),
             ]
             .into(),
+            AnthropicAcp(error) => with_cause(&error, "Anthropic ACP subscription error"),
             Anthropic(anthropic_error) => [
                 ("message", "Anthropic error".into()),
                 ("error", anthropic_error.to_string()),

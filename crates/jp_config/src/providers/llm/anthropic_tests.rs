@@ -5,6 +5,79 @@ use super::*;
 use crate::{AppConfig, assignment::KvAssignment};
 
 #[test]
+fn subscription_flow_defaults_to_acp_without_changing_auth() {
+    let config = AppConfig::new_test().providers.llm.anthropic;
+    assert_eq!(config.subscription_flow, SubscriptionFlow::Acp);
+    assert_eq!(config.auth, vec![AuthEntry::ApiKey(None)]);
+}
+
+#[test]
+fn subscription_flow_assign_merge_and_delta() {
+    let mut before = PartialAnthropicConfig::default();
+    before
+        .assign("subscription_flow=direct".parse().unwrap())
+        .unwrap();
+    assert_eq!(before.subscription_flow, Some(SubscriptionFlow::Direct));
+    let mut after = before.clone();
+    after
+        .assign("subscription_flow=acp".parse().unwrap())
+        .unwrap();
+    let delta = before.delta(after.clone());
+    before.merge(&(), delta).unwrap();
+    assert_eq!(before, after);
+    assert_eq!(before.delta(after).subscription_flow, None);
+}
+
+#[test]
+fn subscription_flow_defaults_fill_and_round_trip() {
+    let mut config = AppConfig::new_test().providers.llm.anthropic;
+    config.subscription_flow = SubscriptionFlow::Direct;
+    let partial = config.to_partial();
+    assert_eq!(partial.subscription_flow, Some(SubscriptionFlow::Direct));
+    let filled = PartialAnthropicConfig::default().fill_from(partial.clone());
+    assert_eq!(filled.subscription_flow, Some(SubscriptionFlow::Direct));
+    let mut explicit = PartialAnthropicConfig::default();
+    explicit
+        .assign("subscription_flow=acp".parse().unwrap())
+        .unwrap();
+    assert_eq!(
+        explicit.fill_from(partial).subscription_flow,
+        Some(SubscriptionFlow::Acp)
+    );
+}
+
+#[test]
+fn subscription_flow_null_clears_the_partial() {
+    let mut config = PartialAnthropicConfig::default();
+    config
+        .assign("subscription_flow=direct".parse().unwrap())
+        .unwrap();
+    config
+        .assign("subscription_flow:=null".parse().unwrap())
+        .unwrap();
+    assert_eq!(config.subscription_flow, None);
+}
+
+#[test]
+fn subscription_flow_serde_and_validation() {
+    assert_eq!(
+        serde_json::to_string(&SubscriptionFlow::Direct).unwrap(),
+        r#""direct""#
+    );
+    assert_eq!(
+        serde_json::from_str::<SubscriptionFlow>(r#""acp""#).unwrap(),
+        SubscriptionFlow::Acp
+    );
+    assert!(serde_json::from_str::<SubscriptionFlow>(r#""automatic""#).is_err());
+    let mut config = PartialAnthropicConfig::default();
+    assert!(
+        config
+            .assign("subscription_flow=automatic".parse().unwrap())
+            .is_err()
+    );
+}
+
+#[test]
 fn test_auth_entry_from_str() {
     let cases = [
         ("api_key", Ok(AuthEntry::ApiKey(None))),
