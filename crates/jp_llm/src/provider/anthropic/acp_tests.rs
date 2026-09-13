@@ -57,16 +57,22 @@ fn subscription_status_is_fail_closed() {
 }
 
 #[test]
-fn model_qualification_does_not_substitute_aliases() {
-    let model = model_details(&"claude-opus-5".parse().unwrap()).unwrap();
+fn model_names_are_not_restricted_to_the_probe_model() {
+    let model = model_details(&"claude-opus-5".parse().unwrap());
     assert_eq!(model.id.to_string(), "anthropic/claude-opus-5");
     assert_eq!(model.subscription, Some(true));
     assert_eq!(model.context_window, None);
     assert_eq!(model.prefill, Some(false));
-    assert_matches!(
-        model_details(&"opus".parse().unwrap()),
-        Err(Error::UnsupportedModel { .. })
-    );
+    for name in [
+        "claude-haiku-4-5",
+        "claude-sonnet-4-6",
+        "haiku",
+        "future-model",
+    ] {
+        let name = name.parse().unwrap();
+        let model = model_details(&name);
+        assert_eq!(model.id.name, name);
+    }
 }
 
 #[test(tokio::test)]

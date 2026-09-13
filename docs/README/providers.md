@@ -60,8 +60,11 @@ jp query --new --auth sub --model anthropic/claude-opus-5 "Review this change."
 ```
 
 This v0.1 path currently requires Unix and the runtime versions above.
-The initial qualified model is `claude-opus-5`; other model names are rejected
-rather than substituted.
+Model identifiers and aliases are passed to Claude Code without a JP allowlist.
+Claude Code decides availability for the active account; JP reports
+model-selection and request failures with the runtime's explanation.
+Canonical identifiers returned for aliases are accepted and recorded in usage
+metadata.
 Restarting an external tool batch is not implemented yet, and native history
 preparation rejects working directories whose encoded names exceed 200 bytes.
 Temperature, top-p, top-k, service tiers other than `off`, and custom model

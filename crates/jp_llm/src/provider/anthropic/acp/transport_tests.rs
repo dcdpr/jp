@@ -1,3 +1,5 @@
+use std::{error::Error as _, iter};
+
 use agent_client_protocol::{
     Agent,
     schema::v1::{
@@ -31,7 +33,7 @@ fn prepared() -> PreparedRequest {
         .with_events(events)
         .build()
         .unwrap();
-    let model = super::super::model_details(&"claude-opus-5".parse().unwrap()).unwrap();
+    let model = super::super::model_details(&"claude-opus-5".parse().unwrap());
     PreparedRequest::new(&model, thread.into()).unwrap()
 }
 
@@ -70,6 +72,89 @@ fn jp_tool_permissions_always_return_to_the_host() {
     );
 }
 
+#[test]
+fn a_followup_error_does_not_replace_the_original_failure() {
+    let state = Mutex::new(State::new("haiku".parse().unwrap(), iter::empty(), false));
+    record_failure(&state, StreamError::other("Model unavailable."));
+    record_failure(&state, StreamError::other("Execution failed."));
+    assert_eq!(
+        state.into_inner().unwrap().failure.unwrap().message(),
+        "Model unavailable."
+    );
+}
+
+#[tokio::test]
+async fn runtime_model_rejection_preserves_its_classification() {
+    let agent = Agent
+        .builder()
+        .on_receive_request(
+            async |_request: InitializeRequest, responder, _cx| {
+                responder.respond(
+                    serde_json::from_value::<InitializeResponse>(
+                        json!({"protocolVersion":1,"agentCapabilities":{"loadSession":true}}),
+                    )
+                    .unwrap(),
+                )
+            },
+            on_receive_request!(),
+        )
+        .on_receive_request(
+            async |_request: LoadSessionRequest, responder, _cx| {
+                responder.respond(LoadSessionResponse::new())
+            },
+            on_receive_request!(),
+        )
+        .on_receive_request(
+            async |request: SetSessionConfigOptionRequest, responder, _cx| {
+                assert_eq!(request.config_id.0.as_ref(), "model");
+                responder.respond_with_error(
+                    RpcError::invalid_params().data("Unknown model on this account."),
+                )
+            },
+            on_receive_request!(),
+        );
+    let mut prepared = prepared();
+    prepared.model = "future-model".parse().unwrap();
+    let environment = options::environment(&prepared, CachePolicy::Short);
+    let (sender, mut receiver) = mpsc::channel(16);
+    let error = tokio::time::timeout(
+        Duration::from_secs(5),
+        drive(
+            prepared,
+            QueryContext {
+                root: "/work/project".into(),
+                mcp_endpoint: None,
+            },
+            vec![],
+            environment,
+            NativeArtifact {
+                session: Some(Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap()),
+                path: None,
+            },
+            agent,
+            sender,
+        ),
+    )
+    .await
+    .unwrap()
+    .unwrap_err();
+    let Error::Stream(error) = error else {
+        panic!("expected classified failure")
+    };
+    assert!(!error.is_retryable());
+    let Some(Error::ModelSelection { model, source }) =
+        error.source().unwrap().downcast_ref::<Error>()
+    else {
+        panic!("expected model selection failure")
+    };
+    assert_eq!(model.as_ref(), "future-model");
+    assert_eq!(
+        serde_json::to_value(source).unwrap()["data"],
+        "Unknown model on this account."
+    );
+    assert!(receiver.recv().await.is_none());
+}
+
 #[tokio::test]
 async fn real_protocol_driver_loads_history_and_emits_only_live_output() {
     let agent = Agent.builder()
@@ -92,7 +177,8 @@ async fn real_protocol_driver_loads_history_and_emits_only_live_output() {
             }
             // Request values are flattened objects; a select's current value is the ID itself.
             let SessionConfigOptionValue::ValueId { value } = request.value else { panic!("expected a value ID") };
-            let response: SetSessionConfigOptionResponse = serde_json::from_value(json!({"configOptions":[{"id":request.config_id,"name":"Setting","type":"select","currentValue":value,"options":[]}]})).unwrap();
+            let current = if request.config_id.0.as_ref() == "model" { json!("resolved-fixture-model") } else { json!(value) };
+            let response: SetSessionConfigOptionResponse = serde_json::from_value(json!({"configOptions":[{"id":request.config_id,"name":"Setting","type":"select","currentValue":current,"options":[]}]})).unwrap();
             responder.respond(response)
         }, on_receive_request!())
         .on_receive_request(async |request: PromptRequest, responder, cx| {
@@ -101,7 +187,7 @@ async fn real_protocol_driver_loads_history_and_emits_only_live_output() {
             cx.send_notification(notification(json!({"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}})))?;
             cx.send_notification(notification(json!({"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"CURRENT"}}})))?;
             cx.send_notification(notification(json!({"type":"stream_event","event":{"type":"content_block_stop","index":0}})))?;
-            cx.send_notification(notification(json!({"type":"assistant","message":{"model":"claude-opus-5","content":[{"type":"text","text":"CURRENT"}]}})))?;
+            cx.send_notification(notification(json!({"type":"assistant","message":{"model":"resolved-fixture-model","content":[{"type":"text","text":"CURRENT"}]}})))?;
             cx.send_notification(notification(json!({"type":"result","subtype":"success","is_error":false})))?;
             responder.respond(serde_json::from_value::<PromptResponse>(json!({"stopReason":"end_turn"})).unwrap())
         }, on_receive_request!());

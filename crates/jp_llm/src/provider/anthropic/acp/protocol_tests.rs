@@ -3,7 +3,11 @@ use serde_json::json;
 use super::*;
 
 fn state() -> State {
-    let mut state = State::new("claude-opus-5".into(), ["lookup".into()].into_iter(), false);
+    let mut state = State::new(
+        "claude-opus-5".parse().unwrap(),
+        ["lookup".into()].into_iter(),
+        false,
+    );
     state.session = Some("session-fixed".into());
     state.authenticated = true;
     state.live = true;
@@ -173,6 +177,28 @@ fn synthetic_error_reports_the_reason_not_a_model_mismatch() {
         error.message(),
         "Claude Code rate_limit: Subscription allowance exhausted."
     );
+}
+
+#[test]
+fn runtime_can_resolve_a_model_alias() {
+    let mut state = state();
+    state.model = "claude-haiku-4-5".parse().unwrap();
+    assert_eq!(state.sdk(notification(json!({"type":"assistant","message":{"id":"msg-haiku","model":"claude-haiku-4-5-20251001","usage":{"input_tokens":1,"output_tokens":2}}}))).unwrap(), vec![]);
+    assert_eq!(
+        state.usage_snapshot()["requests"]["msg-haiku"]["model"],
+        "claude-haiku-4-5-20251001"
+    );
+}
+
+#[test]
+fn unavailable_model_is_classified_with_the_requested_name() {
+    let mut state = state();
+    let error = state.sdk(notification(json!({"type":"assistant","error":"model_not_found","message":{"content":[{"type":"text","text":"Not available on this account."}]}}))).unwrap_err();
+    assert_eq!(
+        error.message(),
+        "Claude Code cannot use model `claude-opus-5`: Not available on this account."
+    );
+    assert!(!error.is_retryable());
 }
 
 #[test]

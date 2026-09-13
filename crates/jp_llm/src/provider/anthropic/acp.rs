@@ -16,7 +16,7 @@ use serde::Deserialize;
 use tokio::{io::AsyncReadExt as _, process::Command, time::timeout};
 use tracing::warn;
 
-use crate::model::ModelDetails;
+use crate::{error::StreamError, model::ModelDetails};
 
 mod options;
 mod protocol;
@@ -25,7 +25,7 @@ mod transport;
 mod usage;
 pub(super) use transport::stream;
 
-/// A failed prerequisite for the Claude Code subscription flow.
+/// A failure in the Claude Code subscription flow.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// The adapter did not confirm a requested session setting.
@@ -118,12 +118,22 @@ pub enum Error {
          configuration; disable paid Usage credits to prevent overage"
     )]
     SubscriptionRequired,
-    /// The selected model has not been qualified for this flow.
-    #[error(
-        "model `{model}` is not qualified for the ACP subscription flow; the qualified model is \
-         claude-opus-5"
-    )]
-    UnsupportedModel { model: Name },
+    /// Claude Code could not select the requested model.
+    #[error("Claude Code could not select model `{model}`: {source}")]
+    ModelSelection {
+        model: Name,
+        #[source]
+        source: RpcError,
+    },
+    /// The runtime reports an unavailable model.
+    #[error("Claude Code cannot use model `{model}`: {detail}")]
+    ModelUnavailable { model: Name, detail: String },
+    /// The runtime rejects the request or its model parameters.
+    #[error("Claude Code rejected the request for model `{model}`: {detail}")]
+    RequestRejected { model: Name, detail: String },
+    /// A classified failure received through an ACP notification.
+    #[error(transparent)]
+    Stream(Box<StreamError>),
     /// Changing request implementation requires a fresh Host context.
     #[error(
         "subscription flow changed to ACP during an HTTP request; retry using the current \
@@ -244,13 +254,9 @@ fn validate_auth(output: &[u8]) -> Result<(), Error> {
     Err(Error::SubscriptionRequired)
 }
 
-/// Qualified model metadata without making an API-key-authenticated request.
-pub(super) fn model_details(name: &Name) -> Result<ModelDetails, Error> {
-    if name.as_ref() != "claude-opus-5" {
-        return Err(Error::UnsupportedModel {
-            model: name.clone(),
-        });
-    }
+/// Describe the selected model without an API-key-authenticated lookup.
+/// Availability is determined by Claude Code when it receives the request.
+pub(super) fn model_details(name: &Name) -> ModelDetails {
     let mut model = ModelDetails::empty(ModelIdConfig {
         provider: ProviderId::Anthropic,
         name: name.clone(),
@@ -258,7 +264,7 @@ pub(super) fn model_details(name: &Name) -> Result<ModelDetails, Error> {
     model.subscription = Some(true);
     model.prefill = Some(false);
     model.structured_output = Some(true);
-    Ok(model)
+    model
 }
 
 fn removes_variable(name: &str) -> bool {

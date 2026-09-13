@@ -57,7 +57,7 @@ fn query(policy: CachePolicy, tag: &str) -> ChatQuery {
 
 async fn request(provider: &Anthropic, query: ChatQuery, context: QueryContext) -> Value {
     tokio::time::timeout(Duration::from_mins(2), async {
-        let model = model_details(&"claude-opus-5".parse().unwrap()).unwrap();
+        let model = model_details(&"claude-opus-5".parse().unwrap());
         let mut stream = provider
             .start_query(&model, query, context)
             .await

@@ -65,7 +65,7 @@ fn conversation() -> ChatQuery {
 
 #[test]
 fn returning_to_anthropic_retains_the_intervening_openai_turn() {
-    let model = super::model_details(&"claude-opus-5".parse().unwrap()).unwrap();
+    let model = super::model_details(&"claude-opus-5".parse().unwrap());
     let prepared = PreparedRequest::new(&model, conversation()).unwrap();
     assert_eq!(prepared.prompt, "Continue.");
     assert_eq!(
@@ -85,7 +85,7 @@ fn returning_to_anthropic_retains_the_intervening_openai_turn() {
 fn selected_turn_fork_excludes_unselected_history() {
     let mut query = conversation();
     query.thread.events.retain_turns(|index| index != 1);
-    let model = super::model_details(&"claude-opus-5".parse().unwrap()).unwrap();
+    let model = super::model_details(&"claude-opus-5".parse().unwrap());
     let prepared = PreparedRequest::new(&model, query).unwrap();
     assert_eq!(prepared.prompt, "Continue.");
     assert_eq!(
@@ -110,7 +110,7 @@ fn replay_uses_the_replacement_request() {
             datetime!(2026-09-11 12:01:00 Z),
         ),
     ]);
-    let model = super::model_details(&"claude-opus-5".parse().unwrap()).unwrap();
+    let model = super::model_details(&"claude-opus-5".parse().unwrap());
     let prepared = PreparedRequest::new(&model, query).unwrap();
     assert_eq!(prepared.prompt, "Revisit instead.");
     assert_eq!(prepared.history.len(), 6);
@@ -134,7 +134,7 @@ fn compacted_view_is_encoded_without_mutating_raw_history() {
         .iter()
         .map(|event| event.event.clone())
         .collect::<Vec<_>>();
-    let model = super::model_details(&"claude-opus-5".parse().unwrap()).unwrap();
+    let model = super::model_details(&"claude-opus-5".parse().unwrap());
     let prepared = PreparedRequest::new(&model, query.clone()).unwrap();
     assert_eq!(prepared.prompt, "Continue.");
     assert_eq!(prepared.history.len(), 2);
@@ -158,7 +158,7 @@ fn tool_result_continuation_does_not_repeat_the_previous_request() {
         .thread
         .events
         .retain(|event| !matches!(event.kind, EventKind::ChatResponse(_)));
-    let model = super::model_details(&"claude-opus-5".parse().unwrap()).unwrap();
+    let model = super::model_details(&"claude-opus-5".parse().unwrap());
     let prepared = PreparedRequest::new(&model, query).unwrap();
     assert_eq!(
         prepared.prompt,
@@ -181,7 +181,7 @@ fn large_historical_tool_results_remain_complete() {
             response.result = Ok(content.clone());
         }
     }
-    let model = super::model_details(&"claude-opus-5".parse().unwrap()).unwrap();
+    let model = super::model_details(&"claude-opus-5".parse().unwrap());
     let prepared = PreparedRequest::new(&model, query).unwrap();
     let message = serde_json::to_value(&prepared.history[2]).unwrap();
     // This is a preservation assertion, not a generated-output expectation.
@@ -209,7 +209,7 @@ fn changed_instructions_schema_and_tool_result_reach_the_next_request() {
     } else {
         panic!("expected the pending request")
     }
-    let model = super::model_details(&"claude-opus-5".parse().unwrap()).unwrap();
+    let model = super::model_details(&"claude-opus-5".parse().unwrap());
     let prepared = PreparedRequest::new(&model, query).unwrap();
     assert_eq!(prepared.system_prompt, "Replacement instructions.");
     assert_eq!(prepared.schema, Some(schema));

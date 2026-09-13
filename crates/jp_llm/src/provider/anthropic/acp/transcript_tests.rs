@@ -46,7 +46,7 @@ fn query() -> ChatQuery {
 
 #[test]
 fn thread_prefix_retains_roles_and_tool_pairing() {
-    let model = super::super::model_details(&"claude-opus-5".parse().unwrap()).unwrap();
+    let model = super::super::model_details(&"claude-opus-5".parse().unwrap());
     let prepared = PreparedRequest::new(&model, query()).unwrap();
     assert_eq!(prepared.prompt, "What is the code?");
     assert_eq!(prepared.system_prompt, "Use the supplied history.");
@@ -63,7 +63,7 @@ fn thread_prefix_retains_roles_and_tool_pairing() {
 
 #[test]
 fn native_bookkeeping_does_not_rewrite_message_content() {
-    let model = super::super::model_details(&"claude-opus-5".parse().unwrap()).unwrap();
+    let model = super::super::model_details(&"claude-opus-5".parse().unwrap());
     let prepared = PreparedRequest::new(&model, query()).unwrap();
     let session = Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap();
     let records = prepared.records(
@@ -86,7 +86,7 @@ fn native_bookkeeping_does_not_rewrite_message_content() {
 
 #[test]
 fn session_ids_and_timestamps_do_not_change_the_model_visible_prefix() {
-    let model = super::super::model_details(&"claude-opus-5".parse().unwrap()).unwrap();
+    let model = super::super::model_details(&"claude-opus-5".parse().unwrap());
     let prepared = PreparedRequest::new(&model, query()).unwrap();
     let first = prepared.records(
         Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap(),
@@ -118,7 +118,7 @@ fn pending_text_is_removed_without_removing_prior_user_blocks() {
         ChatRequest::from("One more instruction."),
         datetime!(2026-09-11 12:00:01 Z),
     )]);
-    let model = super::super::model_details(&"claude-opus-5".parse().unwrap()).unwrap();
+    let model = super::super::model_details(&"claude-opus-5".parse().unwrap());
     let prepared = PreparedRequest::new(&model, query).unwrap();
     assert_eq!(prepared.prompt, "One more instruction.");
     let last = prepared.history.last().unwrap();

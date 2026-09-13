@@ -75,7 +75,11 @@ pub(crate) fn stream(
             result = run(prepared, context, tools, cache, sender.clone()) => result,
         };
         if let Err(error) = result {
-            drop(sender.send(Err(StreamError::other(error.to_string()).with_source(error))).await);
+            let error = match error {
+                Error::Stream(error) => *error,
+                error => StreamError::other(error.to_string()).with_source(error),
+            };
+            drop(sender.send(Err(error)).await);
         }
     });
     while let Some(event) = receiver.recv().await { yield event; }
@@ -94,6 +98,16 @@ async fn emit(
             .map_err(|_| RpcError::internal_error().data("JP event receiver closed"))?;
     }
     Ok(())
+}
+
+fn record_failure(state: &Mutex<State>, error: StreamError) -> RpcError {
+    let response = RpcError::into_internal_error(&error);
+    state
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .failure
+        .get_or_insert(error);
+    response
 }
 
 async fn run(
@@ -149,7 +163,7 @@ async fn drive(
     sender: mpsc::Sender<Result<Event, StreamError>>,
 ) -> Result<(), Error> {
     let state = Arc::new(Mutex::new(State::new(
-        prepared.model.to_string(),
+        prepared.model.clone(),
         tools.iter().cloned(),
         prepared.schema.is_some(),
     )));
@@ -174,11 +188,11 @@ async fn drive(
         )
         .on_receive_notification(
             async move |notification: SdkNotification, _cx| {
-                let events = sdk_state
+                let result = sdk_state
                     .lock()
                     .unwrap_or_else(PoisonError::into_inner)
-                    .sdk(notification)
-                    .map_err(RpcError::into_internal_error)?;
+                    .sdk(notification);
+                let events = result.map_err(|error| record_failure(&sdk_state, error))?;
                 emit(&sdk_sender, events).await
             },
             on_receive_notification!(),
@@ -227,9 +241,15 @@ async fn drive(
         };
         for (config_id, value) in [("model", prepared.model.as_ref()), ("mode", "default")] {
             let request: SetSessionConfigOptionRequest = serde_json::from_value(json!({"sessionId":session,"configId":config_id,"value":value})).map_err(RpcError::into_internal_error)?;
-            let response = cx.send_request(request).block_task().await?;
+            let response = cx.send_request(request).block_task().await.map_err(|source| {
+                if config_id != "model" { return source; }
+                let error = Error::ModelSelection { model: prepared.model.clone(), source };
+                record_failure(&foreground_state, StreamError::other(error.to_string()).with_source(error))
+            })?;
+            // Claude Code can normalize a model alias to a canonical identifier.
             let applied = response.config_options.iter().any(|option| option.id.0.as_ref() == config_id
-                && matches!(&option.kind, SessionConfigKind::Select(select) if select.current_value.0.as_ref() == value));
+                && matches!(&option.kind, SessionConfigKind::Select(select) if
+                    (config_id == "model" && !select.current_value.0.is_empty()) || select.current_value.0.as_ref() == value));
             if !applied { return Err(RpcError::into_internal_error(Error::SettingNotApplied { setting: config_id.into() })); }
         }
         {
@@ -252,6 +272,9 @@ async fn drive(
         tokio::select! {
             result = &mut result => {
                 debug!(usage = %state.lock().unwrap_or_else(PoisonError::into_inner).usage_snapshot(), "Claude ACP usage snapshot");
+                if let Some(error) = state.lock().unwrap_or_else(PoisonError::into_inner).failure.take() {
+                    return Err(Error::Stream(Box::new(error)));
+                }
                 return result.map_err(Error::Protocol);
             },
             _ = tick.tick() => {

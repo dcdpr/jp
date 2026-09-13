@@ -1,7 +1,10 @@
 # Anthropic ACP qualification
 
-The ACP subscription flow accepts `claude-agent-acp` 0.76.0, Claude Code
-2.1.257, and `claude-opus-5`.
+The ACP subscription flow accepts `claude-agent-acp` 0.76.0 with Claude Code
+2.1.257.
+Model availability is decided by the runtime, not a JP allowlist.
+The cache qualification fixture uses `claude-opus-5`; that choice does not
+restrict ordinary queries.
 The setup instructions are in [Providers].
 Qualification uses the production provider entry point, not a separate CLI
 wrapper.

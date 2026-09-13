@@ -341,7 +341,6 @@ impl Provider for Anthropic {
     ) -> Result<QueryStream> {
         let attempt = self.resolve(model.name()).await?;
         if matches!(attempt.route, resolve::Route::Acp) {
-            acp::model_details(&model.id.name)?;
             acp::inspect().await?;
             return Ok(QueryStream {
                 events: acp::stream(model, query, context)?,
@@ -364,7 +363,7 @@ impl Provider for Anthropic {
             }
 
             if matches!(attempt.route, resolve::Route::Acp) {
-                let model = acp::model_details(name)?;
+                let model = acp::model_details(name);
                 acp::inspect().await?;
                 return Ok(model);
             }
@@ -388,7 +387,7 @@ impl Provider for Anthropic {
 
             if matches!(attempt.route, resolve::Route::Acp) {
                 acp::inspect().await?;
-                return Ok(vec![acp::model_details(&"claude-opus-5".parse()?)?]);
+                return Ok(vec![acp::model_details(&"claude-opus-5".parse()?)]);
             }
             let (client, _) = self.client_for(&attempt.route)?;
             let mut all_models = vec![];
@@ -439,7 +438,6 @@ impl Provider for Anthropic {
         // the stream.
         let attempt = self.resolve(model.name()).await?;
         if matches!(attempt.route, resolve::Route::Acp) {
-            acp::model_details(&model.id.name)?;
             acp::inspect().await?;
             let root = env::current_dir().map_err(acp::Error::NativeIo)?;
             let root = Utf8PathBuf::from_path_buf(root).map_err(|_| acp::Error::NativeDirectory)?;

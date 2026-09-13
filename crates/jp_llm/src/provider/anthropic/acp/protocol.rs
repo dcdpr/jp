@@ -11,10 +11,12 @@ use agent_client_protocol::{
     },
 };
 use async_anthropic::types::{CreateMessagesResponse, MessageContent, MessagesStreamEvent, Usage};
+use jp_config::model::id::Name;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use super::{
+    Error,
     transcript::tool_name,
     usage::{METADATA_KEY, ModelUsage, RuntimeUsage, UsageLedger},
 };
@@ -166,7 +168,7 @@ pub(super) struct State {
     pub live: bool,
     pub authenticated: bool,
     pub pending_tools: HashSet<String>,
-    model: String,
+    model: Name,
     tools: HashMap<String, String>,
     structured: bool,
     inventory_checked: bool,
@@ -176,16 +178,14 @@ pub(super) struct State {
     index_base: usize,
     next_index: usize,
     pub final_events: Option<Vec<Event>>,
+    /// Preserve notification failures across the JSON-RPC error boundary.
+    pub failure: Option<StreamError>,
     usage: UsageLedger,
     pending_flush: Option<usize>,
 }
 
 impl State {
-    pub(super) fn new(
-        model: String,
-        tools: impl Iterator<Item = String>,
-        structured: bool,
-    ) -> Self {
+    pub(super) fn new(model: Name, tools: impl Iterator<Item = String>, structured: bool) -> Self {
         Self {
             session: None,
             live: false,
@@ -201,6 +201,7 @@ impl State {
             index_base: 0,
             next_index: 0,
             final_events: None,
+            failure: None,
             usage: UsageLedger::default(),
             pending_flush: None,
         }
@@ -392,12 +393,22 @@ impl State {
                         })
                         .collect::<Vec<_>>()
                         .join("\n");
-                    return Err(StreamError::other(format!("Claude Code {error}: {detail}")));
-                }
-                if message.model.as_deref() != Some(&self.model) {
-                    return Err(StreamError::other(
-                        "Claude Code answered with a different or unreported model",
-                    ));
+                    let rejection = match error.as_str() {
+                        "model_not_found" => Error::ModelUnavailable {
+                            model: self.model.clone(),
+                            detail,
+                        },
+                        "invalid_request" => Error::RequestRejected {
+                            model: self.model.clone(),
+                            detail,
+                        },
+                        _ => {
+                            return Err(StreamError::other(format!(
+                                "Claude Code {error}: {detail}"
+                            )));
+                        }
+                    };
+                    return Err(StreamError::other(rejection.to_string()).with_source(rejection));
                 }
                 self.usage.observe(&message);
                 Ok(vec![])
