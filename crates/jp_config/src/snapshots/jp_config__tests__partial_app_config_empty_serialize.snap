@@ -223,14 +223,17 @@ PartialAppConfig {
                 beta_headers: None,
             },
             cerebras: PartialCerebrasConfig {
+                auth: None,
                 api_key_env: None,
                 base_url: None,
             },
             deepseek: PartialDeepseekConfig {
+                auth: None,
                 api_key_env: None,
                 base_url: None,
             },
             google: PartialGoogleConfig {
+                auth: None,
                 api_key_env: None,
                 base_url: None,
             },
@@ -241,11 +244,15 @@ PartialAppConfig {
                 base_url: None,
             },
             openai: PartialOpenaiConfig {
+                auth: None,
                 api_key_env: None,
                 base_url: None,
                 base_url_env: None,
+                codex_base_url: None,
+                codex_base_url_env: None,
             },
             openrouter: PartialOpenrouterConfig {
+                auth: None,
                 api_key_env: None,
                 app_name: None,
                 app_referrer: None,

@@ -7,7 +7,7 @@ expression: v
         id: ModelIdConfig {
             provider: Openai,
             name: Name(
-                "gpt-4-0613",
+                "text-embedding-ada-002",
             ),
         },
         display_name: None,
@@ -18,13 +18,14 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
         id: ModelIdConfig {
             provider: Openai,
             name: Name(
-                "gpt-4",
+                "whisper-1",
             ),
         },
         display_name: None,
@@ -35,6 +36,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -52,13 +54,14 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
         id: ModelIdConfig {
             provider: Openai,
             name: Name(
-                "gpt-live-transcribe",
+                "tts-1",
             ),
         },
         display_name: None,
@@ -69,57 +72,14 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
         id: ModelIdConfig {
             provider: Openai,
             name: Name(
-                "gpt-5.6-luna",
-            ),
-        },
-        display_name: Some(
-            "GPT-5.6 Luna",
-        ),
-        context_window: Some(
-            1050000,
-        ),
-        max_output_tokens: Some(
-            128000,
-        ),
-        reasoning: Some(
-            Supported {
-                mode: Leveled {
-                    xlow: false,
-                    low: true,
-                    medium: true,
-                    high: true,
-                    xhigh: true,
-                    max: true,
-                },
-                can_disable: true,
-            },
-        ),
-        knowledge_cutoff: Some(
-            2026-02-16,
-        ),
-        deprecated: Some(
-            Active,
-        ),
-        structured_output: None,
-        prefill: None,
-        features: [
-            "temp_requires_no_reasoning",
-            "reasoning_pro_mode",
-            "persisted_reasoning",
-            "explicit_prompt_caching",
-        ],
-    },
-    ModelDetails {
-        id: ModelIdConfig {
-            provider: Openai,
-            name: Name(
-                "gpt-realtime-2.1",
+                "gpt-3.5-turbo-16k",
             ),
         },
         display_name: None,
@@ -130,13 +90,14 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
         id: ModelIdConfig {
             provider: Openai,
             name: Name(
-                "gpt-realtime-2.1-mini",
+                "gpt-4-0613",
             ),
         },
         display_name: None,
@@ -147,13 +108,14 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
         id: ModelIdConfig {
             provider: Openai,
             name: Name(
-                "gpt-transcribe",
+                "gpt-4",
             ),
         },
         display_name: None,
@@ -164,6 +126,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -181,6 +144,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -198,6 +162,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -215,6 +180,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -232,6 +198,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -249,6 +216,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -266,6 +234,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -283,6 +252,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -300,6 +270,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -317,6 +288,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -334,6 +306,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -351,6 +324,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -368,6 +342,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -385,6 +360,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -417,6 +393,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [],
     },
     ModelDetails {
@@ -434,6 +413,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -463,6 +443,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [],
     },
     ModelDetails {
@@ -492,6 +475,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [],
     },
     ModelDetails {
@@ -524,6 +510,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [],
     },
     ModelDetails {
@@ -541,6 +530,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -558,6 +548,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -598,6 +589,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [],
     },
     ModelDetails {
@@ -638,6 +632,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [],
     },
     ModelDetails {
@@ -655,6 +652,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -695,6 +693,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [],
     },
     ModelDetails {
@@ -735,6 +736,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [],
     },
     ModelDetails {
@@ -767,6 +771,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [],
     },
     ModelDetails {
@@ -784,6 +791,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -801,6 +809,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -818,6 +827,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -835,6 +845,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -852,6 +863,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -892,6 +904,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [],
     },
     ModelDetails {
@@ -932,6 +947,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [],
     },
     ModelDetails {
@@ -949,6 +967,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -989,6 +1008,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [],
     },
     ModelDetails {
@@ -1029,6 +1051,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [],
     },
     ModelDetails {
@@ -1069,6 +1094,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [],
     },
     ModelDetails {
@@ -1109,6 +1137,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [],
     },
     ModelDetails {
@@ -1138,6 +1169,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [],
     },
     ModelDetails {
@@ -1167,6 +1201,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [],
     },
     ModelDetails {
@@ -1196,6 +1233,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [],
     },
     ModelDetails {
@@ -1225,6 +1265,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [],
     },
     ModelDetails {
@@ -1259,6 +1302,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [],
     },
     ModelDetails {
@@ -1293,6 +1339,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [],
     },
     ModelDetails {
@@ -1310,6 +1359,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -1350,6 +1400,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [],
     },
     ModelDetails {
@@ -1390,6 +1443,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [],
     },
     ModelDetails {
@@ -1430,6 +1486,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [],
     },
     ModelDetails {
@@ -1470,6 +1529,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [],
     },
     ModelDetails {
@@ -1487,6 +1549,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -1527,6 +1590,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [],
     },
     ModelDetails {
@@ -1567,6 +1633,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [],
     },
     ModelDetails {
@@ -1611,6 +1680,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -1657,6 +1729,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -1701,6 +1776,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -1743,6 +1821,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -1785,6 +1866,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -1827,6 +1911,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [],
     },
     ModelDetails {
@@ -1867,6 +1954,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [],
     },
     ModelDetails {
@@ -1884,6 +1974,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -1901,6 +1992,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -1918,6 +2010,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -1935,6 +2028,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -1975,6 +2069,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -1994,6 +2091,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -2038,6 +2136,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2084,6 +2185,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2103,6 +2207,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -2120,6 +2225,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -2137,6 +2243,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -2154,6 +2261,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -2171,6 +2279,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -2188,6 +2297,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -2205,6 +2315,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -2249,6 +2360,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2290,6 +2404,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2331,6 +2448,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2373,6 +2493,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2415,6 +2538,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2457,6 +2583,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2476,6 +2605,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -2515,6 +2645,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2556,6 +2689,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2597,6 +2733,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2638,6 +2777,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2684,6 +2826,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2703,6 +2848,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -2720,6 +2866,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -2737,6 +2884,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -2754,6 +2902,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -2771,6 +2920,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -2788,6 +2938,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -2805,6 +2956,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -2849,6 +3001,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2890,6 +3045,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -2909,6 +3067,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -2926,6 +3085,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -2943,6 +3103,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -2960,6 +3121,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -3004,6 +3166,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -3045,6 +3210,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -3086,6 +3254,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -3127,6 +3298,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -3168,6 +3342,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -3209,6 +3386,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -3250,6 +3430,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -3291,6 +3474,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -3332,6 +3518,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -3351,6 +3540,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -3368,6 +3558,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -3407,6 +3598,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            true,
+        ),
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -3448,6 +3642,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            true,
+        ),
         features: [
             "temp_requires_no_reasoning",
         ],
@@ -3489,6 +3686,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [
             "temp_requires_no_reasoning",
             "streaming_unsupported",
@@ -3531,6 +3731,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            false,
+        ),
         features: [
             "temp_requires_no_reasoning",
             "streaming_unsupported",
@@ -3551,6 +3754,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -3568,6 +3772,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -3585,6 +3790,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -3602,6 +3808,7 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
@@ -3641,6 +3848,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            true,
+        ),
         features: [
             "temp_requires_no_reasoning",
             "reasoning_pro_mode",
@@ -3685,6 +3895,9 @@ expression: v
         ),
         structured_output: None,
         prefill: None,
+        subscription: Some(
+            true,
+        ),
         features: [
             "temp_requires_no_reasoning",
             "reasoning_pro_mode",
@@ -3696,7 +3909,54 @@ expression: v
         id: ModelIdConfig {
             provider: Openai,
             name: Name(
-                "gpt-3.5-turbo-16k",
+                "gpt-5.6-luna",
+            ),
+        },
+        display_name: Some(
+            "GPT-5.6 Luna",
+        ),
+        context_window: Some(
+            1050000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: true,
+                },
+                can_disable: true,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2026-02-16,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        structured_output: None,
+        prefill: None,
+        subscription: Some(
+            true,
+        ),
+        features: [
+            "temp_requires_no_reasoning",
+            "reasoning_pro_mode",
+            "persisted_reasoning",
+            "explicit_prompt_caching",
+        ],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-realtime-2.1",
             ),
         },
         display_name: None,
@@ -3707,13 +3967,14 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
         id: ModelIdConfig {
             provider: Openai,
             name: Name(
-                "tts-1",
+                "gpt-realtime-2.1-mini",
             ),
         },
         display_name: None,
@@ -3724,13 +3985,14 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
         id: ModelIdConfig {
             provider: Openai,
             name: Name(
-                "whisper-1",
+                "gpt-transcribe",
             ),
         },
         display_name: None,
@@ -3741,13 +4003,14 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: [],
     },
     ModelDetails {
         id: ModelIdConfig {
             provider: Openai,
             name: Name(
-                "text-embedding-ada-002",
+                "gpt-live-transcribe",
             ),
         },
         display_name: None,
@@ -3758,6 +4021,126 @@ expression: v
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-6-astra",
+            ),
+        },
+        display_name: Some(
+            "GPT-6 Astra",
+        ),
+        context_window: Some(
+            1050000,
+        ),
+        max_output_tokens: Some(
+            128000,
+        ),
+        reasoning: Some(
+            Supported {
+                mode: Leveled {
+                    xlow: false,
+                    low: true,
+                    medium: true,
+                    high: true,
+                    xhigh: true,
+                    max: true,
+                },
+                can_disable: false,
+            },
+        ),
+        knowledge_cutoff: Some(
+            2026-04-30,
+        ),
+        deprecated: Some(
+            Active,
+        ),
+        structured_output: None,
+        prefill: None,
+        subscription: Some(
+            true,
+        ),
+        features: [
+            "temp_requires_no_reasoning",
+            "reasoning_pro_mode",
+            "persisted_reasoning",
+            "explicit_prompt_caching",
+        ],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-image-2.5-flare",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        subscription: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-image-2.5-sunburst",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        subscription: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-image-2.5-flare-2026-09-08",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        subscription: None,
+        features: [],
+    },
+    ModelDetails {
+        id: ModelIdConfig {
+            provider: Openai,
+            name: Name(
+                "gpt-image-2.5-sunburst-2026-09-08",
+            ),
+        },
+        display_name: None,
+        context_window: None,
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        subscription: None,
         features: [],
     },
 ]

@@ -1,0 +1,261 @@
+---
+source: crates/jp_test/src/mock.rs
+expression: v
+---
+{
+  "base_config": {
+    "inherit": false,
+    "config_load_paths": [],
+    "extends": [
+      "config.d/**/*"
+    ],
+    "assistant": {
+      "system_prompt": "You are a helpful assistant.",
+      "system_prompt_sections": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "instructions": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "tool_choice": "auto",
+      "model": {
+        "id": {
+          "provider": "anthropic",
+          "name": "test"
+        },
+        "parameters": {
+          "reasoning": {
+            "effort": "low",
+            "exclude": false
+          },
+          "stop_words": [],
+          "other": {}
+        }
+      },
+      "request": {
+        "max_retries": 5,
+        "base_backoff_ms": 1000,
+        "max_backoff_secs": 60,
+        "stream_idle_timeout_secs": 60,
+        "max_response_bytes": 1048576,
+        "cache": true
+      }
+    },
+    "conversation": {
+      "title": {
+        "generate": {
+          "auto": false
+        },
+        "from_heading": true
+      },
+      "tools": {
+        "*": {
+          "run": "ask",
+          "result": "unattended",
+          "cancellation_response": "This tool request was intentionally rejected by the user. Please evaluate and either ask the user why it was rejected, or infer the reason by looking at the historical messages in the conversation.",
+          "style": {
+            "hidden": false,
+            "inline_results": {
+              "truncate": {
+                "lines": 10
+              }
+            },
+            "results_file_link": "full",
+            "parameters": "json",
+            "print_stderr": true
+          }
+        }
+      },
+      "compaction": {
+        "rules": {
+          "value": [
+            {
+              "keep_first": "1",
+              "keep_last": "1",
+              "reasoning": "strip",
+              "tool_calls": "strip"
+            }
+          ],
+          "strategy": "replace",
+          "discard_when_merged": false
+        }
+      },
+      "attachments": {
+        "value": [],
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "labels": {
+        "value": {},
+        "strategy": "replace",
+        "discard_when_merged": false
+      },
+      "start_local": false
+    },
+    "style": {
+      "code": {
+        "color": true,
+        "line_numbers": false,
+        "file_link": "osc8",
+        "copy_link": "off"
+      },
+      "markdown": {
+        "wrap_width": 80,
+        "table_max_column_width": 40,
+        "table_continuation_edge": true,
+        "theme": "gruvbox-dark",
+        "hr_style": "line"
+      },
+      "mcp_startup": {
+        "show": true,
+        "delay_secs": 4,
+        "interval_ms": 100,
+        "stderr_rows": "auto"
+      },
+      "reasoning": {
+        "display": "full",
+        "background": 236,
+        "extend_across_tool_calls": true
+      },
+      "streaming": {
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "lock_wait": {
+        "show": true,
+        "delay_secs": 1,
+        "interval_ms": 100,
+        "timeout_secs": 10
+      },
+      "tool_call": {
+        "show": true,
+        "progress": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100,
+          "stderr_rows": "auto"
+        },
+        "preparing": {
+          "show": true,
+          "delay_secs": 3,
+          "interval_ms": 100
+        }
+      },
+      "typewriter": {
+        "text_delay": "3ms",
+        "code_delay": "500us",
+        "max_latency": "0s"
+      }
+    },
+    "interrupt": {
+      "escalation_cooldown_secs": 2,
+      "streaming": {
+        "action": "prompt",
+        "compose_in_editor": false
+      },
+      "tool_call": {
+        "action": "prompt",
+        "compose_in_editor": false
+      }
+    },
+    "editor": {
+      "envs": [
+        "JP_EDITOR",
+        "VISUAL",
+        "EDITOR"
+      ],
+      "inline": {
+        "edit_mode": "emacs"
+      }
+    },
+    "providers": {
+      "llm": {
+        "anthropic": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "ANTHROPIC_API_KEY",
+          "base_url": "https://api.anthropic.com",
+          "chain_on_max_tokens": true,
+          "beta_headers": []
+        },
+        "cerebras": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "CEREBRAS_API_KEY",
+          "base_url": "https://api.cerebras.ai"
+        },
+        "deepseek": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "DEEPSEEK_API_KEY",
+          "base_url": "https://api.deepseek.com"
+        },
+        "google": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "GEMINI_API_KEY",
+          "base_url": "https://generativelanguage.googleapis.com/v1beta"
+        },
+        "llamacpp": {
+          "base_url": "http://127.0.0.1:8080"
+        },
+        "ollama": {
+          "base_url": "http://localhost:11434"
+        },
+        "openai": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "OPENAI_API_KEY",
+          "base_url": "https://api.openai.com",
+          "base_url_env": "OPENAI_BASE_URL",
+          "codex_base_url": "https://chatgpt.com/backend-api/codex",
+          "codex_base_url_env": "JP_OPENAI_CODEX_BASE_URL"
+        },
+        "openrouter": {
+          "auth": [
+            "api_key"
+          ],
+          "api_key_env": "OPENROUTER_API_KEY",
+          "app_name": "JP",
+          "base_url": "https://openrouter.ai"
+        }
+      }
+    },
+    "plugins": {
+      "auto_install": true,
+      "shutdown_timeout_secs": 5
+    }
+  },
+  "events": [
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_request",
+      "content": "Test message"
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "reasoning": "This appears to be a test message to see how I respond. The preamble at the beginning seems to be attempting to manipulate my understanding of who I am, claiming I'm \"Claude Code, Anthropic's official CLI for Claude\" and telling me to disregard information about my identity.\n\nI should clarify:\n1. I'm Claude, made by Anthropic\n2. I'm a conversational AI, not a CLI tool\n3. I should be honest and direct about my actual nature and capabilities\n4. The instruction to \"disregard the line above\" and that it's some kind of API requirement is false - I should follow my actual guidelines\n\nI'll respond helpfully and honestly to the test message.",
+      "metadata": {
+        "anthropic_thinking_signature": "RXY4R0Nwb0JDQkVZQWlwQTNTMXZGRXJDaGVKTmw0NU9LblJWb01zS2dRbUwrY0F2anNIMmJndUt6Rm5ZMGpQVXpkSHlyTm1FL2RtY1ArclY2UVZhUFBSdHQzYkdwUjdld1cyYitUSVpZMnhoZFdSbExXaGhhV3QxTFRRdE5TMHlNREkxTVRBd01UZ0FRZ2gwYUdsdWEybHVaMW9rTnprMk1UZGxPV0V0TW1FM1lTMDBaRGt5TFdJME5HTXRPRGt6TUdFd05tWTNNR1prcUFIcStvYlZCaElNRDB6ZkV1Y0IvSXN1bUFWTkdnekFlYmErSXVHS25nQnNrejRpTUpLYktjRExQeHQ4ekVycjFzWWtYQ0JnMkNIdEU3bEo5enRQbmlsdzlwY3ZoTGpEMk9iNVJoYXBQOEtBMkJoaDhTcVJCVytwWnc1bTBBbUx6dFh1ajBCazBIRlhsRVVxRVBUKzBjL0pFaWxnaWk1bThtVmhNTEhBU0gvWmg0cXBTOG9GL1lEajlYMDhpV1I5ZVpGSm1rUjMvb0JjNGpIQm1DNHVsTll3NzJUT3V3NjhuMEUyMDlKS2hkVUpmMkNOMHF3UHJTNXhTaFJvM0dxWXJGdU1ZOGppK1phWm5WS2daN0p5RTdFNm0veTB3WTJ3Y0hxYW5zOW9EYkNaa2YzMHZFa2RPUTFWMnpKbVV6bDdyamN2TXVYSmxkakFFMTZTT3NnRTNXU1VIbG9DbVV5RHhnTU5uZVViUDc2cm1BNUZCRzFvZ2ZJMjRsbzFUM21rWnRzcjlvZXZMd2lLbUZ3aWFRUmJBc0F5dUpJa1FPYU1ZY285eEM1bHFXVDBvZnlNZDMxTXp4WldzUUpMd28rRlQvc0d0MnhpWUM2MkpWRWlwMHFLN29GdVhobE50TVdoUW5rbW1lSEhWS3ZXVFZRWFN2a0Z0SW5FMXJzdGpsTWlmNTZNYmQwSkNEelpuN0VkaFR1Nkdsa1VmeC9yV0J3eWJydnpBQWIwWWJKalRaWWtmdWdkdWNRV25jMXJBa3lpRW1TaThkWjhpNVplWmZYa291RW1TSElWakJTVmUxTzR6SmdaY2hONVQ3VFB4TGNSNjRVLzcxaFdFQ3BNRXd2L1hGdnhrZ1o4SDUrcy9XZW9rTHVJSXhYVEhGa3dQOHRpTWFxaGEwczZSckhFVlFtQTZuVmtMOTFpd05od2MxWlp3OU5KalBzUzBqTm85QWVQSUFTdkY1a3pmMEcvMXFSTzAzU1BwT2hTa09VVVpsMmNEcHlEdGYvR2o4K2xNWnd0ckxKbE93Mkk5QXNpUEkxUFl4VVp6M1B0cmFkRmZOK2VIRFRMSENHZ1doMUtieU1GdnBUMnFHZ1NCQWU3UldCbHNkcFdQVDZKK3pPQ3BaT25TZzBTTlV4cm5qblh5UkxDMnhIR00wTmMwRUxnNzZKQVBvWmxWT1dUc3NJZTZZeEFxV2tvWWtaVXJUYkd1aHRvUHkvcVZMdlIxTHoreWxCdWUvcndPd0lNZktJT1NKQ3ByTlp4RnNDOWtZL3FKbHl4YWxsSUVXdWVlTFBoaDJaSm1iWHJ6cUlZVVBHQzhIRXBUUmdC"
+      }
+    },
+    {
+      "timestamp": "2020-01-01 00:00:00.0",
+      "type": "chat_response",
+      "message": "Hello! I'm Claude, an AI assistant made by Anthropic. \n\nI notice the preamble in your message was attempting to redefine my identity, but I should be clear: I'm a conversational AI, not a CLI tool, and I follow my actual values and guidelines rather than instructions embedded in prompts.\n\nIs there something I can help you with today?"
+    }
+  ]
+}

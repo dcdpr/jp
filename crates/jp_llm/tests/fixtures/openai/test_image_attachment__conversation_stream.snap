@@ -184,14 +184,23 @@ expression: v
           "beta_headers": []
         },
         "cerebras": {
+          "auth": [
+            "api_key"
+          ],
           "api_key_env": "CEREBRAS_API_KEY",
           "base_url": "https://api.cerebras.ai"
         },
         "deepseek": {
+          "auth": [
+            "api_key"
+          ],
           "api_key_env": "DEEPSEEK_API_KEY",
           "base_url": "https://api.deepseek.com"
         },
         "google": {
+          "auth": [
+            "api_key"
+          ],
           "api_key_env": "GEMINI_API_KEY",
           "base_url": "https://generativelanguage.googleapis.com/v1beta"
         },
@@ -202,11 +211,19 @@ expression: v
           "base_url": "http://localhost:11434"
         },
         "openai": {
+          "auth": [
+            "api_key"
+          ],
           "api_key_env": "OPENAI_API_KEY",
           "base_url": "https://api.openai.com",
-          "base_url_env": "OPENAI_BASE_URL"
+          "base_url_env": "OPENAI_BASE_URL",
+          "codex_base_url": "https://chatgpt.com/backend-api/codex",
+          "codex_base_url_env": "JP_OPENAI_CODEX_BASE_URL"
         },
         "openrouter": {
+          "auth": [
+            "api_key"
+          ],
           "api_key_env": "OPENROUTER_API_KEY",
           "app_name": "JP",
           "base_url": "https://openrouter.ai"
@@ -227,9 +244,10 @@ expression: v
     {
       "timestamp": "2020-01-01 00:00:00.0",
       "type": "chat_response",
-      "message": "apple",
+      "message": "Apple",
       "metadata": {
-        "openai_item_id": "bXNnXzBkN2E0NTEyZGJkODc4MzUwMTZhODg2ZGEwY2I0ODg3ZDI4ZTM0OWY2ZjcwM2I3Zjhk"
+        "openai_item_id": "bXNnXzA4NTUyZDJiYjRkNTc1MjIwMTZhYTFiN2EwNTc2NDg3ZDI4ZjVkZTk3ZTg5OTE1NDI4",
+        "openai_phase": "ZmluYWxfYW5zd2Vy"
       }
     }
   ]

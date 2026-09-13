@@ -14,224 +14,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                "**Calculating stepwise**\n\nOkay",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                ",",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " I",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " want",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " to",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " address",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " this",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " step",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "-by",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "-step",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                ".",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " I",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                "’m",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " thinking",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " about",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " how",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " to",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " approach",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " the",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " problem",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " effectively",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                ".",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " The",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " note",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " about",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " possibly",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " documenting",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " something",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " irrelevant",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " isn't",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " what",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " I",
+                "**Calculating step-by-step**\n\nI",
             ),
             metadata: {},
         },
@@ -252,49 +35,14 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " focus",
+                " break",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " on",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                ".",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " And",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " hey",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                ",",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " doing",
+                " down",
             ),
             metadata: {},
         },
@@ -308,14 +56,21 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " math",
+                " calculation",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                ",",
+                ":",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " for",
             ),
             metadata: {},
         },
@@ -343,7 +98,336 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " equals",
+                ",",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " I",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " can",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " think",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " of",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " it",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " as",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " (",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "200",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " minus",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " 9",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                ")",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " times",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " 7",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                ".",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " So",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                ",",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " that",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " would",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " be",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " 200",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " times",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " 7",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                ",",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " which",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " is",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " 140",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "0",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                ",",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " and",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " then",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " I",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " subtract",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " 63",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " (",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                "because",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " 9",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " times",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " 7",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " is",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " 63",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                ").",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " Therefore",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                ",",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " the",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " final",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " answer",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " is",
             ),
             metadata: {},
         },
@@ -371,91 +455,56 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " I",
+                " It's",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " want",
+                " interesting",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " to",
+                " how",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " ensure",
+                " breaking",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " I'm",
+                " it",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " clear",
+                " down",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " with",
+                " helps",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " all",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " these",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " details",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " while",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " getting",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " to",
+                " clarify",
             ),
             metadata: {},
         },
@@ -469,21 +518,7 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " right",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " answer",
-            ),
-            metadata: {},
-        },
-        Part {
-            index: 0,
-            part: Reasoning(
-                " efficiently",
+                " process",
             ),
             metadata: {},
         },
@@ -497,14 +532,35 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " Let",
+                " I",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                "’s",
+                "’ll",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " make",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " sure",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " to",
             ),
             metadata: {},
         },
@@ -518,21 +574,35 @@ expression: v
         Part {
             index: 0,
             part: Reasoning(
-                " refining",
+                " things",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " this",
+                " relevant",
             ),
             metadata: {},
         },
         Part {
             index: 0,
             part: Reasoning(
-                " process",
+                " in",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " the",
+            ),
+            metadata: {},
+        },
+        Part {
+            index: 0,
+            part: Reasoning(
+                " future",
             ),
             metadata: {},
         },
@@ -546,8 +616,8 @@ expression: v
         Flush {
             index: 0,
             metadata: {
-                "openai_item_id": String("rs_023419931c2572d9016a886d7a3b2087d2b735df7c081b55ea"),
-                "openai_encrypted_content": String("gAAAAABqiG17IiPjgKLBCF3ep2XxUUE8OCRhf-A5Xt1UDvUiaVE1hq4CR1QjQDJEKq2MtSh9DYx6AKkjod-oCU_444Lewu0CAZJzmGtZ9G5XbYSVpXlW4ZE3g80hie8lA7VK1kwWuNhYp7xNxNb9efh_efoKgKGtmiYHeS9yZ09WABATljwYzv675nd_wRipOBbB5aAEuBTfx-LXjmvFGL-T9fApMrNV7oBh2UZv0gnAOkcFswdpPlxfvQdu4iPtUj_wjL0RWnlfN8YE1mv6He6LnPu2XlagYTbl77NMyhdHnP0Ua3-hP21assO8NUMd9MtuE4N9QYolQDuA8a9Wd3xNGlG7UwZLqKIL_-zP5K2uigSUmNqx8UcRlMVEKFwEQ6528sfFMWjXCHbfYTMkXwOiB7A2gEhMnr-VwrGl7XaZv-HWLKPiTUATqj9LyOmIMAs9M2FpEz_wwJl-wGeJCqBjjRttc9vMjcE7uVUUu3x8vNvkQoUeg7Vu5TUzWNdzhjsrfJdDLlpXjTyEKmRfRhtPnwUGx46d4_qWJ2H2JXZJn-IJevpd_GeQW-K24xAuEhtlbiYeD68e4jVmp9G8HK2c2MXsg8jZTIFq2i23S97edEpIB7DSV_NoAFuzlCw2HHWpAq-1-CCzW19jKzi3U3_gy9U7B-B4d11zn8-61-bw5nuKU_ytw1Ml4rTiMPGQrWE9yv0kwZHFU8s2WHBPDDXS1F0_j3BPRDydRukmx9Yn5uy24Xq2Vf2e1TGNWwSLG0LtBTe_-znbeU7k-wa0hPCAmv9rHxinVyhL2x333nWaRC0YnzWRyiVpoX2h6ay1Ie_ZxElfyXCd8Yk-MyR2nMeN3oMGB-ov0e6Op_NzKiH7flpwNLCNo6IP5qZWvkms15PY62icisHBCM9GogENfL0EvwVg189he850eFmN3YmBejTjgbaIi8brONPHMUipoDKUUZx5V9NW0zyWWQqRnbZmjnf884f7auZm6yUSiGCh33J5CYn77mL6WukjOZjwXv8cWZyJlpIZS0bAlJljLF-TEGjKy12x-Uel4YkxMh9ZGy7nNGCElExxVasawQDBdcQzF8PCrhguDA2y69l9iI5tZGbMfZxCe1AcmrlD7FsQCXfC27ZGivIwuA1u2cs4pcnHkQmMiZsto9sUmFgJbGwFTFv2BUCf1SJQykuHWN3T13pAf8SPr64WzGJ9U0JmyCtxHUpz8ctPCr9w_xMxdYu6B0r3Qj02mN-0K2tUbMSRsIyKMZLbmPyh4mgmOtN6pmh4wbqNZt_oRDVgQvWLeCeXMR9b1v7zrw=="),
+                "openai_item_id": String("rs_0a5b8e5172a3e689016aa1b7a2823487d2b089072d343b5943"),
+                "openai_encrypted_content": String("gAAAAABqobejyQtCjPcOcXgE8KY4g05lZ5jfe9xtbTGNei30WjHwknFW3ngX6jEk2QE95WlANax1fJjShjvrghEX6cFbuOD0Bh92rKx92P5CZZfSOO5jZPpGShHvYrrZlawyzrS2sGcUMiZHY5G8vU_Hyoha4JZgKj8b9YmA1OUzk9kZdpfBZBpEykha_7Du7F_1G9Nucj6YD_MWyvRk3bhqfWdR7R3QWGec7XMIvrCuhdVsasV8x1GjMH3zBSB9VrenDeKgXaZ98n2gnF8rSZ3Ev_uHAaWOicBRSRSgYVw0d5LjaJPm5peCSED50o-I7zP381iFhnLP6yEH-zqa7qRzOk7nn3-NGwXQTNEBGWkZgqo0qGr0SI8x4GHpueOYYWsM83yIpIGFL6YtSV4hB0C-Xc_EOO_QSLQTsx_Njcvl-uS7PusLL0n0ApUX3IVw6-g8c9M4skxHq5_xg5SCiSHbk80E1iFRhC9dgQD9laQD396bsnAujGuDLLTfFG5whi7CTiYBIPJoobfSx5dn7PQvGwHYccRQPZ86j8gWALCR6Sl_lJPJzgH-Q25VZzFO1pkyxOTvYMdKCqDBrnvlO6mrkmLjaOVjYMg-XyOFx5O60-_6cfeIQ9ovbeKlg6UOOgaFFw4xpybysmMLcdRVRLTuvQ00MixJpfIS2d2uStrFIisK3oHXXIOg8kO_rLvO_0biXWyJVIT11KaL-dOfERBy1JwSWsfFiC4trh8L9fvX-l3U8dabCbgVJAUZlDcfVLFRcOMzrwuXj4ANarXMhLFidBo9Kc2Z0xCsowbCmlDVAF-ZTyLHcuZw_h8MNakZIN2mcdqkW404siO7p6nacCuLcoSOyX1F27Wlw0oGy_1UMjh9sSoqbHMY7YoT38YOC1ryPFP5sjZiE3XiHbVKvJ2pwrUJSHR8x4gnLSZTNM_YPkb3O4aaD9Agb9sXsfKi95jq7tdTwMhp7VnMwSE-JwJSmvX0Zh5yNcbj6_ZT_WglM_z4KOww2NMu3E0BfkBO0BaDhEei7OBVCA0JKi30B9Y2RiHbAZUbH8WgiJT0JUJ9yI9B3wnTWcAd6nNs755tc3pBitBWfdkaxjjFndjoDgZYW8d4504dHGRZxrhnci5GPAdDHPXWw5N1SnUPhMf4-4NDrrzHiaQqWKwM1vi7AX6lQGhgLGAry2lBc42_1ONc1UYeTcDr2RxuzIOnNGS1og7lqnO9OI0nP0G7y9r-X-0CEp9umzdSnMBLMCJXM-NFw5gEiO8BICPRfSYDHuJ3K3wE1us8awDGZDtQx4AUnTKyOODoAqYuZA=="),
             },
         },
         Part {
@@ -560,14 +630,14 @@ expression: v
         Part {
             index: 1,
             part: Message(
-                "\\(191 \\times 7 = (190 \\times 7) + (1 \\times 7) = 1330 + 7 = \\boxed{1337}\\)",
+                "\\(7 \\times 191 = 7 \\times (200 - 9) = 1400 - 63 = \\boxed{1337}\\).",
             ),
             metadata: {},
         },
         Flush {
             index: 1,
             metadata: {
-                "openai_item_id": String("msg_023419931c2572d9016a886d7b474887d2b66284d2a49efb63"),
+                "openai_item_id": String("msg_0a5b8e5172a3e689016aa1b7a3260487d2835f5aa54f1b285e"),
                 "openai_phase": String("final_answer"),
             },
         },
@@ -586,14 +656,14 @@ expression: v
         Part {
             index: 0,
             part: Message(
-                "\\(191 \\times 7 = (190 \\times 7) + (1 \\times 7) = 1330 + 7 = \\boxed{1337}\\)",
+                "\\(7 \\times 191 = 7 \\times (200 - 9) = 1400 - 63 = \\boxed{1337}\\).",
             ),
             metadata: {},
         },
         Flush {
             index: 0,
             metadata: {
-                "openai_item_id": String("msg_023419931c2572d9016a886d7ea90487d2b3055d01cf5694b9"),
+                "openai_item_id": String("msg_0a5b8e5172a3e689016aa1b7a861bc87d29552d69e9bf04bc0"),
                 "openai_phase": String("final_answer"),
             },
         },

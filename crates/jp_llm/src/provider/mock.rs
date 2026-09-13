@@ -237,6 +237,21 @@ impl Provider for MockProvider {
     }
 }
 
+/// The mock provider's recorded-test route.
+///
+/// It answers in-process, so no traffic reaches the recording server.
+#[cfg(test)]
+pub(crate) static TEST_SUPPORT: super::ApiOnlyTestSupport = super::ApiOnlyTestSupport(&API_ROUTE);
+
+#[cfg(test)]
+static API_ROUTE: super::ApiTestRoute = super::ApiTestRoute {
+    id: ProviderId::Test,
+    base_url: |_| String::new(),
+    set_base_url: |_, _| {},
+    use_replay_credentials: |_| {},
+    model: || ModelDetails::empty("test/mock-model".parse().unwrap()),
+};
+
 #[cfg(test)]
 #[path = "mock_tests.rs"]
 mod tests;

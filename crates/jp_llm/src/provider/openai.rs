@@ -1,8 +1,11 @@
-use std::{env, time::Duration};
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use async_trait::async_trait;
 use base64::Engine as _;
-use chrono::NaiveDate;
+use chrono::{NaiveDate, Utc};
 use futures::{StreamExt as _, TryStreamExt as _, stream};
 use jp_attachment::AttachmentContent;
 use jp_config::{
@@ -11,24 +14,26 @@ use jp_config::{
         id::{Name, ProviderId},
         parameters::{CustomReasoningConfig, ReasoningConfig, ReasoningEffort, ServiceTier},
     },
-    providers::llm::openai::OpenaiConfig,
+    providers::llm::{AuthEntry, openai::OpenaiConfig},
 };
 use jp_conversation::{
     ConversationStream,
     event::{ChatResponse, ConversationEvent, EventKind, ToolCallResponse},
     thread::text_attachments_to_xml,
 };
+use jp_credentials::CredentialStore;
 use openai_responses::{
     Client, CreateError, StreamError as OpenaiStreamError,
     types::{self, Include, Request, SummaryConfig},
 };
-use reqwest::header::{self, HeaderMap, HeaderValue};
+use reqwest::header::{self, HeaderMap, HeaderName, HeaderValue};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 use tracing::{debug, trace, warn};
 
 use super::{EventStream, ModelDetails, Provider};
 use crate::{
+    credential::Credential,
     error::{
         Error, Result, StreamError, StreamErrorKind, extract_retry_from_text,
         looks_like_context_window_error, looks_like_quota_error,
@@ -40,6 +45,32 @@ use crate::{
     stream::with_tool_call_keepalive,
     tool::{ToolDefinition, json_schema},
 };
+
+pub mod auth;
+pub mod oauth;
+#[cfg(test)]
+pub(crate) mod parity;
+pub mod rate_limits;
+pub(crate) mod resolve;
+pub mod usage;
+
+#[cfg(test)]
+#[path = "openai/fold_tests.rs"]
+mod fold_tests;
+
+#[cfg(test)]
+#[path = "openai/latency_tests.rs"]
+mod latency_tests;
+
+#[cfg(test)]
+#[path = "openai/switchable_tests.rs"]
+mod switchable_tests;
+
+/// The path the subscription host serves the responses endpoint at.
+///
+/// The API serves it at `/v1/responses`; the subscription host mounts the same
+/// endpoint one level up.
+const CODEX_RESPONSES_PATH: &str = "/responses";
 
 static PROVIDER: ProviderId = ProviderId::Openai;
 
@@ -85,16 +116,345 @@ const TOOL_CALL_KEEPALIVE_INTERVAL: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone)]
 pub struct Openai {
-    reqwest_client: reqwest::Client,
-    client: Client,
+    config: OpenaiConfig,
+
+    /// The credential store backing `profile` chain entries.
+    ///
+    /// `None` when the chain holds no profile entries; the default
+    /// `["api_key"]` chain works without touching the store.
+    store: Option<CredentialStore>,
+
+    /// A directly injected credential, bypassing chain resolution.
+    ///
+    /// Test seam: request construction is independent of the credential's
+    /// value, and tests must not read the environment or the store.
+    fixed_credential: Option<(Credential, resolve::Attribution)>,
+
+    /// Where API-key requests go, after the environment override.
     base_url: String,
+
+    /// Where subscription requests go, after the environment override.
+    codex_base_url: String,
+
+    /// The clients built for the most recently resolved credential and session.
+    ///
+    /// A turn issues several requests around tool execution, and resolution
+    /// normally lands on the same credential each time; reusing the clients
+    /// keeps their connection pools alive instead of paying a fresh TLS
+    /// handshake per request.
+    /// A credential switch replaces the entry, since the auth material is baked
+    /// into the clients' default headers, and so does a change of conversation,
+    /// which the session header carries.
+    client_cache: Arc<Mutex<Option<CachedClients>>>,
+}
+
+/// The clients built for one credential and session, and the pair that
+/// identifies them.
+type CachedClients = (Credential, String, Client, reqwest::Client);
+
+impl Openai {
+    /// Build a provider from its configuration.
+    ///
+    /// Construction is the credential preflight: it verifies that at least one
+    /// entry of the `auth` chain could resolve, against a store snapshot and
+    /// the environment, so commands fail fast before starting side-effectful
+    /// work.
+    /// The actual credential is resolved anew before each request the provider
+    /// sends.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the chain, the store, or one of their entries is
+    /// config-shaped-broken, or when no chain entry can resolve.
+    pub fn new(config: &OpenaiConfig) -> Result<Self> {
+        let store = config
+            .auth
+            .iter()
+            .any(AuthEntry::may_need_store)
+            .then(CredentialStore::file_default)
+            .transpose()
+            .map_err(resolve::ResolveError::from)?;
+
+        let provider = Self {
+            config: config.clone(),
+            store,
+            fixed_credential: None,
+            base_url: env_override(&config.base_url_env, &config.base_url),
+            codex_base_url: env_override(&config.codex_base_url_env, &config.codex_base_url),
+            client_cache: Arc::new(Mutex::new(None)),
+        };
+
+        // No model is named at construction, so only account-scoped cooldowns
+        // participate; per-request resolution applies the precise model scope.
+        resolve::preflight(&provider.config, provider.store.as_ref(), "", Utc::now())?;
+
+        Ok(provider)
+    }
+
+    /// Build a provider around an explicit credential, bypassing the chain.
+    ///
+    /// Test seam: no environment or store access, no preflight.
+    #[cfg(test)]
+    pub(crate) fn with_credential(config: &OpenaiConfig, credential: Credential) -> Self {
+        Self {
+            config: config.clone(),
+            store: None,
+            fixed_credential: Some((credential, resolve::Attribution::default())),
+            base_url: config.base_url.clone(),
+            codex_base_url: config.codex_base_url.clone(),
+            client_cache: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    /// Build a provider around an explicit subscription credential.
+    ///
+    /// Test seam for recording and replaying the subscription endpoint without
+    /// reading the user's credential store.
+    #[cfg(test)]
+    pub(crate) fn with_subscription_credential(
+        config: &OpenaiConfig,
+        token: String,
+        account_id: String,
+    ) -> Self {
+        let mut provider = Self::with_credential(config, Credential::Bearer(token));
+        let Some((_, attribution)) = &mut provider.fixed_credential else {
+            unreachable!("with_credential always sets a fixed credential");
+        };
+        attribution.account_id = Some(account_id);
+        provider
+    }
+
+    /// Resolve the credential for a request against `model`.
+    ///
+    /// Refreshes an expired OAuth access token before returning it, so the
+    /// credential handed back is good for the request about to be sent.
+    async fn resolve(&self, model: &str) -> Result<resolve::Attempt> {
+        if let Some((credential, attribution)) = &self.fixed_credential {
+            return Ok(resolve::Attempt {
+                credential: credential.clone(),
+                attribution: attribution.clone(),
+                selected: None,
+                notices: vec![],
+            });
+        }
+
+        Ok(resolve::resolve(&self.config, self.store.as_ref(), model, Utc::now()).await?)
+    }
+
+    /// Record why the attempt's credential is out and move to the next one.
+    ///
+    /// Returns `None` when there is no chain to advance or nothing further in
+    /// it, which the caller surfaces as the original, now-terminal error.
+    async fn advance(
+        &self,
+        attempt: &resolve::Attempt,
+        error: &StreamError,
+        model: &str,
+    ) -> Option<resolve::Attempt> {
+        let spent = attempt.selected.as_ref()?;
+
+        resolve::advance(
+            &self.config,
+            self.store.as_ref(),
+            spent,
+            error,
+            model,
+            Utc::now(),
+        )
+        .await
+    }
+
+    /// The Responses client and a bare HTTP client for `attempt`'s credential.
+    ///
+    /// A subscription credential goes to a different host, at a different path,
+    /// and carries account attribution the API path never sends.
+    fn clients(
+        &self,
+        attempt: &resolve::Attempt,
+        session_id: &str,
+    ) -> Result<(Client, reqwest::Client)> {
+        if let Ok(cache) = self.client_cache.lock()
+            && let Some((credential, session, client, http)) = cache.as_ref()
+            && *credential == attempt.credential
+            && session == session_id
+        {
+            return Ok((client.clone(), http.clone()));
+        }
+
+        let (token, headers, base_url, path) = match &attempt.credential {
+            Credential::ApiKey(key) => (
+                key.clone(),
+                HeaderMap::new(),
+                self.base_url.clone(),
+                "/v1/responses".to_owned(),
+            ),
+            Credential::Bearer(token) => (
+                token.clone(),
+                Self::subscription_headers(&attempt.attribution, session_id)?,
+                self.codex_base_url.clone(),
+                CODEX_RESPONSES_PATH.to_owned(),
+            ),
+        };
+
+        let client = Client::new(&token)?
+            .with_base_url(base_url)
+            .with_responses_path(path)
+            .with_headers(headers.clone());
+
+        let mut default_headers = headers;
+        default_headers.insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_str(&format!("Bearer {token}"))
+                .map_err(|_| CreateError::InvalidApiKey)?,
+        );
+        let http = reqwest::Client::builder()
+            .default_headers(default_headers)
+            .build()?;
+
+        if let Ok(mut cache) = self.client_cache.lock() {
+            *cache = Some((
+                attempt.credential.clone(),
+                session_id.to_owned(),
+                client.clone(),
+                http.clone(),
+            ));
+        }
+
+        Ok((client, http))
+    }
+
+    /// Spend a reset credit to reopen a spent usage window.
+    ///
+    /// Returns the notice announcing it, or `None` when the account has no
+    /// credit to spend or the redemption was refused — in which case the
+    /// caller falls through to the next credential as it would have anyway.
+    async fn redeem_reset_credit(
+        &self,
+        attempt: &resolve::Attempt,
+        session_id: &str,
+    ) -> Option<String> {
+        let (_, http) = self.clients(attempt, session_id).ok()?;
+        let credits = usage::reset_credits(&http, &self.codex_base_url).await?;
+        let credit = credits.credits.first()?;
+
+        // The session identifies the redemption, so a retried turn spends the
+        // same credit once rather than one per attempt.
+        let redeemed = usage::consume_reset_credit(
+            &http,
+            &self.codex_base_url,
+            session_id,
+            credit.id.as_deref(),
+        )
+        .await;
+
+        redeemed.then(|| {
+            let left = credits.credits.len().saturating_sub(1);
+            format!("subscription limit reached — redeemed a usage reset ({left} left)")
+        })
+    }
+
+    /// The headers a subscription request carries beyond its bearer token.
+    fn subscription_headers(
+        attribution: &resolve::Attribution,
+        session_id: &str,
+    ) -> Result<HeaderMap> {
+        let mut headers = HeaderMap::new();
+        let mut set = |name: &'static str, value: &str| -> Result<()> {
+            headers.insert(
+                HeaderName::from_static(name),
+                HeaderValue::from_str(value).map_err(|_| CreateError::InvalidApiKey)?,
+            );
+            Ok(())
+        };
+
+        set("originator", oauth::ORIGINATOR)?;
+        set("session_id", session_id)?;
+
+        if let Some(account_id) = &attribution.account_id {
+            set("chatgpt-account-id", account_id)?;
+        }
+
+        // A residency-constrained account refuses requests routed anywhere
+        // else, so the constraint on the token has to travel with it.
+        if let Some(residency) = &attribution.residency {
+            set("x-openai-internal-codex-residency", residency)?;
+        }
+
+        Ok(headers)
+    }
+}
+
+/// The session a request belongs to, as the subscription host names it.
+///
+/// Codex identifies a session with a UUID and the host keys prompt-cache
+/// residency off it, so a value that changed per process would start every
+/// invocation on a cold cache.
+/// Deriving it from the conversation instead means the same conversation
+/// reports the same session however many times `jp` runs, which is what makes a
+/// cache write on one turn readable by the next.
+///
+/// A request with no conversation behind it (a model probe) gets the nil UUID:
+/// it caches nothing worth keeping and belongs to no session.
+fn session_id(query: Option<&ChatQuery>) -> String {
+    let Some(query) = query else {
+        return uuid::Uuid::nil().to_string();
+    };
+
+    let key = format!(
+        "jp:conversation:{}",
+        query.thread.events.created_at.timestamp_micros()
+    );
+
+    uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, key.as_bytes()).to_string()
+}
+
+/// The models a `ChatGPT` subscription serves.
+///
+/// Only the ids live here; every property comes from the catalog, which
+/// `subscription_models_are_marked_in_the_catalog` holds to agreement.
+const SUBSCRIPTION_MODELS: &[&str] = &[
+    "gpt-6-astra",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "gpt-5.5",
+    "gpt-5.3-codex-spark",
+];
+
+/// A configured value, overridden by an environment variable when it is set.
+fn env_override(env_key: &str, configured: &str) -> String {
+    std::env::var(env_key).unwrap_or_else(|_| configured.to_owned())
 }
 
 #[async_trait]
 impl Provider for Openai {
     async fn model_details(&self, name: &Name) -> Result<ModelDetails> {
-        self.reqwest_client
-            .get(format!("{}/v1/models/{}", self.base_url, name))
+        let attempt = self.resolve(name.as_ref()).await?;
+
+        // The subscription host serves no model endpoint, so the capability
+        // table is the only source. It is authoritative on the API path too, so
+        // this costs nothing but the round-trip it skips.
+        if attempt.is_subscription() {
+            let details = map_model(ModelResponse::named(name.to_string()))?;
+
+            // Refused here rather than at the host, which answers a model it
+            // does not serve with the same 404 it gives a typo. A model the
+            // table has never heard of is let through: the catalog ships with
+            // the binary and the plan's model set does not.
+            if details.subscription == Some(false) {
+                return Err(Error::UnsupportedForCredential(format!(
+                    "{name} is not served by a ChatGPT subscription; pick one of {}, or add \
+                     `api_key` to providers.llm.openai.auth",
+                    SUBSCRIPTION_MODELS.join(", ")
+                )));
+            }
+
+            return Ok(details);
+        }
+
+        let (_, http) = self.clients(&attempt, &session_id(None))?;
+
+        http.get(format!("{}/v1/models/{}", self.base_url, name))
             .send()
             .await?
             .error_for_status()?
@@ -105,8 +465,20 @@ impl Provider for Openai {
     }
 
     async fn models(&self) -> Result<Vec<ModelDetails>> {
-        self.reqwest_client
-            .get(format!("{}/v1/models", self.base_url))
+        let attempt = self.resolve("").await?;
+
+        // No endpoint enumerates a plan's models, so the catalog answers
+        // instead of the request failing.
+        if attempt.is_subscription() {
+            return SUBSCRIPTION_MODELS
+                .iter()
+                .map(|id| map_model(ModelResponse::named((*id).to_owned())))
+                .collect();
+        }
+
+        let (_, http) = self.clients(&attempt, &session_id(None))?;
+
+        http.get(format!("{}/v1/models", self.base_url))
             .send()
             .await?
             .error_for_status()?
@@ -123,29 +495,344 @@ impl Provider for Openai {
         model: &ModelDetails,
         query: ChatQuery,
     ) -> Result<EventStream> {
+        let session = session_id(Some(&query));
         let (request, is_structured, reasoning_enabled) = create_request(model, query)?;
+        let name = model.id.name.to_string();
+        let mut attempt = self.resolve(&name).await?;
 
-        if model.features.contains(&STREAMING_UNSUPPORTED) {
-            let response = self.client.create(request).await??;
-            let events = map_non_streaming_response(response, is_structured, reasoning_enabled)?;
+        let this = self.clone();
+        let buffered = model.features.contains(&STREAMING_UNSUPPORTED);
 
-            return Ok(stream::iter(events.into_iter().map(Ok::<_, StreamError>)).boxed());
+        // HTTP admission and the first response event happen while the caller
+        // polls this stream, not while it asks the provider to construct one.
+        // The caller can therefore leave its `sending request` phase as soon as
+        // setup is complete and measure time-to-first-output under `waiting for
+        // first tokens` instead.
+        let events = async_stream::stream! {
+            // One redemption per turn. A plan holds few credits, and a window
+            // that closes again right after being reopened is not a window a
+            // second credit would fix.
+            let mut redeemed = false;
+
+            // A credential refused or spent at admission is not a failure of
+            // the request: the next entry in the chain can serve it. Each pass
+            // either sends or retires one entry, so the loop is bounded by the
+            // chain.
+            loop {
+                let notices = std::mem::take(&mut attempt.notices);
+                let subscription = attempt.is_subscription();
+                let (client, _) = match this.clients(&attempt, &session) {
+                    Ok(clients) => clients,
+                    Err(error) => {
+                        yield Err(StreamError::other(error.to_string()));
+                        return;
+                    }
+                };
+
+                let mut outgoing = request.clone();
+                if subscription {
+                    prepare_subscription_request(&mut outgoing);
+                }
+
+                // The client sets this itself from the method called. Setting
+                // it here too makes the traced payload replayable.
+                outgoing.stream = Some(!buffered);
+
+                trace!(
+                    subscription,
+                    request = %trace_to_tmpfile("jp-openai-sent", &outgoing),
+                    "Request payload."
+                );
+
+                let started = if buffered {
+                    start_buffered(&client, outgoing, is_structured, reasoning_enabled).await
+                } else {
+                    start_streaming(&client, outgoing, is_structured, reasoning_enabled).await
+                };
+
+                match started {
+                    Ok(mut response) => {
+                        for notice in notices {
+                            yield Ok(Event::Notice(notice));
+                        }
+                        while let Some(event) = response.next().await {
+                            yield event;
+                        }
+                        return;
+                    }
+                    Err(error) => {
+                        let error = annotate(error, subscription, &name);
+
+                        // Only a spent or refused credential is worth another
+                        // entry. Everything else fails the same way under every
+                        // credential in the chain, so switching would burn each
+                        // one on a request that cannot succeed.
+                        if !is_switchable(&error) {
+                            yield Err(error);
+                            return;
+                        }
+
+                        // A plan's reset credits reopen the window this request
+                        // just found closed. Spending one keeps the turn on the
+                        // subscription the user already paid for, instead of
+                        // falling through to per-token billing with allowance
+                        // still on the account.
+                        if subscription
+                            && error.kind == StreamErrorKind::SubscriptionExhausted
+                            && !redeemed
+                            && let Some(notice) =
+                                this.redeem_reset_credit(&attempt, &session).await
+                        {
+                            redeemed = true;
+                            for notice in notices {
+                                yield Ok(Event::Notice(notice));
+                            }
+                            yield Ok(Event::Notice(notice));
+                            continue;
+                        }
+
+                        if let Some(mut next) = this.advance(&attempt, &error, &name).await {
+                            next.notices.splice(..0, notices);
+                            attempt = next;
+                        } else {
+                            yield Err(error);
+                            return;
+                        }
+                    }
+                }
+            }
+        };
+
+        Ok(events.boxed())
+    }
+}
+
+/// Send a non-streaming request and map its response to events.
+async fn start_buffered(
+    client: &Client,
+    request: Request,
+    is_structured: bool,
+    reasoning_enabled: bool,
+) -> std::result::Result<EventStream, StreamError> {
+    let response = client
+        .create(request)
+        .await
+        .map_err(StreamError::from)?
+        .map_err(classify_stream_error)?;
+
+    let events = map_non_streaming_response(response, is_structured, reasoning_enabled)
+        .map_err(|error| StreamError::other(error.to_string()))?;
+
+    Ok(stream::iter(events.into_iter().map(Ok::<_, StreamError>)).boxed())
+}
+
+/// Open a streaming request, surfacing an admission failure as an error rather
+/// than as the stream's first item.
+///
+/// A credential switch has to happen before any content reaches the caller, so
+/// the first event is read here: once it is content, the credential is good and
+/// the rest of the stream is handed on untouched.
+async fn start_streaming(
+    client: &Client,
+    request: Request,
+    is_structured: bool,
+    reasoning_enabled: bool,
+) -> std::result::Result<EventStream, StreamError> {
+    let stream = client
+        .stream(request)
+        .filter_map(skip_unknown_events)
+        .or_else(map_error)
+        .map_ok(move |v| stream::iter(map_event(v, is_structured, reasoning_enabled)))
+        .try_flatten()
+        .boxed();
+
+    let (first, rest) = stream.into_future().await;
+
+    let first = match first {
+        Some(Ok(event)) => event,
+        Some(Err(error)) => return Err(error),
+        None => return Ok(stream::empty().boxed()),
+    };
+
+    let resumed = stream::once(async move { Ok(first) }).chain(rest).boxed();
+
+    Ok(with_tool_call_keepalive(
+        resumed,
+        TOOL_CALL_KEEPALIVE_INTERVAL,
+    ))
+}
+
+/// Sharpen an error whose meaning depends on which credential sent it.
+///
+/// A subscription credential reaches a smaller set of models than an API key,
+/// and the host answers an unavailable model exactly as it answers one that
+/// does not exist.
+/// Naming both possibilities beats asserting the wrong one.
+fn annotate(error: StreamError, subscription: bool, model: &str) -> StreamError {
+    if !subscription || !looks_like_unknown_model(&error) {
+        return error;
+    }
+
+    StreamError::new(
+        error.kind,
+        format!(
+            "model `{model}` does not exist, or is not available on a ChatGPT subscription. \
+             Subscriptions reach a subset of the API's models; name a different model, or add \
+             `api_key` to providers.llm.openai.auth to reach it through the API. ({})",
+            error.message()
+        ),
+    )
+}
+
+/// Whether a failure means the credential is spent or refused, so the request
+/// can only proceed under a different credential.
+///
+/// Deliberately a closed list of kinds rather than "not a success": a
+/// deterministic rejection (a malformed request, an oversized prompt, an
+/// unknown model) is answered identically by every credential, and treating it
+/// as switchable would record a cooldown against each profile in turn for a
+/// fault that has nothing to do with them.
+fn is_switchable(error: &StreamError) -> bool {
+    matches!(
+        error.kind,
+        StreamErrorKind::AuthRejected
+            | StreamErrorKind::SubscriptionExhausted
+            | StreamErrorKind::InsufficientQuota
+    )
+}
+
+/// Reshape a request for the subscription host.
+///
+/// That host accepts a narrower request than the platform API: it takes the
+/// system prompt in a different field, and rejects several parameters outright
+/// with `400 Unsupported parameter: <name>`.
+fn prepare_subscription_request(request: &mut Request) {
+    fold_system_into_instructions(request);
+    strip_unsupported_parameters(request);
+    strip_explicit_cache_controls(request);
+}
+
+/// Remove the explicit prompt-cache controls.
+///
+/// The model behind the subscription route answers a content block carrying
+/// `prompt_cache_breakpoint` with `400 prompt_cache_breakpoint is not supported
+/// on this model`, even for a model that accepts it through the platform API.
+/// `prompt_cache_options` is dropped with it, as the other half of the same
+/// feature.
+///
+/// `prompt_cache_key` stays: the host reads it, and echoes it back on the
+/// response as the key it cached under.
+fn strip_explicit_cache_controls(request: &mut Request) {
+    request.prompt_cache_options = None;
+
+    let types::Input::List(items) = &mut request.input else {
+        return;
+    };
+
+    for item in items {
+        let types::InputListItem::Message(message) = item else {
+            continue;
+        };
+        let types::ContentInput::List(blocks) = &mut message.content else {
+            continue;
+        };
+
+        for block in blocks {
+            let (types::ContentItem::Text {
+                prompt_cache_breakpoint,
+                ..
+            }
+            | types::ContentItem::Image {
+                prompt_cache_breakpoint,
+                ..
+            }
+            | types::ContentItem::File {
+                prompt_cache_breakpoint,
+                ..
+            }) = block;
+
+            *prompt_cache_breakpoint = None;
+        }
+    }
+}
+
+/// Drop the parameters the subscription host refuses.
+///
+/// `max_output_tokens` is refused by name (measured).
+/// The rest are dropped because the first-party client does not send them
+/// either, and the host reports only one unsupported parameter per request —
+/// discovering them one `400` at a time costs a round-trip each.
+///
+/// Sampling controls go with them.
+/// On the API path they are already suppressed for reasoning models, so a
+/// subscription request loses nothing it would have applied; a caller who sets
+/// them explicitly gets them ignored rather than getting a rejected request.
+fn strip_unsupported_parameters(request: &mut Request) {
+    request.max_output_tokens = None;
+    request.temperature = None;
+    request.top_p = None;
+    request.truncation = None;
+    request.metadata = None;
+    request.user = None;
+    request.previous_response_id = None;
+}
+
+/// Move system-role input messages into the request's `instructions`.
+///
+/// The subscription host answers a `role: "system"` entry in `input` with `400
+/// System messages are not allowed`; it takes the system prompt in
+/// `instructions` instead, which is where the Responses API documents it and
+/// where the Codex CLI puts it.
+///
+/// Any `instructions` already set is kept after the folded parts, so the prompt
+/// reads in the order it was assembled.
+///
+/// The cache breakpoint that rode on the last system block is dropped with it.
+/// The host derives its own cache key from the request's `prompt_cache_key`, so
+/// a breakpoint inside a field it does not read buys nothing.
+fn fold_system_into_instructions(request: &mut Request) {
+    let types::Input::List(items) = &mut request.input else {
+        return;
+    };
+
+    let mut folded: Vec<String> = vec![];
+
+    items.retain(|item| {
+        let types::InputListItem::Message(message) = item else {
+            return true;
+        };
+        if !matches!(message.role, types::Role::System) {
+            return true;
         }
 
-        let raw_stream = self
-            .client
-            .stream(request)
-            .filter_map(skip_unknown_events)
-            .or_else(map_error)
-            .map_ok(move |v| stream::iter(map_event(v, is_structured, reasoning_enabled)))
-            .try_flatten()
-            .boxed();
+        match &message.content {
+            types::ContentInput::Text(text) => folded.push(text.clone()),
+            types::ContentInput::List(blocks) => {
+                folded.extend(blocks.iter().filter_map(|block| match block {
+                    types::ContentItem::Text { text, .. } => Some(text.clone()),
+                    types::ContentItem::Image { .. } | types::ContentItem::File { .. } => None,
+                }));
+            }
+        }
 
-        Ok(with_tool_call_keepalive(
-            raw_stream,
-            TOOL_CALL_KEEPALIVE_INTERVAL,
-        ))
+        false
+    });
+
+    if folded.is_empty() {
+        return;
     }
+
+    folded.extend(request.instructions.take());
+    request.instructions = Some(folded.join("\n\n"));
+}
+
+/// Whether an error reads as the model being unknown to the endpoint.
+fn looks_like_unknown_model(error: &StreamError) -> bool {
+    let message = error.message().to_ascii_lowercase();
+
+    message.contains("model_not_found")
+        || message.contains("does not exist")
+        || (message.contains("model") && message.contains("not found"))
 }
 
 fn map_non_streaming_response(
@@ -322,6 +1009,140 @@ pub(crate) struct ModelResponse {
     _created: chrono::DateTime<chrono::Utc>,
     #[serde(rename = "owned_by")]
     _owned_by: String,
+}
+
+impl ModelResponse {
+    /// A response standing in for a model named locally rather than fetched.
+    ///
+    /// Only [`ModelResponse::id`] is read by [`map_model`]; the endpoint's
+    /// other fields carry nothing the capability table needs.
+    fn named(id: String) -> Self {
+        Self {
+            id,
+            _object: "model".to_owned(),
+            _created: chrono::DateTime::UNIX_EPOCH,
+            _owned_by: String::new(),
+        }
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn catalog_model_details(name: &str) -> ModelDetails {
+    map_model(ModelResponse::named(name.to_owned())).expect("a valid OpenAI model id")
+}
+
+/// `OpenAI`'s recorded-test routes.
+///
+/// The only provider so far billed two ways, so the only one whose fixtures are
+/// recorded twice and compared.
+#[cfg(test)]
+pub(crate) static TEST_SUPPORT: OpenaiTestSupport = OpenaiTestSupport;
+
+#[cfg(test)]
+pub(crate) struct OpenaiTestSupport;
+
+#[cfg(test)]
+impl super::ProviderTestSupport for OpenaiTestSupport {
+    fn api(&self) -> &'static dyn super::ProviderTestRoute {
+        &API_ROUTE
+    }
+
+    fn subscription(&self) -> Option<&'static dyn super::ProviderTestRoute> {
+        Some(&SUBSCRIPTION_ROUTE)
+    }
+
+    fn assert_rewrite_preserves_meaning(&self, model: &ModelDetails, query: ChatQuery) {
+        parity::assert_rewrite_preserves_meaning(model, query);
+    }
+
+    fn project_request(&self, body: &serde_json::Value) -> serde_json::Value {
+        parity::project_body(body)
+    }
+}
+
+#[cfg(test)]
+static API_ROUTE: super::ApiTestRoute = super::ApiTestRoute {
+    id: PROVIDER,
+    base_url: |config| config.openai.base_url.clone(),
+    set_base_url: |config, url| config.openai.base_url = url,
+    use_replay_credentials: |config| {
+        config.openai.api_key_env = super::replay_credential_env().into();
+    },
+    // The same model the subscription route records against, read from the
+    // catalog rather than restated here. Comparing two recordings only says
+    // something about the wire dialects when everything else about the request
+    // is held equal, and the model drives reasoning shape, cache handling, and
+    // sampling.
+    model: || catalog_model_details(SHARED_TEST_MODEL),
+};
+
+/// The model both recorded routes use.
+///
+/// Served by a subscription and by the API, and the cheapest model that carries
+/// the full GPT-5.6 feature set.
+#[cfg(test)]
+pub(crate) const SHARED_TEST_MODEL: &str = "gpt-5.6-luna";
+
+#[cfg(test)]
+static SUBSCRIPTION_ROUTE: SubscriptionTestRoute = SubscriptionTestRoute;
+
+/// The `ChatGPT` subscription route.
+///
+/// Recording authenticates exactly as a user's own machine does: through the
+/// credential store, resolved by the same chain a real request walks.
+/// Logging in is a one-time `jp provider llm auth login openai`, and refresh
+/// and rotation are then the production code's problem rather than the
+/// harness's.
+#[cfg(test)]
+pub(crate) struct SubscriptionTestRoute;
+
+#[cfg(test)]
+impl super::ProviderTestRoute for SubscriptionTestRoute {
+    fn base_url(&self, config: &jp_config::providers::llm::LlmProviderConfig) -> String {
+        config.openai.codex_base_url.clone()
+    }
+
+    fn set_base_url(&self, config: &mut jp_config::providers::llm::LlmProviderConfig, url: String) {
+        // The recording server forwards a request's path onto the target's
+        // host and drops whatever path the target URL carried. This is the only
+        // endpoint JP addresses below a path, so the path is restated here to
+        // survive the round trip and reach `…/backend-api/codex/responses`
+        // rather than the web app's front door.
+        config.openai.codex_base_url = format!("{url}/backend-api/codex");
+    }
+
+    fn provider(
+        &self,
+        config: &jp_config::providers::llm::LlmProviderConfig,
+        recording: bool,
+    ) -> std::result::Result<Box<dyn Provider>, String> {
+        // A replayed cassette answers without authenticating, so the token only
+        // has to exist. Reading the store on replay would make the suite
+        // depend on the machine running it.
+        if !recording {
+            return Ok(Box::new(Openai::with_subscription_credential(
+                &config.openai,
+                "test-token".to_owned(),
+                "test-account".to_owned(),
+            )));
+        }
+
+        let profile = super::first_stored_profile(jp_credentials::PROVIDER_OPENAI).ok_or(
+            "recording needs a stored ChatGPT subscription; run `jp provider llm auth login \
+             openai` once",
+        )?;
+
+        let mut config = config.openai.clone();
+        config.auth = vec![AuthEntry::Subscription(Some(profile))];
+
+        Openai::new(&config)
+            .map(|provider| Box::new(provider) as Box<dyn Provider>)
+            .map_err(|error| error.to_string())
+    }
+
+    fn model(&self) -> ModelDetails {
+        catalog_model_details(SHARED_TEST_MODEL)
+    }
 }
 
 #[cfg(test)]
@@ -609,10 +1430,6 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bo
     };
 
     debug!("Sending request to OpenAI.");
-    trace!(
-        request = %trace_to_tmpfile("jp-openai-request", &request),
-        "Request payload."
-    );
 
     Ok((request, is_structured, reasoning_enabled))
 }
@@ -628,6 +1445,9 @@ fn create_request(model: &ModelDetails, query: ChatQuery) -> Result<(Request, bo
 /// published model documentation.
 fn map_model(model: ModelResponse) -> Result<ModelDetails> {
     let details = match model.id.as_str() {
+        // The Codex model set. `subscription: Some(true)` is what lets a
+        // subscription credential list and name these; every other entry
+        // below is API-only.
         "gpt-6-astra" => ModelDetails {
             id: (PROVIDER, model.id).try_into()?,
             display_name: Some("GPT-6 Astra".to_owned()),
@@ -646,6 +1466,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             // Reasoning is always active, so TEMP_REQUIRES_NO_REASONING drops
             // temperature and top_p on every request — which is what this
             // model wants: it rejects both outright.
+            subscription: Some(true),
             features: vec![
                 TEMP_REQUIRES_NO_REASONING,
                 REASONING_PRO_MODE,
@@ -666,6 +1487,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
             prefill: None,
+            subscription: Some(true),
             features: vec![
                 TEMP_REQUIRES_NO_REASONING,
                 REASONING_PRO_MODE,
@@ -685,6 +1507,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
             prefill: None,
+            subscription: Some(true),
             features: vec![
                 TEMP_REQUIRES_NO_REASONING,
                 REASONING_PRO_MODE,
@@ -704,6 +1527,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
             prefill: None,
+            subscription: Some(true),
             features: vec![
                 TEMP_REQUIRES_NO_REASONING,
                 REASONING_PRO_MODE,
@@ -723,6 +1547,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
             prefill: None,
+            subscription: Some(true),
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5.5-pro" | "gpt-5.5-pro-2026-04-23" => ModelDetails {
@@ -737,6 +1562,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![TEMP_REQUIRES_NO_REASONING, STREAMING_UNSUPPORTED],
         },
         "gpt-5.4" | "gpt-5.4-2026-03-05" => ModelDetails {
@@ -751,6 +1577,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5.4-pro" | "gpt-5.4-pro-2026-03-05" => ModelDetails {
@@ -765,6 +1592,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5.4-mini" | "gpt-5.4-mini-2026-03-17" => ModelDetails {
@@ -779,6 +1607,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5.4-nano" | "gpt-5.4-nano-2026-03-17" => ModelDetails {
@@ -793,6 +1622,23 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
+            features: vec![TEMP_REQUIRES_NO_REASONING],
+        },
+        // Codex's ultra-fast tier, served only through a subscription.
+        "gpt-5.3-codex-spark" => ModelDetails {
+            id: (PROVIDER, model.id).try_into()?,
+            display_name: Some("GPT-5.3 Codex Spark".to_owned()),
+            context_window: Some(400_000),
+            max_output_tokens: Some(128_000),
+            reasoning: Some(
+                ReasoningDetails::leveled(false, true, true, true, false, false).always_on(),
+            ),
+            knowledge_cutoff: Some(NaiveDate::from_ymd_opt(2025, 8, 31).unwrap()),
+            deprecated: Some(ModelDeprecation::Active),
+            structured_output: None,
+            prefill: None,
+            subscription: Some(true),
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5.3-codex" => ModelDetails {
@@ -807,6 +1653,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5.3-chat-latest" => ModelDetails {
@@ -824,6 +1671,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             )),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5.2-codex" => ModelDetails {
@@ -842,6 +1690,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             )),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5.2-pro" | "gpt-5.2-pro-2025-12-11" => ModelDetails {
@@ -856,6 +1705,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5.2" | "gpt-5.2-2025-12-11" => ModelDetails {
@@ -871,6 +1721,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5.2-chat-latest" => ModelDetails {
@@ -888,6 +1739,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             )),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5.1-codex-max" => ModelDetails {
@@ -903,6 +1755,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             )),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5.1-codex" => ModelDetails {
@@ -918,6 +1771,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             )),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5.1-codex-mini" => ModelDetails {
@@ -933,6 +1787,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             )),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5.1" | "gpt-5.1-2025-11-13" => ModelDetails {
@@ -948,6 +1803,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5.1-chat-latest" => ModelDetails {
@@ -965,6 +1821,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             )),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5-codex" => ModelDetails {
@@ -980,6 +1837,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             )),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5" => ModelDetails {
@@ -1000,6 +1858,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             )),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5-2025-08-07" => ModelDetails {
@@ -1018,6 +1877,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             )),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5-pro" | "gpt-5-pro-2025-10-06" => ModelDetails {
@@ -1035,6 +1895,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             )),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5-chat-latest" => ModelDetails {
@@ -1052,6 +1913,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             )),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5-mini" | "gpt-5-mini-2025-08-07" => ModelDetails {
@@ -1067,6 +1929,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             )),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![TEMP_REQUIRES_NO_REASONING],
         },
         "gpt-5-nano" | "gpt-5-nano-2025-08-07" => ModelDetails {
@@ -1082,6 +1945,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             )),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![],
         },
         "o4-mini" | "o4-mini-2025-04-16" => ModelDetails {
@@ -1097,6 +1961,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             )),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![],
         },
         "o3-mini" | "o3-mini-2025-01-31" => ModelDetails {
@@ -1112,6 +1977,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             )),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![],
         },
         "o3" | "o3-2025-04-16" => ModelDetails {
@@ -1127,6 +1993,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             )),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![],
         },
         "o3-pro" | "o3-pro-2025-06-10" => ModelDetails {
@@ -1142,6 +2009,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             )),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![],
         },
         "o1" | "o1-2024-12-17" => ModelDetails {
@@ -1157,6 +2025,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             )),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![],
         },
         "o1-pro" | "o1-pro-2025-03-19" => ModelDetails {
@@ -1172,6 +2041,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             )),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![],
         },
         "gpt-4.1" | "gpt-4.1-2025-04-14" => ModelDetails {
@@ -1184,6 +2054,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![],
         },
         "gpt-4o" | "gpt-4o-2024-08-06" | "gpt-4o-2024-11-20" => ModelDetails {
@@ -1201,6 +2072,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             )),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![],
         },
         "gpt-4.1-nano" | "gpt-4.1-nano-2025-04-14" => ModelDetails {
@@ -1216,6 +2088,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             )),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![],
         },
         "gpt-4o-mini" | "gpt-4o-mini-2024-07-18" => ModelDetails {
@@ -1228,6 +2101,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![],
         },
         "gpt-4.1-mini" | "gpt-4.1-mini-2025-04-14" => ModelDetails {
@@ -1240,6 +2114,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![],
         },
         "gpt-oss-120b" => ModelDetails {
@@ -1252,6 +2127,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![],
         },
         "gpt-oss-20b" => ModelDetails {
@@ -1264,6 +2140,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             deprecated: Some(ModelDeprecation::Active),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![],
         },
         "o3-deep-research" | "o3-deep-research-2025-06-26" => ModelDetails {
@@ -1279,6 +2156,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             )),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![],
         },
         "o4-mini-deep-research" | "o4-mini-deep-research-2025-06-26" => ModelDetails {
@@ -1294,6 +2172,7 @@ fn map_model(model: ModelResponse) -> Result<ModelDetails> {
             )),
             structured_output: None,
             prefill: None,
+            subscription: Some(false),
             features: vec![],
         },
         id => {
@@ -1326,7 +2205,26 @@ async fn skip_unknown_events(
 /// Convert an OpenAI [`OpenaiStreamError`] into a [`StreamError`].
 async fn map_error(error: OpenaiStreamError) -> std::result::Result<types::Event, StreamError> {
     Err(match error {
-        OpenaiStreamError::Stream(error) => StreamError::from_eventsource(error).await,
+        OpenaiStreamError::Status {
+            status,
+            headers,
+            body,
+        } => {
+            let mut error = StreamError::from_http(status, &headers, &body);
+            // The body says a limit was hit; the headers say which one and
+            // when it reopens, which is what a cooldown needs to expire on its
+            // own instead of on a guess.
+            rate_limits::apply(&mut error, &headers);
+            error
+        }
+
+        OpenaiStreamError::Transport(error) => StreamError::from(error),
+
+        // A body that stops parsing mid-stream is the disconnect case: the
+        // response was fine until the connection was not, so the retry layer
+        // is what should see it.
+        OpenaiStreamError::Sse(error) => StreamError::transient(error),
+
         OpenaiStreamError::Parsing(error) => {
             StreamError::other(error.to_string()).with_source(error)
         }
@@ -1616,34 +2514,6 @@ fn classify_stream_error(error: types::response::Error) -> StreamError {
     match retry_after {
         Some(d) => StreamError::transient(display).with_retry_after(d),
         None => StreamError::other(display),
-    }
-}
-
-impl TryFrom<&OpenaiConfig> for Openai {
-    type Error = Error;
-
-    fn try_from(config: &OpenaiConfig) -> Result<Self> {
-        let api_key = env::var(&config.api_key_env)
-            .map_err(|_| Error::MissingEnv(config.api_key_env.clone()))?;
-
-        let reqwest_client = reqwest::Client::builder()
-            .default_headers(HeaderMap::from_iter([(
-                header::AUTHORIZATION,
-                HeaderValue::from_str(&format!("Bearer {api_key}"))
-                    .map_err(|_| CreateError::InvalidApiKey)?,
-            )]))
-            .build()?;
-
-        let base_url =
-            std::env::var(&config.base_url_env).unwrap_or_else(|_| config.base_url.clone());
-
-        let client = Client::new(&api_key)?.with_base_url(base_url);
-
-        Ok(Openai {
-            reqwest_client,
-            client,
-            base_url: config.base_url.clone(),
-        })
     }
 }
 

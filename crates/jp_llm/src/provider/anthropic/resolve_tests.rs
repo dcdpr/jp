@@ -23,7 +23,7 @@ const MODEL: &str = "claude-opus-4-6";
 fn anthropic_config(auth: &[&str], api_key_env: &str) -> AnthropicConfig {
     let mut config = jp_config::AppConfig::new_test().providers.llm.anthropic;
     config.auth = auth.iter().map(|s| s.parse().unwrap()).collect();
-    config.api_key_env = api_key_env.to_owned();
+    config.api_key_env = api_key_env.to_owned().into();
     config
 }
 
@@ -62,7 +62,7 @@ fn oauth_profile(access_token: &str, expires_at: DateTime<Utc>) -> StoredCredent
 }
 
 fn profile(name: &str) -> AuthEntry {
-    AuthEntry::Profile(Some(name.to_owned()))
+    AuthEntry::Subscription(Some(name.to_owned()))
 }
 
 /// The credential a walk landed on, failing the test if it needs a refresh.
@@ -70,14 +70,14 @@ fn ready(landing: Landing) -> Credential {
     match landing {
         Landing::Ready(credential) => credential,
         Landing::Stale { profile, .. } => {
-            panic!("profile:{profile} unexpectedly needs a refresh")
+            panic!("subscription:{profile} unexpectedly needs a refresh")
         }
     }
 }
 
 #[test]
 fn test_named_profile_resolves_to_bearer() {
-    let config = anthropic_config(&["profile:personal"], UNSET_ENV_VAR);
+    let config = anthropic_config(&["subscription:personal"], UNSET_ENV_VAR);
     let store = store_with(&[("personal", token_profile("sk-ant-token"))]);
 
     let (landing, _selected, notices) = walk_chain(&config, Some(&store), MODEL, NOW()).unwrap();
@@ -91,7 +91,7 @@ fn test_named_profile_resolves_to_bearer() {
 
 #[test]
 fn test_bare_profile_resolves_sole_profile() {
-    let config = anthropic_config(&["profile"], UNSET_ENV_VAR);
+    let config = anthropic_config(&["subscription"], UNSET_ENV_VAR);
     let store = store_with(&[("personal", token_profile("sk-ant-token"))]);
 
     let (landing, ..) = walk_chain(&config, Some(&store), MODEL, NOW()).unwrap();
@@ -103,7 +103,7 @@ fn test_bare_profile_resolves_sole_profile() {
 
 #[test]
 fn test_bare_profile_with_zero_profiles_is_error() {
-    let config = anthropic_config(&["profile"], UNSET_ENV_VAR);
+    let config = anthropic_config(&["subscription"], UNSET_ENV_VAR);
     let store = store_with(&[]);
 
     let error = walk_chain(&config, Some(&store), MODEL, NOW()).unwrap_err();
@@ -112,7 +112,7 @@ fn test_bare_profile_with_zero_profiles_is_error() {
 
 #[test]
 fn test_bare_profile_with_multiple_profiles_is_error() {
-    let config = anthropic_config(&["profile"], UNSET_ENV_VAR);
+    let config = anthropic_config(&["subscription"], UNSET_ENV_VAR);
     let store = store_with(&[
         ("personal", token_profile("sk-a")),
         ("work", token_profile("sk-b")),
@@ -130,7 +130,7 @@ fn test_unknown_profile_is_error_even_with_later_entries() {
     // A chain entry naming a nonexistent profile is a config-shaped
     // mistake, not a skippable state: it fails even though `api_key`
     // could resolve.
-    let config = anthropic_config(&["profile:missing", "api_key"], SET_ENV_VAR);
+    let config = anthropic_config(&["subscription:missing", "api_key"], SET_ENV_VAR);
     let store = store_with(&[("personal", token_profile("sk-a"))]);
 
     let error = walk_chain(&config, Some(&store), MODEL, NOW()).unwrap_err();
@@ -139,7 +139,7 @@ fn test_unknown_profile_is_error_even_with_later_entries() {
 
 #[test]
 fn test_needs_relogin_profile_falls_through_with_notice() {
-    let config = anthropic_config(&["profile:personal", "api_key"], SET_ENV_VAR);
+    let config = anthropic_config(&["subscription:personal", "api_key"], SET_ENV_VAR);
     let mut profile = token_profile("sk-a");
     profile.needs_relogin = true;
     let store = store_with(&[("personal", profile)]);
@@ -153,7 +153,7 @@ fn test_needs_relogin_profile_falls_through_with_notice() {
 
 #[test]
 fn test_cooldown_scoped_to_model_family() {
-    let config = anthropic_config(&["profile:personal", "api_key"], SET_ENV_VAR);
+    let config = anthropic_config(&["subscription:personal", "api_key"], SET_ENV_VAR);
     let mut profile = token_profile("sk-a");
     profile
         .cooldowns
@@ -176,7 +176,7 @@ fn test_cooldown_scoped_to_model_family() {
 /// place, so the walk reports it as stale rather than falling past it.
 #[test]
 fn test_expired_oauth_token_is_stale_rather_than_skipped() {
-    let config = anthropic_config(&["profile:personal", "api_key"], SET_ENV_VAR);
+    let config = anthropic_config(&["subscription:personal", "api_key"], SET_ENV_VAR);
     let store = store_with(&[(
         "personal",
         oauth_profile("at", datetime!(2026-07-03 11:00:00 Z)),
@@ -194,7 +194,7 @@ fn test_expired_oauth_token_is_stale_rather_than_skipped() {
 /// between being resolved and being used.
 #[test]
 fn test_token_expiring_within_the_buffer_is_stale() {
-    let config = anthropic_config(&["profile:personal"], UNSET_ENV_VAR);
+    let config = anthropic_config(&["subscription:personal"], UNSET_ENV_VAR);
     let store = store_with(&[(
         "personal",
         // Two minutes out, inside the five-minute buffer.
@@ -207,7 +207,7 @@ fn test_token_expiring_within_the_buffer_is_stale() {
 
 #[test]
 fn test_live_oauth_token_resolves() {
-    let config = anthropic_config(&["profile:personal"], UNSET_ENV_VAR);
+    let config = anthropic_config(&["subscription:personal"], UNSET_ENV_VAR);
     let store = store_with(&[(
         "personal",
         oauth_profile("at", datetime!(2026-07-03 13:00:00 Z)),
@@ -228,7 +228,7 @@ fn test_default_chain_missing_env_reports_missing_env() {
 
 #[test]
 fn test_multi_entry_chain_exhaustion_lists_reasons() {
-    let config = anthropic_config(&["profile:personal", "api_key"], UNSET_ENV_VAR);
+    let config = anthropic_config(&["subscription:personal", "api_key"], UNSET_ENV_VAR);
     let mut profile = token_profile("sk-a");
     profile.needs_relogin = true;
     let store = store_with(&[("personal", profile)]);
@@ -242,16 +242,19 @@ fn test_selected_entry_names_the_resolved_profile() {
     // A bare `profile` entry reports the profile it resolved to, so a log
     // line or a switch notice names a concrete credential rather than the
     // ambiguous chain entry the user wrote.
-    let config = anthropic_config(&["profile"], UNSET_ENV_VAR);
+    let config = anthropic_config(&["subscription"], UNSET_ENV_VAR);
     let store = store_with(&[("personal", token_profile("sk-a"))]);
 
     let (_, selected, _) = walk_chain(&config, Some(&store), MODEL, NOW()).unwrap();
-    assert_eq!(selected, AuthEntry::Profile(Some("personal".to_owned())));
+    assert_eq!(
+        selected,
+        AuthEntry::Subscription(Some("personal".to_owned()))
+    );
 
     // An `api_key` entry reports itself.
     let config = anthropic_config(&["api_key"], SET_ENV_VAR);
     let (_, selected, _) = walk_chain(&config, None, MODEL, NOW()).unwrap();
-    assert_eq!(selected, AuthEntry::ApiKey);
+    assert_eq!(selected, AuthEntry::ApiKey(None));
 }
 
 #[test]
@@ -259,28 +262,36 @@ fn test_switch_notice_names_both_credentials_and_the_reason() {
     let exhausted = StreamError::subscription_exhausted("spent", None, None);
     assert_eq!(
         switch_notice(&exhausted, &profile("personal"), Some(&profile("work"))),
-        "subscription limit reached (personal) — continuing with work"
+        "subscription (personal) limit reached, continuing with subscription (work)"
     );
 
     // Falling through to the API key names it as written in the chain, so the
     // notice doubles as the audit trail for entering paid billing.
     assert_eq!(
-        switch_notice(&exhausted, &profile("personal"), Some(&AuthEntry::ApiKey)),
-        "subscription limit reached (personal) — continuing with api_key"
+        switch_notice(
+            &exhausted,
+            &profile("personal"),
+            Some(&AuthEntry::ApiKey(None))
+        ),
+        "subscription (personal) limit reached, continuing with api key"
     );
 
     // A refused credential is a different reason: nothing was spent.
     let rejected = StreamError::auth_rejected("revoked");
     assert_eq!(
-        switch_notice(&rejected, &profile("personal"), Some(&AuthEntry::ApiKey)),
-        "credential rejected (personal) — continuing with api_key"
+        switch_notice(
+            &rejected,
+            &profile("personal"),
+            Some(&AuthEntry::ApiKey(None))
+        ),
+        "subscription (personal) rejected, continuing with api key"
     );
 
     // Billing exhaustion on a per-token account is neither of the above.
     let billing = StreamError::new(StreamErrorKind::InsufficientQuota, "no credit");
     assert_eq!(
-        switch_notice(&billing, &AuthEntry::ApiKey, None),
-        "quota exhausted (api_key)"
+        switch_notice(&billing, &AuthEntry::ApiKey(None), None),
+        "api key quota exhausted, no more alternatives, aborting"
     );
 }
 
@@ -293,9 +304,16 @@ async fn test_advance_from_api_key_is_terminal() {
     let error = StreamError::new(StreamErrorKind::InsufficientQuota, "no credit");
 
     assert!(
-        advance(&config, None, &AuthEntry::ApiKey, &error, MODEL, NOW())
-            .await
-            .is_none()
+        advance(
+            &config,
+            None,
+            &AuthEntry::ApiKey(None),
+            &error,
+            MODEL,
+            NOW()
+        )
+        .await
+        .is_none()
     );
 }
 
@@ -338,7 +356,10 @@ fn stored(store: &CredentialStore, name: &str) -> StoredCredential {
 /// a fresh invocation share one code path.
 #[test(tokio::test)]
 async fn test_advance_records_scoped_cooldown_and_moves_to_next_profile() {
-    let config = anthropic_config(&["profile:personal", "profile:work"], UNSET_ENV_VAR);
+    let config = anthropic_config(
+        &["subscription:personal", "subscription:work"],
+        UNSET_ENV_VAR,
+    );
     let store = memory_store(&[
         ("personal", token_profile("sk-personal")),
         ("work", token_profile("sk-work")),
@@ -368,7 +389,7 @@ async fn test_advance_records_scoped_cooldown_and_moves_to_next_profile() {
     assert_eq!(next.credential, Credential::Bearer("sk-work".to_owned()));
     assert_eq!(
         next.notices.last().unwrap(),
-        "subscription limit reached (personal) \u{2014} continuing with work"
+        "subscription (personal) limit reached, continuing with subscription (work)"
     );
 
     // The cooldown is persisted against the spent profile, at the scope and
@@ -394,7 +415,10 @@ async fn test_advance_records_scoped_cooldown_and_moves_to_next_profile() {
 /// allowance was spent, and waiting cannot help.
 #[test(tokio::test)]
 async fn test_advance_marks_refused_credential_for_relogin() {
-    let config = anthropic_config(&["profile:personal", "profile:work"], UNSET_ENV_VAR);
+    let config = anthropic_config(
+        &["subscription:personal", "subscription:work"],
+        UNSET_ENV_VAR,
+    );
     let store = memory_store(&[
         ("personal", token_profile("sk-personal")),
         ("work", token_profile("sk-work")),
@@ -414,7 +438,7 @@ async fn test_advance_marks_refused_credential_for_relogin() {
     assert_eq!(next.selected, Some(profile("work")));
     assert_eq!(
         next.notices.last().unwrap(),
-        "credential rejected (personal) \u{2014} continuing with work"
+        "subscription (personal) rejected, continuing with subscription (work)"
     );
 
     let spent = stored(&store, "personal");
@@ -428,7 +452,7 @@ async fn test_advance_marks_refused_credential_for_relogin() {
 /// accurate picture instead of rediscovering the exhaustion.
 #[test(tokio::test)]
 async fn test_advance_past_the_last_entry_is_terminal_but_still_records() {
-    let config = anthropic_config(&["profile:personal"], UNSET_ENV_VAR);
+    let config = anthropic_config(&["subscription:personal"], UNSET_ENV_VAR);
     let store = memory_store(&[("personal", token_profile("sk-personal"))]);
 
     let error = StreamError::subscription_exhausted("spent", None, None);
@@ -489,9 +513,9 @@ async fn test_spent_window_on_a_successful_response_records_a_cooldown() {
     );
 
     // The next resolution moves off the profile on its own.
-    let config = anthropic_config(&["profile:personal", "api_key"], SET_ENV_VAR);
+    let config = anthropic_config(&["subscription:personal", "api_key"], SET_ENV_VAR);
     let after = resolve(&config, Some(&store), MODEL, NOW()).await.unwrap();
-    assert_eq!(after.selected, Some(AuthEntry::ApiKey));
+    assert_eq!(after.selected, Some(AuthEntry::ApiKey(None)));
 }
 
 /// An `api_key` request has no stored profile, so there is nothing to record
@@ -499,7 +523,7 @@ async fn test_spent_window_on_a_successful_response_records_a_cooldown() {
 #[test]
 fn test_spent_window_without_a_profile_records_nothing() {
     let store = memory_store(&[("personal", token_profile("sk-personal"))]);
-    let watch = QuotaWatch::new(Some(&store), Some(&AuthEntry::ApiKey));
+    let watch = QuotaWatch::new(Some(&store), Some(&AuthEntry::ApiKey(None)));
 
     let notices = watch.observe(&spent_window_limits(), NOW());
     assert_eq!(notices.len(), 1);
