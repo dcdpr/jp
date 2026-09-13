@@ -2468,7 +2468,6 @@ dependencies = [
 name = "jp_credentials"
 version = "0.1.0"
 dependencies = [
- "assert_matches",
  "camino",
  "camino-tempfile",
  "chrono",
@@ -2479,7 +2478,6 @@ dependencies = [
  "serde_json",
  "test-log",
  "thiserror 2.0.20",
- "tracing",
 ]
 
 [[package]]
@@ -4134,7 +4132,6 @@ dependencies = [
 name = "schematic"
 version = "0.19.4"
 dependencies = [
- "convert_case 0.11.0",
  "indexmap",
  "json-strip-comments",
  "schematic",
