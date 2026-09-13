@@ -267,6 +267,7 @@ fn summarize_events(events: Vec<Event>) -> StreamOutcome {
             Event::Patch(mut p) => patches.append(&mut p),
             // `KeepAlive` is a liveness signal.
             Event::KeepAlive => {}
+            Event::Notice(notice) => tracing::warn!("{notice}"),
         }
     }
 

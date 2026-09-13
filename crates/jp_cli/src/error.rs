@@ -8,6 +8,29 @@ use crate::cmd;
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
+/// Render an error and its cause chain as a single line.
+///
+/// Some errors keep every actionable detail in their source chain and display
+/// as a bare category on their own — `parse error` for a rejected `--cfg`
+/// value, `builder error` for a rejected HTTP header — so stringifying only
+/// the outermost error discards the reason.
+pub(crate) fn error_chain(error: &(dyn std::error::Error + 'static)) -> String {
+    let mut parts = vec![error.to_string()];
+    let mut source = error.source();
+
+    while let Some(error) = source {
+        let message = error.to_string();
+        // Wrappers that interpolate their source into their own Display
+        // would otherwise repeat it verbatim.
+        if !parts.last().is_some_and(|last| last.ends_with(&message)) {
+            parts.push(message);
+        }
+        source = error.source();
+    }
+
+    parts.join(": ")
+}
+
 /// CLI Error types
 #[derive(Debug, thiserror::Error)]
 pub(crate) enum Error {
@@ -45,6 +68,9 @@ pub(crate) enum Error {
     #[error("LLM error")]
     Llm(#[from] jp_llm::Error),
 
+    #[error("Credential store error")]
+    Credentials(#[from] jp_credentials::StoreError),
+
     /// The inquiry model override (`conversation.inquiry.assistant.model`)
     /// could not be used.
     ///
@@ -55,7 +81,7 @@ pub(crate) enum Error {
     #[error("Inquiry model override '{model}' is unusable")]
     InquiryModelOverride {
         model: String,
-        source: jp_llm::Error,
+        source: Box<dyn std::error::Error + Send + Sync>,
     },
 
     /// A per-question inquiry model override (a `QuestionTarget::Assistant`
@@ -71,7 +97,7 @@ pub(crate) enum Error {
         tool: String,
         question: String,
         model: String,
-        source: Box<jp_llm::Error>,
+        source: Box<dyn std::error::Error + Send + Sync>,
     },
 
     /// Reading an `@path` argument value from disk failed.
@@ -239,3 +265,7 @@ pub(crate) enum Error {
     #[error("Title generation failed for {model}: {reason}")]
     TitleGeneration { model: String, reason: String },
 }
+
+#[cfg(test)]
+#[path = "error_tests.rs"]
+mod tests;

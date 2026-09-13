@@ -356,8 +356,8 @@
     "summary": "Stream paragraphs incrementally while guaranteeing byte-identical output to non-streaming, with four guards managing block-start ambiguity, setext reinterpretation, inline spans, and wrap-in-progress stability."
   },
   "090-anthropic-subscription-auth-with-credential-fallback.md": {
-    "hash": "2f2a3694924055b6abf1a6e5a40af4759861017e172e1c94798dda2c3f7557e2",
-    "summary": "JP gains Anthropic subscription auth with automatic fallback to API key billing when quotas exhaust."
+    "hash": "90d6da76cfd31c03bc1282a12899dd43b75d3da93f0dd8694f579072643fd467",
+    "summary": "OAuth subscription auth for Anthropic with automatic fallback chain, credential store, and scoped cooldown tracking across profiles."
   },
   "091-printer-owned-status-region.md": {
     "hash": "9f50bec24fd8434ab87f60ece312c4ec6492f67fcb8014e2d8afc33e9d31e286",

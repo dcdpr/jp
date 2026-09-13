@@ -442,19 +442,17 @@ impl Query {
         }
 
         // Fail fast on provider misconfiguration (e.g. a missing API key
-        // environment variable) before any side-effectful work below:
-        // pre-query compaction can run a full summary LLM round-trip, MCP
-        // servers boot in background tasks, the editor may open to compose
-        // the request, and title generation and attachment loading are all
+        // environment variable, or a credential chain with no usable
+        // entry) before any side-effectful work below: pre-query
+        // compaction can run a full summary LLM round-trip, MCP servers
+        // boot in background tasks, the editor may open to compose the
+        // request, and title generation and attachment loading are all
         // wasted — and the title task alone can hold the run open for
         // seconds at teardown — when the request can never be sent.
         // `Query::run_turn` repeats this check implicitly when it constructs
         // the live provider.
-        provider::preflight(
-            cfg.assistant.model.id.resolved().provider,
-            &cfg.providers.llm,
-        )
-        .map_err(Error::from)?;
+        let model_id = cfg.assistant.model.id.resolved();
+        provider::preflight(model_id.provider, &cfg.providers.llm)?;
 
         // Compact the conversation before querying, if requested.
         if self.compact.should_compact() {
@@ -1056,10 +1054,12 @@ impl Query {
         mut turn_interrupt: TurnInterrupt,
     ) -> Result<()> {
         let model_id = cfg.assistant.model.id.resolved();
+
         let provider: Arc<dyn jp_llm::Provider> = Arc::from(provider::get_provider(
             model_id.provider,
             &cfg.providers.llm,
         )?);
+
         debug!(model = %model_id, "Fetching model details.");
 
         // A network round trip, and the last await before the turn loop starts

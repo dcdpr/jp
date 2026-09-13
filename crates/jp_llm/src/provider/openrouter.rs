@@ -226,6 +226,7 @@ fn call(
                 }
                 patch @ Event::Patch(_) => yield patch,
                 keep_alive @ Event::KeepAlive => yield keep_alive,
+                notice @ Event::Notice(_) => yield notice,
             }
         }
     })

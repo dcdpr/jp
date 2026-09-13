@@ -214,6 +214,30 @@ fn with_conversation_preserves_cfg_over_conversation() {
 }
 
 #[test]
+fn rejected_cfg_value_reports_the_underlying_reason() {
+    let mut pipeline = empty_pipeline();
+    pipeline.cfg_args.push(ResolvedCfgArg::KeyValue(
+        "providers.llm.anthropic.auth=bogus"
+            .parse::<KvAssignment>()
+            .unwrap(),
+    ));
+
+    let error = pipeline.partial_without_conversation().unwrap_err();
+    let message = error.to_string();
+
+    // The key plus the bare category the assignment error displays as are
+    // not enough to act on; the reason sits in its source chain.
+    assert!(
+        message.contains("providers.llm.anthropic.auth"),
+        "{message}"
+    );
+    assert!(
+        message.contains("unrecognized auth chain entry"),
+        "{message}"
+    );
+}
+
+#[test]
 fn conversation_layer_overrides_base() {
     let pipeline = empty_pipeline();
 
