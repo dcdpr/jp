@@ -73,6 +73,17 @@ pub(crate) enum Error {
     #[error("MCP Host recording failed: {0}")]
     McpRecording(#[source] ExecutorError),
 
+    /// The Host could not establish the provider's tool-dispatch contract.
+    #[error("MCP Host control failed: {0}")]
+    McpHost(#[source] ExecutorError),
+
+    /// A cancelled external invocation cannot be implicitly re-submitted.
+    #[error(
+        "restarting a tool batch inside an external agent request is not supported; the request \
+         was stopped without repeating execution"
+    )]
+    ExternalToolRestart,
+
     #[error("LLM error")]
     Llm(#[from] jp_llm::Error),
 

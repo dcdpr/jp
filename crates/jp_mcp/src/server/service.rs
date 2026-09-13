@@ -508,6 +508,13 @@ impl Service {
         })
     }
 
+    /// Observe cancellation of an invocation through the private Host channel.
+    /// Returns `None` after the invocation has left the active set.
+    #[must_use]
+    pub fn call_cancellation(&self, id: InvocationId) -> Option<CancellationToken> {
+        self.inner.state().active.get(&id).cloned()
+    }
+
     /// Cancel an invocation identified through the private Host channel.
     pub fn cancel_call(&self, id: InvocationId) {
         if let Some(token) = self.inner.state().active.get(&id) {

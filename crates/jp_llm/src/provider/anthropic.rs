@@ -4,7 +4,7 @@ mod http;
 pub mod oauth;
 pub mod resolve;
 
-use std::{mem, ops::RangeInclusive, time::Duration};
+use std::{env, mem, ops::RangeInclusive, time::Duration};
 
 use async_anthropic::{
     Client,
@@ -18,18 +18,19 @@ use async_anthropic::{
 use async_stream::try_stream;
 use async_trait::async_trait;
 use base64::Engine as _;
+use camino::Utf8PathBuf;
 use chrono::{NaiveDate, Utc};
 use futures::{StreamExt as _, TryStreamExt as _, pin_mut, stream};
 use jp_attachment::AttachmentContent;
 #[cfg(test)]
-use jp_config::providers::llm::anthropic::{AuthEntry, SubscriptionFlow};
+use jp_config::providers::llm::anthropic::AuthEntry;
 use jp_config::{
     assistant::{request::CachePolicy, tool_choice::ToolChoice},
     model::{
         id::{Name, ProviderId},
         parameters::{ReasoningConfig, ReasoningEffort, ServiceTier},
     },
-    providers::llm::anthropic::AnthropicConfig,
+    providers::llm::anthropic::{AnthropicConfig, SubscriptionFlow},
 };
 use jp_conversation::{
     ConversationStream,
@@ -50,7 +51,7 @@ use crate::{
     event::{Event, EventMatcher, EventPart, EventPatch, FinishReason, PatchAction, ToolCallPart},
     event_builder::EventBuilder,
     model::{ModelDeprecation, ModelDetails, ReasoningDetails, ReasoningMode},
-    query::ChatQuery,
+    query::{ChatQuery, QueryContext, QueryStream, ToolExecution},
     stream::{EventStream, chain::find_merge_point, with_tool_call_keepalive},
 };
 
@@ -308,7 +309,7 @@ impl Anthropic {
     fn client_for(&self, route: &resolve::Route) -> Result<(Client, bool)> {
         match route {
             resolve::Route::Http(credential) => self.client_cache.get(&self.config, credential),
-            resolve::Route::Acp => Err(acp::Error::InferenceUnavailable.into()),
+            resolve::Route::Acp => Err(acp::Error::FlowChanged.into()),
         }
     }
 }
@@ -325,6 +326,35 @@ fn is_switchable(error: &AnthropicError) -> bool {
 
 #[async_trait]
 impl Provider for Anthropic {
+    fn mcp_tool_metadata(&self, model: &ModelDetails) -> Map<String, Value> {
+        if model.served_by_subscription() && self.config.subscription_flow == SubscriptionFlow::Acp
+        {
+            return Map::from_iter([("anthropic/maxResultSizeChars".into(), 500_000.into())]);
+        }
+        Map::new()
+    }
+    async fn start_query(
+        &self,
+        model: &ModelDetails,
+        query: ChatQuery,
+        context: QueryContext,
+    ) -> Result<QueryStream> {
+        let attempt = self.resolve(model.name()).await?;
+        if matches!(attempt.route, resolve::Route::Acp) {
+            acp::model_details(&model.id.name)?;
+            acp::inspect().await?;
+            return Ok(QueryStream {
+                events: acp::stream(model, query, context)?,
+                execution: ToolExecution::Agent {
+                    correlation_key: "claudecode/toolUseId",
+                },
+            });
+        }
+        Ok(QueryStream {
+            events: self.chat_completion_stream(model, query).await?,
+            execution: ToolExecution::Caller,
+        })
+    }
     async fn model_details(&self, name: &Name) -> Result<ModelDetails> {
         let mut attempt = self.resolve(name).await?;
 
@@ -411,7 +441,12 @@ impl Provider for Anthropic {
         if matches!(attempt.route, resolve::Route::Acp) {
             acp::model_details(&model.id.name)?;
             acp::inspect().await?;
-            return Err(acp::Error::InferenceUnavailable.into());
+            let root = env::current_dir().map_err(acp::Error::NativeIo)?;
+            let root = Utf8PathBuf::from_path_buf(root).map_err(|_| acp::Error::NativeDirectory)?;
+            return acp::stream(model, query, QueryContext {
+                root,
+                mcp_endpoint: None,
+            });
         }
 
         let this = self.clone();

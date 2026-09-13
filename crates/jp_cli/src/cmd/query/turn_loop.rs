@@ -30,12 +30,12 @@ use jp_conversation::{
 };
 use jp_inquire::prompt::PromptBackend;
 use jp_llm::{
-    Error as LlmError, Provider,
+    Error as LlmError, EventStream, Provider,
     error::StreamError,
     event::{Event, EventPart, FinishReason, ToolCallPart},
     model::ModelDetails,
     provider::get_provider,
-    query::ChatQuery,
+    query::{ChatQuery, QueryContext, ToolExecution},
     tool::Executor,
     with_idle_timeout, with_output_limit,
 };
@@ -252,6 +252,8 @@ pub(super) async fn run_turn_loop(
     // Crucially: there's no public way to enumerate this directly — the
     // stream is the source of truth for "what needs to run."
     let mut pending_tools = PendingTools::new();
+    let mut continuation: Option<EventStream> = None;
+    let mut execution = ToolExecution::Caller;
 
     // Prompter shared between streaming (permission prompts) and
     // executing (tool question prompts) phases.
@@ -336,25 +338,38 @@ pub(super) async fn run_turn_loop(
                     ReceiverStream::new(interrupt_rx).map(StreamingLoopEvent::Interrupt),
                 );
 
-                let raw_stream = provider
-                    .chat_completion_stream(model, query)
-                    .await
-                    .map_err(|e| map_llm_error(e, vec![]))?;
+                let fresh_request = continuation.is_none();
+                let mut raw_stream = if let Some(stream) = continuation.take() {
+                    stream
+                } else {
+                    let started = provider
+                        .start_query(model, query, QueryContext {
+                            root: root.to_path_buf(),
+                            mcp_endpoint: tool_coordinator.endpoint(),
+                        })
+                        .await
+                        .map_err(|e| map_llm_error(e, vec![]))?;
+                    execution = started.execution;
+                    tool_coordinator
+                        .set_execution(execution)
+                        .map_err(Error::McpHost)?;
+                    let raw_stream = started.events;
+                    let raw_stream = match idle_timeout {
+                        Some(idle) => with_idle_timeout(raw_stream, idle),
+                        None => raw_stream,
+                    };
+                    // Wrapped outside the provider stream, so the bytes of every
+                    // chained continuation accumulate against a single ceiling
+                    // rather than resetting per link. Bytes the provider discards
+                    // while merging those links are billed but never seen here.
+                    match output_limit {
+                        Some(max) => with_output_limit(raw_stream, max),
+                        None => raw_stream,
+                    }
+                };
                 waiting.set_detail("waiting for first tokens");
-                let raw_stream = match idle_timeout {
-                    Some(idle) => with_idle_timeout(raw_stream, idle),
-                    None => raw_stream,
-                };
-                // Wrapped outside the provider stream, so the bytes of every
-                // chained continuation accumulate against a single ceiling
-                // rather than resetting per link. Bytes the provider discards
-                // while merging those links are billed but never seen here.
-                let raw_stream = match output_limit {
-                    Some(max) => with_output_limit(raw_stream, max),
-                    None => raw_stream,
-                };
                 let llm_stream = StreamSource::Llm(
-                    raw_stream
+                    (&mut raw_stream)
                         .fuse()
                         .map(|result| StreamingLoopEvent::Llm(Box::new(result)))
                         // Backstop: if the provider stream ends without a
@@ -372,7 +387,9 @@ pub(super) async fn run_turn_loop(
                             ))),
                         )))),
                 );
-                turn_state.request_count += 1;
+                if fresh_request {
+                    turn_state.request_count += 1;
+                }
 
                 // Reset preparing display for this streaming cycle.
                 tool_renderer.reset();
@@ -456,6 +473,16 @@ pub(super) async fn run_turn_loop(
                                 Ok(event) => event,
                                 Err(e) => {
                                     tool_renderer.cancel_all();
+                                    if matches!(execution, ToolExecution::Agent { .. }) {
+                                        commit_partial_response(
+                                            &mut turn_coordinator,
+                                            &conv,
+                                            &printer,
+                                            ResponseBoundary::Final,
+                                        );
+                                        conv.flush()?;
+                                        return Err(LlmError::Stream(e).into());
+                                    }
 
                                     match handle_stream_error(
                                         e,
@@ -737,6 +764,13 @@ pub(super) async fn run_turn_loop(
                     }
                 }
 
+                drop(streams);
+                if matches!(execution, ToolExecution::Agent { .. })
+                    && turn_coordinator.current_phase() == TurnPhase::Executing
+                {
+                    continuation = Some(raw_stream);
+                }
+
                 // Deregister the streaming interrupt handler; from here the
                 // router treats Ctrl-C as unhandled again.
                 drop(interrupt_guard);
@@ -911,6 +945,9 @@ pub(super) async fn run_turn_loop(
                     // The next loop iteration re-executes the cancelled
                     // batch.
                     ExecutionOutcome::Restart => {
+                        if matches!(execution, ToolExecution::Agent { .. }) {
+                            return Err(Error::ExternalToolRestart);
+                        }
                         restart_requested = true;
                     }
 
@@ -1218,3 +1255,7 @@ fn map_llm_error(error: jp_llm::Error, models: Vec<ModelDetails>) -> Error {
 #[cfg(test)]
 #[path = "turn_loop_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "agent_turn_tests.rs"]
+mod agent_turn_tests;

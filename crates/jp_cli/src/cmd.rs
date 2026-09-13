@@ -449,6 +449,13 @@ impl From<crate::error::Error> for Error {
             Conversation(error) => return error.into(),
             Mcp(error) => return error.into(),
             McpEndpoint(error) => [("message", error.to_string())].into(),
+            McpHost(error) => with_cause(&error, "MCP Host control failed"),
+            ExternalToolRestart => [(
+                "message",
+                "Restarting an external tool batch is not supported; execution was not repeated"
+                    .into(),
+            )]
+            .into(),
             McpRecording(error) => {
                 [("message", format!("MCP Host recording failed: {error}"))].into()
             }

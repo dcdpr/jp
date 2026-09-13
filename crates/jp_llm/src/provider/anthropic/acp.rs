@@ -10,6 +10,7 @@ use std::{
     time::Duration,
 };
 
+use agent_client_protocol::{Error as RpcError, schema::v1::SessionConfigId};
 use jp_config::model::id::{ModelIdConfig, Name, ProviderId};
 use serde::Deserialize;
 use tokio::{io::AsyncReadExt as _, process::Command, time::timeout};
@@ -17,9 +18,52 @@ use tracing::warn;
 
 use crate::model::ModelDetails;
 
+mod options;
+mod protocol;
+mod transcript;
+mod transport;
+pub(super) use transport::stream;
+
 /// A failed prerequisite for the Claude Code subscription flow.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// The adapter did not confirm a requested session setting.
+    #[error("Claude adapter did not apply session setting `{setting}`")]
+    SettingNotApplied { setting: SessionConfigId },
+    /// An explicitly configured parameter has no qualified ACP mapping.
+    #[error("assistant.model.parameters.{parameter} is not supported by the ACP subscription flow")]
+    UnsupportedParameter { parameter: String },
+
+    /// Initialization did not establish the required protocol and transports.
+    #[error("Claude adapter lacks the required ACP v1/HTTP MCP capabilities")]
+    InitializationCapabilities,
+    /// Native history cannot be supplied to this adapter.
+    #[error("Claude adapter does not support history loading")]
+    HistoryLoadingUnsupported,
+    /// A successful ACP response did not include the SDK's final outcome.
+    #[error("Claude adapter ended without an SDK result")]
+    MissingSdkResult,
+    /// Tool-using agent requests need JP's execution endpoint.
+    #[error("ACP tool execution requires the JP MCP Host")]
+    ToolHostRequired,
+    /// The process-group lifecycle has not been qualified on this platform.
+    #[error("the ACP subscription flow currently requires a Unix host")]
+    PlatformUnsupported,
+    /// The native transcript directory cannot be determined safely.
+    #[error(
+        "Claude native history requires an absolute HOME/CLAUDE_CONFIG_DIR and a working \
+         directory whose encoded name is at most 200 bytes"
+    )]
+    NativeDirectory,
+    /// Derived transcript storage failed.
+    #[error("Claude native transcript I/O failed")]
+    NativeIo(#[source] io::Error),
+    /// Derived transcript serialization failed.
+    #[error("Claude native transcript serialization failed")]
+    NativeJson(#[source] serde_json::Error),
+    /// The ACP peer rejected a request or the protocol connection failed.
+    #[error("Claude ACP protocol error: {0}")]
+    Protocol(#[source] RpcError),
     /// JP names do not select Claude Code accounts.
     #[error(
         "subscription credential `{name}` is not mapped to a Claude Code login; use an unnamed \
@@ -79,13 +123,12 @@ pub enum Error {
          claude-opus-5"
     )]
     UnsupportedModel { model: Name },
-    /// Transport qualification exists but prompt execution is not implemented.
+    /// Changing request implementation requires a fresh Host context.
     #[error(
-        "ACP subscription inference is not implemented in this build (RFD 110 phase 2); no \
-         request was sent; explicitly select providers.llm.anthropic.subscription_flow=direct \
-         only if you accept its account-policy risk"
+        "subscription flow changed to ACP during an HTTP request; retry using the current \
+         conversation"
     )]
-    InferenceUnavailable,
+    FlowChanged,
 }
 
 /// A non-inference operation used to inspect the installed runtime.
@@ -126,6 +169,7 @@ struct AuthStatus {
     auth_method: Option<AuthMethod>,
     api_provider: Option<ApiProvider>,
     subscription_type: Option<Plan>,
+    api_key_source: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -189,6 +233,7 @@ fn qualify_versions(adapter: &[u8], claude: &[u8]) -> Result<(), Error> {
 fn validate_auth(output: &[u8]) -> Result<(), Error> {
     let status: AuthStatus = serde_json::from_slice(output).map_err(Error::AuthStatus)?;
     if status.logged_in
+        && status.api_key_source.is_none()
         && matches!(status.auth_method, Some(AuthMethod::ClaudeAccount))
         && matches!(status.api_provider, Some(ApiProvider::FirstParty))
         && matches!(status.subscription_type, Some(Plan::Pro | Plan::Max))

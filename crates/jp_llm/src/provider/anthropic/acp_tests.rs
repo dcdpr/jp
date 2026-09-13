@@ -52,6 +52,7 @@ fn subscription_status_is_fail_closed() {
         Err(Error::SubscriptionRequired)
     );
     assert_matches!(validate_auth(br#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"unknown"}"#), Err(Error::SubscriptionRequired));
+    assert_matches!(validate_auth(br#"{"loggedIn":true,"authMethod":"claude.ai","apiProvider":"firstParty","subscriptionType":"max","apiKeySource":"apiKeyHelper"}"#), Err(Error::SubscriptionRequired));
     assert_matches!(validate_auth(b"not json"), Err(Error::AuthStatus(_)));
 }
 

@@ -101,7 +101,10 @@ use jp_conversation::{
 };
 use jp_editor::EditorBackend;
 use jp_inquire::{ReplyEditMode, prompt::PromptBackend};
-use jp_llm::tool::{Executor, ExecutorError, ExecutorResult, ExecutorSource, PermissionInfo};
+use jp_llm::{
+    query::ToolExecution,
+    tool::{Executor, ExecutorError, ExecutorResult, ExecutorSource, PermissionInfo},
+};
 use jp_mcp::{Client, server::StderrSink};
 use jp_printer::Printer;
 use jp_tool::{AnswerType, Question};
@@ -110,6 +113,7 @@ use serde_json::{Map, Value};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
+use url::Url;
 
 use super::{
     ToolRenderer,
@@ -387,6 +391,16 @@ pub struct ToolCoordinator {
 }
 
 impl ToolCoordinator {
+    /// The endpoint used by provider-owned tool dispatch.
+    pub fn endpoint(&self) -> Option<Url> {
+        self.executor_source.endpoint()
+    }
+
+    /// Bind upcoming tool observations to the selected dispatch contract.
+    pub fn set_execution(&self, execution: ToolExecution) -> Result<(), ExecutorError> {
+        self.executor_source.set_execution(execution)
+    }
+
     pub fn new(tools_config: ToolsConfig, executor_source: Box<dyn ExecutorSource>) -> Self {
         Self {
             executors: Vec::new(),

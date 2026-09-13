@@ -6,6 +6,7 @@
 use std::{
     collections::HashMap,
     sync::{Arc, Mutex as SyncMutex, MutexGuard, PoisonError},
+    time::Duration,
 };
 
 use async_trait::async_trait;
@@ -14,7 +15,10 @@ use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use jp_config::conversation::tool::{RunMode, ToolConfigWithDefaults, ToolsConfig};
 use jp_conversation::event::{InquirySource, ToolCallRequest, ToolCallResponse};
-use jp_llm::tool::{Executor, ExecutorError, ExecutorResult, ExecutorSource, PermissionInfo};
+use jp_llm::{
+    query::ToolExecution,
+    tool::{Executor, ExecutorError, ExecutorResult, ExecutorSource, PermissionInfo},
+};
 use jp_mcp::{
     CallToolResult, Client,
     server::{
@@ -39,11 +43,13 @@ use rmcp::{
 };
 use serde_json::{Map, Value};
 use tokio::{
-    sync::{Mutex, broadcast::error::RecvError as ProgressError, mpsc, oneshot},
+    sync::{Mutex, Notify, broadcast::error::RecvError as ProgressError, mpsc, oneshot},
     task::JoinHandle,
+    time::timeout,
 };
 use tokio_util::sync::CancellationToken;
 use tracing::debug;
+use url::Url;
 
 use crate::access::{approvals::ApprovalStore, compile::compile_tool_policy};
 
@@ -64,7 +70,13 @@ struct Route {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct HostCallKey(String);
 
-type Routes = Arc<SyncMutex<HashMap<HostCallKey, Route>>>;
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum RouteKey {
+    Host(HostCallKey),
+    Agent(String),
+}
+
+type Routes = Arc<SyncMutex<HashMap<RouteKey, Route>>>;
 type Sinks = Arc<SyncMutex<HashMap<InvocationId, StderrSink>>>;
 
 fn locked<T>(value: &SyncMutex<T>) -> MutexGuard<'_, T> {
@@ -80,6 +92,9 @@ pub struct TerminalExecutorSource {
     calls: Calls,
     routes: Routes,
     sinks: Sinks,
+    endpoint: Url,
+    execution: Arc<SyncMutex<ToolExecution>>,
+    routes_changed: Arc<Notify>,
 }
 
 /// Keeps the listener, MCP connection, and Host routing tasks alive for a turn.
@@ -113,7 +128,8 @@ impl Drop for ExecutionOwner {
 }
 
 impl TerminalExecutorSource {
-    /// Start the common MCP execution path and its private Host connection.
+    /// Start the execution path without provider-specific description hints.
+    #[cfg(test)]
     pub async fn start(
         builtins: BuiltinExecutors,
         definitions: &[ToolDefinition],
@@ -122,6 +138,31 @@ impl TerminalExecutorSource {
         invocation: InvocationContext,
         upstream: &Client,
         root: Utf8PathBuf,
+    ) -> Result<(Self, ExecutionOwner), EndpointError> {
+        Self::start_with_metadata(
+            builtins,
+            definitions,
+            tools,
+            approvals,
+            invocation,
+            upstream,
+            root,
+            Map::new(),
+        )
+        .await
+    }
+
+    /// Start the common execution path with Host-supplied tool-description
+    /// hints.
+    pub async fn start_with_metadata(
+        builtins: BuiltinExecutors,
+        definitions: &[ToolDefinition],
+        tools: &ToolsConfig,
+        approvals: Arc<ApprovalStore>,
+        invocation: InvocationContext,
+        upstream: &Client,
+        root: Utf8PathBuf,
+        metadata: Map<String, Value>,
     ) -> Result<(Self, ExecutionOwner), EndpointError> {
         let configured = definitions
             .iter()
@@ -138,50 +179,24 @@ impl TerminalExecutorSource {
                     definition: definition.clone(),
                     config,
                     access,
-                    metadata: Map::new(),
+                    metadata: metadata.clone(),
                 })
             })
             .collect();
-        let (service, mut host) =
+        let (service, host) =
             Service::new(configured, upstream.clone(), builtins, root, invocation)?;
         let mut stderr = service.subscribe_progress();
         let endpoint = Endpoint::start(service).await?;
         let client = endpoint.connect().await?;
         let routes = Routes::default();
-        let router_routes = routes.clone();
-        let router = tokio::spawn(async move {
-            while let Some(request) = host.recv().await {
-                let sender = {
-                    let key = request
-                        .call
-                        .request
-                        .correlation
-                        .get(CORRELATION_KEY)
-                        .and_then(Value::as_str)
-                        .map(|value| HostCallKey(value.to_owned()));
-                    let mut routes = locked(&router_routes);
-                    key.and_then(|key| routes.get_mut(&key)).and_then(|route| {
-                        // Correlation associates an existing Host call, not
-                        // authority from caller-supplied execution metadata.
-                        if route.request.name != request.call.request.name
-                            || route.request.arguments != request.call.request.arguments
-                            || route.invocation.is_some_and(|id| id != request.call.id)
-                        {
-                            return None;
-                        }
-                        if route.invocation.is_none() {
-                            debug!(invocation = ?request.call.id, tool_call_id = %route.request.id, tool = %route.request.name, "Associated MCP invocation with Host tool call");
-                        }
-                        route.invocation = Some(request.call.id);
-                        Some(route.sender.clone())
-                    })
-                };
-                if let Some(sender) = sender {
-                    drop(sender.send(request).await);
-                }
-                // An unassociated call loses its reply sender and fails closed.
-            }
-        });
+        let execution = Arc::new(SyncMutex::new(ToolExecution::Caller));
+        let routes_changed = Arc::new(Notify::new());
+        let router = tokio::spawn(route_host(
+            host,
+            routes.clone(),
+            execution.clone(),
+            routes_changed.clone(),
+        ));
         let sinks = Sinks::default();
         let progress_sinks = sinks.clone();
         let progress = tokio::spawn(async move {
@@ -208,6 +223,12 @@ impl TerminalExecutorSource {
             calls: Calls::default(),
             routes,
             sinks,
+            endpoint: endpoint
+                .url()
+                .parse()
+                .expect("endpoint constructs a loopback HTTP URL"),
+            execution,
+            routes_changed,
         };
         Ok((source, ExecutionOwner {
             endpoint: Some(endpoint),
@@ -218,7 +239,77 @@ impl TerminalExecutorSource {
     }
 }
 
+async fn route_host(
+    mut host: mpsc::Receiver<HostRequest>,
+    routes: Routes,
+    execution: Arc<SyncMutex<ToolExecution>>,
+    changed: Arc<Notify>,
+) {
+    let mut pending = Vec::new();
+    loop {
+        tokio::select! {
+            request = host.recv() => match request {
+                Some(request) => pending.push(request),
+                None => break,
+            },
+            () = changed.notified() => {},
+        }
+        let mut deferred = Vec::new();
+        for request in pending.drain(..) {
+            let (sender, wait_for_route) = {
+                let execution = *locked(&execution);
+                let key = request
+                    .call
+                    .request
+                    .correlation
+                    .get(match execution {
+                        ToolExecution::Caller => CORRELATION_KEY,
+                        ToolExecution::Agent { correlation_key } => correlation_key,
+                    })
+                    .and_then(Value::as_str)
+                    .map(|value| match execution {
+                        ToolExecution::Caller => RouteKey::Host(HostCallKey(value.to_owned())),
+                        ToolExecution::Agent { .. } => RouteKey::Agent(value.to_owned()),
+                    });
+                let mut routes = locked(&routes);
+                let wait = key.as_ref().is_some_and(|key| !routes.contains_key(key))
+                    && matches!(execution, ToolExecution::Agent { .. });
+                let sender = key.and_then(|key| routes.get_mut(&key)).and_then(|route| {
+                    // Correlation identifies existing Host work; it grants no execution authority.
+                    if route.request.name != request.call.request.name
+                        || route.request.arguments != request.call.request.arguments
+                        || route.invocation.is_some_and(|id| id != request.call.id)
+                    { return None; }
+                    if route.invocation.is_none() {
+                        debug!(invocation = ?request.call.id, tool_call_id = %route.request.id, tool = %route.request.name, "Associated MCP invocation with Host tool call");
+                    }
+                    route.invocation = Some(request.call.id);
+                    Some(route.sender.clone())
+                });
+                (sender, wait)
+            };
+            if let Some(sender) = sender {
+                drop(sender.send(request).await);
+            } else if wait_for_route && deferred.len() < 64 {
+                // The MCP request can precede its ACP observation on the independent transport.
+                deferred.push(request);
+            }
+            // Invalid associations lose their reply sender and fail closed.
+        }
+        pending = deferred;
+    }
+}
+
 impl ExecutorSource for TerminalExecutorSource {
+    fn endpoint(&self) -> Option<Url> {
+        Some(self.endpoint.clone())
+    }
+
+    fn set_execution(&self, execution: ToolExecution) -> Result<(), ExecutorError> {
+        *locked(&self.execution) = execution;
+        Ok(())
+    }
+
     fn create(
         &self,
         request: ToolCallRequest,
@@ -226,13 +317,22 @@ impl ExecutorSource for TerminalExecutorSource {
     ) -> Option<Box<dyn Executor>> {
         self.definitions.get(&request.name)?;
         let (sender, receiver) = mpsc::channel(8);
-        let key = HostCallKey(format!("{:032x}", random::<u128>()));
+        let execution = *locked(&self.execution);
+        let key = match execution {
+            ToolExecution::Caller => {
+                RouteKey::Host(HostCallKey(format!("{:032x}", random::<u128>())))
+            }
+            ToolExecution::Agent { .. } => RouteKey::Agent(request.id.clone()),
+        };
         locked(&self.routes).insert(key.clone(), Route {
             request: request.clone(),
             invocation: None,
             sender,
         });
+        self.routes_changed.notify_one();
         let state = Arc::new(Mutex::new(PendingCall {
+            execution,
+            service: self.service.clone(),
             receiver,
             task: None,
             input: None,
@@ -274,6 +374,8 @@ impl ExecutorSource for TerminalExecutorSource {
 }
 
 struct PendingCall {
+    execution: ToolExecution,
+    service: Arc<Service>,
     receiver: mpsc::Receiver<HostRequest>,
     task: Option<JoinHandle<Result<CallToolResult, McpCallError>>>,
     input: Option<(QuestionId, Reply<InputAnswer>)>,
@@ -296,6 +398,33 @@ enum Received {
 
 impl PendingCall {
     async fn next(&mut self) -> Result<Received, ExecutorError> {
+        if matches!(self.execution, ToolExecution::Agent { .. }) {
+            let request = if let Some(id) = self.id {
+                if let Some(token) = self.service.call_cancellation(id) {
+                    tokio::select! {
+                        biased;
+                        () = token.cancelled() => Err(ExecutorError::Cancelled),
+                        request = self.receiver.recv() => request.ok_or(ExecutorError::HostDisconnected),
+                    }
+                } else {
+                    Err(ExecutorError::Cancelled)
+                }
+            } else {
+                match timeout(Duration::from_secs(30), self.receiver.recv()).await {
+                    Ok(request) => request.ok_or(ExecutorError::HostDisconnected),
+                    Err(_) => Err(ExecutorError::ExternalCallTimeout),
+                }
+            };
+            let request = match request {
+                Ok(request) => request,
+                Err(error) => {
+                    self.finished = true;
+                    return Err(error);
+                }
+            };
+            self.id = Some(request.call.id);
+            return Ok(Received::Interaction(request.interaction));
+        }
         let task = self.task.as_mut().ok_or(ExecutorError::NotStarted)?;
         tokio::select! {
             request = self.receiver.recv() => {
@@ -339,6 +468,10 @@ impl PendingCall {
         }
         if let Some(reply) = self.record.take() {
             drop(reply.send(Ok(())));
+            if matches!(self.execution, ToolExecution::Agent { .. }) {
+                self.finished = true;
+                return Ok(());
+            }
         }
         loop {
             match self.next().await? {
@@ -363,6 +496,10 @@ impl PendingCall {
                         return Err(ExecutorError::RecordingMismatch);
                     }
                     drop(reply.send(Ok(())));
+                    if matches!(self.execution, ToolExecution::Agent { .. }) {
+                        self.finished = true;
+                        return Ok(());
+                    }
                 }
                 Received::Finished(delivered) => {
                     if delivered != result {
@@ -382,7 +519,7 @@ impl PendingCall {
 pub struct ToolExecutor {
     request: ToolCallRequest,
     config: ToolConfigWithDefaults,
-    key: HostCallKey,
+    key: RouteKey,
     peer: Peer<RoleClient>,
     service: Arc<Service>,
     state: Arc<Mutex<PendingCall>>,
@@ -431,17 +568,19 @@ impl Executor for ToolExecutor {
         render_arguments: bool,
     ) -> Result<Option<ToolCallResponse>, ExecutorError> {
         let mut state = self.state.lock().await;
-        if state.task.is_some() || state.finished {
+        if state.task.is_some() || state.finished || state.id.is_some() {
             return Err(ExecutorError::AlreadyPrepared);
         }
-        let mut params = CallToolRequestParams::new(self.request.name.clone());
-        params.arguments = Some(self.request.arguments.clone());
-        params.meta = Some(Meta(Map::from_iter([(
-            CORRELATION_KEY.into(),
-            self.key.0.clone().into(),
-        )])));
-        let peer = self.peer.clone();
-        state.task = Some(tokio::spawn(async move { peer.call_tool(params).await }));
+        if let RouteKey::Host(key) = &self.key {
+            let mut params = CallToolRequestParams::new(self.request.name.clone());
+            params.arguments = Some(self.request.arguments.clone());
+            params.meta = Some(Meta(Map::from_iter([(
+                CORRELATION_KEY.into(),
+                key.0.clone().into(),
+            )])));
+            let peer = self.peer.clone();
+            state.task = Some(tokio::spawn(async move { peer.call_tool(params).await }));
+        }
         loop {
             match state.next().await? {
                 Received::Interaction(Interaction::RenderArguments { reply }) => {

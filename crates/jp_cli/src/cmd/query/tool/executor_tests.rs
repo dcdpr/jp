@@ -8,6 +8,7 @@ use jp_config::{
     AppConfig, Config as _,
     conversation::tool::{PartialToolConfig, ToolConfig},
 };
+use jp_llm::query::ToolExecution;
 use jp_mcp::server::BuiltinTool;
 use jp_tool::{Outcome, ToolDocs};
 use serde_json::json;
@@ -158,6 +159,93 @@ async fn fixture(
         )
         .unwrap();
     (source, owner, executor, count)
+}
+
+#[tokio::test]
+async fn external_http_call_is_attached_not_resubmitted() {
+    let (source, owner, unused, count) = fixture("edit").await;
+    drop(unused);
+    source
+        .set_execution(ToolExecution::Agent {
+            correlation_key: "test/toolId",
+        })
+        .unwrap();
+    let client = owner.endpoint.as_ref().unwrap().connect().await.unwrap();
+    let partial: PartialToolConfig =
+        serde_json::from_value(json!({"source":"builtin","run":"ask","result":"edit"})).unwrap();
+    let mut tools = AppConfig::new_test().conversation.tools;
+    tools.insert(
+        "example".into(),
+        ToolConfig::from_partial(partial, vec![]).unwrap(),
+    );
+    let mut executor = source
+        .create(
+            ToolCallRequest {
+                id: "external-1".into(),
+                name: "example".into(),
+                arguments: Map::new(),
+            },
+            tools.get("example").unwrap(),
+        )
+        .unwrap();
+    let peer = client.peer().clone();
+    let mut params = CallToolRequestParams::new("example");
+    params.meta = Some(Meta(Map::from_iter([(
+        "test/toolId".into(),
+        "external-1".into(),
+    )])));
+    let call = tokio::spawn(async move { peer.call_tool(params).await });
+    timeout(Duration::from_secs(2), executor.prepare(false))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(count.load(Ordering::SeqCst), 0);
+    executor.approve().await.unwrap();
+    let result = executor
+        .execute(
+            &IndexMap::new(),
+            &Client::default(),
+            "/tmp".into(),
+            CancellationToken::new(),
+            None,
+        )
+        .await;
+    assert!(matches!(result, ExecutorResult::NeedsInput { .. }));
+    assert_eq!(count.load(Ordering::SeqCst), 1);
+    let result = executor
+        .execute(
+            &IndexMap::from_iter([("confirm".into(), json!(true))]),
+            &Client::default(),
+            "/tmp".into(),
+            CancellationToken::new(),
+            None,
+        )
+        .await;
+    assert!(matches!(result, ExecutorResult::Completed(_)));
+    assert_eq!(count.load(Ordering::SeqCst), 2);
+    assert!(!call.is_finished());
+    timeout(
+        Duration::from_secs(2),
+        source.acknowledge(ToolCallResponse {
+            id: "external-1".into(),
+            result: Ok("approved result".into()),
+        }),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let result = timeout(Duration::from_secs(2), call)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        to_legacy(&from_mcp(result).unwrap()),
+        Ok("approved result".into())
+    );
+    assert_eq!(count.load(Ordering::SeqCst), 2);
+    client.cancel().await.unwrap();
+    owner.shutdown().await.unwrap();
 }
 
 #[tokio::test]

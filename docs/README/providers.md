@@ -42,11 +42,24 @@ JP does not copy Claude Code's tokens.
 Unnamed subscription entries select its active login; JP credential names are
 not mapped to Claude Code accounts.
 
-**ACP prompt execution is not implemented yet.** RFD 110 Phase 1 provides flow
-selection and compatibility checks, not subscription-backed ACP inference.
+The initial ACP implementation supports queries through JP's tool execution
+service, including approvals, tool questions, result editing, and recording.
+JP derives a separate Claude-native transcript from the current conversation for
+each request; auxiliary queries do not share the main query's native session.
+
+```sh
+jp query --new --auth sub --model anthropic/claude-opus-5 "Review this change."
+```
+
+This v0.1 path currently requires Unix and the runtime versions above.
 The initial qualified model is `claude-opus-5`; other model names are rejected
-rather than silently substituted.
+rather than substituted.
+Restarting an external tool batch is not implemented yet, and native history
+preparation rejects working directories whose encoded names exceed 200 bytes.
+Temperature, top-p, top-k, service tiers other than `off`, and custom model
+parameters have no ACP mapping and are rejected when set.
 Compatibility failures do not switch to `direct` or to paid API access.
+Workflow parity and live release qualification remain RFD 110 follow-up phases.
 
 Existing direct subscription users must opt in explicitly:
 

@@ -24,6 +24,9 @@ use jp_mcp::{
 use jp_tool::{Question, ToolDefinition};
 use serde_json::{Map, Value};
 use tokio_util::sync::CancellationToken;
+use url::Url;
+
+use crate::query::ToolExecution;
 
 #[path = "tool_error.rs"]
 mod error;
@@ -123,6 +126,19 @@ pub trait Executor: Send + Sync {
 
 /// Creates Host-facing tool calls and acknowledges their recorded responses.
 pub trait ExecutorSource: Send + Sync {
+    /// The shared endpoint an external agent can use for tool requests.
+    fn endpoint(&self) -> Option<Url> {
+        None
+    }
+
+    /// Select how upcoming calls are associated with their MCP invocations.
+    fn set_execution(&self, execution: ToolExecution) -> Result<(), ExecutorError> {
+        if execution != ToolExecution::Caller {
+            return Err(ExecutorError::ExternalCallsUnsupported);
+        }
+        Ok(())
+    }
+
     /// Release a final delivery barrier after the response has been recorded.
     fn acknowledge(&self, _response: ToolCallResponse) -> BoxFuture<'_, Result<(), ExecutorError>> {
         Box::pin(async { Ok(()) })

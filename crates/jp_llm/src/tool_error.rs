@@ -8,6 +8,14 @@ use tokio::task::JoinError;
 /// A tool-call adapter failed before completing its Host protocol.
 #[derive(Debug, thiserror::Error)]
 pub enum ExecutorError {
+    /// The executor source cannot attach to agent-submitted MCP calls.
+    #[error("executor source does not support external MCP calls")]
+    ExternalCallsUnsupported,
+
+    /// The agent did not submit its announced call to the MCP endpoint.
+    #[error("external tool call did not reach the JP MCP Server within 30 seconds")]
+    ExternalCallTimeout,
+
     /// Execution was requested before submitting a call.
     #[error("MCP call has not started")]
     NotStarted,
