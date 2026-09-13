@@ -1628,6 +1628,11 @@ criteria = "safe-to-deploy"
 delta = "0.10.5 -> 0.10.6"
 notes = "Only new code is some loongarch64 additions which include assembly code for that platform."
 
+[[audits.bytecode-alliance.audits.sha1_smol]]
+who = "Alex Crichton <alex@alexcrichton.com>"
+criteria = "safe-to-deploy"
+version = "1.0.1"
+
 [[audits.bytecode-alliance.audits.sharded-slab]]
 who = "Pat Hickey <phickey@fastly.com>"
 criteria = "safe-to-deploy"
