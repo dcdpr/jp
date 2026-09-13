@@ -98,6 +98,9 @@ fn child_environment_filter_preserves_native_login_location() {
     assert!(removes_variable("ANTHROPIC_BASE_URL"));
     assert!(removes_variable("CLAUDE_CODE_USE_BEDROCK"));
     assert!(removes_variable("CLAUDE_CODE_OAUTH_TOKEN"));
+    assert!(removes_variable("DISABLE_PROMPT_CACHING_OPUS"));
+    assert!(removes_variable("DISABLE_PROMPT_CACHING"));
+    assert!(removes_variable("CLAUDE_CODE_PROMPT_CACHE_TTL"));
     assert!(!removes_variable("HOME"));
     assert!(!removes_variable("CLAUDE_CONFIG_DIR"));
     assert!(!removes_variable("PATH"));

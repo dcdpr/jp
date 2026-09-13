@@ -65,6 +65,24 @@ fn dispatch_uses_permission_identity_and_original_arguments() {
 }
 
 #[test]
+fn tool_only_response_records_usage_without_counting_replay_or_subagents() {
+    let mut state = state();
+    state.live = false;
+    state.sdk(notification(json!({"type":"assistant","message":{"id":"msg-replay","model":"claude-opus-5","usage":{"input_tokens":999,"output_tokens":999}}}))).unwrap();
+    state.live = true;
+    state.sdk(notification(json!({"type":"assistant","parent_tool_use_id":"parent","message":{"id":"msg-child","model":"claude-haiku-4-5","usage":{"input_tokens":99,"output_tokens":99}}}))).unwrap();
+    state.sdk(notification(json!({"type":"assistant","message":{"id":"msg-tool","model":"claude-opus-5","content":[{"type":"tool_use","id":"tool-fixed","name":"mcp__jp__lookup","input":{"path":"README.md"}}],"usage":{"input_tokens":2,"output_tokens":9}}}))).unwrap();
+    let (_, events) = state.permission(permission()).unwrap();
+    let Event::Flush { metadata, .. } = &events[2] else {
+        panic!("expected tool flush")
+    };
+    assert_eq!(
+        metadata["anthropic_acp_usage"],
+        json!({"native_session_id":"session-fixed","requests":{"msg-tool":{"model":"claude-opus-5","input_tokens":2,"output_tokens":9}}})
+    );
+}
+
+#[test]
 fn permission_uses_the_name_from_the_prior_tool_observation() {
     let mut state = state();
     state.observe(serde_json::from_value(json!({"sessionId":"session-fixed","update":{"sessionUpdate":"tool_call","toolCallId":"tool-fixed","title":"Lookup","_meta":{"claudeCode":{"toolName":"mcp__jp__lookup"}}}})).unwrap());
@@ -115,6 +133,36 @@ fn sdk_tool_observation_is_not_an_execution_request() {
     assert_eq!(events, vec![]);
     let events = state.sdk(notification(json!({"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{}"}}}))).unwrap();
     assert_eq!(events, vec![]);
+}
+
+#[test]
+fn completed_content_carries_the_usage_snapshot() {
+    let mut state = state();
+    state.sdk(notification(json!({"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":"Answer."}}}))).unwrap();
+    assert_eq!(
+        state
+            .sdk(notification(
+                json!({"type":"stream_event","event":{"type":"content_block_stop","index":0}})
+            ))
+            .unwrap(),
+        vec![]
+    );
+    state.sdk(notification(json!({"type":"assistant","message":{"id":"msg-fixed","model":"claude-opus-5","content":[{"type":"text","text":"Answer."}],"usage":{"input_tokens":2,"output_tokens":3,"cache_creation_input_tokens":0,"cache_read_input_tokens":500}}}))).unwrap();
+    state.sdk(notification(json!({"type":"result","subtype":"success","is_error":false,"modelUsage":{"claude-opus-5":{"inputTokens":2,"outputTokens":3,"cacheReadInputTokens":500}},"total_cost_usd":0.01}))).unwrap();
+    let events = state.final_events.take().unwrap();
+    let Event::Flush { index, metadata } = &events[0] else {
+        panic!("expected final flush")
+    };
+    assert_eq!(*index, 0);
+    assert_eq!(
+        metadata["anthropic_acp_usage"],
+        json!({
+            "native_session_id":"session-fixed",
+            "requests":{"msg-fixed":{"model":"claude-opus-5","input_tokens":2,"output_tokens":3,"cache_creation_input_tokens":0,"cache_read_input_tokens":500}},
+            "runtime":{"model_usage":{"claude-opus-5":{"inputTokens":2,"outputTokens":3,"cacheReadInputTokens":500}},"estimated_cost_usd":0.01}
+        })
+    );
+    assert_eq!(events[1], Event::Finished(FinishReason::Completed));
 }
 
 #[test]

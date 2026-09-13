@@ -43,6 +43,24 @@ fn notification(message: Value) -> SdkNotification {
 }
 
 #[test]
+fn cache_policy_reaches_the_native_sdk_environment() {
+    let prepared = prepared();
+    for (policy, disabled, ttl) in [
+        (CachePolicy::Off, "1", "5m"),
+        (CachePolicy::Short, "0", "5m"),
+        (CachePolicy::Long, "0", "1h"),
+        (CachePolicy::Custom(Duration::from_secs(1799)), "0", "5m"),
+        (CachePolicy::Custom(Duration::from_mins(30)), "0", "1h"),
+    ] {
+        let environment = options::environment(&prepared, policy);
+        let metadata = options::metadata(&prepared, &environment).unwrap();
+        let native = &metadata["claudeCode"]["options"]["env"];
+        assert_eq!(native["DISABLE_PROMPT_CACHING"], disabled);
+        assert_eq!(native["CLAUDE_CODE_PROMPT_CACHE_TTL"], ttl);
+    }
+}
+
+#[test]
 fn jp_tool_permissions_always_return_to_the_host() {
     let prepared = prepared();
     let metadata = options::metadata(&prepared, &BTreeMap::new()).unwrap();

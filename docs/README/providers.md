@@ -31,11 +31,19 @@ ACP compatibility checks require `claude-agent-acp` 0.76.0 with Claude Code
 2.1.257 and an active Pro or Max login:
 
 ```sh
-npm install --global --include=optional @agentclientprotocol/claude-agent-acp@0.76.0
+npm install --global --prefix "$HOME/.local" --include=optional @agentclientprotocol/claude-agent-acp@0.76.0
+export PATH="$HOME/.local/bin:$PATH"
+claude-agent-acp --version
+claude-agent-acp --cli --version
 claude-agent-acp --cli auth login --claudeai
+claude-agent-acp --cli auth status --json
 ```
 
 Use Node.js 22 or later and keep npm's optional dependencies enabled.
+In fish, use `fish_add_path "$HOME/.local/bin"` instead of the `export` line.
+The adapter bundles Claude Code; a separate installation is unnecessary.
+The auth status must report a first-party Claude account with a Pro or Max plan,
+not an API-key source.
 Disable paid Usage credits in Claude's Settings > Usage if no paid overage is
 permitted.
 JP does not copy Claude Code's tokens.
@@ -68,7 +76,34 @@ results or batches.
 
 The reconstructed-history path has tests for provider switching, selected-turn
 forks, replay, compaction, and changed instructions, schemas, and tool results.
-Live runtime and cache qualification remain follow-up work.
+Live qualification is opt-in; the [qualification procedure] describes the
+production-provider cache comparison and how to interpret its usage reports.
+Fixture tests alone do not establish live cache efficiency.
+
+### Prompt caching
+
+`assistant.request.cache` maps to the Claude runtime's cache controls:
+
+| Policy            | Behavior                                                   |
+| ----------------- | ---------------------------------------------------------- |
+| `short` (default) | Request five-minute cache retention.                       |
+| `long`            | Request one-hour cache retention.                          |
+| `off`             | Disable prompt caching.                                    |
+| Custom duration   | Below 30 minutes selects five minutes; otherwise one hour. |
+
+JP overrides conflicting inherited cache environment settings.
+Runtime-managed policy can still affect requests; live qualification checks the
+reported cache writes rather than assuming a requested setting took effect.
+
+Provider events carry usage snapshots with uncached input, cache writes, cache
+reads, and output counted separately.
+Runtime aggregate totals are separate from main-request usage and must not be
+added to it.
+SDK dollar estimates are not subscription charges or quota percentages.
+See the [qualification procedure] for the metadata format and deduplication
+rules.
+
+### Direct subscription access
 
 Existing direct subscription users must opt in explicitly:
 
@@ -87,3 +122,4 @@ Named subscriptions remain available with this flow.
 [back to README]
 
 [back to README]: ../../README.md
+[qualification procedure]: ../architecture/anthropic-acp-qualification.md

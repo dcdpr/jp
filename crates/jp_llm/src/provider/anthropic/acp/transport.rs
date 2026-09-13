@@ -26,7 +26,7 @@ use futures::StreamExt as _;
 use jp_config::assistant::{request::CachePolicy, tool_choice::ToolChoice};
 use serde_json::json;
 use tokio::sync::mpsc;
-use tracing::warn;
+use tracing::{debug, warn};
 use uuid::Uuid;
 
 use super::{
@@ -107,19 +107,21 @@ async fn run(
         return Err(Error::PlatformUnsupported);
     }
     let artifact = NativeArtifact::write(&prepared, &context.root)?;
+    let environment = options::environment(&prepared, cache);
     // `env -u` removes routing variables without passing their values in argv.
     // The ACP SDK's launcher owns descendant termination but only supports
-    // setting environment variables, not removing inherited ones.
+    // setting environment variables, not removing inherited ones. Explicit JP
+    // overrides must survive `env -u`; envs() replaces their inherited values.
     let mut launch = AcpAgentConfig::new("env");
     for (key, _) in env::vars_os() {
         if let Some(key) = key.to_str()
             && removes_variable(key)
+            && !environment.contains_key(key)
         {
             launch = launch.args(["-u", key]);
         }
     }
     launch = launch.arg("claude-agent-acp");
-    let environment = options::environment(&prepared, cache);
     launch = launch.envs(&environment);
     drive(
         prepared,
@@ -238,15 +240,20 @@ async fn drive(
         }
         let request: PromptRequest = serde_json::from_value(json!({"sessionId":session,"prompt":[{"type":"text","text":prepared.prompt}]})).map_err(RpcError::into_internal_error)?;
         cx.send_request(request).block_task().await?;
-        let events = foreground_state.lock().unwrap_or_else(PoisonError::into_inner).final_events.take()
-            .ok_or_else(|| RpcError::into_internal_error(Error::MissingSdkResult))?;
+        let events = {
+            let mut state = foreground_state.lock().unwrap_or_else(PoisonError::into_inner);
+            state.final_events.take().ok_or_else(|| RpcError::into_internal_error(Error::MissingSdkResult))?
+        };
         emit(&sender, events).await
     });
     tokio::pin!(result);
     let mut tick = tokio::time::interval(Duration::from_secs(5));
     loop {
         tokio::select! {
-            result = &mut result => return result.map_err(Error::Protocol),
+            result = &mut result => {
+                debug!(usage = %state.lock().unwrap_or_else(PoisonError::into_inner).usage_snapshot(), "Claude ACP usage snapshot");
+                return result.map_err(Error::Protocol);
+            },
             _ = tick.tick() => {
                 // Host interactions are activity, not a silent model stream.
                 let pending = !state.lock().unwrap_or_else(PoisonError::into_inner).pending_tools.is_empty();

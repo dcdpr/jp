@@ -85,6 +85,33 @@ fn native_bookkeeping_does_not_rewrite_message_content() {
 }
 
 #[test]
+fn session_ids_and_timestamps_do_not_change_the_model_visible_prefix() {
+    let model = super::super::model_details(&"claude-opus-5".parse().unwrap()).unwrap();
+    let prepared = PreparedRequest::new(&model, query()).unwrap();
+    let first = prepared.records(
+        Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap(),
+        Utf8Path::new("/work/project"),
+        datetime!(2026-09-11 12:00:00 Z),
+    );
+    let second = prepared.records(
+        Uuid::parse_str("22222222-2222-4222-8222-222222222222").unwrap(),
+        Utf8Path::new("/work/project"),
+        datetime!(2026-09-11 12:01:00 Z),
+    );
+    let content = |records: Vec<NativeRecord<'_>>| {
+        records
+            .into_iter()
+            .map(|record| {
+                let value = serde_json::to_value(record).unwrap();
+                json!({"role":value["message"]["role"],"content":value["message"]["content"]})
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_ne!(first[0].uuid, second[0].uuid);
+    assert_eq!(content(first), content(second));
+}
+
+#[test]
 fn pending_text_is_removed_without_removing_prior_user_blocks() {
     let mut query = query();
     query.thread.events.extend([ConversationEvent::new(

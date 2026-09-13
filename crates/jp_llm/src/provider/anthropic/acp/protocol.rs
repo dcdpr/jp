@@ -1,6 +1,6 @@
 //! Typed Claude adapter notifications and response translation.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use agent_client_protocol::{
     JsonRpcNotification,
@@ -10,11 +10,14 @@ use agent_client_protocol::{
         SessionUpdate, ToolCallStatus,
     },
 };
-use async_anthropic::types::{CreateMessagesResponse, MessageContent, MessagesStreamEvent};
+use async_anthropic::types::{CreateMessagesResponse, MessageContent, MessagesStreamEvent, Usage};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use super::transcript::tool_name;
+use super::{
+    transcript::tool_name,
+    usage::{METADATA_KEY, ModelUsage, RuntimeUsage, UsageLedger},
+};
 use crate::{
     error::StreamError,
     event::{Event, EventPart, FinishReason, ToolCallPart},
@@ -82,6 +85,12 @@ pub(super) enum SdkMessage {
         parent_tool_use_id: Option<String>,
     },
     Result {
+        #[serde(default)]
+        usage: Option<Usage>,
+        #[serde(default, rename = "modelUsage")]
+        model_usage: BTreeMap<String, ModelUsage>,
+        #[serde(default)]
+        total_cost_usd: Option<f64>,
         subtype: String,
         is_error: bool,
         #[serde(default)]
@@ -167,6 +176,8 @@ pub(super) struct State {
     index_base: usize,
     next_index: usize,
     pub final_events: Option<Vec<Event>>,
+    usage: UsageLedger,
+    pending_flush: Option<usize>,
 }
 
 impl State {
@@ -190,6 +201,8 @@ impl State {
             index_base: 0,
             next_index: 0,
             final_events: None,
+            usage: UsageLedger::default(),
+            pending_flush: None,
         }
     }
 
@@ -245,7 +258,8 @@ impl State {
         self.pending_tools.insert(id.clone());
         let index = self.next_index;
         self.next_index += 1;
-        let events = vec![
+        let mut events = self.flush_pending().into_iter().collect::<Vec<_>>();
+        events.extend([
             Event::Part {
                 index,
                 part: EventPart::ToolCall(ToolCallPart::Start { id, name }),
@@ -258,15 +272,34 @@ impl State {
                 )),
                 metadata: Map::new(),
             },
-            Event::flush(index),
+            Event::flush_with_metadata(index, self.usage_metadata()),
             Event::Finished(FinishReason::Completed),
-        ];
+        ]);
         Ok((
             RequestPermissionResponse::new(RequestPermissionOutcome::Selected(
                 SelectedPermissionOutcome::new(option.option_id),
             )),
             events,
         ))
+    }
+
+    pub(super) fn usage_snapshot(&self) -> Value {
+        self.session
+            .as_ref()
+            .map_or(Value::Null, |id| self.usage.snapshot(id.0.as_ref()))
+    }
+
+    fn usage_metadata(&self) -> Map<String, Value> {
+        if self.usage.is_empty() || self.session.is_none() {
+            return Map::new();
+        }
+        Map::from_iter([(METADATA_KEY.into(), self.usage_snapshot())])
+    }
+
+    fn flush_pending(&mut self) -> Option<Event> {
+        self.pending_flush
+            .take()
+            .map(|index| Event::flush_with_metadata(index, self.usage_metadata()))
     }
 
     pub(super) fn observe(&mut self, notification: SessionNotification) {
@@ -366,6 +399,7 @@ impl State {
                         "Claude Code answered with a different or unreported model",
                     ));
                 }
+                self.usage.observe(&message);
                 Ok(vec![])
             }
             SdkMessage::StreamEvent {
@@ -373,6 +407,9 @@ impl State {
                 parent_tool_use_id: None,
             } => self.stream_event(event),
             SdkMessage::Result {
+                usage,
+                model_usage,
+                total_cost_usd,
                 subtype,
                 is_error,
                 errors,
@@ -380,7 +417,12 @@ impl State {
                 stop_reason,
                 refusal,
             } => {
-                let mut events = vec![];
+                self.usage.set_runtime(RuntimeUsage {
+                    usage,
+                    model_usage,
+                    estimated_cost_usd: total_cost_usd,
+                });
+                let mut events = self.flush_pending().into_iter().collect::<Vec<_>>();
                 let finish = if stop_reason.as_deref() == Some("refusal") {
                     FinishReason::Refused {
                         category: refusal
@@ -418,7 +460,10 @@ impl State {
                             part: EventPart::Structured(data.to_string()),
                             metadata: Map::new(),
                         });
-                        events.push(Event::flush(self.next_index));
+                        events.push(Event::flush_with_metadata(
+                            self.next_index,
+                            self.usage_metadata(),
+                        ));
                         self.next_index += 1;
                     }
                     FinishReason::Completed
@@ -432,8 +477,10 @@ impl State {
     }
 
     fn stream_event(&mut self, event: MessagesStreamEvent) -> Result<Vec<Event>, StreamError> {
+        let mut events = Vec::new();
         match &event {
             MessagesStreamEvent::MessageStart { .. } => {
+                events.extend(self.flush_pending());
                 self.index_base = self.next_index;
             }
             MessagesStreamEvent::MessageStop => {
@@ -450,8 +497,9 @@ impl State {
                     || (self.structured && matches!(content_block, MessageContent::Text(_)))
                 {
                     self.ignored.insert(*index);
-                    return Ok(vec![]);
+                    return Ok(events);
                 }
+                events.extend(self.flush_pending());
             }
             MessagesStreamEvent::ContentBlockDelta { index, .. }
             | MessagesStreamEvent::ContentBlockStop { index }
@@ -459,9 +507,15 @@ impl State {
             {
                 return Ok(vec![]);
             }
+            MessagesStreamEvent::ContentBlockStop { index } => {
+                events.extend(self.flush_pending());
+                // The final usage arrives after content_block_stop. Text is
+                // already streaming; delay only the commit boundary.
+                self.pending_flush = Some(self.index_base + index);
+                return Ok(events);
+            }
             _ => {}
         }
-        let mut events = Vec::new();
         for event in map_event(event, false) {
             let mut event = event?;
             match &mut event {

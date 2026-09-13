@@ -22,6 +22,7 @@ mod options;
 mod protocol;
 mod transcript;
 mod transport;
+mod usage;
 pub(super) use transport::stream;
 
 /// A failed prerequisite for the Claude Code subscription flow.
@@ -263,6 +264,8 @@ pub(super) fn model_details(name: &Name) -> Result<ModelDetails, Error> {
 fn removes_variable(name: &str) -> bool {
     name.starts_with("ANTHROPIC_")
         || name.starts_with("CLAUDE_CODE_USE_")
+        || name.starts_with("DISABLE_PROMPT_CACHING")
+        || name == "CLAUDE_CODE_PROMPT_CACHE_TTL"
         || matches!(
             name,
             "CLAUDE_CODE_OAUTH_TOKEN" | "CLAUDE_CODE_API_KEY" | "CLAUDECODE"
@@ -321,6 +324,10 @@ async fn read_output(command: &mut Command, check: Check) -> Result<Vec<u8>, Err
     }
     result
 }
+
+#[cfg(all(test, unix))]
+#[path = "acp/live_tests.rs"]
+mod live_tests;
 
 #[cfg(test)]
 #[path = "acp/workflow_tests.rs"]
