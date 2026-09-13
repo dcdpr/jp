@@ -22,10 +22,8 @@ chrono = { workspace = true }
 serde = { workspace = true, features = ["std", "derive"] }
 serde_json = { workspace = true, features = ["std"] }
 thiserror = { workspace = true }
-tracing = { workspace = true }
 
 [dev-dependencies]
-assert_matches = { workspace = true }
 datetime_literal = { workspace = true }
 test-log = { workspace = true }
 
