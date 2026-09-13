@@ -5,10 +5,18 @@ use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
 mod access;
+pub mod content;
+pub mod definition;
+mod error;
+pub mod schema;
+
 pub use access::{
     AccessPolicy, Capability, EnvRule, FsAccessError, FsRule, NetRule,
     canonicalize_workspace_target, lexical_workspace_relative,
 };
+pub use content::{ContentBlock, InputRequest, Resource, ResourceContent, ToolResult};
+pub use definition::{ParameterDocs, ToolDefinition, ToolDocs};
+pub use error::Error;
 
 /// The result of a tool call.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
@@ -206,16 +214,26 @@ pub struct Question {
 }
 
 impl Question {
+    /// Construct a question with an already validated identifier.
+    #[must_use]
+    pub fn new(id: QuestionId, text: impl Into<String>, answer_type: AnswerType) -> Self {
+        Self {
+            id,
+            text: text.into(),
+            answer_type,
+            pre_amble: None,
+            default: None,
+        }
+    }
+
     /// Create a new text question.
     /// Fails if `id` is empty or contains a `.`.
     pub fn text(id: impl Into<String>, text: impl Into<String>) -> Result<Self, InvalidQuestionId> {
-        Ok(Self {
-            id: QuestionId::try_from(id.into())?,
-            text: text.into(),
-            pre_amble: None,
-            answer_type: AnswerType::Text,
-            default: None,
-        })
+        Ok(Self::new(
+            QuestionId::try_from(id.into())?,
+            text,
+            AnswerType::Text,
+        ))
     }
 
     /// Create a new boolean question.

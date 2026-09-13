@@ -1,4 +1,4 @@
-use std::{env, time::Duration};
+use std::time::Duration;
 
 use async_stream::try_stream;
 use async_trait::async_trait;
@@ -226,6 +226,7 @@ fn call(
                 }
                 patch @ Event::Patch(_) => yield patch,
                 keep_alive @ Event::KeepAlive => yield keep_alive,
+                notice @ Event::Notice(_) => yield notice,
             }
         }
     })
@@ -922,6 +923,7 @@ fn map_model(model: response::Model) -> Result<ModelDetails> {
         deprecated: None,
         structured_output,
         prefill: None,
+        subscription: None,
         features: vec![],
     })
 }
@@ -1000,8 +1002,8 @@ impl TryFrom<&OpenrouterConfig> for Openrouter {
     type Error = Error;
 
     fn try_from(config: &OpenrouterConfig) -> Result<Self> {
-        let api_key = env::var(&config.api_key_env)
-            .map_err(|_| Error::MissingEnv(config.api_key_env.clone()))?;
+        let (api_key, _) =
+            super::api_key_chain::resolve("openrouter", &config.auth, &config.api_key_env)?;
 
         let client = Openrouter::new(
             api_key,
@@ -1253,6 +1255,33 @@ impl From<jp_openrouter::Error> for StreamError {
         }
     }
 }
+
+/// OpenRouter's recorded-test route.
+#[cfg(test)]
+pub(crate) static TEST_SUPPORT: super::ApiOnlyTestSupport = super::ApiOnlyTestSupport(&API_ROUTE);
+
+#[cfg(test)]
+static API_ROUTE: super::ApiTestRoute = super::ApiTestRoute {
+    id: ProviderId::Openrouter,
+    base_url: |config| config.openrouter.base_url.clone(),
+    set_base_url: |config, url| config.openrouter.base_url = url,
+    use_replay_credentials: |config| {
+        config.openrouter.api_key_env = super::replay_credential_env().into();
+    },
+    model: || ModelDetails {
+        id: "openrouter/openai/gpt-5-mini".parse().unwrap(),
+        display_name: None,
+        context_window: Some(200_000),
+        max_output_tokens: None,
+        reasoning: None,
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: None,
+        prefill: None,
+        subscription: None,
+        features: vec![],
+    },
+};
 
 #[cfg(test)]
 #[path = "openrouter_tests.rs"]

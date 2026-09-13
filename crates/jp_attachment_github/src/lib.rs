@@ -62,7 +62,6 @@ use jp_github::{
         repos::{DiffEntry, DiffEntryStatus},
     },
 };
-use jp_mcp::Client;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error};
 use url::Url;
@@ -123,11 +122,7 @@ impl Handler for GithubAttachment {
         Ok(self.urls.iter().cloned().collect())
     }
 
-    async fn get(
-        &self,
-        _: &Utf8Path,
-        _: Client,
-    ) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
+    async fn get(&self, _: &Utf8Path) -> Result<Vec<Attachment>, Box<dyn Error + Send + Sync>> {
         debug!(id = "gh", "Fetching GitHub attachments.");
 
         let mut attachments = Vec::with_capacity(self.urls.len());

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, env, time::Duration};
+use std::{collections::HashMap, time::Duration};
 
 use async_trait::async_trait;
 use futures::{Stream, StreamExt as _, future, stream};
@@ -15,6 +15,7 @@ use jp_conversation::{
     event::{ChatResponse, EventKind, ToolCallResponse},
     thread::text_attachments_to_xml,
 };
+use jp_tool::ToolDefinition;
 use reqwest::header::{self, HeaderMap, HeaderValue};
 use reqwest_eventsource::{Event as SseEvent, EventSource, retry::Never};
 use serde::Deserialize;
@@ -33,7 +34,6 @@ use crate::{
     provider::trace_to_tmpfile,
     query::ChatQuery,
     stream::with_tool_call_keepalive,
-    tool::ToolDefinition,
 };
 
 static PROVIDER: ProviderId = ProviderId::Cerebras;
@@ -195,8 +195,8 @@ impl TryFrom<&CerebrasConfig> for Cerebras {
     type Error = Error;
 
     fn try_from(config: &CerebrasConfig) -> Result<Self> {
-        let api_key = env::var(&config.api_key_env)
-            .map_err(|_| Error::MissingEnv(config.api_key_env.clone()))?;
+        let (api_key, _) =
+            super::api_key_chain::resolve("cerebras", &config.auth, &config.api_key_env)?;
 
         let client = reqwest::Client::builder()
             .default_headers(HeaderMap::from_iter([(
@@ -381,6 +381,7 @@ fn map_model(id: &str) -> Result<ModelDetails> {
             deprecated: None,
             structured_output: Some(true),
             prefill: None,
+            subscription: None,
             features: vec![],
         },
         "gpt-oss-120b" => ModelDetails {
@@ -395,6 +396,7 @@ fn map_model(id: &str) -> Result<ModelDetails> {
             deprecated: None,
             structured_output: Some(true),
             prefill: None,
+            subscription: None,
             features: vec![],
         },
         "zai-glm-4.7" => ModelDetails {
@@ -410,6 +412,7 @@ fn map_model(id: &str) -> Result<ModelDetails> {
             deprecated: None,
             structured_output: Some(true),
             prefill: None,
+            subscription: None,
             features: vec![],
         },
         _ => {
@@ -952,6 +955,35 @@ fn handle_sse_event_sync(
         }
     }
 }
+
+/// Cerebras's recorded-test route.
+#[cfg(test)]
+pub(crate) static TEST_SUPPORT: super::ApiOnlyTestSupport = super::ApiOnlyTestSupport(&API_ROUTE);
+
+#[cfg(test)]
+static API_ROUTE: super::ApiTestRoute = super::ApiTestRoute {
+    id: ProviderId::Cerebras,
+    base_url: |config| config.cerebras.base_url.clone(),
+    set_base_url: |config, url| config.cerebras.base_url = url,
+    use_replay_credentials: |config| {
+        config.cerebras.api_key_env = super::replay_credential_env().into();
+    },
+    model: || ModelDetails {
+        id: "cerebras/gpt-oss-120b".parse().unwrap(),
+        display_name: Some("GPT-OSS 120B".to_owned()),
+        context_window: Some(131_072),
+        max_output_tokens: Some(40_960),
+        reasoning: Some(
+            ReasoningDetails::leveled(false, true, true, true, false, false).always_on(),
+        ),
+        knowledge_cutoff: None,
+        deprecated: None,
+        structured_output: Some(true),
+        prefill: None,
+        subscription: None,
+        features: vec![],
+    },
+};
 
 #[cfg(test)]
 #[path = "cerebras_tests.rs"]

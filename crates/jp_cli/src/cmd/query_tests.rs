@@ -23,9 +23,9 @@ use jp_inquire::prompt::MockPromptBackend;
 use jp_llm::{
     Provider,
     provider::mock::MockProvider,
-    tool::{InvocationContext, builtin::BuiltinExecutors, executor::ExecutorSource},
+    tool::{ExecutorSource, TestExecutorSource},
 };
-use jp_mcp::{Startup, StderrLine};
+use jp_mcp::{Startup, StderrLine, server::InvocationContext};
 use jp_printer::{OutputFormat, Printer, SharedBuffer, TerminalCapability};
 use jp_storage::backend::FsStorageBackend;
 use jp_term::width::display_width;
@@ -253,12 +253,7 @@ fn config_with_model(provider: ProviderId, name: &str) -> AppConfig {
 }
 
 fn empty_executor_source() -> Box<dyn ExecutorSource> {
-    Box::new(tool::executor::TerminalExecutorSource::new(
-        BuiltinExecutors::new(),
-        &[],
-        std::sync::Arc::new(crate::access::approvals::ApprovalStore::default()),
-        InvocationContext::default(),
-    ))
+    Box::new(TestExecutorSource::new())
 }
 
 fn build_query_config(
@@ -337,7 +332,7 @@ async fn an_interrupt_during_mcp_startup_stops_the_turn_before_it_runs() {
         mcp_client: jp_mcp::Client::default(),
         workspace_root: tmp.path().to_path_buf(),
         interactive: false,
-        attachments: PendingAttachments { slots: vec![] },
+        attachments: vec![],
         printer: Arc::new(printer),
         approvals: Arc::new(crate::access::approvals::ApprovalStore::default()),
         chat_request: ChatRequest::from("hello"),
@@ -1898,66 +1893,6 @@ fn cleanup_any_removes_a_replaced_draft() {
     assert!(!path.exists());
 }
 
-fn attachment(source: &str) -> Attachment {
-    Attachment {
-        source: source.to_owned(),
-        description: None,
-        content: jp_attachment::AttachmentContent::Text(String::new()),
-    }
-}
-
-/// An MCP attachment resolves later than the rest, but the assistant has to see
-/// every attachment in the order the conversation declares them: each one is
-/// sent as a document numbered by its position.
-#[test]
-fn attachments_keep_their_configured_order_across_deferral() {
-    let mcp = Url::parse("mcp+server+res://one").unwrap();
-
-    // Declared as `[mcp, file, mcp, file]`, so both MCP slots resolve after the
-    // two around them and every one of them has to land back in place.
-    let slots = vec![
-        AttachmentSlot::Deferred(mcp.clone()),
-        AttachmentSlot::Ready(vec![attachment("file://second")]),
-        AttachmentSlot::Deferred(mcp),
-        AttachmentSlot::Ready(vec![attachment("file://fourth")]),
-    ];
-
-    let resolved = vec![vec![attachment("mcp://first")], vec![attachment(
-        "mcp://third",
-    )]];
-
-    let sources: Vec<String> = splice(slots, resolved)
-        .into_iter()
-        .map(|attachment| attachment.source)
-        .collect();
-
-    assert_eq!(sources, [
-        "mcp://first",
-        "file://second",
-        "mcp://third",
-        "file://fourth"
-    ]);
-}
-
-/// One URL can yield several attachments, so a slot holds a group rather than a
-/// single item and the whole group belongs at the slot's position.
-#[test]
-fn a_deferred_slot_keeps_its_whole_group_together() {
-    let slots = vec![
-        AttachmentSlot::Deferred(Url::parse("mcp+server+res://dir").unwrap()),
-        AttachmentSlot::Ready(vec![attachment("file://last")]),
-    ];
-
-    let resolved = vec![vec![attachment("mcp://a"), attachment("mcp://b")]];
-
-    let sources: Vec<String> = splice(slots, resolved)
-        .into_iter()
-        .map(|attachment| attachment.source)
-        .collect();
-
-    assert_eq!(sources, ["mcp://a", "mcp://b", "file://last"]);
-}
-
 fn lock_with_title(
     workspace: &mut Workspace,
     id: ConversationId,
@@ -3490,4 +3425,177 @@ fn read_arg_file_error_names_the_path() {
             .starts_with(&format!("cannot read '{path}': ")),
         "unexpected message: {error}"
     );
+}
+
+/// A partial naming `model` as the turn's model.
+fn partial_with_model(model: PartialModelIdOrAliasConfig) -> PartialAppConfig {
+    let mut partial = PartialAppConfig::default();
+    partial.assistant.model.id = model;
+    partial
+}
+
+fn model_id(id: &str) -> PartialModelIdOrAliasConfig {
+    PartialModelIdOrAliasConfig::Id(id.parse().expect("a valid model id"))
+}
+
+fn alias(name: &str) -> PartialModelIdOrAliasConfig {
+    PartialModelIdOrAliasConfig::Alias(name.to_owned())
+}
+
+/// The chain lands on the provider of the model serving the turn, and nowhere
+/// else.
+#[test]
+fn test_auth_writes_the_chain_to_the_turns_provider() {
+    let mut partial = partial_with_model(model_id("openai/gpt-5.6-luna"));
+    let auth = vec![AuthEntry::Subscription(Some("personal".to_owned()))];
+
+    apply_auth(&mut partial, &auth, None).unwrap();
+
+    assert_eq!(partial.providers.llm.openai.auth.as_ref(), Some(&auth));
+    assert_eq!(partial.providers.llm.anthropic.auth, None);
+    assert_eq!(partial.providers.llm.cerebras.auth, None);
+}
+
+/// A whole chain is written, not only its first entry.
+#[test]
+fn test_auth_writes_every_entry_in_order() {
+    let mut partial = partial_with_model(model_id("anthropic/claude-haiku-4-5"));
+    let auth = vec![
+        AuthEntry::Named("personal".to_owned()),
+        AuthEntry::ApiKey(None),
+    ];
+
+    apply_auth(&mut partial, &auth, None).unwrap();
+
+    assert_eq!(partial.providers.llm.anthropic.auth.as_ref(), Some(&auth));
+}
+
+/// An alias is followed to the provider it stands for.
+#[test]
+fn test_auth_follows_an_alias_to_its_provider() {
+    let mut partial = partial_with_model(alias("luna"));
+    partial
+        .providers
+        .llm
+        .aliases
+        .insert("luna".to_owned(), model_id("openai/gpt-5.6-luna"));
+
+    apply_auth(&mut partial, &[AuthEntry::ApiKey(None)], None).unwrap();
+
+    assert_eq!(
+        partial.providers.llm.openai.auth,
+        Some(vec![AuthEntry::ApiKey(None)])
+    );
+}
+
+/// An alias naming another alias resolves through to the model id.
+#[test]
+fn test_auth_follows_a_chain_of_aliases() {
+    let mut partial = partial_with_model(alias("fast"));
+    partial
+        .providers
+        .llm
+        .aliases
+        .insert("fast".to_owned(), alias("luna"));
+    partial
+        .providers
+        .llm
+        .aliases
+        .insert("luna".to_owned(), model_id("openai/gpt-5.6-luna"));
+
+    apply_auth(&mut partial, &[AuthEntry::ApiKey(None)], None).unwrap();
+
+    assert!(partial.providers.llm.openai.auth.is_some());
+}
+
+/// An alias pointing at itself reports rather than recursing forever.
+#[test]
+fn test_auth_gives_up_on_an_alias_cycle() {
+    let mut partial = partial_with_model(alias("a"));
+    partial
+        .providers
+        .llm
+        .aliases
+        .insert("a".to_owned(), alias("b"));
+    partial
+        .providers
+        .llm
+        .aliases
+        .insert("b".to_owned(), alias("a"));
+
+    let error = apply_auth(&mut partial, &[AuthEntry::ApiKey(None)], None).unwrap_err();
+
+    assert!(
+        error.to_string().contains("--auth needs to know"),
+        "{error}"
+    );
+}
+
+/// The provider comes from the config layers when the CLI names no model.
+#[test]
+fn test_auth_reads_the_provider_from_the_merged_config() {
+    let mut partial = PartialAppConfig::default();
+    let merged = partial_with_model(model_id("cerebras/gpt-oss-120b"));
+
+    apply_auth(&mut partial, &[AuthEntry::ApiKey(None)], Some(&merged)).unwrap();
+
+    assert!(partial.providers.llm.cerebras.auth.is_some());
+}
+
+/// The CLI's own model wins over the one the config layers settled on.
+#[test]
+fn test_auth_prefers_the_models_named_on_the_command_line() {
+    let mut partial = partial_with_model(model_id("openai/gpt-5.6-luna"));
+    let merged = partial_with_model(model_id("anthropic/claude-haiku-4-5"));
+
+    apply_auth(&mut partial, &[AuthEntry::ApiKey(None)], Some(&merged)).unwrap();
+
+    assert!(partial.providers.llm.openai.auth.is_some());
+    assert_eq!(partial.providers.llm.anthropic.auth, None);
+}
+
+/// An unresolvable provider names the `--cfg` form that would work, rather than
+/// writing the chain somewhere it would do nothing.
+#[test]
+fn test_auth_without_a_provider_names_the_alternative() {
+    let mut partial = PartialAppConfig::default();
+    let auth = vec![
+        AuthEntry::Subscription(Some("personal".to_owned())),
+        AuthEntry::ApiKey(None),
+    ];
+
+    let error = apply_auth(&mut partial, &auth, None).unwrap_err();
+    let message = error.to_string();
+
+    assert!(message.contains("--model <provider>/<name>"), "{message}");
+    assert!(
+        message.contains("providers.llm.<provider>.auth=subscription:personal,api_key"),
+        "{message}"
+    );
+}
+
+/// A provider reached over a local socket has no credential to choose.
+#[test]
+fn test_auth_is_refused_for_a_provider_without_credentials() {
+    for model in ["llamacpp/qwen3", "ollama/qwen3"] {
+        let mut partial = partial_with_model(model_id(model));
+
+        let error = apply_auth(&mut partial, &[AuthEntry::ApiKey(None)], None).unwrap_err();
+
+        assert!(
+            error.to_string().contains("needs no credential"),
+            "{model}: {error}"
+        );
+    }
+}
+
+/// Without the flag, nothing is written and no provider is looked for.
+#[test]
+fn test_auth_is_a_no_op_when_the_flag_is_absent() {
+    let mut partial = PartialAppConfig::default();
+
+    apply_auth(&mut partial, &[], None).unwrap();
+
+    assert_eq!(partial.providers.llm.openai.auth, None);
+    assert_eq!(partial.providers.llm.anthropic.auth, None);
 }

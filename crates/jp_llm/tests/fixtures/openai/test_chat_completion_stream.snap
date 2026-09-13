@@ -8,26 +8,13 @@ expression: v
             ConversationEvent {
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
-                    Reasoning {
-                        reasoning: "**Acknowledging user message**\n\nThe user wrote, \"Test message,\" which seems like they might just want a quick acknowledgment. I think it’s good to keep my response concise, just confirming that I see their message. I can also ask if they need anything specific or if there's any way I can help. It’s essential to be helpful and open to their needs!",
-                    },
-                ),
-                metadata: {
-                    "openai_item_id": String("rs_006404854596594a016a886d9d8d8c87d2af9b4fee31deec93"),
-                    "openai_encrypted_content": String("gAAAAABqiG2fKZlqYP0smU5QFZDKA24YM_LpgYQ5qOhcaFowpMwJu_PiEaFTt4AyP5hYNk1DPuqU7kjerOuEax9WmU7e4fI_v_k2LQHtziqGvFBJL_ekfyjXmK9cfjf8UJyFxGfNN86nSwT10yKcr8cGBUJhbXS9u-2S9qVEnl8efz1X73nS2wADsoj2RtrFkvJ64J94OO5K_c0cHg2-vNhB1insJBSdKANzgsa1IETRmS1d_UTgoyueKlCVatwUjOZQgJxsuaxWCIEYQgjaCBLkwnZlMt5Vo3rF9N7y3s0BReK0w5rrbWMkfnQaaSItBK8KtT_WzD2B04gz9W8jWqxWYLIjHCc9w6tYsyetVoE7jRlstXUgQAEb1HG0zOjZgAqk8Gk8z2Zv70LJ0VwcahXP0HIkP_Y8G5QU0xjHcFuRD1leW0pCRfD0cIBq9FTBHANp9ILwcrClTGgyUt9VuNV2e8Pb9kDLp8UOLBm2JYySswO5GcWNN7Cj5BZjJcXiYi3QiCibuM_lBPLfgpu4RZCgsaA2V0pr_2NFOHOqzo9MFB4U2iHLMjPGt3l1O9yRYWHIO6Va3MvRI0VGwqwmwMgLI0iNQLn_m7u9idxoFf9jYeycf6xwB3ZqWjXBpXCUhjfD_d-8br1Bqgmj4eVFR68hqt2ZtAiYi8jPYYq8ZzITONk2wVcPh9zC7BxicG3UmiptSHNBJgYElp5y1w9I_CTsYp_ZA9dZqsa3U49yKiqZCpqq82R7XOxjow0gKpznzBHfMt0WF00nZxvEvf0xuBazZlVNzvjbUO53Y-pxVeCntxf9gPXriLD03zIPSoTMO0nclT55y3wUWqscUmBaWPSct-FDaq9KSrTrb0pkQRouw_0IfAxuDVvHnbdxNQ3oETmz6g52DONmDOlFrz2xcqRPa1kHpoE_Qe-I6FYNA9Ohfwi3xQAJwee1bp9WPfMuqdejML3V7MlHz3QUxP1rV_nl7KYMtwAlrT771JP_BbmB7lvgD8Xz7DT62St0J4R1Q41kNtUMS5_mTpFjWT81Idq1232btTndPUFzHsaWpWXZLNepvDtePOL1DuXW70BmY0P4_juyT7p3KYmSt_FR870N_RfGGDRBKtvu5acKtoQkGDrHHL7mxvNi5za2NUNukZ7KzZlFhSHPT9nBajI-lAExR3izoobOD678VysF2M3Quf07xnxiZtTERUxH0j7cBisajMEYhB-U90KE6Gj_8VVe-znaFHFcg9lB6wCFDb-EMHfrZfgOjWSrPD9BcRDXEKtXv1NpkGgl4UPkemNFpZPLH8Vc1-DwVwc5NtcfvD-yjrjaP3ETMJDpsCX9mBnEGZzg9RdADz9GUeIsfMAz48L5X2TaXKGpbw=="),
-                },
-            },
-        ),
-        Flushed(
-            ConversationEvent {
-                timestamp: 2020-01-01 0:00:00.0 +00,
-                kind: ChatResponse(
                     Message {
-                        message: "Received your test message. How can I help you today?",
+                        message: "Test received successfully.",
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("msg_006404854596594a016a886d9f041887d2b9747759a288ffb2"),
+                    "openai_item_id": String("msg_06a82c06805fdada016aa1b7a09de887d2882c88ab90a64c7c"),
+                    "openai_phase": String("final_answer"),
                 },
             },
         ),

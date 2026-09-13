@@ -12,19 +12,67 @@ readme.workspace = true
 repository.workspace = true
 version.workspace = true
 
+[features]
+default = ["client"]
+
+# Connect to the MCP servers named in `providers.mcp`.
+client = ["rmcp/client", "rmcp/transport-child-process", "rmcp/transport-io"]
+
+# Run JP's tools: local commands, built-ins, and the tools those MCP servers
+# declare. Implies `client`, because running an MCP tool means calling one.
+server = [
+    "client",
+    "dep:async-trait",
+    "dep:axum",
+    "dep:base64",
+    "dep:camino",
+    "dep:futures",
+    "dep:jp_tool",
+    "dep:minijinja",
+    "dep:reqwest",
+    "dep:sse-stream",
+    "dep:tokio-util",
+    "rmcp/server",
+    "rmcp/transport-streamable-http-server",
+    "rmcp/transport-streamable-http-client",
+]
+
 [dependencies]
 jp_config = { workspace = true }
+jp_tool = { workspace = true, optional = true }
 
+async-trait = { workspace = true, optional = true }
+axum = { workspace = true, optional = true, features = ["http1", "tokio"] }
+base64 = { workspace = true, optional = true, features = ["std"] }
+camino = { workspace = true, optional = true }
+futures = { workspace = true, optional = true }
 indexmap = { workspace = true }
-rmcp = { workspace = true, features = ["client", "transport-child-process", "transport-io"] }
+minijinja = { workspace = true, optional = true, features = [
+    "builtins",
+    "json",
+    "preserve_order",
+    "serde",
+    "unicode",
+] }
+reqwest = { workspace = true, optional = true, features = ["json", "stream"] }
+rmcp = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["preserve_order"] }
 sha1 = { workspace = true }
 sha2 = { workspace = true }
+sse-stream = { workspace = true, optional = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+tokio-util = { workspace = true, optional = true }
 tracing = { workspace = true }
 which = { workspace = true }
+
+[dev-dependencies]
+camino-tempfile = { workspace = true }
+assert_matches = { workspace = true }
+jp_test = { workspace = true }
+test-log = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true

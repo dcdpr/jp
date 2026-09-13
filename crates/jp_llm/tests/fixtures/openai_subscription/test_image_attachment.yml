@@ -1,0 +1,70 @@
+when:
+  path: /backend-api/codex/responses
+  method: POST
+  json_body_str: >-
+    {
+      "model": "gpt-5.6-luna",
+      "input": [
+        {
+          "type": "message",
+          "role": "user",
+          "content": [
+            {
+              "type": "input_text",
+              "text": "[Attached file: banana.jpg]"
+            },
+            {
+              "type": "input_image",
+              "detail": "auto",
+              "file_id": null,
+              "image_url": "data:image/jpeg;base64,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"
+            }
+          ]
+        },
+        {
+          "type": "message",
+          "role": "user",
+          "content": "What fruit is in this image? Answer with just the fruit name, nothing else."
+        }
+      ],
+      "prompt_cache_key": "jp:conversation:1577836800000000",
+      "reasoning": {
+        "effort": "none",
+        "summary": "auto"
+      },
+      "store": false,
+      "stream": true,
+      "tool_choice": "auto",
+      "tools": []
+    }
+then:
+  status: 200
+  header: []
+  body: |+
+    event: response.created
+    data: {"type":"response.created","response":{"id":"resp_0a2fdf7fb5bf7f3d016aa1ba61a2b887d297627e4494f2434a","object":"response","created_at":1788983905,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-5.6-luna","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":"9ee4fd7e-d864-531e-b38d-b4502f19d6ac","prompt_cache_retention":"24h","reasoning":{"context":"all_turns","effort":"none","mode":"standard","summary":"detailed"},"safety_identifier":"user-aWF4CWBHpvpaLyYkyiF06JCt","service_tier":"auto","store":false,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[],"top_logprobs":0,"top_p":0.98,"truncation":"disabled","usage":null,"user":null,"metadata":{}},"sequence_number":0}
+    
+    event: response.in_progress
+    data: {"type":"response.in_progress","response":{"id":"resp_0a2fdf7fb5bf7f3d016aa1ba61a2b887d297627e4494f2434a","object":"response","created_at":1788983905,"status":"in_progress","background":false,"completed_at":null,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-5.6-luna","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":"9ee4fd7e-d864-531e-b38d-b4502f19d6ac","prompt_cache_retention":"24h","reasoning":{"context":"all_turns","effort":"none","mode":"standard","summary":"detailed"},"safety_identifier":"user-aWF4CWBHpvpaLyYkyiF06JCt","service_tier":"auto","store":false,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[],"top_logprobs":0,"top_p":0.98,"truncation":"disabled","usage":null,"user":null,"metadata":{}},"sequence_number":1}
+    
+    event: response.output_item.added
+    data: {"type":"response.output_item.added","item":{"id":"msg_0a2fdf7fb5bf7f3d016aa1ba63071487d2a7f62d6cf2a51d75","type":"message","status":"in_progress","content":[],"phase":"final_answer","role":"assistant"},"output_index":0,"sequence_number":2}
+    
+    event: response.content_part.added
+    data: {"type":"response.content_part.added","content_index":0,"item_id":"msg_0a2fdf7fb5bf7f3d016aa1ba63071487d2a7f62d6cf2a51d75","output_index":0,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":""},"sequence_number":3}
+    
+    event: response.output_text.delta
+    data: {"type":"response.output_text.delta","content_index":0,"delta":"apple","item_id":"msg_0a2fdf7fb5bf7f3d016aa1ba63071487d2a7f62d6cf2a51d75","logprobs":[],"obfuscation":"YR1128Q8MVF","output_index":0,"sequence_number":4}
+    
+    event: response.output_text.done
+    data: {"type":"response.output_text.done","content_index":0,"item_id":"msg_0a2fdf7fb5bf7f3d016aa1ba63071487d2a7f62d6cf2a51d75","logprobs":[],"output_index":0,"sequence_number":5,"text":"apple"}
+    
+    event: response.content_part.done
+    data: {"type":"response.content_part.done","content_index":0,"item_id":"msg_0a2fdf7fb5bf7f3d016aa1ba63071487d2a7f62d6cf2a51d75","output_index":0,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":"apple"},"sequence_number":6}
+    
+    event: response.output_item.done
+    data: {"type":"response.output_item.done","item":{"id":"msg_0a2fdf7fb5bf7f3d016aa1ba63071487d2a7f62d6cf2a51d75","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":"apple"}],"phase":"final_answer","role":"assistant"},"output_index":0,"sequence_number":7}
+    
+    event: response.completed
+    data: {"type":"response.completed","response":{"id":"resp_0a2fdf7fb5bf7f3d016aa1ba61a2b887d297627e4494f2434a","object":"response","created_at":1788983905,"status":"completed","background":false,"completed_at":1788983907,"error":null,"frequency_penalty":0.0,"incomplete_details":null,"instructions":null,"max_output_tokens":null,"max_tool_calls":null,"model":"gpt-5.6-luna","moderation":null,"output":[],"parallel_tool_calls":true,"presence_penalty":0.0,"previous_response_id":null,"prompt_cache_key":"9ee4fd7e-d864-531e-b38d-b4502f19d6ac","prompt_cache_retention":"24h","reasoning":{"context":"all_turns","effort":"none","mode":"standard","summary":"detailed"},"safety_identifier":"user-aWF4CWBHpvpaLyYkyiF06JCt","service_tier":"default","store":false,"temperature":1.0,"text":{"format":{"type":"text"},"verbosity":"medium"},"tool_choice":"auto","tool_usage":{"image_gen":{"input_tokens":0,"input_tokens_details":{"image_tokens":0,"text_tokens":0},"output_tokens":0,"output_tokens_details":{"image_tokens":0,"text_tokens":0},"total_tokens":0},"web_search":{"num_requests":0}},"tools":[],"top_logprobs":0,"top_p":0.98,"truncation":"disabled","usage":{"attribution":{"items":{"msg_0a2fdf7fb5bf7f3d016aa1ba61a9a487d2b263cbdd2833a402":{"cache_write_tokens":0,"cached_tokens":0,"content":[{"cache_write_tokens":0,"cached_tokens":0,"input_tokens":10,"output_tokens":0},{"cache_write_tokens":0,"cached_tokens":0,"input_tokens":32,"output_tokens":0}],"input_tokens":42,"output_tokens":0},"msg_0a2fdf7fb5bf7f3d016aa1ba61a90887d2aa0f93f50c1b9c51":{"cache_write_tokens":0,"cached_tokens":0,"content":[{"cache_write_tokens":0,"cached_tokens":0,"input_tokens":21,"output_tokens":0}],"input_tokens":21,"output_tokens":0},"msg_0a2fdf7fb5bf7f3d016aa1ba63071487d2a7f62d6cf2a51d75":{"cache_write_tokens":0,"cached_tokens":0,"content":[{"cache_write_tokens":0,"cached_tokens":0,"input_tokens":2,"output_tokens":5}],"input_tokens":2,"output_tokens":5}}},"input_tokens":65,"input_tokens_details":{"cache_write_tokens":0,"cached_tokens":0},"output_tokens":5,"output_tokens_details":{"reasoning_tokens":0},"total_tokens":70},"user":null,"metadata":{}},"sequence_number":8}
+    

@@ -20,14 +20,14 @@ use jp_conversation::{
     thread::{Thread, ThreadBuilder},
 };
 use jp_test::mock::{Snap, Vcr};
+use jp_tool::{ToolDefinition, ToolDocs};
 
 use crate::{
     event::{Event, FinishReason},
     event_builder::EventBuilder,
-    model::{ModelDetails, ReasoningDetails},
-    provider::get_provider,
+    model::ModelDetails,
+    provider::{ProviderTestRoute, provider_test_support},
     query::ChatQuery,
-    tool::{ToolDefinition, ToolDocs},
 };
 
 /// Fail when a model calls a tool with arguments its schema does not declare.
@@ -444,38 +444,91 @@ impl std::fmt::Debug for TestRequest {
     }
 }
 
+/// Where one provider's fixtures for one billing route live.
+///
+/// Derived, so the recorder and the readers cannot disagree.
+pub(crate) fn fixture_dir(provider: ProviderId, mode: ProviderTestMode) -> String {
+    match mode {
+        ProviderTestMode::Api => provider.to_string(),
+        ProviderTestMode::Subscription => format!("{provider}_subscription"),
+    }
+}
+
+/// Which billing route a recorded provider test exercises.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProviderTestMode {
+    /// The provider's API route, authenticated through its default mechanism.
+    Api,
+
+    /// The provider's subscription endpoint, authenticated with a subscription
+    /// access token.
+    Subscription,
+}
+
 pub async fn run_test(
     provider: ProviderId,
     test_name: impl AsRef<str>,
     requests: impl IntoIterator<Item = TestRequest>,
 ) -> jp_test::Result {
-    crate::test::run_chat_completion(
+    run_test_mode(provider, test_name, requests, ProviderTestMode::Api).await
+}
+
+/// Run a recorded provider test through one billing route.
+pub async fn run_test_mode(
+    provider: ProviderId,
+    test_name: impl AsRef<str>,
+    requests: impl IntoIterator<Item = TestRequest>,
+    mode: ProviderTestMode,
+) -> jp_test::Result {
+    crate::test::run_chat_completion_mode(
         test_name,
         provider,
         LlmProviderConfig::default(),
         requests.into_iter().collect(),
+        mode,
+    )
+    .await
+}
+
+pub async fn run_chat_completion(
+    test_name: impl AsRef<str>,
+    provider_id: ProviderId,
+    config: LlmProviderConfig,
+    requests: Vec<TestRequest>,
+) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    run_chat_completion_mode(
+        test_name,
+        provider_id,
+        config,
+        requests,
+        ProviderTestMode::Api,
     )
     .await
 }
 
 #[expect(clippy::too_many_lines)]
-pub async fn run_chat_completion(
+pub async fn run_chat_completion_mode(
     test_name: impl AsRef<str>,
     provider_id: ProviderId,
     mut config: LlmProviderConfig,
     requests: Vec<TestRequest>,
+    mode: ProviderTestMode,
 ) -> std::result::Result<(), Box<dyn std::error::Error>> {
-    let vcr = Vcr::new(match provider_id {
-        ProviderId::Anthropic => config.anthropic.base_url.clone(),
-        ProviderId::Cerebras => config.cerebras.base_url.clone(),
-        ProviderId::Google => config.google.base_url.clone(),
-        ProviderId::Llamacpp => config.llamacpp.base_url.clone(),
-        ProviderId::Ollama => config.ollama.base_url.clone(),
-        ProviderId::Openai => config.openai.base_url.clone(),
-        ProviderId::Openrouter => config.openrouter.base_url.clone(),
-        _ => String::new(),
-    })
-    .with_fixture_suffix(&provider_id.as_str());
+    let support = provider_test_support(provider_id);
+    let subscription = mode == ProviderTestMode::Subscription;
+
+    // A provider billed one way has no second route to record, so its
+    // subscription suite is skipped rather than failed.
+    let route: &dyn ProviderTestRoute = match mode {
+        ProviderTestMode::Api => support.api(),
+        ProviderTestMode::Subscription => match support.subscription() {
+            Some(route) => route,
+            None => return Ok(()),
+        },
+    };
+
+    let vcr =
+        Vcr::new(route.base_url(&config)).with_fixture_suffix(&fixture_dir(provider_id, mode));
 
     vcr.cassette(
         test_name.as_ref(),
@@ -485,32 +538,15 @@ pub async fn run_chat_completion(
             });
         },
         |recording, url| async move {
-            match provider_id {
-                ProviderId::Anthropic => config.anthropic.base_url = url,
-                ProviderId::Cerebras => config.cerebras.base_url = url,
-                ProviderId::Google => config.google.base_url = format!("{url}/v1beta"),
-                ProviderId::Llamacpp => config.llamacpp.base_url = url,
-                ProviderId::Ollama => config.ollama.base_url = url,
-                ProviderId::Openai => config.openai.base_url = url,
-                ProviderId::Openrouter => config.openrouter.base_url = url,
-                _ => {}
-            }
+            route.set_base_url(&mut config, url);
 
             if !recording {
-                // dummy api key value when replaying a cassette
-                let env = if cfg!(windows) { "USERNAME" } else { "USER" }.to_owned();
-
-                match provider_id {
-                    ProviderId::Anthropic => config.anthropic.api_key_env = env,
-                    ProviderId::Cerebras => config.cerebras.api_key_env = env,
-                    ProviderId::Google => config.google.api_key_env = env,
-                    ProviderId::Openai => config.openai.api_key_env = env,
-                    ProviderId::Openrouter => config.openrouter.api_key_env = env,
-                    _ => {}
-                }
+                route.use_replay_credentials(&mut config);
             }
 
-            let provider = get_provider(provider_id, &config).unwrap();
+            let provider = route
+                .provider(&config, recording)
+                .unwrap_or_else(|error| panic!("{error}"));
             let has_chat_request = requests
                 .iter()
                 .any(|v| matches!(v, TestRequest::Chat { .. }));
@@ -581,6 +617,17 @@ pub async fn run_chat_completion(
                     // this test request, so we skip it.
                     None => continue,
                 };
+
+                // A second billing route reaches its own model catalog, so its
+                // fixtures record against the model that route serves.
+                if subscription && matches!(&request, TestRequest::Chat { .. }) {
+                    let model = route.model();
+                    request = request.model(model.id.clone()).model_details(model);
+                }
+
+                if let TestRequest::Chat { model, query, .. } = &request {
+                    support.assert_rewrite_preserves_meaning(model, query.clone());
+                }
 
                 let config = match &request {
                     TestRequest::Chat { query, .. } => {
@@ -675,7 +722,7 @@ pub async fn run_chat_completion(
                                         stream.extend(std::iter::once(event));
                                     }
                                 }
-                                Event::Patch(_) | Event::KeepAlive => {}
+                                Event::Patch(_) | Event::KeepAlive | Event::Notice(_) => {}
                                 Event::Finished(reason) => {
                                     for mut event in builder.drain() {
                                         event.timestamp =
@@ -694,6 +741,17 @@ pub async fn run_chat_completion(
                                 }
                             }
                         }
+
+                        // A turn that decodes nothing is a turn that proves
+                        // nothing, and it is indistinguishable from a passing
+                        // one once its assertions are all satisfied vacuously.
+                        // A provider answering a chat request owes at least one
+                        // event, whatever it contains.
+                        assert!(
+                            !all_events[index].is_empty(),
+                            "request {index} produced no events; the provider answered with \
+                             nothing this build could decode"
+                        );
 
                         if recording {
                             assert_tool_calls_match_schema(&tools, &all_events[index]);
@@ -769,96 +827,9 @@ pub(crate) fn fixture_attachment(path: impl AsRef<Path>) -> Attachment {
     Attachment::binary(path.as_ref().display().to_string(), data, media_type)
 }
 
+/// The model a provider's API-route fixtures record against.
+///
+/// Owned by each provider, so the harness never carries a catalog of its own.
 pub(crate) fn test_model_details(id: ProviderId) -> ModelDetails {
-    match id {
-        ProviderId::Anthropic => ModelDetails {
-            id: "anthropic/claude-haiku-4-5".parse().unwrap(),
-            display_name: None,
-            context_window: Some(200_000),
-            max_output_tokens: Some(64_000),
-            reasoning: Some(ReasoningDetails::budgetted(1024, None)),
-            knowledge_cutoff: None,
-            deprecated: None,
-            structured_output: None,
-            prefill: None,
-            features: vec!["interleaved-thinking", "context-editing"],
-        },
-        ProviderId::Google => ModelDetails {
-            id: "google/gemini-2.5-flash-lite".parse().unwrap(),
-            display_name: None,
-            context_window: Some(200_000),
-            max_output_tokens: Some(64_000),
-            reasoning: Some(ReasoningDetails::budgetted(512, Some(24576))),
-            knowledge_cutoff: None,
-            deprecated: None,
-            structured_output: None,
-            prefill: None,
-            features: vec![],
-        },
-        ProviderId::Openai => ModelDetails {
-            id: "openai/gpt-5-mini".parse().unwrap(),
-            display_name: Some("GPT-5 mini".to_owned()),
-            context_window: Some(400_000),
-            max_output_tokens: Some(128_000),
-            reasoning: Some(ReasoningDetails::budgetted(0, None)),
-            knowledge_cutoff: None,
-            deprecated: None,
-            structured_output: None,
-            prefill: None,
-            features: vec![],
-        },
-        ProviderId::Llamacpp => ModelDetails {
-            id: "llamacpp/unsloth/Qwen3.5-9B-GGUF:Q4_K_M".parse().unwrap(),
-            display_name: None,
-            context_window: None,
-            max_output_tokens: None,
-            reasoning: None,
-            knowledge_cutoff: None,
-            deprecated: None,
-            structured_output: None,
-            prefill: None,
-            features: vec![],
-        },
-        ProviderId::Ollama => ModelDetails {
-            id: "ollama/qwen3.5:9b".parse().unwrap(),
-            display_name: None,
-            context_window: None,
-            max_output_tokens: None,
-            reasoning: None,
-            knowledge_cutoff: None,
-            deprecated: None,
-            structured_output: None,
-            prefill: None,
-            features: vec![],
-        },
-        ProviderId::Openrouter => ModelDetails {
-            id: "openrouter/openai/gpt-5-mini".parse().unwrap(),
-            display_name: None,
-            context_window: Some(200_000),
-            max_output_tokens: None,
-            reasoning: None,
-            knowledge_cutoff: None,
-            deprecated: None,
-            structured_output: None,
-            prefill: None,
-            features: vec![],
-        },
-        ProviderId::Cerebras => ModelDetails {
-            id: "cerebras/gpt-oss-120b".parse().unwrap(),
-            display_name: Some("GPT-OSS 120B".to_owned()),
-            context_window: Some(131_072),
-            max_output_tokens: Some(40_960),
-            reasoning: Some(
-                ReasoningDetails::leveled(false, true, true, true, false, false).always_on(),
-            ),
-            knowledge_cutoff: None,
-            deprecated: None,
-            structured_output: Some(true),
-            prefill: None,
-            features: vec![],
-        },
-        ProviderId::Test => ModelDetails::empty("test/mock-model".parse().unwrap()),
-        ProviderId::Xai => unimplemented!(),
-        ProviderId::Deepseek => unimplemented!(),
-    }
+    provider_test_support(id).api().model()
 }

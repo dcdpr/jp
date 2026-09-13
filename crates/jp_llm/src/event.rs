@@ -72,6 +72,14 @@ pub enum Event {
     /// Carries no content and is never persisted or rendered.
     /// It signals only that the connection is still alive.
     KeepAlive,
+
+    /// A user-facing notice from the provider, rendered as chrome on stderr.
+    ///
+    /// Announces provider-level decisions the user must see — a skipped
+    /// credential, a credential switch — without being part of the
+    /// conversation: a notice is never persisted and never reaches the
+    /// conversation stream.
+    Notice(String),
 }
 
 /// A chunk of streaming data from an LLM provider.

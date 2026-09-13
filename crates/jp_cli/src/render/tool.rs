@@ -21,7 +21,7 @@ use jp_config::{
     style::{StyleConfig, stderr_rows::StderrRows},
 };
 use jp_conversation::event::ToolCallResponse;
-use jp_llm::{CommandResult, run_tool_command, tool::InvocationContext};
+use jp_mcp::server::{CommandResult, InvocationContext, run_tool_command};
 use jp_md::{
     format::{DefaultBackground, Formatter},
     shade::ShadedWriter,
@@ -322,7 +322,18 @@ impl ToolRenderer {
         arguments: &Map<String, Value>,
         cmd: CommandConfig,
     ) -> RenderOutcome {
-        match format_args_custom(invoked_name, arguments, cmd, &self.root, &self.invocation).await {
+        let result =
+            format_args_custom(invoked_name, arguments, cmd, &self.root, &self.invocation).await;
+        self.render_custom_result(name, result)
+    }
+
+    /// Render custom arguments already formatted by the execution service.
+    pub(crate) fn render_custom_result(
+        &self,
+        name: &str,
+        result: Result<String, String>,
+    ) -> RenderOutcome {
+        match result {
             Ok(content) if !content.is_empty() => {
                 let styled_name = name.yellow().bold();
                 self.write_chrome(self.current_region.as_ref(), |w| {
@@ -856,7 +867,7 @@ async fn format_args_custom(
             );
             Err(detail)
         }
-        CommandResult::FatalError(raw) => {
+        CommandResult::FatalError { raw, .. } => {
             warn!(
                 command = %cmd,
                 "Custom parameters formatter returned fatal error"

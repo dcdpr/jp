@@ -14,9 +14,8 @@
 use jp_attachment::Attachment;
 use jp_config::assistant::sections::SectionConfig;
 use jp_conversation::{ConversationEvent, ConversationStream, EventKind, event::ChatResponse};
+use jp_tool::ToolDefinition;
 use tracing::info;
-
-use crate::tool::ToolDefinition;
 
 /// Estimated chars-per-token ratio used for estimation.
 pub const CHARS_PER_TOKEN: usize = 3;

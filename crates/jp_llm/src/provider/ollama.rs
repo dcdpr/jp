@@ -14,6 +14,7 @@ use jp_conversation::{
     event::{ChatResponse, EventKind},
     thread::text_attachments_to_xml,
 };
+use jp_tool::ToolDefinition;
 use ollama_rs::{
     Ollama as Client,
     error::OllamaError,
@@ -35,7 +36,6 @@ use crate::{
     event::{Event, FinishReason},
     model::ReasoningDetails,
     query::ChatQuery,
-    tool::{ToolDefinition, json_schema},
 };
 
 static PROVIDER: ProviderId = ProviderId::Ollama;
@@ -118,6 +118,7 @@ fn map_model(model: LocalModel) -> Result<ModelDetails> {
         deprecated: None,
         structured_output: None,
         prefill: None,
+        subscription: None,
         features: vec![],
     })
 }
@@ -421,7 +422,7 @@ fn convert_tools(tools: Vec<ToolDefinition>) -> Result<Vec<ToolInfo>> {
     tools
         .into_iter()
         .map(|tool| {
-            let parameters = json_schema::inline(&tool.parameters)
+            let parameters = jp_tool::schema::inline(&tool.parameters)
                 .as_object()
                 .cloned()
                 .unwrap_or_default();
@@ -550,6 +551,21 @@ impl From<OllamaError> for StreamError {
         }
     }
 }
+
+/// Ollama's recorded-test route.
+///
+/// A local server needs no credential, so replay leaves configuration alone.
+#[cfg(test)]
+pub(crate) static TEST_SUPPORT: super::ApiOnlyTestSupport = super::ApiOnlyTestSupport(&API_ROUTE);
+
+#[cfg(test)]
+static API_ROUTE: super::ApiTestRoute = super::ApiTestRoute {
+    id: ProviderId::Ollama,
+    base_url: |config| config.ollama.base_url.clone(),
+    set_base_url: |config, url| config.ollama.base_url = url,
+    use_replay_credentials: |_| {},
+    model: || ModelDetails::empty("ollama/qwen3.5:9b".parse().unwrap()),
+};
 
 #[cfg(test)]
 #[path = "ollama_tests.rs"]

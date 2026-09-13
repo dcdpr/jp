@@ -36,10 +36,12 @@ use jp_llm::{
     model::ModelDetails,
     provider::get_provider,
     query::ChatQuery,
-    tool::{InvocationContext, ToolDefinition, executor::Executor},
+    tool::Executor,
     with_idle_timeout, with_output_limit,
 };
+use jp_mcp::server::InvocationContext;
 use jp_printer::{ErrChannel, Printer, RegionStyle, StatusRegion};
+use jp_tool::ToolDefinition;
 use jp_workspace::{ConversationLock, ConversationMut};
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::{debug, info, warn};
@@ -466,6 +468,7 @@ pub(super) async fn run_turn_loop(
                                     .await
                                     {
                                         StreamErrorOutcome::Retry => break,
+
                                         StreamErrorOutcome::Fatal(error) => {
                                             // Persist any partial content
                                             // flushed before aborting, so a
@@ -545,7 +548,12 @@ pub(super) async fn run_turn_loop(
                             let advances_cycle = match &event {
                                 Event::Part { .. } => true,
                                 Event::Finished(reason) => *reason != FinishReason::Retry,
-                                Event::Flush { .. } | Event::Patch(_) | Event::KeepAlive => false,
+                                // A notice is chrome: it says nothing about
+                                // the provider having produced content.
+                                Event::Flush { .. }
+                                | Event::Patch(_)
+                                | Event::KeepAlive
+                                | Event::Notice(_) => false,
                             };
                             if !received_provider_event && advances_cycle {
                                 received_provider_event = true;
@@ -877,7 +885,8 @@ pub(super) async fn run_turn_loop(
                             &mut tool_coordinator,
                             &mut turn_coordinator,
                             &mut conv,
-                        )?;
+                        )
+                        .await?;
                         return Err(cmd::Error::interrupted().into());
                     }
 
@@ -894,7 +903,8 @@ pub(super) async fn run_turn_loop(
                             &mut tool_coordinator,
                             &mut turn_coordinator,
                             &mut conv,
-                        )?;
+                        )
+                        .await?;
                         break;
                     }
 
@@ -911,7 +921,9 @@ pub(super) async fn run_turn_loop(
                             &mut tool_coordinator,
                             &mut turn_coordinator,
                             &mut conv,
-                        )? {
+                        )
+                        .await?
+                        {
                             tool_choice = ToolChoice::Auto;
                         }
                     }
@@ -967,22 +979,21 @@ async fn build_inquiry_backend(
         // Attribute failures to the override: without this, e.g. a missing
         // API key environment variable renders identically to a main-model
         // failure and points the user at the wrong config.
+        let wrap_err =
+            |source: Box<dyn std::error::Error + Send + Sync>| Error::InquiryModelOverride {
+                model: inquiry_model_id.to_string(),
+                source,
+            };
+
         let inquiry_provider: Arc<dyn Provider> = Arc::from(
-            get_provider(inquiry_model_id.provider, &cfg.providers.llm).map_err(|source| {
-                Error::InquiryModelOverride {
-                    model: inquiry_model_id.to_string(),
-                    source,
-                }
-            })?,
+            get_provider(inquiry_model_id.provider, &cfg.providers.llm)
+                .map_err(|e| wrap_err(Box::new(e)))?,
         );
         debug!(model = %inquiry_model_id, "Fetching inquiry model details.");
         let inquiry_model = inquiry_provider
             .model_details(&inquiry_model_id.name)
             .await
-            .map_err(|source| Error::InquiryModelOverride {
-                model: inquiry_model_id.to_string(),
-                source,
-            })?;
+            .map_err(|e| wrap_err(Box::new(e)))?;
 
         if inquiry_model.structured_output == Some(false) {
             warn!(
@@ -1051,24 +1062,30 @@ async fn build_inquiry_overrides(
                 // this, e.g. a missing API key environment variable renders
                 // identically to a main-model failure and points the user at
                 // the wrong config.
-                let wrap_err = |source| Error::InquiryQuestionModelOverride {
-                    tool: tool_name.to_owned(),
-                    question: question_id.clone(),
-                    model: model_id.to_string(),
-                    source: Box::new(source),
+                let wrap_err = |source: Box<dyn std::error::Error + Send + Sync>| {
+                    Error::InquiryQuestionModelOverride {
+                        tool: tool_name.to_owned(),
+                        question: question_id.clone(),
+                        model: model_id.to_string(),
+                        source,
+                    }
                 };
 
                 let prov = if let Some(p) = providers.get(&model_id.provider) {
                     Arc::clone(p)
                 } else {
                     let p: Arc<dyn Provider> = Arc::from(
-                        get_provider(model_id.provider, &cfg.providers.llm).map_err(wrap_err)?,
+                        get_provider(model_id.provider, &cfg.providers.llm)
+                            .map_err(|e| wrap_err(Box::new(e)))?,
                     );
                     providers.insert(model_id.provider, Arc::clone(&p));
                     p
                 };
 
-                let details = prov.model_details(&model_id.name).await.map_err(wrap_err)?;
+                let details = prov
+                    .model_details(&model_id.name)
+                    .await
+                    .map_err(|e| wrap_err(Box::new(e)))?;
 
                 if details.structured_output == Some(false) {
                     warn!(
@@ -1131,7 +1148,7 @@ async fn build_inquiry_overrides(
 ///
 /// Returns `true` if a follow-up LLM cycle is needed (i.e. tool responses were
 /// added and the coordinator wants to continue).
-fn commit_tool_responses(
+async fn commit_tool_responses(
     result: ExecutionResult,
     pre_resolved: Vec<(usize, ToolCallResponse)>,
     tool: &mut ToolCoordinator,
@@ -1150,8 +1167,12 @@ fn commit_tool_responses(
     indexed.sort_by_key(|(idx, _)| *idx);
     let responses: Vec<_> = indexed.into_iter().map(|(_, r)| r).collect();
 
+    let recorded = responses.clone();
     let action = conv.update_events(|stream| turn.handle_tool_responses(stream, responses));
     conv.flush()?;
+    tool.acknowledge_responses(recorded)
+        .await
+        .map_err(Error::McpRecording)?;
 
     Ok(matches!(action, Action::SendFollowUp))
 }

@@ -1,4 +1,3 @@
-use indexmap::IndexMap;
 use test_log::test;
 
 use super::*;
@@ -164,9 +163,8 @@ async fn test_commands_get_missing_binary_names_command() {
     );
 
     let root = camino_tempfile::tempdir().unwrap();
-    let client = Client::new(IndexMap::default());
     let err = commands
-        .get(root.path(), client)
+        .get(root.path())
         .await
         .expect_err("spawning a missing binary should error");
 
@@ -207,8 +205,7 @@ async fn test_commands_get() {
     std::fs::write(path.join("file1"), "").unwrap();
     std::fs::write(path.join("file2"), "").unwrap();
 
-    let client = Client::new(IndexMap::default());
-    let attachments = commands.get(path, client).await.unwrap();
+    let attachments = commands.get(path).await.unwrap();
     assert_eq!(attachments, vec![
         Attachment::text("false", indoc::indoc! {"
                     <Output>

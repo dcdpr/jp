@@ -39,10 +39,10 @@ impl TitleGeneratorTask {
     ) -> Result<Self, Box<dyn Error + Send + Sync>> {
         let model = title::resolve_model(config, None);
 
-        // Fail fast on a misconfigured title provider (e.g. a missing API
-        // key environment variable). Without this, the failure only surfaces
-        // inside the spawned task, after the query has already committed to
-        // waiting for it at teardown.
+        // Fail fast on a misconfigured title provider (e.g. a missing API key
+        // environment variable, or a credential chain with no usable entry).
+        // Without this, the failure only surfaces inside the spawned task,
+        // after the query has already committed to waiting for it at teardown.
         provider::preflight(model.id.resolved().provider, &config.providers.llm)?;
 
         Ok(Self {

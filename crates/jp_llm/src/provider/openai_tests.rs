@@ -321,10 +321,10 @@ mod parameters_with_strict_mode {
 }
 
 mod convert_tools {
+    use jp_tool::{ToolDefinition, ToolDocs};
     use serde_json::json;
 
     use super::super::convert_tools;
-    use crate::tool::{ToolDefinition, ToolDocs};
 
     /// One converted tool, as it goes on the wire.
     fn converted(parameters: serde_json::Value) -> serde_json::Value {
@@ -1149,7 +1149,7 @@ mod create_request {
         // Dummy API key env var, mirroring the VCR harness.
         let env = if cfg!(windows) { "USERNAME" } else { "USER" }.to_owned();
         let mut providers = LlmProviderConfig::default();
-        providers.openai.api_key_env = env;
+        providers.openai.api_key_env = env.into();
 
         let details = map_model(ModelResponse {
             id: "gpt-6-astra".to_owned(),
@@ -1173,11 +1173,11 @@ mod create_request {
             "reasoning not clamped to the lowest supported effort: {request}"
         );
         assert!(
-            request.contains(r#""temperature":null"#),
+            !request.contains(r#""temperature":"#),
             "temperature not stripped: {request}"
         );
         assert!(
-            request.contains(r#""top_p":null"#),
+            !request.contains(r#""top_p":"#),
             "top_p not stripped: {request}"
         );
     }
@@ -1237,7 +1237,7 @@ mod unknown_model {
         // Dummy API key env var, mirroring the VCR harness.
         let env = if cfg!(windows) { "USERNAME" } else { "USER" }.to_owned();
         let mut providers = LlmProviderConfig::default();
-        providers.openai.api_key_env = env;
+        providers.openai.api_key_env = env.into();
 
         let model = ModelDetails::empty("openai/gpt-9".parse().unwrap());
         let request = build_request_value(
@@ -1287,7 +1287,7 @@ mod unknown_model {
         let thread = ThreadBuilder::new().with_events(stream).build().unwrap();
         let env = if cfg!(windows) { "USERNAME" } else { "USER" }.to_owned();
         let mut providers = LlmProviderConfig::default();
-        providers.openai.api_key_env = env;
+        providers.openai.api_key_env = env.into();
 
         let mut model = ModelDetails::empty("openai/gpt-4o".parse().unwrap());
         model.reasoning = Some(ReasoningDetails::unsupported());
@@ -1334,7 +1334,7 @@ mod unknown_model {
         // Dummy API key env var, mirroring the VCR harness.
         let env = if cfg!(windows) { "USERNAME" } else { "USER" }.to_owned();
         let mut providers = LlmProviderConfig::default();
-        providers.openai.api_key_env = env;
+        providers.openai.api_key_env = env.into();
 
         let model = ModelDetails::empty("openai/gpt-9".parse().unwrap());
         let request = build_request_value(
@@ -1347,11 +1347,11 @@ mod unknown_model {
         .to_string();
 
         assert!(
-            request.contains(r#""temperature":null"#),
+            !request.contains(r#""temperature":"#),
             "temperature not stripped alongside active reasoning: {request}"
         );
         assert!(
-            request.contains(r#""top_p":null"#),
+            !request.contains(r#""top_p":"#),
             "top_p not stripped alongside active reasoning: {request}"
         );
     }
@@ -1382,7 +1382,7 @@ mod unknown_model {
         // Dummy API key env var, mirroring the VCR harness.
         let env = if cfg!(windows) { "USERNAME" } else { "USER" }.to_owned();
         let mut providers = LlmProviderConfig::default();
-        providers.openai.api_key_env = env;
+        providers.openai.api_key_env = env.into();
 
         let model = ModelDetails::empty("openai/gpt-9".parse().unwrap());
         let request = build_request_value(
@@ -1426,7 +1426,7 @@ mod unknown_model {
         // Dummy API key env var, mirroring the VCR harness.
         let env = if cfg!(windows) { "USERNAME" } else { "USER" }.to_owned();
         let mut providers = LlmProviderConfig::default();
-        providers.openai.api_key_env = env;
+        providers.openai.api_key_env = env.into();
 
         let model = ModelDetails::empty("openai/gpt-9".parse().unwrap());
         let request = build_request_value(
@@ -1439,7 +1439,7 @@ mod unknown_model {
         .to_string();
 
         assert!(
-            request.contains(r#""reasoning":null"#),
+            !request.contains(r#""reasoning":"#),
             "reasoning field sent without explicit configuration: {request}"
         );
     }

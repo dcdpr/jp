@@ -28,7 +28,6 @@ unknown-registry = "deny"
 unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = [
-    "https://github.com/JeanMertz/async-anthropic",
     "https://github.com/JeanMertz/backon",
     "https://github.com/JeanMertz/gemini-client",
     "https://github.com/JeanMertz/httpmock?branch=tweaks",

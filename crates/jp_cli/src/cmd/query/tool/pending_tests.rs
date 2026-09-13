@@ -2,7 +2,7 @@ use jp_conversation::{
     ConversationStream,
     event::{ChatRequest, ChatResponse, ToolCallRequest, ToolCallResponse},
 };
-use jp_llm::tool::executor::MockExecutor;
+use jp_llm::tool::MockExecutor;
 use serde_json::Map;
 
 use super::*;

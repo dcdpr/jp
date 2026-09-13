@@ -503,9 +503,12 @@ fn apply_cfg_args(
     for arg in args {
         match arg {
             ResolvedCfgArg::KeyValue(kv) => {
+                // Assignment errors keep the offending value and the reason
+                // in their source chain; the outermost error is only a
+                // category (`parse error`).
                 partial
                     .assign(kv.clone())
-                    .map_err(|e| Error::CliConfig(e.to_string()))?;
+                    .map_err(|e| Error::CliConfig(crate::error::error_chain(e.as_ref())))?;
             }
             ResolvedCfgArg::Partials(entries) => {
                 for entry in entries {

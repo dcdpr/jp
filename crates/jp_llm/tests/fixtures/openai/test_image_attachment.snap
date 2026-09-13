@@ -9,11 +9,12 @@ expression: v
                 timestamp: 2020-01-01 0:00:00.0 +00,
                 kind: ChatResponse(
                     Message {
-                        message: "apple",
+                        message: "Apple",
                     },
                 ),
                 metadata: {
-                    "openai_item_id": String("msg_0d7a4512dbd87835016a886da0cb4887d28e349f6f703b7f8d"),
+                    "openai_item_id": String("msg_08552d2bb4d57522016aa1b7a0576487d28f5de97e89915428"),
+                    "openai_phase": String("final_answer"),
                 },
             },
         ),

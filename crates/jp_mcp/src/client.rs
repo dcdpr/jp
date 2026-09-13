@@ -11,7 +11,7 @@ use indexmap::IndexMap;
 use jp_config::providers::mcp::{AlgorithmConfig, McpProviderConfig};
 use rmcp::{
     model::{
-        CallToolRequestParams, CallToolResult, ReadResourceRequestParams, Resource,
+        CallToolRequestParams, CallToolResult, Meta, ReadResourceRequestParams, Resource,
         ResourceContents, Tool,
     },
     service::{RoleClient, RunningService, ServiceExt},
@@ -212,6 +212,7 @@ impl Client {
         tool_name: &str,
         server_name: &str,
         params: &serde_json::Value,
+        meta: Option<serde_json::Map<String, serde_json::Value>>,
     ) -> Result<CallToolResult> {
         let server_id = McpServerId::new(server_name);
         let services = self.services.read().await;
@@ -221,6 +222,7 @@ impl Client {
 
         let mut call_params = CallToolRequestParams::new(tool_name.to_owned());
         call_params.arguments = params.as_object().cloned();
+        call_params.meta = meta.filter(|meta| !meta.is_empty()).map(Meta);
 
         client
             .peer()
@@ -258,6 +260,26 @@ impl Client {
             .read_resource(ReadResourceRequestParams::new(uri))
             .await?
             .contents)
+    }
+
+    /// Close the owned upstream connections and wait for their service tasks.
+    ///
+    /// Callers must stop admitting work before shutdown.
+    /// All clones share these connections, so this also disconnects users of a
+    /// cloned client.
+    pub async fn shutdown(&self) {
+        let services = {
+            let mut services = self.services.write().await;
+            services
+                .drain()
+                .map(|(_, service)| service)
+                .collect::<Vec<_>>()
+        };
+        for service in services {
+            if let Err(error) = service.cancel().await {
+                warn!(%error, "MCP service failed during shutdown");
+            }
+        }
     }
 
     pub async fn run_services(
@@ -648,6 +670,10 @@ fn spawn_stderr_forwarder(
 #[cfg(test)]
 #[path = "client_tests.rs"]
 mod tests;
+
+#[cfg(all(test, feature = "server"))]
+#[path = "client_protocol_tests.rs"]
+mod protocol_tests;
 
 pub fn verify_file_checksum(
     server: &str,

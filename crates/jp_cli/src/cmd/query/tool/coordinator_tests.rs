@@ -1,21 +1,29 @@
 use async_trait::async_trait;
 use camino_tempfile::Utf8TempDir;
+#[cfg(unix)]
+use jp_config::AppConfig;
 use jp_config::conversation::tool::{ToolConfig, ToolSource, style::PartialDisplayStyleConfig};
 use jp_inquire::{ReplyOutcome, prompt::MockPromptBackend};
-use jp_llm::tool::executor::MockExecutor;
+use jp_llm::tool::{MockExecutor, TestExecutorSource};
+#[cfg(unix)]
+use jp_mcp::{
+    Client,
+    server::{InvocationContext, builtin::BuiltinExecutors},
+};
 use jp_printer::{ErrChannel, OutputFormat, Printer};
+#[cfg(unix)]
+use jp_tool::{ToolDefinition, ToolDocs};
 use schematic::Config as _;
+#[cfg(unix)]
+use serde_json::json;
 
-use super::{super::executor::TerminalExecutorSource, *};
+use super::*;
 use crate::render::tool::ToolRenderer;
+#[cfg(unix)]
+use crate::{access::approvals::ApprovalStore, cmd::query::tool::executor::TerminalExecutorSource};
 
-fn empty_executor_source() -> Box<dyn jp_llm::tool::executor::ExecutorSource> {
-    Box::new(TerminalExecutorSource::new(
-        jp_llm::tool::builtin::BuiltinExecutors::new(),
-        &[],
-        std::sync::Arc::new(crate::access::approvals::ApprovalStore::default()),
-        jp_llm::tool::InvocationContext::default(),
-    ))
+fn empty_executor_source() -> Box<dyn ExecutorSource> {
+    Box::new(TestExecutorSource::new())
 }
 
 #[test]
@@ -298,7 +306,7 @@ async fn test_pre_render_for_prompt_function_call_fires_before_approval() {
         ErrChannel::new(printer.clone()),
         style_config,
         root.path().to_owned(),
-        jp_llm::tool::InvocationContext::default(),
+        jp_mcp::server::InvocationContext::default(),
     );
 
     let mut args = Map::new();
@@ -363,7 +371,7 @@ async fn test_pre_render_for_prompt_custom_ask_defers_rendering() {
         ErrChannel::new(printer.clone()),
         style_config,
         root.path().to_owned(),
-        jp_llm::tool::InvocationContext::default(),
+        jp_mcp::server::InvocationContext::default(),
     );
 
     let result = coordinator
@@ -420,7 +428,7 @@ impl Executor for EditableExecutor {
         _mcp_client: &jp_mcp::Client,
         _root: &camino::Utf8Path,
         _cancellation_token: tokio_util::sync::CancellationToken,
-        _stderr: Option<jp_llm::tool::StderrSink>,
+        _stderr: Option<jp_mcp::server::StderrSink>,
     ) -> ExecutorResult {
         unreachable!("resolve_tool_call_decision does not invoke execute()")
     }
@@ -462,7 +470,7 @@ async fn test_resolve_tool_call_decision_invalidates_prerender_on_edit() {
         ErrChannel::new(printer.clone()),
         style_config,
         root.path().to_owned(),
-        jp_llm::tool::InvocationContext::default(),
+        jp_mcp::server::InvocationContext::default(),
     );
 
     let mut pre_edit_args = Map::new();
@@ -815,7 +823,7 @@ async fn custom_formatter_receives_the_invoked_tool_name() {
         ErrChannel::new(printer.clone()),
         jp_config::AppConfig::new_test().style,
         root.path().to_owned(),
-        jp_llm::tool::InvocationContext::default(),
+        jp_mcp::server::InvocationContext::default(),
     );
 
     let outcome = coordinator
@@ -834,4 +842,72 @@ async fn custom_formatter_receives_the_invoked_tool_name() {
     let output = String::from_utf8(strip_ansi_escapes::strip(stderr.lock().as_str()))
         .expect("valid utf-8 after stripping ANSI");
     assert_eq!(output, "Calling tool ls\n\nfs_list_files\n");
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn remembered_denial_does_not_run_http_argument_formatter() {
+    let root = Utf8TempDir::new().unwrap();
+    let mut config = AppConfig::new_test();
+    let partial = serde_json::from_value(json!({
+        "source":"builtin", "run":"ask", "format":"unattended",
+        "style":{"parameters":{"program":"sh", "args":["-c","printf formatted > formatted"], "shell":false}}
+    })).unwrap();
+    config.conversation.tools.insert(
+        "example".into(),
+        ToolConfig::from_partial(partial, vec![]).unwrap(),
+    );
+    let definitions = vec![ToolDefinition {
+        name: "example".into(),
+        docs: ToolDocs::default(),
+        parameters: json!({"type":"object","properties":{}}),
+    }];
+    let (source, owner) = TerminalExecutorSource::start(
+        BuiltinExecutors::new(),
+        &definitions,
+        &config.conversation.tools,
+        Arc::new(ApprovalStore::default()),
+        InvocationContext::default(),
+        &Client::default(),
+        root.path().to_owned(),
+    )
+    .await
+    .unwrap();
+    let mut coordinator = ToolCoordinator::new(config.conversation.tools.clone(), Box::new(source));
+    let executor = coordinator
+        .prepare_one(ToolCallRequest {
+            id: "call-1".into(),
+            name: "example".into(),
+            arguments: Map::new(),
+        })
+        .unwrap();
+    let printer = Arc::new(Printer::sink());
+    let prompter = ToolPrompter::with_prompt_backend(
+        printer.clone(),
+        None,
+        Arc::new(MockPromptBackend::new()),
+        ReplyEditMode::default(),
+    );
+    let renderer = ToolRenderer::new(
+        ErrChannel::new(printer),
+        config.style,
+        root.path().to_owned(),
+        InvocationContext::default(),
+    );
+    let mut state = TurnState::default();
+    state
+        .remembered_permission_decisions
+        .insert(PermissionCacheKey::new("example"), false);
+    let decision = coordinator
+        .resolve_tool_call_decision(executor, &prompter, true, &mut state, &renderer)
+        .await;
+    let ToolCallDecision::Skipped(response) = decision else {
+        panic!("expected remembered denial")
+    };
+    assert!(!root.path().join("formatted").exists());
+    coordinator
+        .acknowledge_responses(vec![response])
+        .await
+        .unwrap();
+    owner.shutdown().await.unwrap();
 }

@@ -16,7 +16,8 @@ version.workspace = true
 jp_attachment = { workspace = true }
 jp_config = { workspace = true }
 jp_conversation = { workspace = true }
-jp_mcp = { workspace = true }
+jp_credentials = { workspace = true }
+jp_mcp = { workspace = true, features = ["server"] }
 jp_openrouter = { workspace = true }
 jp_tool = { workspace = true }
 
@@ -29,13 +30,6 @@ chrono = { workspace = true }
 futures = { workspace = true }
 gemini_client_rs = { workspace = true }
 indexmap = { workspace = true }
-minijinja = { workspace = true, features = [
-    "builtins",
-    "json",
-    "preserve_order",
-    "serde",
-    "unicode",
-] }
 ollama-rs = { workspace = true, features = ["rustls", "stream"] }
 openai_responses = { workspace = true, features = ["stream"] }
 quick-xml = { workspace = true, features = ["serialize"] }
@@ -44,19 +38,24 @@ reqwest = { workspace = true }
 reqwest-eventsource = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["preserve_order"] }
+sha2 = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tracing = { workspace = true }
 url = { workspace = true }
+uuid = { workspace = true, features = ["v4", "v5"] }
 
 [dev-dependencies]
 assert_matches = { workspace = true }
+saphyr = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
+datetime_literal = { workspace = true }
 eventsource-stream = { workspace = true }
 http = { workspace = true }
 infer = { workspace = true, features = ["std"] }
 insta = { workspace = true, features = ["json"] }
+jp_storage = { workspace = true }
 jp_test = { workspace = true }
 paste = { workspace = true }
 test-log = { workspace = true }
