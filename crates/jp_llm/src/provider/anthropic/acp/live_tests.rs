@@ -1,6 +1,10 @@
 //! Opt-in qualification against the installed subscription-backed runtime.
 
-use std::{env, time::Duration};
+use std::{
+    env, fmt,
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use camino::Utf8PathBuf;
 use datetime_literal::datetime;
@@ -15,13 +19,58 @@ use jp_conversation::{
     thread::ThreadBuilder,
 };
 use serde_json::{Value, json};
+use tracing::{
+    Event as TracingEvent, Subscriber,
+    field::{Field, Visit},
+    instrument::WithSubscriber as _,
+};
+use tracing_subscriber::{
+    Layer,
+    layer::{Context, SubscriberExt as _},
+    registry,
+};
 
-use super::{super::Anthropic, model_details, usage::METADATA_KEY};
+use super::{super::Anthropic, model_details};
 use crate::{
     Provider,
     event::{Event, EventPart, FinishReason},
     query::{ChatQuery, QueryContext},
 };
+
+/// Test-only observer of the production diagnostic event, never conversation
+/// metadata.
+#[derive(Clone, Default)]
+pub(super) struct UsageCapture(Arc<Mutex<Option<Value>>>);
+
+impl UsageCapture {
+    pub(super) fn snapshot(&self) -> Option<Value> {
+        self.0.lock().unwrap().clone()
+    }
+}
+
+struct UsageVisitor(Option<Value>);
+impl Visit for UsageVisitor {
+    fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+        if field.name() == "usage" {
+            self.0 = Some(
+                serde_json::from_str(&format!("{value:?}")).expect("usage diagnostic must be JSON"),
+            );
+        }
+    }
+}
+
+impl<S: Subscriber> Layer<S> for UsageCapture {
+    fn on_event(&self, event: &TracingEvent<'_>, _: Context<'_, S>) {
+        if event.metadata().target() != "jp_llm::provider::anthropic::acp::transport" {
+            return;
+        }
+        let mut visitor = UsageVisitor(None);
+        event.record(&mut visitor);
+        if let Some(value) = visitor.0 {
+            *self.0.lock().unwrap() = Some(value);
+        }
+    }
+}
 
 fn query(policy: CachePolicy, tag: &str) -> ChatQuery {
     let mut config = AppConfig::new_test();
@@ -55,35 +104,35 @@ fn query(policy: CachePolicy, tag: &str) -> ChatQuery {
 }
 
 async fn request(provider: &Anthropic, query: ChatQuery, context: QueryContext) -> Value {
-    tokio::time::timeout(Duration::from_mins(2), async {
-        let model = model_details(&"claude-opus-5".parse().unwrap());
-        let mut stream = provider
-            .start_query(&model, query, context)
-            .await
-            .unwrap()
-            .events;
-        let mut snapshot = None;
-        let mut finish = None;
-        let mut response = String::new();
-        while let Some(event) = stream.next().await {
-            match event.unwrap() {
-                Event::Part {
-                    part: EventPart::Message(text),
-                    ..
-                } => response.push_str(&text),
-                Event::Flush { metadata, .. } => {
-                    if let Some(value) = metadata.get(METADATA_KEY) {
-                        snapshot = Some(value.clone());
-                    }
+    let capture = UsageCapture::default();
+    let subscriber = registry().with(capture.clone());
+    tokio::time::timeout(
+        Duration::from_mins(2),
+        async {
+            let model = model_details(&"claude-opus-5".parse().unwrap());
+            let mut stream = provider
+                .start_query(&model, query, context)
+                .await
+                .unwrap()
+                .events;
+            let mut finish = None;
+            let mut response = String::new();
+            while let Some(event) = stream.next().await {
+                match event.unwrap() {
+                    Event::Part {
+                        part: EventPart::Message(text),
+                        ..
+                    } => response.push_str(&text),
+                    Event::Finished(reason) => finish = Some(reason),
+                    _ => {}
                 }
-                Event::Finished(reason) => finish = Some(reason),
-                _ => {}
             }
+            assert_eq!(finish, Some(FinishReason::Completed));
+            assert_eq!(response.trim(), "INV-1042");
+            capture.snapshot().expect("runtime did not report usage")
         }
-        assert_eq!(finish, Some(FinishReason::Completed));
-        assert_eq!(response.trim(), "INV-1042");
-        snapshot.expect("runtime did not report usage")
-    })
+        .with_subscriber(subscriber),
+    )
     .await
     .expect("live ACP query exceeded two minutes")
 }

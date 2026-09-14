@@ -66,8 +66,8 @@ On Windows, npm's `claude-agent-acp.cmd` must be on PATH.
 Model identifiers and aliases are passed to Claude Code without a JP allowlist.
 Claude Code decides availability for the active account; JP reports
 model-selection and request failures with the runtime's explanation.
-Canonical identifiers returned for aliases are accepted and recorded in usage
-metadata.
+Canonical identifiers returned for aliases are accepted and reported in usage
+traces.
 JP does not set or change `CLAUDE_CONFIG_DIR` for a default login: that variable
 also selects credentials, including the macOS Keychain entry.
 A user-supplied value is inherited unchanged.
@@ -114,13 +114,13 @@ JP removes inherited cache environment overrides from the launched process.
 Claude Code's own defaults and managed policy decide retention when caching is
 not disabled.
 
-Provider events carry usage snapshots with uncached input, cache writes, cache
-reads, and output counted separately.
+Debug tracing reports uncached input, cache writes, cache reads, and output
+separately.
+These diagnostics are not stored in conversation metadata.
 Runtime aggregate totals are separate from main-request usage and must not be
 added to it.
 SDK dollar estimates are not subscription charges or quota percentages.
-See the [qualification procedure] for the metadata format and deduplication
-rules.
+See the [qualification procedure] for the diagnostic format.
 
 ### Direct subscription access
 

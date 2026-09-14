@@ -18,7 +18,7 @@ use serde_json::{Map, Value};
 use super::{
     Error,
     transcript::tool_name,
-    usage::{METADATA_KEY, ModelUsage, RuntimeUsage, UsageLedger},
+    usage::{ModelUsage, RuntimeUsage, UsageLedger},
 };
 use crate::{
     error::StreamError,
@@ -182,7 +182,6 @@ pub(super) struct State {
     pub failure: Option<StreamError>,
     usage: UsageLedger,
     current_message: Option<MessageIdentity>,
-    pending_flush: Option<usize>,
 }
 
 struct MessageIdentity {
@@ -210,7 +209,6 @@ impl State {
             failure: None,
             usage: UsageLedger::default(),
             current_message: None,
-            pending_flush: None,
         }
     }
 
@@ -266,8 +264,7 @@ impl State {
         self.pending_tools.insert(id.clone());
         let index = self.next_index;
         self.next_index += 1;
-        let mut events = self.flush_pending().into_iter().collect::<Vec<_>>();
-        events.extend([
+        let events = vec![
             Event::Part {
                 index,
                 part: EventPart::ToolCall(ToolCallPart::Start { id, name }),
@@ -280,9 +277,9 @@ impl State {
                 )),
                 metadata: Map::new(),
             },
-            Event::flush_with_metadata(index, self.usage_metadata()),
+            Event::flush(index),
             Event::Finished(FinishReason::Completed),
-        ]);
+        ];
         Ok((
             RequestPermissionResponse::new(RequestPermissionOutcome::Selected(
                 SelectedPermissionOutcome::new(option.option_id),
@@ -295,19 +292,6 @@ impl State {
         self.session
             .as_ref()
             .map_or(Value::Null, |id| self.usage.snapshot(id.0.as_ref()))
-    }
-
-    fn usage_metadata(&self) -> Map<String, Value> {
-        if self.usage.is_empty() || self.session.is_none() {
-            return Map::new();
-        }
-        Map::from_iter([(METADATA_KEY.into(), self.usage_snapshot())])
-    }
-
-    fn flush_pending(&mut self) -> Option<Event> {
-        self.pending_flush
-            .take()
-            .map(|index| Event::flush_with_metadata(index, self.usage_metadata()))
     }
 
     pub(super) fn observe(&mut self, notification: SessionNotification) {
@@ -440,7 +424,7 @@ impl State {
                     model_usage,
                     estimated_cost_usd: total_cost_usd,
                 });
-                let mut events = self.flush_pending().into_iter().collect::<Vec<_>>();
+                let mut events = vec![];
                 let finish = if stop_reason.as_deref() == Some("refusal") {
                     FinishReason::Refused {
                         category: refusal
@@ -478,10 +462,7 @@ impl State {
                             part: EventPart::Structured(data.to_string()),
                             metadata: Map::new(),
                         });
-                        events.push(Event::flush_with_metadata(
-                            self.next_index,
-                            self.usage_metadata(),
-                        ));
+                        events.push(Event::flush(self.next_index));
                         self.next_index += 1;
                     }
                     FinishReason::Completed
@@ -498,7 +479,6 @@ impl State {
         let mut events = Vec::new();
         match &event {
             MessagesStreamEvent::MessageStart { message, usage } => {
-                events.extend(self.flush_pending());
                 self.index_base = self.next_index;
                 self.current_message = Some(MessageIdentity {
                     id: message.id.clone(),
@@ -532,20 +512,12 @@ impl State {
                     self.ignored.insert(*index);
                     return Ok(events);
                 }
-                events.extend(self.flush_pending());
             }
             MessagesStreamEvent::ContentBlockDelta { index, .. }
             | MessagesStreamEvent::ContentBlockStop { index }
                 if self.ignored.contains(index) =>
             {
                 return Ok(vec![]);
-            }
-            MessagesStreamEvent::ContentBlockStop { index } => {
-                events.extend(self.flush_pending());
-                // The final usage arrives after content_block_stop. Text is
-                // already streaming; delay only the commit boundary.
-                self.pending_flush = Some(self.index_base + index);
-                return Ok(events);
             }
             _ => {}
         }

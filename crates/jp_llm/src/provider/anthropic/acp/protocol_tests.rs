@@ -80,8 +80,9 @@ fn tool_only_response_records_usage_without_counting_replay_or_subagents() {
     let Event::Flush { metadata, .. } = &events[2] else {
         panic!("expected tool flush")
     };
+    assert!(metadata.is_empty());
     assert_eq!(
-        metadata["anthropic_acp_usage"],
+        state.usage_snapshot(),
         json!({"native_session_id":"session-fixed","requests":{"msg-tool":{"model":"claude-opus-5","input_tokens":2,"output_tokens":9}}})
     );
 }
@@ -152,7 +153,7 @@ fn final_usage_delta_wins_over_an_earlier_assistant_snapshot() {
 }
 
 #[test]
-fn completed_content_carries_the_usage_snapshot() {
+fn usage_does_not_delay_content_or_enter_event_metadata() {
     let mut state = state();
     state.sdk(notification(json!({"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":"Answer."}}}))).unwrap();
     assert_eq!(
@@ -161,24 +162,20 @@ fn completed_content_carries_the_usage_snapshot() {
                 json!({"type":"stream_event","event":{"type":"content_block_stop","index":0}})
             ))
             .unwrap(),
-        vec![]
+        vec![Event::flush(0)]
     );
     state.sdk(notification(json!({"type":"assistant","message":{"id":"msg-fixed","model":"claude-opus-5","content":[{"type":"text","text":"Answer."}],"usage":{"input_tokens":2,"output_tokens":3,"cache_creation_input_tokens":0,"cache_read_input_tokens":500}}}))).unwrap();
     state.sdk(notification(json!({"type":"result","subtype":"success","is_error":false,"modelUsage":{"claude-opus-5":{"inputTokens":2,"outputTokens":3,"cacheReadInputTokens":500}},"total_cost_usd":0.01}))).unwrap();
     let events = state.final_events.take().unwrap();
-    let Event::Flush { index, metadata } = &events[0] else {
-        panic!("expected final flush")
-    };
-    assert_eq!(*index, 0);
+    assert_eq!(events, vec![Event::Finished(FinishReason::Completed)]);
     assert_eq!(
-        metadata["anthropic_acp_usage"],
+        state.usage_snapshot(),
         json!({
             "native_session_id":"session-fixed",
             "requests":{"msg-fixed":{"model":"claude-opus-5","input_tokens":2,"output_tokens":3,"cache_creation_input_tokens":0,"cache_read_input_tokens":500}},
             "runtime":{"model_usage":{"claude-opus-5":{"inputTokens":2,"outputTokens":3,"cacheReadInputTokens":500}},"estimated_cost_usd":0.01}
         })
     );
-    assert_eq!(events[1], Event::Finished(FinishReason::Completed));
 }
 
 #[test]

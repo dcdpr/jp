@@ -16,8 +16,10 @@ use jp_conversation::{
 };
 use jp_mcp::server::InvocationContext;
 use serde_json::{Map, Value, json};
+use tracing::instrument::WithSubscriber as _;
+use tracing_subscriber::{layer::SubscriberExt as _, registry};
 
-use super::*;
+use super::{super::live_tests::UsageCapture, *};
 use crate::event::{EventPart, FinishReason};
 
 fn prepared() -> PreparedRequest {
@@ -226,7 +228,7 @@ async fn real_protocol_driver_loads_history_and_emits_only_live_output() {
             cx.send_notification(notification(json!({"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}})))?;
             cx.send_notification(notification(json!({"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"CURRENT"}}})))?;
             cx.send_notification(notification(json!({"type":"stream_event","event":{"type":"content_block_stop","index":0}})))?;
-            cx.send_notification(notification(json!({"type":"assistant","message":{"model":"resolved-fixture-model","content":[{"type":"text","text":"CURRENT"}]}})))?;
+            cx.send_notification(notification(json!({"type":"assistant","message":{"id":"msg-traced","model":"resolved-fixture-model","content":[{"type":"text","text":"CURRENT"}],"usage":{"input_tokens":2,"output_tokens":7,"cache_read_input_tokens":500}}})))?;
             cx.send_notification(notification(json!({"type":"result","subtype":"success","is_error":false})))?;
             responder.respond(serde_json::from_value::<PromptResponse>(json!({"stopReason":"end_turn"})).unwrap())
         }, on_receive_request!());
@@ -237,6 +239,8 @@ async fn real_protocol_driver_loads_history_and_emits_only_live_output() {
         session: Some(Uuid::parse_str("11111111-1111-4111-8111-111111111111").unwrap()),
         path: None,
     };
+    let capture = UsageCapture::default();
+    let subscriber = registry().with(capture.clone());
     tokio::time::timeout(
         Duration::from_secs(5),
         drive(
@@ -251,7 +255,8 @@ async fn real_protocol_driver_loads_history_and_emits_only_live_output() {
             artifact,
             agent,
             sender,
-        ),
+        )
+        .with_subscriber(subscriber),
     )
     .await
     .unwrap()
@@ -260,6 +265,10 @@ async fn real_protocol_driver_loads_history_and_emits_only_live_output() {
     while let Some(event) = receiver.recv().await {
         events.push(event.unwrap());
     }
+    assert_eq!(
+        capture.snapshot().unwrap(),
+        json!({"native_session_id":"11111111-1111-4111-8111-111111111111","requests":{"msg-traced":{"model":"resolved-fixture-model","input_tokens":2,"output_tokens":7,"cache_read_input_tokens":500}}})
+    );
     // Empty block starts carry no JP content; the first delta supplies it.
     assert_eq!(events, vec![
         Event::Part {

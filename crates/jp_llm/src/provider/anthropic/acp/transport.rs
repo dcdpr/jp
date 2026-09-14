@@ -26,7 +26,7 @@ use jp_config::assistant::{request::CachePolicy, tool_choice::ToolChoice};
 use serde_json::json;
 use sha2::{Digest as _, Sha256};
 use tokio::sync::mpsc;
-use tracing::{debug, warn};
+use tracing::{debug, instrument::WithSubscriber as _, warn};
 use uuid::Uuid;
 
 use super::{
@@ -81,7 +81,7 @@ pub(crate) fn stream(
             };
             drop(sender.send(Err(error)).await);
         }
-    });
+    }.with_current_subscriber());
     while let Some(event) = receiver.recv().await { yield event; }
     }
     .boxed())

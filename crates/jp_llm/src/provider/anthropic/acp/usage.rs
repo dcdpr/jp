@@ -10,8 +10,6 @@ use async_anthropic::types::{CreateMessagesResponse, Usage};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-pub(super) const METADATA_KEY: &str = "anthropic_acp_usage";
-
 #[derive(Debug, Default)]
 pub(super) struct UsageLedger {
     requests: BTreeMap<String, RequestUsage>,
@@ -94,10 +92,6 @@ impl UsageLedger {
         {
             self.runtime = Some(runtime);
         }
-    }
-
-    pub(super) fn is_empty(&self) -> bool {
-        self.requests.is_empty() && self.runtime.is_none()
     }
 
     /// A cumulative snapshot; consumers replace earlier snapshots for this

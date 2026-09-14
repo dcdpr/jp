@@ -13,11 +13,10 @@ They do not prove live cache hits or subscription allowance savings.
 
 ## Usage accounting
 
-Provider event metadata contains `anthropic_acp_usage`.
-Each value is a **snapshot**, identified by `native_session_id`, not an
-increment.
-Keep the latest snapshot for each native session; do not sum snapshots from
-different content blocks or tool calls in that session.
+The ACP transport emits a debug tracing event with a JSON `usage` field.
+It is diagnostic data, not conversation metadata.
+Each value is a snapshot identified by `native_session_id`, not an increment.
+The live test captures this tracing event with a test-only subscriber.
 
 - `requests` contains observed main-session model usage, keyed by native message
   ID.
@@ -33,12 +32,9 @@ different content blocks or tool calls in that session.
 - `runtime.estimated_cost_usd` is the SDK's list-price estimate, not a bill or a
   subscription quota measurement.
 
-Text streams as it arrives.
-The last content block's commit waits for the usage notification; structured
-answers and tool-only responses also carry snapshots.
+Content is emitted and committed independently of usage reporting.
 Replay and subagent messages do not enter the main-request accounting.
-The transport logs its available snapshot at debug level when the connection
-finishes, including for auxiliary consumers that discard event metadata.
+The transport logs its available snapshot when the connection finishes.
 A cancelled or failed request may never receive final usage from the runtime.
 
 ## Controlled live comparison
