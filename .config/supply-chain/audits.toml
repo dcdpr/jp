@@ -311,6 +311,11 @@ who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.37.0 -> 0.38.0"
 
+[[audits.rustls]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.23.35 -> 0.23.45"
+
 [[audits.rustls-webpki]]
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
@@ -320,6 +325,11 @@ delta = "0.103.6 -> 0.103.10"
 who = "Jean Mertz <git@jeanmertz.com>"
 criteria = "safe-to-deploy"
 delta = "0.103.10 -> 0.103.12"
+
+[[audits.rustls-webpki]]
+who = "Jean Mertz <git@jeanmertz.com>"
+criteria = "safe-to-deploy"
+delta = "0.103.13 -> 0.103.15"
 
 [[audits.ruzstd]]
 who = "Jean Mertz <git@jeanmertz.com>"
