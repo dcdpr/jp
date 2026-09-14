@@ -90,17 +90,11 @@ use jp_config::{
     },
     interrupt::ToolInterruptConfig,
 };
-use jp_conversation::{
-    ConversationStream,
-    event::{
-        CancellationReason, InquiryAnswerType, InquiryId, InquiryQuestion, InquiryRequest,
-        InquiryResponse, InquirySource, SelectOption, ToolCallRequest, ToolCallResponse,
-    },
+use jp_conversation::event::{
+    CancellationReason, InquiryAnswerType, InquiryId, InquiryQuestion, InquiryRequest,
+    InquiryResponse, InquirySource, SelectOption, ToolCallRequest, ToolCallResponse,
 };
-use jp_editor::EditorBackend;
-use jp_inquire::{ReplyEditMode, prompt::PromptBackend};
 use jp_mcp::server::StderrSink;
-use jp_printer::Printer;
 use jp_tool::{AnswerType, Question};
 use jp_workspace::ConversationMut;
 use serde_json::{Map, Value};
@@ -117,11 +111,8 @@ use super::{
 use crate::{
     Error,
     cmd::query::{
-        interrupt::signals::{ToolInterruptResult, handle_tool_interrupt},
-        turn::{
-            TurnCoordinator,
-            state::{PermissionCacheKey, ToolAnswerCacheKey, TurnState},
-        },
+        interrupt::signals::{InterruptUi, ToolInterruptResult, handle_tool_interrupt},
+        turn::state::{PermissionCacheKey, ToolAnswerCacheKey, TurnState},
     },
     render::tool::RenderOutcome,
     signals::{InterruptNotice, SignalRouter},
@@ -167,7 +158,6 @@ enum ExecutionEvent {
 
     ResultModeProcessed {
         index: usize,
-        tool_id: String,
         review: Review,
     },
 }
@@ -268,6 +258,49 @@ struct ExecutingTool {
     /// re-spawns an answered question triggers, so a tool that asks a question
     /// keeps feeding the same window row afterwards.
     stderr: Option<StderrSink>,
+}
+
+/// What an execution phase talks to, fixed from the moment it starts.
+///
+/// Every handler in the phase needs some of these and none of them changes, so
+/// they travel as one borrow rather than as eight repeated parameters.
+struct PhaseServices<'a> {
+    /// Runs the inline prompts a question or a result review needs.
+    prompter: Arc<ToolPrompter>,
+
+    /// Answers a question routed to an assistant instead of the user.
+    inquiry_backend: Arc<dyn InquiryBackend>,
+
+    /// Where a spawned prompt, inquiry, or execution reports back to.
+    event_tx: mpsc::Sender<ExecutionEvent>,
+
+    /// Parent of every token this phase hands to a spawned task.
+    cancellation_token: CancellationToken,
+
+    /// The conversation each inquiry pair is recorded on.
+    conv: &'a ConversationMut,
+
+    /// Whether a user is there to answer a prompt at all.
+    interactive: bool,
+}
+
+/// What an execution phase is keeping track of while its tools run.
+///
+/// Indexed by the phase's own contiguous index, not the caller's plan index:
+/// see [`ToolCoordinator::execute_with_prompting`] for why the two differ.
+struct PhaseState {
+    /// Every call the phase started, kept for the life of the phase so an
+    /// answered question can re-spawn the tool it belongs to.
+    tools: HashMap<usize, ExecutingTool>,
+
+    /// What the Host settled on per call, filled in as calls finish.
+    reviews: Vec<Option<Review>>,
+
+    /// Prompts waiting for the terminal, which one call holds at a time.
+    pending_prompts: VecDeque<PendingPrompt>,
+
+    /// Whether a prompt currently owns the terminal.
+    prompt_active: bool,
 }
 
 #[derive(Debug)]
@@ -986,19 +1019,14 @@ impl ToolCoordinator {
     /// `interactive` gates every question and result prompt.
     /// The elapsed-time progress row takes no parameter: it is a status region,
     /// so the printer's own terminal capability decides whether it renders.
-    #[allow(clippy::too_many_arguments)]
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     pub async fn execute_with_prompting(
         &mut self,
         executors: Vec<(usize, Box<dyn Executor>)>,
         prompter: Arc<ToolPrompter>,
         signals: &SignalRouter,
-        turn_coordinator: &mut TurnCoordinator,
         turn_state: &mut TurnState,
-        printer: &Printer,
-        prompt_backend: &dyn PromptBackend,
-        editor: Option<Arc<dyn EditorBackend>>,
-        edit_mode: ReplyEditMode,
+        interrupt_ui: &mut InterruptUi<'_>,
         inquiry_backend: Arc<dyn InquiryBackend>,
         conv: &ConversationMut,
         tool_renderer: &mut ToolRenderer,
@@ -1036,10 +1064,20 @@ impl ToolCoordinator {
         let total_tools = executors.len();
         let cancellation_token = self.cancellation_token.clone();
         let (event_tx, mut event_rx) = mpsc::channel::<ExecutionEvent>(32);
-        let mut executing_tools: HashMap<usize, ExecutingTool> = HashMap::new();
-        let mut results: Vec<Option<Review>> = vec![None; total_tools];
-        let mut pending_prompts: VecDeque<PendingPrompt> = VecDeque::new();
-        let mut prompt_active = false;
+        let services = PhaseServices {
+            prompter,
+            inquiry_backend,
+            event_tx: event_tx.clone(),
+            cancellation_token: cancellation_token.clone(),
+            conv,
+            interactive,
+        };
+        let mut state = PhaseState {
+            tools: HashMap::new(),
+            reviews: vec![None; total_tools],
+            pending_prompts: VecDeque::new(),
+            prompt_active: false,
+        };
 
         // Claimed before the sinks below, not after: `StatusRegion::source`
         // copies the region it is asked of, so a sink taken from the inert
@@ -1067,24 +1105,17 @@ impl ToolCoordinator {
 
             let stderr = stderr_sink(tool_renderer, &self.tools_config, &tool_name);
 
-            executing_tools.insert(index, ExecutingTool {
-                executor: Arc::clone(&executor),
+            let tool = ExecutingTool {
+                executor,
                 tool_id: tool_id.clone(),
-                tool_name: tool_name.clone(),
-                accumulated_answers: accumulated_answers.clone(),
-                stderr: stderr.clone(),
-            });
+                tool_name,
+                accumulated_answers,
+                stderr,
+            };
 
             self.set_tool_state(&tool_id, ToolCallState::Running);
-
-            Self::spawn_tool_execution(
-                index,
-                executor,
-                accumulated_answers,
-                cancellation_token.child_token(),
-                event_tx.clone(),
-                stderr,
-            );
+            Self::spawn_tool_execution(index, &tool, &services);
+            state.tools.insert(index, tool);
         }
 
         // Forward interrupt notifications into the execution event channel.
@@ -1111,25 +1142,16 @@ impl ToolCoordinator {
         while let Some(event) = event_rx.recv().await {
             match event {
                 ExecutionEvent::ToolResult { index, result } => {
-                    let Some(tool) = executing_tools.get_mut(&index) else {
+                    if !state.tools.contains_key(&index) {
                         warn!(index, "Received ToolResult for unknown tool.");
                         continue;
-                    };
-                    let response = &mut results[index];
+                    }
                     self.handle_tool_result(
                         result,
-                        tool,
                         index,
-                        response,
-                        &mut pending_prompts,
-                        &mut prompt_active,
-                        prompter.clone(),
-                        &inquiry_backend,
-                        conv,
-                        &cancellation_token,
-                        event_tx.clone(),
+                        &mut state,
+                        &services,
                         turn_state,
-                        interactive,
                         tool_renderer,
                     );
                 }
@@ -1148,13 +1170,8 @@ impl ToolCoordinator {
                         answer,
                         persist_level,
                         redact,
-                        &mut executing_tools,
-                        &mut pending_prompts,
-                        &mut prompt_active,
-                        prompter.clone(),
-                        &cancellation_token,
-                        event_tx.clone(),
-                        conv,
+                        &mut state,
+                        &services,
                         turn_state,
                     );
                 }
@@ -1169,36 +1186,29 @@ impl ToolCoordinator {
                         // Close the recorded pair before the tool lookup, so an
                         // unknown index cannot leave the request unpaired on
                         // disk (sanitize() would drop it on the next load).
-                        Self::record_inquiry_answer(conv, &inquiry_id, &answer);
-                        if let Some(tool) = executing_tools.get_mut(&index) {
+                        Self::record_inquiry_answer(services.conv, &inquiry_id, &answer);
+                        if let Some(tool) = state.tools.get_mut(&index) {
                             tool.accumulated_answers.insert(question_id, answer);
                             self.set_tool_state(&tool.tool_id, ToolCallState::Running);
-                            Self::spawn_tool_execution(
-                                index,
-                                tool.executor.clone(),
-                                tool.accumulated_answers.clone(),
-                                cancellation_token.child_token(),
-                                event_tx.clone(),
-                                tool.stderr.clone(),
-                            );
+                            Self::spawn_tool_execution(index, tool, &services);
                         } else {
                             warn!(index, "Received InquiryResult for unknown tool.");
                         }
                     }
                     Err(error) => {
                         Self::record_inquiry_cancelled(
-                            conv,
+                            services.conv,
                             &inquiry_id,
                             Self::cancellation_reason(&error),
                         );
-                        match executing_tools.get(&index) {
+                        match state.tools.get(&index) {
                             None => {
                                 warn!(index, %error, "Received InquiryResult for unknown tool.");
                             }
                             Some(tool) => {
                                 self.set_tool_state(&tool.tool_id, ToolCallState::Completed);
 
-                                results[index] = Some(Review::replaced(ToolCallResponse {
+                                state.reviews[index] = Some(Review::replaced(ToolCallResponse {
                                     id: tool.tool_id.clone(),
                                     result: Err(format!(
                                         "The tool '{}' asked a follow-up question (\"{}\") that \
@@ -1218,42 +1228,25 @@ impl ToolCoordinator {
                     inquiry_id,
                     reason,
                 } => {
-                    self.handle_prompt_cancelled(
-                        index,
-                        &inquiry_id,
-                        reason,
-                        &mut executing_tools,
-                        &mut results,
-                        &mut pending_prompts,
-                        &mut prompt_active,
-                        prompter.clone(),
-                        event_tx.clone(),
-                        conv,
-                    );
+                    self.handle_prompt_cancelled(index, &inquiry_id, reason, &mut state, &services);
                 }
-                ExecutionEvent::ResultModeProcessed {
-                    index,
-                    tool_id,
-                    review,
-                } => {
-                    prompt_active = false;
-                    let tool_name = executing_tools
-                        .get(&index)
-                        .map(|tool| tool.tool_name.clone())
-                        .unwrap_or_default();
-                    self.render_result(&tool_name, &review.response, tool_renderer);
-                    self.set_tool_state(&tool_id, ToolCallState::Completed);
-                    results[index] = Some(review);
-                    self.process_next_prompt(
-                        &mut pending_prompts,
-                        &mut prompt_active,
-                        prompter.clone(),
-                        &executing_tools,
-                        event_tx.clone(),
-                    );
+                ExecutionEvent::ResultModeProcessed { index, review } => {
+                    state.prompt_active = false;
+                    // The tool is still registered: nothing removes an entry
+                    // for the life of the phase, and this index came from one.
+                    if let Some(tool) = state.tools.get(&index) {
+                        let tool_name = tool.tool_name.clone();
+                        let tool_id = tool.tool_id.clone();
+                        self.render_result(&tool_name, &review.response, tool_renderer);
+                        self.set_tool_state(&tool_id, ToolCallState::Completed);
+                    } else {
+                        warn!(index, "Received ResultModeProcessed for unknown tool.");
+                    }
+                    state.reviews[index] = Some(review);
+                    self.process_next_prompt(&mut state, &services);
                 }
                 ExecutionEvent::Interrupt(notice) => {
-                    if prompt_active {
+                    if state.prompt_active {
                         // An active inline prompt owns the terminal; pass the
                         // interrupt down the handler stack instead of stacking
                         // the menu on top of the prompt.
@@ -1261,12 +1254,8 @@ impl ToolCoordinator {
                     } else {
                         let result = handle_tool_interrupt(
                             &cancellation_token,
-                            turn_coordinator,
                             self.is_prompting(),
-                            printer,
-                            prompt_backend,
-                            editor.clone(),
-                            edit_mode,
+                            interrupt_ui,
                             &self.interrupt_config,
                         );
 
@@ -1299,7 +1288,8 @@ impl ToolCoordinator {
                                 outcome.upgrade(ExecutionOutcome::Restart);
                             }
                             ToolInterruptResult::Cancelled { response, exit } => {
-                                cancelled_indices = results
+                                cancelled_indices = state
+                                    .reviews
                                     .iter()
                                     .enumerate()
                                     .filter(|(_, r)| r.is_none())
@@ -1323,7 +1313,7 @@ impl ToolCoordinator {
                 }
             }
 
-            if results.iter().all(Option::is_some) {
+            if state.reviews.iter().all(Option::is_some) {
                 break;
             }
         }
@@ -1336,8 +1326,8 @@ impl ToolCoordinator {
 
         let mut reviews: Vec<(usize, Review)> = plan_indices
             .into_iter()
-            .zip(results.into_iter().map(|result| {
-                result.unwrap_or_else(|| {
+            .zip(state.reviews.into_iter().map(|review| {
+                review.unwrap_or_else(|| {
                     Review::replaced(ToolCallResponse {
                         id: "unknown".to_owned(),
                         result: Err("Tool did not complete".to_owned()),
@@ -1357,7 +1347,8 @@ impl ToolCoordinator {
                 } else {
                     // No custom message: each cancelled tool answers with its
                     // configured cancellation response.
-                    let tool_name = executing_tools
+                    let tool_name = state
+                        .tools
                         .get(&i)
                         .map(|tool| tool.tool_name.as_str())
                         .unwrap_or_default();
@@ -1389,14 +1380,16 @@ impl ToolCoordinator {
         }
     }
 
-    fn spawn_tool_execution(
-        index: usize,
-        executor: Arc<dyn Executor>,
-        answers: IndexMap<String, Value>,
-        token: CancellationToken,
-        tx: mpsc::Sender<ExecutionEvent>,
-        stderr: Option<StderrSink>,
-    ) {
+    /// Run one attempt of a tool, reporting back through the phase's channel.
+    ///
+    /// The answers are snapshotted here rather than borrowed, so the spawned
+    /// task is unaffected by a later question adding to them.
+    fn spawn_tool_execution(index: usize, tool: &ExecutingTool, services: &PhaseServices<'_>) {
+        let executor = tool.executor.clone();
+        let answers = tool.accumulated_answers.clone();
+        let stderr = tool.stderr.clone();
+        let token = services.cancellation_token.child_token();
+        let tx = services.event_tx.clone();
         tokio::spawn(async move {
             let result = executor.execute(&answers, token, stderr).await;
             let _err = tx.send(ExecutionEvent::ToolResult { index, result }).await;
@@ -1486,11 +1479,13 @@ impl ToolCoordinator {
         id: String,
         tool_name: String,
         question: Question,
-        backend: Arc<dyn InquiryBackend>,
-        mut events: ConversationStream,
-        cancellation_token: CancellationToken,
-        event_tx: mpsc::Sender<ExecutionEvent>,
+        services: &PhaseServices<'_>,
     ) {
+        let backend = Arc::clone(&services.inquiry_backend);
+        let cancellation_token = services.cancellation_token.child_token();
+        let event_tx = services.event_tx.clone();
+        let mut events = services.conv.events().clone();
+
         // Insert a ToolCallResponse into the cloned stream so the LLM sees the
         // tool as "paused". The ID must match the original ToolCallRequest.id
         // so providers can resolve the tool name when converting events to
@@ -1561,24 +1556,29 @@ impl ToolCoordinator {
         *tracked_review = Some(Review::unchanged(response));
     }
 
-    #[allow(clippy::too_many_arguments)]
+    /// Take one finished attempt and decide what the phase does about it.
+    ///
+    /// `index` names a call the phase started; the caller checks that before
+    /// dispatching here.
     fn handle_tool_result(
         &mut self,
         result: ExecutorResult,
-        tool: &mut ExecutingTool,
         index: usize,
-        tracked_review: &mut Option<Review>,
-        pending_prompts: &mut VecDeque<PendingPrompt>,
-        prompt_active: &mut bool,
-        prompter: Arc<ToolPrompter>,
-        inquiry_backend: &Arc<dyn InquiryBackend>,
-        conv: &ConversationMut,
-        cancellation_token: &CancellationToken,
-        event_tx: mpsc::Sender<ExecutionEvent>,
+        state: &mut PhaseState,
+        services: &PhaseServices<'_>,
         turn_state: &mut TurnState,
-        interactive: bool,
         tool_renderer: &ToolRenderer,
     ) {
+        let PhaseState {
+            tools,
+            reviews,
+            pending_prompts,
+            prompt_active,
+        } = state;
+        let Some(tool) = tools.get_mut(&index) else {
+            return;
+        };
+        let tracked_review = &mut reviews[index];
         match result {
             ExecutorResult::Completed(response) => {
                 match self.result_mode(&tool.tool_name) {
@@ -1595,7 +1595,7 @@ impl ToolCoordinator {
                     }
                     // Nobody is there to answer, so the configured prompt is
                     // skipped and the result stands as the tool produced it.
-                    ResultMode::Ask | ResultMode::Edit if !interactive => {
+                    ResultMode::Ask | ResultMode::Edit if !services.interactive => {
                         self.finish_tool_call(tool, response, tracked_review, tool_renderer);
                     }
                     // Both Ask and Edit prompt whenever a user is there to
@@ -1615,12 +1615,10 @@ impl ToolCoordinator {
                             self.set_tool_state(&tool.tool_id, ToolCallState::AwaitingResultEdit);
                             Self::spawn_result_mode_prompt(
                                 index,
-                                tool.tool_id.clone(),
                                 tool.tool_name.clone(),
                                 response,
                                 result_mode,
-                                prompter,
-                                event_tx,
+                                services,
                             );
                         }
                     }
@@ -1660,18 +1658,13 @@ impl ToolCoordinator {
                         question,
                         source,
                     },
-                    tool,
                     index,
+                    tool,
                     tracked_review,
                     pending_prompts,
                     prompt_active,
-                    &prompter,
-                    inquiry_backend,
-                    conv,
-                    cancellation_token,
-                    event_tx,
+                    services,
                     turn_state,
-                    interactive,
                 );
             }
         }
@@ -1684,24 +1677,19 @@ impl ToolCoordinator {
     /// A question answered from the turn cache or from configuration resumes
     /// the tool here; anything else hands off to a prompt or to the assistant
     /// and resumes on a later event.
-    #[allow(clippy::too_many_arguments)]
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     fn route_tool_question(
         &mut self,
         question: ToolQuestion,
-        tool: &mut ExecutingTool,
         index: usize,
+        tool: &mut ExecutingTool,
         tracked_review: &mut Option<Review>,
         pending_prompts: &mut VecDeque<PendingPrompt>,
         prompt_active: &mut bool,
-        prompter: &Arc<ToolPrompter>,
-        inquiry_backend: &Arc<dyn InquiryBackend>,
-        conv: &ConversationMut,
-        cancellation_token: &CancellationToken,
-        event_tx: mpsc::Sender<ExecutionEvent>,
+        services: &PhaseServices<'_>,
         turn_state: &mut TurnState,
-        interactive: bool,
     ) {
+        let conv = services.conv;
         let ToolQuestion {
             tool_id,
             tool_name,
@@ -1738,14 +1726,7 @@ impl ToolCoordinator {
                 Self::record_inquiry_answer(conv, &inquiry_id, &answer);
                 tool.accumulated_answers
                     .insert(question.id.to_string(), answer);
-                Self::spawn_tool_execution(
-                    index,
-                    tool.executor.clone(),
-                    tool.accumulated_answers.clone(),
-                    cancellation_token.clone(),
-                    event_tx,
-                    tool.stderr.clone(),
-                );
+                Self::spawn_tool_execution(index, tool, services);
                 return;
             }
         }
@@ -1760,14 +1741,7 @@ impl ToolCoordinator {
             }
             tool.accumulated_answers
                 .insert(question.id.to_string(), answer);
-            Self::spawn_tool_execution(
-                index,
-                tool.executor.clone(),
-                tool.accumulated_answers.clone(),
-                cancellation_token.clone(),
-                event_tx,
-                tool.stderr.clone(),
-            );
+            Self::spawn_tool_execution(index, tool, services);
             return;
         }
 
@@ -1782,11 +1756,11 @@ impl ToolCoordinator {
             question_text = %question.text,
             question_type = ?question.answer_type,
             target = ?target,
-            interactive = interactive,
+            interactive = services.interactive,
             "Tool question received, routing to target",
         );
 
-        if interactive && target.is_user() {
+        if services.interactive && target.is_user() {
             if *prompt_active {
                 pending_prompts.push_back(PendingPrompt::Question {
                     index,
@@ -1796,7 +1770,7 @@ impl ToolCoordinator {
             } else {
                 *prompt_active = true;
                 self.set_tool_state(&tool_id, ToolCallState::AwaitingInput);
-                Self::spawn_user_prompt(index, question, inquiry_id, prompter.clone(), event_tx);
+                Self::spawn_user_prompt(index, question, inquiry_id, services);
             }
         } else if is_secret {
             // A secret requires a human at an interactive prompt; it must never
@@ -1834,16 +1808,12 @@ impl ToolCoordinator {
                 tool_id.clone(),
                 tool_name,
                 question,
-                Arc::clone(inquiry_backend),
-                conv.events().clone(),
-                cancellation_token.child_token(),
-                event_tx.clone(),
+                services,
             );
             self.set_tool_state(&tool_id, ToolCallState::AwaitingInput);
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn handle_prompt_answer(
         &mut self,
         index: usize,
@@ -1852,26 +1822,21 @@ impl ToolCoordinator {
         answer: Value,
         persist_level: jp_tool::PersistLevel,
         redact: bool,
-        executing_tools: &mut HashMap<usize, ExecutingTool>,
-        pending_prompts: &mut VecDeque<PendingPrompt>,
-        prompt_active: &mut bool,
-        prompter: Arc<ToolPrompter>,
-        cancellation_token: &CancellationToken,
-        event_tx: mpsc::Sender<ExecutionEvent>,
-        conv: &ConversationMut,
+        state: &mut PhaseState,
+        services: &PhaseServices<'_>,
         turn_state: &mut TurnState,
     ) {
-        *prompt_active = false;
+        state.prompt_active = false;
 
         // Close the recorded inquiry with the user's answer; a secret answer
         // is persisted as `Redacted` and never carries the value.
         if redact {
-            Self::record_inquiry_redacted(conv, inquiry_id);
+            Self::record_inquiry_redacted(services.conv, inquiry_id);
         } else {
-            Self::record_inquiry_answer(conv, inquiry_id, &answer);
+            Self::record_inquiry_answer(services.conv, inquiry_id, &answer);
         }
 
-        if let Some(tool) = executing_tools.get_mut(&index) {
+        if let Some(tool) = state.tools.get_mut(&index) {
             // Secrets never enter the turn-answer cache.
             if persist_level == jp_tool::PersistLevel::Turn && !redact {
                 let answer_key = ToolAnswerCacheKey::new(&tool.tool_name, &question_id);
@@ -1881,39 +1846,20 @@ impl ToolCoordinator {
             }
             tool.accumulated_answers.insert(question_id, answer);
             self.set_tool_state(&tool.tool_id, ToolCallState::Running);
-            Self::spawn_tool_execution(
-                index,
-                tool.executor.clone(),
-                tool.accumulated_answers.clone(),
-                cancellation_token.clone(),
-                event_tx.clone(),
-                tool.stderr.clone(),
-            );
+            Self::spawn_tool_execution(index, tool, services);
         }
-        self.process_next_prompt(
-            pending_prompts,
-            prompt_active,
-            prompter,
-            executing_tools,
-            event_tx,
-        );
+        self.process_next_prompt(state, services);
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn handle_prompt_cancelled(
         &mut self,
         index: usize,
         inquiry_id: &InquiryId,
         reason: CancellationReason,
-        executing_tools: &mut HashMap<usize, ExecutingTool>,
-        results: &mut [Option<Review>],
-        pending_prompts: &mut VecDeque<PendingPrompt>,
-        prompt_active: &mut bool,
-        prompter: Arc<ToolPrompter>,
-        event_tx: mpsc::Sender<ExecutionEvent>,
-        conv: &ConversationMut,
+        state: &mut PhaseState,
+        services: &PhaseServices<'_>,
     ) {
-        *prompt_active = false;
+        state.prompt_active = false;
 
         // A user cancellation (Esc / Ctrl-C / EOF at the prompt) completes the
         // tool benignly; a prompt failure is a tool-level error.
@@ -1921,31 +1867,26 @@ impl ToolCoordinator {
             CancellationReason::User => Ok("Tool input cancelled by user.".to_owned()),
             _ => Err("Tool input prompt failed.".to_owned()),
         };
-        Self::record_inquiry_cancelled(conv, inquiry_id, reason);
+        Self::record_inquiry_cancelled(services.conv, inquiry_id, reason);
 
-        if let Some(tool) = executing_tools.get(&index) {
+        if let Some(tool) = state.tools.get(&index) {
             self.set_tool_state(&tool.tool_id, ToolCallState::Completed);
-            results[index] = Some(Review::replaced(ToolCallResponse {
+            state.reviews[index] = Some(Review::replaced(ToolCallResponse {
                 id: tool.tool_id.clone(),
                 result,
             }));
         }
-        self.process_next_prompt(
-            pending_prompts,
-            prompt_active,
-            prompter,
-            executing_tools,
-            event_tx,
-        );
+        self.process_next_prompt(state, services);
     }
 
     fn spawn_user_prompt(
         index: usize,
         question: Question,
         inquiry_id: InquiryId,
-        prompter: Arc<ToolPrompter>,
-        event_tx: mpsc::Sender<ExecutionEvent>,
+        services: &PhaseServices<'_>,
     ) {
+        let prompter = services.prompter.clone();
+        let event_tx = services.event_tx.clone();
         let question_id = question.id.to_string();
         let redact = question.answer_type == AnswerType::Secret;
         tokio::task::spawn_blocking(move || match prompter.prompt_question(&question) {
@@ -1976,16 +1917,15 @@ impl ToolCoordinator {
         });
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn spawn_result_mode_prompt(
         index: usize,
-        tool_id: String,
         tool_name: String,
         response: ToolCallResponse,
         result_mode: ResultMode,
-        prompter: Arc<ToolPrompter>,
-        event_tx: mpsc::Sender<ExecutionEvent>,
+        services: &PhaseServices<'_>,
     ) {
+        let prompter = services.prompter.clone();
+        let event_tx = services.event_tx.clone();
         tokio::task::spawn_blocking(move || {
             // Whether the content changed is decided here, where both the
             // offered response and the user's answer are in hand. Downstream
@@ -2010,11 +1950,7 @@ impl ToolCoordinator {
                 ResultMode::Edit => Self::handle_edit_result(&prompter, response),
                 _ => Review::unchanged(response),
             };
-            drop(event_tx.blocking_send(ExecutionEvent::ResultModeProcessed {
-                index,
-                tool_id,
-                review,
-            }));
+            drop(event_tx.blocking_send(ExecutionEvent::ResultModeProcessed { index, review }));
         });
     }
 
@@ -2035,28 +1971,22 @@ impl ToolCoordinator {
         }
     }
 
-    fn process_next_prompt(
-        &mut self,
-        pending_prompts: &mut VecDeque<PendingPrompt>,
-        prompt_active: &mut bool,
-        prompter: Arc<ToolPrompter>,
-        executing_tools: &HashMap<usize, ExecutingTool>,
-        event_tx: mpsc::Sender<ExecutionEvent>,
-    ) {
-        let Some(next) = pending_prompts.pop_front() else {
+    /// Hand the terminal to the next waiting prompt, if there is one.
+    fn process_next_prompt(&mut self, state: &mut PhaseState, services: &PhaseServices<'_>) {
+        let Some(next) = state.pending_prompts.pop_front() else {
             return;
         };
-        *prompt_active = true;
+        state.prompt_active = true;
         match next {
             PendingPrompt::Question {
                 index,
                 question,
                 inquiry_id,
             } => {
-                if let Some(tool) = executing_tools.get(&index) {
+                if let Some(tool) = state.tools.get(&index) {
                     self.set_tool_state(&tool.tool_id, ToolCallState::AwaitingInput);
                 }
-                Self::spawn_user_prompt(index, question, inquiry_id, prompter, event_tx);
+                Self::spawn_user_prompt(index, question, inquiry_id, services);
             }
             PendingPrompt::ResultMode {
                 index,
@@ -2066,15 +1996,7 @@ impl ToolCoordinator {
                 result_mode,
             } => {
                 self.set_tool_state(&tool_id, ToolCallState::AwaitingResultEdit);
-                Self::spawn_result_mode_prompt(
-                    index,
-                    tool_id,
-                    tool_name,
-                    response,
-                    result_mode,
-                    prompter.clone(),
-                    event_tx.clone(),
-                );
+                Self::spawn_result_mode_prompt(index, tool_name, response, result_mode, services);
             }
         }
     }

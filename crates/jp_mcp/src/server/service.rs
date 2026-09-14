@@ -29,7 +29,7 @@ use tokio::sync::{Notify, broadcast, mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
 use super::{
-    CommandResult, ExecutionOutcome, InvocationContext,
+    Answers, CommandResult, Execution, ExecutionOutcome, InvocationContext, StderrSink,
     builtin::BuiltinExecutors,
     execute,
     result::{ResultError, to_mcp},
@@ -807,32 +807,32 @@ async fn execute_with_answers(
             });
         }
     };
-    let mut answers = IndexMap::new();
+    let progress = inner.progress.clone();
+    let id = call.id;
+    let stderr: StderrSink = Arc::new(move |line: &str| {
+        drop(progress.send(Progress {
+            id,
+            line: line.into(),
+        }));
+    });
+    // Built once: every attempt of this invocation runs the same tool, in the
+    // same place, under the same policy. Only the answers grow.
+    let execution = Execution {
+        definition: &tool.definition,
+        id: call.id.0.to_string(),
+        arguments: Value::Object(arguments.clone()),
+        config: &tool.config,
+        root: &inner.root,
+        access,
+        invocation: &inner.invocation,
+        builtins: &inner.builtins,
+        upstream: &inner.upstream,
+        cancellation: cancellation.clone(),
+        stderr: Some(stderr),
+    };
+    let mut answers = Answers::new();
     loop {
-        let progress = inner.progress.clone();
-        let id = call.id;
-        let stderr = Arc::new(move |line: &str| {
-            drop(progress.send(Progress {
-                id,
-                line: line.into(),
-            }));
-        });
-        let outcome = execute(
-            &tool.definition,
-            call.id.0.to_string(),
-            Value::Object(arguments.clone()),
-            &answers,
-            &tool.config,
-            &inner.upstream,
-            &inner.root,
-            cancellation.clone(),
-            &inner.builtins,
-            access,
-            &inner.invocation,
-            Some(stderr),
-        )
-        .await?;
-        match outcome {
+        match execute(&execution, &answers).await? {
             ExecutionOutcome::Cancelled { .. } => return Err(ServiceError::Cancelled),
             ExecutionOutcome::Completed { result, .. } => {
                 return Ok(CallOutput {

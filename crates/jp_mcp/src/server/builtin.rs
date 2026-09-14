@@ -12,6 +12,17 @@ use jp_tool::Outcome;
 use serde_json::Value;
 
 /// A built-in tool that executes Rust code instead of shelling out.
+///
+/// The return type is [`Outcome`], so a built-in produces text, an error, or a
+/// question — the same three shapes a local command can print on stdout.
+/// A resource, an image, structured content, or MCP annotations are not
+/// reachable from here; only a tool on an upstream MCP server can return those,
+/// because only that path carries a native MCP result into [`ToolResult`].
+/// Widening this is [RFD 058]'s work, not something to route around one tool at
+/// a time.
+///
+/// [RFD 058]: https://jp.computer/rfd/058-typed-content-blocks-for-tool-responses
+/// [`ToolResult`]: jp_tool::ToolResult
 #[async_trait]
 pub trait BuiltinTool: Send + Sync {
     /// Execute the tool with the given arguments and accumulated answers.

@@ -29,7 +29,7 @@ use super::{Client, McpServerId};
 use crate::{
     Content,
     server::{
-        ExecutionOutcome, InvocationContext,
+        Answers, Execution, ExecutionOutcome, InvocationContext,
         builtin::BuiltinExecutors,
         execute,
         http::Endpoint,
@@ -106,43 +106,29 @@ async fn upstream_receives_context_options_and_accumulated_answers() {
         workspace_id: "workspace-1".into(),
         conversation_id: "conversation-1".into(),
     };
-    let first = execute(
-        &definition,
-        "call-1".into(),
-        json!({"value":"edited"}),
-        &IndexMap::new(),
-        &config,
-        &client,
-        "/work".into(),
-        CancellationToken::new(),
-        &BuiltinExecutors::new(),
-        None,
-        &invocation,
-        None,
-    )
-    .await
-    .unwrap();
+    let builtins = BuiltinExecutors::new();
+    // One context for both attempts, which is what the service does: the second
+    // attempt differs only by the answer it carries.
+    let execution = Execution {
+        definition: &definition,
+        id: "call-1".into(),
+        arguments: json!({"value":"edited"}),
+        config: &config,
+        root: "/work".into(),
+        access: None,
+        invocation: &invocation,
+        builtins: &builtins,
+        upstream: &client,
+        cancellation: CancellationToken::new(),
+        stderr: None,
+    };
+    let first = execute(&execution, &Answers::new()).await.unwrap();
     let ExecutionOutcome::NeedsInput { question, .. } = first else {
         panic!("expected decoded question")
     };
     assert_eq!(question, Question::boolean("confirm", "Continue?").unwrap());
-    let answers = IndexMap::from_iter([("confirm".into(), json!(true))]);
-    let second = execute(
-        &definition,
-        "call-1".into(),
-        json!({"value":"edited"}),
-        &answers,
-        &config,
-        &client,
-        "/work".into(),
-        CancellationToken::new(),
-        &BuiltinExecutors::new(),
-        None,
-        &invocation,
-        None,
-    )
-    .await
-    .unwrap();
+    let answers = Answers::from_iter([("confirm".into(), json!(true))]);
+    let second = execute(&execution, &answers).await.unwrap();
     let ExecutionOutcome::Completed { result, .. } = second else {
         panic!("expected final result")
     };

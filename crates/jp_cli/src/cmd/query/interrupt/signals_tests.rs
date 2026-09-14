@@ -469,12 +469,14 @@ fn tool_interrupt_restart_returns_restart() {
 
     let result = handle_tool_interrupt(
         &token,
-        &mut turn_coordinator,
         false, // not prompting
-        &printer,
-        &backend,
-        None,
-        ReplyEditMode::Emacs,
+        &mut InterruptUi {
+            turn_coordinator: &mut turn_coordinator,
+            printer: &printer,
+            backend: &backend,
+            editor: None,
+            edit_mode: ReplyEditMode::Emacs,
+        },
         &tool_prompt(),
     );
 
@@ -502,12 +504,14 @@ fn tool_interrupt_cancelled_empty_reply_has_no_custom_message() {
 
     let result = handle_tool_interrupt(
         &token,
-        &mut turn_coordinator,
         false, // not prompting
-        &printer,
-        &backend,
-        None,
-        ReplyEditMode::Emacs,
+        &mut InterruptUi {
+            turn_coordinator: &mut turn_coordinator,
+            printer: &printer,
+            backend: &backend,
+            editor: None,
+            edit_mode: ReplyEditMode::Emacs,
+        },
         &tool_prompt(),
     );
 
@@ -537,12 +541,14 @@ fn tool_interrupt_cancelled_with_custom_response() {
 
     let result = handle_tool_interrupt(
         &token,
-        &mut turn_coordinator,
         false, // not prompting
-        &printer,
-        &backend,
-        None,
-        ReplyEditMode::Emacs,
+        &mut InterruptUi {
+            turn_coordinator: &mut turn_coordinator,
+            printer: &printer,
+            backend: &backend,
+            editor: None,
+            edit_mode: ReplyEditMode::Emacs,
+        },
         &tool_prompt(),
     );
 
@@ -566,12 +572,14 @@ fn tool_interrupt_resume_continues_without_cancel() {
 
     let result = handle_tool_interrupt(
         &token,
-        &mut turn_coordinator,
         false, // not prompting
-        &printer,
-        &backend,
-        None,
-        ReplyEditMode::Emacs,
+        &mut InterruptUi {
+            turn_coordinator: &mut turn_coordinator,
+            printer: &printer,
+            backend: &backend,
+            editor: None,
+            edit_mode: ReplyEditMode::Emacs,
+        },
         &tool_prompt(),
     );
 
@@ -596,12 +604,14 @@ fn tool_interrupt_declined_when_prompting() {
 
     let result = handle_tool_interrupt(
         &token,
-        &mut turn_coordinator,
         true, // prompting
-        &printer,
-        &backend,
-        None,
-        ReplyEditMode::Emacs,
+        &mut InterruptUi {
+            turn_coordinator: &mut turn_coordinator,
+            printer: &printer,
+            backend: &backend,
+            editor: None,
+            edit_mode: ReplyEditMode::Emacs,
+        },
         &tool_prompt(),
     );
 
@@ -627,12 +637,14 @@ fn tool_interrupt_handled_when_not_prompting() {
 
     let result = handle_tool_interrupt(
         &token,
-        &mut turn_coordinator,
         false, // not prompting
-        &printer,
-        &backend,
-        None,
-        ReplyEditMode::Emacs,
+        &mut InterruptUi {
+            turn_coordinator: &mut turn_coordinator,
+            printer: &printer,
+            backend: &backend,
+            editor: None,
+            edit_mode: ReplyEditMode::Emacs,
+        },
         &tool_prompt(),
     );
 
@@ -661,12 +673,14 @@ fn tool_interrupt_menu_cancel_escalates() {
 
     let result = handle_tool_interrupt(
         &token,
-        &mut turn_coordinator,
         false, // not prompting
-        &printer,
-        &backend,
-        None,
-        ReplyEditMode::Emacs,
+        &mut InterruptUi {
+            turn_coordinator: &mut turn_coordinator,
+            printer: &printer,
+            backend: &backend,
+            editor: None,
+            edit_mode: ReplyEditMode::Emacs,
+        },
         &tool_prompt(),
     );
 

@@ -46,7 +46,9 @@
 //! [`ToolCallResponse`]: jp_conversation::event::ToolCallResponse
 //! [`TurnCoordinator`]: turn::coordinator::TurnCoordinator
 
+mod args;
 pub(crate) mod interrupt;
+mod mcp_startup;
 mod stream;
 pub(crate) mod tool;
 mod turn;
@@ -54,19 +56,17 @@ mod turn_loop;
 
 use std::{
     borrow::Cow,
-    collections::{HashMap, HashSet},
-    env,
-    fmt::Write as _,
-    fs,
+    collections::HashSet,
+    env, fs,
     io::{self, IsTerminal},
     sync::Arc,
     time::{Duration, Instant},
 };
 
+pub(crate) use args::{QueryInput, ToolDirective, ToolDirectives};
 use camino::{Utf8Path, Utf8PathBuf};
 use chrono::{DateTime, Utc};
 use clap::{ArgAction, builder::TypedValueParser as _};
-use crossterm::style::Stylize as _;
 use indexmap::IndexMap;
 use jp_attachment::Attachment;
 use jp_config::{
@@ -93,7 +93,7 @@ use jp_config::{
         },
     },
     providers::llm::AuthEntry,
-    style::{mcp_startup::McpStartupConfig, reasoning::ReasoningDisplayConfig},
+    style::reasoning::ReasoningDisplayConfig,
 };
 use jp_conversation::{
     Conversation, ConversationEvent, ConversationId, ConversationStream, Labels,
@@ -105,7 +105,6 @@ use jp_inquire::prompt::{PromptBackend, TerminalPromptBackend};
 use jp_llm::{event::NoticeSink, provider};
 use jp_mcp::{
     StartupSet,
-    id::McpServerId,
     server::{
         InvocationContext,
         builtin::{BuiltinExecutors, describe_tools::DescribeTools},
@@ -113,17 +112,15 @@ use jp_mcp::{
     },
 };
 use jp_md::format::Formatter;
-use jp_printer::{LineSink, PrintableExt as _, Printer, RegionStyle, StatusRegion};
+use jp_printer::Printer;
 use jp_storage::backend::{FsStorageBackend, Projection};
 use jp_task::task::TitleGeneratorTask;
-use jp_term::width::{display_width, truncate_to_width};
 use jp_tool::{Error as ToolError, ToolDefinition, ToolDocs};
 use jp_workspace::{
     ConversationHandle, ConversationLock, ConversationMut, Id as WorkspaceId, Workspace,
 };
 use minijinja::{Environment, UndefinedBehavior};
 use strip_ansi_escapes::strip_str;
-use tokio::sync::broadcast::error::RecvError;
 use tool::{TerminalExecutorSource, ToolCoordinator};
 use tracing::{debug, info, trace, warn};
 use turn_loop::run_turn_loop;
@@ -154,8 +151,8 @@ use crate::{
     editor,
     error::{Error, Result},
     output::{notice_sink, print_json},
-    parser::{AttachmentUrlOrPath, split_list},
-    render::{RenderFlow, TurnView, tool::output_lines},
+    parser::AttachmentUrlOrPath,
+    render::{RenderFlow, TurnView},
     signals::{SignalRouter, TurnInterrupt},
 };
 
@@ -1546,13 +1543,13 @@ impl TurnInputs {
                 // Wait for all MCP servers to finish loading, showing a timer line
                 // when the wait takes long enough to be noticeable.
                 let waited = Instant::now();
-                let skipped = await_mcp_servers(
+                let skipped = mcp_startup::await_mcp_servers(
                     self.mcp_servers,
                     cfg.style.mcp_startup.clone(),
                     self.printer.clone(),
                 )
                 .await?;
-                report_skipped_servers(&self.printer, cfg, &skipped);
+                mcp_startup::report_skipped_servers(&self.printer, cfg, &skipped);
                 debug!(
                     elapsed_ms = waited.elapsed().as_millis(),
                     "MCP servers ready."
@@ -1617,214 +1614,6 @@ impl TurnInputs {
             turn_interrupt,
         )
         .await
-    }
-}
-
-/// Wait for background MCP server startups to complete.
-///
-/// Shows an aggregate status row on stderr once the wait exceeds the configured
-/// delay, updating the listed server names as startups finish, with a rolling
-/// window of the servers' own stderr above it.
-/// Servers that finish within the delay never trigger the row.
-///
-/// Returns the optional servers that failed and were skipped, so the caller can
-/// account for the tools that went with them.
-/// A required server's failure is returned as an error instead; the rows are
-/// erased on the way out, so it renders on a clean line.
-async fn await_mcp_servers(
-    mut startup: StartupSet,
-    config: McpStartupConfig,
-    printer: Arc<Printer>,
-) -> std::result::Result<Vec<McpServerId>, cmd::Error> {
-    if startup.joins.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let region = claim_mcp_startup_region(&printer, &config);
-    region.set_detail(mcp_startup_status(&startup.pending));
-
-    // One sink per pending server, dropped the moment that server's join
-    // completes. The forwarder behind the channel runs until the *server*
-    // exits, which is long after it finished starting; a sink left open would
-    // let a started server's operational logging evict the build output of one
-    // still compiling.
-    let mut sinks: HashMap<McpServerId, LineSink> = startup
-        .pending
-        .iter()
-        .map(|id| (id.clone(), region.source(id.as_str())))
-        .collect();
-
-    let mut skipped = Vec::new();
-    let mut lines_open = true;
-
-    let result = loop {
-        tokio::select! {
-            line = startup.stderr.recv(), if lines_open => match line {
-                Ok((id, text)) => if let Some(sink) = sinks.get(&id) {
-                    sink.push(text);
-                },
-                // The window shows the most recent lines by definition, so
-                // falling behind costs nothing worth reporting.
-                Err(RecvError::Lagged(_)) => {}
-                Err(RecvError::Closed) => lines_open = false,
-            },
-            joined = startup.joins.join_next() => match joined {
-                None => break Ok(()),
-                Some(Err(error)) => break Err(cmd::Error::from(error)),
-                Some(Ok(Err(error))) => break Err(cmd::Error::from(error)),
-                Some(Ok(Ok(outcome))) => {
-                    let id = outcome.id();
-                    sinks.remove(id);
-                    startup.pending.retain(|pending| pending != id);
-                    if outcome.was_skipped() {
-                        skipped.push(id.clone());
-                    }
-                    if !startup.pending.is_empty() {
-                        region.set_detail(mcp_startup_status(&startup.pending));
-                    }
-                }
-            },
-        }
-    };
-
-    result.map(|()| skipped)
-}
-
-/// Report optional MCP servers that failed to start.
-///
-/// A skipped server completes the wait successfully, so without this the query
-/// quietly loses tools: the `warn!` explaining why goes to the trace log, which
-/// is discarded unless the run itself fails.
-///
-/// Emitted whatever `style.mcp_startup.show` and `stderr_rows` say.
-/// Those keys gate progress display; gating a failure report behind them would
-/// reproduce the silence this closes.
-///
-/// `--format json` gets the parts rather than a sentence about them: a program
-/// deciding what to do about a missing server reads `server` and `tools`, and
-/// can render its own prose from them if it wants any.
-fn report_skipped_servers(printer: &Printer, config: &AppConfig, skipped: &[McpServerId]) {
-    for id in skipped {
-        let tools = tools_backed_by(config, id);
-
-        if printer.format().is_json() {
-            printer.println_raw(skipped_server_record(printer, id, &tools).to_err());
-            continue;
-        }
-
-        let mut line = format!("Optional MCP server '{id}' did not start");
-        if !tools.is_empty() {
-            let _err = write!(line, "; unavailable tools: {}", tools.join(", "));
-        }
-        line.push_str(" (run with -v for the reason)");
-
-        printer.eprintln(line.yellow().to_string());
-    }
-}
-
-/// Serialize one skipped-server report, indented when the format asks for it.
-fn skipped_server_record(printer: &Printer, id: &McpServerId, tools: &[String]) -> String {
-    let record = serde_json::json!({
-        "event": "mcp_server_unavailable",
-        "server": id.as_str(),
-        "tools": tools,
-    });
-
-    if printer.format().is_json_pretty() {
-        serde_json::to_string_pretty(&record)
-    } else {
-        serde_json::to_string(&record)
-    }
-    .unwrap_or_else(|_| record.to_string())
-}
-
-/// Names of the enabled tools sourced from `server`.
-///
-/// Sorted, so the report reads the same way twice.
-fn tools_backed_by(config: &AppConfig, server: &McpServerId) -> Vec<String> {
-    let mut names: Vec<String> = config
-        .conversation
-        .tools
-        .iter()
-        .filter(|(_, tool)| tool.is_enabled())
-        .filter(|(_, tool)| match tool.source() {
-            ToolSource::Mcp { server: name, .. } => &McpServerId::new(name.as_str()) == server,
-            _ => false,
-        })
-        .map(|(name, _)| name.to_string())
-        .collect();
-
-    names.sort();
-    names
-}
-
-/// Claim the status region for the MCP server startup wait.
-///
-/// Returns an inert region when `style.mcp_startup.show` is off, or when the
-/// terminal cannot carry one.
-fn claim_mcp_startup_region(printer: &Printer, config: &McpStartupConfig) -> StatusRegion {
-    if !config.show {
-        return StatusRegion::inert();
-    }
-
-    // The row bounds itself rather than letting the region cut its tail: the
-    // elapsed time lives at the end, and a long server list would take it with
-    // it.
-    let columns = printer.chrome_columns();
-
-    printer.status_region(
-        RegionStyle::new(
-            Duration::from_secs(config.delay_secs.into()),
-            Duration::from_millis(config.interval_ms.into()),
-            move |secs, detail| mcp_startup_line(secs, detail, columns),
-        )
-        .with_output(output_lines(config.stderr_rows)),
-    )
-}
-
-/// Render the MCP startup status row for `secs` elapsed and `status`, bounding
-/// the visible text to `width` columns when known.
-///
-/// Truncation falls on the server-list fragment only: the ` ⏱ Starting  `
-/// prefix and the `  {secs:.1}s ` timer suffix are always preserved, so the
-/// elapsed time keeps moving even when a long list overflows.
-/// A terminal too narrow for even the prefix and suffix falls back to a bounded
-/// `⏱ {secs:.1}s`.
-fn mcp_startup_line(secs: f64, status: Option<&str>, width: Option<u16>) -> String {
-    let status = status.unwrap_or("MCP servers");
-    let full = format!("⏱ Starting {status}… {secs:.1}s");
-    match width {
-        Some(w) if display_width(&full) > usize::from(w) => {
-            let w = usize::from(w);
-            let prefix = "⏱ Starting ";
-            let suffix = format!(" {secs:.1}s");
-            let reserved = display_width(prefix) + display_width(&suffix);
-            if w <= reserved {
-                truncate_to_width(&format!("⏱ {secs:.1}s"), w)
-            } else {
-                let status = truncate_to_width(status, w - reserved);
-                format!("{prefix}{status}{suffix}")
-            }
-        }
-        _ => full,
-    }
-}
-
-/// Render the pending-server fragment for the MCP startup timer line.
-///
-/// One server renders as `MCP server bookworm`; several render as `2 MCP
-/// servers (bookworm, grizzly)`.
-fn mcp_startup_status(pending: &[McpServerId]) -> String {
-    match pending {
-        [id] => format!("MCP server {id}"),
-        ids => format!(
-            "{} MCP servers ({})",
-            ids.len(),
-            ids.iter()
-                .map(McpServerId::as_str)
-                .collect::<Vec<_>>()
-                .join(", ")
-        ),
     }
 }
 
@@ -1911,336 +1700,6 @@ fn reformat_quoted_message(message: &str, config: &AppConfig) -> String {
         .unwrap_or_else(|_| message.to_owned());
 
     strip_str(rendered).trim_end().to_owned()
-}
-
-/// The query text and the `--quote` seed.
-///
-/// The two are parsed together because `--quote` accepts its value either
-/// attached (`--quote=false`) or as the word right after the flag (`--quote
-/// false`), and in the second form that word arrives as query text.
-#[derive(Debug, Default)]
-pub(crate) struct QueryInput {
-    /// The query words, in the order they were given.
-    query: Option<Vec<String>>,
-
-    /// `Some(true)` prefixes the quoted message with ` >  `, `Some(false)`
-    /// seeds it verbatim, `None` means `--quote` was not given.
-    quote: Option<bool>,
-}
-
-impl QueryInput {
-    /// Split the parsed arguments into the query and the quote seed.
-    fn resolve(args: QueryInputArgs, matches: &clap::ArgMatches) -> Self {
-        let QueryInputArgs {
-            mut query,
-            escaped_query,
-            quote,
-        } = args;
-
-        let quote = match quote {
-            None => None,
-            Some(QuoteArg::Attached(prefixed)) => Some(prefixed),
-            // A bare `--quote` reads its value from the next word when that
-            // word is exactly `true` or `false`. Anything else there is query
-            // text, and the flag falls back to its default.
-            Some(QuoteArg::Bare) => Some(take_quote_value(&mut query, matches).unwrap_or(true)),
-        };
-
-        // The two halves are one query. They stay apart until here so that
-        // `--quote` above only ever sees the unescaped words, and stay in this
-        // order because `--` always comes last.
-        if let Some(escaped) = escaped_query {
-            query.get_or_insert_default().extend(escaped);
-        }
-
-        Self { query, quote }
-    }
-}
-
-/// Take the `true` / `false` word sitting directly after `--quote` out of the
-/// query and return its value.
-///
-/// Returns `None` — leaving the query untouched — when the flag is followed
-/// by anything else.
-/// Words given after `--` are never candidates: they land in a separate
-/// argument that this never reads.
-fn take_quote_value(query: &mut Option<Vec<String>>, matches: &clap::ArgMatches) -> Option<bool> {
-    // clap counts a flag and its value as two separate indices, so the word
-    // directly after `--quote` sits one past the index of the flag's own
-    // (defaulted) value.
-    let after_quote = matches.index_of("quote")? + 1;
-    let position = matches
-        .indices_of("query")?
-        .position(|index| index == after_quote)?;
-
-    let words = query.as_mut()?;
-    let value = words.get(position)?.parse::<bool>().ok()?;
-
-    words.remove(position);
-    if words.is_empty() {
-        *query = None;
-    }
-
-    Some(value)
-}
-
-/// Argument declarations for [`QueryInput`].
-///
-/// [`QueryInput`] borrows these declarations and resolves the parsed values
-/// itself; it is never constructed as a command's own arguments.
-#[derive(Debug, clap::Args)]
-struct QueryInputArgs {
-    /// The query to send.
-    /// If not provided, uses `$JP_EDITOR`, `$VISUAL` or `$EDITOR` to open edit
-    /// the query in an editor.
-    ///
-    /// A query consisting of a single `@path` value is read from that file.
-    query: Option<Vec<String>>,
-
-    /// Query words given after `--`.
-    ///
-    /// clap only fills this argument through the `--` separator, which makes it
-    /// the record of which words were escaped.
-    /// They are appended to `query` once `--quote` has been resolved, so `--`
-    /// shields a `true` / `false` word from being read as the flag's value.
-    #[arg(last = true, hide = true)]
-    escaped_query: Option<Vec<String>>,
-
-    /// Pre-fill the editor with the last assistant message quoted as a markdown
-    /// blockquote (each line prefixed with ` >  `).
-    ///
-    /// Useful for inline replies: open `$EDITOR` with the assistant's last
-    /// response pre-quoted, then intersperse your replies between the quoted
-    /// lines (mutt/email style).
-    /// The complete buffer — quotes plus your replies — becomes your next
-    /// message.
-    ///
-    /// `--quote=false` seeds the message verbatim, without the ` >  ` prefixes.
-    /// `--quote=true` is the same as a bare `--quote`.
-    /// Both values also work unattached (`--quote false`); any other word after
-    /// `--quote` stays part of the query, so `jp q --quote what now?` still
-    /// asks "what now?".
-    /// To ask a question that *is* `true` or `false`, put it after `--`.
-    ///
-    /// Forces the editor open by default; respects `--no-edit` / `--edit=false`
-    /// if explicitly suppressed, in which case the quoted text is sent as-is
-    /// and echoed to the terminal before the turn runs.
-    /// Composes with `--replay`: the quote is taken from the stream *after* the
-    /// replayed turn has been trimmed, i.e. the assistant message preceding the
-    /// turn being replayed.
-    ///
-    /// If no prior assistant message exists in this conversation, a warning is
-    /// emitted and the editor opens with whatever other content was seeded
-    /// (query, stdin, or empty).
-    #[arg(
-        long = "quote",
-        value_name = "BOOL",
-        num_args = 0..=1,
-        require_equals = true,
-        default_missing_value = "",
-        value_parser = parse_quote_arg,
-    )]
-    quote: Option<QuoteArg>,
-}
-
-/// The `--quote` value as it was written on the command line.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum QuoteArg {
-    /// `--quote` with nothing attached.
-    Bare,
-
-    /// `--quote=true` or `--quote=false`.
-    Attached(bool),
-}
-
-/// Parse the `--quote` value.
-///
-/// The empty string is what a bare `--quote` yields, since `require_equals`
-/// keeps it from swallowing the next word and the flag falls back to its
-/// `default_missing_value`.
-fn parse_quote_arg(s: &str) -> std::result::Result<QuoteArg, String> {
-    match s {
-        "" => Ok(QuoteArg::Bare),
-        "true" => Ok(QuoteArg::Attached(true)),
-        "false" => Ok(QuoteArg::Attached(false)),
-        _ => Err("expected `true` or `false`".to_owned()),
-    }
-}
-
-impl clap::Args for QueryInput {
-    fn augment_args(cmd: clap::Command) -> clap::Command {
-        QueryInputArgs::augment_args(cmd)
-    }
-
-    fn augment_args_for_update(cmd: clap::Command) -> clap::Command {
-        QueryInputArgs::augment_args_for_update(cmd)
-    }
-}
-
-impl clap::FromArgMatches for QueryInput {
-    fn from_arg_matches(matches: &clap::ArgMatches) -> std::result::Result<Self, clap::Error> {
-        QueryInputArgs::from_arg_matches(matches).map(|args| Self::resolve(args, matches))
-    }
-
-    fn update_from_arg_matches(
-        &mut self,
-        matches: &clap::ArgMatches,
-    ) -> std::result::Result<(), clap::Error> {
-        *self = Self::from_arg_matches(matches)?;
-        Ok(())
-    }
-}
-
-/// A single tool selection directive from the CLI.
-///
-/// Directives are evaluated left-to-right, allowing users to compose tool sets
-/// precisely (e.g. `--no-tools --tool=write --no-tools=fs_modify_file`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum ToolDirective {
-    EnableAll,
-    DisableAll,
-    Enable(String),
-    Disable(String),
-}
-
-impl ToolDirective {
-    /// Returns the single-tool directive as a string slice.
-    #[must_use]
-    fn as_single(&self) -> Option<&str> {
-        match self {
-            Self::Enable(name) | Self::Disable(name) => Some(name.as_str()),
-            _ => None,
-        }
-    }
-}
-
-/// Ordered sequence of tool directives parsed from `--tool` and `--no-tools`.
-///
-/// Implements manual [`clap::Args`] and [`clap::FromArgMatches`] to recover the
-/// position of each flag value using [`ArgMatches::indices_of`], then merges
-/// and sorts them by index into a single ordered list.
-///
-/// [`ArgMatches::indices_of`]: clap::ArgMatches::indices_of
-#[derive(Debug, Clone, Default)]
-struct ToolDirectives(Vec<ToolDirective>);
-
-impl std::ops::Deref for ToolDirectives {
-    type Target = [ToolDirective];
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl clap::FromArgMatches for ToolDirectives {
-    fn from_arg_matches(matches: &clap::ArgMatches) -> std::result::Result<Self, clap::Error> {
-        let tool_values: Vec<String> = matches
-            .get_many("tools")
-            .map(|v| v.cloned().collect())
-            .unwrap_or_default();
-        let tool_indices: Vec<_> = matches
-            .indices_of("tools")
-            .map(Iterator::collect)
-            .unwrap_or_default();
-
-        let no_tool_values: Vec<String> = matches
-            .get_many("no_tools")
-            .map(|v| v.cloned().collect())
-            .unwrap_or_default();
-        let no_tool_indices: Vec<_> = matches
-            .indices_of("no_tools")
-            .map(Iterator::collect)
-            .unwrap_or_default();
-
-        let mut indexed = vec![];
-        for (val, idx) in tool_values.into_iter().zip(tool_indices) {
-            if val.is_empty() {
-                indexed.push((idx, ToolDirective::EnableAll));
-                continue;
-            }
-
-            for name in split_list(&val, "tool name")? {
-                indexed.push((idx, ToolDirective::Enable(name)));
-            }
-        }
-
-        for (val, idx) in no_tool_values.into_iter().zip(no_tool_indices) {
-            if val.is_empty() {
-                indexed.push((idx, ToolDirective::DisableAll));
-                continue;
-            }
-
-            for name in split_list(&val, "tool name")? {
-                indexed.push((idx, ToolDirective::Disable(name)));
-            }
-        }
-
-        // A stable sort, so the names of a single flag keep the order they were
-        // written in: they all carry that flag's index.
-        indexed.sort_by_key(|(idx, _)| *idx);
-        Ok(Self(indexed.into_iter().map(|(_, d)| d).collect()))
-    }
-
-    fn update_from_arg_matches(
-        &mut self,
-        matches: &clap::ArgMatches,
-    ) -> std::result::Result<(), clap::Error> {
-        *self = Self::from_arg_matches(matches)?;
-        Ok(())
-    }
-}
-
-impl clap::Args for ToolDirectives {
-    fn augment_args(cmd: clap::Command) -> clap::Command {
-        cmd.arg(
-            clap::Arg::new("tools")
-                .short('t')
-                .long("tool")
-                .alias("tools")
-                .help("The tool(s) to enable")
-                .long_help(
-                    "The tool(s) to enable.\n\nIf an existing tool is configured with a matching \
-                     name, it is enabled for this query and every later one on the conversation; \
-                     use `--no-tool` to turn it back off.\n\nTo run a disabled tool just once, \
-                     use `--tool-use NAME` instead.\n\nIf no arguments are provided, every tool \
-                     that allows it is enabled; a tool set to `explicit` or `always` is \
-                     unaffected.\n\nName several tools at once by separating them with commas \
-                     (`--tool=read,write`), or by providing this flag multiple times. Flags are \
-                     evaluated left-to-right, so `--no-tools --tool=write` first disables \
-                     everything, then re-enables only 'write'.",
-                )
-                .action(ArgAction::Append)
-                .num_args(0..=1)
-                // The values are split on commas by hand rather than with
-                // `value_delimiter(',')`, which splits before this empty string
-                // is read: an empty segment in `--tool=read,` would then be
-                // indistinguishable from a bare `--tool` and enable every tool.
-                .default_missing_value(""),
-        )
-        .arg(
-            clap::Arg::new("no_tools")
-                .short('T')
-                .long("no-tool")
-                .alias("no-tools")
-                .help("Disable tool(s)")
-                .long_help(
-                    "Disable tool(s).\n\nIf provided without a value, every tool that allows it \
-                     is disabled (a tool set to `explicit` or `always` is unaffected), otherwise \
-                     name the tools to disable, separated by commas (`--no-tool=read,write`) or \
-                     across repeated flags.\n\nThe change applies to this query and every later \
-                     one on the conversation; use `--tool` to turn tools back on. To suppress \
-                     tools for a single query, use `--no-tool-use`.\n\nFlags are evaluated \
-                     left-to-right together with `--tool`.",
-                )
-                .action(ArgAction::Append)
-                .num_args(0..=1)
-                .default_missing_value(""),
-        )
-    }
-
-    fn augment_args_for_update(cmd: clap::Command) -> clap::Command {
-        Self::augment_args(cmd)
-    }
 }
 
 /// Fork a conversation and return the new conversation's lock.

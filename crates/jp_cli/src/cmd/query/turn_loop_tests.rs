@@ -7944,8 +7944,6 @@ async fn a_tool_that_does_not_join_reasoning_renders_unshaded_live() {
         &model,
         &config,
         &router,
-        root,
-        InvocationContext::default(),
         false, // interactive
         &[],
         &lock,

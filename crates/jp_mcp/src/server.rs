@@ -648,126 +648,113 @@ pub struct InvocationContext {
     pub conversation_id: String,
 }
 
-/// Execute a tool without any interactive prompts.
+/// Everything an execution attempt needs, fixed for the life of one invocation.
 ///
-/// Runs one attempt through the tool's command or MCP call and returns an
-/// [`ExecutionOutcome`].
-/// All interactive decisions (permission prompts, result editing, question
-/// handling) are the caller's responsibility.
+/// A tool that asks for input ends its attempt and is run again once the answer
+/// arrives, so [`execute`] takes the accumulated answers separately: they are
+/// the only thing that differs between one attempt and the next.
+pub struct Execution<'a> {
+    /// The tool's advertised name and argument schema.
+    pub definition: &'a ToolDefinition,
+
+    /// Correlation id echoed back on the outcome.
+    pub id: String,
+
+    /// Arguments as the caller supplied them.
+    /// Each attempt coerces its own copy to the schema.
+    pub arguments: Value,
+
+    /// Where the tool comes from, and how it is configured to run.
+    pub config: &'a ToolConfigWithDefaults,
+
+    /// Working directory for a local command, and the root its access policy
+    /// resolves paths against.
+    pub root: &'a Utf8Path,
+
+    /// Compiled access grants, or `None` for a tool that declares no policy.
+    pub access: Option<&'a AccessPolicy>,
+
+    /// Workspace and conversation the call belongs to.
+    pub invocation: &'a InvocationContext,
+
+    /// Rust implementations, reached by a `builtin` source.
+    pub builtins: &'a builtin::BuiltinExecutors,
+
+    /// Upstream connections, reached by an `mcp` source.
+    pub upstream: &'a Client,
+
+    /// Stops the attempt in progress.
+    pub cancellation: CancellationToken,
+
+    /// Receives the tool's stderr lines as they arrive, for a caller showing
+    /// progress.
+    /// `None` when nothing is watching; the lines still reach tracing either
+    /// way.
+    pub stderr: Option<StderrSink>,
+}
+
+impl Execution<'_> {
+    /// The name the tool's own implementation answers to, which is the
+    /// configured `source` name when it differs from the advertised one.
+    fn invoked_name<'n>(&'n self, source_name: Option<&'n str>) -> &'n str {
+        source_name.unwrap_or(&self.definition.name)
+    }
+
+    /// Build the trusted template and metadata context for one attempt.
+    fn context(&self, name: &str, arguments: &Value, answers: &Answers, action: &Action) -> Value {
+        tool_context(
+            name,
+            arguments,
+            answers,
+            self.config,
+            self.root,
+            action,
+            self.access,
+            self.invocation,
+        )
+    }
+}
+
+/// Answers a tool's earlier questions received, keyed by question id.
+pub type Answers = IndexMap<String, Value>;
+
+/// Run one execution attempt, without any interactive prompt.
 ///
-/// # Arguments
+/// Every interactive decision — admission, argument editing, who answers a
+/// question, result review — belongs to the caller.
+/// This resolves the tool's source, runs it once, and reports what came back.
 ///
-/// - `id` - The tool call ID for correlation with the request
-/// - `arguments` - The tool arguments (caller is responsible for any
-///   pre-processing)
-/// - `answers` - Pre-provided answers to tool questions (from previous
-///   `NeedsInput`)
-/// - `config` - Tool configuration
-/// - `mcp_client` - MCP client for MCP tool execution
-/// - `root` - Working directory for local tool execution
-/// - `cancellation_token` - Token to cancel long-running execution
-/// - `builtin_executors` - Registry of builtin tools
-///
-/// # Returns
-///
-/// - [`ExecutionOutcome::Completed`] - Tool finished (check inner `Result` for
-///   success/error)
-/// - [`ExecutionOutcome::NeedsInput`] - Tool needs user input to continue
-/// - [`ExecutionOutcome::Cancelled`] - Execution was cancelled via the token
+/// An [`ExecutionOutcome::NeedsInput`] outcome ends the attempt.
+/// Call again with the answer added to `answers` to run the tool a second time;
+/// it is not suspended and resumed.
 ///
 /// # Errors
 ///
-/// Returns [`ToolError`] for infrastructure errors (spawn failure, missing
-/// command, etc.).
-/// Tool-level errors (command returned non-zero) are returned as
-/// `Ok(ExecutionOutcome::Completed { result: Err(...) })`.
-///
-/// # Example
-///
-/// ```ignore
-/// loop {
-///     match execute(&definition, id, args, &answers, ...).await? {
-///         ExecutionOutcome::Completed { result, .. } => {
-///             // Handle success or tool error
-///             break result;
-///         }
-///         ExecutionOutcome::NeedsInput { question, .. } => {
-///             // Prompt user for input
-///             let answer = prompt_user(&question)?;
-///             answers.insert(question.id, answer);
-///             // Loop to retry with answer
-///         }
-///         ExecutionOutcome::Cancelled { .. } => {
-///             break Ok("Cancelled".into());
-///         }
-///     }
-/// }
-/// ```
-#[expect(clippy::too_many_arguments)]
+/// Returns [`ToolError`] when the tool could not be run at all: a missing
+/// command, a spawn failure, an unreachable MCP server, a malformed result
+/// envelope.
+/// A tool that ran and reported its own failure is an
+/// [`ExecutionOutcome::Completed`] carrying an error [`ToolResult`], not an
+/// `Err`.
 pub async fn execute(
-    definition: &ToolDefinition,
-    id: String,
-    arguments: Value,
-    answers: &IndexMap<String, Value>,
-    config: &ToolConfigWithDefaults,
-    mcp_client: &Client,
-    root: &Utf8Path,
-    cancellation_token: CancellationToken,
-    builtin_executors: &builtin::BuiltinExecutors,
-    access: Option<&jp_tool::AccessPolicy>,
-    invocation: &InvocationContext,
-    stderr: Option<StderrSink>,
+    execution: &Execution<'_>,
+    answers: &Answers,
 ) -> Result<ExecutionOutcome, ToolError> {
-    let mut arguments = arguments;
-    if let Some(arguments) = arguments.as_object_mut() {
-        definition.coerce_arguments(arguments);
+    let mut arguments = execution.arguments.clone();
+    if let Some(object) = arguments.as_object_mut() {
+        execution.definition.coerce_arguments(object);
     }
-    info!(tool = %definition.name, arguments = ?arguments, "Executing tool.");
+    info!(tool = %execution.definition.name, arguments = ?arguments, "Executing tool.");
 
-    match config.source() {
+    match execution.config.source() {
         ToolSource::Local { tool } => {
-            execute_local(
-                definition,
-                id,
-                arguments,
-                answers,
-                config,
-                tool.as_deref(),
-                root,
-                cancellation_token,
-                access,
-                invocation,
-                stderr,
-            )
-            .await
+            execute_local(execution, arguments, answers, tool.as_deref()).await
         }
         ToolSource::Mcp { server, tool } => {
-            execute_mcp(
-                definition,
-                id,
-                arguments,
-                mcp_client,
-                server,
-                tool.as_deref(),
-                answers,
-                config,
-                root,
-                access,
-                invocation,
-                cancellation_token,
-            )
-            .await
+            execute_mcp(execution, arguments, answers, server, tool.as_deref()).await
         }
         ToolSource::Builtin { tool } => {
-            execute_builtin(
-                definition,
-                id,
-                &arguments,
-                answers,
-                tool.as_deref(),
-                builtin_executors,
-            )
-            .await
+            execute_builtin(execution, &arguments, answers, tool.as_deref()).await
         }
     }
 }
@@ -777,27 +764,20 @@ pub async fn execute(
 /// Runs one local command attempt.
 /// It validates arguments, runs the command, and converts the result to an
 /// `ExecutionOutcome`.
-#[expect(clippy::too_many_arguments)]
 async fn execute_local(
-    definition: &ToolDefinition,
-    id: String,
+    execution: &Execution<'_>,
     mut arguments: Value,
-    answers: &IndexMap<String, Value>,
-    config: &ToolConfigWithDefaults,
+    answers: &Answers,
     tool: Option<&str>,
-    root: &Utf8Path,
-    cancellation_token: CancellationToken,
-    access: Option<&jp_tool::AccessPolicy>,
-    invocation: &InvocationContext,
-    stderr: Option<StderrSink>,
 ) -> Result<ExecutionOutcome, ToolError> {
-    let name = tool.unwrap_or(&definition.name);
+    let name = execution.invoked_name(tool);
+    let id = execution.id.clone();
 
     // Apply configured defaults for missing parameters, then validate.
     if let Some(args) = arguments.as_object_mut() {
-        apply_parameter_defaults(args, &definition.parameters);
+        apply_parameter_defaults(args, &execution.definition.parameters);
 
-        if let Err(error) = validate_tool_arguments(args, &definition.parameters) {
+        if let Err(error) = validate_tool_arguments(args, &execution.definition.parameters) {
             return Ok(ExecutionOutcome::Completed {
                 id,
                 result: ToolResult::error(format!(
@@ -808,28 +788,28 @@ async fn execute_local(
         }
     }
 
-    let ctx = tool_context(
-        name,
-        &arguments,
-        answers,
-        config,
-        root,
-        &Action::Run,
-        access,
-        invocation,
-    );
+    let ctx = execution.context(name, &arguments, answers, &Action::Run);
 
-    let Some(command) = config.command() else {
+    let Some(command) = execution.config.command() else {
         return Err(ToolError::MissingCommand);
     };
 
     let trace_as = ToolTrace {
         id: &id,
         name,
-        stderr,
+        stderr: execution.stderr.clone(),
     };
 
-    match run_tool_command(command, ctx, root, cancellation_token, Some(trace_as)).await? {
+    let outcome = run_tool_command(
+        command,
+        ctx,
+        execution.root,
+        execution.cancellation.clone(),
+        Some(trace_as),
+    )
+    .await?;
+
+    match outcome {
         CommandResult::Success(content) => Ok(ExecutionOutcome::Completed {
             id,
             result: ToolResult::text(content),
@@ -847,43 +827,29 @@ async fn execute_local(
 ///
 /// Runs one upstream MCP call.
 /// It calls the MCP server and converts the result to an `ExecutionOutcome`.
-#[expect(clippy::too_many_arguments)]
 async fn execute_mcp(
-    definition: &ToolDefinition,
-    id: String,
+    execution: &Execution<'_>,
     arguments: Value,
-    mcp_client: &Client,
+    answers: &Answers,
     server: &str,
     tool: Option<&str>,
-    answers: &IndexMap<String, Value>,
-    config: &ToolConfigWithDefaults,
-    root: &Utf8Path,
-    access: Option<&AccessPolicy>,
-    invocation: &InvocationContext,
-    cancellation_token: CancellationToken,
 ) -> Result<ExecutionOutcome, ToolError> {
-    let name = tool.unwrap_or(&definition.name);
+    let name = execution.invoked_name(tool);
+    let id = execution.id.clone();
 
-    let context = tool_context(
-        name,
-        &arguments,
-        answers,
-        config,
-        root,
-        &Action::Run,
-        access,
-        invocation,
-    );
+    let context = execution.context(name, &arguments, answers, &Action::Run);
     let meta = Map::from_iter([
         ("computer.jp/tool".into(), context["tool"].clone()),
         ("computer.jp/context".into(), context["context"].clone()),
     ]);
-    let call_future = mcp_client.call_tool(name, server, &arguments, Some(meta));
+    let call_future = execution
+        .upstream
+        .call_tool(name, server, &arguments, Some(meta));
 
     let response = tokio::select! {
         biased;
-        () = cancellation_token.cancelled() => {
-            info!(tool = %definition.name, "MCP tool call cancelled");
+        () = execution.cancellation.cancelled() => {
+            info!(tool = %execution.definition.name, "MCP tool call cancelled");
             return Ok(ExecutionOutcome::Cancelled { id });
         }
         result = call_future => result.map_err(|error| ToolError::McpRunToolError(Box::new(error)))?,
@@ -927,15 +893,15 @@ async fn execute_mcp(
 /// which the registry is keyed on.
 /// When absent, the implementation shares the tool's own name.
 async fn execute_builtin(
-    definition: &ToolDefinition,
-    id: String,
+    execution: &Execution<'_>,
     arguments: &Value,
-    answers: &IndexMap<String, Value>,
+    answers: &Answers,
     source_name: Option<&str>,
-    builtin_executors: &builtin::BuiltinExecutors,
 ) -> Result<ExecutionOutcome, ToolError> {
-    let name = source_name.unwrap_or(&definition.name);
-    let executor = builtin_executors
+    let name = execution.invoked_name(source_name);
+    let id = execution.id.clone();
+    let executor = execution
+        .builtins
         .get(name)
         .ok_or_else(|| ToolError::NotFound {
             name: name.to_owned(),

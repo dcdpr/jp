@@ -45,7 +45,7 @@ use tokio::{
     task::JoinHandle,
 };
 use tokio_util::sync::CancellationToken;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use super::executor::{
     Executor, ExecutorError, ExecutorResult, ExecutorSource, PermissionInfo, Review, response,
@@ -94,7 +94,13 @@ struct CallSlot {
     /// interaction.
     invocation: SyncMutex<Option<InvocationId>>,
 
-    /// Where to show this tool's stderr while something is watching.
+    /// Where to show this tool's stderr, for the length of one attempt.
+    ///
+    /// Set when an attempt starts and cleared when it ends, so a display that
+    /// has moved on is never written to by whatever runs next under this
+    /// invocation.
+    /// `None` whenever no attempt is in flight, or when nothing is watching
+    /// this one.
     stderr: SyncMutex<Option<StderrSink>>,
 
     /// The call's protocol phase and the Host reply it is parked on.
@@ -254,8 +260,13 @@ async fn route(
             request = host.recv() => {
                 let Some(request) = request else { break };
                 let Some(slot) = resolve(&calls, &request) else {
-                    // An unassociated call loses its reply sender and fails
-                    // closed.
+                    // The reply sender drops with the request, so the service
+                    // sees the Host decline and fails the call closed.
+                    warn!(
+                        tool = %request.call.request.name,
+                        invocation = ?request.call.id,
+                        "No Host route for this MCP invocation; failing it closed."
+                    );
                     continue;
                 };
                 by_invocation.insert(request.call.id, slot.clone());
@@ -282,10 +293,16 @@ async fn route(
 
 /// Find the call an interaction belongs to, if it names one.
 ///
-/// The correlation key alone identifies the call.
-/// The name and arguments are checked too so a key that somehow leaked cannot
-/// be pointed at a different call than the one it was issued for; neither field
-/// grants any authority of its own.
+/// The correlation key is what identifies the call: the Host generates it, puts
+/// it on the outgoing request, and the service echoes it back untouched.
+/// An interaction arriving without a key it issued belongs to somebody else's
+/// call, and gets no route.
+///
+/// The name and arguments are checked afterwards as a consistency assertion,
+/// not as a second authority: anything able to supply the key could supply
+/// these too.
+/// They catch the service echoing the wrong correlation map, which would
+/// otherwise show up as a tool that silently never finishes.
 fn resolve(calls: &SyncMutex<Registry>, request: &HostRequest) -> Option<Arc<CallSlot>> {
     let key = request
         .call
@@ -298,11 +315,25 @@ fn resolve(calls: &SyncMutex<Registry>, request: &HostRequest) -> Option<Arc<Cal
     if slot.request.name != request.call.request.name
         || slot.request.arguments != request.call.request.arguments
     {
+        warn!(
+            tool_call_id = %slot.request.id,
+            expected = %slot.request.name,
+            received = %request.call.request.name,
+            "Correlation key names a call whose request does not match; refusing the route."
+        );
         return None;
     }
     let mut invocation = locked(&slot.invocation);
     match *invocation {
-        Some(id) if id != request.call.id => return None,
+        Some(id) if id != request.call.id => {
+            warn!(
+                tool_call_id = %slot.request.id,
+                bound = ?id,
+                received = ?request.call.id,
+                "Correlation key is already bound to another invocation; refusing the route."
+            );
+            return None;
+        }
         Some(_) => {}
         None => {
             debug!(
@@ -758,6 +789,10 @@ impl Executor for ToolExecutor {
             () = cancellation.cancelled() => Err(ExecutorError::Cancelled),
             result = attempt => result,
         };
+        // The service reports an outcome only once the attempt's process has
+        // exited and its stderr has been drained, so the sink has nothing left
+        // to receive. A question's next attempt brings its own.
+        *locked(&self.slot.stderr) = None;
         result.unwrap_or_else(|error| {
             // The call cannot continue, so stop the service-side work rather
             // than leaving it parked on a reply that will never arrive.

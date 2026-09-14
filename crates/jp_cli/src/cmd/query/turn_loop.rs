@@ -47,7 +47,7 @@ use super::{
     PendingStreamTrim, build_sections, build_thread,
     interrupt::{
         LoopAction, StreamingInterruptResult, handle_llm_event, handle_streaming_interrupt,
-        reply_edit_mode,
+        reply_edit_mode, signals::InterruptUi,
     },
     stream::{
         ResponseBoundary, StreamErrorOutcome, StreamRetryState, commit_partial_response,
@@ -853,17 +853,20 @@ pub(super) async fn run_turn_loop(
 
                 tool_coordinator.reset_for_execution();
 
+                let mut interrupt_ui = InterruptUi {
+                    turn_coordinator: &mut turn_coordinator,
+                    printer: &printer,
+                    backend: prompt_backend.as_ref(),
+                    editor: build_editor_backend(&cfg.editor, &printer),
+                    edit_mode: reply_edit_mode(cfg.editor.inline.edit_mode),
+                };
                 let execution_result = tool_coordinator
                     .execute_with_prompting(
                         approved,
                         Arc::clone(&prompter),
                         signals,
-                        &mut turn_coordinator,
                         &mut turn_state,
-                        &printer,
-                        prompt_backend.as_ref(),
-                        build_editor_backend(&cfg.editor, &printer),
-                        reply_edit_mode(cfg.editor.inline.edit_mode),
+                        &mut interrupt_ui,
                         Arc::clone(&inquiry_backend),
                         &conv,
                         &mut tool_renderer,
