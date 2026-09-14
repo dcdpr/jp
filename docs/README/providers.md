@@ -80,8 +80,9 @@ directory.
 Session filenames remain unique per request; the real working directory passed
 to Claude Code is unchanged.
 
-Restarting tool execution from the interrupt menu is not implemented for ACP
-queries.
+Restarting tool execution stops the attempt while keeping the original MCP call
+open.
+The MCP Host re-prepares the call before another execution attempt.
 Temperature, top-p, top-k, stop words, service tiers other than `off`, and
 custom model parameters have no ACP mapping.
 Non-default values are ignored with a warning in tracing output; they do not

@@ -91,6 +91,12 @@ pub trait Executor: Send + Sync {
     /// request.
     fn set_arguments(&mut self, args: Value);
 
+    /// Prepare to cancel the current attempt while retaining its logical call.
+    /// Returns false when the executor requires a fresh invocation instead.
+    fn pause_for_restart(&self) -> bool {
+        false
+    }
+
     /// Advance the call to its next input request or result.
     ///
     /// An MCP-backed executor releases prepared work or answers the pending

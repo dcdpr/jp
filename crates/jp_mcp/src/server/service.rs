@@ -234,6 +234,22 @@ pub enum Interaction {
     },
 }
 
+impl Interaction {
+    /// Whether the server has abandoned this interaction, for example after a
+    /// restart.
+    #[must_use]
+    pub fn is_expired(&self) -> bool {
+        match self {
+            Self::RenderArguments { reply } => reply.is_closed(),
+            Self::Prepare { reply, .. } => reply.is_closed(),
+            Self::Release { reply, .. } => reply.is_closed(),
+            Self::Input { reply, .. } => reply.is_closed(),
+            Self::Review { reply, .. } => reply.is_closed(),
+            Self::Record { reply, .. } => reply.is_closed(),
+        }
+    }
+}
+
 /// Bounded, best-effort progress.
 /// It is independent of required Host requests.
 #[derive(Clone, Debug)]
@@ -370,7 +386,13 @@ struct Inner {
 struct State {
     stopped: bool,
     next_id: u64,
-    active: HashMap<InvocationId, CancellationToken>,
+    active: HashMap<InvocationId, CallControl>,
+}
+
+struct CallControl {
+    lifetime: CancellationToken,
+    attempt: CancellationToken,
+    resume: Arc<Notify>,
 }
 
 impl Inner {
@@ -482,7 +504,13 @@ impl Service {
             .ok_or(ServiceError::IdExhausted)?;
         let id = InvocationId(state.next_id);
         let cancellation = CancellationToken::new();
-        state.active.insert(id, cancellation.clone());
+        let mut attempt = cancellation.child_token();
+        let resume = Arc::new(Notify::new());
+        state.active.insert(id, CallControl {
+            lifetime: cancellation.clone(),
+            attempt: attempt.clone(),
+            resume: resume.clone(),
+        });
         drop(state);
         let (sender, result) = oneshot::channel();
         let task_token = cancellation.clone();
@@ -493,11 +521,29 @@ impl Service {
         tokio::spawn(async move {
             let _active = active;
             let call = CallInfo { id, request };
-            let result = tokio::select! {
-                biased;
-                () = task_token.cancelled() => Err(ServiceError::Cancelled),
-                () = inner.host.closed() => Err(ServiceError::HostDisconnected),
-                result = run_call(&inner, &call, tool, &task_token) => result,
+            let result = loop {
+                let result = tokio::select! {
+                    biased;
+                    () = task_token.cancelled() => Some(Err(ServiceError::Cancelled)),
+                    () = inner.host.closed() => Some(Err(ServiceError::HostDisconnected)),
+                    () = attempt.cancelled() => None,
+                    result = run_call(&inner, &call, tool.clone(), &attempt) => Some(result),
+                };
+                if let Some(result) = result {
+                    break result;
+                }
+                // The MCP caller still owns the same pending request. Wait for
+                // the Host to re-prepare it before opening another attempt.
+                tokio::select! {
+                    biased;
+                    () = task_token.cancelled() => break Err(ServiceError::Cancelled),
+                    () = inner.host.closed() => break Err(ServiceError::HostDisconnected),
+                    () = resume.notified() => {},
+                }
+                attempt = task_token.child_token();
+                if let Some(control) = inner.state().active.get_mut(&id) {
+                    control.attempt = attempt.clone();
+                }
             };
             drop(sender.send(result));
         });
@@ -512,20 +558,44 @@ impl Service {
     /// Returns `None` after the invocation has left the active set.
     #[must_use]
     pub fn call_cancellation(&self, id: InvocationId) -> Option<CancellationToken> {
-        self.inner.state().active.get(&id).cloned()
+        self.inner
+            .state()
+            .active
+            .get(&id)
+            .map(|control| control.lifetime.clone())
+    }
+
+    /// Stop the current attempt without completing the MCP call.
+    /// The Host must call `resume_call` to re-prepare and release another
+    /// attempt.
+    #[must_use]
+    pub fn pause_call(&self, id: InvocationId) -> bool {
+        let state = self.inner.state();
+        let Some(control) = state.active.get(&id) else {
+            return false;
+        };
+        control.attempt.cancel();
+        true
+    }
+
+    /// Allow a paused call to start another preparation/approval cycle.
+    pub fn resume_call(&self, id: InvocationId) {
+        if let Some(control) = self.inner.state().active.get(&id) {
+            control.resume.notify_one();
+        }
     }
 
     /// Cancel an invocation identified through the private Host channel.
     pub fn cancel_call(&self, id: InvocationId) {
         if let Some(token) = self.inner.state().active.get(&id) {
-            token.cancel();
+            token.lifetime.cancel();
         }
     }
 
     /// Stop current calls without preventing admission of later work.
     pub fn cancel_current(&self) {
         for token in self.inner.state().active.values() {
-            token.cancel();
+            token.lifetime.cancel();
         }
     }
 
@@ -534,7 +604,7 @@ impl Service {
         let mut state = self.inner.state();
         state.stopped = true;
         for token in state.active.values() {
-            token.cancel();
+            token.lifetime.cancel();
         }
     }
 

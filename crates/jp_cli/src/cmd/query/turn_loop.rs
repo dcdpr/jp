@@ -947,9 +947,6 @@ pub(super) async fn run_turn_loop(
                     // The next loop iteration re-executes the cancelled
                     // batch.
                     ExecutionOutcome::Restart => {
-                        if matches!(execution, ToolExecution::Agent { .. }) {
-                            return Err(Error::ExternalToolRestart);
-                        }
                         restart_requested = true;
                     }
 

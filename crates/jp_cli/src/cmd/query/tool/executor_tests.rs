@@ -1,6 +1,9 @@
-use std::sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
+use std::{
+    future::pending,
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
 };
 
 use async_trait::async_trait;
@@ -12,9 +15,176 @@ use jp_llm::query::ToolExecution;
 use jp_mcp::server::BuiltinTool;
 use jp_tool::{Outcome, ToolDocs};
 use serde_json::json;
-use tokio::time::{Duration, advance, pause, resume, timeout};
+use tokio::{
+    sync::Notify,
+    time::{Duration, advance, pause, resume, timeout},
+};
 
 use super::*;
+
+struct RestartingTool {
+    count: Arc<AtomicUsize>,
+    started: Arc<Notify>,
+}
+#[async_trait]
+impl BuiltinTool for RestartingTool {
+    async fn execute(&self, _: &Value, _: &IndexMap<String, Value>) -> Outcome {
+        if self.count.fetch_add(1, Ordering::SeqCst) == 0 {
+            self.started.notify_one();
+            return pending().await;
+        }
+        Outcome::Success {
+            content: "after restart".into(),
+        }
+    }
+}
+
+#[tokio::test]
+async fn host_http_request_survives_execution_restart() {
+    restart_through_http(ToolExecution::Caller).await;
+}
+
+#[tokio::test]
+async fn third_party_http_request_survives_execution_restart() {
+    restart_through_http(ToolExecution::Agent {
+        correlation_key: "test/toolId",
+    })
+    .await;
+}
+
+#[expect(
+    clippy::too_many_lines,
+    reason = "Keep the two-client restart and recording sequence explicit"
+)]
+async fn restart_through_http(execution: ToolExecution) {
+    timeout(Duration::from_secs(5), async {
+        let mut cfg = AppConfig::new_test();
+        cfg.conversation.tools.insert(
+            "example".into(),
+            ToolConfig::from_partial(
+                serde_json::from_value::<PartialToolConfig>(
+                    json!({"source":"builtin","run":"ask","result":"unattended"}),
+                )
+                .unwrap(),
+                vec![],
+            )
+            .unwrap(),
+        );
+        let count = Arc::new(AtomicUsize::new(0));
+        let started = Arc::new(Notify::new());
+        let definitions = vec![ToolDefinition {
+            name: "example".into(),
+            docs: ToolDocs::default(),
+            parameters: json!({"type":"object","properties":{}}),
+        }];
+        let (source, owner) = TerminalExecutorSource::start(
+            BuiltinExecutors::new().register("example", RestartingTool {
+                count: count.clone(),
+                started: started.clone(),
+            }),
+            &definitions,
+            &cfg.conversation.tools,
+            Arc::new(ApprovalStore::default()),
+            InvocationContext::default(),
+            &Client::default(),
+            "/tmp".into(),
+        )
+        .await
+        .unwrap();
+        source.set_execution(execution).unwrap();
+        let client = owner.endpoint.as_ref().unwrap().connect().await.unwrap();
+        let external = if let ToolExecution::Agent { correlation_key } = execution {
+            let peer = client.peer().clone();
+            let mut request = CallToolRequestParams::new("example");
+            request.arguments = Some(Map::new());
+            request.meta = Some(Meta(Map::from_iter([(
+                correlation_key.into(),
+                "call-restart".into(),
+            )])));
+            Some(tokio::spawn(async move { peer.call_tool(request).await }))
+        } else {
+            None
+        };
+        let request = ToolCallRequest {
+            id: "call-restart".into(),
+            name: "example".into(),
+            arguments: Map::new(),
+        };
+        let config = cfg.conversation.tools.get("example").unwrap();
+        let mut executor = source.create(request.clone(), config.clone()).unwrap();
+        assert_eq!(executor.prepare(false).await.unwrap(), None);
+        executor.approve().await.unwrap();
+        let original = *locked(&source.calls)
+            .get(&request.id)
+            .unwrap()
+            .id
+            .get()
+            .unwrap();
+        let executor: Arc<dyn Executor> = Arc::from(executor);
+        let worker_executor = executor.clone();
+        let cancellation = CancellationToken::new();
+        let worker_token = cancellation.clone();
+        let worker = tokio::spawn(async move {
+            worker_executor
+                .execute(
+                    &IndexMap::new(),
+                    &Client::default(),
+                    "/tmp".into(),
+                    worker_token,
+                    None,
+                )
+                .await
+        });
+        started.notified().await;
+        assert_eq!(count.load(Ordering::SeqCst), 1);
+        assert!(executor.pause_for_restart());
+        cancellation.cancel();
+        let ExecutorResult::Completed(response) = worker.await.unwrap() else {
+            panic!("expected cancelled worker")
+        };
+        assert!(response.result.is_err());
+        if let Some(external) = &external {
+            assert!(!external.is_finished());
+        }
+        let mut executor = source.create(request.clone(), config).unwrap();
+        assert_eq!(executor.prepare(false).await.unwrap(), None);
+        executor.approve().await.unwrap();
+        let ExecutorResult::Completed(response) = executor
+            .execute(
+                &IndexMap::new(),
+                &Client::default(),
+                "/tmp".into(),
+                CancellationToken::new(),
+                None,
+            )
+            .await
+        else {
+            panic!("expected completed retry")
+        };
+        assert_eq!(response.result, Ok("after restart".into()));
+        assert_eq!(count.load(Ordering::SeqCst), 2);
+        assert_eq!(
+            *locked(&source.calls)
+                .get(&request.id)
+                .unwrap()
+                .id
+                .get()
+                .unwrap(),
+            original
+        );
+        source.acknowledge(response).await.unwrap();
+        if let Some(external) = external {
+            assert_eq!(
+                from_mcp(external.await.unwrap().unwrap()).unwrap(),
+                ToolResult::text("after restart")
+            );
+        }
+        client.cancel().await.unwrap();
+        owner.shutdown().await.unwrap();
+    })
+    .await
+    .unwrap();
+}
 
 struct InquiringTool(Arc<AtomicUsize>);
 #[async_trait]

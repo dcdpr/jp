@@ -5,7 +5,10 @@
 
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex as SyncMutex, MutexGuard, PoisonError},
+    sync::{
+        Arc, Mutex as SyncMutex, MutexGuard, OnceLock, PoisonError,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 
@@ -57,7 +60,15 @@ const CORRELATION_KEY: &str = "computer.jp/hostCall";
 
 type TextResult = Result<String, String>;
 type Reply<T> = oneshot::Sender<HostReply<T>>;
-type Calls = Arc<SyncMutex<HashMap<String, Arc<Mutex<PendingCall>>>>>;
+type Calls = Arc<SyncMutex<HashMap<String, ManagedCall>>>;
+
+#[derive(Clone)]
+struct ManagedCall {
+    state: Arc<Mutex<PendingCall>>,
+    restarting: Arc<AtomicBool>,
+    id: Arc<OnceLock<InvocationId>>,
+    key: RouteKey,
+}
 
 struct Route {
     request: ToolCallRequest,
@@ -316,6 +327,24 @@ impl ExecutorSource for TerminalExecutorSource {
         config: ToolConfigWithDefaults,
     ) -> Option<Box<dyn Executor>> {
         self.definitions.get(&request.name)?;
+        if let Some(call) = locked(&self.calls)
+            .get(&request.id)
+            .filter(|call| call.restarting.load(Ordering::Acquire))
+            .cloned()
+        {
+            return Some(Box::new(ToolExecutor {
+                request,
+                config,
+                key: call.key,
+                peer: self.peer.clone(),
+                service: self.service.clone(),
+                state: call.state,
+                restarting: call.restarting,
+                invocation: call.id,
+                formatted: None,
+                sinks: self.sinks.clone(),
+            }));
+        }
         let (sender, receiver) = mpsc::channel(8);
         let execution = *locked(&self.execution);
         let key = match execution {
@@ -343,7 +372,14 @@ impl ExecutorSource for TerminalExecutorSource {
             id: None,
             finished: false,
         }));
-        locked(&self.calls).insert(request.id.clone(), state.clone());
+        let restarting = Arc::new(AtomicBool::new(false));
+        let invocation = Arc::new(OnceLock::new());
+        locked(&self.calls).insert(request.id.clone(), ManagedCall {
+            state: state.clone(),
+            restarting: restarting.clone(),
+            id: invocation.clone(),
+            key: key.clone(),
+        });
         Some(Box::new(ToolExecutor {
             request,
             config,
@@ -351,6 +387,8 @@ impl ExecutorSource for TerminalExecutorSource {
             peer: self.peer.clone(),
             service: self.service.clone(),
             state,
+            restarting,
+            invocation,
             formatted: None,
             sinks: self.sinks.clone(),
         }))
@@ -362,7 +400,7 @@ impl ExecutorSource for TerminalExecutorSource {
             let Some(call) = call else {
                 return Ok(());
             };
-            let mut call = call.lock().await;
+            let mut call = call.state.lock().await;
             let result = call.acknowledge(response.result).await;
             if let Some(id) = call.id {
                 locked(&self.sinks).remove(&id);
@@ -398,6 +436,16 @@ enum Received {
 
 impl PendingCall {
     async fn next(&mut self) -> Result<Received, ExecutorError> {
+        loop {
+            let received = self.receive().await?;
+            if matches!(&received, Received::Interaction(interaction) if interaction.is_expired()) {
+                continue;
+            }
+            return Ok(received);
+        }
+    }
+
+    async fn receive(&mut self) -> Result<Received, ExecutorError> {
         if matches!(self.execution, ToolExecution::Agent { .. }) {
             let request = if let Some(id) = self.id {
                 if let Some(token) = self.service.call_cancellation(id) {
@@ -523,6 +571,8 @@ pub struct ToolExecutor {
     peer: Peer<RoleClient>,
     service: Arc<Service>,
     state: Arc<Mutex<PendingCall>>,
+    restarting: Arc<AtomicBool>,
+    invocation: Arc<OnceLock<InvocationId>>,
     formatted: Option<Result<String, FormatterError>>,
     sinks: Sinks,
 }
@@ -568,10 +618,20 @@ impl Executor for ToolExecutor {
         render_arguments: bool,
     ) -> Result<Option<ToolCallResponse>, ExecutorError> {
         let mut state = self.state.lock().await;
-        if state.task.is_some() || state.finished || state.id.is_some() {
+        let restarting = self.restarting.swap(false, Ordering::AcqRel);
+        if restarting {
+            state.input = None;
+            state.prepare = None;
+            state.release = None;
+            state.review = None;
+            state.record = None;
+            state.finished = false;
+            self.service
+                .resume_call(*self.invocation.get().ok_or(ExecutorError::NotStarted)?);
+        } else if state.task.is_some() || state.finished || state.id.is_some() {
             return Err(ExecutorError::AlreadyPrepared);
         }
-        if let RouteKey::Host(key) = &self.key {
+        if !restarting && let RouteKey::Host(key) = &self.key {
             let mut params = CallToolRequestParams::new(self.request.name.clone());
             params.arguments = Some(self.request.arguments.clone());
             params.meta = Some(Meta(Map::from_iter([(
@@ -595,6 +655,9 @@ impl Executor for ToolExecutor {
                     self.request.arguments = arguments;
                     self.formatted = formatted_arguments;
                     state.prepare = Some(reply);
+                    if let Some(id) = state.id {
+                        self.invocation.get_or_init(|| id);
+                    }
                     return Ok(None);
                 }
                 Received::Interaction(Interaction::Record { result, reply, .. }) => {
@@ -642,6 +705,18 @@ impl Executor for ToolExecutor {
             Received::Finished(Err(message)) => Err(ExecutorError::Rejected { message }),
             _ => Err(ExecutorError::MissingRelease),
         }
+    }
+
+    fn pause_for_restart(&self) -> bool {
+        let Some(id) = self.invocation.get() else {
+            return false;
+        };
+        self.restarting.store(true, Ordering::Release);
+        if self.service.pause_call(*id) {
+            return true;
+        }
+        self.restarting.store(false, Ordering::Release);
+        false
     }
 
     async fn execute(
@@ -715,7 +790,7 @@ impl Executor for ToolExecutor {
             () = cancellation.cancelled() => Err(ExecutorError::Cancelled),
             result = result => result,
         };
-        if result.is_err() {
+        if result.is_err() && !self.restarting.load(Ordering::Acquire) {
             if let Some(id) = state.id {
                 self.service.cancel_call(id);
             }
