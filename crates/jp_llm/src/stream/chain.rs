@@ -118,7 +118,10 @@ impl EventChain {
             }
 
             // Pass through immediately — not part of the content stream.
-            Event::Patch(_) | Event::KeepAlive | Event::Notice(_) => vec![event],
+            Event::Patch(_)
+            | Event::KeepAlive
+            | Event::ToolCallPending { .. }
+            | Event::Notice(_) => vec![event],
         }
     }
 
@@ -165,7 +168,10 @@ impl EventChain {
             }
 
             // Pass through immediately — not part of the content stream.
-            Event::Patch(_) | Event::KeepAlive | Event::Notice(_) => vec![event],
+            Event::Patch(_)
+            | Event::KeepAlive
+            | Event::ToolCallPending { .. }
+            | Event::Notice(_) => vec![event],
         }
     }
 

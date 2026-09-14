@@ -14,6 +14,35 @@ fn strip_ansi(s: &str) -> String {
 }
 
 #[test]
+fn pending_tool_progress_does_not_become_an_executable_or_partial_event() {
+    let mut stream = ConversationStream::new_test();
+    let (printer, _, _) = Printer::memory(OutputFormat::Text);
+    let mut coordinator = TurnCoordinator::new(
+        Arc::new(printer),
+        AppConfig::new_test().style,
+        None,
+        None,
+        None,
+    );
+    coordinator.start_turn(&mut stream, ChatRequest::from("test"));
+    coordinator.handle_event(&mut stream, Event::ToolCallPending {
+        id: "pending".into(),
+        name: "fs_create_file".into(),
+    });
+    assert!(coordinator.peek_partial_events().is_empty());
+    assert_eq!(coordinator.current_phase(), TurnPhase::Streaming);
+    let result = coordinator.handle_event(&mut stream, Event::Finished(FinishReason::Completed));
+    assert!(matches!(result.action, Action::Done));
+    assert_eq!(
+        stream
+            .iter()
+            .filter_map(|event| event.event.as_tool_call_request())
+            .count(),
+        0
+    );
+}
+
+#[test]
 fn test_transitions_to_executing_on_tool_call() {
     let mut _turn_state = TurnState::default();
     let mut stream = ConversationStream::new_test();

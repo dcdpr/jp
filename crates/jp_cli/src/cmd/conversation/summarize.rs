@@ -265,8 +265,8 @@ fn summarize_events(events: Vec<Event>) -> StreamOutcome {
             // Providers emit patches alongside `FinishReason::Retry`; nothing
             // else consumes them on this path, so keep them for the rebuild.
             Event::Patch(mut p) => patches.append(&mut p),
-            // `KeepAlive` is a liveness signal.
-            Event::KeepAlive => {}
+            // Progress and liveness events carry no summary content.
+            Event::KeepAlive | Event::ToolCallPending { .. } => {}
             Event::Notice(notice) => tracing::warn!("{notice}"),
         }
     }

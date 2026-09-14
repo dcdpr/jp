@@ -506,7 +506,12 @@ impl Provider for Anthropic {
                     match item {
                         Ok(event) => {
                             content_seen = content_seen
-                                || !matches!(event, Event::KeepAlive | Event::Notice(_));
+                                || !matches!(
+                                    event,
+                                    Event::KeepAlive
+                                        | Event::ToolCallPending { .. }
+                                        | Event::Notice(_)
+                                );
                             yield event;
                         }
                         Err(error) if error.needs_credential_switch() => {
@@ -789,7 +794,7 @@ fn call(
                     yield flush;
                 }
                 patch @ Event::Patch(_) => yield patch,
-                keep_alive @ Event::KeepAlive => yield keep_alive,
+                progress @ (Event::KeepAlive | Event::ToolCallPending { .. }) => yield progress,
                 notice @ Event::Notice(_) => yield notice,
             }
         }

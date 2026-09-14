@@ -65,8 +65,11 @@ pub fn structured_data(events: Vec<Event>) -> Option<Value> {
                 flushed.extend(builder.handle_flush(index, metadata));
             }
             Event::Finished(_) => flushed.extend(builder.drain()),
-            // A notice is chrome, and carries no structured payload.
-            Event::Patch(_) | Event::KeepAlive | Event::Notice(_) => {}
+            // Control and progress events carry no structured payload.
+            Event::Patch(_)
+            | Event::KeepAlive
+            | Event::ToolCallPending { .. }
+            | Event::Notice(_) => {}
         }
     }
 

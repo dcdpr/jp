@@ -582,6 +582,7 @@ pub(super) async fn run_turn_loop(
                                 Event::Flush { .. }
                                 | Event::Patch(_)
                                 | Event::KeepAlive
+                                | Event::ToolCallPending { .. }
                                 | Event::Notice(_) => false,
                             };
                             if !received_provider_event && advances_cycle {
@@ -595,7 +596,8 @@ pub(super) async fn run_turn_loop(
                             if let Event::Part {
                                 part: EventPart::ToolCall(ToolCallPart::Start { id, name }),
                                 ..
-                            } = &event
+                            }
+                            | Event::ToolCallPending { id, name } = &event
                             {
                                 // The tool-call boundary is owned here: only the
                                 // turn loop holds the per-tool config and

@@ -722,7 +722,10 @@ pub async fn run_chat_completion_mode(
                                         stream.extend(std::iter::once(event));
                                     }
                                 }
-                                Event::Patch(_) | Event::KeepAlive | Event::Notice(_) => {}
+                                Event::Patch(_)
+                                | Event::KeepAlive
+                                | Event::ToolCallPending { .. }
+                                | Event::Notice(_) => {}
                                 Event::Finished(reason) => {
                                     for mut event in builder.drain() {
                                         event.timestamp =

@@ -535,6 +535,12 @@ impl State {
                 if let MessageContent::ToolUse(call) = content_block {
                     self.open_tool_blocks.insert(*index);
                     trace!(index, tool_call_id = %call.id, "Receiving ACP tool arguments");
+                    if let Some(name) = self.tools.get(&call.name) {
+                        events.push(Event::ToolCallPending {
+                            id: call.id.clone(),
+                            name: name.clone(),
+                        });
+                    }
                 }
                 if matches!(content_block, MessageContent::ToolUse(_))
                     || (self.structured && matches!(content_block, MessageContent::Text(_)))

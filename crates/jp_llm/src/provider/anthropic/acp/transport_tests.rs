@@ -233,7 +233,13 @@ async fn buffered_tool_arguments_remain_live_without_dispatching_a_tool() {
             finish,
         } = liveness_fixture(true);
         while events.recv().await.unwrap().unwrap() != Event::flush(0) {}
-        assert_eq!(events.recv().await.unwrap().unwrap(), Event::KeepAlive);
+        assert_eq!(
+            events.recv().await.unwrap().unwrap(),
+            Event::ToolCallPending {
+                id: "call-args".into(),
+                name: "lookup".into()
+            }
+        );
         // Hold argument generation open longer than the normal 60-second idle limit.
         for _ in 0..14 {
             advance(Duration::from_secs(5)).await;

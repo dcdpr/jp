@@ -95,6 +95,11 @@ impl Provider for AgentProvider {
         let id = self.conversation;
         let config = self.config.clone();
         let stream = async_stream::stream! {
+            yield Ok(Event::ToolCallPending { id: "agent-call".into(), name: "http_tool".into() });
+            yield Ok(Event::ToolCallPending { id: "agent-call-2".into(), name: "http_tool".into() });
+            let stored = serde_json::from_str(&storage.read_test_events_raw(&id).unwrap()).unwrap();
+            let events = ConversationStream::from_parts(json!({}), stored, &config.clone().into()).unwrap();
+            assert_eq!(events.iter().filter_map(|event| event.event.as_tool_call_request()).count(), 0);
             let mut params = CallToolRequestParams::new("http_tool");
             params.meta = Some(Meta(Map::from_iter([("test/agentId".into(), "agent-call".into())])));
             let peer = client.peer().clone();

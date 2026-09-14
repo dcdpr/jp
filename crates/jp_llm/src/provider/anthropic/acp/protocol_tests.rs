@@ -136,7 +136,10 @@ fn unexpected_tools_fail_inventory_check() {
 fn sdk_tool_observation_is_not_an_execution_request() {
     let mut state = state();
     let events = state.sdk(notification(json!({"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tool-fixed","name":"mcp__jp__lookup","input":{}}}}))).unwrap();
-    assert_eq!(events, vec![]);
+    assert_eq!(events, vec![Event::ToolCallPending {
+        id: "tool-fixed".into(),
+        name: "lookup".into()
+    }]);
     assert!(state.has_tool_activity());
     let events = state.sdk(notification(json!({"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{}"}}}))).unwrap();
     assert_eq!(events, vec![]);
