@@ -225,7 +225,7 @@ fn call(
                     yield flush;
                 }
                 patch @ Event::Patch(_) => yield patch,
-                progress @ (Event::KeepAlive | Event::ToolCallPending { .. }) => yield progress,
+                progress @ (Event::KeepAlive | Event::ToolCallPending { .. } | Event::ToolCallPendingEnd { .. }) => yield progress,
                 notice @ Event::Notice(_) => yield notice,
             }
         }

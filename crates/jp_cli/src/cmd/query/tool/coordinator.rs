@@ -439,6 +439,16 @@ impl ToolCoordinator {
         self.tool_states.insert(tool_id.into(), state);
     }
 
+    /// Remove an abandoned argument preview without changing executable calls.
+    pub(crate) fn discard_pending_tool(&mut self, tool_id: &str) {
+        if matches!(
+            self.tool_states.get(tool_id),
+            Some(ToolCallState::ReceivingArguments { .. })
+        ) {
+            self.tool_states.remove(tool_id);
+        }
+    }
+
     fn clear_tool_states(&mut self) {
         self.tool_states.clear();
     }

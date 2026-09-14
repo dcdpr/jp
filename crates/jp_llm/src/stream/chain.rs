@@ -121,6 +121,7 @@ impl EventChain {
             Event::Patch(_)
             | Event::KeepAlive
             | Event::ToolCallPending { .. }
+            | Event::ToolCallPendingEnd { .. }
             | Event::Notice(_) => vec![event],
         }
     }
@@ -171,6 +172,7 @@ impl EventChain {
             Event::Patch(_)
             | Event::KeepAlive
             | Event::ToolCallPending { .. }
+            | Event::ToolCallPendingEnd { .. }
             | Event::Notice(_) => vec![event],
         }
     }

@@ -11,6 +11,7 @@ use agent_client_protocol::{
     },
 };
 use async_anthropic::types::{CreateMessagesResponse, MessageContent, MessagesStreamEvent, Usage};
+use indexmap::IndexSet;
 use jp_config::model::id::Name;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -184,6 +185,7 @@ pub(super) struct State {
     usage: UsageLedger,
     current_message: Option<MessageIdentity>,
     open_tool_blocks: HashSet<usize>,
+    pending_previews: IndexSet<String>,
 }
 
 struct MessageIdentity {
@@ -212,6 +214,7 @@ impl State {
             usage: UsageLedger::default(),
             current_message: None,
             open_tool_blocks: HashSet::new(),
+            pending_previews: IndexSet::new(),
         }
     }
 
@@ -264,6 +267,7 @@ impl State {
             .ok_or_else(|| {
                 StreamError::other("ACP did not offer one-call delegation to JP's MCP server")
             })?;
+        self.pending_previews.shift_remove(&id);
         self.pending_tools.insert(id.clone());
         let index = self.next_index;
         self.next_index += 1;
@@ -296,6 +300,17 @@ impl State {
     /// timeout.
     pub(super) fn has_tool_activity(&self) -> bool {
         !self.open_tool_blocks.is_empty() || !self.pending_tools.is_empty()
+    }
+
+    fn retire_previews(&mut self) -> Vec<Event> {
+        self.open_tool_blocks.clear();
+        self.pending_previews
+            .drain(..)
+            .map(|id| {
+                trace!(tool_call_id = %id, "Removing abandoned ACP pending-tool display");
+                Event::ToolCallPendingEnd { id }
+            })
+            .collect()
     }
 
     pub(super) fn usage_snapshot(&self) -> Value {
@@ -444,7 +459,7 @@ impl State {
                     model_usage,
                     estimated_cost_usd: total_cost_usd,
                 });
-                let mut events = vec![];
+                let mut events = self.retire_previews();
                 let finish = if stop_reason.as_deref() == Some("refusal") {
                     FinishReason::Refused {
                         category: refusal
@@ -504,6 +519,9 @@ impl State {
         }
         match &event {
             MessagesStreamEvent::MessageStart { message, usage } => {
+                // A replacement response cannot leave the previous attempt's
+                // uncommitted tool identities on the Host's preparing row.
+                events.extend(self.retire_previews());
                 self.index_base = self.next_index;
                 self.current_message = Some(MessageIdentity {
                     id: message.id.clone(),
@@ -513,11 +531,12 @@ impl State {
                     self.usage.observe_usage(&message.id, &message.model, usage);
                 }
             }
-            MessagesStreamEvent::MessageDelta {
-                usage: Some(usage), ..
-            } => {
-                if let Some(message) = &self.current_message {
+            MessagesStreamEvent::MessageDelta { delta, usage } => {
+                if let (Some(message), Some(usage)) = (&self.current_message, usage) {
                     self.usage.observe_usage(&message.id, &message.model, usage);
+                }
+                if matches!(delta.stop_reason.as_deref(), Some("max_tokens" | "refusal")) {
+                    events.extend(self.retire_previews());
                 }
             }
             MessagesStreamEvent::MessageStop => {
@@ -535,7 +554,12 @@ impl State {
                 if let MessageContent::ToolUse(call) = content_block {
                     self.open_tool_blocks.insert(*index);
                     trace!(index, tool_call_id = %call.id, "Receiving ACP tool arguments");
-                    if let Some(name) = self.tools.get(&call.name) {
+                    // SDK observations can arrive after delegation; they must
+                    // not reopen a call's completed preparing row.
+                    if let Some(name) = self.tools.get(&call.name)
+                        && !self.seen_calls.contains(&call.id)
+                        && self.pending_previews.insert(call.id.clone())
+                    {
                         events.push(Event::ToolCallPending {
                             id: call.id.clone(),
                             name: name.clone(),

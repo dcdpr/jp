@@ -583,6 +583,7 @@ pub(super) async fn run_turn_loop(
                                 | Event::Patch(_)
                                 | Event::KeepAlive
                                 | Event::ToolCallPending { .. }
+                                | Event::ToolCallPendingEnd { .. }
                                 | Event::Notice(_) => false,
                             };
                             if !received_provider_event && advances_cycle {
@@ -615,6 +616,11 @@ pub(super) async fn run_turn_loop(
                                     .set_tool_state(id, ToolCallState::ReceivingArguments {
                                         name: name.clone(),
                                     });
+                            }
+
+                            if let Event::ToolCallPendingEnd { id } = &event {
+                                tool_renderer.complete(id);
+                                tool_coordinator.discard_pending_tool(id);
                             }
 
                             let is_finished = matches!(event, Event::Finished(_));

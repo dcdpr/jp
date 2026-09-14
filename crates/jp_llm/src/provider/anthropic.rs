@@ -510,6 +510,7 @@ impl Provider for Anthropic {
                                     event,
                                     Event::KeepAlive
                                         | Event::ToolCallPending { .. }
+                                        | Event::ToolCallPendingEnd { .. }
                                         | Event::Notice(_)
                                 );
                             yield event;
@@ -794,7 +795,9 @@ fn call(
                     yield flush;
                 }
                 patch @ Event::Patch(_) => yield patch,
-                progress @ (Event::KeepAlive | Event::ToolCallPending { .. }) => yield progress,
+                progress @ (Event::KeepAlive
+                | Event::ToolCallPending { .. }
+                | Event::ToolCallPendingEnd { .. }) => yield progress,
                 notice @ Event::Notice(_) => yield notice,
             }
         }

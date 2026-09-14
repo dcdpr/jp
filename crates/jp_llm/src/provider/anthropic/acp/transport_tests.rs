@@ -260,7 +260,12 @@ async fn buffered_tool_arguments_remain_live_without_dispatching_a_tool() {
                 remaining.push(event);
             }
         }
-        assert_eq!(remaining, vec![Event::Finished(FinishReason::Completed)]);
+        assert_eq!(remaining, vec![
+            Event::ToolCallPendingEnd {
+                id: "call-args".into()
+            },
+            Event::Finished(FinishReason::Completed)
+        ]);
         driver.await.unwrap().unwrap();
     })
     .await

@@ -375,9 +375,10 @@ impl TurnCoordinator {
 
             // Patches and tool progress are handled by the caller. None of
             // these events contributes content to the conversation.
-            Event::Patch(_) | Event::KeepAlive | Event::ToolCallPending { .. } => {
-                HandleEventOutcome::new(Action::Continue)
-            }
+            Event::Patch(_)
+            | Event::KeepAlive
+            | Event::ToolCallPending { .. }
+            | Event::ToolCallPendingEnd { .. } => HandleEventOutcome::new(Action::Continue),
 
             // A provider decision the user must see (a skipped credential, a
             // credential switch): chrome on stderr, never part of the

@@ -85,6 +85,13 @@ pub enum Event {
         name: String,
     },
 
+    /// Remove pending-arguments progress that the provider has abandoned.
+    /// This neither cancels execution nor records a tool response.
+    ToolCallPendingEnd {
+        /// The identity used by the earlier pending notification.
+        id: String,
+    },
+
     /// A user-facing notice from the provider, rendered as chrome on stderr.
     ///
     /// Announces provider-level decisions the user must see — a skipped

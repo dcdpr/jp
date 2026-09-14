@@ -153,6 +153,62 @@ fn sdk_tool_observation_is_not_an_execution_request() {
 }
 
 #[test]
+fn a_late_sdk_start_cannot_restore_a_delegated_call_to_pending() {
+    let mut state = state();
+    state.permission(permission()).unwrap();
+    state.sdk(notification(json!({"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"tool-fixed","content":"done"}]}}))).unwrap();
+    let events = state.sdk(notification(json!({"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tool-fixed","name":"mcp__jp__lookup","input":{}}}}))).unwrap();
+    assert_eq!(events, vec![]);
+}
+
+#[test]
+fn a_new_response_retracts_abandoned_pending_calls() {
+    let mut state = state();
+    state.sdk(notification(json!({"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"abandoned","name":"mcp__jp__lookup","input":{}}}}))).unwrap();
+    let events = state.sdk(notification(json!({"type":"stream_event","event":{"type":"message_start","message":{"id":"retry-response","model":"claude-opus-5","role":"assistant","content":[]}}}))).unwrap();
+    assert_eq!(events, vec![Event::ToolCallPendingEnd {
+        id: "abandoned".into()
+    }]);
+    let events = state.sdk(notification(json!({"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"replacement","name":"mcp__jp__lookup","input":{}}}}))).unwrap();
+    assert_eq!(events, vec![Event::ToolCallPending {
+        id: "replacement".into(),
+        name: "lookup".into()
+    }]);
+}
+
+#[test]
+fn distinct_calls_to_the_same_tool_are_not_collapsed() {
+    let mut state = state();
+    let first = state.sdk(notification(json!({"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"tool-fixed","name":"mcp__jp__lookup","input":{}}}}))).unwrap();
+    let second = state.sdk(notification(json!({"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"second","name":"mcp__jp__lookup","input":{}}}}))).unwrap();
+    assert_eq!(first, vec![Event::ToolCallPending {
+        id: "tool-fixed".into(),
+        name: "lookup".into()
+    }]);
+    assert_eq!(second, vec![Event::ToolCallPending {
+        id: "second".into(),
+        name: "lookup".into()
+    }]);
+    let end = state.sdk(notification(json!({"type":"stream_event","event":{"type":"message_delta","delta":{"stop_reason":"tool_use"}}}))).unwrap();
+    assert_eq!(end, vec![]);
+    state.permission(permission()).unwrap();
+    assert_eq!(state.retire_previews(), vec![Event::ToolCallPendingEnd {
+        id: "second".into()
+    }]);
+}
+
+#[test]
+fn truncation_retracts_an_unfinished_tool_preview() {
+    let mut state = state();
+    state.sdk(notification(json!({"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"truncated","name":"mcp__jp__lookup","input":{}}}}))).unwrap();
+    let events = state.sdk(notification(json!({"type":"stream_event","event":{"type":"message_delta","delta":{"stop_reason":"max_tokens"}}}))).unwrap();
+    assert_eq!(events, vec![Event::ToolCallPendingEnd {
+        id: "truncated".into()
+    }]);
+    assert!(!state.has_tool_activity());
+}
+
+#[test]
 fn final_usage_delta_wins_over_an_earlier_assistant_snapshot() {
     let mut state = state();
     state.sdk(notification(json!({"type":"stream_event","event":{"type":"message_start","message":{"id":"msg-count","model":"claude-opus-5","role":"assistant","content":[],"usage":{"input_tokens":2,"output_tokens":1}}}}))).unwrap();

@@ -69,6 +69,7 @@ pub fn structured_data(events: Vec<Event>) -> Option<Value> {
             Event::Patch(_)
             | Event::KeepAlive
             | Event::ToolCallPending { .. }
+            | Event::ToolCallPendingEnd { .. }
             | Event::Notice(_) => {}
         }
     }

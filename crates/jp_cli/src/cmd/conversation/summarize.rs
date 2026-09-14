@@ -266,7 +266,8 @@ fn summarize_events(events: Vec<Event>) -> StreamOutcome {
             // else consumes them on this path, so keep them for the rebuild.
             Event::Patch(mut p) => patches.append(&mut p),
             // Progress and liveness events carry no summary content.
-            Event::KeepAlive | Event::ToolCallPending { .. } => {}
+            Event::KeepAlive | Event::ToolCallPending { .. } | Event::ToolCallPendingEnd { .. } => {
+            }
             Event::Notice(notice) => tracing::warn!("{notice}"),
         }
     }
