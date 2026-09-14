@@ -14,6 +14,7 @@ use async_anthropic::types::{CreateMessagesResponse, MessageContent, MessagesStr
 use jp_config::model::id::Name;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use tracing::trace;
 
 use super::{
     Error,
@@ -182,6 +183,7 @@ pub(super) struct State {
     pub failure: Option<StreamError>,
     usage: UsageLedger,
     current_message: Option<MessageIdentity>,
+    open_tool_blocks: HashSet<usize>,
 }
 
 struct MessageIdentity {
@@ -209,6 +211,7 @@ impl State {
             failure: None,
             usage: UsageLedger::default(),
             current_message: None,
+            open_tool_blocks: HashSet::new(),
         }
     }
 
@@ -286,6 +289,13 @@ impl State {
             )),
             events,
         ))
+    }
+
+    /// Tool arguments may be buffered by the provider before any delta arrives.
+    /// Execution and Host interactions can also outlive the stream idle
+    /// timeout.
+    pub(super) fn has_tool_activity(&self) -> bool {
+        !self.open_tool_blocks.is_empty() || !self.pending_tools.is_empty()
     }
 
     pub(super) fn usage_snapshot(&self) -> Value {
@@ -487,6 +497,11 @@ impl State {
 
     fn stream_event(&mut self, event: MessagesStreamEvent) -> Result<Vec<Event>, StreamError> {
         let mut events = Vec::new();
+        if let MessagesStreamEvent::ContentBlockStop { index } = &event
+            && self.open_tool_blocks.remove(index)
+        {
+            trace!(index, "Finished receiving ACP tool arguments");
+        }
         match &event {
             MessagesStreamEvent::MessageStart { message, usage } => {
                 self.index_base = self.next_index;
@@ -509,6 +524,7 @@ impl State {
                 self.current_message = None;
                 self.index_base = self.next_index;
                 self.ignored.clear();
+                self.open_tool_blocks.clear();
                 return Ok(vec![]);
             }
             MessagesStreamEvent::ContentBlockStart {
@@ -516,6 +532,10 @@ impl State {
                 content_block,
             } => {
                 self.next_index = self.next_index.max(self.index_base + index + 1);
+                if let MessageContent::ToolUse(call) = content_block {
+                    self.open_tool_blocks.insert(*index);
+                    trace!(index, tool_call_id = %call.id, "Receiving ACP tool arguments");
+                }
                 if matches!(content_block, MessageContent::ToolUse(_))
                     || (self.structured && matches!(content_block, MessageContent::Text(_)))
                 {

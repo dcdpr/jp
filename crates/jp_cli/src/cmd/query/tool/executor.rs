@@ -119,15 +119,22 @@ pub struct ExecutionOwner {
 impl ExecutionOwner {
     /// Cancel pending work and wait for listener/connection cleanup.
     pub async fn shutdown(mut self) -> Result<(), EndpointError> {
-        if let Some(endpoint) = self.endpoint.take() {
-            endpoint.shutdown().await?;
+        if let Some(endpoint) = &self.endpoint {
+            endpoint.service().stop();
         }
-        if let Some(client) = self.client.take() {
-            client.cancel().await?;
-        }
+        // Session deletion is part of client shutdown and needs the listener.
+        let client_result = match self.client.take() {
+            Some(client) => client.cancel().await.map(drop),
+            None => Ok(()),
+        };
+        let server_result = match self.endpoint.take() {
+            Some(endpoint) => endpoint.shutdown().await,
+            None => Ok(()),
+        };
         self.router.abort();
         self.progress.abort();
-        Ok(())
+        client_result?;
+        server_result
     }
 }
 

@@ -164,6 +164,7 @@ async fn drive(
     let permission_sender = sender.clone();
     let auth_state = state.clone();
     let update_state = state.clone();
+    let update_sender = sender.clone();
     let connection = Client
         .builder()
         .on_receive_notification(
@@ -179,21 +180,33 @@ async fn drive(
         )
         .on_receive_notification(
             async move |notification: SdkNotification, _cx| {
-                let result = sdk_state
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .sdk(notification);
-                let events = result.map_err(|error| record_failure(&sdk_state, error))?;
+                let (active, result) = {
+                    let mut state = sdk_state.lock().unwrap_or_else(PoisonError::into_inner);
+                    let active =
+                        state.live && state.session.as_ref() == Some(&notification.session_id);
+                    (active, state.sdk(notification))
+                };
+                let mut events = result.map_err(|error| record_failure(&sdk_state, error))?;
+                // Non-rendered SDK updates still prove the connection is active.
+                if active && events.is_empty() {
+                    events.push(Event::KeepAlive);
+                }
                 emit(&sdk_sender, events).await
             },
             on_receive_notification!(),
         )
         .on_receive_notification(
             async move |notification: SessionNotification, _cx| {
-                update_state
-                    .lock()
-                    .unwrap_or_else(PoisonError::into_inner)
-                    .observe(notification);
+                let active = {
+                    let mut state = update_state.lock().unwrap_or_else(PoisonError::into_inner);
+                    let active =
+                        state.live && state.session.as_ref() == Some(&notification.session_id);
+                    state.observe(notification);
+                    active
+                };
+                if active {
+                    emit(&update_sender, vec![Event::KeepAlive]).await?;
+                }
                 Ok(())
             },
             on_receive_notification!(),
@@ -269,8 +282,9 @@ async fn drive(
                 return result.map_err(Error::Protocol);
             },
             _ = tick.tick() => {
-                // Host interactions are activity, not a silent model stream.
-                let pending = !state.lock().unwrap_or_else(PoisonError::into_inner).pending_tools.is_empty();
+                // Anthropic can buffer an entire argument value. Keep the same
+                // liveness policy as the direct flow while that block is open.
+                let pending = state.lock().unwrap_or_else(PoisonError::into_inner).has_tool_activity();
                 if pending {
                     emit(&heartbeat, vec![Event::KeepAlive]).await.map_err(Error::Protocol)?;
                 }

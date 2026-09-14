@@ -3,8 +3,8 @@ use std::{error::Error as _, iter};
 use agent_client_protocol::{
     Agent,
     schema::v1::{
-        InitializeResponse, LoadSessionResponse, PromptResponse, SessionConfigOptionValue,
-        SetSessionConfigOptionResponse,
+        InitializeResponse, LoadSessionResponse, NewSessionResponse, PromptResponse,
+        SessionConfigOptionValue, SetSessionConfigOptionResponse,
     },
 };
 use datetime_literal::datetime;
@@ -16,6 +16,11 @@ use jp_conversation::{
 };
 use jp_mcp::server::InvocationContext;
 use serde_json::{Map, Value, json};
+use tokio::{
+    sync::Notify,
+    task::JoinHandle,
+    time::{advance, timeout},
+};
 use tracing::instrument::WithSubscriber as _;
 use tracing_subscriber::{layer::SubscriberExt as _, registry};
 
@@ -180,7 +185,7 @@ async fn runtime_model_rejection_preserves_its_classification() {
     prepared.model = "future-model".parse().unwrap();
     let environment = options::environment(&prepared, CachePolicy::Short);
     let (sender, mut receiver) = mpsc::channel(16);
-    let error = tokio::time::timeout(
+    let error = timeout(
         Duration::from_secs(5),
         drive(
             prepared,
@@ -217,6 +222,133 @@ async fn runtime_model_rejection_preserves_its_classification() {
         "Unknown model on this account."
     );
     assert!(receiver.recv().await.is_none());
+}
+
+#[tokio::test(start_paused = true)]
+async fn buffered_tool_arguments_remain_live_without_dispatching_a_tool() {
+    timeout(Duration::from_mins(2), async {
+        let LivenessFixture {
+            driver,
+            mut events,
+            finish,
+        } = liveness_fixture(true);
+        while events.recv().await.unwrap().unwrap() != Event::flush(0) {}
+        assert_eq!(events.recv().await.unwrap().unwrap(), Event::KeepAlive);
+        // Hold argument generation open longer than the normal 60-second idle limit.
+        for _ in 0..14 {
+            advance(Duration::from_secs(5)).await;
+            assert_eq!(
+                timeout(Duration::from_secs(6), events.recv())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .unwrap(),
+                Event::KeepAlive
+            );
+        }
+        finish.notify_one();
+        let mut remaining = vec![];
+        while let Some(event) = events.recv().await {
+            let event = event.unwrap();
+            if event != Event::KeepAlive {
+                remaining.push(event);
+            }
+        }
+        assert_eq!(remaining, vec![Event::Finished(FinishReason::Completed)]);
+        driver.await.unwrap().unwrap();
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_quiet_agent_outside_tool_work_does_not_get_timer_activity() {
+    timeout(Duration::from_secs(90), async {
+        let LivenessFixture {
+            driver,
+            mut events,
+            finish,
+        } = liveness_fixture(false);
+        while events.recv().await.unwrap().unwrap() != Event::flush(0) {}
+        assert!(
+            timeout(Duration::from_secs(65), events.recv())
+                .await
+                .is_err()
+        );
+        finish.notify_one();
+        let mut remaining = vec![];
+        while let Some(event) = events.recv().await {
+            let event = event.unwrap();
+            if event != Event::KeepAlive {
+                remaining.push(event);
+            }
+        }
+        assert_eq!(remaining, vec![Event::Finished(FinishReason::Completed)]);
+        driver.await.unwrap().unwrap();
+    })
+    .await
+    .unwrap();
+}
+
+struct LivenessFixture {
+    driver: JoinHandle<Result<(), Error>>,
+    events: mpsc::Receiver<Result<Event, StreamError>>,
+    finish: Arc<Notify>,
+}
+
+fn liveness_fixture(arguments: bool) -> LivenessFixture {
+    let finish = Arc::new(Notify::new());
+    let release = finish.clone();
+    let agent = Agent.builder()
+        .on_receive_request(async |_: InitializeRequest, responder, _cx| {
+            responder.respond(serde_json::from_value::<InitializeResponse>(json!({"protocolVersion":1,"agentCapabilities":{"mcpCapabilities":{"http":true}}})).unwrap())
+        }, on_receive_request!())
+        .on_receive_request(async |_: NewSessionRequest, responder, cx| {
+            cx.send_notification(serde_json::from_value::<AuthUpdate>(json!({"authStatus":{"kind":"account","account":{"plan":"Claude Max"}}})).unwrap())?;
+            responder.respond(serde_json::from_value::<NewSessionResponse>(json!({"sessionId":"11111111-1111-4111-8111-111111111111"})).unwrap())
+        }, on_receive_request!())
+        .on_receive_request(async |request: SetSessionConfigOptionRequest, responder, _cx| {
+            let SessionConfigOptionValue::ValueId { value } = request.value else { panic!("expected value") };
+            responder.respond(serde_json::from_value::<SetSessionConfigOptionResponse>(json!({"configOptions":[{"id":request.config_id,"name":"Setting","type":"select","currentValue":value,"options":[]}]})).unwrap())
+        }, on_receive_request!())
+        .on_receive_request(async move |_: PromptRequest, responder, cx| {
+            cx.send_notification(notification(json!({"type":"system","subtype":"init","tools":["mcp__jp__lookup"]})))?;
+            cx.send_notification(notification(json!({"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":"Rewrite."}}})))?;
+            cx.send_notification(notification(json!({"type":"stream_event","event":{"type":"content_block_stop","index":0}})))?;
+            if arguments {
+                cx.send_notification(notification(json!({"type":"stream_event","event":{"type":"content_block_start","index":1,"content_block":{"type":"tool_use","id":"call-args","name":"mcp__jp__lookup","input":{}}}})))?;
+            }
+            release.notified().await;
+            if arguments {
+                cx.send_notification(notification(json!({"type":"stream_event","event":{"type":"content_block_stop","index":1}})))?;
+            }
+            cx.send_notification(notification(json!({"type":"result","subtype":"success","is_error":false})))?;
+            responder.respond(serde_json::from_value::<PromptResponse>(json!({"stopReason":"end_turn"})).unwrap())
+        }, on_receive_request!());
+    let prepared = prepared();
+    let environment = options::environment(&prepared, CachePolicy::Short);
+    let (sender, receiver) = mpsc::channel(16);
+    let driver = tokio::spawn(drive(
+        prepared,
+        QueryContext {
+            root: "/work/project".into(),
+            mcp_endpoint: Some("http://127.0.0.1:1/mcp".parse().unwrap()),
+            invocation: None,
+        },
+        vec!["lookup".into()],
+        environment,
+        NativeArtifact {
+            session: None,
+            path: None,
+        },
+        agent,
+        sender,
+    ));
+    LivenessFixture {
+        driver,
+        events: receiver,
+        finish,
+    }
 }
 
 #[tokio::test]
@@ -264,7 +396,7 @@ async fn real_protocol_driver_loads_history_and_emits_only_live_output() {
     };
     let capture = UsageCapture::default();
     let subscriber = registry().with(capture.clone());
-    tokio::time::timeout(
+    timeout(
         Duration::from_secs(5),
         drive(
             prepared,
@@ -292,14 +424,18 @@ async fn real_protocol_driver_loads_history_and_emits_only_live_output() {
         capture.snapshot().unwrap(),
         json!({"native_session_id":"11111111-1111-4111-8111-111111111111","requests":{"msg-traced":{"model":"resolved-fixture-model","input_tokens":2,"output_tokens":7,"cache_read_input_tokens":500}}})
     );
-    // Empty block starts carry no JP content; the first delta supplies it.
+    // Replay emits nothing; live SDK observations without content are liveness.
     assert_eq!(events, vec![
+        Event::KeepAlive,
+        Event::KeepAlive,
         Event::Part {
             index: 0,
             part: EventPart::Message("CURRENT".into()),
             metadata: Map::new()
         },
         Event::flush(0),
+        Event::KeepAlive,
+        Event::KeepAlive,
         Event::Finished(FinishReason::Completed)
     ]);
 }

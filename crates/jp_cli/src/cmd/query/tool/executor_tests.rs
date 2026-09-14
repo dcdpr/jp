@@ -22,6 +22,9 @@ use tokio::{
 
 use super::*;
 
+#[path = "executor_shutdown_tests.rs"]
+mod shutdown;
+
 struct RestartingTool {
     count: Arc<AtomicUsize>,
     started: Arc<Notify>,
