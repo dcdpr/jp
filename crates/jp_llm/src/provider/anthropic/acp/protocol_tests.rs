@@ -1,7 +1,37 @@
+use std::error::Error as _;
+
 use serde_json::json;
 
 use super::*;
 use crate::error::StreamErrorKind;
+
+#[test]
+fn oversized_prompt_uses_the_context_window_error_kind() {
+    let mut state = state();
+    let error = state.sdk(notification(json!({"type":"assistant","error":"invalid_request","message":{"content":[{"type":"text","text":"Prompt is too long"}]}}))).unwrap_err();
+    assert_eq!(error.kind, StreamErrorKind::ContextWindowExceeded);
+    assert!(!error.is_retryable());
+    assert_eq!(
+        error.message(),
+        "Claude Code rejected the request for model `claude-opus-5`: Prompt is too long"
+    );
+    let source = error.source().unwrap().downcast_ref::<Error>().unwrap();
+    assert!(
+        matches!(source, Error::RequestRejected { model, detail } if model.as_ref() == "claude-opus-5" && detail == "Prompt is too long")
+    );
+}
+
+#[test]
+fn unrelated_invalid_requests_are_not_context_window_errors() {
+    let mut state = state();
+    let error = state.sdk(notification(json!({"type":"assistant","error":"invalid_request","message":{"content":[{"type":"text","text":"Unsupported thinking configuration"}]}}))).unwrap_err();
+    assert_eq!(error.kind, StreamErrorKind::Other);
+    assert_eq!(
+        error.message(),
+        "Claude Code rejected the request for model `claude-opus-5`: Unsupported thinking \
+         configuration"
+    );
+}
 
 fn state() -> State {
     let mut state = State::new(

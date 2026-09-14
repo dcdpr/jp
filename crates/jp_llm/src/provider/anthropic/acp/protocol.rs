@@ -23,7 +23,7 @@ use super::{
     usage::{ModelUsage, RuntimeUsage, UsageLedger},
 };
 use crate::{
-    error::{StreamError, StreamErrorKind},
+    error::{StreamError, StreamErrorKind, looks_like_context_window_error},
     event::{Event, EventPart, FinishReason, ToolCallPart},
     provider::anthropic::map_event,
 };
@@ -434,7 +434,15 @@ impl State {
                             )));
                         }
                     };
-                    return Err(StreamError::other(rejection.to_string()).with_source(rejection));
+                    let kind = if matches!(&rejection, Error::RequestRejected { detail, .. } if looks_like_context_window_error(detail))
+                    {
+                        StreamErrorKind::ContextWindowExceeded
+                    } else {
+                        StreamErrorKind::Other
+                    };
+                    return Err(
+                        StreamError::new(kind, rejection.to_string()).with_source(rejection)
+                    );
                 }
                 self.usage.observe(&message);
                 Ok(vec![])
