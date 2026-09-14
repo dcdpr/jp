@@ -14,6 +14,7 @@ use jp_conversation::{
     event::{ChatRequest, ChatResponse, ConversationEvent},
     thread::ThreadBuilder,
 };
+use jp_mcp::server::InvocationContext;
 use serde_json::{Map, Value, json};
 
 use super::*;
@@ -42,6 +43,23 @@ fn notification(message: Value) -> SdkNotification {
         session_id: "11111111-1111-4111-8111-111111111111".into(),
         message: serde_json::from_value(message).unwrap(),
     }
+}
+
+#[test]
+fn project_directory_is_scoped_by_host_identity_not_worktree_path() {
+    let mut context = QueryContext {
+        root: "/work/first".into(),
+        mcp_endpoint: None,
+        invocation: Some(InvocationContext {
+            workspace_id: "otvo8".into(),
+            conversation_id: "c123456789".into(),
+        }),
+    };
+    assert_eq!(project_name(&context), "jp-c123456789-otvo8");
+    context.root = format!("/work/{}", "long".repeat(100)).into();
+    assert_eq!(project_name(&context), "jp-c123456789-otvo8");
+    context.invocation.as_mut().unwrap().conversation_id = "c987654321".into();
+    assert_eq!(project_name(&context), "jp-c987654321-otvo8");
 }
 
 #[test]
@@ -124,6 +142,7 @@ async fn runtime_model_rejection_preserves_its_classification() {
             QueryContext {
                 root: "/work/project".into(),
                 mcp_endpoint: None,
+                invocation: None,
             },
             vec![],
             environment,
@@ -205,6 +224,7 @@ async fn real_protocol_driver_loads_history_and_emits_only_live_output() {
             QueryContext {
                 root: "/work/project".into(),
                 mcp_endpoint: None,
+                invocation: None,
             },
             vec![],
             environment,

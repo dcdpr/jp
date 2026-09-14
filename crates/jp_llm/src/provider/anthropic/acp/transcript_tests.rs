@@ -1,7 +1,7 @@
 use async_anthropic::types::{MessageContent, MessageRole};
 use camino::Utf8Path;
 use datetime_literal::datetime;
-use jp_config::AppConfig;
+use jp_config::{AppConfig, PartialAppConfig};
 use jp_conversation::{
     ConversationStream,
     event::{ChatRequest, ChatResponse, ConversationEvent, ToolCallRequest, ToolCallResponse},
@@ -109,6 +109,15 @@ fn session_ids_and_timestamps_do_not_change_the_model_visible_prefix() {
     };
     assert_ne!(first[0].uuid, second[0].uuid);
     assert_eq!(content(first), content(second));
+}
+
+#[test]
+fn unsupported_parameters_do_not_block_subscription_requests() {
+    let mut query = query();
+    query.thread.events.add_config_delta(serde_json::from_value::<PartialAppConfig>(json!({"assistant":{"model":{"parameters":{"temperature":0.4,"top_p":0.8,"top_k":10,"service_tier":"flex","custom_option":true}}}})).unwrap());
+    let model = super::super::model_details(&"claude-opus-5".parse().unwrap());
+    let prepared = PreparedRequest::new(&model, query).unwrap();
+    assert_eq!(prepared.prompt, "What is the code?");
 }
 
 #[test]

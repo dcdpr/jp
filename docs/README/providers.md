@@ -59,16 +59,29 @@ each request; auxiliary queries do not share the main query's native session.
 jp query --new --auth sub --model anthropic/claude-opus-5 "Review this change."
 ```
 
-This v0.1 path currently requires Unix and the runtime versions above.
+This v0.1 path requires the runtime versions above.
+The launcher uses Unix process groups or Windows job objects to clean up
+descendant processes.
+On Windows, npm's `claude-agent-acp.cmd` must be on PATH.
 Model identifiers and aliases are passed to Claude Code without a JP allowlist.
 Claude Code decides availability for the active account; JP reports
 model-selection and request failures with the runtime's explanation.
 Canonical identifiers returned for aliases are accepted and recorded in usage
 metadata.
-Restarting an external tool batch is not implemented yet, and native history
-preparation rejects working directories whose encoded names exceed 200 bytes.
-Temperature, top-p, top-k, service tiers other than `off`, and custom model
-parameters have no ACP mapping and are rejected when set.
+JP stores derived Claude Code conversations under
+`~/.claude/projects/jp-<conversation-id>-<workspace-id>/`, or under the
+configured `CLAUDE_CONFIG_DIR`.
+Auxiliary requests use a separate directory derived from their working
+directory.
+Session filenames remain unique per request; the real working directory passed
+to Claude Code is unchanged.
+
+Restarting tool execution from the interrupt menu is not implemented for ACP
+queries.
+Temperature, top-p, top-k, stop words, service tiers other than `off`, and
+custom model parameters have no ACP mapping.
+Non-default values are ignored with a warning in tracing output; they do not
+prevent the query.
 Compatibility failures do not switch to `direct` or to paid API access.
 If Claude Code substitutes a `<persisted-output>` file reference for a tool
 result, JP reports the loss instead of accepting it silently.

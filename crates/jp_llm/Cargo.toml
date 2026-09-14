@@ -33,6 +33,7 @@ gemini_client_rs = { workspace = true }
 indexmap = { workspace = true }
 ollama-rs = { workspace = true, features = ["rustls", "stream"] }
 openai_responses = { workspace = true, features = ["stream"] }
+process-wrap = { workspace = true, features = ["tokio1", "process-group", "job-object", "kill-on-drop"] }
 quick-xml = { workspace = true, features = ["serialize"] }
 rand = { workspace = true, features = ["thread_rng"] }
 reqwest = { workspace = true }
@@ -42,7 +43,7 @@ serde_json = { workspace = true, features = ["preserve_order"] }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
-tokio-util = { workspace = true }
+tokio-util = { workspace = true, features = ["compat"] }
 tracing = { workspace = true }
 url = { workspace = true }
 uuid = { workspace = true, features = ["v4", "v5", "serde"] }

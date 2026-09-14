@@ -11,12 +11,15 @@ use async_anthropic::types::{
 };
 use camino::Utf8Path;
 use chrono::{DateTime, Utc};
-use jp_config::model::{id::Name, parameters::ServiceTier};
+use jp_config::{
+    PartialAppConfig,
+    model::{id::Name, parameters::ServiceTier},
+};
 use serde::Serialize;
 use serde_json::{Map, Value};
+use tracing::warn;
 use uuid::Uuid;
 
-use super::Error;
 use crate::{
     error::Result,
     model::ModelDetails,
@@ -37,13 +40,14 @@ pub(super) struct PreparedRequest {
 }
 
 impl PreparedRequest {
-    pub(super) fn new(model: &ModelDetails, query: ChatQuery) -> Result<Self> {
+    pub(super) fn new(model: &ModelDetails, mut query: ChatQuery) -> Result<Self> {
         let config = query.thread.events.config()?;
         let parameters = &config.assistant.model.parameters;
         for (parameter, configured) in [
             ("temperature", parameters.temperature.is_some()),
             ("top_p", parameters.top_p.is_some()),
             ("top_k", parameters.top_k.is_some()),
+            ("stop_words", !parameters.stop_words.is_empty()),
             (
                 "service_tier",
                 parameters
@@ -52,17 +56,27 @@ impl PreparedRequest {
             ),
         ] {
             if configured {
-                return Err(Error::UnsupportedParameter {
-                    parameter: parameter.into(),
-                }
-                .into());
+                warn!(
+                    parameter,
+                    "Ignoring unsupported model parameter for the ACP subscription flow"
+                );
             }
         }
-        if let Some(parameter) = parameters.other.keys().next() {
-            return Err(Error::UnsupportedParameter {
-                parameter: parameter.clone(),
-            }
-            .into());
+        for parameter in parameters.other.keys() {
+            warn!(
+                parameter,
+                "Ignoring unsupported model parameter for the ACP subscription flow"
+            );
+        }
+        // API-tier validation must not reject a request whose tier is omitted
+        // from the SDK options. This delta affects only the owned request view.
+        if parameters
+            .service_tier
+            .is_some_and(|tier| tier != ServiceTier::Off)
+        {
+            let mut delta = PartialAppConfig::default();
+            delta.assistant.model.parameters.service_tier = Some(ServiceTier::Off);
+            query.thread.events.add_config_delta(delta);
         }
         let beta = BetaFeatures(
             query

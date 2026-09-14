@@ -101,6 +101,9 @@ fn api_construction_ignores_subscription_flow() {
 #[test]
 fn child_environment_filter_preserves_native_login_location() {
     assert!(removes_variable("ANTHROPIC_API_KEY"));
+    assert!(removes_variable("anthropic_api_key"));
+    assert!(removes_variable("FORCE_PROMPT_CACHING_5M"));
+    assert!(removes_variable("ENABLE_PROMPT_CACHING_1H"));
     assert!(removes_variable("ANTHROPIC_BASE_URL"));
     assert!(removes_variable("CLAUDE_CODE_USE_BEDROCK"));
     assert!(removes_variable("CLAUDE_CODE_OAUTH_TOKEN"));
@@ -118,7 +121,7 @@ async fn inspection_output_is_bounded() {
     let mut command = Command::new("sh");
     command.args(["-c", "printf '%65537s' ''"]);
     assert_matches!(
-        read_output(&mut command, Check::AdapterVersion).await,
+        read_output(command, Check::AdapterVersion).await,
         Err(Error::OutputLimit {
             check: Check::AdapterVersion
         })
@@ -127,8 +130,8 @@ async fn inspection_output_is_bounded() {
 
 #[test(tokio::test)]
 async fn missing_runtime_has_setup_guidance() {
-    let mut command = Command::new("jp-test-nonexistent-claude-agent-acp");
-    let error = read_output(&mut command, Check::AdapterVersion)
+    let command = Command::new("jp-test-nonexistent-claude-agent-acp");
+    let error = read_output(command, Check::AdapterVersion)
         .await
         .unwrap_err();
     assert_matches!(&error, Error::Io { source, .. } if source.kind() == io::ErrorKind::NotFound);
@@ -145,7 +148,7 @@ async fn missing_runtime_has_setup_guidance() {
 async fn command_failure_is_typed_and_does_not_include_output() {
     let mut command = Command::new("sh");
     command.args(["-c", "printf private-diagnostic; exit 7"]);
-    let error = read_output(&mut command, Check::Authentication)
+    let error = read_output(command, Check::Authentication)
         .await
         .unwrap_err();
     assert_matches!(error, Error::CommandFailed { status, .. } if status.code() == Some(7));

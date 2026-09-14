@@ -216,6 +216,7 @@ pub(super) async fn run_turn_loop(
         cfg.assistant.name.clone(),
         Some(cfg.assistant.model.id.resolved().to_string()),
     );
+    let query_invocation = invocation.clone();
     let mut tool_renderer = ToolRenderer::new(
         ErrChannel::new(if cfg.style.tool_call.show && !printer.format().is_json() {
             printer.clone()
@@ -346,6 +347,7 @@ pub(super) async fn run_turn_loop(
                         .start_query(model, query, QueryContext {
                             root: root.to_path_buf(),
                             mcp_endpoint: tool_coordinator.endpoint(),
+                            invocation: Some(query_invocation.clone()),
                         })
                         .await
                         .map_err(|e| map_llm_error(e, vec![]))?;

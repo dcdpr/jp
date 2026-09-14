@@ -140,6 +140,18 @@ fn sdk_tool_observation_is_not_an_execution_request() {
 }
 
 #[test]
+fn final_usage_delta_wins_over_an_earlier_assistant_snapshot() {
+    let mut state = state();
+    state.sdk(notification(json!({"type":"stream_event","event":{"type":"message_start","message":{"id":"msg-count","model":"claude-opus-5","role":"assistant","content":[],"usage":{"input_tokens":2,"output_tokens":1}}}}))).unwrap();
+    state.sdk(notification(json!({"type":"stream_event","event":{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":7}}}))).unwrap();
+    state.sdk(notification(json!({"type":"assistant","message":{"id":"msg-count","model":"claude-opus-5","usage":{"input_tokens":2,"output_tokens":1}}}))).unwrap();
+    assert_eq!(
+        state.usage_snapshot()["requests"]["msg-count"]["output_tokens"],
+        7
+    );
+}
+
+#[test]
 fn completed_content_carries_the_usage_snapshot() {
     let mut state = state();
     state.sdk(notification(json!({"type":"stream_event","event":{"type":"content_block_start","index":0,"content_block":{"type":"text","text":"Answer."}}}))).unwrap();

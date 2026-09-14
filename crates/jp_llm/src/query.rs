@@ -1,6 +1,7 @@
 use camino::Utf8PathBuf;
 use jp_config::assistant::tool_choice::ToolChoice;
 use jp_conversation::thread::Thread;
+use jp_mcp::server::InvocationContext;
 use jp_tool::ToolDefinition;
 use url::Url;
 
@@ -15,6 +16,9 @@ pub struct QueryContext {
     /// JP's in-process MCP endpoint, with policy controlled through Host
     /// channels.
     pub mcp_endpoint: Option<Url>,
+    /// Host identity for scoping derived agent files.
+    /// Auxiliary requests that have no conversation owner leave this unset.
+    pub invocation: Option<InvocationContext>,
 }
 
 /// Who dispatches the tool calls reported in a provider stream.

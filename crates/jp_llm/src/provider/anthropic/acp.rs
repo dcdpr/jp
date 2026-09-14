@@ -4,7 +4,7 @@
 //! No prompt is submitted and JP never reads Claude Code's credential files.
 
 use std::{
-    env, fmt, io,
+    fmt, io,
     process::{ExitStatus, Stdio},
     str::{self, Utf8Error},
     time::Duration,
@@ -19,6 +19,7 @@ use tracing::warn;
 use crate::{error::StreamError, model::ModelDetails};
 
 mod options;
+mod process;
 mod protocol;
 mod transcript;
 mod transport;
@@ -31,9 +32,6 @@ pub enum Error {
     /// The adapter did not confirm a requested session setting.
     #[error("Claude adapter did not apply session setting `{setting}`")]
     SettingNotApplied { setting: SessionConfigId },
-    /// An explicitly configured parameter has no qualified ACP mapping.
-    #[error("assistant.model.parameters.{parameter} is not supported by the ACP subscription flow")]
-    UnsupportedParameter { parameter: String },
 
     /// Initialization did not establish the required protocol and transports.
     #[error("Claude adapter lacks the required ACP v1/HTTP MCP capabilities")]
@@ -47,13 +45,9 @@ pub enum Error {
     /// Tool-using agent requests need JP's execution endpoint.
     #[error("ACP tool execution requires the JP MCP Host")]
     ToolHostRequired,
-    /// The process-group lifecycle has not been qualified on this platform.
-    #[error("the ACP subscription flow currently requires a Unix host")]
-    PlatformUnsupported,
     /// The native transcript directory cannot be determined safely.
     #[error(
-        "Claude native history requires an absolute HOME/CLAUDE_CONFIG_DIR and a working \
-         directory whose encoded name is at most 200 bytes"
+        "Claude native history requires an absolute configuration directory and working directory"
     )]
     NativeDirectory,
     /// Derived transcript storage failed.
@@ -268,40 +262,39 @@ pub(super) fn model_details(name: &Name) -> ModelDetails {
 }
 
 fn removes_variable(name: &str) -> bool {
+    let normalized = name.to_ascii_uppercase();
+    let name = normalized.as_str();
     name.starts_with("ANTHROPIC_")
         || name.starts_with("CLAUDE_CODE_USE_")
         || name.starts_with("DISABLE_PROMPT_CACHING")
         || name == "CLAUDE_CODE_PROMPT_CACHE_TTL"
         || matches!(
             name,
-            "CLAUDE_CODE_OAUTH_TOKEN" | "CLAUDE_CODE_API_KEY" | "CLAUDECODE"
+            "CLAUDE_CODE_OAUTH_TOKEN"
+                | "CLAUDE_CODE_API_KEY"
+                | "CLAUDECODE"
+                | "FORCE_PROMPT_CACHING_5M"
+                | "ENABLE_PROMPT_CACHING_1H"
         )
 }
 
 async fn run(check: Check) -> Result<Vec<u8>, Error> {
-    let mut command = Command::new("claude-agent-acp");
+    let mut command = process::command();
     command.args(check.args());
-    for (name, _) in env::vars_os() {
-        if name.to_str().is_some_and(removes_variable) {
-            command.env_remove(name);
-        }
-    }
-    read_output(&mut command, check).await
+    read_output(command, check).await
 }
 
-async fn read_output(command: &mut Command, check: Check) -> Result<Vec<u8>, Error> {
+async fn read_output(mut command: Command, check: Check) -> Result<Vec<u8>, Error> {
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .kill_on_drop(true);
-    let mut child = command
-        .spawn()
-        .map_err(|source| Error::Io { check, source })?;
+    let mut child = process::spawn(command).map_err(|source| Error::Io { check, source })?;
     let result = timeout(Duration::from_secs(15), async {
         let mut bytes = Vec::new();
         child
-            .stdout
+            .stdout()
             .take()
             .expect("stdout is piped")
             .take(65_537)
@@ -324,14 +317,14 @@ async fn read_output(command: &mut Command, check: Check) -> Result<Vec<u8>, Err
     let result = result.unwrap_or(Err(Error::Timeout { check }));
     if result.is_err()
         && child.id().is_some()
-        && let Err(error) = child.kill().await
+        && let Err(error) = Box::into_pin(child.kill()).await
     {
         warn!(%error, %check, "Failed to stop Claude ACP inspection process.");
     }
     result
 }
 
-#[cfg(all(test, unix))]
+#[cfg(test)]
 #[path = "acp/live_tests.rs"]
 mod live_tests;
 

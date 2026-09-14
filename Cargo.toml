@@ -113,6 +113,7 @@ percent-encoding = { version = "2", default-features = false }
 portable-pty = { version = "0.9", default-features = false }
 pretty_assertions = { version = "1", default-features = false }
 proc-macro2 = { version = "1", default-features = false }
+process-wrap = { version = "9", default-features = false }
 proptest = { version = "1", default-features = false }
 quick-xml = { version = "0.41", default-features = false }
 quote = { version = "1", default-features = false }

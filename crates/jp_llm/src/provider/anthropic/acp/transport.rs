@@ -9,8 +9,7 @@ use std::{
 };
 
 use agent_client_protocol::{
-    AcpAgent, AcpAgentConfig, Client, ConnectTo, Error as RpcError, on_receive_notification,
-    on_receive_request,
+    Client, ConnectTo, Error as RpcError, on_receive_notification, on_receive_request,
     schema::{
         ProtocolVersion,
         v1::{
@@ -25,14 +24,15 @@ use chrono::Utc;
 use futures::StreamExt as _;
 use jp_config::assistant::{request::CachePolicy, tool_choice::ToolChoice};
 use serde_json::json;
+use sha2::{Digest as _, Sha256};
 use tokio::sync::mpsc;
 use tracing::{debug, warn};
 use uuid::Uuid;
 
 use super::{
     Error, options,
+    process::{self, Process},
     protocol::{AuthUpdate, SdkNotification, State},
-    removes_variable,
     transcript::PreparedRequest,
 };
 use crate::{
@@ -117,33 +117,21 @@ async fn run(
     cache: CachePolicy,
     sender: mpsc::Sender<Result<Event, StreamError>>,
 ) -> Result<(), Error> {
-    if !cfg!(unix) {
-        return Err(Error::PlatformUnsupported);
-    }
-    let artifact = NativeArtifact::write(&prepared, &context.root)?;
-    let environment = options::environment(&prepared, cache);
-    // `env -u` removes routing variables without passing their values in argv.
-    // The ACP SDK's launcher owns descendant termination but only supports
-    // setting environment variables, not removing inherited ones. Explicit JP
-    // overrides must survive `env -u`; envs() replaces their inherited values.
-    let mut launch = AcpAgentConfig::new("env");
-    for (key, _) in env::vars_os() {
-        if let Some(key) = key.to_str()
-            && removes_variable(key)
-            && !environment.contains_key(key)
-        {
-            launch = launch.args(["-u", key]);
-        }
-    }
-    launch = launch.arg("claude-agent-acp");
-    launch = launch.envs(&environment);
+    let directory = native_directory()?;
+    let project = project_name(&context);
+    let artifact = NativeArtifact::write(&prepared, &context.root, &directory, &project)?;
+    let mut environment = options::environment(&prepared, cache);
+    environment.insert("CLAUDE_CONFIG_DIR".into(), directory.into_string());
+    environment.insert("CLAUDE_CODE_PROJECT_DIR_NAME".into(), project);
+    let mut launch = process::command();
+    launch.envs(&environment);
     drive(
         prepared,
         context,
         tools,
         environment,
         artifact,
-        AcpAgent::new(launch),
+        Process(launch),
         sender,
     )
     .await
@@ -288,32 +276,68 @@ async fn drive(
     }
 }
 
+fn project_name(context: &QueryContext) -> String {
+    if let Some(invocation) = &context.invocation {
+        let name = format!(
+            "jp-{}-{}",
+            invocation.conversation_id, invocation.workspace_id
+        );
+        if name.len() <= 64
+            && name
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+        {
+            return name;
+        }
+        return format!(
+            "jp-{}",
+            &format!("{:x}", Sha256::digest(name.as_bytes()))[..48]
+        );
+    }
+    // Auxiliary requests have no conversation binding; their session files
+    // remain independent even when they share this storage directory.
+    format!(
+        "jp-aux-{}",
+        &format!("{:x}", Sha256::digest(context.root.as_str().as_bytes()))[..48]
+    )
+}
+
+fn native_directory() -> Result<Utf8PathBuf, Error> {
+    let directory = env::var("CLAUDE_CONFIG_DIR")
+        .or_else(|_| {
+            #[cfg(windows)]
+            let home = env::var("USERPROFILE").or_else(|_| env::var("HOME"));
+            #[cfg(not(windows))]
+            let home = env::var("HOME");
+            home.map(|home| format!("{home}/.claude"))
+        })
+        .map(Utf8PathBuf::from)
+        .map_err(|_| Error::NativeDirectory)?;
+    if !directory.is_absolute() {
+        return Err(Error::NativeDirectory);
+    }
+    Ok(directory)
+}
+
 struct NativeArtifact {
     session: Option<Uuid>,
     path: Option<Utf8PathBuf>,
 }
 
 impl NativeArtifact {
-    fn write(prepared: &PreparedRequest, root: &Utf8Path) -> Result<Self, Error> {
+    fn write(
+        prepared: &PreparedRequest,
+        root: &Utf8Path,
+        directory: &Utf8Path,
+        project: &str,
+    ) -> Result<Self, Error> {
         if prepared.history.is_empty() {
             return Ok(Self {
                 session: None,
                 path: None,
             });
         }
-        let home = env::var("CLAUDE_CONFIG_DIR")
-            .or_else(|_| env::var("HOME").map(|home| format!("{home}/.claude")))
-            .map_err(|_| Error::NativeDirectory)?;
-        let directory = Utf8PathBuf::from(home);
-        if !directory.is_absolute() || !root.is_absolute() {
-            return Err(Error::NativeDirectory);
-        }
-        let project: String = root
-            .as_str()
-            .chars()
-            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
-            .collect();
-        if project.len() > 200 {
+        if !root.is_absolute() {
             return Err(Error::NativeDirectory);
         }
         let directory = directory.join("projects").join(project);

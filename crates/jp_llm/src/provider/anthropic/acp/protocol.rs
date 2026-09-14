@@ -181,7 +181,13 @@ pub(super) struct State {
     /// Preserve notification failures across the JSON-RPC error boundary.
     pub failure: Option<StreamError>,
     usage: UsageLedger,
+    current_message: Option<MessageIdentity>,
     pending_flush: Option<usize>,
+}
+
+struct MessageIdentity {
+    id: String,
+    model: String,
 }
 
 impl State {
@@ -203,6 +209,7 @@ impl State {
             final_events: None,
             failure: None,
             usage: UsageLedger::default(),
+            current_message: None,
             pending_flush: None,
         }
     }
@@ -490,11 +497,26 @@ impl State {
     fn stream_event(&mut self, event: MessagesStreamEvent) -> Result<Vec<Event>, StreamError> {
         let mut events = Vec::new();
         match &event {
-            MessagesStreamEvent::MessageStart { .. } => {
+            MessagesStreamEvent::MessageStart { message, usage } => {
                 events.extend(self.flush_pending());
                 self.index_base = self.next_index;
+                self.current_message = Some(MessageIdentity {
+                    id: message.id.clone(),
+                    model: message.model.clone(),
+                });
+                if let Some(usage) = message.usage.as_ref().or(usage.as_ref()) {
+                    self.usage.observe_usage(&message.id, &message.model, usage);
+                }
+            }
+            MessagesStreamEvent::MessageDelta {
+                usage: Some(usage), ..
+            } => {
+                if let Some(message) = &self.current_message {
+                    self.usage.observe_usage(&message.id, &message.model, usage);
+                }
             }
             MessagesStreamEvent::MessageStop => {
+                self.current_message = None;
                 self.index_base = self.next_index;
                 self.ignored.clear();
                 return Ok(vec![]);

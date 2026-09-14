@@ -61,15 +61,21 @@ impl UsageLedger {
         else {
             return;
         };
+        self.observe_usage(id, model, usage);
+    }
+
+    pub(super) fn observe_usage(&mut self, id: &str, model: &str, usage: &Usage) {
         let entry = self
             .requests
-            .entry(id.clone())
+            .entry(id.to_owned())
             .or_insert_with(|| RequestUsage {
-                model: model.clone(),
+                model: model.to_owned(),
                 usage: usage.clone(),
             });
         entry.usage.input_tokens = usage.input_tokens.or(entry.usage.input_tokens);
-        entry.usage.output_tokens = usage.output_tokens.or(entry.usage.output_tokens);
+        // A complete assistant block can repeat the initial usage after the
+        // terminal message_delta has reported the final generated count.
+        entry.usage.output_tokens = entry.usage.output_tokens.max(usage.output_tokens);
         entry.usage.cache_creation_input_tokens = usage
             .cache_creation_input_tokens
             .or(entry.usage.cache_creation_input_tokens);

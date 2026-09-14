@@ -135,6 +135,7 @@ async fn live_cache_reconstruction() {
     let context = QueryContext {
         root: Utf8PathBuf::from_path_buf(env::current_dir().unwrap()).unwrap(),
         mcp_endpoint: None,
+        invocation: None,
     };
     let short = query(CachePolicy::Short, &tag);
     let first = request(&provider, short.clone(), context.clone()).await;

@@ -444,6 +444,7 @@ impl Provider for Anthropic {
             return acp::stream(model, query, QueryContext {
                 root,
                 mcp_endpoint: None,
+                invocation: None,
             });
         }
 
