@@ -1,7 +1,8 @@
 use async_trait::async_trait;
+use camino::Utf8PathBuf;
 use jp_config::{
     AppConfig, Config as _,
-    conversation::tool::{PartialToolConfig, ToolConfig},
+    conversation::tool::{PartialToolConfig, ToolConfig, ToolConfigWithDefaults},
 };
 use jp_tool::{Outcome, ToolDefinition, ToolDocs};
 use serde_json::Map;
@@ -16,6 +17,67 @@ impl BuiltinTool for EchoArguments {
     async fn execute(&self, arguments: &Value, _answers: &IndexMap<String, Value>) -> Outcome {
         Outcome::Success {
             content: arguments.to_string(),
+        }
+    }
+}
+
+/// The pieces an [`Execution`] borrows, owned so a test can keep them alive
+/// while it builds one.
+struct Fixture {
+    definition: ToolDefinition,
+    config: ToolConfigWithDefaults,
+    builtins: builtin::BuiltinExecutors,
+    upstream: Client,
+    root: Utf8PathBuf,
+    invocation: InvocationContext,
+}
+
+impl Fixture {
+    /// A tool configured from `partial`, with the given name and parameters.
+    fn new(name: &str, partial: Value, parameters: Value) -> Self {
+        let partial: PartialToolConfig = serde_json::from_value(partial).unwrap();
+        let mut app = AppConfig::new_test();
+        app.conversation.tools.insert(
+            name.to_owned(),
+            ToolConfig::from_partial(partial, vec![]).unwrap(),
+        );
+        Self {
+            definition: ToolDefinition {
+                name: name.to_owned(),
+                docs: ToolDocs::default(),
+                parameters,
+            },
+            config: app.conversation.tools.get(name).unwrap(),
+            builtins: builtin::BuiltinExecutors::new(),
+            upstream: Client::new(IndexMap::new()),
+            root: "/tmp".into(),
+            invocation: InvocationContext::default(),
+        }
+    }
+
+    fn with_builtin(mut self, name: &str, tool: impl BuiltinTool + 'static) -> Self {
+        self.builtins = self.builtins.register(name, tool);
+        self
+    }
+
+    fn with_invocation(mut self, invocation: InvocationContext) -> Self {
+        self.invocation = invocation;
+        self
+    }
+
+    fn execution(&self, id: &str, arguments: Value) -> Execution<'_> {
+        Execution {
+            definition: &self.definition,
+            id: id.to_owned(),
+            arguments,
+            config: &self.config,
+            root: &self.root,
+            access: None,
+            invocation: &self.invocation,
+            builtins: &self.builtins,
+            upstream: &self.upstream,
+            cancellation: CancellationToken::new(),
+            stderr: None,
         }
     }
 }
@@ -228,36 +290,16 @@ async fn local_tool_rejects_scalar_enum_on_array_parameter() {
 
 #[tokio::test]
 async fn execute_coerces_json_strings_before_calling_tool() {
-    let partial: PartialToolConfig = serde_json::from_value(json!({
-        "source": "builtin",
-    }))
-    .unwrap();
-    let tool = ToolConfig::from_partial(partial, vec![]).unwrap();
-    let mut app = AppConfig::new_test();
-    app.conversation
-        .tools
-        .insert("echo_arguments".to_owned(), tool);
-    let config = app.conversation.tools.get("echo_arguments").unwrap();
-    let definition = ToolDefinition {
-        name: "echo_arguments".to_owned(),
-        docs: ToolDocs::default(),
-        parameters: schema([("start_line", param("integer"), false)]),
-    };
-    let builtins = builtin::BuiltinExecutors::new().register("echo_arguments", EchoArguments);
+    let fixture = Fixture::new(
+        "echo_arguments",
+        json!({"source": "builtin"}),
+        schema([("start_line", param("integer"), false)]),
+    )
+    .with_builtin("echo_arguments", EchoArguments);
 
     let outcome = execute(
-        &definition,
-        "call_1".to_owned(),
-        json!({"start_line": "1"}),
-        &IndexMap::new(),
-        &config,
-        &Client::new(IndexMap::new()),
-        Utf8Path::new("/tmp"),
-        CancellationToken::new(),
-        &builtins,
-        None,
-        &InvocationContext::default(),
-        None,
+        &fixture.execution("call_1", json!({"start_line": "1"})),
+        &Answers::new(),
     )
     .await
     .unwrap();
@@ -470,54 +512,22 @@ async fn test_run_tool_command_tojson_filter_on_scalar_still_works() {
 #[tokio::test]
 #[cfg(unix)]
 async fn test_execute_local_exposes_invocation_ids_in_context() {
-    use jp_config::{
-        AppConfig, Config,
-        conversation::tool::{PartialToolConfig, ToolConfig},
-    };
-
-    let partial: PartialToolConfig = serde_json::from_value(json!({
-        "source": "local",
-        "command": "echo {{context.workspace_id}}-{{context.conversation_id}}",
-    }))
-    .expect("valid partial tool config");
-    let tool = ToolConfig::from_partial(partial, vec![]).expect("resolved tool config");
-
-    let mut cfg = AppConfig::new_test();
-    cfg.conversation.tools.insert("echo_ids".to_owned(), tool);
-    let config = cfg
-        .conversation
-        .tools
-        .get("echo_ids")
-        .expect("tool present");
-
-    let definition = ToolDefinition {
-        name: "echo_ids".to_owned(),
-        docs: ToolDocs::default(),
-        parameters: schema([]),
-    };
-    let invocation = InvocationContext {
+    let fixture = Fixture::new(
+        "echo_ids",
+        json!({
+            "source": "local",
+            "command": "echo {{context.workspace_id}}-{{context.conversation_id}}",
+        }),
+        schema([]),
+    )
+    .with_invocation(InvocationContext {
         workspace_id: "ws-abc".to_owned(),
         conversation_id: "conv-xyz".to_owned(),
-    };
-    let mcp_client = Client::new(IndexMap::new());
-    let builtins = builtin::BuiltinExecutors::new();
+    });
 
-    let outcome = execute(
-        &definition,
-        "call-1".to_owned(),
-        json!({}),
-        &IndexMap::new(),
-        &config,
-        &mcp_client,
-        Utf8Path::new("/tmp"),
-        CancellationToken::new(),
-        &builtins,
-        None,
-        &invocation,
-        None,
-    )
-    .await
-    .expect("execution succeeds");
+    let outcome = execute(&fixture.execution("call-1", json!({})), &Answers::new())
+        .await
+        .expect("execution succeeds");
 
     match outcome {
         ExecutionOutcome::Completed { result, .. } => {
@@ -543,45 +553,16 @@ impl builtin::BuiltinTool for ReachedBuiltin {
 /// paths treat theirs.
 #[tokio::test]
 async fn test_execute_builtin_dispatches_on_source_name() {
-    use jp_config::{
-        AppConfig, Config,
-        conversation::tool::{PartialToolConfig, ToolConfig},
-    };
-
-    let partial: PartialToolConfig = serde_json::from_value(json!({
-        "source": "builtin.describe_tools",
-    }))
-    .expect("valid partial tool config");
-    let tool = ToolConfig::from_partial(partial, vec![]).expect("resolved tool config");
-
-    let mut cfg = AppConfig::new_test();
-    cfg.conversation.tools.insert("docs".to_owned(), tool);
-    let config = cfg.conversation.tools.get("docs").expect("tool present");
-
-    let definition = ToolDefinition {
-        name: "docs".to_owned(),
-        docs: ToolDocs::default(),
-        parameters: schema([]),
-    };
-    let mcp_client = Client::new(IndexMap::new());
-    let builtins = builtin::BuiltinExecutors::new().register("describe_tools", ReachedBuiltin);
-
-    let outcome = execute(
-        &definition,
-        "call-1".to_owned(),
-        json!({}),
-        &IndexMap::new(),
-        &config,
-        &mcp_client,
-        Utf8Path::new("/tmp"),
-        CancellationToken::new(),
-        &builtins,
-        None,
-        &InvocationContext::default(),
-        None,
+    let fixture = Fixture::new(
+        "docs",
+        json!({"source": "builtin.describe_tools"}),
+        schema([]),
     )
-    .await
-    .expect("execution succeeds");
+    .with_builtin("describe_tools", ReachedBuiltin);
+
+    let outcome = execute(&fixture.execution("call-1", json!({})), &Answers::new())
+        .await
+        .expect("execution succeeds");
 
     match outcome {
         ExecutionOutcome::Completed { result, .. } => {

@@ -13,6 +13,14 @@
 //!
 //! Tools speaking the [`Outcome`] protocol are converted at the boundary; see
 //! the `From` implementations below.
+//!
+//! Which of these shapes a tool can actually produce depends on where it runs.
+//! An upstream MCP server returns a native MCP result, so every variant is
+//! reachable.
+//! A local command and a built-in both speak [`Outcome`], which carries text,
+//! an error, or a question and nothing else, so a result from either is always
+//! text.
+//! Closing that gap is RFD 058's work.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};

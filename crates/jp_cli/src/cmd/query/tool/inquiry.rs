@@ -211,7 +211,6 @@ impl LlmInquiryBackend {
 }
 
 #[async_trait]
-#[allow(clippy::too_many_lines)]
 impl InquiryBackend for LlmInquiryBackend {
     async fn inquire(
         &self,

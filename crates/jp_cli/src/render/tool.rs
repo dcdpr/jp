@@ -391,7 +391,7 @@ impl ToolRenderer {
     /// - `response` - The tool call response containing the result
     /// - `inline_results` - How to display inline results (Off, Full, Truncate)
     /// - `results_file_link` - How to display file links (Off, Full, Osc8)
-    #[allow(clippy::too_many_lines)]
+    #[expect(clippy::too_many_lines)]
     pub fn render_result(
         &self,
         response: &ToolCallResponse,
