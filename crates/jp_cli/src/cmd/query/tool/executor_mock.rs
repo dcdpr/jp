@@ -3,11 +3,10 @@
 use std::{collections::HashMap, sync::Mutex};
 
 use async_trait::async_trait;
-use camino::Utf8Path;
 use indexmap::IndexMap;
 use jp_config::conversation::tool::ToolConfigWithDefaults;
 use jp_conversation::event::{ToolCallRequest, ToolCallResponse};
-use jp_mcp::{Client, server::StderrSink};
+use jp_mcp::server::StderrSink;
 use jp_tool::{ToolDefinition, ToolDocs};
 use serde_json::{Map, Value, json};
 use tokio_util::sync::CancellationToken;
@@ -99,8 +98,6 @@ impl Executor for MockExecutor {
     async fn execute(
         &self,
         _answers: &IndexMap<String, Value>,
-        _mcp_client: &Client,
-        _root: &Utf8Path,
         _cancellation_token: CancellationToken,
         _stderr: Option<StderrSink>,
     ) -> ExecutorResult {

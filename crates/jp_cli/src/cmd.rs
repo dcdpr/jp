@@ -449,9 +449,6 @@ impl From<crate::error::Error> for Error {
             Conversation(error) => return error.into(),
             Mcp(error) => return error.into(),
             McpEndpoint(error) => [("message", error.to_string())].into(),
-            McpRecording(error) => {
-                [("message", format!("MCP Host recording failed: {error}"))].into()
-            }
             Llm(error) => return error.into(),
             Io(error) => return error.into(),
             Url(error) => return error.into(),

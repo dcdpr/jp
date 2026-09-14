@@ -614,14 +614,7 @@ fn parse_command_output(stdout: &[u8], stderr: &[u8], success: bool) -> CommandR
         // model to invent an explanation. Output that is not an `Outcome` at
         // all stays `RawOutput`.
         Err(error) => {
-            let value = serde_json::from_str::<Value>(&stdout_str).ok();
-            let is_needs_input = value
-                .as_ref()
-                .and_then(|v| v.get("type"))
-                .and_then(Value::as_str)
-                == Some("needs_input");
-
-            if !is_needs_input {
+            if !Outcome::claims_needs_input(&stdout_str) {
                 return CommandResult::RawOutput {
                     stdout: stdout_str.into_owned(),
                     stderr: String::from_utf8_lossy(stderr).into_owned(),
@@ -629,19 +622,13 @@ fn parse_command_output(stdout: &[u8], stderr: &[u8], success: bool) -> CommandR
                 };
             }
 
-            let question_id = value
-                .as_ref()
-                .and_then(|v| v.get("question"))
-                .and_then(|q| q.get("id"))
-                .and_then(Value::as_str);
-
-            match question_id {
+            match Outcome::claimed_question_id(&stdout_str) {
                 // The id itself is the problem: empty, or containing the `.`
                 // reserved as the inquiry-id separator (`QuestionId` rejects
                 // both).
-                Some(id) if id.is_empty() || id.contains('.') => CommandResult::InvalidInquiry {
-                    question_id: id.to_owned(),
-                },
+                Some(id) if id.is_empty() || id.contains('.') => {
+                    CommandResult::InvalidInquiry { question_id: id }
+                }
                 // Some other field failed to parse (wrong shape, missing
                 // field, protocol skew).
                 _ => CommandResult::MalformedInquiry { detail: error },

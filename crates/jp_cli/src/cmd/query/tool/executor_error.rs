@@ -71,12 +71,17 @@ pub(crate) enum ExecutorError {
     /// The content the caller received differs from the content recorded.
     #[error("MCP response differs from the recorded response")]
     DeliveryMismatch,
+}
 
-    /// The legacy inquiry interface accepts only textual choices.
-    #[error("Non-string inquiry choice")]
-    NonStringChoice,
-
-    /// The legacy inquiry interface cannot present this schema.
-    #[error("Unsupported tool inquiry schema")]
-    UnsupportedInquirySchema,
+impl ExecutorError {
+    /// Whether this belongs in the conversation as the call's outcome.
+    ///
+    /// A user stopping a tool is something that happened to the call, and the
+    /// model needs to know it.
+    /// Everything else here is the Host and the execution service failing to
+    /// agree, which is JP's problem to report to the user rather than the
+    /// model's to reason about.
+    pub(crate) fn is_call_outcome(&self) -> bool {
+        matches!(self, Self::Cancelled)
+    }
 }

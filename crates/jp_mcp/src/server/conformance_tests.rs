@@ -151,12 +151,14 @@ impl SseReader {
         }
     }
 
-    // Parse complete LF-framed events, including priming events with no data.
-    // Decoding after finding the delimiter handles split UTF-8 code points.
+    /// Read one complete event, including a priming event carrying no data.
+    ///
+    /// Decoding after finding the delimiter rather than before handles a UTF-8
+    /// code point split across two chunks.
     async fn frame(&mut self) -> (Option<String>, Option<Value>) {
         loop {
-            if let Some(offset) = self.buffer.windows(2).position(|bytes| bytes == b"\n\n") {
-                let bytes = self.buffer.drain(..offset + 2).collect::<Vec<_>>();
+            if let Some((start, len)) = Self::delimiter(&self.buffer) {
+                let bytes = self.buffer.drain(..start + len).collect::<Vec<_>>();
                 let frame = String::from_utf8(bytes).unwrap();
                 let id = frame
                     .lines()
@@ -183,6 +185,24 @@ impl SseReader {
         }
     }
 
+    /// Where the first event delimiter starts, and how long it is.
+    ///
+    /// The SSE grammar ends an event on a blank line, whose line break may be
+    /// LF, CRLF, or a bare CR.
+    /// A reader that only knows `\n\n` would hang on a conforming server rather
+    /// than report what it received.
+    fn delimiter(buffer: &[u8]) -> Option<(usize, usize)> {
+        let crlf = buffer.windows(4).position(|bytes| bytes == b"\r\n\r\n");
+        let lf = buffer.windows(2).position(|bytes| bytes == b"\n\n");
+        let cr = buffer.windows(2).position(|bytes| bytes == b"\r\r");
+        // The earliest match wins, and a CRLF pair starting at the same offset
+        // as a bare LF would have matched one byte later.
+        [(crlf, 4), (lf, 2), (cr, 2)]
+            .into_iter()
+            .filter_map(|(start, len)| Some((start?, len)))
+            .min_by_key(|(start, len)| (*start, std::cmp::Reverse(*len)))
+    }
+
     async fn reply(mut self, id: u64) -> Value {
         loop {
             if let (_, Some(message)) = self.frame().await {
@@ -192,6 +212,20 @@ impl SseReader {
             }
         }
     }
+}
+
+/// The fixture client has to frame events the way a conforming server may send
+/// them, or a future transport change looks like a hang rather than a failure.
+#[test]
+fn the_sse_reader_frames_every_line_break_the_grammar_allows() {
+    assert_eq!(SseReader::delimiter(b"data: x\n\nrest"), Some((7, 2)));
+    assert_eq!(SseReader::delimiter(b"data: x\r\n\r\nrest"), Some((7, 4)));
+    assert_eq!(SseReader::delimiter(b"data: x\r\rrest"), Some((7, 2)));
+    assert_eq!(SseReader::delimiter(b"data: x\n"), None);
+
+    // A CRLF pair must be consumed whole: taking the inner `\n\n` would leave
+    // a stray `\r` at the head of the next event.
+    assert_eq!(SseReader::delimiter(b"a\r\n\r\nb\n\nc"), Some((1, 4)));
 }
 
 struct Fixture {
@@ -381,7 +415,7 @@ async fn external_inquiry_reexecutes_with_host_answers_and_records_edited_output
     };
     assert_eq!(request.id.as_str(), "confirm");
     assert_eq!(
-        request.schema,
+        request.schema(),
         json!({"type":"boolean"}).as_object().unwrap().clone()
     );
     assert!(answers.is_empty());
@@ -413,21 +447,15 @@ async fn external_inquiry_reexecutes_with_host_answers_and_records_edited_output
         pending.call.request.arguments,
         json!({"value":"requested"}).as_object().unwrap().clone()
     );
-    let Interaction::Record {
-        arguments,
-        raw_result,
-        result,
-        reply,
-    } = pending.interaction
-    else {
+    let Interaction::Record { recording, reply } = pending.interaction else {
         panic!("expected record barrier")
     };
     assert_eq!(
-        arguments,
+        recording.arguments,
         json!({"value":"edited"}).as_object().unwrap().clone()
     );
-    assert_eq!(raw_result, Some(ToolResult::text(raw)));
-    assert_eq!(result, ToolResult::text("approved output"));
+    assert_eq!(recording.raw_result, Some(ToolResult::text(raw)));
+    assert_eq!(recording.result, ToolResult::text("approved output"));
     let mut returned = tokio::spawn(response.reply(11));
     assert!(
         timeout(Duration::from_millis(40), &mut returned)
@@ -439,8 +467,8 @@ async fn external_inquiry_reexecutes_with_host_answers_and_records_edited_output
     // delivered until this has happened.
     let record = json!({
         "requested": pending.call.request.arguments,
-        "executed": arguments,
-        "result": result.to_text(),
+        "executed": recording.arguments,
+        "result": recording.result.to_text(),
     });
     fs::write(
         fixture.root.path().join("record.json"),
@@ -812,10 +840,10 @@ async fn cancellation_is_scoped_to_the_requesting_client_session() {
         .unwrap();
     let record = next(&mut fixture.host).await;
     assert_eq!(record.call.id, second_input.call.id);
-    let Interaction::Record { result, reply, .. } = record.interaction else {
+    let Interaction::Record { recording, reply } = record.interaction else {
         panic!("expected only the second result")
     };
-    assert_eq!(result, ToolResult::text("answered"));
+    assert_eq!(recording.result, ToolResult::text("answered"));
     reply.send(Ok(())).unwrap();
     assert_eq!(
         second_response.reply(31).await,
@@ -838,10 +866,10 @@ impl BuiltinTool for LargeResult {
 
 #[tokio::test]
 async fn large_result_reaches_external_client_byte_for_byte() {
-    // A repetitive fixed payload avoids a large checked-in fixture. Comparing
-    // the entire value catches truncation, duplication, and newline changes.
+    // 240 KB, well past any single chunk the transport reads. A repetitive
+    // fixed payload avoids a large checked-in fixture, and comparing the entire
+    // value catches truncation, duplication, and newline changes.
     let payload = "line\n".repeat(48_000);
-    assert_eq!(payload.len(), 240_000);
     let mut fixture = fixture(
         json!({"source":"builtin", "run":"ask", "result":"unattended"}),
         BuiltinExecutors::new().register("probe", LargeResult(payload.clone())),
@@ -852,11 +880,10 @@ async fn large_result_reaches_external_client_byte_for_byte() {
         .request(33, "tools/call", json!({"name":"probe","arguments":{}}))
         .await;
     release(&mut fixture.host).await;
-    let Interaction::Record { result, reply, .. } = next(&mut fixture.host).await.interaction
-    else {
+    let Interaction::Record { recording, reply } = next(&mut fixture.host).await.interaction else {
         panic!("expected record")
     };
-    assert_eq!(result, ToolResult::text(payload.clone()));
+    assert_eq!(recording.result, ToolResult::text(payload.clone()));
     reply.send(Ok(())).unwrap();
     let result = response.reply(33).await;
     assert_eq!(
@@ -882,13 +909,10 @@ async fn external_denial_never_executes_the_tool() {
             reason: "denied by Host".into(),
         }))
         .unwrap();
-    let Interaction::Record {
-        raw_result, reply, ..
-    } = next(&mut fixture.host).await.interaction
-    else {
+    let Interaction::Record { recording, reply } = next(&mut fixture.host).await.interaction else {
         panic!("expected recording without release")
     };
-    assert_eq!(raw_result, None);
+    assert_eq!(recording.raw_result, None);
     reply.send(Ok(())).unwrap();
     assert_eq!(
         response.reply(35).await,

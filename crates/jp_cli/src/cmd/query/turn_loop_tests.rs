@@ -359,7 +359,6 @@ async fn test_interrupt_stop_during_streaming_persists_content() {
 
         let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        let mcp_client = jp_mcp::Client::default();
         let (router, signals) = test_router();
         let router = Arc::new(router);
 
@@ -385,8 +384,6 @@ async fn test_interrupt_stop_during_streaming_persists_content() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             false, // interactive
             &[],   // attachments
             &lock,
@@ -459,7 +456,6 @@ async fn a_completed_block_is_persisted_before_the_turn_ends() {
 
         let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        let mcp_client = jp_mcp::Client::default();
         let (router, signals) = test_router();
         let router = Arc::new(router);
 
@@ -484,8 +480,6 @@ async fn a_completed_block_is_persisted_before_the_turn_ends() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             false, // is_tty
             &[],   // attachments
             &lock,
@@ -558,7 +552,6 @@ async fn a_refusal_takes_back_content_it_had_persisted() {
 
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
-    let mcp_client = jp_mcp::Client::default();
     let (router, _signals) = test_router();
     let router = Arc::new(router);
 
@@ -567,8 +560,6 @@ async fn a_refusal_takes_back_content_it_had_persisted() {
         &model,
         &config,
         &router,
-        &mcp_client,
-        root,
         false,
         &[],
         &lock,
@@ -626,7 +617,6 @@ async fn test_streaming_interrupt_menu_cancel_escalates() {
 
         let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        let mcp_client = jp_mcp::Client::default();
         let (router, signals) = test_router();
         let router = Arc::new(router);
 
@@ -653,8 +643,6 @@ async fn test_streaming_interrupt_menu_cancel_escalates() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             false, // interactive
             &[],   // attachments
             &lock,
@@ -728,7 +716,6 @@ async fn test_normal_completion_persists_content() {
 
     let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
-    let mcp_client = jp_mcp::Client::default();
     let router = detached_router();
 
     run_turn_loop(
@@ -736,8 +723,6 @@ async fn test_normal_completion_persists_content() {
         &model,
         &config,
         &router,
-        &mcp_client,
-        root,
         false, // interactive
         &[],
         &lock,
@@ -810,7 +795,6 @@ async fn premature_stream_end_without_finished_returns_error() {
 
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
-    let mcp_client = jp_mcp::Client::default();
     let router = detached_router();
 
     // Without the backstop the loop pends forever, so cap the whole run.
@@ -821,8 +805,6 @@ async fn premature_stream_end_without_finished_returns_error() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             false, // interactive
             &[],
             &lock,
@@ -874,7 +856,6 @@ async fn premature_stream_end_exhausts_retry_budget() {
 
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
-    let mcp_client = jp_mcp::Client::default();
     let router = detached_router();
 
     let result = timeout(
@@ -884,8 +865,6 @@ async fn premature_stream_end_exhausts_retry_budget() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             false, // interactive
             &[],
             &lock,
@@ -953,7 +932,6 @@ async fn output_ceiling_ends_turn_without_re_requesting() {
 
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
-    let mcp_client = jp_mcp::Client::default();
     let router = detached_router();
 
     let result = timeout(
@@ -963,8 +941,6 @@ async fn output_ceiling_ends_turn_without_re_requesting() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             false, // interactive
             &[],
             &lock,
@@ -1059,7 +1035,6 @@ async fn orphan_tool_call_is_sanitized_before_provider_request() {
 
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
-    let mcp_client = jp_mcp::Client::default();
     let router = detached_router();
 
     run_turn_loop(
@@ -1067,8 +1042,6 @@ async fn orphan_tool_call_is_sanitized_before_provider_request() {
         &model,
         &config,
         &router,
-        &mcp_client,
-        root,
         false, // interactive
         &[],
         &lock,
@@ -1143,7 +1116,6 @@ async fn test_tool_call_cycle_completes_with_followup() {
 
     let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
-    let mcp_client = jp_mcp::Client::default();
     let router = detached_router();
 
     let result = run_turn_loop(
@@ -1151,8 +1123,6 @@ async fn test_tool_call_cycle_completes_with_followup() {
         &model,
         &config,
         &router,
-        &mcp_client,
-        root,
         false, // interactive
         &[],
         &lock,
@@ -1254,8 +1224,6 @@ impl Executor for SleepingExecutor {
     async fn execute(
         &self,
         _answers: &IndexMap<String, Value>,
-        _mcp_client: &jp_mcp::Client,
-        _root: &Utf8Path,
         cancellation_token: CancellationToken,
         _stderr: Option<jp_mcp::server::StderrSink>,
     ) -> ExecutorResult {
@@ -1414,7 +1382,6 @@ async fn test_tool_interrupt_menu_cancel_escalates() {
 
         let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        let mcp_client = jp_mcp::Client::default();
         let (router, signals) = test_router();
         let router = Arc::new(router);
 
@@ -1448,8 +1415,6 @@ async fn test_tool_interrupt_menu_cancel_escalates() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             false, // interactive
             &[],
             &lock,
@@ -1562,7 +1527,6 @@ async fn test_tool_stop_on_interrupt_commits_responses_without_follow_up() {
 
         let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        let mcp_client = jp_mcp::Client::default();
         let (router, signals) = test_router();
         let router = Arc::new(router);
 
@@ -1596,8 +1560,6 @@ async fn test_tool_stop_on_interrupt_commits_responses_without_follow_up() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             false, // interactive
             &[],
             &lock,
@@ -1705,7 +1667,6 @@ async fn test_interrupt_during_tool_prompt_completes_turn_early() {
 
         let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        let mcp_client = jp_mcp::Client::default();
         let (router, signals) = test_router();
         let router = Arc::new(router);
 
@@ -1740,8 +1701,6 @@ async fn test_interrupt_during_tool_prompt_completes_turn_early() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             true, // interactive: user-targeted question prompts need a user
             &[],
             &lock,
@@ -1843,7 +1802,6 @@ async fn test_multiple_tool_calls_in_sequence() {
 
     let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
-    let mcp_client = jp_mcp::Client::default();
     let router = detached_router();
 
     let result = run_turn_loop(
@@ -1851,8 +1809,6 @@ async fn test_multiple_tool_calls_in_sequence() {
         &model,
         &config,
         &router,
-        &mcp_client,
-        root,
         false, // interactive
         &[],
         &lock,
@@ -1933,7 +1889,6 @@ async fn test_empty_tool_response_continues_cycle() {
 
     let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
-    let mcp_client = jp_mcp::Client::default();
     let router = detached_router();
 
     let result = run_turn_loop(
@@ -1941,8 +1896,6 @@ async fn test_empty_tool_response_continues_cycle() {
         &model,
         &config,
         &router,
-        &mcp_client,
-        root,
         false, // interactive
         &[],
         &lock,
@@ -2042,7 +1995,6 @@ async fn test_tool_restart_on_interrupt() {
 
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        let mcp_client = jp_mcp::Client::default();
         let (router, signals) = test_router();
         let router = Arc::new(router);
 
@@ -2086,8 +2038,6 @@ async fn test_tool_restart_on_interrupt() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             false, // interactive
             &[],
             &lock,
@@ -2197,7 +2147,6 @@ async fn test_merged_stream_exits_after_tool_response() {
 
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         // No signals sent - the turn loop should complete naturally after
@@ -2207,8 +2156,6 @@ async fn test_merged_stream_exits_after_tool_response() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             false, // interactive
             &[],
             &lock,
@@ -2307,7 +2254,6 @@ async fn test_tool_call_with_run_mode_ask_approves() {
 
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         // Mock: user presses 'y' to approve
@@ -2334,8 +2280,6 @@ async fn test_tool_call_with_run_mode_ask_approves() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             true, // interactive = true to enable prompts
             &[],
             &lock,
@@ -2450,7 +2394,6 @@ async fn test_tool_call_with_run_mode_ask_skips() {
 
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         // Mock: user presses 'n' to skip
@@ -2476,8 +2419,6 @@ async fn test_tool_call_with_run_mode_ask_skips() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             true, // interactive
             &[],
             &lock,
@@ -2604,7 +2545,6 @@ async fn test_permission_prompt_follows_interactive_not_is_tty() {
 
         let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         let backend = MockPromptBackend::new().with_inline_responses(['n']);
@@ -2629,8 +2569,6 @@ async fn test_permission_prompt_follows_interactive_not_is_tty() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             true, // interactive: the user is still at the terminal
             &[],
             &lock,
@@ -2730,7 +2668,6 @@ async fn test_tool_call_with_run_mode_unattended() {
 
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         // No prompt responses needed - tool runs without asking
@@ -2752,8 +2689,6 @@ async fn test_tool_call_with_run_mode_unattended() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             true, // interactive doesn't matter for Unattended
             &[],
             &lock,
@@ -2868,7 +2803,6 @@ async fn test_tool_call_with_run_mode_skip() {
 
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         // No prompt responses needed - tool is skipped automatically
@@ -2899,8 +2833,6 @@ async fn test_tool_call_with_run_mode_skip() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             true, // interactive
             &[],
             &lock,
@@ -3068,7 +3000,6 @@ async fn test_multiple_tools_with_different_run_modes() {
 
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         // User presses 'y' to approve the Ask tool
@@ -3102,8 +3033,6 @@ async fn test_multiple_tools_with_different_run_modes() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             true, // interactive
             &[],
             &lock,
@@ -3230,7 +3159,6 @@ async fn test_tool_call_returns_error() {
 
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         let backend = MockPromptBackend::new();
@@ -3250,8 +3178,6 @@ async fn test_tool_call_returns_error() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             true, // interactive
             &[],
             &lock,
@@ -3477,7 +3403,6 @@ async fn test_waiting_indicator_shows_during_delay() {
         let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
         // The status region only renders against a terminal it has to itself.
         let printer = Arc::new(printer.with_terminal(TerminalCapability::interactive(Some(80))));
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         run_turn_loop(
@@ -3485,8 +3410,6 @@ async fn test_waiting_indicator_shows_during_delay() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             false, // interactive
             &[],
             &lock,
@@ -3577,7 +3500,6 @@ async fn test_waiting_indicator_survives_keep_alive_and_shows_status() {
 
         let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer.with_terminal(TerminalCapability::interactive(Some(80))));
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         run_turn_loop(
@@ -3585,8 +3507,6 @@ async fn test_waiting_indicator_survives_keep_alive_and_shows_status() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             true, // interactive
             &[],
             &lock,
@@ -3691,7 +3611,6 @@ async fn test_waiting_indicator_cleared_before_retry_notice() {
 
         let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer.with_terminal(TerminalCapability::interactive(Some(80))));
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         run_turn_loop(
@@ -3699,8 +3618,6 @@ async fn test_waiting_indicator_cleared_before_retry_notice() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             true, // interactive
             &[],
             &lock,
@@ -3778,7 +3695,6 @@ async fn test_waiting_indicator_not_shown_when_disabled() {
         // A terminal is available; `show = false` is what turns the indicator
         // off, so the region must stay inert on its own.
         let printer = Arc::new(printer.with_terminal(TerminalCapability::interactive(Some(80))));
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         run_turn_loop(
@@ -3786,8 +3702,6 @@ async fn test_waiting_indicator_not_shown_when_disabled() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             true, // interactive
             &[],
             &lock,
@@ -3857,7 +3771,6 @@ async fn test_waiting_indicator_not_shown_for_non_tty() {
         // The default capability models a piped stderr.
         let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         run_turn_loop(
@@ -3865,8 +3778,6 @@ async fn test_waiting_indicator_not_shown_for_non_tty() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             true, // interactive
             &[],
             &lock,
@@ -3937,7 +3848,6 @@ async fn test_waiting_indicator_follows_stderr_not_stdout() {
         // though stdout is a terminal.
         let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         run_turn_loop(
@@ -3945,8 +3855,6 @@ async fn test_waiting_indicator_follows_stderr_not_stdout() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             true, // interactive
             &[],
             &lock,
@@ -4122,7 +4030,6 @@ async fn test_multi_part_tool_call_shows_preparing_spinner() {
 
         let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer.with_terminal(terminal));
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         let result = run_turn_loop(
@@ -4130,8 +4037,6 @@ async fn test_multi_part_tool_call_shows_preparing_spinner() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             true, // interactive
             &[],
             &lock,
@@ -4209,7 +4114,6 @@ async fn test_turn_start_event_is_emitted() {
 
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
-    let mcp_client = jp_mcp::Client::default();
     let router = detached_router();
 
     run_turn_loop(
@@ -4217,8 +4121,6 @@ async fn test_turn_start_event_is_emitted() {
         &model,
         &config,
         &router,
-        &mcp_client,
-        root,
         false, // interactive
         &[],
         &lock,
@@ -4260,8 +4162,6 @@ async fn test_turn_start_index_increments_across_turns() {
         .create_and_lock_conversation(Conversation::default(), config.clone().into(), None)
         .unwrap();
 
-    let mcp_client = jp_mcp::Client::default();
-
     // First turn.
     let chat_request = ChatRequest::from("First question");
 
@@ -4280,8 +4180,6 @@ async fn test_turn_start_index_increments_across_turns() {
         &model,
         &config,
         &router,
-        &mcp_client,
-        root,
         false, // interactive
         &[],
         &lock,
@@ -4315,8 +4213,6 @@ async fn test_turn_start_index_increments_across_turns() {
         &model,
         &config,
         &router,
-        &mcp_client,
-        root,
         false, // interactive
         &[],
         &lock,
@@ -4402,7 +4298,6 @@ async fn test_markdown_flushed_before_tool_header() {
 
         let (printer, out, err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer.with_terminal(terminal));
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         run_turn_loop(
@@ -4410,8 +4305,6 @@ async fn test_markdown_flushed_before_tool_header() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             true, // interactive
             &[],
             &lock,
@@ -4573,7 +4466,6 @@ async fn test_parallel_tool_calls_rendered_atomically() {
 
         let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         let executor_source = TestExecutorSource::new()
@@ -4596,8 +4488,6 @@ async fn test_parallel_tool_calls_rendered_atomically() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             false, // interactive
             &[],
             &lock,
@@ -4664,8 +4554,8 @@ async fn test_parallel_tool_calls_rendered_atomically() {
 
 /// Verifies that a single tool call uses "Calling tool" (singular), and that
 /// its header+arguments are rendered atomically.
-#[tokio::test]
 #[expect(clippy::too_many_lines)]
+#[tokio::test]
 async fn test_single_tool_call_rendered_with_args() {
     let test_result = Box::pin(timeout(Duration::from_secs(5), async {
         let tmp = tempdir().unwrap();
@@ -4739,7 +4629,6 @@ async fn test_single_tool_call_rendered_with_args() {
 
         let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         let executor_source = TestExecutorSource::new().with_executor("fs_read_file", |req| {
@@ -4755,8 +4644,6 @@ async fn test_single_tool_call_rendered_with_args() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             false, // interactive
             &[],
             &lock,
@@ -4859,8 +4746,6 @@ impl Executor for TalkingExecutor {
     async fn execute(
         &self,
         _answers: &IndexMap<String, Value>,
-        _mcp_client: &jp_mcp::Client,
-        _root: &Utf8Path,
         _cancellation_token: CancellationToken,
         stderr: Option<jp_mcp::server::StderrSink>,
     ) -> ExecutorResult {
@@ -4979,7 +4864,6 @@ async fn a_running_tools_stderr_reaches_the_progress_window() {
         let printer = Arc::new(
             printer.with_terminal(TerminalCapability::interactive(Some(80)).with_rows(Some(24))),
         );
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         let got_sink = Arc::new(AtomicBool::new(false));
@@ -5001,8 +4885,6 @@ async fn a_running_tools_stderr_reaches_the_progress_window() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             false, // interactive
             &[],
             &lock,
@@ -5064,7 +4946,6 @@ async fn parallel_tools_label_their_window_rows() {
         let printer = Arc::new(
             printer.with_terminal(TerminalCapability::interactive(Some(80)).with_rows(Some(24))),
         );
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         let seen = Arc::new(AtomicBool::new(false));
@@ -5098,8 +4979,6 @@ async fn parallel_tools_label_their_window_rows() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             false, // interactive
             &[],
             &lock,
@@ -5149,7 +5028,6 @@ async fn parallel_tools_label_their_window_rows() {
 /// region frame lands inside the link's line — not about the text being
 /// present at all.
 #[tokio::test(flavor = "multi_thread")]
-#[expect(clippy::too_many_lines)]
 async fn a_tool_result_survives_a_live_window() {
     let test_result = Box::pin(timeout(Duration::from_secs(5), async {
         let tmp = tempdir().unwrap();
@@ -5190,7 +5068,6 @@ async fn a_tool_result_survives_a_live_window() {
         let printer = Arc::new(
             printer.with_terminal(TerminalCapability::interactive(Some(80)).with_rows(Some(24))),
         );
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         let seen = Arc::new(AtomicBool::new(false));
@@ -5220,8 +5097,6 @@ async fn a_tool_result_survives_a_live_window() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             false, // interactive
             &[],
             &lock,
@@ -5322,7 +5197,6 @@ async fn a_sink_survives_the_re_spawn_an_answer_triggers() {
         let printer = Arc::new(
             printer.with_terminal(TerminalCapability::interactive(Some(80)).with_rows(Some(24))),
         );
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         let executor_source = TestExecutorSource::new().with_executor("asking_tool", |req| {
@@ -5335,8 +5209,6 @@ async fn a_sink_survives_the_re_spawn_an_answer_triggers() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             false, // interactive
             &[],
             &lock,
@@ -5374,8 +5246,8 @@ async fn a_sink_survives_the_re_spawn_an_answer_triggers() {
 /// Rows are screen space, so the window's size is global.
 /// Membership is not: `conversation.tools.<name>.style.print_stderr` keeps one
 /// noisy tool out without shrinking the window for everything else.
-#[tokio::test(flavor = "multi_thread")]
 #[expect(clippy::too_many_lines)]
+#[tokio::test(flavor = "multi_thread")]
 async fn a_tool_can_opt_out_of_the_progress_window() {
     let test_result = Box::pin(timeout(Duration::from_secs(5), async {
         let tmp = tempdir().unwrap();
@@ -5434,7 +5306,6 @@ async fn a_tool_can_opt_out_of_the_progress_window() {
         let printer = Arc::new(
             printer.with_terminal(TerminalCapability::interactive(Some(80)).with_rows(Some(24))),
         );
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         let loud_got_sink = Arc::new(AtomicBool::new(false));
@@ -5469,8 +5340,6 @@ async fn a_tool_can_opt_out_of_the_progress_window() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             false, // interactive
             &[],
             &lock,
@@ -5675,7 +5544,6 @@ async fn a_tool_prompt_hides_the_window_and_restores_it() {
         let printer = Arc::new(
             printer.with_terminal(TerminalCapability::interactive(Some(80)).with_rows(Some(24))),
         );
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         let prompts = Arc::new(ObservingPromptBackend::new(
@@ -5693,8 +5561,6 @@ async fn a_tool_prompt_hides_the_window_and_restores_it() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             true, // interactive: a user-targeted question needs a user
             &[],
             &lock,
@@ -5796,8 +5662,6 @@ impl Executor for AskingTalkingExecutor {
     async fn execute(
         &self,
         answers: &IndexMap<String, Value>,
-        _mcp_client: &jp_mcp::Client,
-        _root: &Utf8Path,
         _cancellation_token: CancellationToken,
         stderr: Option<jp_mcp::server::StderrSink>,
     ) -> ExecutorResult {
@@ -5870,8 +5734,6 @@ impl Executor for InquiryMockExecutor {
     async fn execute(
         &self,
         answers: &IndexMap<String, Value>,
-        _mcp_client: &jp_mcp::Client,
-        _root: &camino::Utf8Path,
         _cancellation_token: tokio_util::sync::CancellationToken,
         _stderr: Option<jp_mcp::server::StderrSink>,
     ) -> ExecutorResult {
@@ -6155,8 +6017,8 @@ async fn inquiry_ceiling_honors_the_per_question_override() {
 
 /// Tool has one boolean question with `QuestionTarget::Assistant`.
 /// Flow: LLM tool call → `NeedsInput` → inquiry → answer → tool completes.
-#[tokio::test]
 #[expect(clippy::too_many_lines)]
+#[tokio::test]
 async fn test_tool_with_single_inquiry() {
     let test_result = Box::pin(timeout(Duration::from_secs(5), async {
         let tmp = tempdir().unwrap();
@@ -6199,7 +6061,6 @@ async fn test_tool_with_single_inquiry() {
 
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         let executor_source = TestExecutorSource::new().with_executor("inquiry_tool", |req| {
@@ -6217,8 +6078,6 @@ async fn test_tool_with_single_inquiry() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             false, // interactive
             &[],
             &lock,
@@ -6327,7 +6186,6 @@ async fn test_secret_question_without_tty_fails_tool() {
 
         let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         let executor_source = TestExecutorSource::new().with_executor("secret_tool", |req| {
@@ -6345,8 +6203,6 @@ async fn test_secret_question_without_tty_fails_tool() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             false, // interactive
             &[],
             &lock,
@@ -6436,7 +6292,6 @@ async fn test_secret_question_with_assistant_target_fails_tool() {
 
         let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         let executor_source = TestExecutorSource::new().with_executor("secret_tool", |req| {
@@ -6454,8 +6309,6 @@ async fn test_secret_question_with_assistant_target_fails_tool() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             false, // interactive
             &[],
             &lock,
@@ -6538,7 +6391,6 @@ async fn test_secret_prompter_answer_is_redacted() {
 
         let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         let executor_source = TestExecutorSource::new().with_executor("secret_tool", |req| {
@@ -6556,8 +6408,6 @@ async fn test_secret_prompter_answer_is_redacted() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             true, // interactive
             &[],
             &lock,
@@ -6644,7 +6494,6 @@ async fn test_secret_static_answer_is_redacted() {
 
         let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         let executor_source = TestExecutorSource::new().with_executor("secret_tool", |req| {
@@ -6662,8 +6511,6 @@ async fn test_secret_static_answer_is_redacted() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             false, // interactive
             &[],
             &lock,
@@ -6751,7 +6598,6 @@ async fn test_static_answer_records_answered_inquiry() {
 
         let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         let executor_source = TestExecutorSource::new().with_executor("static_tool", |req| {
@@ -6769,8 +6615,6 @@ async fn test_static_answer_records_answered_inquiry() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             false, // interactive
             &[],
             &lock,
@@ -6861,7 +6705,6 @@ async fn test_remembered_answer_cache_hit_records_new_inquiry_pair() {
 
         let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         let executor_source = TestExecutorSource::new().with_executor("cached_tool", |req| {
@@ -6884,8 +6727,6 @@ async fn test_remembered_answer_cache_hit_records_new_inquiry_pair() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             true, // interactive
             &[],
             &lock,
@@ -6985,7 +6826,6 @@ async fn test_tool_with_multiple_inquiries() {
 
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         let executor_source = TestExecutorSource::new().with_executor("multi_q_tool", |req| {
@@ -7006,8 +6846,6 @@ async fn test_tool_with_multiple_inquiries() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             false, // interactive
             &[],
             &lock,
@@ -7064,8 +6902,8 @@ async fn test_tool_with_multiple_inquiries() {
 
 /// Two parallel tools: one requires an inquiry, the other completes normally.
 /// The inquiry should not block the normal tool from completing.
-#[tokio::test]
 #[expect(clippy::too_many_lines)]
+#[tokio::test]
 async fn test_parallel_tools_one_with_inquiry() {
     let test_result = Box::pin(timeout(Duration::from_secs(5), async {
         let tmp = tempdir().unwrap();
@@ -7136,7 +6974,6 @@ async fn test_parallel_tools_one_with_inquiry() {
 
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         let executor_source = TestExecutorSource::new()
@@ -7158,8 +6995,6 @@ async fn test_parallel_tools_one_with_inquiry() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             false, // interactive
             &[],
             &lock,
@@ -7211,8 +7046,8 @@ async fn test_parallel_tools_one_with_inquiry() {
 /// Two parallel tools both requiring inquiries.
 /// Uses responses without `inquiry_id` since the concurrent inquiry call order
 /// is non-deterministic.
-#[tokio::test]
 #[expect(clippy::too_many_lines)]
+#[tokio::test]
 async fn test_parallel_tools_both_with_inquiries() {
     let test_result = Box::pin(timeout(Duration::from_secs(5), async {
         let tmp = tempdir().unwrap();
@@ -7269,7 +7104,6 @@ async fn test_parallel_tools_both_with_inquiries() {
 
         let (printer, out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         let executor_source = TestExecutorSource::new()
@@ -7296,8 +7130,6 @@ async fn test_parallel_tools_both_with_inquiries() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             false, // interactive
             &[],
             &lock,
@@ -7438,7 +7270,6 @@ async fn test_retry_counter_resets_on_successful_event() {
 
         let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         let result = run_turn_loop(
@@ -7446,8 +7277,6 @@ async fn test_retry_counter_resets_on_successful_event() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             false, // interactive
             &[],
             &lock,
@@ -7569,7 +7398,6 @@ async fn test_unavailable_tool_before_approved_does_not_panic() {
 
         let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         // Only `ok_tool` is registered with the executor source; the
@@ -7585,8 +7413,6 @@ async fn test_unavailable_tool_before_approved_does_not_panic() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             false, // interactive
             &[],
             &lock,
@@ -7677,7 +7503,6 @@ async fn test_inquiry_failure_marks_tool_as_error() {
 
         let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         let executor_source = TestExecutorSource::new().with_executor("inquiry_tool", |req| {
@@ -7695,8 +7520,6 @@ async fn test_inquiry_failure_marks_tool_as_error() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             false, // interactive
             &[],
             &lock,
@@ -7881,7 +7704,6 @@ async fn test_live_header_uses_configured_model_id_not_provider_returned() {
         // The live role header is chrome, so it lands on the error stream.
         let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
         let printer = Arc::new(printer);
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         run_turn_loop(
@@ -7889,8 +7711,6 @@ async fn test_live_header_uses_configured_model_id_not_provider_returned() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             false, // interactive
             &[],
             &lock,
@@ -7991,7 +7811,6 @@ async fn reasoning_before_a_tool_call_shades_the_tool_chrome() {
 
     let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
-    let mcp_client = jp_mcp::Client::default();
     let router = detached_router();
 
     let executor_source = TestExecutorSource::new().with_executor("mock_tool", |req| {
@@ -8004,8 +7823,6 @@ async fn reasoning_before_a_tool_call_shades_the_tool_chrome() {
         &model,
         &config,
         &router,
-        &mcp_client,
-        root,
         false, // interactive
         &[],
         &lock,
@@ -8115,7 +7932,6 @@ async fn a_tool_that_does_not_join_reasoning_renders_unshaded_live() {
 
     let (printer, _out, err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
-    let mcp_client = jp_mcp::Client::default();
     let router = detached_router();
 
     let executor_source = TestExecutorSource::new().with_executor("mock_tool", |req| {
@@ -8128,8 +7944,8 @@ async fn a_tool_that_does_not_join_reasoning_renders_unshaded_live() {
         &model,
         &config,
         &router,
-        &mcp_client,
         root,
+        InvocationContext::default(),
         false, // interactive
         &[],
         &lock,
@@ -8250,7 +8066,6 @@ async fn test_rebuild_cap_stops_a_provider_that_keeps_requesting_rebuilds() {
 
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
-    let mcp_client = jp_mcp::Client::default();
     let (router, _signals) = test_router();
     let router = Arc::new(router);
 
@@ -8259,8 +8074,6 @@ async fn test_rebuild_cap_stops_a_provider_that_keeps_requesting_rebuilds() {
         &model,
         &config,
         &router,
-        &mcp_client,
-        root,
         false, // interactive
         &[],
         &lock,
@@ -8342,7 +8155,6 @@ async fn test_refused_rebuild_clears_the_retry_line() {
         // The notice only takes a status region on a terminal; elsewhere it is
         // a persistent line with nothing to retire.
         let printer = Arc::new(printer.with_terminal(TerminalCapability::interactive(Some(80))));
-        let mcp_client = jp_mcp::Client::default();
         let router = detached_router();
 
         let result = run_turn_loop(
@@ -8350,8 +8162,6 @@ async fn test_refused_rebuild_clears_the_retry_line() {
             &model,
             &config,
             &router,
-            &mcp_client,
-            root,
             true, // interactive
             &[],
             &lock,
@@ -8425,7 +8235,6 @@ async fn test_refused_rebuild_persists_streamed_content() {
 
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
-    let mcp_client = jp_mcp::Client::default();
     let (router, _signals) = test_router();
     let router = Arc::new(router);
 
@@ -8434,8 +8243,6 @@ async fn test_refused_rebuild_persists_streamed_content() {
         &model,
         &config,
         &router,
-        &mcp_client,
-        root,
         false, // interactive
         &[],
         &lock,
@@ -8537,8 +8344,6 @@ async fn http_tool_cycle_persists_inquiry_and_response_before_followup() {
             &model,
             &config,
             &router,
-            &client,
-            root,
             false,
             &[],
             &lock,

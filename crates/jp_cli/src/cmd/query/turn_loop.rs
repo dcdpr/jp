@@ -10,7 +10,6 @@ use std::{
     time::Duration,
 };
 
-use camino::Utf8Path;
 use futures::{
     Stream, StreamExt as _, future,
     stream::{self, SelectAll},
@@ -176,8 +175,6 @@ pub(super) async fn run_turn_loop(
     model: &ModelDetails,
     cfg: &AppConfig,
     signals: &SignalRouter,
-    mcp_client: &jp_mcp::Client,
-    root: &Utf8Path,
     interactive: bool,
     attachments: &[Attachment],
     lock: &ConversationLock,
@@ -869,8 +866,6 @@ pub(super) async fn run_turn_loop(
                         reply_edit_mode(cfg.editor.inline.edit_mode),
                         Arc::clone(&inquiry_backend),
                         &conv,
-                        mcp_client,
-                        root,
                         &mut tool_renderer,
                         interactive,
                     )
@@ -1188,9 +1183,14 @@ async fn commit_tool_responses(
     conv.flush()?;
     // Only now does each call's MCP response reach its caller: the service
     // holds every result until the conversation has it on disk.
-    tool.acknowledge_reviews(reviews)
-        .await
-        .map_err(Error::McpRecording)?;
+    //
+    // The conversation is already written at this point, so a failure here is
+    // the Host and the execution service disagreeing about a call that, from
+    // the user's side, succeeded. Ending the turn over it would discard work
+    // that is on disk and about to be answered.
+    if let Err(error) = tool.acknowledge_reviews(reviews).await {
+        warn!(%error, "Could not acknowledge a recorded tool response.");
+    }
 
     Ok(matches!(action, Action::SendFollowUp))
 }

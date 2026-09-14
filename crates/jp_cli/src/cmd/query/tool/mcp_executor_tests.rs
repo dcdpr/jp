@@ -147,13 +147,7 @@ async fn one_call_spans_input_and_recording() {
     assert_eq!(fixture.attempts(), 0, "approval alone must not execute");
 
     let first = executor
-        .execute(
-            &IndexMap::new(),
-            &Client::default(),
-            "/tmp".into(),
-            CancellationToken::new(),
-            None,
-        )
+        .execute(&IndexMap::new(), CancellationToken::new(), None)
         .await;
     let ExecutorResult::NeedsInput { question, .. } = first else {
         panic!("expected the tool's question, got {first:?}")
@@ -164,8 +158,6 @@ async fn one_call_spans_input_and_recording() {
     let second = executor
         .execute(
             &IndexMap::from_iter([("confirm".into(), json!(true))]),
-            &Client::default(),
-            "/tmp".into(),
             CancellationToken::new(),
             None,
         )
@@ -258,21 +250,13 @@ async fn an_unedited_review_reaches_the_service_through_a_real_call() {
     executor.approve().await.unwrap();
 
     let first = executor
-        .execute(
-            &IndexMap::new(),
-            &Client::default(),
-            "/tmp".into(),
-            CancellationToken::new(),
-            None,
-        )
+        .execute(&IndexMap::new(), CancellationToken::new(), None)
         .await;
     assert!(matches!(first, ExecutorResult::NeedsInput { .. }));
 
     let second = executor
         .execute(
             &IndexMap::from_iter([("confirm".into(), json!(true))]),
-            &Client::default(),
-            "/tmp".into(),
             CancellationToken::new(),
             None,
         )
@@ -336,13 +320,7 @@ async fn a_declined_inquiry_finishes_without_another_attempt() {
     executor.approve().await.unwrap();
 
     let result = executor
-        .execute(
-            &IndexMap::new(),
-            &Client::default(),
-            "/tmp".into(),
-            CancellationToken::new(),
-            None,
-        )
+        .execute(&IndexMap::new(), CancellationToken::new(), None)
         .await;
     assert!(matches!(result, ExecutorResult::NeedsInput { .. }));
     assert_eq!(fixture.attempts(), 1);
@@ -369,15 +347,7 @@ async fn cancellation_before_release_does_not_execute() {
 
     let token = CancellationToken::new();
     token.cancel();
-    let result = executor
-        .execute(
-            &IndexMap::new(),
-            &Client::default(),
-            "/tmp".into(),
-            token,
-            None,
-        )
-        .await;
+    let result = executor.execute(&IndexMap::new(), token, None).await;
 
     let ExecutorResult::Completed(response) = result else {
         panic!("expected a cancelled response, got {result:?}")
@@ -389,6 +359,29 @@ async fn cancellation_before_release_does_not_execute() {
         .acknowledge(Review::unchanged(response))
         .await
         .unwrap();
+    fixture.shutdown().await;
+}
+
+#[tokio::test]
+async fn a_protocol_failure_is_reported_as_a_failure_not_as_tool_output() {
+    // Executing before the call is released puts the adapter and the service
+    // out of step. That is JP's problem, so it must not arrive as a tool
+    // result the model reads as "the tool said this".
+    let fixture = Fixture::inquiring("unattended").await;
+    let executor = fixture.executor(&json!({}));
+
+    let result = executor
+        .execute(&IndexMap::new(), CancellationToken::new(), None)
+        .await;
+
+    let ExecutorResult::Failed(error) = result else {
+        panic!("a protocol failure must not be a tool result, got {result:?}")
+    };
+    assert_eq!(
+        error.to_string(),
+        "MCP call cannot execute while not yet submitted"
+    );
+    assert_eq!(fixture.attempts(), 0);
     fixture.shutdown().await;
 }
 

@@ -91,6 +91,42 @@ impl Outcome {
     pub fn unwrap_content(self) -> String {
         self.into_content().unwrap()
     }
+
+    /// Whether `text` claims to be a `needs_input` outcome, however badly.
+    ///
+    /// Answers the question a decoder asks after [`Outcome`] itself failed to
+    /// parse: did the tool mean to ask something?
+    /// A payload that says it did and then will not parse is a protocol
+    /// mismatch the caller must report, where output that was never an
+    /// `Outcome` is just text.
+    #[must_use]
+    pub fn claims_needs_input(text: &str) -> bool {
+        Self::claimed_shape(text).is_some_and(|kind| kind == "needs_input")
+    }
+
+    /// The variant tag `text` carries, if it is a JSON object carrying one.
+    fn claimed_shape(text: &str) -> Option<String> {
+        serde_json::from_str::<Value>(text)
+            .ok()?
+            .get("type")?
+            .as_str()
+            .map(str::to_owned)
+    }
+
+    /// The question id a `needs_input` payload carries, if it carries one.
+    ///
+    /// Read straight from the JSON rather than from a parsed [`Question`],
+    /// because the reason a caller wants it is that parsing failed: an id that
+    /// [`QuestionId`] rejects is exactly what it is looking for.
+    #[must_use]
+    pub fn claimed_question_id(text: &str) -> Option<String> {
+        serde_json::from_str::<Value>(text)
+            .ok()?
+            .get("question")?
+            .get("id")?
+            .as_str()
+            .map(str::to_owned)
+    }
 }
 
 /// A validated tool-question identifier.

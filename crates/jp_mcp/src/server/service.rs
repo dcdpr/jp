@@ -229,16 +229,29 @@ pub enum Interaction {
     },
     /// Acknowledge final recording before returning the result to the caller.
     Record {
-        /// Post-edit execution arguments, separate from `CallInfo::request`.
-        arguments: Map<String, Value>,
-        /// Original completed result; absent for skipped calls.
-        raw_result: Option<ToolResult>,
-        /// Content approved for delivery.
-        result: ToolResult,
+        /// What the Host is being asked to record.
+        ///
+        /// Boxed because it is the largest thing the private channel carries,
+        /// and every other interaction in flight would otherwise be sized for
+        /// it.
+        recording: Box<Recording>,
         /// Acknowledges the Host's configured persistence policy, not an
         /// unconditional disk write.
         reply: oneshot::Sender<HostReply<()>>,
     },
+}
+
+/// One call as the Host should record it.
+#[derive(Debug)]
+pub struct Recording {
+    /// Post-edit execution arguments, separate from `CallInfo::request`.
+    pub arguments: Map<String, Value>,
+
+    /// Original completed result; absent for skipped calls.
+    pub raw_result: Option<ToolResult>,
+
+    /// Content approved for delivery.
+    pub result: ToolResult,
 }
 
 /// Bounded, best-effort progress.
@@ -717,10 +730,13 @@ async fn record_without_executing(
     result: ToolResult,
 ) -> Result<CallOutput, ServiceError> {
     ask(inner, call, |reply| Interaction::Record {
-        arguments,
-        // Nothing ran, so there is no unedited result behind the one delivered.
-        raw_result: None,
-        result: result.clone(),
+        recording: Box::new(Recording {
+            arguments,
+            // Nothing ran, so there is no unedited result behind the delivered
+            // one.
+            raw_result: None,
+            result: result.clone(),
+        }),
         reply,
     })
     .await?;
@@ -759,9 +775,13 @@ async fn deliver_result(
         }
     };
     ask(inner, call, |reply| Interaction::Record {
-        arguments,
-        raw_result: (executed && !delivery_decided).then_some(raw_result),
-        result: result.clone(),
+        recording: Box::new(Recording {
+            arguments,
+            // A call the Host resolved at an earlier barrier never produced a
+            // result of its own, so there is nothing unedited behind it.
+            raw_result: (executed && !delivery_decided).then_some(raw_result),
+            result: result.clone(),
+        }),
         reply,
     })
     .await?;
@@ -844,7 +864,7 @@ async fn execute_with_answers(
                         });
                     }
                 };
-                if !Node::root(&Value::Object(request.schema)).permits(&answer) {
+                if !Node::root(&Value::Object(request.schema())).permits(&answer) {
                     return Err(ServiceError::InvalidAnswer(request.id.clone()));
                 }
                 answers.insert(request.id.to_string(), answer);
