@@ -9,7 +9,9 @@ use std::{
     },
 };
 
+use assert_matches::assert_matches;
 use async_trait::async_trait;
+use camino::Utf8Path;
 #[cfg(unix)]
 use camino_tempfile::{Utf8TempDir, tempdir};
 use jp_config::{
@@ -44,12 +46,19 @@ impl BuiltinTool for CountingTool {
     }
 }
 
-fn fixture(run: &str, result: &str) -> (Service, HostReceiver, Arc<AtomicUsize>) {
-    let count = Arc::new(AtomicUsize::new(0));
-    let partial: PartialToolConfig =
-        serde_json::from_value(json!({"source":"builtin", "run":run, "result":result})).unwrap();
-    let mut config = AppConfig::new_test();
-    config.conversation.tools.insert(
+/// Build a service around one builtin tool named `count`.
+///
+/// `config` is the tool's configuration as a user would write it, so a test
+/// says what it needs rather than patching a service after construction.
+fn service(
+    config: Value,
+    root: &Utf8Path,
+    builtins: BuiltinExecutors,
+    invocation: InvocationContext,
+) -> (Service, HostReceiver) {
+    let partial: PartialToolConfig = serde_json::from_value(config).unwrap();
+    let mut app = AppConfig::new_test();
+    app.conversation.tools.insert(
         "count".into(),
         ToolConfig::from_partial(partial, vec![]).unwrap(),
     );
@@ -57,20 +66,38 @@ fn fixture(run: &str, result: &str) -> (Service, HostReceiver, Arc<AtomicUsize>)
         definition: ToolDefinition {
             name: "count".into(),
             docs: ToolDocs::default(),
-            parameters: json!({"type":"object", "properties":{"path":{"type":"string"}}, "required":["path"]}),
+            parameters: json!({
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+            }),
         },
-        config: config.conversation.tools.get("count").unwrap(),
+        config: app.conversation.tools.get("count").unwrap(),
         access: Ok(None),
         metadata: Map::new(),
     };
-    let (service, host) = Service::new(
+    Service::new(
         vec![tool],
         Client::default(),
-        BuiltinExecutors::new().register("count", CountingTool(count.clone())),
-        "/tmp".into(),
-        InvocationContext::default(),
+        builtins,
+        root.to_owned(),
+        invocation,
     )
-    .unwrap();
+    .unwrap()
+}
+
+/// A service whose `count` tool asks one question and then echoes its input.
+///
+/// The counter records how many execution attempts actually ran, which is what
+/// separates "the call was denied" from "the call silently went nowhere".
+fn fixture(run: &str, result: &str) -> (Service, HostReceiver, Arc<AtomicUsize>) {
+    let count = Arc::new(AtomicUsize::new(0));
+    let (service, host) = service(
+        json!({"source": "builtin", "run": run, "result": result}),
+        "/tmp".into(),
+        BuiltinExecutors::new().register("count", CountingTool(count.clone())),
+        InvocationContext::default(),
+    );
     (service, host, count)
 }
 
@@ -167,7 +194,7 @@ async fn preparation_release_input_and_delivery_use_distinct_acknowledgements() 
         call.finish().await.unwrap(),
         ToolResult::text("edited result")
     );
-    service.shutdown().await.unwrap();
+    service.shutdown().await;
 }
 
 #[tokio::test]
@@ -239,7 +266,6 @@ async fn shutdown_cancels_pending_release_and_rejects_late_reply() {
     };
     timeout(Duration::from_secs(2), service.shutdown())
         .await
-        .unwrap()
         .unwrap();
     assert!(reply.send(Ok(ReleaseDecision::Execute)).is_err());
     assert!(matches!(call.finish().await, Err(ServiceError::Cancelled)));
@@ -281,8 +307,10 @@ async fn failed_recording_prevents_result_delivery() {
             "disk full",
         )))))
         .unwrap();
-    assert!(
-        matches!(call.finish().await, Err(ServiceError::Host(HostError::Recording(source))) if source.to_string() == "disk full")
+    assert_matches!(
+        call.finish().await,
+        Err(ServiceError::Host(HostError::Recording(source)))
+            if source.to_string() == "disk full"
     );
     assert_eq!(count.load(Ordering::SeqCst), 2);
 }
@@ -489,8 +517,12 @@ async fn wrong_argument_type_fails_before_host_approval() {
     let mut input = request();
     input.arguments.insert("path".into(), json!(42));
     let call = service.start_call(input).unwrap();
-    assert!(
-        matches!(timeout(Duration::from_secs(2), call.finish()).await.unwrap(), Err(ServiceError::InvalidArgument { path }) if path == "path")
+    let finished = timeout(Duration::from_secs(2), call.finish())
+        .await
+        .unwrap();
+    assert_matches!(
+        finished,
+        Err(ServiceError::InvalidArgument { path }) if path == "path"
     );
     assert_eq!(count.load(Ordering::SeqCst), 0);
 }
@@ -517,14 +549,17 @@ impl BuiltinTool for BlockedTool {
 
 #[tokio::test]
 async fn cancellation_drops_an_in_flight_builtin_attempt() {
-    let (mut service, mut host, _) = fixture("ask", "unattended");
     let entered = Arc::new(Notify::new());
     let dropped = Arc::new(AtomicUsize::new(0));
-    Arc::get_mut(&mut service.inner).unwrap().builtins =
+    let (service, mut host) = service(
+        json!({"source": "builtin", "run": "ask", "result": "unattended"}),
+        "/tmp".into(),
         BuiltinExecutors::new().register("count", BlockedTool {
             entered: entered.clone(),
             dropped: dropped.clone(),
-        });
+        }),
+        InvocationContext::default(),
+    );
     let call = service.start_call(request()).unwrap();
     release(&mut host).await;
     timeout(Duration::from_secs(2), entered.notified())
@@ -551,25 +586,39 @@ async fn dropping_result_receiver_does_not_cancel_or_reexecute() {
     };
     reply.send(Ok(())).unwrap();
     assert_eq!(count.load(Ordering::SeqCst), 2);
-    service.shutdown().await.unwrap();
+    service.shutdown().await;
 }
 
+/// A service whose `count` tool formats its arguments with a shell command.
+///
+/// The formatter touches `formatter-ran` in the working root, so a test can
+/// tell "the formatter did not run" from "it ran and produced nothing", and
+/// echoes the action and the invocation identity the service supplied it.
 #[cfg(unix)]
 fn formatter_fixture(mode: &str) -> (Service, HostReceiver, Utf8TempDir) {
-    let (mut service, host, _) = fixture("ask", "unattended");
     let root = tempdir().unwrap();
-    let partial: PartialToolConfig = serde_json::from_value(json!({
-        "source":"builtin", "run":"ask", "format":mode,
-        "style":{"parameters":{"program":"sh", "args":["-c", "printf 'formatted' > formatter-ran; printf '%s' '{{context.action}}:{{tool.arguments.path}}'"], "shell":false}}
-    })).unwrap();
-    let mut cfg = AppConfig::new_test();
-    cfg.conversation.tools.insert(
-        "count".into(),
-        ToolConfig::from_partial(partial, vec![]).unwrap(),
+    let (service, host) = service(
+        json!({
+            "source": "builtin",
+            "run": "ask",
+            "format": mode,
+            "style": {"parameters": {
+                "program": "sh",
+                "args": [
+                    "-c",
+                    "printf 'formatted' > formatter-ran; printf '%s' \
+                     '{{context.action}}:{{tool.arguments.path}}:{{context.workspace_id}}/{{context.conversation_id}}'",
+                ],
+                "shell": false,
+            }},
+        }),
+        root.path(),
+        BuiltinExecutors::new().register("count", CountingTool(Arc::new(AtomicUsize::new(0)))),
+        InvocationContext {
+            workspace_id: "ws-abc".into(),
+            conversation_id: "conv-xyz".into(),
+        },
     );
-    let inner = Arc::get_mut(&mut service.inner).unwrap();
-    inner.root = root.path().to_owned();
-    inner.tools.get_mut("count").unwrap().config = cfg.conversation.tools.get("count").unwrap();
     (service, host, root)
 }
 
@@ -605,9 +654,11 @@ async fn formatter_asks_for_visibility_and_waits_for_approval() {
     else {
         panic!("expected release")
     };
+    // The formatter runs under the action, arguments, and invocation identity
+    // the service supplies, not values a caller could set.
     assert_eq!(
         formatted_arguments.map(|result| result.map_err(|error| error.to_string())),
-        Some(Ok("format_arguments:original".into()))
+        Some(Ok("format_arguments:original:ws-abc/conv-xyz".into()))
     );
     assert_eq!(
         fs::read_to_string(root.path().join("formatter-ran")).unwrap(),
@@ -636,9 +687,52 @@ async fn unattended_formatter_is_available_before_approval() {
     };
     assert_eq!(
         formatted_arguments.map(|result| result.map_err(|error| error.to_string())),
-        Some(Ok("format_arguments:original".into()))
+        Some(Ok("format_arguments:original:ws-abc/conv-xyz".into()))
     );
     assert!(root.path().join("formatter-ran").exists());
+    call.cancel();
+    assert!(matches!(call.finish().await, Err(ServiceError::Cancelled)));
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn a_formatter_is_told_the_name_the_tool_runs_under() {
+    // A `source` naming an implementation (`builtin.counter` under the key
+    // `count`) is the name the tool executes as, so the formatter is asked
+    // about that name rather than the key the assistant called. Handing it the
+    // key asks about a tool that does not exist.
+    let root = tempdir().unwrap();
+    let (service, mut host) = service(
+        json!({
+            "source": "builtin.counter",
+            "run": "ask",
+            "format": "unattended",
+            "style": {"parameters": {
+                "program": "sh",
+                "args": ["-c", "printf '%s' '{{tool.name}}'"],
+                "shell": false,
+            }},
+        }),
+        root.path(),
+        BuiltinExecutors::new().register("counter", CountingTool(Arc::new(AtomicUsize::new(0)))),
+        InvocationContext::default(),
+    );
+    let call = service.start_call(request()).unwrap();
+    let Interaction::RenderArguments { reply } = next(&mut host).await.interaction else {
+        panic!("expected visibility request")
+    };
+    reply.send(Ok(true)).unwrap();
+    let Interaction::Prepare {
+        formatted_arguments,
+        ..
+    } = next(&mut host).await.interaction
+    else {
+        panic!("expected preparation")
+    };
+    assert_eq!(
+        formatted_arguments.map(|result| result.map_err(|error| error.to_string())),
+        Some(Ok("counter".into()))
+    );
     call.cancel();
     assert!(matches!(call.finish().await, Err(ServiceError::Cancelled)));
 }

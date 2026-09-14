@@ -1175,7 +1175,7 @@ impl Query {
             tools,
             &cfg.conversation.tools,
             approvals,
-            invocation.clone(),
+            invocation,
             mcp_client,
             root.clone(),
         )
@@ -1201,7 +1201,6 @@ impl Query {
             prompt_backend,
             tool_coordinator,
             chat_request,
-            invocation,
             pending_trim,
             turn_interrupt,
         )

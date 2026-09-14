@@ -8,7 +8,6 @@ pub mod query;
 pub mod retry;
 mod stream;
 pub mod title;
-pub mod tool;
 pub mod window;
 
 #[cfg(test)]

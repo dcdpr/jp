@@ -276,6 +276,19 @@ async fn next(host: &mut HostReceiver) -> HostRequest {
         .expect("Host channel closed")
 }
 
+/// A fixture whose `probe` tool requires one integer argument.
+async fn integer_argument_fixture(count: &Arc<AtomicUsize>) -> Fixture {
+    fixture(
+        json!({
+            "source": "builtin",
+            "run": "ask",
+            "parameters": {"value": {"type": "integer", "required": true}},
+        }),
+        BuiltinExecutors::new().register("probe", Ordinal(count.clone())),
+    )
+    .await
+}
+
 #[tokio::test]
 async fn external_discovery_preserves_host_metadata_without_executing() {
     let (mut fixture, count) = counting_fixture().await;
@@ -422,7 +435,18 @@ async fn external_inquiry_reexecutes_with_host_answers_and_records_edited_output
             .is_err()
     );
     assert!(!reply.is_closed());
-    fs::write(fixture.root.path().join("record.json"), serde_json::to_vec(&json!({"requested":pending.call.request.arguments,"executed":arguments,"result":result.to_text()})).unwrap()).unwrap();
+    // Stand in for the Host writing its conversation: the call must not be
+    // delivered until this has happened.
+    let record = json!({
+        "requested": pending.call.request.arguments,
+        "executed": arguments,
+        "result": result.to_text(),
+    });
+    fs::write(
+        fixture.root.path().join("record.json"),
+        serde_json::to_vec(&record).unwrap(),
+    )
+    .unwrap();
     reply.send(Ok(())).unwrap();
     assert_eq!(
         returned.await.unwrap(),
@@ -680,7 +704,7 @@ async fn host_loss_closes_an_outstanding_approval_without_execution() {
 #[tokio::test]
 async fn malformed_arguments_are_rejected_before_approval() {
     let count = Arc::new(AtomicUsize::new(0));
-    let mut fixture = fixture(json!({"source":"builtin", "run":"ask", "parameters":{"value":{"type":"integer","required":true}}}), BuiltinExecutors::new().register("probe", Ordinal(count.clone()))).await;
+    let mut fixture = integer_argument_fixture(&count).await;
     let external = ExternalClient::connect(fixture.endpoint.url()).await;
     let response = external
         .request(
@@ -878,7 +902,7 @@ async fn external_denial_never_executes_the_tool() {
 #[tokio::test]
 async fn edited_arguments_are_checked_before_execution_release() {
     let count = Arc::new(AtomicUsize::new(0));
-    let mut fixture = fixture(json!({"source":"builtin", "run":"ask", "parameters":{"value":{"type":"integer","required":true}}}), BuiltinExecutors::new().register("probe", Ordinal(count.clone()))).await;
+    let mut fixture = integer_argument_fixture(&count).await;
     let external = ExternalClient::connect(fixture.endpoint.url()).await;
     let response = external
         .request(

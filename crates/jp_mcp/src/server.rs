@@ -16,7 +16,7 @@ pub mod json_schema;
 pub mod result;
 pub mod service;
 mod upstream;
-use std::{convert::identity, ffi::OsStr, fmt, process::Stdio, sync::Arc};
+use std::{ffi::OsStr, fmt, process::Stdio, sync::Arc};
 
 pub use builtin::BuiltinTool;
 use camino::Utf8Path;
@@ -33,7 +33,7 @@ use jp_tool::{
     schema::{Node, merge_description},
 };
 use minijinja::{Environment, ErrorKind as MinijinjaErrorKind, value::ValueKind};
-use result::{from_mcp, to_legacy};
+use result::from_mcp;
 use serde_json::{Error as JsonError, Map, Value, json};
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, BufReader},
@@ -920,8 +920,9 @@ async fn execute_mcp(
                 let text = if transient {
                     json!({"message":message, "trace":trace}).to_string()
                 } else {
-                    to_legacy(&from_mcp(response.clone()).map_err(ToolError::MalformedOutput)?)
-                        .unwrap_or_else(identity)
+                    from_mcp(response.clone())
+                        .map_err(ToolError::MalformedOutput)?
+                        .to_text()
                 };
                 let mut result = from_mcp(replace_envelope(response, &text, true))
                     .map_err(ToolError::MalformedOutput)?;

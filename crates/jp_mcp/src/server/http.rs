@@ -49,7 +49,7 @@ pub enum EndpointError {
     /// The HTTP task failed.
     #[error(transparent)]
     Task(#[from] JoinError),
-    /// Execution service shutdown failed.
+    /// The tool catalog the Host supplied cannot be served.
     #[error(transparent)]
     Service(#[from] ServiceError),
     /// The MCP handshake failed.
@@ -76,6 +76,12 @@ impl Endpoint {
         let service = Arc::new(service);
         let factory = service.clone();
         let cancellation = CancellationToken::new();
+        // Only this listener's own address is an acceptable Host or Origin, so
+        // a page in a browser cannot reach the endpoint by resolving some other
+        // name to loopback.
+        //
+        // Assigned field by field because rmcp marks the config
+        // `#[non_exhaustive]`, which rules out struct-update syntax downstream.
         let mut config = StreamableHttpServerConfig::default();
         config.allowed_hosts = vec![address.to_string()];
         config.allowed_origins = vec![origin];
@@ -112,6 +118,8 @@ impl Endpoint {
 
     /// Establish the MCP Host's ordinary HTTP connection to this endpoint.
     pub async fn connect(&self) -> Result<RunningService<RoleClient, ()>, EndpointError> {
+        // A loopback connection must not be routed through an environment
+        // proxy or followed to another host.
         let client =
             LoopbackClient::new().map_err(|error| EndpointError::Connect(Box::new(error)))?;
         let config = StreamableHttpClientTransportConfig::with_uri(self.url.clone())
@@ -134,7 +142,7 @@ impl Endpoint {
 
     /// Stop tool work, close upstream services, and join the HTTP listener.
     pub async fn shutdown(mut self) -> Result<(), EndpointError> {
-        self.service.shutdown().await?;
+        self.service.shutdown().await;
         self.cancellation.cancel();
         if let Some(task) = self.task.take() {
             task.await??;
@@ -157,6 +165,8 @@ struct Handler {
 
 impl ServerHandler for Handler {
     fn get_info(&self) -> ServerInfo {
+        // Assigned field by field because rmcp marks `ServerInfo`
+        // `#[non_exhaustive]`, which rules out struct-update syntax downstream.
         let mut info = ServerInfo::default();
         info.server_info.name = "jp".into();
         info.server_info.version = env!("CARGO_PKG_VERSION").into();

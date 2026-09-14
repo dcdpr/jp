@@ -30,8 +30,31 @@ async fn resolving_a_stored_attachment_names_it_and_how_to_remove_it() {
     assert_eq!(
         error.to_string(),
         "MCP resource attachments are no longer resolved: \
-         `mcp+github-mcp-server+repo://owner/name`. Remove it with `jp attachment rm \
-         mcp+github-mcp-server+repo://owner/name`."
+         `mcp+github-mcp-server+repo://owner/name`. Remove them with: jp attachment rm \
+         'mcp+github-mcp-server+repo://owner/name'"
+    );
+}
+
+/// A conversation carrying several of them names all of them at once, so the
+/// user does not learn about the next one by querying again.
+#[tokio::test]
+async fn resolving_names_every_stored_attachment() {
+    let second = Url::parse("mcp+other-server+file:///notes.md").unwrap();
+    let mut handler = McpResources::default();
+    handler.add(&uri(), Utf8Path::new("/")).await.unwrap();
+    handler.add(&second, Utf8Path::new("/")).await.unwrap();
+
+    let error = handler
+        .get(Utf8Path::new("/"))
+        .await
+        .expect_err("mcp resource attachments no longer resolve");
+
+    assert_eq!(
+        error.to_string(),
+        "MCP resource attachments are no longer resolved: \
+         `mcp+github-mcp-server+repo://owner/name`, `mcp+other-server+file:///notes.md`. Remove \
+         them with: jp attachment rm 'mcp+github-mcp-server+repo://owner/name' && jp attachment \
+         rm 'mcp+other-server+file:///notes.md'"
     );
 }
 

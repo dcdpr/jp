@@ -22,10 +22,10 @@ fn native_content_round_trips_through_shared_result() {
     let result = from_mcp(native).unwrap();
     assert_eq!(result.content.len(), 6);
     assert!(matches!(result.content[1], ContentBlock::Image(_)));
-    assert_eq!(
-        to_legacy(&result),
-        Ok("first\n\nembedded\n\nYmxvYg==".into())
-    );
+    // Image, audio, and links contribute no text, and a blob resource
+    // contributes its URI rather than its bytes.
+    assert_eq!(result.to_text(), "first\n\nembedded\n\nfile:///b");
+    assert!(!result.is_error());
     assert_eq!(serde_json::to_value(to_mcp(result).unwrap()).unwrap(), wire);
 }
 
@@ -47,7 +47,8 @@ fn error_details_survive_mcp_encoding() {
     );
     let decoded = from_mcp(native).unwrap();
     assert_eq!(decoded.status, result.status);
-    assert_eq!(to_legacy(&decoded), Err("busy\n\nTrace:\nupstream".into()));
+    assert!(decoded.is_error());
+    assert_eq!(decoded.to_text(), "busy\n\nTrace:\nupstream");
 }
 
 #[test]

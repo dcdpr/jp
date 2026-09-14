@@ -223,30 +223,6 @@ fn to_content(block: ContentBlock) -> Result<Content, ResultError> {
     Ok(content)
 }
 
-/// Existing conversation-format projection, applied by the MCP Host only.
-/// Image, audio, and links contribute no text; embedded blobs retain their
-/// base64 form.
-pub fn to_legacy(result: &ToolResult) -> Result<String, String> {
-    let text = result
-        .content
-        .iter()
-        .filter_map(|block| match block {
-            ContentBlock::Text { text, .. } => Some(text.clone()),
-            ContentBlock::Resource(resource) => Some(match &resource.content {
-                ResourceContent::Text(text) | ResourceContent::EncodedBlob(text) => text.clone(),
-                ResourceContent::Blob(bytes) => STANDARD.encode(bytes),
-            }),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n");
-    if result.is_error() {
-        Err(text)
-    } else {
-        Ok(text)
-    }
-}
-
 #[cfg(test)]
 #[path = "result_tests.rs"]
 mod tests;

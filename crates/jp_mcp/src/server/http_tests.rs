@@ -258,5 +258,5 @@ async fn dropping_endpoint_stops_admission_even_if_host_is_still_connected() {
         Err(ServiceError::Stopped)
     ));
     assert_eq!(count.load(Ordering::SeqCst), 0);
-    service.shutdown().await.unwrap();
+    service.shutdown().await;
 }

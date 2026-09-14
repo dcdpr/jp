@@ -8,7 +8,7 @@ pub(crate) mod label;
 mod lock;
 pub(crate) mod plugin;
 mod provider;
-mod query;
+pub(crate) mod query;
 pub(crate) mod target;
 pub(crate) mod time;
 pub(crate) mod turn_selection;

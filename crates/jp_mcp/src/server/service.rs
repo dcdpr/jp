@@ -15,7 +15,8 @@ use std::{
 use camino::Utf8PathBuf;
 use indexmap::IndexMap;
 use jp_config::conversation::tool::{
-    FormatMode, ResultMode, RunMode, ToolConfigWithDefaults, ToolSource, style::ParametersStyle,
+    CommandConfig, FormatMode, ResultMode, RunMode, ToolConfigWithDefaults, ToolSource,
+    style::ParametersStyle,
 };
 use jp_tool::{
     AccessPolicy, Action, ContentBlock, Error as ToolError, InputRequest, QuestionId,
@@ -113,6 +114,12 @@ pub struct AccessPolicyError {
     pub source: Arc<dyn StdError + Send + Sync>,
 }
 
+/// What a tool's argument formatter produced, or why it produced nothing.
+///
+/// A formatter that fails leaves the call runnable: the Host decides whether to
+/// show the diagnostic or suppress the call from its display.
+pub type Formatted = Result<String, FormatterError>;
+
 /// An argument formatter failed without producing presentation text.
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum FormatterError {
@@ -186,7 +193,7 @@ pub enum Interaction {
         arguments: Map<String, Value>,
         /// Custom formatter output, if formatting was permitted before
         /// approval.
-        formatted_arguments: Option<Result<String, FormatterError>>,
+        formatted_arguments: Option<Formatted>,
         /// One reply for this preparation operation.
         reply: oneshot::Sender<HostReply<Admission>>,
     },
@@ -195,7 +202,7 @@ pub enum Interaction {
         /// Validated arguments that will actually execute.
         arguments: Map<String, Value>,
         /// Custom representation of the approved arguments, if requested.
-        formatted_arguments: Option<Result<String, FormatterError>>,
+        formatted_arguments: Option<Formatted>,
         /// Permission to execute, or a final response without execution.
         reply: oneshot::Sender<HostReply<ReleaseDecision>>,
     },
@@ -534,9 +541,11 @@ impl Service {
     /// Stop admission, cancel outstanding calls, wait for their cleanup, and
     /// close owned upstream services.
     /// Safe to call more than once.
-    pub async fn shutdown(&self) -> Result<(), ServiceError> {
+    pub async fn shutdown(&self) {
         self.stop();
         loop {
+            // Enabling the notification before checking is what makes this
+            // race-free: a call finishing in between is still observed.
             let idle = self.inner.idle.notified();
             tokio::pin!(idle);
             idle.as_mut().enable();
@@ -546,7 +555,6 @@ impl Service {
             idle.await;
         }
         self.inner.upstream.shutdown().await;
-        Ok(())
     }
 }
 
@@ -618,21 +626,35 @@ async fn run_call(
 ) -> Result<CallOutput, ServiceError> {
     let mut arguments = call.request.arguments.clone();
     validate_arguments(&tool, &mut arguments)?;
-    let wants_format = if tool.config.run() != RunMode::Skip
-        && !tool.config.style().hidden
-        && matches!(tool.config.style().parameters, ParametersStyle::Custom(_))
-    {
-        ask(inner, call, |reply| Interaction::RenderArguments { reply }).await?
-    } else {
-        false
+    // A skipped or hidden call shows nothing, so its formatter is a command
+    // that would run for output nobody reads.
+    let formatter = match &tool.config.style().parameters {
+        ParametersStyle::Custom(command)
+            if tool.config.run() != RunMode::Skip && !tool.config.style().hidden =>
+        {
+            Some(command.clone().command())
+        }
+        _ => None,
     };
-    let mut formatted_arguments = if wants_format && tool.config.format() == FormatMode::Unattended
-    {
-        Some(format_arguments(inner, &tool, &arguments, cancellation).await?)
-    } else {
-        None
+    let formatter = match formatter {
+        Some(command)
+            if ask(inner, call, |reply| Interaction::RenderArguments { reply }).await? =>
+        {
+            Some(command)
+        }
+        _ => None,
+    };
+    // `format = "ask"` holds a user-configured command back until the Host has
+    // admitted the call.
+    let mut formatted_arguments = match &formatter {
+        Some(command) if tool.config.format() == FormatMode::Unattended => {
+            Some(format_arguments(inner, &tool, command, &arguments, cancellation).await?)
+        }
+        _ => None,
     };
     let original_arguments = arguments.clone();
+    // `run = "skip"` is the service's own decision, so it needs no Host
+    // admission, but it resolves the call the same way a Host denial does.
     let admission = if tool.config.run() == RunMode::Skip {
         Admission::Skip {
             reason: "Tool execution skipped by configuration.".into(),
@@ -646,32 +668,24 @@ async fn run_call(
         })
         .await?
     };
-    let admission = match admission {
-        Admission::Skip { reason } => Admission::Complete {
-            result: ToolResult::text(reason),
-        },
-        other => other,
-    };
     arguments = match admission {
         Admission::Run { arguments } => arguments,
-        Admission::Complete { result } => {
-            ask(inner, call, |reply| Interaction::Record {
-                arguments,
-                raw_result: None,
-                result: result.clone(),
-                reply,
-            })
-            .await?;
-            return Ok(CallOutput {
-                result,
-                delivery_decided: true,
-            });
+        Admission::Skip { reason } => {
+            return record_without_executing(inner, call, arguments, ToolResult::text(reason))
+                .await;
         }
-        Admission::Skip { .. } => unreachable!("skip was normalized above"),
+        Admission::Complete { result } => {
+            return record_without_executing(inner, call, arguments, result).await;
+        }
     };
     validate_arguments(&tool, &mut arguments)?;
-    if wants_format && (formatted_arguments.is_none() || arguments != original_arguments) {
-        formatted_arguments = Some(format_arguments(inner, &tool, &arguments, cancellation).await?);
+    // Arguments the Host edited make any earlier formatting stale, so the
+    // presentation is rebuilt from what will actually execute.
+    if let Some(command) = &formatter
+        && (formatted_arguments.is_none() || arguments != original_arguments)
+    {
+        formatted_arguments =
+            Some(format_arguments(inner, &tool, command, &arguments, cancellation).await?);
     }
     let release = ask(inner, call, |reply| Interaction::Release {
         arguments: arguments.clone(),
@@ -693,6 +707,27 @@ async fn run_call(
         ),
     };
     deliver_result(inner, call, &tool, arguments, output, executed).await
+}
+
+/// Record a call the Host resolved before it could execute.
+async fn record_without_executing(
+    inner: &Inner,
+    call: &CallInfo,
+    arguments: Map<String, Value>,
+    result: ToolResult,
+) -> Result<CallOutput, ServiceError> {
+    ask(inner, call, |reply| Interaction::Record {
+        arguments,
+        // Nothing ran, so there is no unedited result behind the one delivered.
+        raw_result: None,
+        result: result.clone(),
+        reply,
+    })
+    .await?;
+    Ok(CallOutput {
+        result,
+        delivery_decided: true,
+    })
 }
 
 async fn deliver_result(
@@ -818,15 +853,18 @@ async fn execute_with_answers(
     }
 }
 
+/// Run a tool's configured argument formatter and return what it printed.
+///
+/// A formatter that fails is presentation that failed, not a failed call, so it
+/// comes back as [`FormatterError`] for the Host to show or suppress.
+/// Only cancellation and a policy that never compiled end the call itself.
 async fn format_arguments(
     inner: &Inner,
     tool: &ConfiguredTool,
+    command: &CommandConfig,
     arguments: &Map<String, Value>,
     cancellation: &CancellationToken,
-) -> Result<Result<String, FormatterError>, ServiceError> {
-    let ParametersStyle::Custom(command) = &tool.config.style().parameters else {
-        return Ok(Ok(String::new()));
-    };
+) -> Result<Formatted, ServiceError> {
     let name = match tool.config.source() {
         ToolSource::Local { tool: name }
         | ToolSource::Builtin { tool: name }
@@ -843,7 +881,7 @@ async fn format_arguments(
         &inner.invocation,
     );
     let result = match run_tool_command(
-        command.clone().command(),
+        command.clone(),
         context,
         &inner.root,
         cancellation.clone(),
@@ -863,12 +901,7 @@ async fn format_arguments(
         })),
         other => {
             let result = other.into_tool_result(name);
-            let message = result
-                .content
-                .iter()
-                .filter_map(ContentBlock::as_text)
-                .collect::<Vec<_>>()
-                .join("\n\n");
+            let message = result.to_text();
             if result.is_error() {
                 Ok(Err(FormatterError::Reported { message }))
             } else {
