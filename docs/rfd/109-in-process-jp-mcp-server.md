@@ -470,5 +470,4 @@ shared contracts and execution behavior specified here.
 [RFD 058]: 058-typed-content-blocks-for-tool-responses.md
 [RFD 065]: 065-typed-resource-model-for-attachments.md
 [RFD 108]: 108-transitional-jp-protocol-bridge-for-mcp-tools.md
-[RFD 110]: 110-anthropic-subscription-queries-via-acp.md
 [Streamable HTTP]: https://modelcontextprotocol.io/specification/2025-11-25/basic/transports#streamable-http

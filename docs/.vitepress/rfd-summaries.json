@@ -432,11 +432,11 @@
     "summary": "Bridge MCP tools into JP semantics via speculative Outcome unwrap and _meta context attachment, pending RFD 058."
   },
   "109-in-process-jp-mcp-server.md": {
-    "hash": "7f753e8a90b0cb174ed549fa8bfa1c2f7bcb76bf19963694533d6521563b24e3",
+    "hash": "c8885cf427536b74ff143a94208aeff19a19aceeeb0c67467374a378aec31d52",
     "summary": "Extract tool execution into an in-process MCP server accessible via HTTP, unifying invocation paths for JP and external clients."
   },
   "110-anthropic-subscription-queries-via-acp.md": {
-    "hash": "2d1e7552db739baf36a0e623f9b0b8168e2c04be8bb7659e4d3f742728b08a24",
+    "hash": "19fc3a39babadad88b17dfd7df87ae8568f2166e1fbe8c2c46cc768d90d067fb",
     "summary": "ACP subscription flow for Anthropic provider using Claude Code runtime instead of direct credential extraction."
   }
 }
