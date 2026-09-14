@@ -29,7 +29,16 @@ pub enum ResultError {
     UnansweredQuestion,
 }
 
-fn convert<T: Serialize, U: DeserializeOwned>(value: T) -> Result<U, JsonError> {
+/// Re-read a value as the type the MCP wire gives it.
+///
+/// The wire representation is the only thing both sides are defined against.
+/// For rmcp's model types that is not merely convenient but required:
+/// `Annotations`, `Icon`, and `IconTheme` are `#[non_exhaustive]`, so nothing
+/// outside rmcp can name their fields to build one field by field.
+///
+/// An error here means two definitions of the same wire shape have drifted
+/// apart, not that a tool sent something malformed.
+fn via_wire<T: Serialize, U: DeserializeOwned>(value: T) -> Result<U, JsonError> {
     serde_json::from_value(serde_json::to_value(value)?)
 }
 
@@ -60,7 +69,7 @@ pub fn from_mcp(result: CallToolResult) -> Result<ToolResult, JsonError> {
 }
 
 fn from_content(content: Content) -> Result<ContentBlock, JsonError> {
-    let annotations: Option<Annotations> = content.annotations.map(convert).transpose()?;
+    let annotations: Option<Annotations> = content.annotations.map(via_wire).transpose()?;
     Ok(match content.raw {
         RawContent::Text(text) => ContentBlock::Text {
             text: text.text,
@@ -108,7 +117,7 @@ fn from_content(content: Content) -> Result<ContentBlock, JsonError> {
             })
         }
         RawContent::ResourceLink(link) => {
-            let mut link: ResourceLink = convert(link)?;
+            let mut link: ResourceLink = via_wire(link)?;
             link.annotations = annotations;
             ContentBlock::ResourceLink(link)
         }
@@ -137,7 +146,7 @@ pub fn to_mcp(result: ToolResult) -> Result<CallToolResult, ResultError> {
                     Some(value) => serde_json::from_value(value)?,
                     None => Map::new(),
                 };
-                let encoded: Map<String, Value> = convert(error)?;
+                let encoded: Map<String, Value> = via_wire(error)?;
                 details.extend(encoded);
                 metadata.insert(ERROR_METADATA.into(), Value::Object(details));
             }
@@ -214,12 +223,14 @@ fn to_content(block: ContentBlock) -> Result<Content, ResultError> {
             (content, resource.annotations)
         }
         ContentBlock::ResourceLink(mut link) => {
+            // Annotations live on the enclosing content block, not on the link
+            // itself, so they are moved out before the link crosses over.
             let annotations = link.annotations.take();
-            (Content::resource_link(convert(link)?), annotations)
+            (Content::resource_link(via_wire(link)?), annotations)
         }
         ContentBlock::Question(_) => return Err(ResultError::UnansweredQuestion),
     };
-    content.annotations = annotations.map(convert).transpose()?;
+    content.annotations = annotations.map(via_wire).transpose()?;
     Ok(content)
 }
 

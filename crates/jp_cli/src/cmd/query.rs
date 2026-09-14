@@ -1126,8 +1126,6 @@ impl Query {
             &model,
             cfg,
             signals,
-            mcp_client,
-            &root,
             interactive,
             attachments,
             lock,

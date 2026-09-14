@@ -82,7 +82,6 @@ use std::{
     sync::Arc,
 };
 
-use camino::{Utf8Path, Utf8PathBuf};
 use indexmap::IndexMap;
 use inquire::error::InquireError;
 use jp_config::{
@@ -95,12 +94,12 @@ use jp_conversation::{
     ConversationStream,
     event::{
         CancellationReason, InquiryAnswerType, InquiryId, InquiryQuestion, InquiryRequest,
-        InquiryResponse, SelectOption, ToolCallRequest, ToolCallResponse,
+        InquiryResponse, InquirySource, SelectOption, ToolCallRequest, ToolCallResponse,
     },
 };
 use jp_editor::EditorBackend;
 use jp_inquire::{ReplyEditMode, prompt::PromptBackend};
-use jp_mcp::{Client, server::StderrSink};
+use jp_mcp::server::StderrSink;
 use jp_printer::Printer;
 use jp_tool::{AnswerType, Question};
 use jp_workspace::ConversationMut;
@@ -285,6 +284,18 @@ enum PendingPrompt {
         response: ToolCallResponse,
         result_mode: ResultMode,
     },
+}
+
+/// A question one tool asked, and what routing it needs to know.
+///
+/// The four travel together because answering needs all of them: the call to
+/// resume, the name its configuration is keyed on, the question itself, and the
+/// provenance the recorded `InquiryRequest` carries.
+struct ToolQuestion {
+    tool_id: String,
+    tool_name: String,
+    question: Question,
+    source: InquirySource,
 }
 
 /// What rendering a tool call before its approval prompt produced.
@@ -650,24 +661,30 @@ impl ToolCoordinator {
         let ParametersStyle::Custom(_) = self.parameter_style(name) else {
             return self.render_approved_tool(name, executor.arguments(), renderer);
         };
-        // No formatter output means the service was never asked for it, so the
-        // call header is all there is to show.
-        let formatted = executor
-            .formatted_arguments()
-            .cloned()
-            .unwrap_or_else(|| Ok(String::new()));
-        renderer.render_custom_result(name, formatted.map_err(|error| error.to_string()))
+        let Some(formatted) = executor.formatted_arguments() else {
+            // The service formats a call's arguments before releasing it,
+            // unless the call is hidden or configured not to run. Both of
+            // those are already handled, so no output here means there is no
+            // call to announce: a bare header would say otherwise.
+            return RenderOutcome::Rendered { content: None };
+        };
+        renderer.render_custom_result(name, formatted.clone().map_err(|error| error.to_string()))
     }
 
     /// Acknowledge the execution service after the conversation owner flushes.
     ///
     /// Until this runs, each call is still parked on its final barrier and its
     /// MCP response has not been returned to the caller.
+    /// Every call is acknowledged even when one fails, so one call's
+    /// disagreement does not strand the rest; the first failure is returned.
     pub async fn acknowledge_reviews(&self, reviews: Vec<Review>) -> Result<(), ExecutorError> {
+        let mut failure = None;
         for review in reviews {
-            self.executor_source.acknowledge(review).await?;
+            if let Err(error) = self.executor_source.acknowledge(review).await {
+                failure.get_or_insert(error);
+            }
         }
-        Ok(())
+        failure.map_or(Ok(()), Err)
     }
 
     pub fn question_target(&self, tool_name: &str, question_id: &str) -> Option<QuestionTarget> {
@@ -971,8 +988,6 @@ impl ToolCoordinator {
         edit_mode: ReplyEditMode,
         inquiry_backend: Arc<dyn InquiryBackend>,
         conv: &ConversationMut,
-        mcp_client: &Client,
-        root: &Utf8Path,
         tool_renderer: &mut ToolRenderer,
         interactive: bool,
     ) -> ExecutionResult {
@@ -1053,8 +1068,6 @@ impl ToolCoordinator {
                 index,
                 executor,
                 accumulated_answers,
-                mcp_client.clone(),
-                root.to_path_buf(),
                 cancellation_token.child_token(),
                 event_tx.clone(),
                 stderr,
@@ -1100,8 +1113,6 @@ impl ToolCoordinator {
                         prompter.clone(),
                         &inquiry_backend,
                         conv,
-                        mcp_client,
-                        root,
                         &cancellation_token,
                         event_tx.clone(),
                         turn_state,
@@ -1128,8 +1139,6 @@ impl ToolCoordinator {
                         &mut pending_prompts,
                         &mut prompt_active,
                         prompter.clone(),
-                        mcp_client,
-                        root,
                         &cancellation_token,
                         event_tx.clone(),
                         conv,
@@ -1155,8 +1164,6 @@ impl ToolCoordinator {
                                 index,
                                 tool.executor.clone(),
                                 tool.accumulated_answers.clone(),
-                                mcp_client.clone(),
-                                root.to_path_buf(),
                                 cancellation_token.child_token(),
                                 event_tx.clone(),
                                 tool.stderr.clone(),
@@ -1219,32 +1226,9 @@ impl ToolCoordinator {
                     prompt_active = false;
                     let tool_name = executing_tools
                         .get(&index)
-                        .map(|t| t.tool_name.clone())
+                        .map(|tool| tool.tool_name.clone())
                         .unwrap_or_default();
-                    let is_error = review.response.result.is_err();
-                    let (inline_results, results_file_link) = self
-                        .tools_config
-                        .get(&tool_name)
-                        .map(|c| {
-                            (
-                                c.style().inline_results(is_error).clone(),
-                                c.style().results_file_link(is_error).clone(),
-                            )
-                        })
-                        .unwrap_or_default();
-
-                    let is_hidden = self
-                        .tools_config
-                        .get(&tool_name)
-                        .is_some_and(|cfg| cfg.style().hidden);
-                    if !is_hidden {
-                        tool_renderer.render_result(
-                            &review.response,
-                            &inline_results,
-                            &results_file_link,
-                        );
-                    }
-
+                    self.render_result(&tool_name, &review.response, tool_renderer);
                     self.set_tool_state(&tool_id, ToolCallState::Completed);
                     results[index] = Some(review);
                     self.process_next_prompt(
@@ -1396,16 +1380,12 @@ impl ToolCoordinator {
         index: usize,
         executor: Arc<dyn Executor>,
         answers: IndexMap<String, Value>,
-        client: Client,
-        root: Utf8PathBuf,
         token: CancellationToken,
         tx: mpsc::Sender<ExecutionEvent>,
         stderr: Option<StderrSink>,
     ) {
         tokio::spawn(async move {
-            let result = executor
-                .execute(&answers, &client, &root, token, stderr)
-                .await;
+            let result = executor.execute(&answers, token, stderr).await;
             let _err = tx.send(ExecutionEvent::ToolResult { index, result }).await;
         });
     }
@@ -1534,8 +1514,41 @@ impl ToolCoordinator {
         });
     }
 
+    /// Show a finished call's result, unless the tool renders no chrome.
+    fn render_result(&self, tool_name: &str, response: &ToolCallResponse, renderer: &ToolRenderer) {
+        if self.is_hidden(tool_name) {
+            return;
+        }
+        let style = self.tools_config.get(tool_name);
+        let is_error = response.result.is_err();
+        let (inline_results, results_file_link) = style
+            .map(|config| {
+                (
+                    config.style().inline_results(is_error).clone(),
+                    config.style().results_file_link(is_error).clone(),
+                )
+            })
+            .unwrap_or_default();
+        renderer.render_result(response, &inline_results, &results_file_link);
+    }
+
+    /// Show a call's result and record it as the content the Host settled on.
+    ///
+    /// This is the path for a result nobody was asked about: either the tool is
+    /// configured to deliver unattended, or there is no user to ask.
+    fn finish_tool_call(
+        &mut self,
+        tool: &ExecutingTool,
+        response: ToolCallResponse,
+        tracked_review: &mut Option<Review>,
+        tool_renderer: &ToolRenderer,
+    ) {
+        self.render_result(&tool.tool_name, &response, tool_renderer);
+        self.set_tool_state(&tool.tool_id, ToolCallState::Completed);
+        *tracked_review = Some(Review::unchanged(response));
+    }
+
     #[allow(clippy::too_many_arguments)]
-    #[allow(clippy::too_many_lines)]
     fn handle_tool_result(
         &mut self,
         result: ExecutorResult,
@@ -1547,8 +1560,6 @@ impl ToolCoordinator {
         prompter: Arc<ToolPrompter>,
         inquiry_backend: &Arc<dyn InquiryBackend>,
         conv: &ConversationMut,
-        mcp_client: &Client,
-        root: &Utf8Path,
         cancellation_token: &CancellationToken,
         event_tx: mpsc::Sender<ExecutionEvent>,
         turn_state: &mut TurnState,
@@ -1557,88 +1568,69 @@ impl ToolCoordinator {
     ) {
         match result {
             ExecutorResult::Completed(response) => {
-                let is_error = response.result.is_err();
-                let (inline_results, results_file_link) = self
-                    .tools_config
-                    .get(&tool.tool_name)
-                    .map(|c| {
-                        (
-                            c.style().inline_results(is_error).clone(),
-                            c.style().results_file_link(is_error).clone(),
-                        )
-                    })
-                    .unwrap_or_default();
-
                 match self.result_mode(&tool.tool_name) {
                     ResultMode::Unattended => {
-                        let is_hidden = self
-                            .tools_config
-                            .get(&tool.tool_name)
-                            .is_some_and(|cfg| cfg.style().hidden);
-                        if !is_hidden {
-                            tool_renderer.render_result(
-                                &response,
-                                &inline_results,
-                                &results_file_link,
-                            );
-                        }
-                        self.set_tool_state(&tool.tool_id, ToolCallState::Completed);
-                        *tracked_review = Some(Review::unchanged(response));
+                        self.finish_tool_call(tool, response, tracked_review, tool_renderer);
                     }
                     // The execution service applies `result = "skip"` itself,
                     // so this response is already its skip message rather than
-                    // the tool's output, and recording it replaces nothing.
+                    // the tool's output. Rendering it would announce a result
+                    // the configuration asked not to deliver.
                     ResultMode::Skip => {
                         self.set_tool_state(&tool.tool_id, ToolCallState::Completed);
                         *tracked_review = Some(Review::unchanged(response));
                     }
-                    result_mode @ (ResultMode::Ask | ResultMode::Edit) => {
-                        // Both Ask and Edit prompt whenever a user is there to
-                        // answer: the Edit flow uses the inline widget, which
-                        // does not need a configured editor.
-                        let can_prompt = interactive;
-                        if can_prompt {
-                            if *prompt_active {
-                                pending_prompts.push_back(PendingPrompt::ResultMode {
-                                    index,
-                                    tool_id: tool.tool_id.clone(),
-                                    tool_name: tool.tool_name.clone(),
-                                    response,
-                                    result_mode,
-                                });
-                            } else {
-                                *prompt_active = true;
-                                self.set_tool_state(
-                                    &tool.tool_id,
-                                    ToolCallState::AwaitingResultEdit,
-                                );
-                                Self::spawn_result_mode_prompt(
-                                    index,
-                                    tool.tool_id.clone(),
-                                    tool.tool_name.clone(),
-                                    response,
-                                    result_mode,
-                                    prompter,
-                                    event_tx,
-                                );
-                            }
+                    // Nobody is there to answer, so the configured prompt is
+                    // skipped and the result stands as the tool produced it.
+                    ResultMode::Ask | ResultMode::Edit if !interactive => {
+                        self.finish_tool_call(tool, response, tracked_review, tool_renderer);
+                    }
+                    // Both Ask and Edit prompt whenever a user is there to
+                    // answer: the Edit flow uses the inline widget, which does
+                    // not need a configured editor.
+                    result_mode => {
+                        if *prompt_active {
+                            pending_prompts.push_back(PendingPrompt::ResultMode {
+                                index,
+                                tool_id: tool.tool_id.clone(),
+                                tool_name: tool.tool_name.clone(),
+                                response,
+                                result_mode,
+                            });
                         } else {
-                            let is_hidden = self
-                                .tools_config
-                                .get(&tool.tool_name)
-                                .is_some_and(|cfg| cfg.style().hidden);
-                            if !is_hidden {
-                                tool_renderer.render_result(
-                                    &response,
-                                    &inline_results,
-                                    &results_file_link,
-                                );
-                            }
-                            self.set_tool_state(&tool.tool_id, ToolCallState::Completed);
-                            *tracked_review = Some(Review::unchanged(response));
+                            *prompt_active = true;
+                            self.set_tool_state(&tool.tool_id, ToolCallState::AwaitingResultEdit);
+                            Self::spawn_result_mode_prompt(
+                                index,
+                                tool.tool_id.clone(),
+                                tool.tool_name.clone(),
+                                response,
+                                result_mode,
+                                prompter,
+                                event_tx,
+                            );
                         }
                     }
                 }
+            }
+            ExecutorResult::Failed(error) => {
+                // Nothing ran, and the reason is JP's rather than the tool's.
+                // The user gets the detail; the model gets only the fact that
+                // the call did not happen, so it can decide to retry.
+                warn!(
+                    %error,
+                    tool = %tool.tool_name,
+                    "Tool call could not be completed."
+                );
+                self.set_tool_state(&tool.tool_id, ToolCallState::Completed);
+                *tracked_review = Some(Review::replaced(ToolCallResponse {
+                    id: tool.tool_id.clone(),
+                    result: Err(format!(
+                        "Tool '{}' was not executed: JP could not complete the call. You may \
+                         retry it.",
+                        tool.tool_name
+                    )),
+                }));
             }
             ExecutorResult::NeedsInput {
                 tool_id,
@@ -1647,156 +1639,194 @@ impl ToolCoordinator {
                 source,
                 accumulated_answers,
             } => {
-                tool.accumulated_answers = accumulated_answers.clone();
-
-                // Allocate the inquiry ID (incrementing the per-turn attempt
-                // counter) and record the `InquiryRequest` before any routing
-                // decision, so every question round-trip lands on the stream
-                // regardless of how it is answered.
-                let attempt = turn_state.next_inquiry_attempt(&tool_id, question.id.as_str());
-                let inquiry_id = InquiryId::new(inquiry::tool_call_inquiry_id(
-                    &tool_id,
-                    question.id.as_str(),
-                    attempt,
-                ));
-                let inquiry_question = tool_question_to_inquiry_question(&question);
-                conv.update_events(|events| {
-                    events
-                        .current_turn_mut()
-                        .add_inquiry_request(InquiryRequest::new(
-                            inquiry_id.clone(),
-                            source,
-                            inquiry_question,
-                        ))
-                        .build()
-                        .expect("Invalid ConversationStream state");
-                });
-
-                let is_secret = question.answer_type == AnswerType::Secret;
-
-                // Secrets never enter or read the turn-answer cache.
-                if !is_secret {
-                    let answer_key = ToolAnswerCacheKey::new(&tool_name, question.id.as_str());
-                    let persisted_answer =
-                        turn_state.remembered_tool_answers.get(&answer_key).cloned();
-                    if let Some(answer) = persisted_answer {
-                        Self::record_inquiry_answer(conv, &inquiry_id, &answer);
-                        tool.accumulated_answers
-                            .insert(question.id.to_string(), answer);
-                        Self::spawn_tool_execution(
-                            index,
-                            tool.executor.clone(),
-                            tool.accumulated_answers.clone(),
-                            mcp_client.clone(),
-                            root.to_path_buf(),
-                            cancellation_token.clone(),
-                            event_tx,
-                            tool.stderr.clone(),
-                        );
-                        return;
-                    }
-                }
-
-                if let Some(answer) = self.static_answer(&tool_name, question.id.as_str()) {
-                    // The tool still receives the configured value in-memory;
-                    // only the persisted record is redacted for secrets.
-                    if is_secret {
-                        Self::record_inquiry_redacted(conv, &inquiry_id);
-                    } else {
-                        Self::record_inquiry_answer(conv, &inquiry_id, &answer);
-                    }
-                    tool.accumulated_answers
-                        .insert(question.id.to_string(), answer);
-                    Self::spawn_tool_execution(
-                        index,
-                        tool.executor.clone(),
-                        tool.accumulated_answers.clone(),
-                        mcp_client.clone(),
-                        root.to_path_buf(),
-                        cancellation_token.clone(),
-                        event_tx,
-                        tool.stderr.clone(),
-                    );
-                    return;
-                }
-
-                let target = self
-                    .question_target(&tool_name, question.id.as_str())
-                    .unwrap_or(QuestionTarget::User);
-
-                tracing::info!(
-                    tool_name = %tool_name,
-                    tool_id = %tool_id,
-                    question_id = %question.id,
-                    question_text = %question.text,
-                    question_type = ?question.answer_type,
-                    target = ?target,
-                    interactive = interactive,
-                    "Tool question received, routing to target",
-                );
-
-                if interactive && target.is_user() {
-                    if *prompt_active {
-                        pending_prompts.push_back(PendingPrompt::Question {
-                            index,
-                            question,
-                            inquiry_id,
-                        });
-                    } else {
-                        *prompt_active = true;
-                        self.set_tool_state(&tool_id, ToolCallState::AwaitingInput);
-                        Self::spawn_user_prompt(
-                            index,
-                            question,
-                            inquiry_id,
-                            prompter.clone(),
-                            event_tx,
-                        );
-                    }
-                } else if is_secret {
-                    // A secret requires a human at an interactive prompt; it
-                    // must never route to the inquiry backend. Fail the tool
-                    // and close the recorded inquiry with the guard's reason.
-                    let (reason, message) = if target.is_user() {
-                        (
-                            CancellationReason::NoPromptBackend,
-                            format!(
-                                "The tool '{tool_name}' asked for a secret value, which requires \
-                                 an interactive prompt, but no interactive terminal is available."
-                            ),
-                        )
-                    } else {
-                        (
-                            CancellationReason::AssistantRoutingDenied,
-                            format!(
-                                "The tool '{tool_name}' asked for a secret value, which must be \
-                                 entered by a human and cannot be routed to the assistant."
-                            ),
-                        )
-                    };
-                    Self::record_inquiry_cancelled(conv, &inquiry_id, reason);
-                    self.set_tool_state(&tool_id, ToolCallState::Completed);
-                    *tracked_review = Some(Review::replaced(ToolCallResponse {
-                        id: tool_id.clone(),
-                        result: Err(message),
-                    }));
-                } else {
-                    // The `InquiryRequest` is already recorded above; spawn the
-                    // async inquiry on a cloned snapshot.
-                    Self::spawn_inquiry(
-                        index,
-                        inquiry_id,
-                        tool_id.clone(),
+                tool.accumulated_answers = accumulated_answers;
+                self.route_tool_question(
+                    ToolQuestion {
+                        tool_id,
                         tool_name,
                         question,
-                        Arc::clone(inquiry_backend),
-                        conv.events().clone(),
-                        cancellation_token.child_token(),
-                        event_tx.clone(),
-                    );
-                    self.set_tool_state(&tool_id, ToolCallState::AwaitingInput);
-                }
+                        source,
+                    },
+                    tool,
+                    index,
+                    tracked_review,
+                    pending_prompts,
+                    prompt_active,
+                    &prompter,
+                    inquiry_backend,
+                    conv,
+                    cancellation_token,
+                    event_tx,
+                    turn_state,
+                    interactive,
+                );
             }
+        }
+    }
+
+    /// Decide who answers a tool's question, and set that in motion.
+    ///
+    /// The `InquiryRequest` is recorded before any routing decision, so every
+    /// question round-trip lands on the stream however it is answered.
+    /// A question answered from the turn cache or from configuration resumes
+    /// the tool here; anything else hands off to a prompt or to the assistant
+    /// and resumes on a later event.
+    #[allow(clippy::too_many_arguments)]
+    #[allow(clippy::too_many_lines)]
+    fn route_tool_question(
+        &mut self,
+        question: ToolQuestion,
+        tool: &mut ExecutingTool,
+        index: usize,
+        tracked_review: &mut Option<Review>,
+        pending_prompts: &mut VecDeque<PendingPrompt>,
+        prompt_active: &mut bool,
+        prompter: &Arc<ToolPrompter>,
+        inquiry_backend: &Arc<dyn InquiryBackend>,
+        conv: &ConversationMut,
+        cancellation_token: &CancellationToken,
+        event_tx: mpsc::Sender<ExecutionEvent>,
+        turn_state: &mut TurnState,
+        interactive: bool,
+    ) {
+        let ToolQuestion {
+            tool_id,
+            tool_name,
+            question,
+            source,
+        } = question;
+        // Allocate the inquiry ID, incrementing the per-turn attempt counter.
+        let attempt = turn_state.next_inquiry_attempt(&tool_id, question.id.as_str());
+        let inquiry_id = InquiryId::new(inquiry::tool_call_inquiry_id(
+            &tool_id,
+            question.id.as_str(),
+            attempt,
+        ));
+        let inquiry_question = tool_question_to_inquiry_question(&question);
+        conv.update_events(|events| {
+            events
+                .current_turn_mut()
+                .add_inquiry_request(InquiryRequest::new(
+                    inquiry_id.clone(),
+                    source,
+                    inquiry_question,
+                ))
+                .build()
+                .expect("Invalid ConversationStream state");
+        });
+
+        let is_secret = question.answer_type == AnswerType::Secret;
+
+        // Secrets never enter or read the turn-answer cache.
+        if !is_secret {
+            let answer_key = ToolAnswerCacheKey::new(&tool_name, question.id.as_str());
+            let persisted_answer = turn_state.remembered_tool_answers.get(&answer_key).cloned();
+            if let Some(answer) = persisted_answer {
+                Self::record_inquiry_answer(conv, &inquiry_id, &answer);
+                tool.accumulated_answers
+                    .insert(question.id.to_string(), answer);
+                Self::spawn_tool_execution(
+                    index,
+                    tool.executor.clone(),
+                    tool.accumulated_answers.clone(),
+                    cancellation_token.clone(),
+                    event_tx,
+                    tool.stderr.clone(),
+                );
+                return;
+            }
+        }
+
+        if let Some(answer) = self.static_answer(&tool_name, question.id.as_str()) {
+            // The tool still receives the configured value in-memory;
+            // only the persisted record is redacted for secrets.
+            if is_secret {
+                Self::record_inquiry_redacted(conv, &inquiry_id);
+            } else {
+                Self::record_inquiry_answer(conv, &inquiry_id, &answer);
+            }
+            tool.accumulated_answers
+                .insert(question.id.to_string(), answer);
+            Self::spawn_tool_execution(
+                index,
+                tool.executor.clone(),
+                tool.accumulated_answers.clone(),
+                cancellation_token.clone(),
+                event_tx,
+                tool.stderr.clone(),
+            );
+            return;
+        }
+
+        let target = self
+            .question_target(&tool_name, question.id.as_str())
+            .unwrap_or(QuestionTarget::User);
+
+        tracing::info!(
+            tool_name = %tool_name,
+            tool_id = %tool_id,
+            question_id = %question.id,
+            question_text = %question.text,
+            question_type = ?question.answer_type,
+            target = ?target,
+            interactive = interactive,
+            "Tool question received, routing to target",
+        );
+
+        if interactive && target.is_user() {
+            if *prompt_active {
+                pending_prompts.push_back(PendingPrompt::Question {
+                    index,
+                    question,
+                    inquiry_id,
+                });
+            } else {
+                *prompt_active = true;
+                self.set_tool_state(&tool_id, ToolCallState::AwaitingInput);
+                Self::spawn_user_prompt(index, question, inquiry_id, prompter.clone(), event_tx);
+            }
+        } else if is_secret {
+            // A secret requires a human at an interactive prompt; it must never
+            // route to the inquiry backend. Fail the tool and close the
+            // recorded inquiry with the guard's reason.
+            let (reason, message) = if target.is_user() {
+                (
+                    CancellationReason::NoPromptBackend,
+                    format!(
+                        "The tool '{tool_name}' asked for a secret value, which requires an \
+                         interactive prompt, but no interactive terminal is available."
+                    ),
+                )
+            } else {
+                (
+                    CancellationReason::AssistantRoutingDenied,
+                    format!(
+                        "The tool '{tool_name}' asked for a secret value, which must be entered \
+                         by a human and cannot be routed to the assistant."
+                    ),
+                )
+            };
+            Self::record_inquiry_cancelled(conv, &inquiry_id, reason);
+            self.set_tool_state(&tool_id, ToolCallState::Completed);
+            *tracked_review = Some(Review::replaced(ToolCallResponse {
+                id: tool_id.clone(),
+                result: Err(message),
+            }));
+        } else {
+            // The `InquiryRequest` is already recorded above; spawn the
+            // async inquiry on a cloned snapshot.
+            Self::spawn_inquiry(
+                index,
+                inquiry_id,
+                tool_id.clone(),
+                tool_name,
+                question,
+                Arc::clone(inquiry_backend),
+                conv.events().clone(),
+                cancellation_token.child_token(),
+                event_tx.clone(),
+            );
+            self.set_tool_state(&tool_id, ToolCallState::AwaitingInput);
         }
     }
 
@@ -1813,8 +1843,6 @@ impl ToolCoordinator {
         pending_prompts: &mut VecDeque<PendingPrompt>,
         prompt_active: &mut bool,
         prompter: Arc<ToolPrompter>,
-        mcp_client: &Client,
-        root: &Utf8Path,
         cancellation_token: &CancellationToken,
         event_tx: mpsc::Sender<ExecutionEvent>,
         conv: &ConversationMut,
@@ -1844,8 +1872,6 @@ impl ToolCoordinator {
                 index,
                 tool.executor.clone(),
                 tool.accumulated_answers.clone(),
-                mcp_client.clone(),
-                root.to_path_buf(),
                 cancellation_token.clone(),
                 event_tx.clone(),
                 tool.stderr.clone(),

@@ -105,10 +105,10 @@ async fn http_call_waits_for_host_release_and_records_edited_result() {
     };
     assert_eq!(result, ToolResult::text("raw"));
     reply.send(Ok(ToolResult::text("edited"))).unwrap();
-    let Interaction::Record { result, reply, .. } = host.recv().await.unwrap().interaction else {
+    let Interaction::Record { recording, reply } = host.recv().await.unwrap().interaction else {
         panic!("expected record")
     };
-    assert_eq!(result, ToolResult::text("edited"));
+    assert_eq!(recording.result, ToolResult::text("edited"));
     assert!(!task.is_finished());
     reply.send(Ok(())).unwrap();
     let result = timeout(Duration::from_secs(2), task)
@@ -168,9 +168,7 @@ async fn http_denial_is_recorded_without_execution() {
             reason: "not approved".into(),
         }))
         .unwrap();
-    let Interaction::Record {
-        reply, raw_result, ..
-    } = timeout(Duration::from_secs(2), host.recv())
+    let Interaction::Record { recording, reply } = timeout(Duration::from_secs(2), host.recv())
         .await
         .unwrap()
         .unwrap()
@@ -178,7 +176,7 @@ async fn http_denial_is_recorded_without_execution() {
     else {
         panic!("expected recording")
     };
-    assert_eq!(raw_result, None);
+    assert_eq!(recording.raw_result, None);
     assert_eq!(count.load(Ordering::SeqCst), 0);
     reply.send(Ok(())).unwrap();
     let result = timeout(Duration::from_secs(2), task)

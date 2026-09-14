@@ -365,7 +365,6 @@ async fn an_interrupt_during_mcp_startup_stops_the_turn_before_it_runs() {
 }
 
 async fn run_mock_turn(
-    root: &camino::Utf8Path,
     cfg: &AppConfig,
     lock: &jp_workspace::ConversationLock,
     prompt: &str,
@@ -378,7 +377,6 @@ async fn run_mock_turn(
         .unwrap();
     let (printer, _out, _err) = Printer::memory(OutputFormat::TextPretty);
     let printer = Arc::new(printer);
-    let mcp_client = jp_mcp::Client::default();
     let router = detached_router();
 
     turn_loop::run_turn_loop(
@@ -386,8 +384,6 @@ async fn run_mock_turn(
         &model,
         cfg,
         &router,
-        &mcp_client,
-        root,
         false, // interactive
         &[],
         lock,
@@ -1763,14 +1759,7 @@ async fn query_sequence_new_cfg_profile_then_model_override_persists_for_plain_q
         .create_and_lock_conversation(Conversation::default(), Arc::new(cfg1.clone()), None)
         .unwrap();
     let conversation_id = lock1.id();
-    run_mock_turn(
-        root,
-        &cfg1,
-        &lock1,
-        "is this thing on?",
-        "Yes, loud and clear.",
-    )
-    .await;
+    run_mock_turn(&cfg1, &lock1, "is this thing on?", "Yes, loud and clear.").await;
     drop(lock1);
 
     let handle2 = workspace.acquire_conversation(&conversation_id).unwrap();
@@ -1787,7 +1776,7 @@ async fn query_sequence_new_cfg_profile_then_model_override_persists_for_plain_q
     lock2
         .as_mut()
         .update_events(|events| events.add_config_delta(delta));
-    run_mock_turn(root, &cfg2, &lock2, "are you there?", "Yes.").await;
+    run_mock_turn(&cfg2, &lock2, "are you there?", "Yes.").await;
     drop(lock2);
 
     let handle3 = workspace.acquire_conversation(&conversation_id).unwrap();

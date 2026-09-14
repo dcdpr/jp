@@ -5,7 +5,7 @@ use jp_conversation::ConversationId;
 use jp_mcp::server::http::EndpointError;
 use url::Url;
 
-use crate::{cmd, cmd::query::tool::executor::ExecutorError};
+use crate::cmd;
 
 pub(crate) type Result<T> = std::result::Result<T, Error>;
 
@@ -68,9 +68,6 @@ pub(crate) enum Error {
 
     #[error(transparent)]
     McpEndpoint(#[from] EndpointError),
-
-    #[error("MCP Host recording failed: {0}")]
-    McpRecording(#[source] ExecutorError),
 
     #[error("LLM error")]
     Llm(#[from] jp_llm::Error),

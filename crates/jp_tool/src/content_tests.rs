@@ -73,49 +73,89 @@ fn outcome_conversion_preserves_question_context() {
 }
 
 #[test]
-fn a_select_question_becomes_an_enum_schema() {
-    let request = InputRequest::from(question("branch", AnswerType::Select {
+fn a_question_keeps_its_answer_type_and_derives_an_enum_schema() {
+    let answer_type = AnswerType::Select {
         options: vec!["main".to_owned(), "develop".to_owned()],
-    }));
+    };
+    let request = InputRequest::from(question("branch", answer_type.clone()));
 
     assert_eq!(request, InputRequest {
         id: "branch".parse().unwrap(),
         label: "Which branch?".to_owned(),
-        schema: json!({ "type": "string", "enum": ["main", "develop"] })
+        answer_type,
+        default: Some(json!("main")),
+    });
+    assert_eq!(
+        request.schema(),
+        json!({ "type": "string", "enum": ["main", "develop"] })
             .as_object()
             .cloned()
-            .unwrap(),
-        default: Some(json!("main")),
-        secret: false,
-    });
+            .unwrap()
+    );
 }
 
 #[test]
-fn a_boolean_question_becomes_a_boolean_schema() {
+fn a_boolean_question_derives_a_boolean_schema() {
     let request = InputRequest::from(question("proceed", AnswerType::Boolean));
 
+    assert_eq!(request.answer_type, AnswerType::Boolean);
     assert_eq!(
-        request.schema,
+        request.schema(),
         json!({ "type": "boolean" }).as_object().cloned().unwrap()
     );
 }
 
-/// Secrecy is a typed field, not a schema keyword: a consumer that rewrites the
-/// schema for a provider cannot drop the rule that the answer stays off disk.
+/// Secrecy rides on the answer type, not on a schema keyword: a consumer that
+/// rewrites the schema for a provider cannot drop the rule that the answer
+/// stays off disk.
 #[test]
-fn a_secret_question_is_a_plain_string_schema_and_a_set_flag() {
+fn a_secret_question_derives_a_plain_string_schema_and_stays_secret() {
     let request = InputRequest::from(question("token", AnswerType::Secret));
 
-    assert!(request.secret);
+    assert!(request.is_secret());
     assert_eq!(
-        request.schema,
+        request.schema(),
         json!({ "type": "string" }).as_object().cloned().unwrap()
     );
 }
 
+/// A text question derives the same schema as a secret one, which is exactly
+/// why the schema cannot be what tells them apart.
 #[test]
 fn an_ordinary_text_question_is_not_secret() {
-    assert!(!InputRequest::from(question("name", AnswerType::Text)).secret);
+    let request = InputRequest::from(question("name", AnswerType::Text));
+
+    assert!(!request.is_secret());
+    assert_eq!(
+        request.schema(),
+        InputRequest::from(question("token", AnswerType::Secret)).schema()
+    );
+}
+
+/// Every answer type comes back as itself after a request crosses the service
+/// boundary, including the two that share a schema and the one whose options a
+/// schema-only representation would have to re-read.
+#[test]
+fn every_answer_type_survives_the_request_round_trip() {
+    let types = [
+        AnswerType::Text,
+        AnswerType::Secret,
+        AnswerType::Boolean,
+        AnswerType::Select {
+            options: vec!["main".to_owned(), "develop".to_owned()],
+        },
+    ];
+
+    for answer_type in types {
+        let original = question("q", answer_type.clone());
+        let request = InputRequest::from(original.clone());
+
+        let mut restored = Question::new(request.id, request.label, request.answer_type);
+        restored.default = request.default;
+        restored.pre_amble = original.pre_amble.clone();
+
+        assert_eq!(restored, original, "round trip lost {answer_type:?}");
+    }
 }
 
 #[test]

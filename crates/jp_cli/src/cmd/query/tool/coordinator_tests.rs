@@ -409,8 +409,6 @@ impl Executor for EditableExecutor {
     async fn execute(
         &self,
         _answers: &IndexMap<String, Value>,
-        _mcp_client: &jp_mcp::Client,
-        _root: &camino::Utf8Path,
         _cancellation_token: tokio_util::sync::CancellationToken,
         _stderr: Option<jp_mcp::server::StderrSink>,
     ) -> ExecutorResult {

@@ -1,7 +1,6 @@
 //! JP-aware result decoding for upstream MCP tools.
 
 use jp_tool::Outcome;
-use serde_json::Value;
 use tracing::warn;
 
 use crate::{CallToolResult, RawContent};
@@ -42,19 +41,9 @@ pub(super) fn decode_result(result: CallToolResult) -> Result<UpstreamResult, se
         }),
         // A payload shaped like an inquiry that will not parse is a protocol
         // mismatch, not prose: handing the raw JSON to the model would hide it.
-        Err(error) if is_needs_input(&text.text) => Err(error),
+        Err(error) if Outcome::claims_needs_input(&text.text) => Err(error),
         Err(_) => Ok(UpstreamResult::Native(result)),
     }
-}
-
-/// Whether the text is a JSON object announcing itself as an inquiry.
-fn is_needs_input(text: &str) -> bool {
-    serde_json::from_str::<Value>(text)
-        .ok()
-        .as_ref()
-        .and_then(|value| value.get("type"))
-        .and_then(Value::as_str)
-        == Some("needs_input")
 }
 
 /// Replace a recognized envelope's text while retaining its native metadata.

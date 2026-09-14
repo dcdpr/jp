@@ -316,20 +316,15 @@ async fn native_upstream_result_survives_host_projection_and_http_delivery() {
         );
         reply.send(Ok(reviewed.clone())).unwrap();
 
-        let Interaction::Record {
-            result: projected,
-            raw_result,
-            reply,
-            ..
-        } = host.recv().await.unwrap().interaction
+        let Interaction::Record { recording, reply } = host.recv().await.unwrap().interaction
         else {
             panic!("expected recording")
         };
-        assert_eq!(projected, reviewed);
-        assert_eq!(raw_result, Some(reviewed));
+        assert_eq!(recording.result, reviewed);
+        assert_eq!(recording.raw_result, Some(reviewed));
         // The conversation stores only the text, which is what makes the
         // assertion below worth making.
-        assert_eq!(projected.to_text(), "alpha\n\nresource");
+        assert_eq!(recording.result.to_text(), "alpha\n\nresource");
         assert!(!reply.is_closed());
         reply.send(Ok(())).unwrap();
 

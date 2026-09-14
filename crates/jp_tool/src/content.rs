@@ -384,17 +384,34 @@ pub struct InputRequest {
     /// Supporting material belongs in the content blocks preceding this one.
     pub label: String,
 
-    /// JSON Schema the answer must satisfy.
-    pub schema: Map<String, Value>,
+    /// What kind of answer the tool expects.
+    ///
+    /// Both the [`schema`] an answer is validated against and the widget a host
+    /// prompts with come from this, so a request that crosses a service
+    /// boundary and comes back describes the same input it started as.
+    ///
+    /// [`schema`]: Self::schema
+    pub answer_type: AnswerType,
 
     /// The answer used when none is given.
     pub default: Option<Value>,
+}
+
+impl InputRequest {
+    /// The JSON Schema an answer must satisfy.
+    #[must_use]
+    pub fn schema(&self) -> Map<String, Value> {
+        self.answer_type.to_schema()
+    }
 
     /// Whether the answer must not be written to disk.
     ///
     /// A secret answer is not echoed while it is typed, and the recorded
     /// inquiry response holds a redaction marker rather than the answer.
-    pub secret: bool,
+    #[must_use]
+    pub fn is_secret(&self) -> bool {
+        matches!(self.answer_type, AnswerType::Secret)
+    }
 }
 
 impl From<Question> for InputRequest {
@@ -410,8 +427,7 @@ impl From<Question> for InputRequest {
         Self {
             id,
             label: text,
-            secret: matches!(answer_type, AnswerType::Secret),
-            schema: answer_type.to_schema(),
+            answer_type,
             default,
         }
     }
@@ -420,9 +436,9 @@ impl From<Question> for InputRequest {
 impl AnswerType {
     /// The JSON Schema an answer of this type must satisfy.
     ///
-    /// A secret answer is a string like any other; that it must not be
-    /// persisted is carried by [`InputRequest::secret`], not by the schema, so
-    /// the rule cannot be lost by rewriting the schema.
+    /// A secret answer is a string like any other: that it must not be
+    /// persisted is a property of the answer type, not of the schema, so the
+    /// rule cannot be lost by rewriting the schema.
     #[must_use]
     pub fn to_schema(&self) -> Map<String, Value> {
         let schema = match self {

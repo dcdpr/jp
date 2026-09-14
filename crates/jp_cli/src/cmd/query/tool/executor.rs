@@ -9,15 +9,11 @@
 //! Execution itself lives in `jp_mcp::server`; nothing here runs a tool.
 
 use async_trait::async_trait;
-use camino::Utf8Path;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use jp_config::conversation::tool::{RunMode, ToolConfigWithDefaults, ToolSource};
 use jp_conversation::event::{InquirySource, ToolCallRequest, ToolCallResponse};
-use jp_mcp::{
-    Client,
-    server::{StderrSink, service::Formatted},
-};
+use jp_mcp::server::{StderrSink, service::Formatted};
 use jp_tool::{Question, ToolResult};
 use serde_json::{Map, Value};
 use tokio_util::sync::CancellationToken;
@@ -110,8 +106,6 @@ pub(crate) trait Executor: Send + Sync {
     /// # Arguments
     ///
     /// - `answers` - Accumulated answers from previous `NeedsInput` responses
-    /// - `mcp_client` - MCP client for remote tool execution
-    /// - `root` - Project root directory
     /// - `cancellation_token` - Token to cancel execution
     /// - `stderr` - Receives the tool's stderr lines as they arrive, for a
     ///   caller showing progress while it runs.
@@ -120,8 +114,6 @@ pub(crate) trait Executor: Send + Sync {
     async fn execute(
         &self,
         answers: &IndexMap<String, Value>,
-        mcp_client: &Client,
-        root: &Utf8Path,
         cancellation_token: CancellationToken,
         stderr: Option<StderrSink>,
     ) -> ExecutorResult;
@@ -218,6 +210,13 @@ pub(crate) enum ExecutorResult {
     /// The full result stays with the executor, which hands it back unchanged
     /// if the Host records this response without editing it.
     Completed(ToolCallResponse),
+
+    /// The call could not be advanced, and nothing ran.
+    ///
+    /// Distinct from a tool that ran and reported failure: the reason is JP's
+    /// own machinery, not the tool's, so it is not content for the model to
+    /// reason about.
+    Failed(ExecutorError),
 
     /// Tool needs additional input before it can continue.
     ///

@@ -14,7 +14,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use camino::{Utf8Path, Utf8PathBuf};
+use camino::Utf8PathBuf;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use jp_config::conversation::tool::{RunMode, ToolConfigWithDefaults, ToolsConfig};
@@ -32,9 +32,7 @@ use jp_mcp::{
         },
     },
 };
-use jp_tool::{
-    AnswerType, ContentBlock, InputRequest, Question, QuestionId, ToolDefinition, ToolResult,
-};
+use jp_tool::{ContentBlock, InputRequest, Question, QuestionId, ToolDefinition, ToolResult};
 use rand::random;
 use rmcp::{
     Peer, ServiceError as McpCallError,
@@ -100,6 +98,18 @@ struct CallSlot {
     stderr: SyncMutex<Option<StderrSink>>,
 
     /// The call's protocol phase and the Host reply it is parked on.
+    ///
+    /// Held for the whole of every operation that advances the call, including
+    /// across the await on the service, so two operations on one call are
+    /// serialised rather than interleaved.
+    /// Ordering is not left to that serialisation: [`Phase`] is what makes an
+    /// operation arriving out of turn an [`ExecutorError::OutOfOrder`] instead
+    /// of a silently wrong reply.
+    ///
+    /// The cost is that acknowledging a call while it is still executing waits
+    /// for the execution attempt to finish.
+    /// The coordinator never does that, because it acknowledges only after the
+    /// conversation has the response.
     state: Mutex<PendingCall>,
 }
 
@@ -609,8 +619,8 @@ impl Executor for ToolExecutor {
                         state.phase = Phase::Admission(reply);
                         return Ok(None);
                     }
-                    Interaction::Record { result, reply, .. } => {
-                        let response = response(&self.slot.request.id, &result);
+                    Interaction::Record { recording, reply } => {
+                        let response = response(&self.slot.request.id, &recording.result);
                         state.phase = Phase::Record(reply);
                         return Ok(Some(response));
                     }
@@ -669,8 +679,6 @@ impl Executor for ToolExecutor {
     async fn execute(
         &self,
         answers: &IndexMap<String, Value>,
-        _: &Client,
-        _: &Utf8Path,
         cancellation: CancellationToken,
         stderr: Option<StderrSink>,
     ) -> ExecutorResult {
@@ -714,7 +722,7 @@ impl Executor for ToolExecutor {
                         answers,
                         reply,
                     } => {
-                        let question = question(request, &supporting)?;
+                        let question = question(request, &supporting);
                         state.phase = Phase::Input {
                             id: question.id.clone(),
                             reply,
@@ -735,8 +743,8 @@ impl Executor for ToolExecutor {
                         };
                         Ok(ExecutorResult::Completed(offered))
                     }
-                    Interaction::Record { result, reply, .. } => {
-                        let response = response(id, &result);
+                    Interaction::Record { recording, reply } => {
+                        let response = response(id, &recording.result);
                         state.phase = Phase::Record(reply);
                         Ok(ExecutorResult::Completed(response))
                     }
@@ -755,46 +763,31 @@ impl Executor for ToolExecutor {
             // than leaving it parked on a reply that will never arrive.
             self.cancel_invocation();
             state.phase = Phase::Finished;
-            ExecutorResult::Completed(ToolCallResponse {
-                id: self.slot.request.id.clone(),
-                result: Err(error.to_string()),
-            })
+            if error.is_call_outcome() {
+                return ExecutorResult::Completed(ToolCallResponse {
+                    id: self.slot.request.id.clone(),
+                    result: Err(error.to_string()),
+                });
+            }
+            ExecutorResult::Failed(error)
         })
     }
 }
 
 /// Render a shared input request as the question the terminal prompts with.
-fn question(request: InputRequest, supporting: &[ContentBlock]) -> Result<Question, ExecutorError> {
-    let answer_type = if request.secret {
-        AnswerType::Secret
-    } else if request.schema.get("type").and_then(Value::as_str) == Some("boolean") {
-        AnswerType::Boolean
-    } else if let Some(options) = request.schema.get("enum").and_then(Value::as_array) {
-        AnswerType::Select {
-            options: options
-                .iter()
-                .map(|value| {
-                    value
-                        .as_str()
-                        .map(str::to_owned)
-                        .ok_or(ExecutorError::NonStringChoice)
-                })
-                .collect::<Result<_, _>>()?,
-        }
-    } else if request.schema.get("type").and_then(Value::as_str) == Some("string") {
-        AnswerType::Text
-    } else {
-        return Err(ExecutorError::UnsupportedInquirySchema);
-    };
+///
+/// The supporting blocks are the content the tool emitted before its request;
+/// the terminal shows them above the prompt.
+fn question(request: InputRequest, supporting: &[ContentBlock]) -> Question {
     let preamble = supporting
         .iter()
         .filter_map(ContentBlock::as_text)
         .collect::<Vec<_>>()
         .join("\n\n");
-    let mut question = Question::new(request.id, request.label, answer_type);
+    let mut question = Question::new(request.id, request.label, request.answer_type);
     question.pre_amble = (!preamble.is_empty()).then_some(preamble);
     question.default = request.default;
-    Ok(question)
+    question
 }
 
 #[cfg(test)]

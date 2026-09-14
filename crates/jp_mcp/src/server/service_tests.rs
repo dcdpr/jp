@@ -88,6 +88,9 @@ fn service(
 
 /// A service whose `count` tool asks one question and then echoes its input.
 ///
+/// `run` and `result` are that tool's `run` and `result` settings, spelled as a
+/// user writes them: `unattended`, `ask`, `edit`, or `skip`.
+///
 /// The counter records how many execution attempts actually ran, which is what
 /// separates "the call was denied" from "the call silently went nowhere".
 fn fixture(run: &str, result: &str) -> (Service, HostReceiver, Arc<AtomicUsize>) {
@@ -184,10 +187,10 @@ async fn preparation_release_input_and_delivery_use_distinct_acknowledgements() 
     );
     assert_eq!(count.load(Ordering::SeqCst), 2);
     reply.send(Ok(ToolResult::text("edited result"))).unwrap();
-    let Interaction::Record { result, reply, .. } = next(&mut host).await.interaction else {
+    let Interaction::Record { recording, reply } = next(&mut host).await.interaction else {
         panic!("expected recording")
     };
-    assert_eq!(result, ToolResult::text("edited result"));
+    assert_eq!(recording.result, ToolResult::text("edited result"));
     assert!(!call.is_finished());
     reply.send(Ok(())).unwrap();
     assert_eq!(
@@ -209,10 +212,10 @@ async fn denied_call_never_executes() {
             reason: "denied".into(),
         }))
         .unwrap();
-    let Interaction::Record { reply, result, .. } = next(&mut host).await.interaction else {
+    let Interaction::Record { recording, reply } = next(&mut host).await.interaction else {
         panic!("expected recording")
     };
-    assert_eq!(result, ToolResult::text("denied"));
+    assert_eq!(recording.result, ToolResult::text("denied"));
     reply.send(Ok(())).unwrap();
     assert_eq!(call.finish().await.unwrap(), ToolResult::text("denied"));
     assert_eq!(count.load(Ordering::SeqCst), 0);
@@ -402,13 +405,10 @@ async fn identical_calls_have_independent_answers_and_out_of_order_delivery() {
 async fn configured_skip_never_requests_execution_release() {
     let (service, mut host, count) = fixture("skip", "unattended");
     let call = service.start_call(request()).unwrap();
-    let Interaction::Record {
-        reply, raw_result, ..
-    } = next(&mut host).await.interaction
-    else {
+    let Interaction::Record { recording, reply } = next(&mut host).await.interaction else {
         panic!("skip must go directly to recording")
     };
-    assert_eq!(raw_result, None);
+    assert_eq!(recording.raw_result, None);
     reply.send(Ok(())).unwrap();
     assert_eq!(
         call.finish().await.unwrap(),
@@ -426,23 +426,18 @@ async fn skipped_delivery_records_original_without_delivering_it() {
         panic!("expected input")
     };
     reply.send(Ok(json!(true).into())).unwrap();
-    let Interaction::Record {
-        reply,
-        raw_result,
-        result,
-        ..
-    } = next(&mut host).await.interaction
-    else {
+    let Interaction::Record { recording, reply } = next(&mut host).await.interaction else {
         panic!("expected recording, no review")
     };
+    // The tool's own output is recorded even though the user never sees it.
     assert_eq!(
-        raw_result,
+        recording.raw_result,
         Some(ToolResult::text(
             r#"{"arguments":{"path":"original"},"answer":true}"#
         ))
     );
     assert_eq!(
-        result,
+        recording.result,
         ToolResult::text("Result delivery skipped by configuration.")
     );
     reply.send(Ok(())).unwrap();
